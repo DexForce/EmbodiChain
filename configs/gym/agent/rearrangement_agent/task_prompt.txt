@@ -1,8 +1,23 @@
 Task:
-Use both arms to rearrange a fork and a spoon on opposite sides of a plate. Perform the following steps **simultaneously**.
+Use both arms to rearrange a fork and a spoon on opposite sides of a plate.
+Generate a nominal graph with exactly three semantic edges. On every edge,
+the left and right arm actions should be placed on the same edge so they execute
+simultaneously.
 
-1. Grasp the fork with the left arm and the spoon with the right arm.
+Use only these atomic actions: pick_up, move, and place.
 
-2. Reorient both end-effectors to a downward-facing pose.
+1. Pick up the fork with the left arm and the spoon with the right arm:
+   - left_arm_action: pick_up(robot_name="left_arm", obj_name="fork")
+   - right_arm_action: pick_up(robot_name="right_arm", obj_name="spoon")
 
-3. Place the fork at y = +0.16 and the spoon at y = −0.16 relative to the plate’s center.
+2. Move both held objects to downward-facing pre-place poses relative to the plate:
+   - fork target: relative_to="plate", y_offset=0.16, z_offset=0.18, direction="down"
+   - spoon target: relative_to="plate", y_offset=-0.16, z_offset=0.18, direction="down"
+
+3. Place both objects on the plate:
+   - fork target: relative_to="plate", y_offset=0.16, z_offset=0.08, direction="down"
+   - spoon target: relative_to="plate", y_offset=-0.16, z_offset=0.08, direction="down"
+
+The place action target is an end-effector pose, not an object-center pose.
+Always include z_offset=0.08 for place actions so the end-effector lowers the
+held utensil toward the plate before opening the gripper.

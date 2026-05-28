@@ -1,0 +1,72 @@
+### Atomic Actions for Rearrangement
+
+Use only the three functions below. Do not use or invent any other action APIs.
+Do not call grasp, place_on_table, move_relative_to_object, move_to_absolute_position,
+move_by_relative_offset, rotate_eef, orient_eef, back_to_initial_pose, close_gripper,
+or open_gripper.
+
+All actions return one single-arm joint trajectory. The graph runtime executes
+left_arm_action and right_arm_action on the same edge simultaneously.
+
+"pick_up":
+    def pick_up(robot_name: str,
+                obj_name: str,
+                pre_grasp_distance: float = 0.05,
+                lift_height: float = 0.1,
+                **kwargs) -> list[np.ndarray]
+
+    Uses AtomicActionEngine + PickUpAction. The action builds an AntipodalAffordance
+    from the object's full mesh, plans a pre-grasp approach, closes the gripper,
+    and lifts the object
+
+    Example:
+        pick_up(robot_name="left_arm", obj_name="fork")
+
+"move":
+    def move(robot_name: str,
+             target_pose=None,
+             relative_to: str | None = None,
+             obj_name: str | None = None,
+             x: float | None = None,
+             y: float | None = None,
+             z: float | None = None,
+             x_offset: float = 0.0,
+             y_offset: float = 0.0,
+             z_offset: float = 0.0,
+             direction: str | None = None,
+             **kwargs) -> list[np.ndarray]
+
+    Uses AtomicActionEngine + MoveAction. If relative_to is set, the target
+    end-effector position is object_position + [x_offset, y_offset, z_offset].
+    Any explicit x, y, or z overrides that coordinate. direction can be "down"
+    or "front" to replace the end-effector orientation while preserving position.
+
+    Example:
+        move(robot_name="left_arm", relative_to="plate",
+             y_offset=0.16, z_offset=0.18, direction="down")
+
+"place":
+    def place(robot_name: str,
+              obj_name: str,
+              target_pose=None,
+              relative_to: str | None = None,
+              x: float | None = None,
+              y: float | None = None,
+              z: float | None = None,
+              x_offset: float = 0.0,
+              y_offset: float = 0.0,
+              z_offset: float = 0.0,
+              lift_height: float = 0.1,
+              direction: str | None = None,
+              **kwargs) -> list[np.ndarray]
+
+    Uses AtomicActionEngine + PlaceAction. The target is an end-effector pose,
+    not an object-center pose. For this rearrangement task, always set
+    relative_to="plate", direction="down", and z_offset=0.08 when placing on
+    the plate. Use y_offset=0.16 for the fork and y_offset=-0.16 for the spoon.
+
+    Examples:
+        place(robot_name="left_arm", obj_name="fork", relative_to="plate",
+              y_offset=0.16, z_offset=0.08, direction="down")
+        place(robot_name="right_arm", obj_name="spoon", relative_to="plate",
+              y_offset=-0.16, z_offset=0.08, direction="down")

@@ -29,6 +29,24 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 from embodichain.utils.utility import encode_image
 from functools import partial
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    AntipodalAffordance,
+    MoveActionCfg,
+    ObjectSemantics,
+    PickUpActionCfg,
+    PlaceActionCfg,
+)
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    GraspGeneratorCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
+    AntipodalSamplerCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
+    GripperCollisionCfg,
+)
 
 # Import utility functions for atom actions
 from embodichain.lab.sim.agent.atom_action_utils import (
@@ -57,6 +75,333 @@ from embodichain.lab.sim.agent.monitor_functions import *
 --------------------------------------------Atom action functions----------------------------------------------------
 --------------------------------------------Atom action functions----------------------------------------------------
 """
+
+
+def _is_left_arm(robot_name: str) -> bool:
+    return "left" in robot_name
+
+
+def _control_parts(robot_name: str) -> tuple[bool, str, str]:
+    is_left = _is_left_arm(robot_name)
+    arm_control_part = "left_arm" if is_left else "right_arm"
+    hand_control_part = "left_eef" if is_left else "right_eef"
+    return is_left, arm_control_part, hand_control_part
+
+
+def _motion_generator(env) -> MotionGenerator:
+    return MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+    )
+
+
+def _hand_qpos(env, hand_control_part: str, state: torch.Tensor) -> torch.Tensor:
+    joint_ids = env.robot.get_joint_ids(name=hand_control_part)
+    qpos = torch.as_tensor(state, dtype=torch.float32, device=env.robot.device).flatten()
+    if qpos.numel() == 1:
+        qpos = qpos.repeat(len(joint_ids))
+    if qpos.numel() != len(joint_ids):
+        log_error(
+            f"{hand_control_part} state must contain 1 or {len(joint_ids)} values, got {qpos.numel()}."
+        )
+    return qpos
+
+
+def _approach_direction(robot_name: str, approach_direction=None) -> torch.Tensor:
+    if approach_direction is None or approach_direction == "top":
+        direction = [0.0, 0.0, -1.0]
+    return direction
+
+
+def _object_pose(env, obj_name: str) -> torch.Tensor:
+    obj = env.sim.get_rigid_object(obj_name)
+    return obj.get_local_pose(to_matrix=True).squeeze(0).to(env.robot.device)
+
+
+def _default_affordance_config(**overrides) -> dict:
+    config = {
+        "gripper_collision_cfg": GripperCollisionCfg(
+            max_open_length=0.1,
+            finger_length=0.08,
+            point_sample_dense=0.01,
+        ),
+        "generator_cfg": GraspGeneratorCfg(
+            antipodal_sampler_cfg=AntipodalSamplerCfg(
+                n_sample=20000,
+                max_length=0.1,
+                min_length=0.001,
+            ),
+        ),
+    }
+    config.update(overrides)
+    return config
+
+
+def _object_semantics(
+    env,
+    obj_name: str,
+    *,
+    force_reannotate: bool = False,
+    is_draw_grasp_xpos: bool = False,
+    custom_config: dict | None = None,
+) -> ObjectSemantics:
+    obj = env.sim.get_rigid_object(obj_name)
+    grasp_affordance = AntipodalAffordance(
+        object_label=obj_name,
+        force_reannotate=force_reannotate,
+        is_draw_grasp_xpos=is_draw_grasp_xpos,
+        custom_config=_default_affordance_config(**(custom_config or {})),
+    )
+    return ObjectSemantics(
+        label=obj_name,
+        geometry={
+            "mesh_vertices": obj.get_vertices(env_ids=[0], scale=True)[0],
+            "mesh_triangles": obj.get_triangles(env_ids=[0])[0],
+        },
+        affordance=grasp_affordance,
+        entity=obj,
+    )
+
+
+def _replace_pose_orientation(pose: torch.Tensor, direction: str | None) -> torch.Tensor:
+    if direction is None:
+        return pose
+    direction = direction.lower()
+    if direction == "front":
+        rotation_matrix = R.from_euler("xyz", [180, -90, 0], degrees=True).as_matrix()
+    elif direction == "down":
+        rotation_matrix = R.from_euler("x", 180, degrees=True).as_matrix()
+    else:
+        log_error("direction must be 'front', 'down', or None.")
+    pose = pose.clone()
+    pose[:3, :3] = torch.as_tensor(
+        rotation_matrix,
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    return pose
+
+
+def _target_pose_from_kwargs(
+    env,
+    robot_name: str,
+    *,
+    target_pose=None,
+    relative_to: str | None = None,
+    obj_name: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    z: float | None = None,
+    x_offset: float = 0.0,
+    y_offset: float = 0.0,
+    z_offset: float = 0.0,
+    direction: str | None = None,
+) -> torch.Tensor:
+    if target_pose is not None:
+        pose = torch.as_tensor(target_pose, dtype=torch.float32, device=env.robot.device)
+        return _replace_pose_orientation(pose, direction)
+
+    _, _, _, current_pose, _ = get_arm_states(env, robot_name)
+    pose = torch.as_tensor(
+        current_pose, dtype=torch.float32, device=env.robot.device
+    ).clone()
+
+    reference_name = relative_to or obj_name
+    if reference_name is not None:
+        reference_pose = _object_pose(env, reference_name)
+        pose[:3, 3] = reference_pose[:3, 3] + torch.tensor(
+            [x_offset, y_offset, z_offset],
+            dtype=pose.dtype,
+            device=pose.device,
+        )
+    else:
+        pose[:3, 3] += torch.tensor(
+            [x_offset, y_offset, z_offset],
+            dtype=pose.dtype,
+            device=pose.device,
+        )
+
+    if x is not None:
+        pose[0, 3] = x
+    if y is not None:
+        pose[1, 3] = y
+    if z is not None:
+        pose[2, 3] = z
+
+    return _replace_pose_orientation(pose, direction)
+
+
+def _run_atomic_action(env, cfg, target) -> tuple[bool, torch.Tensor]:
+    engine = AtomicActionEngine(
+        motion_generator=_motion_generator(env),
+        actions_cfg_list=[cfg],
+    )
+    return engine.execute_static([target])
+
+
+def _actions_from_atomic_trajectory(
+    env,
+    robot_name: str,
+    trajectory: torch.Tensor,
+) -> np.ndarray:
+    is_left, arm_control_part, hand_control_part = _control_parts(robot_name)
+    arm_joint_ids = env.robot.get_joint_ids(name=arm_control_part)
+    hand_joint_ids = env.robot.get_joint_ids(name=hand_control_part)
+    joint_ids = arm_joint_ids + hand_joint_ids
+    final_qpos = trajectory[0, -1]
+
+    final_arm_qpos = final_qpos[arm_joint_ids].detach().cpu()
+    env.set_current_qpos_agent(final_arm_qpos, is_left=is_left)
+    env.set_current_xpos_agent(
+        env.robot.compute_fk(
+            qpos=final_qpos[arm_joint_ids],
+            name=arm_control_part,
+            to_matrix=True,
+        ).squeeze(0).detach().cpu(),
+        is_left=is_left,
+    )
+    env.set_current_gripper_state_agent(
+        final_qpos[hand_joint_ids][0].detach().cpu().unsqueeze(0),
+        is_left=is_left,
+    )
+    return trajectory[0, :, joint_ids].detach().cpu().numpy()
+
+
+def pick_up(
+    robot_name: str,
+    obj_name: str,
+    pre_grasp_distance: float = 0.05,
+    lift_height: float = 0.1,
+    approach_direction=None,
+    env=None,
+    **kwargs,
+):
+    """Plan a single-arm pick-up action through AtomicActionEngine."""
+    _, arm_control_part, hand_control_part = _control_parts(robot_name)
+    cfg = PickUpActionCfg(
+        control_part=arm_control_part,
+        hand_control_part=hand_control_part,
+        hand_open_qpos=_hand_qpos(env, hand_control_part, env.open_state),
+        hand_close_qpos=_hand_qpos(env, hand_control_part, env.close_state),
+        pre_grasp_distance=pre_grasp_distance,
+        approach_direction=_approach_direction(robot_name, approach_direction),
+        lift_height=lift_height,
+        sample_interval=kwargs.get("sample_num", 80),
+        hand_interp_steps=kwargs.get("hand_interp_steps", 5),
+    )
+    target = _object_semantics(
+        env,
+        obj_name,
+        force_reannotate=kwargs.get("force_reannotate", False),
+        is_draw_grasp_xpos=kwargs.get("is_draw_grasp_xpos", False),
+        custom_config=kwargs.get("affordance_config"),
+    )
+    is_success, trajectory = _run_atomic_action(env, cfg, target)
+    if not is_success:
+        log_error(f"Atomic pick_up failed for {robot_name} on '{obj_name}'.")
+    actions = _actions_from_atomic_trajectory(env, robot_name, trajectory)
+    log_info(
+        f"Total generated trajectory number for atomic pick_up: {len(actions)}.",
+        color="green",
+    )
+    return actions
+
+
+def move(
+    robot_name: str,
+    target_pose=None,
+    relative_to: str | None = None,
+    obj_name: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    z: float | None = None,
+    x_offset: float = 0.0,
+    y_offset: float = 0.0,
+    z_offset: float = 0.0,
+    direction: str | None = None,
+    env=None,
+    **kwargs,
+):
+    """Plan a single-arm free-space move through AtomicActionEngine."""
+    _, arm_control_part, _ = _control_parts(robot_name)
+    target = _target_pose_from_kwargs(
+        env,
+        robot_name,
+        target_pose=target_pose,
+        relative_to=relative_to,
+        obj_name=obj_name,
+        x=x,
+        y=y,
+        z=z,
+        x_offset=x_offset,
+        y_offset=y_offset,
+        z_offset=z_offset,
+        direction=direction,
+    )
+    cfg = MoveActionCfg(
+        control_part=arm_control_part,
+        sample_interval=kwargs.get("sample_num", 50),
+    )
+    is_success, trajectory = _run_atomic_action(env, cfg, target)
+    if not is_success:
+        log_error(f"Atomic move failed for {robot_name}.")
+    actions = _actions_from_atomic_trajectory(env, robot_name, trajectory)
+    log_info(
+        f"Total generated trajectory number for atomic move: {len(actions)}.",
+        color="green",
+    )
+    return actions
+
+
+def place(
+    robot_name: str,
+    obj_name: str,
+    target_pose=None,
+    relative_to: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    z: float | None = None,
+    x_offset: float = 0.0,
+    y_offset: float = 0.0,
+    z_offset: float = 0.0,
+    lift_height: float = 0.1,
+    direction: str | None = None,
+    env=None,
+    **kwargs,
+):
+    """Plan a single-arm place action through AtomicActionEngine."""
+    _, arm_control_part, hand_control_part = _control_parts(robot_name)
+    target = _target_pose_from_kwargs(
+        env,
+        robot_name,
+        target_pose=target_pose,
+        relative_to=relative_to,
+        obj_name=obj_name,
+        x=x,
+        y=y,
+        z=z,
+        x_offset=x_offset,
+        y_offset=y_offset,
+        z_offset=z_offset,
+        direction=direction,
+    )
+    cfg = PlaceActionCfg(
+        control_part=arm_control_part,
+        hand_control_part=hand_control_part,
+        hand_open_qpos=_hand_qpos(env, hand_control_part, env.open_state),
+        hand_close_qpos=_hand_qpos(env, hand_control_part, env.close_state),
+        lift_height=lift_height,
+        sample_interval=kwargs.get("sample_num", 80),
+        hand_interp_steps=kwargs.get("hand_interp_steps", 5),
+    )
+    is_success, trajectory = _run_atomic_action(env, cfg, target)
+    if not is_success:
+        log_error(f"Atomic place failed for {robot_name} on '{obj_name}'.")
+    actions = _actions_from_atomic_trajectory(env, robot_name, trajectory)
+    log_info(
+        f"Total generated trajectory number for atomic place: {len(actions)}.",
+        color="green",
+    )
+    return actions
 
 
 def move_to_target_pose(

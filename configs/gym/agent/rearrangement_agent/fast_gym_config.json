@@ -322,10 +322,10 @@
             "uid": "fork",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "TableWare/tableware/fork/standard_fork_scale.ply",
+                "fpath": "/home/dex/下载/raw_mesh+simready/simready_apple/assets/asset_simready/asset_simready.obj",
                 "compute_uv": true
             },
-            "body_scale": [1.0, 1.0, 1.0],
+            "body_scale": [0.8, 0.8, 0.8],
             "init_pos": [0.5, 0.21, 1.0],
             "attrs" : {
                 "mass": 0.01,
@@ -340,10 +340,10 @@
             "uid": "spoon",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "TableWare/tableware/spoon/standard_spoon_a_rescale.ply",
+                "fpath": "/home/dex/下载/raw_mesh+simready/simready_apple/assets/asset_simready/asset_simready.obj",
                 "compute_uv": true
             },
-            "body_scale": [1.0, 1.0, 1.0],
+            "body_scale": [0.8, 0.8, 0.8],
             "init_pos": [0.5, -0.21, 1.0],
             "attrs" : {
                 "mass": 0.01,
