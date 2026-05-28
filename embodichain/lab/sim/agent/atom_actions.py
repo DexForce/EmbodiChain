@@ -83,6 +83,24 @@ def _use_public_atomic_actions(kwargs):
     return kwargs.get("use_public_atomic_actions", False) is True
 
 
+def _require_public_atomic_actions(kwargs):
+    return kwargs.get("require_public_atomic_actions", False) is True
+
+
+def _require_public_grasp_actions(kwargs):
+    return (
+        _require_public_atomic_actions(kwargs)
+        or kwargs.get("require_public_grasp_action", False) is True
+    )
+
+
+def _require_public_non_grasp_actions(kwargs):
+    return (
+        _require_public_atomic_actions(kwargs)
+        or kwargs.get("require_public_non_grasp_actions", False) is True
+    )
+
+
 def _select_arm_parts(env, robot_name):
     is_left = resolve_arm_side(env, robot_name) == "left"
     arm_part = "left_arm" if is_left else "right_arm"
@@ -260,6 +278,121 @@ def _sync_agent_state_from_public_action(env, robot_name, action_np):
     )
 
 
+def _sync_agent_state_from_public_qpos_action(
+    env,
+    robot_name,
+    action_np,
+    control_part,
+):
+    if action_np is None or len(action_np) == 0:
+        raise ValueError("Public atomic action is empty; cannot sync agent state.")
+
+    is_left, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
+        env, robot_name
+    )
+    final_action = np.asarray(action_np[-1], dtype=np.float32)
+    arm_dof = len(arm_joints)
+
+    if control_part == arm_part:
+        arm_qpos = torch.as_tensor(
+            final_action[:arm_dof],
+            dtype=torch.float32,
+            device=env.robot.device,
+        )
+        env.set_current_qpos_agent(arm_qpos, is_left=is_left)
+        env.set_current_xpos_agent(
+            env.get_arm_fk(qpos=arm_qpos, is_left=is_left),
+            is_left=is_left,
+        )
+        return
+
+    if control_part == hand_part:
+        if len(eef_joints) == 0:
+            return
+        (
+            _,
+            _,
+            _,
+            _,
+            select_arm_current_gripper_state,
+        ) = get_arm_states(env, robot_name)
+        eef_qpos = final_action[arm_dof : arm_dof + len(eef_joints)]
+        state_dof = max(
+            int(torch.as_tensor(select_arm_current_gripper_state).numel()), 1
+        )
+        if len(eef_qpos) >= state_dof:
+            gripper_qpos = eef_qpos[:state_dof]
+        else:
+            gripper_qpos = np.resize(eef_qpos, state_dof)
+
+        current_gripper_state = torch.as_tensor(select_arm_current_gripper_state)
+        env.set_current_gripper_state_agent(
+            torch.as_tensor(
+                gripper_qpos,
+                dtype=current_gripper_state.dtype,
+                device=current_gripper_state.device,
+            ),
+            is_left=is_left,
+        )
+        return
+
+    raise ValueError(f"Unsupported public qpos control_part: {control_part}.")
+
+
+def _try_public_qpos_move_action(
+    *,
+    env,
+    robot_name: str,
+    control_part: str,
+    target_qpos,
+    start_qpos,
+    sample_num: int,
+    kwargs: dict,
+    log_name: str,
+):
+    def _fail(message, exc=None):
+        suffix = f" ({exc})" if exc is not None else ""
+        log_warning(f"{message} for {log_name}; fallback to legacy logic.{suffix}")
+        if _require_public_non_grasp_actions(kwargs):
+            raise RuntimeError(message) from exc
+        return None
+
+    if env is None:
+        if _require_public_non_grasp_actions(kwargs):
+            return _fail("Public qpos MoveAction requires env")
+        return None
+    if not _use_public_atomic_actions(kwargs):
+        if _require_public_non_grasp_actions(kwargs):
+            return _fail(
+                "Public qpos MoveAction requires use_public_atomic_actions=True"
+            )
+        return None
+
+    try:
+        device = env.robot.device
+        cfg = MoveActionCfg(
+            name="move",
+            control_part=control_part,
+            sample_interval=int(sample_num),
+        )
+        engine = _make_atomic_engine(env, cfg)
+        action = engine._actions["move"]
+        is_success, trajectory, joint_ids = action.execute(
+            target=torch.as_tensor(target_qpos, dtype=torch.float32, device=device),
+            start_qpos=torch.as_tensor(start_qpos, dtype=torch.float32, device=device),
+        )
+        if not is_success:
+            return _fail("Public qpos MoveAction failed")
+
+        action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _sync_agent_state_from_public_qpos_action(
+            env, robot_name, action_np, control_part
+        )
+        return action_np
+    except Exception as e:
+        return _fail("Public qpos MoveAction failed", e)
+
+
 def _semantic_public_grasp_enabled(kwargs):
     return (
         kwargs.get("use_public_grasp_semantics", False) is True
@@ -380,27 +513,35 @@ def _try_public_semantic_grasp_action(
     def _fail(message, exc=None):
         suffix = f" ({exc})" if exc is not None else ""
         log_warning(f"{message}; fallback to legacy grasp.{suffix}")
-        if kwargs.get("require_public_grasp_action", False) is True:
+        if _require_public_grasp_actions(kwargs):
             raise RuntimeError(message) from exc
         return None
 
     if env is None:
         return _fail("Public semantic grasp requires env")
     if not _use_public_atomic_actions(kwargs):
+        if _require_public_grasp_actions(kwargs):
+            return _fail(
+                "Public semantic grasp requires use_public_atomic_actions=True"
+            )
         return None
     if not _semantic_public_grasp_enabled(kwargs):
+        if kwargs.get("use_public_grasp_action", False) is True:
+            return None
+        if _require_public_grasp_actions(kwargs):
+            return _fail("Public semantic grasp is disabled")
         return None
 
     try:
         target = _build_public_grasp_semantics(env, obj_name, kwargs)
         if target is None:
-            return None
+            return _fail("Public semantic grasp target is unavailable")
 
         is_left, arm_part, hand_part, arm_joints, _ = _select_arm_parts(env, robot_name)
         device = env.robot.device
         hand_dof = len(env.left_eef_joints if is_left else env.right_eef_joints)
         approach_direction = torch.as_tensor(
-            kwargs.get("public_grasp_approach_direction", [0, 0, -1]),
+            kwargs.get("public_grasp_approach_direction", [1, -1, 0]),
             dtype=torch.float32,
             device=device,
         )
@@ -450,7 +591,20 @@ def _try_public_semantic_grasp_action(
 def _try_public_move_action(
     env, robot_name, target_pose, public_sample_num, action_name, **kwargs
 ):
+    def _fail(message, exc=None):
+        suffix = f" ({exc})" if exc is not None else ""
+        log_warning(f"{message}; fallback to legacy logic.{suffix}")
+        if _require_public_non_grasp_actions(kwargs):
+            raise RuntimeError(message) from exc
+        return None
+
+    if env is None:
+        if _require_public_non_grasp_actions(kwargs):
+            return _fail("Public MoveAction requires env")
+        return None
     if not _use_public_atomic_actions(kwargs):
+        if _require_public_non_grasp_actions(kwargs):
+            return _fail("Public MoveAction requires use_public_atomic_actions=True")
         return None
 
     try:
@@ -482,19 +636,13 @@ def _try_public_move_action(
             start_qpos=start_qpos,
         )
         if not is_success:
-            log_warning(
-                f"Public atomic action failed for {action_name}; fallback to legacy logic."
-            )
-            return None
+            return _fail(f"Public atomic action failed for {action_name}")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
         _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
-        log_warning(
-            f"Public atomic action failed for {action_name}; fallback to legacy logic. ({e})"
-        )
-        return None
+        return _fail(f"Public atomic action failed for {action_name}", e)
 
 
 def _try_public_pickup_action(
@@ -505,10 +653,20 @@ def _try_public_pickup_action(
     pre_grasp_dis,
     **kwargs,
 ):
-    if (
-        not _use_public_atomic_actions(kwargs)
-        or kwargs.get("use_public_grasp_action", False) is not True
-    ):
+    def _fail(message, exc=None):
+        suffix = f" ({exc})" if exc is not None else ""
+        log_warning(f"{message}; fallback to legacy logic.{suffix}")
+        if _require_public_grasp_actions(kwargs):
+            raise RuntimeError(message) from exc
+        return None
+
+    if not _use_public_atomic_actions(kwargs):
+        if _require_public_grasp_actions(kwargs):
+            return _fail("Public PickUpAction requires use_public_atomic_actions=True")
+        return None
+    if kwargs.get("use_public_grasp_action", False) is not True:
+        if _require_public_grasp_actions(kwargs):
+            return _fail("Public PickUpAction is disabled")
         return None
 
     try:
@@ -575,19 +733,13 @@ def _try_public_pickup_action(
             ),
         )
         if not is_success:
-            log_warning(
-                "Public atomic action failed for grasp; fallback to legacy logic."
-            )
-            return None
+            return _fail("Public atomic action failed for grasp")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
         _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
-        log_warning(
-            f"Public atomic action failed for grasp; fallback to legacy logic. ({e})"
-        )
-        return None
+        return _fail("Public atomic action failed for grasp", e)
 
 
 def _try_public_place_action(
@@ -597,10 +749,20 @@ def _try_public_place_action(
     pre_place_dis,
     **kwargs,
 ):
-    if (
-        not _use_public_atomic_actions(kwargs)
-        or kwargs.get("use_public_place_action", False) is not True
-    ):
+    def _fail(message, exc=None):
+        suffix = f" ({exc})" if exc is not None else ""
+        log_warning(f"{message}; fallback to legacy logic.{suffix}")
+        if _require_public_atomic_actions(kwargs):
+            raise RuntimeError(message) from exc
+        return None
+
+    if not _use_public_atomic_actions(kwargs):
+        if _require_public_atomic_actions(kwargs):
+            return _fail("Public PlaceAction requires use_public_atomic_actions=True")
+        return None
+    if kwargs.get("use_public_place_action", False) is not True:
+        if _require_public_atomic_actions(kwargs):
+            return _fail("Public PlaceAction is disabled")
         return None
 
     try:
@@ -633,19 +795,13 @@ def _try_public_place_action(
             ),
         )
         if not is_success:
-            log_warning(
-                "Public atomic action failed for place on table; fallback to legacy logic."
-            )
-            return None
+            return _fail("Public atomic action failed for place on table")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
         _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
-        log_warning(
-            f"Public atomic action failed for place on table; fallback to legacy logic. ({e})"
-        )
-        return None
+        return _fail("Public atomic action failed for place on table", e)
 
 
 def move_to_target_pose(
@@ -1305,7 +1461,31 @@ def back_to_initial_pose(robot_name: str, env=None, **kwargs):
 
     # Retrieve the initial joint configuration of this arm
     target_qpos = env.left_arm_init_qpos if is_left else env.right_arm_init_qpos
-    target_qpos = torch.as_tensor(target_qpos, dtype=select_arm_current_qpos.dtype)
+    target_qpos = torch.as_tensor(target_qpos, dtype=torch.float32)
+
+    sample_num = kwargs.get("sample_num", 30)
+    if _use_public_atomic_actions(kwargs):
+        public_actions = _try_public_qpos_move_action(
+            env=env,
+            robot_name=robot_name,
+            control_part=select_arm,
+            target_qpos=target_qpos.to(env.robot.device),
+            start_qpos=torch.as_tensor(
+                select_arm_current_qpos,
+                dtype=torch.float32,
+                device=env.robot.device,
+            ).reshape(1, -1),
+            sample_num=sample_num,
+            kwargs=kwargs,
+            log_name="back to initial pose",
+        )
+        if public_actions is not None:
+            log_info(
+                "Total generated trajectory number for back to initial pose: "
+                f"{len(public_actions)}.",
+                color="green",
+            )
+            return public_actions
 
     # ---------------------------------------- Pose ----------------------------------------
     # Pre-back pose: move along tool z by a small offset (use intrinsic frame)
@@ -1344,7 +1524,6 @@ def back_to_initial_pose(robot_name: str, env=None, **kwargs):
 
     # ------------------------------------ Traj: init → initial_pose ------------------------------------
     qpos_list_preback_to_target = [pre_back_qpos, target_qpos]
-    sample_num = kwargs.get("sample_num", 30)
 
     plan_trajectory(
         env,
@@ -1385,6 +1564,29 @@ def rotate_eef(robot_name: str, degree: float = 0, env=None, **kwargs):
     # Compute new joint positions
     rotated_qpos = deepcopy(select_arm_current_qpos)
     rotated_qpos[5] += np.deg2rad(degree)
+    sample_num = kwargs.get("sample_num", 20)
+
+    if _use_public_atomic_actions(kwargs):
+        public_actions = _try_public_qpos_move_action(
+            env=env,
+            robot_name=robot_name,
+            control_part=select_arm,
+            target_qpos=rotated_qpos,
+            start_qpos=torch.as_tensor(
+                select_arm_current_qpos,
+                dtype=torch.float32,
+                device=env.robot.device,
+            ).reshape(1, -1),
+            sample_num=sample_num,
+            kwargs=kwargs,
+            log_name="rotate eef",
+        )
+        if public_actions is not None:
+            log_info(
+                f"Total generated trajectory number for rotate eef: {len(public_actions)}.",
+                color="green",
+            )
+            return public_actions
 
     # Optional: limit checking (commented out by default)
     # joint5_limit = env.get_joint_limits(select_arm)[5]
@@ -1403,7 +1605,6 @@ def rotate_eef(robot_name: str, degree: float = 0, env=None, **kwargs):
 
     # ------------------------------------ Traj 1: init → rotated ------------------------------------
     qpos_list_init_to_rotated = [select_arm_current_qpos, rotated_qpos]
-    sample_num = kwargs.get("sample_num", 20)
 
     plan_trajectory(
         env,
@@ -1527,6 +1728,30 @@ def close_gripper(robot_name: str, env=None, **kwargs):
 
     # ---------------------------------------- Traj ----------------------------------------
     sample_num = kwargs.get("sample_num", 15)
+    if _use_public_atomic_actions(kwargs):
+        _, _, hand_part, _, eef_joints = _select_arm_parts(env, robot_name)
+        hand_dof = len(eef_joints)
+        public_actions = _try_public_qpos_move_action(
+            env=env,
+            robot_name=robot_name,
+            control_part=hand_part,
+            target_qpos=_state_to_hand_qpos(
+                env.close_state, hand_dof, env.robot.device
+            ),
+            start_qpos=_state_to_hand_qpos(
+                select_arm_current_gripper_state, hand_dof, env.robot.device
+            ).reshape(1, hand_dof),
+            sample_num=sample_num,
+            kwargs=kwargs,
+            log_name="close gripper",
+        )
+        if public_actions is not None:
+            log_info(
+                f"Total generated trajectory number for close gripper: {len(public_actions)}.",
+                color="green",
+            )
+            return public_actions
+
     execute_open = False  # False → closing motion
 
     plan_gripper_trajectory(
@@ -1581,6 +1806,28 @@ def open_gripper(robot_name: str, env=None, **kwargs):
 
     # ---------------------------------------- Traj ----------------------------------------
     sample_num = kwargs.get("sample_num", 15)
+    if _use_public_atomic_actions(kwargs):
+        _, _, hand_part, _, eef_joints = _select_arm_parts(env, robot_name)
+        hand_dof = len(eef_joints)
+        public_actions = _try_public_qpos_move_action(
+            env=env,
+            robot_name=robot_name,
+            control_part=hand_part,
+            target_qpos=_state_to_hand_qpos(env.open_state, hand_dof, env.robot.device),
+            start_qpos=_state_to_hand_qpos(
+                select_arm_current_gripper_state, hand_dof, env.robot.device
+            ).reshape(1, hand_dof),
+            sample_num=sample_num,
+            kwargs=kwargs,
+            log_name="open gripper",
+        )
+        if public_actions is not None:
+            log_info(
+                f"Total generated trajectory number for open gripper: {len(public_actions)}.",
+                color="green",
+            )
+            return public_actions
+
     execute_open = True  # True → opening motion
 
     plan_gripper_trajectory(

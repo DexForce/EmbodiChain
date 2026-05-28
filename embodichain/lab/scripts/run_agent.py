@@ -70,6 +70,12 @@ if __name__ == "__main__":
         default=True,
     )
     parser.add_argument(
+        "--require_public_atomic_actions",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to raise instead of falling back to legacy when public atomic actions fail.",
+        default=False,
+    )
+    parser.add_argument(
         "--use_public_grasp_semantics",
         action=argparse.BooleanOptionalAction,
         help="Whether to use mesh semantics and AntipodalAffordance for grasp.",
@@ -106,6 +112,10 @@ if __name__ == "__main__":
     if args.num_envs != 1:
         log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
         exit(1)
+    if args.require_public_atomic_actions and not args.use_public_atomic_actions:
+        log_error(
+            "--require_public_atomic_actions requires --use_public_atomic_actions."
+        )
 
     # Load configurations
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)

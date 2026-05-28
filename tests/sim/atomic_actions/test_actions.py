@@ -186,6 +186,34 @@ class TestMoveActionHelpers:
         expected_mid = torch.tensor([0.5, 0.5])
         assert torch.allclose(result[1], expected_mid, atol=1e-6)
 
+    def test_execute_accepts_hand_qpos_target(self):
+        cfg = MoveActionCfg(control_part="hand", sample_interval=5)
+        action = MoveAction(self.mg, cfg=cfg)
+        start_qpos = torch.tensor([[0.0, 0.1], [0.2, 0.3]])
+        target_qpos = torch.tensor([0.8, 0.9])
+
+        is_success, trajectory, joint_ids = action.execute(
+            target=target_qpos,
+            start_qpos=start_qpos,
+        )
+
+        assert is_success is True
+        assert trajectory.shape == (NUM_ENVS, cfg.sample_interval, HAND_DOF)
+        assert torch.allclose(trajectory[:, 0], start_qpos)
+        assert torch.allclose(
+            trajectory[:, -1],
+            target_qpos.unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
+        assert joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
+
+    def test_interpolate_qpos_requires_start_and_target_waypoints(self):
+        with pytest.raises(ValueError, match="at least 2"):
+            self.action._interpolate_qpos(
+                torch.zeros(NUM_ENVS, ARM_DOF),
+                torch.ones(NUM_ENVS, ARM_DOF),
+                1,
+            )
+
 
 # ---------------------------------------------------------------------------
 # PickUpAction

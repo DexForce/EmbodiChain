@@ -51,6 +51,17 @@ def _load_drive_function():
         if isinstance(node, ast.FunctionDef) and node.name == "drive"
     ]
     drive_module = ast.Module(body=function_nodes, type_ignores=[])
+
+    def _stub_as_2d_action(action, action_name):
+        if action is None:
+            return None
+        action = np.asarray(action, dtype=np.float32)
+        if action.ndim == 1:
+            action = action[None, :]
+        if action.ndim != 2 or len(action) == 0:
+            raise ValueError(f"{action_name} must have shape (T, D).")
+        return action
+
     namespace = {
         "np": np,
         "torch": torch,
@@ -62,6 +73,7 @@ def _load_drive_function():
         "log_info": lambda *args, **kwargs: None,
         "log_warning": lambda *args, **kwargs: None,
         "log_error": lambda *args, **kwargs: None,
+        "_as_2d_action": _stub_as_2d_action,
         "setup_interactive_error_input": lambda enabled=None: None,
         "restore_interactive_error_input": lambda interactive_input: None,
         "interactive_error_requested": lambda interactive_input: False,
@@ -131,12 +143,27 @@ def _load_open_gripper_function():
     def _stub_plan_gripper_trajectory(*args, **kwargs):
         plan_calls["count"] += 1
 
+    def _stub_is_current_gripper_open(env, current_state, threshold):
+        current_state = torch.as_tensor(current_state, dtype=torch.float32).flatten()
+        open_state = torch.as_tensor(env.open_state, dtype=torch.float32).flatten()
+        if open_state.numel() == 1 and current_state.numel() > 1:
+            open_state = open_state.repeat(current_state.numel())
+        return torch.all(
+            torch.abs(current_state - open_state[: current_state.numel()]) <= threshold
+        ).item()
+
+    def _stub_use_public_atomic_actions(kwargs):
+        return kwargs.get("use_public_atomic_actions", False) is True
+
     namespace = {
         "np": np,
         "torch": torch,
         "get_arm_states": _stub_get_arm_states,
         "plan_gripper_trajectory": _stub_plan_gripper_trajectory,
         "finalize_actions": _finalize_actions,
+        "_is_current_gripper_open": _stub_is_current_gripper_open,
+        "_use_public_atomic_actions": _stub_use_public_atomic_actions,
+        "_try_public_qpos_move_action": lambda **kwargs: None,
         "log_info": lambda *args, **kwargs: None,
     }
     exec(
@@ -148,8 +175,116 @@ def _load_open_gripper_function():
 open_gripper, open_gripper_plan_calls = _load_open_gripper_function()
 
 
+def _load_agent_action_function(function_name, public_result=None):
+    source_path = (
+        REPO_ROOT / "embodichain" / "lab" / "sim" / "agent" / "atom_actions.py"
+    )
+    source = source_path.read_text()
+    module = ast.parse(source, filename=str(source_path))
+    function_node = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    function_module = ast.Module(body=[function_node], type_ignores=[])
+    public_calls = []
+    plan_calls = {"count": 0}
+
+    def _stub_get_arm_states(env, robot_name):
+        if "left" in robot_name:
+            return (
+                True,
+                "left_arm",
+                env.left_arm_current_qpos,
+                torch.eye(4, dtype=torch.float32),
+                env.left_arm_current_gripper_state,
+            )
+        return (
+            False,
+            "right_arm",
+            env.right_arm_current_qpos,
+            torch.eye(4, dtype=torch.float32),
+            env.right_arm_current_gripper_state,
+        )
+
+    def _stub_select_arm_parts(env, robot_name):
+        if "left" in robot_name:
+            return (
+                True,
+                "left_arm",
+                "left_eef",
+                list(env.left_arm_joints),
+                list(env.left_eef_joints),
+            )
+        return (
+            False,
+            "right_arm",
+            "right_eef",
+            list(env.right_arm_joints),
+            list(env.right_eef_joints),
+        )
+
+    def _stub_state_to_hand_qpos(state, hand_dof, device):
+        state = torch.as_tensor(state, dtype=torch.float32, device=device).flatten()
+        if state.numel() == hand_dof:
+            return state
+        if state.numel() == 1:
+            return state.repeat(hand_dof)
+        return state[:hand_dof]
+
+    def _stub_public_qpos_move_action(**kwargs):
+        public_calls.append(kwargs)
+        return public_result
+
+    def _stub_use_public_atomic_actions(kwargs):
+        return kwargs.get("use_public_atomic_actions", False) is True
+
+    def _stub_plan_gripper_trajectory(
+        env,
+        is_left,
+        sample_num,
+        execute_open,
+        select_arm_current_qpos,
+        select_qpos_traj,
+        ee_state_list_select,
+    ):
+        plan_calls["count"] += 1
+        target_state = (
+            torch.as_tensor(env.open_state if execute_open else env.close_state)
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        select_qpos_traj.extend([select_arm_current_qpos] * sample_num)
+        ee_state_list_select.extend([target_state] * sample_num)
+
+    namespace = {
+        "np": np,
+        "torch": torch,
+        "deepcopy": __import__("copy").deepcopy,
+        "get_arm_states": _stub_get_arm_states,
+        "_select_arm_parts": _stub_select_arm_parts,
+        "_state_to_hand_qpos": _stub_state_to_hand_qpos,
+        "_try_public_qpos_move_action": _stub_public_qpos_move_action,
+        "_use_public_atomic_actions": _stub_use_public_atomic_actions,
+        "_is_current_gripper_open": lambda *args, **kwargs: False,
+        "plan_gripper_trajectory": _stub_plan_gripper_trajectory,
+        "plan_trajectory": lambda *args, **kwargs: None,
+        "finalize_actions": _finalize_actions,
+        "log_info": lambda *args, **kwargs: None,
+        "get_offset_pose": lambda pose, *args, **kwargs: pose,
+        "get_qpos": lambda env, is_left, select_arm, pose, qpos_seed, **kwargs: (
+            pose,
+            qpos_seed,
+        ),
+    }
+    exec(compile(function_module, filename=str(source_path), mode="exec"), namespace)
+    return namespace[function_name], public_calls, plan_calls
+
+
 class _DummyRobot:
     def __init__(self) -> None:
+        self.device = torch.device("cpu")
         self.qpos = torch.zeros(8, dtype=torch.float32)
 
     def get_qpos(self) -> torch.Tensor:
@@ -201,6 +336,21 @@ class _ObjectMovementEnv(_DummyEnv):
         self.obj_info["cup"]["pose"] = self.current_object_pose.clone()
 
 
+class _SixDofEnv(_DummyEnv):
+    def __init__(self) -> None:
+        super().__init__()
+        self.left_arm_joints = list(range(6))
+        self.left_eef_joints = [6, 7]
+        self.right_arm_joints = list(range(8, 14))
+        self.right_eef_joints = [14, 15]
+        self.left_arm_current_qpos = np.arange(6, dtype=np.float32)
+        self.right_arm_current_qpos = np.arange(6, dtype=np.float32)
+        self.left_arm_init_qpos = np.arange(10, 16, dtype=np.float32)
+        self.right_arm_init_qpos = np.arange(20, 26, dtype=np.float32)
+        self.open_state = torch.tensor([0.0], dtype=torch.float32)
+        self.close_state = torch.tensor([0.05], dtype=torch.float32)
+
+
 def test_open_gripper_skips_when_skip_condition_is_met() -> None:
     env = _DummyEnv()
     env.open_state = torch.tensor([0.05], dtype=torch.float32)
@@ -215,6 +365,91 @@ def test_open_gripper_skips_when_skip_condition_is_met() -> None:
         actions[0], np.array([0.0, 0.0, 0.05, 0.05], dtype=np.float32)
     )
     assert open_gripper_plan_calls["count"] == before_calls
+
+
+def test_open_gripper_public_qpos_success_returns_public_actions() -> None:
+    public_result = np.array([[0.0, 0.0, 0.01, 0.01]], dtype=np.float32)
+    action_fn, public_calls, plan_calls = _load_agent_action_function(
+        "open_gripper", public_result=public_result
+    )
+    env = _DummyEnv()
+    env.open_state = torch.tensor([0.0], dtype=torch.float32)
+    env.left_arm_current_gripper_state = np.array([0.05], dtype=np.float32)
+
+    actions = action_fn(
+        robot_name="left_arm",
+        env=env,
+        use_public_atomic_actions=True,
+    )
+
+    assert actions is public_result
+    assert plan_calls["count"] == 0
+    assert public_calls[0]["control_part"] == "left_eef"
+    torch.testing.assert_close(
+        public_calls[0]["target_qpos"],
+        torch.tensor([0.0, 0.0], dtype=torch.float32),
+    )
+
+
+def test_close_gripper_public_qpos_fallback_uses_legacy_plan() -> None:
+    action_fn, public_calls, plan_calls = _load_agent_action_function(
+        "close_gripper", public_result=None
+    )
+    env = _DummyEnv()
+    env.open_state = torch.tensor([0.0], dtype=torch.float32)
+    env.close_state = torch.tensor([0.05], dtype=torch.float32)
+
+    actions = action_fn(
+        robot_name="left_arm",
+        env=env,
+        use_public_atomic_actions=True,
+        sample_num=3,
+    )
+
+    assert len(public_calls) == 1
+    assert plan_calls["count"] == 1
+    assert actions.shape == (3, 4)
+
+
+def test_rotate_eef_public_qpos_updates_wrist_joint_target() -> None:
+    public_result = np.zeros((1, 8), dtype=np.float32)
+    action_fn, public_calls, _ = _load_agent_action_function(
+        "rotate_eef", public_result=public_result
+    )
+    env = _SixDofEnv()
+
+    actions = action_fn(
+        robot_name="left_arm",
+        degree=90,
+        env=env,
+        use_public_atomic_actions=True,
+    )
+
+    assert actions is public_result
+    target_qpos = np.asarray(public_calls[0]["target_qpos"], dtype=np.float32)
+    expected = env.left_arm_current_qpos.copy()
+    expected[5] += np.deg2rad(90)
+    np.testing.assert_allclose(target_qpos, expected)
+
+
+def test_back_to_initial_pose_public_qpos_uses_init_qpos() -> None:
+    public_result = np.zeros((1, 8), dtype=np.float32)
+    action_fn, public_calls, _ = _load_agent_action_function(
+        "back_to_initial_pose", public_result=public_result
+    )
+    env = _SixDofEnv()
+
+    actions = action_fn(
+        robot_name="left_arm",
+        env=env,
+        use_public_atomic_actions=True,
+    )
+
+    assert actions is public_result
+    torch.testing.assert_close(
+        public_calls[0]["target_qpos"],
+        torch.tensor(env.left_arm_init_qpos, dtype=torch.float32),
+    )
 
 
 def test_drive_stops_failed_trajectory_when_monitor_triggers() -> None:

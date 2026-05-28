@@ -226,6 +226,7 @@ class BaseAgentEnv:
         )
         public_atomic_kwargs = {
             "use_public_atomic_actions": True,
+            "require_public_atomic_actions": False,
             "use_public_grasp_semantics": True,
             "use_public_grasp_action": False,
             "use_public_place_action": True,
