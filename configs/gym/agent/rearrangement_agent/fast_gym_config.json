@@ -1,6 +1,6 @@
 {   
     "id": "RearrangementAgent-v3",
-    "max_episodes": 5,
+    "max_episodes": 1,
     "max_episode_steps": 300,
     "env": {
         "events": {

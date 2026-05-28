@@ -29,6 +29,13 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 from embodichain.utils.utility import encode_image
 from functools import partial
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    MoveActionCfg,
+    PickUpActionCfg,
+    PlaceActionCfg,
+)
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 
 # Import utility functions for atom actions
 from embodichain.lab.sim.agent.atom_action_utils import (
@@ -59,6 +66,348 @@ from embodichain.lab.sim.agent.monitor_functions import *
 """
 
 
+def _use_public_atomic_actions(kwargs):
+    return kwargs.get("use_public_atomic_actions", False) is True
+
+
+def _select_arm_parts(env, robot_name):
+    is_left = "right" not in robot_name
+    arm_part = "left_arm" if is_left else "right_arm"
+    hand_part = "left_eef" if is_left else "right_eef"
+    arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
+    eef_joints = env.left_eef_joints if is_left else env.right_eef_joints
+    return is_left, arm_part, hand_part, list(arm_joints), list(eef_joints)
+
+
+def _make_motion_generator(env):
+    return MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+    )
+
+
+def _make_atomic_engine(env, cfg):
+    return AtomicActionEngine(
+        motion_generator=_make_motion_generator(env),
+        actions_cfg_list=[cfg],
+    )
+
+
+def _state_to_hand_qpos(state, hand_dof, device):
+    if hand_dof <= 0:
+        return torch.empty(0, dtype=torch.float32, device=device)
+
+    state = torch.as_tensor(state, dtype=torch.float32, device=device).flatten()
+    if state.numel() == 0:
+        return torch.zeros(hand_dof, dtype=torch.float32, device=device)
+    if state.numel() == hand_dof:
+        return state
+    if state.numel() == 1:
+        return state.repeat(hand_dof)
+    if state.numel() > hand_dof:
+        return state[:hand_dof]
+
+    repeat_num = int(np.ceil(hand_dof / state.numel()))
+    return state.repeat(repeat_num)[:hand_dof]
+
+
+def _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids):
+    _, _, _, arm_joints, eef_joints = _select_arm_parts(env, robot_name)
+    (
+        _,
+        _,
+        select_arm_current_qpos,
+        _,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
+
+    if isinstance(trajectory, torch.Tensor):
+        trajectory = trajectory.detach()
+    else:
+        trajectory = torch.as_tensor(trajectory)
+
+    if trajectory.dim() == 3:
+        trajectory = trajectory[0]
+    if trajectory.dim() != 2 or trajectory.shape[0] == 0:
+        raise ValueError(
+            "Public atomic trajectory must have shape (T, D) or (N, T, D), "
+            f"got {trajectory.shape}."
+        )
+
+    joint_ids = [int(joint_id) for joint_id in joint_ids]
+    if len(joint_ids) != trajectory.shape[-1]:
+        raise ValueError(
+            f"Public atomic joint_ids length {len(joint_ids)} does not match "
+            f"trajectory width {trajectory.shape[-1]}."
+        )
+
+    device = trajectory.device
+    current_arm_qpos = torch.as_tensor(
+        select_arm_current_qpos, dtype=torch.float32, device=device
+    ).flatten()
+    current_hand_qpos = _state_to_hand_qpos(
+        select_arm_current_gripper_state,
+        len(eef_joints),
+        device,
+    )
+    agent_action = torch.cat([current_arm_qpos, current_hand_qpos], dim=0)
+    agent_action = agent_action.unsqueeze(0).repeat(trajectory.shape[0], 1)
+
+    joint_id_to_col = {joint_id: col for col, joint_id in enumerate(joint_ids)}
+    for out_col, joint_id in enumerate(arm_joints + eef_joints):
+        if joint_id in joint_id_to_col:
+            agent_action[:, out_col] = trajectory[:, joint_id_to_col[joint_id]]
+
+    return agent_action.detach().cpu().numpy().astype(np.float32)
+
+
+def _sync_agent_state_from_public_action(env, robot_name, action_np):
+    if action_np is None or len(action_np) == 0:
+        raise ValueError("Public atomic action is empty; cannot sync agent state.")
+
+    is_left, _, _, arm_joints, eef_joints = _select_arm_parts(env, robot_name)
+    (
+        _,
+        _,
+        _,
+        _,
+        select_arm_current_gripper_state,
+    ) = get_arm_states(env, robot_name)
+
+    final_action = np.asarray(action_np[-1], dtype=np.float32)
+    arm_dof = len(arm_joints)
+    arm_qpos = torch.as_tensor(
+        final_action[:arm_dof],
+        dtype=torch.float32,
+        device=env.robot.device,
+    )
+    env.set_current_qpos_agent(arm_qpos, is_left=is_left)
+    env.set_current_xpos_agent(
+        env.get_arm_fk(qpos=arm_qpos, is_left=is_left),
+        is_left=is_left,
+    )
+
+    if len(eef_joints) == 0:
+        return
+
+    eef_qpos = final_action[arm_dof : arm_dof + len(eef_joints)]
+    state_dof = max(int(torch.as_tensor(select_arm_current_gripper_state).numel()), 1)
+    if len(eef_qpos) >= state_dof:
+        gripper_qpos = eef_qpos[:state_dof]
+    else:
+        gripper_qpos = np.resize(eef_qpos, state_dof)
+
+    current_gripper_state = torch.as_tensor(select_arm_current_gripper_state)
+    env.set_current_gripper_state_agent(
+        torch.as_tensor(
+            gripper_qpos,
+            dtype=current_gripper_state.dtype,
+            device=current_gripper_state.device,
+        ),
+        is_left=is_left,
+    )
+
+
+def _try_public_move_action(
+    env, robot_name, target_pose, public_sample_num, action_name, **kwargs
+):
+    if not _use_public_atomic_actions(kwargs):
+        return None
+
+    try:
+        _, arm_part, _, _, _ = _select_arm_parts(env, robot_name)
+        (
+            _,
+            _,
+            select_arm_current_qpos,
+            _,
+            _,
+        ) = get_arm_states(env, robot_name)
+        target_pose = torch.as_tensor(
+            target_pose, dtype=torch.float32, device=env.robot.device
+        )
+        start_qpos = torch.as_tensor(
+            select_arm_current_qpos,
+            dtype=torch.float32,
+            device=env.robot.device,
+        )
+
+        cfg = MoveActionCfg(
+            control_part=arm_part,
+            sample_interval=int(public_sample_num),
+        )
+        engine = _make_atomic_engine(env, cfg)
+        action = engine._actions[cfg.name]
+        is_success, trajectory, joint_ids = action.execute(
+            target=target_pose,
+            start_qpos=start_qpos,
+        )
+        if not is_success:
+            log_warning(
+                f"Public atomic action failed for {action_name}; fallback to legacy logic."
+            )
+            return None
+
+        action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _sync_agent_state_from_public_action(env, robot_name, action_np)
+        return action_np
+    except Exception as e:
+        log_warning(
+            f"Public atomic action failed for {action_name}; fallback to legacy logic. ({e})"
+        )
+        return None
+
+
+def _try_public_pickup_action(
+    env,
+    robot_name,
+    obj_name,
+    target_obj_pose,
+    pre_grasp_dis,
+    **kwargs,
+):
+    if (
+        not _use_public_atomic_actions(kwargs)
+        or kwargs.get("use_public_grasp_action", False) is not True
+    ):
+        return None
+
+    try:
+        is_left, arm_part, hand_part, _, eef_joints = _select_arm_parts(env, robot_name)
+        (
+            _,
+            _,
+            select_arm_current_qpos,
+            _,
+            _,
+        ) = get_arm_states(env, robot_name)
+
+        grasp_pose_object = env.obj_info.get(obj_name, {}).get("grasp_pose_obj")
+        if grasp_pose_object is None:
+            raise ValueError(f"No grasp_pose_obj found for object {obj_name}.")
+
+        device = env.robot.device
+        target_obj_pose = torch.as_tensor(
+            target_obj_pose, dtype=torch.float32, device=device
+        )
+        grasp_pose_object = torch.as_tensor(
+            grasp_pose_object, dtype=torch.float32, device=device
+        )
+
+        select_arm_base_pose = (
+            env.left_arm_base_pose if is_left else env.right_arm_base_pose
+        )
+        select_arm_base_pose = torch.as_tensor(
+            select_arm_base_pose, dtype=torch.float32, device=device
+        )
+        delta_xy = target_obj_pose[:2, 3] - select_arm_base_pose[:2, 3]
+        aim_horizontal_angle = float(
+            torch.atan2(delta_xy[1], delta_xy[0]).detach().cpu()
+        )
+        if bool((grasp_pose_object[0, 2] > 0.5).item()):
+            target_obj_pose = torch.as_tensor(
+                get_rotation_replaced_pose(
+                    target_obj_pose.detach().cpu().numpy(),
+                    aim_horizontal_angle,
+                    "z",
+                    "intrinsic",
+                ),
+                dtype=torch.float32,
+                device=device,
+            )
+        grasp_pose = target_obj_pose @ grasp_pose_object
+
+        cfg = PickUpActionCfg(
+            control_part=arm_part,
+            hand_control_part=hand_part,
+            hand_open_qpos=_state_to_hand_qpos(env.open_state, len(eef_joints), device),
+            hand_close_qpos=_state_to_hand_qpos(
+                env.close_state, len(eef_joints), device
+            ),
+            pre_grasp_distance=pre_grasp_dis,
+            sample_interval=int(kwargs.get("sample_num", 80)),
+        )
+        engine = _make_atomic_engine(env, cfg)
+        action = engine._actions[cfg.name]
+        is_success, trajectory, joint_ids = action.execute(
+            target=grasp_pose,
+            start_qpos=torch.as_tensor(
+                select_arm_current_qpos, dtype=torch.float32, device=device
+            ),
+        )
+        if not is_success:
+            log_warning(
+                "Public atomic action failed for grasp; fallback to legacy logic."
+            )
+            return None
+
+        action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _sync_agent_state_from_public_action(env, robot_name, action_np)
+        return action_np
+    except Exception as e:
+        log_warning(
+            f"Public atomic action failed for grasp; fallback to legacy logic. ({e})"
+        )
+        return None
+
+
+def _try_public_place_action(
+    env,
+    robot_name,
+    target_pose,
+    pre_place_dis,
+    **kwargs,
+):
+    if (
+        not _use_public_atomic_actions(kwargs)
+        or kwargs.get("use_public_place_action", False) is not True
+    ):
+        return None
+
+    try:
+        _, arm_part, hand_part, _, eef_joints = _select_arm_parts(env, robot_name)
+        (
+            _,
+            _,
+            select_arm_current_qpos,
+            _,
+            _,
+        ) = get_arm_states(env, robot_name)
+        device = env.robot.device
+
+        cfg = PlaceActionCfg(
+            control_part=arm_part,
+            hand_control_part=hand_part,
+            hand_open_qpos=_state_to_hand_qpos(env.open_state, len(eef_joints), device),
+            hand_close_qpos=_state_to_hand_qpos(
+                env.close_state, len(eef_joints), device
+            ),
+            lift_height=pre_place_dis,
+            sample_interval=int(kwargs.get("sample_num", 80)),
+        )
+        engine = _make_atomic_engine(env, cfg)
+        action = engine._actions[cfg.name]
+        is_success, trajectory, joint_ids = action.execute(
+            target=torch.as_tensor(target_pose, dtype=torch.float32, device=device),
+            start_qpos=torch.as_tensor(
+                select_arm_current_qpos, dtype=torch.float32, device=device
+            ),
+        )
+        if not is_success:
+            log_warning(
+                "Public atomic action failed for place on table; fallback to legacy logic."
+            )
+            return None
+
+        action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _sync_agent_state_from_public_action(env, robot_name, action_np)
+        return action_np
+    except Exception as e:
+        log_warning(
+            f"Public atomic action failed for place on table; fallback to legacy logic. ({e})"
+        )
+        return None
+
+
 def move_to_target_pose(
     robot_name: str,
     target_pose=None,
@@ -77,6 +426,22 @@ def move_to_target_pose(
         select_arm_current_pose,
         select_arm_current_gripper_state,
     ) = get_arm_states(env, robot_name)
+
+    public_actions = _try_public_move_action(
+        env,
+        robot_name,
+        target_pose,
+        sample_num,
+        "move to target",
+        **kwargs,
+    )
+    if public_actions is not None:
+        log_info(
+            "Total generated trajectory number for move to target: "
+            f"{len(public_actions)}.",
+            color="green",
+        )
+        return public_actions
 
     target_pose, move_target_qpos = get_qpos(
         env,
@@ -128,6 +493,21 @@ def grasp(
         log_error(f"No matched object {obj_uids}.")
     target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
 
+    public_actions = _try_public_pickup_action(
+        env,
+        robot_name,
+        obj_name,
+        target_obj_pose,
+        pre_grasp_dis,
+        **kwargs,
+    )
+    if public_actions is not None:
+        log_info(
+            f"Total generated trajectory number for grasp: {len(public_actions)}.",
+            color="green",
+        )
+        return public_actions
+
     # Open the gripper if currently closed
     actions = None
     select_arm_current_gripper_state = (
@@ -163,6 +543,9 @@ def grasp(
         select_arm_current_pose, select_arm_init_pose, rtol=1e-5, atol=1e-8
     ):
         delta = float(base_to_eef_xy_dis - (base_to_obj_xy_dis - dis_eps))
+        legacy_move_kwargs = dict(kwargs)
+        legacy_move_kwargs["use_public_atomic_actions"] = False
+        legacy_move_kwargs.pop("sample_num", None)
         back_actions = move_by_relative_offset(
             robot_name=robot_name,
             dx=0.0,
@@ -172,7 +555,7 @@ def grasp(
             force_valid=force_valid,
             mode="intrinsic",
             sample_num=15,
-            **kwargs,
+            **legacy_move_kwargs,
         )
         actions = (
             np.concatenate([actions, back_actions], axis=0)
@@ -322,6 +705,35 @@ def place_on_table(
     init_obj_height = env.obj_info.get(obj_name).get("height")
     height = init_obj_height + kwargs.get("eps", 0.03)
 
+    (
+        _,
+        _,
+        _,
+        select_arm_current_pose,
+        _,
+    ) = get_arm_states(env, robot_name)
+    place_pose = deepcopy(select_arm_current_pose)
+    if x is not None:
+        place_pose[0, 3] = x
+    if y is not None:
+        place_pose[1, 3] = y
+    place_pose[2, 3] = height
+
+    public_actions = _try_public_place_action(
+        env,
+        robot_name,
+        place_pose,
+        pre_place_dis,
+        **kwargs,
+    )
+    if public_actions is not None:
+        log_info(
+            "Total generated trajectory number for place on table: "
+            f"{len(public_actions)}.",
+            color="green",
+        )
+        return public_actions
+
     traj_actions = move_to_absolute_position(
         robot_name, x=x, y=y, z=height, env=env, force_valid=force_valid, **kwargs
     )
@@ -377,6 +789,22 @@ def move_relative_to_object(
     move_target_pose[0, 3] += x_offset
     move_target_pose[1, 3] += y_offset
     move_target_pose[2, 3] += z_offset
+
+    public_actions = _try_public_move_action(
+        env,
+        robot_name,
+        move_target_pose,
+        kwargs.get("sample_num", 30),
+        "move relative to object",
+        **kwargs,
+    )
+    if public_actions is not None:
+        log_info(
+            "Total generated trajectory number for move relative to object: "
+            f"{len(public_actions)}.",
+            color="green",
+        )
+        return public_actions
 
     # Solve IK for target pose
     move_target_pose, move_target_qpos = get_qpos(
@@ -456,6 +884,22 @@ def move_to_absolute_position(
 
     move_pose[:3, 3] = target_xyz
 
+    public_actions = _try_public_move_action(
+        env,
+        robot_name,
+        move_pose,
+        kwargs.get("sample_num", 30),
+        "move to absolute position",
+        **kwargs,
+    )
+    if public_actions is not None:
+        log_info(
+            "Total generated trajectory number for move to absolute position: "
+            f"{len(public_actions)}.",
+            color="green",
+        )
+        return public_actions
+
     # Try IK on target pose
     move_pose, move_qpos = get_qpos(
         env,
@@ -526,6 +970,22 @@ def move_by_relative_offset(
     move_pose = get_offset_pose(move_pose, dx, "x", mode)
     move_pose = get_offset_pose(move_pose, dy, "y", mode)
     move_pose = get_offset_pose(move_pose, dz, "z", mode)
+
+    public_actions = _try_public_move_action(
+        env,
+        robot_name,
+        move_pose,
+        kwargs.get("sample_num", 20),
+        "move by relative offset",
+        **kwargs,
+    )
+    if public_actions is not None:
+        log_info(
+            "Total generated trajectory number for move by relative offset: "
+            f"{len(public_actions)}.",
+            color="green",
+        )
+        return public_actions
 
     # Solve IK
     move_pose, move_qpos = get_qpos(
