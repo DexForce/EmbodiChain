@@ -1,24 +1,24 @@
 {
   "task_graph": {
-    "task": "pick_and_place_cup",
+    "task": "cup transfer",
     "start": "v0_start",
     "goal": "v3_done",
     "nodes": [
       {
         "id": "v0_start",
-        "semantic": "Initial state: cup at [0.75, 0.18] on table, robot at initial pose"
+        "semantic": "initial state with cup at [0.75, 0.18]"
       },
       {
         "id": "v1_grasped",
-        "semantic": "Cup grasped by right arm at start location"
+        "semantic": "cup grasped by right arm"
       },
       {
         "id": "v2_placed",
-        "semantic": "Cup placed at target location [0.75, -0.18] on table"
+        "semantic": "cup placed at target [0.75, -0.18]"
       },
       {
         "id": "v3_done",
-        "semantic": "Robot returned to initial pose, task complete"
+        "semantic": "right arm returned to initial pose"
       }
     ],
     "edges": [
@@ -67,11 +67,11 @@
     ]
   },
   "recovery_spec": {
-    "task": "pick_and_place_cup",
+    "task": "cup transfer",
     "recovery_bindings": []
   },
   "recovery_graph": {
-    "task": "pick_and_place_cup",
+    "task": "cup transfer",
     "recovery_nodes": [],
     "recovery_edges": [],
     "recovery_branches": []
@@ -79,8 +79,8 @@
   "metadata": {
     "recovery_enabled": false,
     "schema_version": "recovery_bindings_v1",
-    "task_graph_hash": "83823d99861d4fcd9a2e9e242022f01d95e8a5848339abcf5b440e14b6df96dd",
-    "raw_recovery_spec_hash": "40a0ea0db525e8938446f551481979739a34342f0de8dad8b2dbc8ba71c61728",
-    "recovery_spec_hash": "40a0ea0db525e8938446f551481979739a34342f0de8dad8b2dbc8ba71c61728"
+    "task_graph_hash": "b48eb7af618b842818b2de38d052961c0c38926bd00635d2b0c1ab4ada345c64",
+    "raw_recovery_spec_hash": "3d7378b56d5070671066d68313ed4257c812c73c008a4c6590bd429eeae207b1",
+    "recovery_spec_hash": "3d7378b56d5070671066d68313ed4257c812c73c008a4c6590bd429eeae207b1"
   }
 }

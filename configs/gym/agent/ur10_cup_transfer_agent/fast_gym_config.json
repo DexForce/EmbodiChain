@@ -61,8 +61,8 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "cup"},
-                    "position_range": [[-0.03, -0.02, 0.0], [0.03, 0.02, 0.0]],
-                    "rotation_range": [[0, 0, -20], [0, 0, 20]],
+                    "position_range": [[-0.0, -0.1, 0.0], [-0.0, -0.1, 0.0]],
+                    "rotation_range": [[0, 0, 0], [0, 0, 0]],
                     "relative_position": true,
                     "relative_rotation": true
                 }
@@ -89,9 +89,9 @@
                                 "uid": "cup"
                             },
                             "value": [[
-                                [0.32039, -0.03227, 0.94673, 0.0],
-                                [0.00675, -0.99932, -0.03635, 0.0],
-                                [0.94726, 0.01803, -0.31996, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.04],
                                 [0.0, 0.0, 0.0, 1.0]
                             ]]
                         }
@@ -173,8 +173,9 @@
         "extensions": {
             "single_arm_name": "right_arm",
             "single_eef_name": "right_eef",
+            "arm_aim_yaw_offset": 3.141592653589793,
             "gripper_open_state": [0.0],
-            "gripper_close_state": [0.025],
+            "gripper_close_state": [0.04],
             "target_xy": [0.75, -0.18],
             "success_tolerance": 0.04
         }
@@ -189,25 +190,25 @@
                 },
                 {
                     "component_type": "hand",
-                    "urdf_path": "DH_PGC_140_50/DH_PGC_140_50.urdf"
+                    "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
                 }
             ]
         },
         "init_pos": [0.0, 0.0, 0.7775],
         "init_rot": [0.0, 0.0, 0.0],
-        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
+        "init_qpos": [3.14159, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
         "drive_pros": {
             "stiffness": {
                 "JOINT[1-6]": 10000.0,
-                "FINGER[1-2]_JOINT": 100.0
+                "GRIPPER_FINGER[1-2]_JOINT_1": 100.0
             },
             "damping": {
                 "JOINT[1-6]": 1000.0,
-                "FINGER[1-2]_JOINT": 10.0
+                "GRIPPER_FINGER[1-2]_JOINT_1": 10.0
             },
             "max_effort": {
                 "JOINT[1-6]": 100000.0,
-                "FINGER[1-2]_JOINT": 1000.0
+                "GRIPPER_FINGER[1-2]_JOINT_1": 1000.0
             }
         },
         "solver_cfg": {
@@ -218,14 +219,14 @@
                 "tcp": [
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.13],
+                    [0.0, 0.0, 1.0, 0.16],
                     [0.0, 0.0, 0.0, 1.0]
                 ]
             }
         },
         "control_parts": {
             "right_arm": ["JOINT[1-6]"],
-            "right_eef": ["FINGER[1-2]_JOINT"]
+            "right_eef": ["GRIPPER_FINGER[1-2]_JOINT_1"]
         }
     },
     "sensor": [
@@ -284,6 +285,8 @@
             },
             "attrs": {
                 "mass": 0.01,
+                "static_friction": 2.0,
+                "dynamic_friction": 1.5,
                 "contact_offset": 0.003,
                 "rest_offset": 0.001,
                 "restitution": 0.01,

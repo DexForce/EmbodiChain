@@ -1,23 +1,23 @@
 {
-  "task": "pick_and_place_cup",
+  "task": "cup transfer",
   "start": "v0_start",
   "goal": "v3_done",
   "nodes": [
     {
       "id": "v0_start",
-      "semantic": "Initial state: cup at [0.75, 0.18] on table, robot at initial pose"
+      "semantic": "initial state with cup at [0.75, 0.18]"
     },
     {
       "id": "v1_grasped",
-      "semantic": "Cup grasped by right arm at start location"
+      "semantic": "cup grasped by right arm"
     },
     {
       "id": "v2_placed",
-      "semantic": "Cup placed at target location [0.75, -0.18] on table"
+      "semantic": "cup placed at target [0.75, -0.18]"
     },
     {
       "id": "v3_done",
-      "semantic": "Robot returned to initial pose, task complete"
+      "semantic": "right arm returned to initial pose"
     }
   ],
   "edges": [

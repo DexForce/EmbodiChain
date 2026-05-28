@@ -1,0 +1,86 @@
+{
+  "task_graph": {
+    "task": "cup transfer",
+    "start": "v0_start",
+    "goal": "v3_done",
+    "nodes": [
+      {
+        "id": "v0_start",
+        "semantic": "initial state with cup at [0.75, 0.18]"
+      },
+      {
+        "id": "v1_grasped",
+        "semantic": "cup grasped by right arm"
+      },
+      {
+        "id": "v2_placed",
+        "semantic": "cup placed at target [0.75, -0.18]"
+      },
+      {
+        "id": "v3_done",
+        "semantic": "right arm returned to initial pose"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e01_grasp",
+        "source": "v0_start",
+        "target": "v1_grasped",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "grasp",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "cup",
+            "pre_grasp_dis": 0.08
+          }
+        }
+      },
+      {
+        "id": "e12_place",
+        "source": "v1_grasped",
+        "target": "v2_placed",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "place_on_table",
+          "kwargs": {
+            "robot_name": "right_arm",
+            "obj_name": "cup",
+            "x": 0.75,
+            "y": -0.18,
+            "pre_place_dis": 0.08
+          }
+        }
+      },
+      {
+        "id": "e23_return",
+        "source": "v2_placed",
+        "target": "v3_done",
+        "left_arm_action": null,
+        "right_arm_action": {
+          "fn": "back_to_initial_pose",
+          "kwargs": {
+            "robot_name": "right_arm"
+          }
+        }
+      }
+    ]
+  },
+  "recovery_spec": {
+    "task": "cup transfer",
+    "recovery_bindings": []
+  },
+  "recovery_graph": {
+    "task": "cup transfer",
+    "recovery_nodes": [],
+    "recovery_edges": [],
+    "recovery_branches": []
+  },
+  "metadata": {
+    "recovery_enabled": false,
+    "schema_version": "recovery_bindings_v1",
+    "task_graph_hash": "b48eb7af618b842818b2de38d052961c0c38926bd00635d2b0c1ab4ada345c64",
+    "raw_recovery_spec_hash": "3d7378b56d5070671066d68313ed4257c812c73c008a4c6590bd429eeae207b1",
+    "recovery_spec_hash": "3d7378b56d5070671066d68313ed4257c812c73c008a4c6590bd429eeae207b1"
+  }
+}

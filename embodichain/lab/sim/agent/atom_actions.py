@@ -92,6 +92,14 @@ def _select_arm_parts(env, robot_name):
     return is_left, arm_part, hand_part, list(arm_joints), list(eef_joints)
 
 
+def _get_arm_aim_yaw_offset(env, robot_name):
+    offset = getattr(env, "arm_aim_yaw_offset", 0.0)
+    if isinstance(offset, dict):
+        side = resolve_arm_side(env, robot_name)
+        offset = offset.get(f"{side}_arm", offset.get(side, 0.0))
+    return float(offset)
+
+
 def _make_motion_generator(env):
     return MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
@@ -534,7 +542,7 @@ def _try_public_pickup_action(
         delta_xy = target_obj_pose[:2, 3] - select_arm_base_pose[:2, 3]
         aim_horizontal_angle = float(
             torch.atan2(delta_xy[1], delta_xy[0]).detach().cpu()
-        )
+        ) + _get_arm_aim_yaw_offset(env, robot_name)
         if bool((grasp_pose_object[0, 2] > 0.5).item()):
             target_obj_pose = torch.as_tensor(
                 get_rotation_replaced_pose(
@@ -831,7 +839,8 @@ def grasp(
     # Rotate the arm base to face the object for better grasping
     delta_xy = target_obj_pose[:2, 3] - select_arm_base_pose[:2, 3]
     dx, dy = delta_xy[0], delta_xy[1]
-    aim_horizontal_angle = np.arctan2(dy, dx)
+    aim_horizontal_angle = float(torch.atan2(dy, dx).detach().cpu())
+    aim_horizontal_angle += _get_arm_aim_yaw_offset(env, robot_name)
     select_arm_aim_qpos = deepcopy(select_arm_current_qpos)
     select_arm_aim_qpos[0] = aim_horizontal_angle
 

@@ -1,0 +1,67 @@
+{
+  "task": "cup transfer",
+  "start": "v0_start",
+  "goal": "v3_done",
+  "nodes": [
+    {
+      "id": "v0_start",
+      "semantic": "initial state with cup at [0.75, 0.18]"
+    },
+    {
+      "id": "v1_grasped",
+      "semantic": "cup grasped by right arm"
+    },
+    {
+      "id": "v2_placed",
+      "semantic": "cup placed at target [0.75, -0.18]"
+    },
+    {
+      "id": "v3_done",
+      "semantic": "right arm returned to initial pose"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01_grasp",
+      "source": "v0_start",
+      "target": "v1_grasped",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "grasp",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "cup",
+          "pre_grasp_dis": 0.08
+        }
+      }
+    },
+    {
+      "id": "e12_place",
+      "source": "v1_grasped",
+      "target": "v2_placed",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "place_on_table",
+        "kwargs": {
+          "robot_name": "right_arm",
+          "obj_name": "cup",
+          "x": 0.75,
+          "y": -0.18,
+          "pre_place_dis": 0.08
+        }
+      }
+    },
+    {
+      "id": "e23_return",
+      "source": "v2_placed",
+      "target": "v3_done",
+      "left_arm_action": null,
+      "right_arm_action": {
+        "fn": "back_to_initial_pose",
+        "kwargs": {
+          "robot_name": "right_arm"
+        }
+      }
+    }
+  ]
+}
