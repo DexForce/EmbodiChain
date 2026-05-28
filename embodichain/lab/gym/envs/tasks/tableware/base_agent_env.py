@@ -230,6 +230,7 @@ class BaseAgentEnv:
             "use_public_grasp_action": False,
             "use_public_place_action": True,
             "allow_public_grasp_annotation": True,
+            "force_public_grasp_reannotate": False,
         }
         for key in public_atomic_kwargs:
             if key in kwargs:

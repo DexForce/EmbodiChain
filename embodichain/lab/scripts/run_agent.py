@@ -93,6 +93,12 @@ if __name__ == "__main__":
         help="Whether to allow public grasp annotation when cache is missing.",
         default=True,
     )
+    parser.add_argument(
+        "--force_public_grasp_reannotate",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to force re-annotating public grasp regions even if cache exists.",
+        default=False,
+    )
 
     args = parser.parse_args()
 
