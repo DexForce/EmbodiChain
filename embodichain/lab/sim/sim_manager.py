@@ -574,6 +574,7 @@ class SimulationManager:
     def init_gpu_physics(self) -> None:
         """Initialize the GPU physics simulation."""
         if self.is_newton_backend:
+            self._is_initialized_gpu_physics = True
             return
 
         if not self.is_use_gpu_physics:

@@ -178,10 +178,6 @@ class RigidBodyData:
             torch.Tensor: The center of mass pose with shape (N, 7).
         """
         if self.is_newton_backend:
-            if getattr(self.body_view, "supports_com_local_pose", False):
-                self.body_view.fetch_com_local_pose(self._com_pose)
-                return self._com_pose
-
             manager = self.body_view.scene.manager
             for i, entity_handle in enumerate(self.body_view.entity_handles):
                 attr = manager.dexsim_meta.get(entity_handle, {}).get("attr")
@@ -1033,24 +1029,18 @@ class RigidObject(BatchEntity):
             )
 
         if self._data is not None and self._data.is_newton_backend:
-            body_view = self._data.body_view
-            if getattr(body_view, "supports_com_local_pose", False):
-                body_ids = self._data.body_ids_for(local_env_ids)
-                body_view.apply_com_local_pose(
-                    com_pose.to(device=self.device, dtype=torch.float32), body_ids
-                )
-                return
+            com_pose = com_pose.cpu().numpy()
+            for i, env_idx in enumerate(local_env_ids):
+                pos = com_pose[i, :3]
+                quat = convert_quat(com_pose[i, 3:7], to="wxyz")
+                self._entities[env_idx].set_cmass_local_pose(pos, quat)
+            return
 
         com_pose = com_pose.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             pos = com_pose[i, :3]
             quat = convert_quat(com_pose[i, 3:7], to="wxyz")
-            if self._data is not None and self._data.is_newton_backend:
-                self._entities[env_idx].set_cmass_local_pose(pos, quat)
-            else:
-                self._entities[env_idx].get_physical_body().set_cmass_local_pose(
-                    pos, quat
-                )
+            self._entities[env_idx].get_physical_body().set_cmass_local_pose(pos, quat)
 
     def set_body_type(self, body_type: str) -> None:
         """Set the body type of the rigid object.

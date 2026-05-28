@@ -76,7 +76,7 @@ def main():
             body_type="dynamic",
             body_scale=[0.5, 0.5, 0.5],
             attrs=RigidBodyAttributesCfg(
-                mass=1.0,
+                mass=0.1,
                 dynamic_friction=0.5,
                 static_friction=0.5,
                 restitution=0.1,
@@ -109,9 +109,6 @@ def main():
     if not args.headless:
         sim.open_window()
 
-    from IPython import embed
-
-    embed()
     # Run the simulation
     run_simulation(sim, max_steps=args.max_steps)
 

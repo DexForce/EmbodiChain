@@ -181,7 +181,7 @@ class NewtonPhysicsCfg(PhysicsCfg):
     """Whether to enable Newton debug mode."""
 
     solver_type: Literal["mjwarp", "xpbd", "semi_implicit", "featherstone", "vbd"] = (
-        "semi_implicit"
+        "mjwarp"
     )
     """Newton solver preset."""
 

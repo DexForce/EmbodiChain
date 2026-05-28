@@ -40,46 +40,20 @@ Z_TRANSLATION = 2.0
 
 def _make_test_com_pose(device: torch.device) -> torch.Tensor:
     """Create per-env COM poses using EmbodiChain xyzw quaternion convention."""
-    com_pose = torch.zeros((NUM_ARENAS, 7), device=device, dtype=torch.float32)
-    com_pose[:, 3:] = torch.tensor(
+    return torch.tensor(
         [
-            [0.0, 0.0, 0.0, 1.0],
-            [0.0, 0.0, 0.70710677, 0.70710677],
+            [0.04, -0.02, 0.03, 0.0, 0.0, 0.0, 1.0],
+            [-0.01, 0.05, 0.02, 0.0, 0.0, 0.70710677, 0.70710677],
         ],
         device=device,
         dtype=torch.float32,
     )
-    com_pose[:, :3] = torch.tensor(
-        [[0.04, -0.02, 0.03], [-0.01, 0.05, 0.02]],
-        device=device,
-        dtype=torch.float32,
-    )
-    return com_pose
 
 
 def _teardown_newton_physics() -> None:
     from dexsim.engine.newton_physics import teardown_newton_physics
 
     teardown_newton_physics()
-
-
-def _read_set_com_pose_result(
-    sim_device: str, physics: str = "default"
-) -> torch.Tensor:
-    test = BaseRigidObjectTest()
-    test.setup_simulation(sim_device, physics=physics)
-    try:
-        assert test.duck.body_data is not None
-        com_pose = _make_test_com_pose(test.sim.device)
-
-        test.duck.set_com_pose(com_pose)
-        test.sim.forward_physics()
-
-        return test.duck.body_data.com_pose.detach().cpu().clone()
-    finally:
-        test.teardown_method()
-        if physics == "newton":
-            _teardown_newton_physics()
 
 
 class BaseRigidObjectTest:
@@ -591,29 +565,60 @@ class BaseRigidObjectTest:
             self.duck.get_body_scale(), new_scale
         ), f"Body scale not set correctly"
 
-        # 6. COM pose
-        com_pose = torch.zeros((NUM_ARENAS, 7), device=self.sim.device)
-        com_pose[:, 3] = 1.0  # Unit quaternion
-        com_pose[0, :3] = torch.tensor([0.1, 0.1, 0.1], device=self.sim.device)
-
-        self.duck.set_com_pose(com_pose)
-
-        # Static object should not be able to set COM pose
-        self.table.set_com_pose(com_pose)  # Should log warning but not crash
-
+    def test_set_com_pose(self):
+        """Test setting full and partial center-of-mass poses."""
         assert self.duck.body_data is not None
         assert self.duck.body_data.default_com_pose is not None
         assert self.duck.body_data.default_com_pose.shape == (
             NUM_ARENAS,
             7,
-        ), f"Default COM pose should have shape (NUM_ARENAS, 7)"
+        ), "Default COM pose should have shape (NUM_ARENAS, 7)"
 
-        com_pose = self.duck.body_data.com_pose
-        assert isinstance(com_pose, torch.Tensor), "com_pose should be a torch.Tensor"
-        assert com_pose.shape == (
+        com_pose = _make_test_com_pose(self.sim.device)
+
+        self.duck.set_com_pose(com_pose)
+        self.sim.forward_physics()
+
+        actual_com_pose = self.duck.body_data.com_pose
+        assert isinstance(
+            actual_com_pose, torch.Tensor
+        ), "com_pose should be a torch.Tensor"
+        assert actual_com_pose.shape == (
             NUM_ARENAS,
             7,
-        ), f"COM pose should have shape (NUM_ARENAS, 7), got {com_pose.shape}"
+        ), f"COM pose should have shape (NUM_ARENAS, 7), got {actual_com_pose.shape}"
+        assert torch.allclose(actual_com_pose, com_pose, atol=1e-5), (
+            "COM pose did not match after full set: "
+            f"expected {com_pose.tolist()}, got {actual_com_pose.tolist()}"
+        )
+
+        partial_com_pose = torch.tensor(
+            [[0.07, -0.03, 0.04, 0.0, 0.38268343, 0.0, 0.9238795]],
+            device=self.sim.device,
+            dtype=torch.float32,
+        )
+        expected_com_pose = com_pose.clone()
+        expected_com_pose[1] = partial_com_pose[0]
+
+        self.duck.set_com_pose(partial_com_pose, env_ids=[1])
+        self.sim.forward_physics()
+
+        actual_com_pose = self.duck.body_data.com_pose
+        assert torch.allclose(actual_com_pose, expected_com_pose, atol=1e-5), (
+            "COM pose did not preserve untouched envs after partial set: "
+            f"expected {expected_com_pose.tolist()}, got {actual_com_pose.tolist()}"
+        )
+
+        assert self.chair.body_data is not None
+        chair_com_pose_before = self.chair.body_data.com_pose.clone()
+        self.chair.set_com_pose(com_pose)
+        self.sim.forward_physics()
+        assert torch.allclose(
+            self.chair.body_data.com_pose, chair_com_pose_before, atol=1e-5
+        ), "Kinematic rigid object COM pose should not change"
+
+        # Static object should not be able to set COM pose.
+        self.table.set_com_pose(com_pose)
 
     def test_misc_properties(self):
         """Test miscellaneous properties like collision filter, vertices, and visual materials."""
