@@ -129,6 +129,30 @@ class DefaultRigidBodyView(RigidBodyViewBase):
         for i, idx in enumerate(indices):
             self.entities[idx].set_local_pose(mat[i])
 
+    # -- RigidBodyViewBase: center of mass (local) ---------------------------
+
+    def fetch_com_local_pose(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        entities = self._select_entities(body_ids)
+        for i, entity in enumerate(entities):
+            pos, quat = entity.get_physical_body().get_cmass_local_pose()
+            data[i, :3] = torch.as_tensor(
+                pos, dtype=torch.float32, device=self.device
+            )
+            data[i, 3:7] = torch.as_tensor(
+                quat, dtype=torch.float32, device=self.device
+            )
+
+    def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        data = data.to(dtype=torch.float32)
+        indices = body_ids.detach().cpu().tolist()
+        data_cpu = data.cpu().numpy()
+        for i, idx in enumerate(indices):
+            pos = data_cpu[i, :3]
+            quat = convert_quat(data_cpu[i, 3:7], to="wxyz")
+            self.entities[idx].get_physical_body().set_cmass_local_pose(pos, quat)
+
     # -- RigidBodyViewBase: velocity -----------------------------------------
 
     def fetch_linear_velocity(

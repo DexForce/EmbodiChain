@@ -177,40 +177,7 @@ class RigidBodyData:
         Returns:
             torch.Tensor: The center of mass pose with shape (N, 7).
         """
-        if self.is_newton_backend:
-            if self.body_view.is_ready:
-                self.body_view.fetch_com_local_pose(self._com_pose)
-                return self._com_pose
-
-            manager = self.body_view.scene.manager
-            for i, entity_handle in enumerate(self.body_view.entity_handles):
-                attr = manager.dexsim_meta.get(entity_handle, {}).get("attr")
-                if attr is None:
-                    pos = np.zeros(3, dtype=np.float32)
-                    quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
-                else:
-                    pos = np.asarray(attr.com_position, dtype=np.float32).copy()
-                    quat = np.asarray(attr.com_quaternion, dtype=np.float32).copy()
-                self._com_pose[i, :3] = torch.as_tensor(
-                    pos, dtype=torch.float32, device=self.device
-                )
-                self._com_pose[i, 3:7] = torch.as_tensor(
-                    convert_quat(quat, to="xyzw"),
-                    dtype=torch.float32,
-                    device=self.device,
-                )
-            return self._com_pose
-
-        for i, entity in enumerate(self.entities):
-            pos, quat = entity.get_physical_body().get_cmass_local_pose()
-            self._com_pose[i, :3] = torch.as_tensor(
-                pos, dtype=torch.float32, device=self.device
-            )
-            self._com_pose[i, 3:7] = torch.as_tensor(
-                convert_quat(np.asarray(quat, dtype=np.float32), to="xyzw"),
-                dtype=torch.float32,
-                device=self.device,
-            )
+        self.body_view.fetch_com_local_pose(self._com_pose)
         return self._com_pose
 
 
@@ -1034,18 +1001,13 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match com_pose length {len(com_pose)}."
             )
 
-        if self._data is not None and self._data.is_newton_backend:
+        if self._data is not None:
             target_com_pose = com_pose.to(device=self.device, dtype=torch.float32)
-            if self._data.body_view.is_ready:
-                body_ids = self._data.body_ids_for(local_env_ids)
-                self._data.body_view.apply_com_local_pose(target_com_pose, body_ids)
-                return
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_com_local_pose(target_com_pose, body_ids)
+            return
 
-        com_pose = com_pose.cpu().numpy()
-        for i, env_idx in enumerate(local_env_ids):
-            pos = com_pose[i, :3]
-            quat = convert_quat(com_pose[i, 3:7], to="wxyz")
-            self._entities[env_idx].get_physical_body().set_cmass_local_pose(pos, quat)
+        logger.log_error("Cannot set center of mass pose before body view is ready.")
 
     def set_body_type(self, body_type: str) -> None:
         """Set the body type of the rigid object.

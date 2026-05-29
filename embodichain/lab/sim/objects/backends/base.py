@@ -72,6 +72,20 @@ class RigidBodyViewBase(ABC):
         """Apply poses from ``(N, 7)`` tensor in ``(x, y, z, qx, qy, qz, qw)``."""
         ...
 
+    # -- Center of Mass (local) ---------------------------------------------
+
+    @abstractmethod
+    def fetch_com_local_pose(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch center-of-mass local poses into ``data`` as ``(N, 7)``."""
+        ...
+
+    @abstractmethod
+    def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        """Apply center-of-mass local poses from ``(N, 7)`` tensor."""
+        ...
+
     # -- Velocity -----------------------------------------------------------
 
     @abstractmethod

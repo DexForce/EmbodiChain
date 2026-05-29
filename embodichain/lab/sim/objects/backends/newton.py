@@ -25,6 +25,7 @@ import warp as wp
 from dexsim.models import MeshObject
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.utils import logger
+from embodichain.utils.math import convert_quat
 
 __all__ = ["NewtonRigidBodyView", "is_newton_scene"]
 
@@ -133,6 +134,19 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().POSE, pose)
 
+    # -- RigidBodyViewBase: center of mass (local) ---------------------------
+
+    def fetch_com_local_pose(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
+        body_ids = self._body_id_list(body_ids)
+        self.scene.gpu_fetch_rigid_body_data(data, body_ids, data_type)
+
+    def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
+        self._apply_data(body_ids, data_type, data)
+
     # -- RigidBodyViewBase: velocity -----------------------------------------
 
     def fetch_linear_velocity(
@@ -173,21 +187,33 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().TORQUE, data)
 
-    # -- Newton COM local pose -------------------------------------------------
+    # -- Internal helpers ----------------------------------------------------
 
-    def fetch_com_local_pose(
+    def _entity_indices(self, body_ids: torch.Tensor | None) -> list[int]:
+        if body_ids is None:
+            return list(range(len(self.entities)))
+        return [int(i) for i in body_ids.detach().cpu().tolist()]
+
+    def _fetch_com_local_pose_from_entities(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
-        body_ids = self._body_id_list(body_ids)
-        out = self._as_warp_array(data)
-        self.scene.gpu_fetch_rigid_body_data(out, body_ids, data_type)
+        for i, idx in enumerate(self._entity_indices(body_ids)):
+            pos, quat = self.entities[idx].get_physical_body().get_cmass_local_pose()
+            data[i, :3] = torch.as_tensor(
+                pos, dtype=torch.float32, device=self.device
+            )
+            data[i, 3:7] = torch.as_tensor(
+                quat, dtype=torch.float32, device=self.device
+            )
 
-    def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
-        data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
-        self._apply_data(body_ids, data_type, data)
-
-    # -- Internal helpers ----------------------------------------------------
+    def _apply_com_local_pose_to_entities(
+        self, data: torch.Tensor, body_ids: torch.Tensor
+    ) -> None:
+        data_cpu = data.to(dtype=torch.float32).cpu().numpy()
+        for i, idx in enumerate(self._entity_indices(body_ids)):
+            pos = data_cpu[i, :3]
+            quat = convert_quat(data_cpu[i, 3:7], to="wxyz")
+            self.entities[idx].get_physical_body().set_cmass_local_pose(pos, quat)
 
     def _resolve_body_id(self, entity: MeshObject) -> int:
         manager = getattr(self.scene, "manager", None)
