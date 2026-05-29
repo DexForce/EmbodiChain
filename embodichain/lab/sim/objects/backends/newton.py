@@ -199,9 +199,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         for i, idx in enumerate(self._entity_indices(body_ids)):
             pos, quat = self.entities[idx].get_physical_body().get_cmass_local_pose()
-            data[i, :3] = torch.as_tensor(
-                pos, dtype=torch.float32, device=self.device
-            )
+            data[i, :3] = torch.as_tensor(pos, dtype=torch.float32, device=self.device)
             data[i, 3:7] = torch.as_tensor(
                 quat, dtype=torch.float32, device=self.device
             )
@@ -221,7 +219,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
             entity_handle = _normalize_native_handle(
                 entity.get_native_handle(), "MeshObject"
             )
-            body_id = getattr(manager, "dexsim2newton_body", {}).get(entity_handle)
+            body_id = manager.body_id_for_entity(entity_handle)
             if body_id is not None:
                 return int(body_id)
 
@@ -258,8 +256,8 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         self, body_ids: torch.Tensor, data_type, data: torch.Tensor
     ) -> None:
         """Apply data to bodies via the unified Newton GPU API."""
-        data = data.to(dtype=torch.float32)
-        payload = data.detach().cpu().numpy()
         self.scene.gpu_apply_rigid_body_data(
-            payload, body_ids.detach().cpu().tolist(), data_type
+            data.to(dtype=torch.float32).contiguous(),
+            self._body_id_list(body_ids),
+            data_type,
         )

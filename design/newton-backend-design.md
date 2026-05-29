@@ -73,7 +73,7 @@ Add:
 class NewtonPhysicsCfg:
     num_substeps: int = 10
     device: str | None = None
-    require_grad: bool = False
+    requires_grad: bool = False
     use_cuda_graph: bool = True
     debug_mode: bool = False
     solver_type: str = "mjwarp"  # allowed: mjwarp, xpbd, semi_implicit, featherstone
@@ -103,7 +103,7 @@ class SimulationManagerCfg:
 
 For gradient mode:
 
-- `require_grad=True`
+- `requires_grad=True`
 - `solver_type="semi_implicit"`
 - CUDA graph should be disabled by DexSim Newton or by the config conversion when needed.
 
@@ -283,7 +283,7 @@ rollout = env.create_gradient_rollout(record_steps, loss_fn, optimizer_step)
 
 Constraints:
 
-- `newton_physics_cfg.require_grad` must be true.
+- `newton_physics_cfg.requires_grad` must be true.
 - `newton_physics_cfg.solver_type` must be `semi_implicit`.
 - Observations and rewards used for differentiable training must avoid CPU getters, NumPy conversion, and detached tensors.
 - Rendering and randomization should be disabled inside differentiable rollout unless explicitly made gradient-safe.
@@ -341,7 +341,7 @@ Gym:
 
 Gradient:
 
-- `require_grad=True` plus `solver_type="semi_implicit"` can create a gradient rollout.
+- `requires_grad=True` plus `solver_type="semi_implicit"` can create a gradient rollout.
 - A simple loss can backpropagate through the rollout without CPU/NumPy observation paths.
 
 ## Known Risks

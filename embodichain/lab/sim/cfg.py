@@ -171,7 +171,7 @@ class NewtonPhysicsCfg(PhysicsCfg):
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step."""
 
-    require_grad: bool = False
+    requires_grad: bool = False
     """Whether to finalize the Newton model for differentiable simulation."""
 
     use_cuda_graph: bool = True
@@ -224,7 +224,7 @@ class NewtonPhysicsCfg(PhysicsCfg):
         }
         solver_cfg = solver_cfg_map[self.solver_type]()
 
-        if self.require_grad and self.solver_type != "semi_implicit":
+        if self.requires_grad and self.solver_type != "semi_implicit":
             logger.log_error(
                 "Newton gradient mode requires solver_type='semi_implicit'."
             )
@@ -234,14 +234,14 @@ class NewtonPhysicsCfg(PhysicsCfg):
             num_substeps=self.num_substeps,
             device=device,
             debug_mode=self.debug_mode,
-            require_grad=self.require_grad,
+            requires_grad=self.requires_grad,
             solver_cfg=solver_cfg,
             collision_pipeline_cfg=NewtonCollisionPipelineCfg(
                 broad_phase=self.broad_phase,
-                requires_grad=self.require_grad,
+                requires_grad=self.requires_grad,
             ),
         )
-        cfg.use_cuda_graph = self.use_cuda_graph and not self.require_grad
+        cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
         cfg._visualizer_enabled = self.visualizer_enabled
         return cfg
 

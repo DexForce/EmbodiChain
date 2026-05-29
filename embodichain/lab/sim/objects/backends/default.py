@@ -137,9 +137,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
         entities = self._select_entities(body_ids)
         for i, entity in enumerate(entities):
             pos, quat = entity.get_physical_body().get_cmass_local_pose()
-            data[i, :3] = torch.as_tensor(
-                pos, dtype=torch.float32, device=self.device
-            )
+            data[i, :3] = torch.as_tensor(pos, dtype=torch.float32, device=self.device)
             data[i, 3:7] = torch.as_tensor(
                 quat, dtype=torch.float32, device=self.device
             )

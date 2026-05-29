@@ -640,6 +640,8 @@ class SimulationManager:
         if lifecycle_state != "READY":
             mgr.start_simulation()
 
+        self.reset_objects_state()
+
         lifecycle_state = getattr(getattr(mgr, "lifecycle_state", None), "name", "")
         if lifecycle_state != "READY":
             logger.log_error(
