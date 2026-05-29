@@ -34,10 +34,8 @@ def main():
     sim_device = "cpu"
     config = SimulationManagerCfg(headless=False, sim_device=sim_device)
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
 
-    # Franka FR3 URDF from EmbodiChain data
-    urdf = get_data_path("Franka/FR3/fr3.urdf")
+    urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
     assert os.path.isfile(urdf)
 
     checkpoint_path = os.path.expanduser(
@@ -54,8 +52,8 @@ def main():
         [0.0, 0.0, 0.0, 1.0],
     ]
     joint_names = [
-        "fr3_joint1", "fr3_joint2", "fr3_joint3", "fr3_joint4",
-        "fr3_joint5", "fr3_joint6", "fr3_joint7",
+        "Joint1", "Joint2", "Joint3", "Joint4",
+        "Joint5", "Joint6", "Joint7",
     ]
 
 
@@ -67,8 +65,8 @@ def main():
         "solver_cfg": {
             "main_arm": {
                 "class_type": "NeuralIKSolver",
-                "end_link_name": "fr3_link8",
-                "root_link_name": "fr3_link0",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
                 "tcp": tcp,
                 "checkpoint_path": checkpoint_path,
                 "num_arm_joints": 7,
@@ -78,23 +76,18 @@ def main():
             },
         },
     }
-    import ipdb; ipdb.set_trace()
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
-    ipdb.set_trace()
     arm_name = "main_arm"
 
-    # Set home position and also set it as the joint target for PD control
     qpos = torch.tensor(
-        [0.0, -0.7854, 0.0, -2.3562, 0.0, 1.5708, 0.7854],
+        [0.0, -np.pi/4, 0.0, -3*np.pi/4, 0.0, np.pi/2, np.pi/4],
         dtype=torch.float32,
         device=sim_device,
     ).unsqueeze(0)
-    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
-    robot.set_qpos_target(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
-
-    # Wait for physics to settle
+    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name), target=False)
+    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name), target=True)
+    sim.set_manual_update(False)
     time.sleep(2.0)
-
     # Compute FK to get current EE pose (with TCP applied)
     fk_xpos = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
     print(f"Current EE pose (TCP):\n{fk_xpos}")
@@ -102,7 +95,7 @@ def main():
     # Define target offset from current pose
     start_pose = fk_xpos.clone()[0]
     end_pose = fk_xpos.clone()[0]
-    end_pose[:3, 3] += torch.tensor([0.1, 0.2, -0.1], device=sim_device)
+    end_pose[:3, 3] += torch.tensor([0.3, 0.4, -0.2], device=sim_device)
 
     # Interpolate between start and end
     num_steps = 50
@@ -157,19 +150,16 @@ def main():
         )
         t_end = time.time()
 
-        if not res:
-            print(f"Step {i}: IK failed (pos_err shown in solver)")
-            continue
-
         if ik_qpos.dim() == 3:
             q = ik_qpos[0][0]
         else:
             q = ik_qpos
-        robot.set_qpos(qpos=q, joint_ids=robot.get_joint_ids(arm_name))
-        robot.set_qpos_target(qpos=q, joint_ids=robot.get_joint_ids(arm_name))
+        robot.set_qpos(qpos=q, joint_ids=robot.get_joint_ids(arm_name), target=False)
+        robot.set_qpos(qpos=q, joint_ids=robot.get_joint_ids(arm_name), target=True)
 
-        print(f"Step {i}: time={t_end - t_start:.4f}s")
-        time.sleep(0.01)
+        status = "OK" if res.item() else "FAIL"
+        print(f"Step {i}: [{status}] time={t_end - t_start:.4f}s")
+        time.sleep(0.02)
 
     embed(header="NeuralIKSolver example. Press Ctrl+D to exit.")
 
