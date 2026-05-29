@@ -49,9 +49,14 @@ Usage examples::
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 import os
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 from embodichain.utils.logger import log_info, log_warning, log_error
 
@@ -76,6 +81,87 @@ def build_sim_cfg(args: argparse.Namespace):
         sim_device=args.sim_device,
         render_cfg=RenderCfg(renderer=args.renderer),
     )
+
+
+def _resolve_mesh_path(mesh_path: str, config_dir: Path) -> str:
+    """Resolve a mesh path from a gym config."""
+    if os.path.isabs(mesh_path):
+        return mesh_path
+
+    config_relative_path = (config_dir / mesh_path).resolve()
+    if config_relative_path.exists():
+        return str(config_relative_path)
+
+    try:
+        from embodichain.data import get_data_path
+    except ImportError:
+        return str(config_relative_path)
+
+    return get_data_path(mesh_path)
+
+
+def _is_pose_matrix(value: Any) -> bool:
+    """Return whether a config value looks like a 4x4 pose matrix."""
+    try:
+        pose = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    return pose.shape == (4, 4)
+
+
+def _resolve_config_object(
+    obj_dict: dict[str, Any], config_dir: Path, is_background: bool
+) -> dict[str, Any]:
+    """Resolve mesh paths and pose aliases in an object config."""
+    resolved_obj = copy.deepcopy(obj_dict)
+    shape = resolved_obj.get("shape", {})
+    mesh_path = shape.get("fpath")
+    if mesh_path:
+        shape["fpath"] = _resolve_mesh_path(mesh_path, config_dir)
+
+    if is_background and "body_type" not in resolved_obj:
+        resolved_obj["body_type"] = "dynamic"
+
+    has_explicit_pose = "init_local_pose" in resolved_obj or (
+        "init_pos" in resolved_obj and "init_rot" in resolved_obj
+    )
+    for pose_key in ("local_pose", "pose", "transform", "T_gym_mesh_to_world"):
+        pose_value = resolved_obj.pop(pose_key, None)
+        if (
+            pose_value is not None
+            and not has_explicit_pose
+            and _is_pose_matrix(pose_value)
+        ):
+            resolved_obj.setdefault("init_local_pose", pose_value)
+            has_explicit_pose = True
+
+    return resolved_obj
+
+
+def load_assets_from_gym_config(sim: SimulationManager, args: argparse.Namespace):
+    """Load background and rigid objects from a gym config file."""
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    gym_config_path = Path(args.gym_config).expanduser().resolve()
+    config_dir = gym_config_path.parent
+    with gym_config_path.open("r", encoding="utf-8") as f:
+        gym_config = json.load(f)
+
+    loaded_assets = []
+    objects = [
+        (obj_dict, True) for obj_dict in gym_config.get("background", [])
+    ] + [(obj_dict, False) for obj_dict in gym_config.get("rigid_object", [])]
+    for obj_dict, is_background in objects:
+        obj_cfg_dict = _resolve_config_object(obj_dict, config_dir, is_background)
+        cfg = RigidObjectCfg.from_dict(obj_cfg_dict)
+        log_info(
+            f"Loading config object: {cfg.uid} "
+            f"(body_type={cfg.body_type}, pos={cfg.init_pos}, rot={cfg.init_rot}) ...",
+            color="green",
+        )
+        loaded_assets.append(sim.add_rigid_object(cfg))
+
+    return loaded_assets
 
 
 def load_assets(sim: SimulationManager, args: argparse.Namespace):
@@ -222,7 +308,10 @@ def main(args: argparse.Namespace) -> None:
             log_info(f"Setting environment map: {args.env_map} ...", color="green")
             sim.set_indirect_lighting(args.env_map)
 
-        assets = load_assets(sim, args)
+        if args.gym_config:
+            assets = load_assets_from_gym_config(sim, args)
+        else:
+            assets = load_assets(sim, args)
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
 
         if args.preview:
@@ -253,8 +342,17 @@ def cli():
         "--asset_path",
         type=str,
         nargs="+",
-        required=True,
+        default=None,
         help="Path(s) to asset file(s) (.usd/.usda/.usdc/.obj/.stl/.glb/.urdf).",
+    )
+    parser.add_argument(
+        "--gym_config",
+        type=str,
+        default=None,
+        help=(
+            "Path to a gym config JSON. When set, loads background and rigid_object "
+            "entries with their per-object init_pos/init_rot."
+        ),
     )
     parser.add_argument(
         "--asset_type",
@@ -349,6 +447,8 @@ def cli():
     )
 
     args = parser.parse_args()
+    if args.gym_config is None and not args.asset_path:
+        parser.error("one of --asset_path or --gym_config is required")
 
     main(args)
 

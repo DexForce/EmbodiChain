@@ -1,0 +1,71 @@
+{
+  "task": "pick_up_apple",
+  "start": "v0_start",
+  "goal": "v2_done",
+  "nodes": [
+    {
+      "id": "v0_start",
+      "semantic": "initial robot configuration"
+    },
+    {
+      "id": "v1_grasped",
+      "semantic": "apple grasped by arm"
+    },
+    {
+      "id": "v2_done",
+      "semantic": "apple lifted clear of tabletop"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01_pick_up",
+      "source": "v0_start",
+      "target": "v1_grasped",
+      "left_arm_action": {
+        "fn": "pick_up",
+        "kwargs": {
+          "robot_name": "arm",
+          "obj_name": "apple",
+          "pre_grasp_distance": 0.15,
+          "lift_height": 0.15,
+          "sample_num": 100,
+          "hand_interp_steps": 8,
+          "force_reannotate": false,
+          "affordance_config": {
+            "gripper_collision_cfg": {
+              "max_open_length": 0.088,
+              "finger_length": 0.078,
+              "point_sample_dense": 0.012
+            },
+            "generator_cfg": {
+              "viser_port": 11801,
+              "antipodal_sampler_cfg": {
+                "n_sample": 20000,
+                "max_length": 0.088,
+                "min_length": 0.003
+              }
+            }
+          }
+        }
+      },
+      "right_arm_action": null
+    },
+    {
+      "id": "e02_move_up",
+      "source": "v1_grasped",
+      "target": "v2_done",
+      "left_arm_action": {
+        "fn": "move",
+        "kwargs": {
+          "robot_name": "arm",
+          "x": -0.04736585442532049,
+          "y": 1.8148307472408205,
+          "z": 2.5630881156516896,
+          "direction": "down",
+          "sample_num": 80
+        }
+      },
+      "right_arm_action": null
+    }
+  ]
+}

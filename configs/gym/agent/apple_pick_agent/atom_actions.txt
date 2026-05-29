@@ -1,0 +1,76 @@
+### Atomic Actions for Apple Pick-Up
+
+Use only the three functions below. Do not use or invent any other action APIs.
+This task has one physical arm. In the task graph, put the action in
+left_arm_action and set right_arm_action to null. Always use robot_name="arm".
+
+"pick_up":
+    def pick_up(robot_name: str,
+                obj_name: str,
+                pre_grasp_distance: float = 0.15,
+                lift_height: float = 0.15,
+                approach_direction=None,
+                sample_num: int = 100,
+                hand_interp_steps: int = 8,
+                force_reannotate: bool = False,
+                affordance_config: dict | None = None,
+                **kwargs) -> list[np.ndarray]
+
+    Uses AtomicActionEngine + PickUpAction. The action builds an AntipodalAffordance
+    from the object's full mesh, plans a pre-grasp approach, closes the gripper,
+    and lifts the object. For this task, use obj_name="apple".
+
+    Recommended apple affordance_config:
+        {
+            "gripper_collision_cfg": {
+                "max_open_length": 0.088,
+                "finger_length": 0.078,
+                "point_sample_dense": 0.012
+            },
+            "generator_cfg": {
+                "viser_port": 11801,
+                "antipodal_sampler_cfg": {
+                    "n_sample": 20000,
+                    "max_length": 0.088,
+                    "min_length": 0.003
+                }
+            }
+        }
+
+"move":
+    def move(robot_name: str,
+             target_pose=None,
+             relative_to: str | None = None,
+             obj_name: str | None = None,
+             x: float | None = None,
+             y: float | None = None,
+             z: float | None = None,
+             x_offset: float = 0.0,
+             y_offset: float = 0.0,
+             z_offset: float = 0.0,
+             direction: str | None = None,
+             sample_num: int = 80,
+             **kwargs) -> list[np.ndarray]
+
+    Uses AtomicActionEngine + MoveAction. target_pose may be a 4x4 homogeneous
+    end-effector pose. direction can be "down", "front", or null.
+
+"place":
+    def place(robot_name: str,
+              obj_name: str,
+              target_pose=None,
+              relative_to: str | None = None,
+              x: float | None = None,
+              y: float | None = None,
+              z: float | None = None,
+              x_offset: float = 0.0,
+              y_offset: float = 0.0,
+              z_offset: float = 0.0,
+              lift_height: float = 0.15,
+              direction: str | None = None,
+              sample_num: int = 100,
+              hand_interp_steps: int = 30,
+              **kwargs) -> list[np.ndarray]
+
+    Uses AtomicActionEngine + PlaceAction. The target is an end-effector pose,
+    not an object-center pose.

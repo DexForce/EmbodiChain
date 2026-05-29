@@ -39,13 +39,16 @@ class AtomicActionsAgentEnv(BaseAgentEnv, EmbodiedEnv):
         return obs, info
 
     def is_task_success(self) -> torch.Tensor:
-        mug = self.sim.get_rigid_object("mug")
-        mug_pose = mug.get_local_pose(to_matrix=True)
+        target_object_name = getattr(self, "agent_success_object", "mug")
+        target_object = self.sim.get_rigid_object(target_object_name)
+        target_object_pose = target_object.get_local_pose(to_matrix=True)
         target_position = torch.as_tensor(
             getattr(self, "agent_success_position", [0.2489, 0.3970, 0.24]),
-            dtype=mug_pose.dtype,
-            device=mug_pose.device,
+            dtype=target_object_pose.dtype,
+            device=target_object_pose.device,
         )
         tolerance = float(getattr(self, "agent_success_tolerance", 0.05))
-        distance = torch.linalg.norm(mug_pose[:, :3, 3] - target_position, dim=-1)
+        distance = torch.linalg.norm(
+            target_object_pose[:, :3, 3] - target_position, dim=-1
+        )
         return distance <= tolerance

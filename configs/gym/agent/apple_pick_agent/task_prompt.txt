@@ -1,0 +1,35 @@
+Task:
+Use the single UR10 arm mounted on the tabletop at the center of the long side
+closer to the apple to pick up the apple from the 1779962412_gym_project scene
+and lift it clear of the tabletop.
+
+Generate a nominal graph with exactly two semantic edges. This is a single-arm
+task: put every action in left_arm_action with robot_name="arm" and set
+right_arm_action to null on every edge. Use only these atomic actions: pick_up
+and move.
+
+1. Pick up the apple:
+   - left_arm_action: pick_up(robot_name="arm", obj_name="apple",
+     pre_grasp_distance=0.15, lift_height=0.15, sample_num=100,
+     hand_interp_steps=8, force_reannotate=false, affordance_config={
+       "gripper_collision_cfg": {
+         "max_open_length": 0.088,
+         "finger_length": 0.078,
+         "point_sample_dense": 0.012
+       },
+       "generator_cfg": {
+         "viser_port": 11801,
+         "antipodal_sampler_cfg": {
+           "n_sample": 20000,
+           "max_length": 0.088,
+           "min_length": 0.003
+         }
+       }
+     })
+   - right_arm_action: null
+
+2. Move the arm upward while holding the apple:
+   - left_arm_action: move(robot_name="arm",
+     x=-0.04736585442532049, y=1.8148307472408205, z=2.5630881156516896,
+     direction="down", sample_num=80)
+   - right_arm_action: null
