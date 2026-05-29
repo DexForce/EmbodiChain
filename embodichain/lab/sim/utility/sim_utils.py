@@ -151,8 +151,13 @@ def is_rt_enabled() -> bool:
         bool: True if Ray Tracing rendering is enabled, False otherwise.
     """
     config = dexsim.get_world_config()
-
-    return config.renderer == dexsim.types.Renderer.FASTRT
+    renderer = config.renderer
+    rt_renderers = [dexsim.types.Renderer.FASTRT]
+    for name in ("HYBRID", "OFFLINERT", "UE5"):
+        value = getattr(dexsim.types.Renderer, name, None)
+        if value is not None:
+            rt_renderers.append(value)
+    return renderer in rt_renderers
 
 
 def create_cube(

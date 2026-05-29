@@ -405,4 +405,7 @@ class VisualMaterialInst:
             return
         self.ior = ior
         inst = self._mat.get_inst(self.uid)
-        inst.set_rt_param("ior", ior)
+        if hasattr(inst, "set_pbr_param"):
+            inst.set_pbr_param("ior", ior)
+        else:
+            inst.set_rt_param("ior", ior)

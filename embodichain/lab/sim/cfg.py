@@ -23,6 +23,7 @@ from typing import Sequence, Union, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
+    Renderer,
     PhysicalAttr,
     ActorType,
     AxisArrowType,
@@ -39,6 +40,50 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+
+DEFAULT_RENDERER: Literal["raster", "hybrid", "fast-rt", "rt"] = "hybrid"
+
+
+def _dexsim_version_tuple() -> tuple[int, int]:
+    version = getattr(__import__("dexsim"), "__version__", "0.0.0")
+    parts: list[int] = []
+    for part in version.split(".")[:2]:
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 2:
+        parts.append(0)
+    return tuple(parts)  # type: ignore[return-value]
+
+
+@configclass
+class RenderCfg:
+    """Renderer backend configuration."""
+
+    renderer: Literal["raster", "hybrid", "fast-rt", "rt"] = DEFAULT_RENDERER
+    """Renderer backend to use for the simulation."""
+
+    enable_denoiser: bool = True
+    """Whether to enable denoising when ray tracing is used."""
+
+    spp: int = 64
+    """Samples per pixel when denoising is disabled."""
+
+    def to_dexsim_flags(self):
+        if self.renderer == "raster":
+            return getattr(Renderer, "RASTER")
+        if self.renderer == "hybrid":
+            if _dexsim_version_tuple() < (0, 4):
+                return getattr(Renderer, "RASTER")
+            return getattr(Renderer, "HYBRID")
+        if self.renderer == "fast-rt":
+            return getattr(Renderer, "FASTRT")
+        if self.renderer == "rt":
+            return getattr(Renderer, "OFFLINERT", getattr(Renderer, "UE5", None))
+        logger.log_error(
+            f"Invalid renderer type '{self.renderer}'. Expected raster, hybrid, fast-rt, or rt."
+        )
 
 
 @configclass

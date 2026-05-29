@@ -737,7 +737,7 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         --num_envs: Number of environments to run in parallel (default: 1)
         --device: Device to run the environment on (default: 'cpu')
         --headless: Whether to perform the simulation in headless mode (default: False)
-        --enable_rt: Whether to use RTX rendering backend for the simulation (default: False)
+        --renderer: Renderer backend to use for the simulation. Options are 'raster', 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
         --gpu_id: The GPU ID to use for the simulation (default: 0)
         --gym_config: Path to gym config file (default: '')
         --action_config: Path to action config file (default: None)
@@ -780,6 +780,13 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         help="Whether to use RTX rendering backend for the simulation.",
         default=False,
         action="store_true",
+    )
+    parser.add_argument(
+        "--renderer",
+        type=str,
+        choices=["raster", "hybrid", "fast-rt", "rt"],
+        default="hybrid",
+        help="Renderer backend to use for the simulation.",
     )
     parser.add_argument(
         "--gpu_id",
@@ -834,6 +841,9 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config["device"] = args.device
     merged_config["headless"] = args.headless
     merged_config["enable_rt"] = args.enable_rt
+    merged_config["renderer"] = getattr(
+        args, "renderer", merged_config.get("renderer", "hybrid")
+    )
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     return merged_config
@@ -854,6 +864,7 @@ def build_env_cfg_from_args(
     from embodichain.utils.utility import load_json
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
 
     gym_config = load_json(args.gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
@@ -877,6 +888,7 @@ def build_env_cfg_from_args(
         headless=gym_config["headless"],
         sim_device=gym_config["device"],
         enable_rt=gym_config["enable_rt"],
+        render_cfg=RenderCfg(renderer=gym_config.get("renderer", "hybrid")),
         gpu_id=gym_config["gpu_id"],
         arena_space=gym_config["arena_space"],
     )

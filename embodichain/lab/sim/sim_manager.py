@@ -36,6 +36,21 @@ MATERIAL_CACHE_DIR = SIM_CACHE_DIR / "mat_cache"
 CONVEX_DECOMP_DIR = SIM_CACHE_DIR / "convex_decomposition"
 REACHABLE_XPOS_DIR = SIM_CACHE_DIR / "robot_reachable_xpos"
 
+
+def _dexsim_gte_040() -> bool:
+    """Return True when the active dexsim runtime is 0.4.0 or newer."""
+    version = getattr(dexsim, "__version__", "0.0.0")
+    parts: list[int] = []
+    for part in version.split(".")[:2]:
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 2:
+        parts.append(0)
+    return tuple(parts) >= (0, 4)
+
+
 from dexsim.types import (
     Backend,
     ThreadMode,
@@ -68,6 +83,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
+    RenderCfg,
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
@@ -106,13 +122,16 @@ class SimulationManagerCfg:
     """Whether to run the simulation in headless mode (no Window)."""
 
     enable_rt: bool = False
-    """Whether to enable ray tracing rendering."""
+    """Deprecated compatibility flag. Prefer ``render_cfg`` for dexsim 0.4+."""
 
     enable_denoiser: bool = True
     """Whether to enable denoising for ray tracing rendering."""
 
     spp: int = 64
     """Samples per pixel for ray tracing rendering. This parameter is only valid when ray tracing is enabled and enable_denoiser is False."""
+
+    render_cfg: RenderCfg = field(default_factory=RenderCfg)
+    """The rendering backend configuration."""
 
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
@@ -221,10 +240,10 @@ class SimulationManager:
         self._window: Windows | None = None
         self._is_registered_window_control = False
 
-        fps = int(1.0 / sim_config.physics_dt)
-        self._world.set_physics_fps(fps)
-
-        self._world.set_time_scale(1.0)
+        if not _dexsim_gte_040():
+            fps = int(1.0 / sim_config.physics_dt)
+            self._world.set_physics_fps(fps)
+            self._world.set_time_scale(1.0)
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
 
@@ -239,9 +258,8 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        # set unique material path to accelerate material creation.
-        # TODO: This will be removed.
-        if self.sim_config.enable_rt is False:
+        # set_unique_mat_path is removed in dexsim 0.4.0.
+        if not _dexsim_gte_040() and self.sim_config.enable_rt is False:
             self._env.set_unique_mat_path(
                 os.path.join(self._material_cache_dir, "default_mat")
             )
@@ -352,7 +370,12 @@ class SimulationManager:
     @property
     def is_rt_enabled(self) -> bool:
         """Check if Ray Tracing rendering backend is enabled."""
-        return self.sim_config.enable_rt
+        if self.sim_config.enable_rt:
+            return True
+        renderer = self.sim_config.render_cfg.renderer
+        if renderer == "hybrid":
+            return _dexsim_gte_040()
+        return renderer in {"fast-rt", "rt"}
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -399,6 +422,11 @@ class SimulationManager:
             world_config.renderer = dexsim.types.Renderer.FASTRT
             if sim_config.enable_denoiser is False:
                 world_config.raytrace_config.spp = sim_config.spp
+                world_config.raytrace_config.open_denoise = False
+        else:
+            world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+            if sim_config.render_cfg.enable_denoiser is False:
+                world_config.raytrace_config.spp = sim_config.render_cfg.spp
                 world_config.raytrace_config.open_denoise = False
 
         if type(sim_config.sim_device) is str:
