@@ -16,8 +16,6 @@
 from __future__ import annotations
 
 from typing import Sequence
-from functools import cached_property
-
 import numpy as np
 import torch
 import warp as wp
@@ -47,8 +45,8 @@ def is_newton_scene(scene: object) -> bool:
     return (
         scene is not None
         and hasattr(scene, "manager")
-        and hasattr(scene, "gpu_fetch_rigid_body_data")
-        and hasattr(scene, "gpu_apply_rigid_body_data")
+        and hasattr(scene, "batch_fetch_rigid_body_data")
+        and hasattr(scene, "batch_apply_rigid_body_data")
     )
 
 
@@ -76,14 +74,14 @@ class NewtonRigidBodyView(RigidBodyViewBase):
             _normalize_native_handle(entity.get_native_handle(), "MeshObject")
             for entity in self.entities
         ]
-        self._body_ids = [self._resolve_body_id(entity) for entity in self.entities]
-        if any(bid < 0 or bid > _INT32_MAX for bid in self._body_ids):
-            logger.log_error(
-                "Newton rigid body view found an entity without a Newton body id."
-            )
-        self._body_ids_tensor = torch.as_tensor(
-            self._body_ids, dtype=torch.int32, device=self.device
-        )
+        # Body IDs are resolved lazily because Newton's model is not built
+        # until finalization.  Pre-finalization, ``body_id_for_entity()``
+        # returns tentative IDs that may differ from the final interleaved
+        # layout.  We track whether IDs have been resolved in the READY
+        # state and re-resolve once when the manager transitions.
+        self._body_ids: list[int] | None = None
+        self._body_ids_tensor: torch.Tensor | None = None
+        self._body_ids_finalized: bool = False
 
     # -- Lazy enum access ---------------------------------------------------
 
@@ -109,15 +107,41 @@ class NewtonRigidBodyView(RigidBodyViewBase):
 
     # -- RigidBodyViewBase: body IDs -----------------------------------------
 
-    @cached_property
-    def body_ids(self) -> list[int]:
-        return self._body_ids
+    def _ensure_body_ids(self) -> None:
+        """Resolve body IDs from the Newton manager.
 
-    @cached_property
+        Body IDs resolved before finalization may be tentative.  Once the
+        manager transitions to READY, re-resolve to get the correct
+        interleaved layout.
+        """
+        if self._body_ids_finalized:
+            return
+        if self._body_ids is not None and not self.is_ready:
+            return
+        ids = [self._resolve_body_id(entity) for entity in self.entities]
+        if any(bid < 0 or bid > _INT32_MAX for bid in ids):
+            logger.log_error(
+                "Newton rigid body view found an entity without a Newton body id."
+            )
+        self._body_ids = ids
+        self._body_ids_tensor = torch.as_tensor(
+            ids, dtype=torch.int32, device=self.device
+        )
+        if self.is_ready:
+            self._body_ids_finalized = True
+
+    @property
+    def body_ids(self) -> list[int]:
+        self._ensure_body_ids()
+        return self._body_ids  # type: ignore[return-value]
+
+    @property
     def body_ids_tensor(self) -> torch.Tensor:
-        return self._body_ids_tensor
+        self._ensure_body_ids()
+        return self._body_ids_tensor  # type: ignore[return-value]
 
     def select_body_ids(self, indices: Sequence[int] | torch.Tensor) -> torch.Tensor:
+        self._ensure_body_ids()
         if not isinstance(indices, torch.Tensor):
             indices = torch.as_tensor(indices, dtype=torch.long, device=self.device)
         return self._body_ids_tensor[indices.to(device=self.device, dtype=torch.long)]
@@ -129,7 +153,9 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         body_ids = self._body_id_list(body_ids)
         out = self._as_warp_array(data)
-        self.scene.gpu_fetch_rigid_body_data(out, body_ids, self._get_data_type().POSE)
+        self.scene.batch_fetch_rigid_body_data(
+            out, body_ids, self._get_data_type().POSE
+        )
 
     def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().POSE, pose)
@@ -141,7 +167,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
         body_ids = self._body_id_list(body_ids)
-        self.scene.gpu_fetch_rigid_body_data(data, body_ids, data_type)
+        self.scene.batch_fetch_rigid_body_data(data, body_ids, data_type)
 
     def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
@@ -186,6 +212,42 @@ class NewtonRigidBodyView(RigidBodyViewBase):
 
     def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().TORQUE, data)
+
+    # -- RigidBodyViewBase: physical properties ------------------------------
+
+    def fetch_mass(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_scalar(self._get_data_type().MASS, data, body_ids)
+
+    def apply_mass(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        self._apply_data(body_ids, self._get_data_type().MASS, data)
+
+    def fetch_inertia_diagonal(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_vec3(self._get_data_type().INERTIA_DIAGONAL, data, body_ids)
+
+    def apply_inertia_diagonal(
+        self, data: torch.Tensor, body_ids: torch.Tensor
+    ) -> None:
+        self._apply_data(body_ids, self._get_data_type().INERTIA_DIAGONAL, data)
+
+    def fetch_friction(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_scalar(self._get_data_type().FRICTION, data, body_ids)
+
+    def apply_friction(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        self._apply_data(body_ids, self._get_data_type().FRICTION, data)
+
+    def fetch_restitution(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_scalar(self._get_data_type().RESTITUTION, data, body_ids)
+
+    def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        self._apply_data(body_ids, self._get_data_type().RESTITUTION, data)
 
     # -- Internal helpers ----------------------------------------------------
 
@@ -232,7 +294,8 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def _body_id_list(self, body_ids: torch.Tensor | None = None) -> list[int]:
         """Return body IDs as a Python list for the Newton scene API."""
         if body_ids is None:
-            return self._body_ids
+            self._ensure_body_ids()
+            return self._body_ids  # type: ignore[return-value]
         body_ids = body_ids.detach().cpu().tolist()
         return [int(body_id) for body_id in body_ids]
 
@@ -250,13 +313,24 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     ) -> None:
         body_ids = self._body_id_list(body_ids)
         out = self._as_warp_array(data)
-        self.scene.gpu_fetch_rigid_body_data(out, body_ids, data_type)
+        self.scene.batch_fetch_rigid_body_data(out, body_ids, data_type)
+
+    def _fetch_scalar(
+        self,
+        data_type,
+        data: torch.Tensor,
+        body_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Fetch a scalar field ``(N, 1)`` from the Newton scene."""
+        body_ids = self._body_id_list(body_ids)
+        out = self._as_warp_array(data)
+        self.scene.batch_fetch_rigid_body_data(out, body_ids, data_type)
 
     def _apply_data(
         self, body_ids: torch.Tensor, data_type, data: torch.Tensor
     ) -> None:
         """Apply data to bodies via the unified Newton GPU API."""
-        self.scene.gpu_apply_rigid_body_data(
+        self.scene.batch_apply_rigid_body_data(
             data.to(dtype=torch.float32).contiguous(),
             self._body_id_list(body_ids),
             data_type,

@@ -329,7 +329,6 @@ class SimulationManager:
 
         self._is_initialized_gpu_physics = False
         self._is_finalized_newton_physics = False
-        self._has_reset_newton_entities_after_finalize = False
 
         # activate physics
         self.enable_physics(True)
@@ -553,19 +552,16 @@ class SimulationManager:
         """Mark the Newton scene as needing finalization after scene mutation."""
         if self.is_newton_backend:
             self._is_finalized_newton_physics = False
-            self._has_reset_newton_entities_after_finalize = False
 
     def _reset_newton_entities_after_finalize(self) -> None:
         """Apply deferred initial resets once Newton runtime data is ready."""
-        if not self.is_newton_backend or self._has_reset_newton_entities_after_finalize:
+        if not self.is_newton_backend:
             return
 
         for rigid_obj in self._rigid_objects.values():
             rigid_obj.reset()
         for rigid_obj_group in self._rigid_object_groups.values():
             rigid_obj_group.reset()
-
-        self._has_reset_newton_entities_after_finalize = True
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -619,6 +615,11 @@ class SimulationManager:
 
         self._is_initialized_gpu_physics = True
 
+    def _newton_lifecycle_state(self) -> str:
+        """Return the Newton manager lifecycle state name, or empty string."""
+        mgr = self.newton_manager
+        return getattr(getattr(mgr, "lifecycle_state", None), "name", "")
+
     def finalize_newton_physics(self) -> None:
         """Finalize the Newton scene if it has not been finalized yet."""
         if not self.is_newton_backend:
@@ -627,26 +628,46 @@ class SimulationManager:
             )
             return
 
-        mgr = self.newton_manager
-
-        lifecycle_state = getattr(getattr(mgr, "lifecycle_state", None), "name", "")
         if (
             self._is_finalized_newton_physics
-            and lifecycle_state == "READY"
-            and self._has_reset_newton_entities_after_finalize
+            and self._newton_lifecycle_state() == "READY"
         ):
             return
 
-        if lifecycle_state != "READY":
-            mgr.start_simulation()
+        mgr = self.newton_manager
+        state = self._newton_lifecycle_state()
 
-        self.reset_objects_state()
+        if state != "READY":
+            world = getattr(self, "_world", None)
+            if world is not None:
+                from dexsim.engine.newton_physics.rebuild import (
+                    ensure_simulation_prepared_lazy,
+                    rebuild_newton_from_scene,
+                )
 
-        lifecycle_state = getattr(getattr(mgr, "lifecycle_state", None), "name", "")
-        if lifecycle_state != "READY":
+                safe_to_continue, _ = ensure_simulation_prepared_lazy(
+                    mgr,
+                    world,
+                    rebuild_from_scene=rebuild_newton_from_scene,
+                    warn=True,
+                )
+                if not safe_to_continue:
+                    logger.log_error(
+                        "Failed to finalize Newton physics: model is not ready to build "
+                        f"(lifecycle state {state!r})."
+                    )
+                    return
+            else:
+                mgr.start_simulation()
+
+        if getattr(self, "_world", None) is not None:
+            self.reset_objects_state()
+
+        state = self._newton_lifecycle_state()
+        if state != "READY":
             logger.log_error(
                 "Failed to finalize Newton physics: lifecycle state is "
-                f"{lifecycle_state!r} after start_simulation()."
+                f"{state!r} after simulation preparation."
             )
 
         self._is_finalized_newton_physics = True
@@ -672,13 +693,19 @@ class SimulationManager:
 
         self._world.render_camera_group(group_ids)
 
-    def update(self, physics_dt: float | None = None, step: int = 10) -> None:
+    def update(self, physics_dt: float | None = None, step: int | None = None) -> None:
         """Update the physics.
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
-            step (int, optional): the number of steps to update physics. Defaults to 10.
+            step (int | None, optional): the number of :meth:`World.update` calls per invocation.
+                Defaults to ``1`` for the Newton backend (each call already runs
+                ``NewtonPhysicsCfg.num_substeps`` solver substeps) and ``10`` for
+                the default PhysX backend.
         """
+        if step is None:
+            step = 1 if self.is_newton_backend else 10
+
         if self.is_newton_backend:
             self.finalize_newton_physics()
         elif self.is_use_gpu_physics and not self._is_initialized_gpu_physics:

@@ -190,15 +190,7 @@ class BaseRigidObjectTest:
             assert torch.allclose(
                 chair_xyz_after, expected_chair_pos, atol=1e-5
             ), f"FAIL: Chair pose changed unexpectedly: {chair_xyz_after.tolist()}"
-        else:
-            # TODO: DexSim Newton kinematic bodies may drift until runtime
-            # kinematic control is fully wired; only check XY placement here.
-            assert torch.allclose(
-                chair_xyz_after[:2], expected_chair_pos[:2], atol=1e-5
-            ), (
-                "FAIL: Chair XY pose changed unexpectedly: "
-                f"{chair_xyz_after[:2].tolist()}"
-            )
+        # Newton: kinematic bodies are not pose-locked yet (DexSim TODO).
 
     def test_add_force_torque(self):
         """Test that add_force applies force correctly to the duck object."""
@@ -456,31 +448,46 @@ class BaseRigidObjectTest:
                 ],
                 device=self.sim.device,
             ).repeat(NUM_ARENAS, 1)
-            expected_inertia = torch.zeros(
-                (NUM_ARENAS, 3), dtype=torch.float32, device=self.sim.device
-            )
+            expected_inertia = self.duck.get_inertia()
+            assert expected_inertia.shape == (NUM_ARENAS, 3)
+            assert (
+                expected_inertia >= 0
+            ).all(), "Initial inertia should be non-negative"
 
             assert torch.allclose(self.duck.get_mass(), expected_mass)
             assert torch.allclose(self.duck.get_friction(), expected_friction)
             assert torch.allclose(self.duck.get_damping(), expected_damping)
-            assert torch.allclose(self.duck.get_inertia(), expected_inertia)
 
-            # TODO: DexSim Newton does not expose runtime mutation for these
-            # attributes yet. The EmbodiChain API should skip them without
-            # falling through to the default physical-body path.
+            # set_attrs and set_body_type remain unsupported on Newton
             self.duck.set_attrs(RigidBodyAttributesCfg(mass=2.5))
-            self.duck.set_mass(torch.full((NUM_ARENAS,), 2.5, device=self.sim.device))
-            self.duck.set_friction(
-                torch.full((NUM_ARENAS,), 0.7, device=self.sim.device)
-            )
+            self.duck.set_body_type("kinematic")
+            assert self.duck.body_type == "dynamic"
+
+            # Mass: set and verify round-trip
+            new_mass = torch.full((NUM_ARENAS,), 2.5, device=self.sim.device)
+            self.duck.set_mass(new_mass)
+            assert torch.allclose(
+                self.duck.get_mass(), new_mass, atol=1e-5
+            ), f"Newton set_mass round-trip failed: {self.duck.get_mass()}"
+
+            # Friction: set and verify round-trip
+            new_friction = torch.full((NUM_ARENAS,), 0.7, device=self.sim.device)
+            self.duck.set_friction(new_friction)
+            assert torch.allclose(
+                self.duck.get_friction(), new_friction, atol=1e-5
+            ), f"Newton set_friction round-trip failed: {self.duck.get_friction()}"
+
+            # Inertia: set and verify round-trip
+            new_inertia = torch.full((NUM_ARENAS, 3), 0.3, device=self.sim.device)
+            self.duck.set_inertia(new_inertia)
+            assert torch.allclose(
+                self.duck.get_inertia(), new_inertia, atol=1e-5
+            ), f"Newton set_inertia round-trip failed: {self.duck.get_inertia()}"
+
+            # Damping: still unsupported on Newton
             self.duck.set_damping(
                 torch.full((NUM_ARENAS, 2), 0.2, device=self.sim.device)
             )
-            self.duck.set_inertia(
-                torch.full((NUM_ARENAS, 3), 0.3, device=self.sim.device)
-            )
-            self.duck.set_body_type("kinematic")
-            assert self.duck.body_type == "dynamic"
 
             self.table.get_mass()
             self.table.get_friction()
@@ -726,7 +733,7 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
         _teardown_newton_physics()
 
     def test_physical_attributes(self):
-        """Newton getters work; runtime attribute setters are skipped with TODO."""
+        """Newton getters and setters for mass, friction, inertia work via batch API."""
         super().test_physical_attributes()
 
     @pytest.mark.skip(

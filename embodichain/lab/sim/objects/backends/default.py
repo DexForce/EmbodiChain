@@ -139,7 +139,9 @@ class DefaultRigidBodyView(RigidBodyViewBase):
             pos, quat = entity.get_physical_body().get_cmass_local_pose()
             data[i, :3] = torch.as_tensor(pos, dtype=torch.float32, device=self.device)
             data[i, 3:7] = torch.as_tensor(
-                quat, dtype=torch.float32, device=self.device
+                convert_quat(quat, to="xyzw"),
+                dtype=torch.float32,
+                device=self.device,
             )
 
     def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
@@ -230,6 +232,72 @@ class DefaultRigidBodyView(RigidBodyViewBase):
             data,
             body_ids,
         )
+
+    # -- RigidBodyViewBase: physical properties ------------------------------
+
+    def fetch_mass(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        entities = self._select_entities(body_ids)
+        for i, entity in enumerate(entities):
+            data[i, 0] = entity.get_physical_body().get_mass()
+
+    def apply_mass(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        data_cpu = data.to(dtype=torch.float32).cpu().numpy()
+        indices = body_ids.detach().cpu().tolist()
+        for i, idx in enumerate(indices):
+            self.entities[int(idx)].get_physical_body().set_mass(data_cpu[i, 0])
+
+    def fetch_inertia_diagonal(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        entities = self._select_entities(body_ids)
+        for i, entity in enumerate(entities):
+            inertia = entity.get_physical_body().get_mass_space_inertia_tensor()
+            data[i, :3] = torch.as_tensor(
+                inertia, dtype=torch.float32, device=self.device
+            )
+
+    def apply_inertia_diagonal(
+        self, data: torch.Tensor, body_ids: torch.Tensor
+    ) -> None:
+        data_cpu = data.to(dtype=torch.float32).cpu().numpy()
+        indices = body_ids.detach().cpu().tolist()
+        for i, idx in enumerate(indices):
+            self.entities[int(idx)].get_physical_body().set_mass_space_inertia_tensor(
+                data_cpu[i]
+            )
+
+    def fetch_friction(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        entities = self._select_entities(body_ids)
+        for i, entity in enumerate(entities):
+            data[i, 0] = entity.get_physical_body().get_dynamic_friction()
+
+    def apply_friction(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        data_cpu = data.to(dtype=torch.float32).cpu().numpy()
+        indices = body_ids.detach().cpu().tolist()
+        for i, idx in enumerate(indices):
+            self.entities[int(idx)].get_physical_body().set_dynamic_friction(
+                data_cpu[i, 0]
+            )
+            self.entities[int(idx)].get_physical_body().set_static_friction(
+                data_cpu[i, 0]
+            )
+
+    def fetch_restitution(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        entities = self._select_entities(body_ids)
+        for i, entity in enumerate(entities):
+            data[i, 0] = entity.get_physical_body().get_restitution()
+
+    def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        data_cpu = data.to(dtype=torch.float32).cpu().numpy()
+        indices = body_ids.detach().cpu().tolist()
+        for i, idx in enumerate(indices):
+            self.entities[int(idx)].get_physical_body().set_restitution(data_cpu[i, 0])
 
     # -- Internal helpers ----------------------------------------------------
 

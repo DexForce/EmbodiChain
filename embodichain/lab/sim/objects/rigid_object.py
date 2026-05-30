@@ -79,7 +79,8 @@ class RigidBodyData:
             )
 
         # Kept for backward compatibility with callers that index gpu_indices directly.
-        self.gpu_indices = self.body_view.body_ids_tensor
+        # NOTE: for Newton, body IDs are lazily resolved after finalization.
+        # Use the ``gpu_indices`` property instead of caching here.
 
         # Initialize rigid body data.
         self._pose = torch.zeros(
@@ -104,10 +105,25 @@ class RigidBodyData:
         self._com_pose = torch.zeros(
             (self.num_instances, 7), dtype=torch.float32, device=self.device
         )
+        # Physical property buffers
+        self._mass = torch.zeros(
+            (self.num_instances, 1), dtype=torch.float32, device=self.device
+        )
+        self._inertia = torch.zeros(
+            (self.num_instances, 3), dtype=torch.float32, device=self.device
+        )
+        self._friction = torch.zeros(
+            (self.num_instances, 1), dtype=torch.float32, device=self.device
+        )
 
     @property
     def is_newton_backend(self) -> bool:
         return isinstance(self.body_view, NewtonRigidBodyView)
+
+    @property
+    def gpu_indices(self) -> torch.Tensor:
+        """Body ID tensor (backward-compatible alias for ``body_view.body_ids_tensor``)."""
+        return self.body_view.body_ids_tensor
 
     def body_ids_for(self, env_ids: Sequence[int]) -> torch.Tensor:
         return self.body_view.select_body_ids(env_ids)
@@ -313,8 +329,8 @@ class RigidObject(BatchEntity):
 
     def _warn_newton_unsupported(self, api_name: str) -> None:
         logger.log_warning(
-            f"Newton backend does not support RigidObject.{api_name} runtime updates yet. "
-            "Skipping this call. TODO: wire this API when DexSim Newton exposes runtime physical-attribute mutation."
+            f"Newton backend does not support RigidObject.{api_name} runtime updates. "
+            "Skipping this call."
         )
 
     def _newton_lifecycle_state(self) -> str:
@@ -687,13 +703,17 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match mass length {len(mass)}."
             )
 
-        if is_newton_scene(self._ps):
-            self._warn_newton_unsupported("set_mass")
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_mass(
+                mass.to(dtype=torch.float32, device=self.device).unsqueeze(-1),
+                body_ids,
+            )
             return
 
-        mass = mass.cpu().numpy()
+        mass_np = mass.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_mass(mass[i])
+            self._entities[env_idx].get_physical_body().set_mass(mass_np[i])
 
     def get_mass(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get mass for the rigid object.
@@ -705,6 +725,12 @@ class RigidObject(BatchEntity):
             torch.Tensor: The mass of the rigid object with shape (N,).
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
+            buf = self._data._mass[: len(local_env_ids)]
+            self._data.body_view.fetch_mass(buf, body_ids)
+            return buf.squeeze(-1)
 
         masses = []
         for _, env_idx in enumerate(local_env_ids):
@@ -732,16 +758,22 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match friction length {len(friction)}."
             )
 
-        if is_newton_scene(self._ps):
-            self._warn_newton_unsupported("set_friction")
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_friction(
+                friction.to(dtype=torch.float32, device=self.device).unsqueeze(-1),
+                body_ids,
+            )
             return
 
-        friction = friction.cpu().numpy()
+        friction_np = friction.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             self._entities[env_idx].get_physical_body().set_dynamic_friction(
-                friction[i]
+                friction_np[i]
             )
-            self._entities[env_idx].get_physical_body().set_static_friction(friction[i])
+            self._entities[env_idx].get_physical_body().set_static_friction(
+                friction_np[i]
+            )
 
     def get_friction(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get friction for the rigid object.
@@ -753,6 +785,12 @@ class RigidObject(BatchEntity):
             torch.Tensor: The friction of the rigid object with shape (N,).
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
+            buf = self._data._friction[: len(local_env_ids)]
+            self._data.body_view.fetch_friction(buf, body_ids)
+            return buf.squeeze(-1)
 
         frictions = []
         for _, env_idx in enumerate(local_env_ids):
@@ -839,14 +877,18 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match inertia length {len(inertia)}."
             )
 
-        if is_newton_scene(self._ps):
-            self._warn_newton_unsupported("set_inertia")
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
+            self._data.body_view.apply_inertia_diagonal(
+                inertia.to(dtype=torch.float32, device=self.device),
+                body_ids,
+            )
             return
 
-        inertia = inertia.cpu().numpy()
+        inertia_np = inertia.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             self._entities[env_idx].get_physical_body().set_mass_space_inertia_tensor(
-                inertia[i]
+                inertia_np[i]
             )
 
     def get_inertia(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
@@ -859,6 +901,12 @@ class RigidObject(BatchEntity):
             torch.Tensor: The inertia tensor of the rigid object with shape (N, 3), where each row is the diagonal of the inertia tensor.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if self._data is not None and self._data.body_view.is_ready:
+            body_ids = self._data.body_ids_for(local_env_ids)
+            buf = self._data._inertia[: len(local_env_ids)]
+            self._data.body_view.fetch_inertia_diagonal(buf, body_ids)
+            return buf
 
         inertias = []
         for _, env_idx in enumerate(local_env_ids):

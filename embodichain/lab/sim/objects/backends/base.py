@@ -141,3 +141,55 @@ class RigidBodyViewBase(ABC):
     def apply_torque(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         """Apply external torques ``(N, 3)``.  One-shot — consumed on next step."""
         ...
+
+    # -- Physical Properties -------------------------------------------------
+
+    @abstractmethod
+    def fetch_mass(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch masses into ``data`` as ``(N, 1)``."""
+        ...
+
+    @abstractmethod
+    def apply_mass(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        """Apply masses from ``(N, 1)`` tensor."""
+        ...
+
+    @abstractmethod
+    def fetch_inertia_diagonal(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch inertia diagonals into ``data`` as ``(N, 3)``."""
+        ...
+
+    @abstractmethod
+    def apply_inertia_diagonal(
+        self, data: torch.Tensor, body_ids: torch.Tensor
+    ) -> None:
+        """Apply inertia diagonals from ``(N, 3)`` tensor."""
+        ...
+
+    @abstractmethod
+    def fetch_friction(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch friction coefficients into ``data`` as ``(N, 1)``."""
+        ...
+
+    @abstractmethod
+    def apply_friction(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        """Apply friction coefficients from ``(N, 1)`` tensor."""
+        ...
+
+    @abstractmethod
+    def fetch_restitution(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch restitution coefficients into ``data`` as ``(N, 1)``."""
+        ...
+
+    @abstractmethod
+    def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        """Apply restitution coefficients from ``(N, 1)`` tensor."""
+        ...
