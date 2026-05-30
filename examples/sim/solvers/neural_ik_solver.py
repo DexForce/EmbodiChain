@@ -31,36 +31,45 @@ def main():
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
+    # Set up simulation with specified device (CPU or CUDA)
     sim_device = "cpu"
     config = SimulationManagerCfg(headless=False, sim_device=sim_device)
     sim = SimulationManager(config)
+    sim.set_manual_update(False)
 
+    # Load robot URDF file
     urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
     assert os.path.isfile(urdf)
 
+    # Load neural IK checkpoint
     checkpoint_path = os.path.expanduser(
         "~/文档/Research/analytic_policy_gradients/checkpoints/"
         "FrankaReach-v0__rl__1__1779942193/best.pt"
     )
     assert os.path.isfile(checkpoint_path), f"Checkpoint not found: {checkpoint_path}"
+
+    # TCP offset (rotation of -pi/4 around Z, translation along Z)
     c = math.cos(-math.pi / 4)
     s = math.sin(-math.pi / 4)
     tcp = [
         [c, -s, 0.0, 0.0],
-        [s,  c, 0.0, 0.0],
+        [s, c, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.1034],
         [0.0, 0.0, 0.0, 1.0],
     ]
-    joint_names = [
-        "Joint1", "Joint2", "Joint3", "Joint4",
-        "Joint5", "Joint6", "Joint7",
-    ]
-
 
     cfg_dict = {
         "fpath": urdf,
         "control_parts": {
-            "main_arm": joint_names,
+            "main_arm": [
+                "Joint1",
+                "Joint2",
+                "Joint3",
+                "Joint4",
+                "Joint5",
+                "Joint6",
+                "Joint7",
+            ],
         },
         "solver_cfg": {
             "main_arm": {
@@ -73,32 +82,34 @@ def main():
                 "max_steps": 30,
                 "action_scale": 0.2,
                 "hidden_dims": [256, 256],
+                "pos_eps": 0.1,
+                "rot_eps": 0.5,
             },
         },
     }
+
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
     arm_name = "main_arm"
 
+    # Set initial joint positions
     qpos = torch.tensor(
-        [0.0, -np.pi/4, 0.0, -3*np.pi/4, 0.0, np.pi/2, np.pi/4],
+        [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
         dtype=torch.float32,
         device=sim_device,
     ).unsqueeze(0)
-    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name), target=False)
-    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name), target=True)
-    sim.set_manual_update(False)
-    time.sleep(2.0)
+    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
+    time.sleep(3.0)
+
     # Compute FK to get current EE pose (with TCP applied)
     fk_xpos = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
-    print(f"Current EE pose (TCP):\n{fk_xpos}")
-
-    # Define target offset from current pose
+    print(f"fk_xpos: {fk_xpos}")
     start_pose = fk_xpos.clone()[0]
     end_pose = fk_xpos.clone()[0]
     end_pose[:3, 3] += torch.tensor([0.3, 0.4, -0.2], device=sim_device)
 
-    # Interpolate between start and end
     num_steps = 50
+
+    # Interpolate poses between start and end
     interpolated_poses = [
         torch.lerp(start_pose, end_pose, t) for t in np.linspace(0, 1, num_steps)
     ]
@@ -106,35 +117,29 @@ def main():
     ik_qpos = qpos
 
     # Solve IK for the end pose and measure time
-    t0 = time.time()
-    res, ik_qpos = robot.compute_ik(
-        pose=end_pose, joint_seed=ik_qpos, name=arm_name
-    )
-    t1 = time.time()
-    print(f"End-pose IK: success={res}, time={t1 - t0:.4f}s")
+    start_time = time.time()
+    res, ik_qpos = robot.compute_ik(pose=end_pose, joint_seed=ik_qpos, name=arm_name)
+    end_time = time.time()
+    print(f"End-pose IK: success={res}, time={end_time - start_time:.4f}s")
 
     if ik_qpos.dim() == 3:
-        ik_xpos = robot.compute_fk(
-            qpos=ik_qpos[0][0], name=arm_name, to_matrix=True
-        )
+        ik_xpos = robot.compute_fk(qpos=ik_qpos[0][0], name=arm_name, to_matrix=True)
     else:
         ik_xpos = robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
-    pos_err = (ik_xpos[:, :3, 3] - end_pose[:3, 3].unsqueeze(0)).norm().item()
-    print(f"Position error at end pose: {pos_err:.6f} m")
 
-    # Draw markers for target and IK result
     sim.draw_marker(
         cfg=MarkerCfg(
-            name="target",
+            name="fk_xpos",
             marker_type="axis",
             axis_xpos=np.array(end_pose.tolist()),
             axis_size=0.002,
             axis_len=0.005,
         )
     )
+
     sim.draw_marker(
         cfg=MarkerCfg(
-            name="ik_result",
+            name="ik_xpos",
             marker_type="axis",
             axis_xpos=np.array(ik_xpos.tolist()),
             axis_size=0.002,
@@ -142,23 +147,40 @@ def main():
         )
     )
 
-    # Step through interpolated poses
     for i, pose in enumerate(interpolated_poses):
-        t_start = time.time()
-        res, ik_qpos = robot.compute_ik(
-            pose=pose, joint_seed=ik_qpos, name=arm_name
-        )
-        t_end = time.time()
+        print(f"Step {i}: Moving to pose:\n{pose}")
+        start_time = time.time()
+        res, ik_qpos = robot.compute_ik(pose=pose, joint_seed=ik_qpos, name=arm_name)
+        end_time = time.time()
+        compute_time = end_time - start_time
+        print(f"Step {i}: IK computation time: {compute_time:.6f} seconds")
 
+        print(f"IK result: {res}, ik_qpos: {ik_qpos}")
+        if not res:
+            print(f"Step {i}: IK failed for pose:\n{pose}")
+            continue
+
+        # Set robot joint positions
         if ik_qpos.dim() == 3:
-            q = ik_qpos[0][0]
+            robot.set_qpos(
+                qpos=ik_qpos[0][0], joint_ids=robot.get_joint_ids(arm_name)
+            )
         else:
-            q = ik_qpos
-        robot.set_qpos(qpos=q, joint_ids=robot.get_joint_ids(arm_name), target=False)
-        robot.set_qpos(qpos=q, joint_ids=robot.get_joint_ids(arm_name), target=True)
+            robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
-        status = "OK" if res.item() else "FAIL"
-        print(f"Step {i}: [{status}] time={t_end - t_start:.4f}s")
+        # Visualize current pose
+        ik_xpos = robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
+
+        sim.draw_marker(
+            cfg=MarkerCfg(
+                name=f"ik_xpos_step_{i}",
+                marker_type="axis",
+                axis_xpos=np.array(ik_xpos.tolist()),
+                axis_size=0.002,
+                axis_len=0.005,
+            )
+        )
+
         time.sleep(0.02)
 
     embed(header="NeuralIKSolver example. Press Ctrl+D to exit.")
