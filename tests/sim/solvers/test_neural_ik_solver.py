@@ -21,6 +21,7 @@ import os
 import numpy as np
 import pytest
 import torch
+from huggingface_hub import hf_hub_download
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -28,10 +29,8 @@ from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.utils.utility import reset_all_seeds
 
-CHECKPOINT_PATH = os.path.expanduser(
-    "~/文档/Research/analytic_policy_gradients/checkpoints/"
-    "FrankaReach-v0__rl__1__1779942193/best.pt"
-)
+CHECKPOINT_REPO = "dexforce/neural_ik_solver"
+CHECKPOINT_FILE = "franka.pt"
 
 IK_POS_ATOL = 0.05
 IK_ROT_ATOL = 0.55
@@ -74,10 +73,10 @@ def grid_sample_qpos_from_limits(
     return stacked
 
 
-# Skip entire module if checkpoint is not available.
+# Skip tests if huggingface_hub cannot reach the checkpoint repo.
 pytestmark = pytest.mark.skipif(
-    not os.path.isfile(CHECKPOINT_PATH),
-    reason=f"NeuralIK checkpoint not found: {CHECKPOINT_PATH}",
+    os.environ.get("NEURAL_IK_OFFLINE") is not None,
+    reason="NEURAL_IK_OFFLINE is set, skipping NeuralIK tests",
 )
 
 
@@ -90,6 +89,9 @@ class BaseSolverTest:
 
         urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
         assert os.path.isfile(urdf)
+        checkpoint_path = hf_hub_download(
+            repo_id=CHECKPOINT_REPO, filename=CHECKPOINT_FILE
+        )
 
         cfg_dict = {
             "fpath": urdf,
@@ -110,7 +112,7 @@ class BaseSolverTest:
                     "end_link_name": "ee_link",
                     "root_link_name": "base_link",
                     "tcp": TCP,
-                    "checkpoint_path": CHECKPOINT_PATH,
+                    "checkpoint_path": checkpoint_path,
                     "num_arm_joints": 7,
                     "max_steps": 30,
                     "action_scale": 0.2,
