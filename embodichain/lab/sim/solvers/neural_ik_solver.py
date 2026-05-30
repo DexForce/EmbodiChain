@@ -153,7 +153,14 @@ class NeuralIKSolver(BaseSolver):
     ) -> torch.Tensor:
         """Build observation vector: [joint_pos(N), ee_pose(7), target_pose(7), last_action(N)]."""
         return torch.cat(
-            [qpos[:, : self._num_arm_joints], ee_pos, ee_quat, target_pos, target_quat, last_action],
+            [
+                qpos[:, : self._num_arm_joints],
+                ee_pos,
+                ee_quat,
+                target_pos,
+                target_quat,
+                last_action,
+            ],
             dim=-1,
         )
 
@@ -182,9 +189,7 @@ class NeuralIKSolver(BaseSolver):
         B = target_xpos.shape[0]
 
         target_pos = target_xpos[:, :3, 3]
-        target_quat = convert_quat(
-            quat_from_matrix(target_xpos[:, :3, :3]), to="xyzw"
-        )
+        target_quat = convert_quat(quat_from_matrix(target_xpos[:, :3, :3]), to="xyzw")
 
         if qpos_seed is None:
             qpos = torch.zeros(B, self.dof, device=self.device)
@@ -200,9 +205,7 @@ class NeuralIKSolver(BaseSolver):
             for _ in range(self._max_steps):
                 ee_xpos = self.get_fk(qpos)
                 ee_pos = ee_xpos[:, :3, 3]
-                ee_quat = convert_quat(
-                    quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw"
-                )
+                ee_quat = convert_quat(quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw")
 
                 obs = self._build_obs(
                     qpos, ee_pos, ee_quat, target_pos, target_quat, last_action

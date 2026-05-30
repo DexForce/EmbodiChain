@@ -41,7 +41,7 @@ def main():
     # Load robot URDF file
     urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
     assert os.path.isfile(urdf)
-    
+
     checkpoint_path = hf_hub_download(
         repo_id="dexforce/neural_ik_solver", filename="franka.pt"
     )
@@ -160,9 +160,7 @@ def main():
 
         # Set robot joint positions
         if ik_qpos.dim() == 3:
-            robot.set_qpos(
-                qpos=ik_qpos[0][0], joint_ids=robot.get_joint_ids(arm_name)
-            )
+            robot.set_qpos(qpos=ik_qpos[0][0], joint_ids=robot.get_joint_ids(arm_name))
         else:
             robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
