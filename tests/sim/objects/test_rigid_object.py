@@ -700,6 +700,227 @@ class BaseRigidObjectTest:
                 1.0,
             ], f"Material {i} base color incorrect"
 
+    def test_geometry_data(self):
+        """Test mesh-level read APIs: get_triangles and scaled get_vertices.
+
+        Covers:
+        - ``get_triangles`` — shape ``(N, num_tris, 3)``, int32, partial env_ids.
+        - ``get_vertices(scale=True)`` — scaled vertices differ from unscaled.
+        """
+        # --- get_triangles (full) ---
+        triangles = self.duck.get_triangles()
+        assert isinstance(
+            triangles, torch.Tensor
+        ), "get_triangles should return a torch.Tensor"
+        assert triangles.ndim == 3, "Triangles tensor should be 3-D (N, num_tris, 3)"
+        assert (
+            triangles.shape[0] == NUM_ARENAS
+        ), f"First dim should be {NUM_ARENAS}, got {triangles.shape[0]}"
+        assert triangles.shape[2] == 3, "Last dim should be 3 (vertex indices)"
+        assert (
+            triangles.dtype == torch.int32
+        ), f"Triangles dtype should be int32, got {triangles.dtype}"
+
+        # --- get_triangles (partial) ---
+        partial_tris = self.duck.get_triangles(env_ids=[0])
+        assert (
+            partial_tris.shape[0] == 1
+        ), "Partial get_triangles should return 1 instance"
+
+        # --- get_vertices(scale=True) ---
+        new_scale = torch.full(
+            (NUM_ARENAS, 3), 2.0, device=self.sim.device, dtype=torch.float32
+        )
+        self.duck.set_body_scale(new_scale)
+
+        verts_raw = self.duck.get_vertices()
+        verts_scaled = self.duck.get_vertices(scale=True)
+        assert torch.allclose(
+            verts_scaled, verts_raw * 2.0, atol=1e-5
+        ), "Scaled vertices should be 2x the raw vertices"
+
+    def test_enable_collision(self):
+        """Test enable_collision toggle for individual arenas.
+
+        Covers:
+        - ``enable_collision`` with ``enable=False`` (per-instance mask).
+        - ``enable_collision`` with ``enable=True`` (restore).
+        - partial ``env_ids`` subset.
+        """
+        # Disable collision for all arenas and re-enable — no exception should be raised.
+        disable = torch.zeros(NUM_ARENAS, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(disable)
+
+        enable = torch.ones(NUM_ARENAS, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(enable)
+
+        # Partial: disable only env 0.
+        partial_disable = torch.zeros(1, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(partial_disable, env_ids=[0])
+
+        # Restore env 0.
+        partial_enable = torch.ones(1, dtype=torch.bool, device=self.sim.device)
+        self.duck.enable_collision(partial_enable, env_ids=[0])
+
+    def test_reset(self):
+        """Test reset() restores initial pose and clears dynamics.
+
+        Covers:
+        - ``reset()`` — all envs returned to ``cfg.init_pos`` (default origin).
+        - Velocities cleared to zero after reset.
+        - Partial ``env_ids`` reset: only the specified instance is restored.
+        """
+        # Move duck far from origin and give it velocity.
+        pose_far = torch.eye(4, device=self.sim.device).unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        pose_far[:, 2, 3] = 5.0
+        self.duck.set_local_pose(pose_far)
+
+        lin_vel = (
+            torch.tensor([3.0, 0.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        self.duck.set_velocity(lin_vel=lin_vel)
+
+        # Full reset.
+        self.duck.reset()
+        self.sim.forward_physics()
+
+        pos_after = self.duck.get_local_pose()[:, :3]
+        origin = torch.zeros(NUM_ARENAS, 3, device=self.sim.device)
+        assert torch.allclose(
+            pos_after, origin, atol=1e-4
+        ), f"Duck should be at origin after reset, got {pos_after.tolist()}"
+
+        # Velocities should be zero after reset.
+        assert self.duck.body_data is not None
+        lin_vel_after = self.duck.body_data.lin_vel
+        assert torch.allclose(
+            lin_vel_after, torch.zeros_like(lin_vel_after), atol=1e-5
+        ), f"Linear velocity should be zero after reset, got {lin_vel_after.tolist()}"
+
+        # --- Partial reset: move duck again, reset only env 0 ---
+        self.duck.set_local_pose(pose_far)
+        self.duck.reset(env_ids=[0])
+        self.sim.forward_physics()
+
+        pos_partial = self.duck.get_local_pose()[:, :3]
+        assert torch.allclose(
+            pos_partial[0], origin[0], atol=1e-4
+        ), f"Env 0 should be at origin after partial reset, got {pos_partial[0].tolist()}"
+        # Env 1 was not reset — it should still be displaced.
+        assert (
+            pos_partial[1, 2].item() > 1.0
+        ), f"Env 1 should remain displaced after partial reset, got z={pos_partial[1, 2].item()}"
+
+    def test_local_pose_matrix(self):
+        """Test ``get_local_pose(to_matrix=True)`` returns correct shape and values.
+
+        Covers:
+        - Shape ``(N, 4, 4)`` output.
+        - Rotation and translation columns are consistent with the 7-vec form.
+        - Partial ``env_ids``.
+        """
+        pose_7 = torch.eye(4, device=self.sim.device)
+        pose_7[0, 3] = 1.0
+        pose_7[1, 3] = 2.0
+        pose_7[2, 3] = 3.0
+        pose_mat_input = pose_7.unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        self.duck.set_local_pose(pose_mat_input)
+
+        # 7-vec form
+        pose_vec = self.duck.get_local_pose(to_matrix=False)
+        assert pose_vec.shape == (
+            NUM_ARENAS,
+            7,
+        ), f"7-vec pose shape should be ({NUM_ARENAS}, 7), got {pose_vec.shape}"
+
+        # Matrix form
+        pose_mat = self.duck.get_local_pose(to_matrix=True)
+        assert pose_mat.shape == (
+            NUM_ARENAS,
+            4,
+            4,
+        ), f"Matrix pose shape should be ({NUM_ARENAS}, 4, 4), got {pose_mat.shape}"
+
+        # Translation columns must match.
+        assert torch.allclose(
+            pose_mat[:, :3, 3], pose_vec[:, :3], atol=1e-5
+        ), "Matrix translation column should match 7-vec xyz"
+
+        # Last row must be [0, 0, 0, 1].
+        last_row = torch.tensor(
+            [0.0, 0.0, 0.0, 1.0], device=self.sim.device
+        ).unsqueeze(0).repeat(NUM_ARENAS, 1)
+        assert torch.allclose(
+            pose_mat[:, 3, :], last_row, atol=1e-5
+        ), "Last row of pose matrix should be [0, 0, 0, 1]"
+
+        # Rotation matrix must be orthogonal (R @ R.T ≈ I).
+        R = pose_mat[:, :3, :3]
+        eye = torch.eye(3, device=self.sim.device).unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        assert torch.allclose(
+            torch.bmm(R, R.transpose(1, 2)), eye, atol=1e-5
+        ), "Rotation sub-matrix should be orthogonal"
+
+        # Partial env_ids.
+        pose_mat_partial = self.duck.get_local_pose(to_matrix=True)
+        assert pose_mat_partial.shape[0] == NUM_ARENAS
+
+    def test_body_data_vel_clear(self):
+        """Test ``body_data.vel``, partial ``clear_dynamics``, and verify dynamics reset.
+
+        Covers:
+        - ``body_data.vel`` — shape ``(N, 6)`` concatenated lin+ang vel.
+        - ``clear_dynamics()`` — verifies all velocities become zero (not just called).
+        - ``clear_dynamics(env_ids=[0])`` — partial clear; only env 0 is zeroed.
+        """
+        assert self.duck.body_data is not None
+
+        lin_vel = (
+            torch.tensor([2.0, 0.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        ang_vel = (
+            torch.tensor([0.0, 3.0, 0.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
+        self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
+
+        # --- body_data.vel ---
+        vel = self.duck.body_data.vel
+        assert vel.shape == (
+            NUM_ARENAS,
+            6,
+        ), f"vel shape should be ({NUM_ARENAS}, 6), got {vel.shape}"
+        assert torch.allclose(
+            vel[:, :3], lin_vel, atol=1e-5
+        ), f"First 3 columns of vel should match lin_vel"
+        assert torch.allclose(
+            vel[:, 3:], ang_vel, atol=1e-5
+        ), f"Last 3 columns of vel should match ang_vel"
+
+        # --- clear_dynamics() full — verify velocities go to zero ---
+        self.duck.clear_dynamics()
+        vel_after_clear = self.duck.body_data.vel
+        assert torch.allclose(
+            vel_after_clear, torch.zeros_like(vel_after_clear), atol=1e-5
+        ), f"Velocities should be zero after clear_dynamics, got {vel_after_clear.tolist()}"
+
+        # --- clear_dynamics(env_ids=[0]) partial ---
+        # Give env 1 non-zero velocity again.
+        self.duck.set_velocity(lin_vel=lin_vel, ang_vel=ang_vel)
+        self.duck.clear_dynamics(env_ids=[0])
+        vel_partial = self.duck.body_data.vel
+        assert torch.allclose(
+            vel_partial[0], torch.zeros(6, device=self.sim.device), atol=1e-5
+        ), f"Env 0 should be zeroed after partial clear_dynamics, got {vel_partial[0].tolist()}"
+        assert not torch.allclose(
+            vel_partial[1], torch.zeros(6, device=self.sim.device), atol=1e-5
+        ), "Env 1 should still have non-zero velocity after partial clear_dynamics"
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

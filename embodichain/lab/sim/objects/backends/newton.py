@@ -16,14 +16,11 @@
 from __future__ import annotations
 
 from typing import Sequence
-import numpy as np
 import torch
-import warp as wp
 
 from dexsim.models import MeshObject
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.utils import logger
-from embodichain.utils.math import convert_quat
 
 __all__ = ["NewtonRigidBodyView", "is_newton_scene"]
 
@@ -151,10 +148,10 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def fetch_pose(
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
-        body_ids = self._body_id_list(body_ids)
-        out = self._as_warp_array(data)
         self.scene.batch_fetch_rigid_body_data(
-            out, body_ids, self._get_data_type().POSE
+            self._fetch_buffer(data),
+            self._resolve_body_ids(body_ids),
+            self._get_data_type().POSE,
         )
 
     def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
@@ -166,8 +163,9 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         self, data: torch.Tensor, body_ids: torch.Tensor | None = None
     ) -> None:
         data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
-        body_ids = self._body_id_list(body_ids)
-        self.scene.batch_fetch_rigid_body_data(data, body_ids, data_type)
+        self.scene.batch_fetch_rigid_body_data(
+            self._fetch_buffer(data), self._resolve_body_ids(body_ids), data_type
+        )
 
     def apply_com_local_pose(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         data_type = getattr(self._get_data_type(), "COM_LOCAL_POSE", None)
@@ -251,30 +249,6 @@ class NewtonRigidBodyView(RigidBodyViewBase):
 
     # -- Internal helpers ----------------------------------------------------
 
-    def _entity_indices(self, body_ids: torch.Tensor | None) -> list[int]:
-        if body_ids is None:
-            return list(range(len(self.entities)))
-        return [int(i) for i in body_ids.detach().cpu().tolist()]
-
-    def _fetch_com_local_pose_from_entities(
-        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
-    ) -> None:
-        for i, idx in enumerate(self._entity_indices(body_ids)):
-            pos, quat = self.entities[idx].get_physical_body().get_cmass_local_pose()
-            data[i, :3] = torch.as_tensor(pos, dtype=torch.float32, device=self.device)
-            data[i, 3:7] = torch.as_tensor(
-                quat, dtype=torch.float32, device=self.device
-            )
-
-    def _apply_com_local_pose_to_entities(
-        self, data: torch.Tensor, body_ids: torch.Tensor
-    ) -> None:
-        data_cpu = data.to(dtype=torch.float32).cpu().numpy()
-        for i, idx in enumerate(self._entity_indices(body_ids)):
-            pos = data_cpu[i, :3]
-            quat = convert_quat(data_cpu[i, 3:7], to="wxyz")
-            self.entities[idx].get_physical_body().set_cmass_local_pose(pos, quat)
-
     def _resolve_body_id(self, entity: MeshObject) -> int:
         manager = getattr(self.scene, "manager", None)
         if manager is not None and hasattr(entity, "get_native_handle"):
@@ -291,19 +265,28 @@ class NewtonRigidBodyView(RigidBodyViewBase):
                 return body_id
         return -1
 
-    def _body_id_list(self, body_ids: torch.Tensor | None = None) -> list[int]:
-        """Return body IDs as a Python list for the Newton scene API."""
+    def _resolve_body_ids(self, body_ids: torch.Tensor | None) -> torch.Tensor:
+        """Return body IDs as a device int32 tensor for the Newton scene API.
+
+        DexSim's batch API normalizes GPU-resident tensors without a host
+        round-trip, so the cached ``body_ids_tensor`` is passed straight
+        through.  This avoids a per-call ``cuda -> cpu`` synchronization on the
+        per-step fetch/apply hot path.
+        """
         if body_ids is None:
             self._ensure_body_ids()
-            return self._body_ids  # type: ignore[return-value]
-        body_ids = body_ids.detach().cpu().tolist()
-        return [int(body_id) for body_id in body_ids]
+            return self._body_ids_tensor  # type: ignore[return-value]
+        if not isinstance(body_ids, torch.Tensor):
+            body_ids = torch.as_tensor(
+                body_ids, dtype=torch.int32, device=self.device
+            )
+        return body_ids
 
-    def _as_warp_array(self, data: torch.Tensor):
-        """Wrap a caller-owned torch tensor as a Warp float32 array."""
+    def _fetch_buffer(self, data: torch.Tensor) -> torch.Tensor:
+        """Validate and forward a caller-owned fetch buffer to the scene API."""
         if not data.is_contiguous():
             logger.log_error("Newton rigid body fetch buffers must be contiguous.")
-        return wp.from_torch(data, dtype=wp.float32)
+        return data
 
     def _fetch_vec3(
         self,
@@ -311,20 +294,12 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         data: torch.Tensor,
         body_ids: torch.Tensor | None = None,
     ) -> None:
-        body_ids = self._body_id_list(body_ids)
-        out = self._as_warp_array(data)
-        self.scene.batch_fetch_rigid_body_data(out, body_ids, data_type)
+        self.scene.batch_fetch_rigid_body_data(
+            self._fetch_buffer(data), self._resolve_body_ids(body_ids), data_type
+        )
 
-    def _fetch_scalar(
-        self,
-        data_type,
-        data: torch.Tensor,
-        body_ids: torch.Tensor | None = None,
-    ) -> None:
-        """Fetch a scalar field ``(N, 1)`` from the Newton scene."""
-        body_ids = self._body_id_list(body_ids)
-        out = self._as_warp_array(data)
-        self.scene.batch_fetch_rigid_body_data(out, body_ids, data_type)
+    # Scalar ``(N, 1)`` fields share the same fetch path as vec3 fields.
+    _fetch_scalar = _fetch_vec3
 
     def _apply_data(
         self, body_ids: torch.Tensor, data_type, data: torch.Tensor
@@ -332,6 +307,6 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         """Apply data to bodies via the unified Newton GPU API."""
         self.scene.batch_apply_rigid_body_data(
             data.to(dtype=torch.float32).contiguous(),
-            self._body_id_list(body_ids),
+            self._resolve_body_ids(body_ids),
             data_type,
         )
