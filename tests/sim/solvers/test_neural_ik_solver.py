@@ -21,16 +21,13 @@ import os
 import numpy as np
 import pytest
 import torch
-from huggingface_hub import hf_hub_download
 
 from embodichain.data import get_data_path
+from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.utils.utility import reset_all_seeds
-
-CHECKPOINT_REPO = "dexforce/neural_ik_solver"
-CHECKPOINT_FILE = "franka.pt"
 
 IK_POS_ATOL = 0.05
 IK_ROT_ATOL = 0.55
@@ -89,9 +86,7 @@ class BaseSolverTest:
 
         urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
         assert os.path.isfile(urdf)
-        checkpoint_path = hf_hub_download(
-            repo_id=CHECKPOINT_REPO, filename=CHECKPOINT_FILE
-        )
+        checkpoint_path = download_neural_ik_checkpoint()
 
         cfg_dict = {
             "fpath": urdf,

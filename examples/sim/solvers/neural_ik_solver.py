@@ -19,10 +19,10 @@ import time
 
 import numpy as np
 import torch
-from huggingface_hub import hf_hub_download
 from IPython import embed
 
 from embodichain.data import get_data_path
+from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -42,9 +42,7 @@ def main():
     urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
     assert os.path.isfile(urdf)
 
-    checkpoint_path = hf_hub_download(
-        repo_id="dexforce/neural_ik_solver", filename="franka.pt"
-    )
+    checkpoint_path = download_neural_ik_checkpoint()
 
     # TCP offset (rotation of -pi/4 around Z, translation along Z)
     c = math.cos(-math.pi / 4)
