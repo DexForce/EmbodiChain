@@ -198,6 +198,52 @@ class TestNeuralIKSolver(BaseSolverTest):
     def setup_method(self):
         self.setup_simulation(solver_type="NeuralIKSolver")
 
+    def _make_solver_input(self):
+        """Create a standard qpos and its FK target for solver tests."""
+        arm_name = "main_arm"
+        qpos = torch.tensor(
+            [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
+            dtype=torch.float32,
+            device=self.robot.device,
+        ).unsqueeze(0)
+        target_xpos = self.robot.compute_fk(
+            qpos=qpos, name=arm_name, to_matrix=True
+        )
+        solver = self.robot.get_solver(arm_name)
+        return solver, qpos, target_xpos
+
+    def test_multi_sample_shape(self):
+        """Verify output shape when using multiple samples."""
+        reset_all_seeds(0)
+        solver, qpos, target_xpos = self._make_solver_input()
+
+        success, ik_qpos = solver.get_ik(
+            target_xpos=target_xpos,
+            qpos_seed=qpos,
+            num_samples=5,
+        )
+
+        dof = qpos.shape[-1]
+        assert success.shape == (1,)
+        assert ik_qpos.shape == (1, 1, dof)
+
+    def test_multi_sample_return_all(self):
+        """Verify return_all_solutions returns all sampled solutions."""
+        reset_all_seeds(0)
+        solver, qpos, target_xpos = self._make_solver_input()
+        num_samples = 5
+
+        success, ik_qpos = solver.get_ik(
+            target_xpos=target_xpos,
+            qpos_seed=qpos,
+            num_samples=num_samples,
+            return_all_solutions=True,
+        )
+
+        dof = qpos.shape[-1]
+        assert success.shape == (1,)
+        assert ik_qpos.shape == (1, num_samples, dof)
+
 
 if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)

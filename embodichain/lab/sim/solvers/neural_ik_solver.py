@@ -25,6 +25,7 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
+from embodichain.lab.sim.solvers.qpos_seed_sampler import QposSeedSampler
 
 __all__ = ["NeuralIKSolverCfg", "NeuralIKSolver"]
 
@@ -58,6 +59,9 @@ class NeuralIKSolverCfg(SolverCfg):
 
     rot_eps: float = 0.1
     """Rotation convergence tolerance (radians) for success check."""
+
+    num_samples: int = 1
+    """Number of random initial qpos seeds to sample per target pose."""
 
     def init_solver(
         self, device: torch.device = torch.device("cpu"), **kwargs
@@ -96,6 +100,7 @@ class NeuralIKSolver(BaseSolver):
         self._num_arm_joints = cfg.num_arm_joints
         self._pos_eps = cfg.pos_eps
         self._rot_eps = cfg.rot_eps
+        self._num_samples = cfg.num_samples
 
         ckpt = torch.load(
             cfg.checkpoint_path, map_location=self.device, weights_only=False
@@ -164,48 +169,34 @@ class NeuralIKSolver(BaseSolver):
             dim=-1,
         )
 
-    def get_ik(
+    def _run_policy(
         self,
+        qpos: torch.Tensor,
         target_xpos: torch.Tensor,
-        qpos_seed: torch.Tensor | None = None,
-        num_samples: int | None = None,
-        **kwargs,
+        target_pos: torch.Tensor,
+        target_quat: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Solve IK using the trained neural policy.
+        """Run the iterative neural policy loop and check convergence.
 
         Args:
-            target_xpos: Target pose as 4x4 matrix, shape (4,4) or (B,4,4).
-            qpos_seed: Initial joint positions, shape (dof,) or (B,dof).
-            num_samples: Ignored (policy is deterministic).
+            qpos: Joint positions, shape (B, dof). Modified in-place.
+            target_xpos: Target poses, shape (B, 4, 4).
+            target_pos: Target positions, shape (B, 3).
+            target_quat: Target quaternions (xyzw), shape (B, 4).
 
         Returns:
-            Tuple of (success [B], target_joints [B,1,dof]).
+            Tuple of (success [B], ik_qpos [B, dof]).
         """
-        target_xpos = torch.as_tensor(
-            target_xpos, device=self.device, dtype=torch.float32
-        )
-        if target_xpos.dim() == 2:
-            target_xpos = target_xpos.unsqueeze(0)
-        B = target_xpos.shape[0]
-
-        target_pos = target_xpos[:, :3, 3]
-        target_quat = convert_quat(quat_from_matrix(target_xpos[:, :3, :3]), to="xyzw")
-
-        if qpos_seed is None:
-            qpos = torch.zeros(B, self.dof, device=self.device)
-        else:
-            qpos = torch.as_tensor(qpos_seed, device=self.device, dtype=torch.float32)
-            if qpos.dim() == 1:
-                qpos = qpos.unsqueeze(0).expand(B, -1)
-            qpos = qpos.clone()
-
+        B = qpos.shape[0]
         last_action = torch.zeros(B, self._num_arm_joints, device=self.device)
 
         with torch.no_grad():
             for _ in range(self._max_steps):
                 ee_xpos = self.get_fk(qpos)
                 ee_pos = ee_xpos[:, :3, 3]
-                ee_quat = convert_quat(quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw")
+                ee_quat = convert_quat(
+                    quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw"
+                )
 
                 obs = self._build_obs(
                     qpos, ee_pos, ee_quat, target_pos, target_quat, last_action
@@ -228,4 +219,86 @@ class NeuralIKSolver(BaseSolver):
         rot_err = quat_error_magnitude(target_quat_wxyz, ik_quat_wxyz)
         success = (pos_err < self._pos_eps) & (rot_err < self._rot_eps)
 
-        return success, qpos.unsqueeze(1)
+        return success, qpos
+
+    def get_ik(
+        self,
+        target_xpos: torch.Tensor,
+        qpos_seed: torch.Tensor | None = None,
+        num_samples: int | None = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve IK using the trained neural policy.
+
+        Args:
+            target_xpos: Target pose as 4x4 matrix, shape (4,4) or (B,4,4).
+            qpos_seed: Initial joint positions, shape (dof,) or (B,dof).
+            num_samples: Number of random initial seeds per target pose.
+                Defaults to ``cfg.num_samples`` (1). When > 1, generates
+                multiple random seeds within joint limits and returns the
+                solution closest to ``qpos_seed``.
+            return_all_solutions: If True, return all sampled solutions
+                with shape (B, num_samples, dof) instead of the closest.
+
+        Returns:
+            Tuple of (success [B], target_joints [B,1,dof] or [B,num_samples,dof]).
+        """
+        return_all_solutions = kwargs.get("return_all_solutions", False)
+
+        n = num_samples if num_samples is not None else self._num_samples
+
+        target_xpos = torch.as_tensor(
+            target_xpos, device=self.device, dtype=torch.float32
+        )
+        if target_xpos.dim() == 2:
+            target_xpos = target_xpos.unsqueeze(0)
+        B = target_xpos.shape[0]
+
+        target_pos = target_xpos[:, :3, 3]
+        target_quat = convert_quat(quat_from_matrix(target_xpos[:, :3, :3]), to="xyzw")
+
+        if qpos_seed is None:
+            qpos_seed = torch.zeros(B, self.dof, device=self.device)
+        else:
+            qpos_seed = torch.as_tensor(
+                qpos_seed, device=self.device, dtype=torch.float32
+            )
+            if qpos_seed.dim() == 1:
+                qpos_seed = qpos_seed.unsqueeze(0).expand(B, -1)
+            qpos_seed = qpos_seed.clone()
+
+        # Single sample: run directly without QposSeedSampler overhead.
+        if n <= 1:
+            success, ik_qpos = self._run_policy(
+                qpos_seed, target_xpos, target_pos, target_quat
+            )
+            return success, ik_qpos.unsqueeze(1)
+
+        # Multiple samples: use QposSeedSampler for random seeds.
+        sampler = QposSeedSampler(num_samples=n, dof=self.dof, device=self.device)
+        all_seeds = sampler.sample(
+            qpos_seed, self.lower_qpos_limits, self.upper_qpos_limits, B
+        )
+        target_xpos_repeated = sampler.repeat_target_xpos(target_xpos, n)
+        target_pos_rep = target_xpos_repeated[:, :3, 3]
+        target_quat_rep = convert_quat(
+            quat_from_matrix(target_xpos_repeated[:, :3, :3]), to="xyzw"
+        )
+
+        success_flat, ik_qpos_flat = self._run_policy(
+            all_seeds, target_xpos_repeated, target_pos_rep, target_quat_rep
+        )
+
+        all_success = success_flat.reshape(B, n)
+        all_results = ik_qpos_flat.reshape(B, n, self.dof)
+
+        if return_all_solutions:
+            return all_success.any(dim=1), all_results
+
+        # Pick solution closest to seed.
+        seed_repeat = qpos_seed.unsqueeze(1).repeat(1, n, 1)
+        dist = (all_results - seed_repeat).norm(dim=-1)
+        dist[~all_success] = float("inf")
+        closest_idx = torch.argmin(dist, dim=1)
+        closest_qpos = all_results[torch.arange(B, device=self.device), closest_idx]
+        return all_success.any(dim=1), closest_qpos[:, None, :]
