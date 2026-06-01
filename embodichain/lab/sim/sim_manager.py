@@ -285,6 +285,8 @@ class SimulationManager:
 
         self.sim_config = sim_config
         self.device = torch.device("cpu")
+
+        # Initialize physics backend.
         self._physics_backend = physics_backend_from_cfg(sim_config.physics_cfg)
         self._newton_manager: NewtonManager = None
 
@@ -533,7 +535,6 @@ class SimulationManager:
             importlib.import_module("dexsim.engine.newton_physics")
 
             newton_physics_cfg = sim_config.physics_cfg
-            assert isinstance(newton_physics_cfg, NewtonPhysicsCfg)
             world_config.newton_cfg = newton_physics_cfg.to_dexsim_cfg(
                 gpu_id=sim_config.gpu_id,
             )
@@ -560,8 +561,8 @@ class SimulationManager:
 
         for rigid_obj in self._rigid_objects.values():
             rigid_obj.reset()
-        for rigid_obj_group in self._rigid_object_groups.values():
-            rigid_obj_group.reset()
+        # for rigid_obj_group in self._rigid_object_groups.values():
+        #     rigid_obj_group.reset()
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -590,6 +591,9 @@ class SimulationManager:
     def init_gpu_physics(self) -> None:
         """Initialize the GPU physics simulation."""
         if self.is_newton_backend:
+            logger.log_warning(
+                "GPU physics initialization is handled by the Newton backend. Forcing finalization of Newton physics."
+            )
             self.finalize_newton_physics()
             return
 
@@ -634,34 +638,27 @@ class SimulationManager:
         ):
             return
 
-        mgr = self.newton_manager
+        mgr: NewtonManager = self.newton_manager
         state = self._newton_lifecycle_state()
 
         if state != "READY":
-            world = getattr(self, "_world", None)
-            if world is not None:
-                from dexsim.engine.newton_physics.rebuild import (
-                    ensure_simulation_prepared_lazy,
-                    rebuild_newton_from_scene,
-                )
+            from dexsim.engine.newton_physics.rebuild import (
+                ensure_simulation_prepared_lazy,
+                rebuild_newton_from_scene,
+            )
 
-                safe_to_continue, _ = ensure_simulation_prepared_lazy(
-                    mgr,
-                    world,
-                    rebuild_from_scene=rebuild_newton_from_scene,
-                    warn=True,
+            safe_to_continue, _ = ensure_simulation_prepared_lazy(
+                mgr,
+                self._world,
+                rebuild_from_scene=rebuild_newton_from_scene,
+                warn=True,
+            )
+            if not safe_to_continue:
+                logger.log_error(
+                    "Failed to finalize Newton physics: model is not ready to build "
+                    f"(lifecycle state {state!r})."
                 )
-                if not safe_to_continue:
-                    logger.log_error(
-                        "Failed to finalize Newton physics: model is not ready to build "
-                        f"(lifecycle state {state!r})."
-                    )
-                    return
-            else:
-                mgr.start_simulation()
-
-        if getattr(self, "_world", None) is not None:
-            self.reset_objects_state()
+                return
 
         state = self._newton_lifecycle_state()
         if state != "READY":
@@ -671,16 +668,8 @@ class SimulationManager:
             )
 
         self._is_finalized_newton_physics = True
-        self._is_initialized_gpu_physics = True
+        self._is_initialized_gpu_physics = self.device.type == "cuda"
         self._reset_newton_entities_after_finalize()
-
-    def forward_physics(self) -> None:
-        """Refresh backend physics state without advancing time when supported."""
-        if self.is_newton_backend:
-            self.finalize_newton_physics()
-            mgr = self.newton_manager
-            if mgr is not None and getattr(mgr.lifecycle_state, "name", "") == "READY":
-                mgr.forward_kinematics()
 
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
@@ -719,6 +708,8 @@ class SimulationManager:
                 physics_dt = self.sim_config.physics_dt
             for i in range(step):
                 self._world.update(physics_dt)
+
+            # TODO: Maybe add newton manager forward kinematics update.
 
         else:
             logger.log_warning("Physics simulation is not manually updated.")

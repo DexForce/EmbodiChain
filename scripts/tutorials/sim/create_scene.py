@@ -105,12 +105,13 @@ def main():
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
-    # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
     if sim.is_newton_backend:
         sim.finalize_newton_physics()
 
+    # Open window when the scene has been set up
+    if not args.headless:
+        sim.open_window()
+        
     # Run the simulation
     run_simulation(sim, max_steps=args.max_steps)
 
