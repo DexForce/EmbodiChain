@@ -194,9 +194,7 @@ class NeuralIKSolver(BaseSolver):
             for _ in range(self._max_steps):
                 ee_xpos = self.get_fk(qpos)
                 ee_pos = ee_xpos[:, :3, 3]
-                ee_quat = convert_quat(
-                    quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw"
-                )
+                ee_quat = convert_quat(quat_from_matrix(ee_xpos[:, :3, :3]), to="xyzw")
 
                 obs = self._build_obs(
                     qpos, ee_pos, ee_quat, target_pos, target_quat, last_action

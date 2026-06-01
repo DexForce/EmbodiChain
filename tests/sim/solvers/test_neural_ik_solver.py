@@ -206,9 +206,7 @@ class TestNeuralIKSolver(BaseSolverTest):
             dtype=torch.float32,
             device=self.robot.device,
         ).unsqueeze(0)
-        target_xpos = self.robot.compute_fk(
-            qpos=qpos, name=arm_name, to_matrix=True
-        )
+        target_xpos = self.robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
         solver = self.robot.get_solver(arm_name)
         return solver, qpos, target_xpos
 
