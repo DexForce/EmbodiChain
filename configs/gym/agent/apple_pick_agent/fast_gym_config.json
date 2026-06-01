@@ -5,9 +5,9 @@
     "env": {
         "extensions": {
             "agent_open_state": [0.0],
-            "agent_close_state": [0.025],
+            "agent_close_state": [0.03],
             "agent_success_object": "apple",
-            "agent_success_position": [-0.04736585442532049, 1.8148307472408205, 2.4330881156516893],
+            "agent_success_position": [0.022634145574679516, 1.7448307472408204, 1.2830881156516893],
             "agent_success_tolerance": 0.05
         },
         "events": {
@@ -96,11 +96,11 @@
                         "control_freq": 25
                     },
                     "instruction": {
-                        "lang": "Pick up the apple from the table with the UR10 arm."
+                        "lang": "Pick up the apple with the UR10 arm and place it at the nearby tabletop target."
                     },
                     "extra": {
                         "scene_type": "1779962412_gym_project",
-                        "task_description": "UR10 apple pick-up",
+                        "task_description": "UR10 apple pick-and-place",
                         "data_type": "sim"
                     },
                     "use_videos": true

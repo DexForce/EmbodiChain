@@ -1,19 +1,23 @@
 {
-  "task": "pick_up_apple",
+  "task": "apple_pick_and_place",
   "start": "v0_start",
-  "goal": "v2_done",
+  "goal": "v3_done",
   "nodes": [
     {
       "id": "v0_start",
-      "semantic": "initial robot configuration"
+      "semantic": "Initial state: apple on table, arm not holding apple"
     },
     {
       "id": "v1_grasped",
-      "semantic": "apple grasped by arm"
+      "semantic": "Apple grasped and lifted from table"
     },
     {
-      "id": "v2_done",
-      "semantic": "apple lifted clear of tabletop"
+      "id": "v2_moved",
+      "semantic": "Apple moved to nearby pre-place pose"
+    },
+    {
+      "id": "v3_done",
+      "semantic": "Apple placed on table at target location"
     }
   ],
   "edges": [
@@ -51,18 +55,33 @@
       "right_arm_action": null
     },
     {
-      "id": "e02_move_up",
+      "id": "e12_move",
       "source": "v1_grasped",
-      "target": "v2_done",
+      "target": "v2_moved",
       "left_arm_action": {
         "fn": "move",
         "kwargs": {
           "robot_name": "arm",
-          "x": -0.04736585442532049,
-          "y": 1.8148307472408205,
-          "z": 2.5630881156516896,
-          "direction": "down",
+          "x_offset": 0.07,
+          "y_offset": -0.07,
           "sample_num": 80
+        }
+      },
+      "right_arm_action": null
+    },
+    {
+      "id": "e23_place",
+      "source": "v2_moved",
+      "target": "v3_done",
+      "left_arm_action": {
+        "fn": "place",
+        "kwargs": {
+          "robot_name": "arm",
+          "obj_name": "apple",
+          "z_offset": -0.05,
+          "lift_height": 0.05,
+          "sample_num": 100,
+          "hand_interp_steps": 8
         }
       },
       "right_arm_action": null

@@ -1,4 +1,4 @@
-### Atomic Actions for Apple Pick-Up
+### Atomic Actions for Apple Pick-and-Place
 
 Use only the three functions below. Do not use or invent any other action APIs.
 This task has one physical arm. In the task graph, put the action in
@@ -73,4 +73,5 @@ left_arm_action and set right_arm_action to null. Always use robot_name="arm".
               **kwargs) -> list[np.ndarray]
 
     Uses AtomicActionEngine + PlaceAction. The target is an end-effector pose,
-    not an object-center pose.
+    not an object-center pose. For this task, place the held apple at the
+    tabletop target specified in task_prompt.txt.

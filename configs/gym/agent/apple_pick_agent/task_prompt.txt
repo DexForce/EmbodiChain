@@ -1,12 +1,13 @@
 Task:
 Use the single UR10 arm mounted on the tabletop at the center of the long side
-closer to the apple to pick up the apple from the 1779962412_gym_project scene
-and lift it clear of the tabletop.
+closer to the apple to pick up the apple from the 1779962412_gym_project scene,
+move it along a smooth linear-style atomic trajectory to a nearby target place,
+and place it back down on the tabletop.
 
-Generate a nominal graph with exactly two semantic edges. This is a single-arm
+Generate a nominal graph with exactly three semantic edges. This is a single-arm
 task: put every action in left_arm_action with robot_name="arm" and set
-right_arm_action to null on every edge. Use only these atomic actions: pick_up
-and move.
+right_arm_action to null on every edge. Use only these atomic actions: pick_up,
+move, and place.
 
 1. Pick up the apple:
    - left_arm_action: pick_up(robot_name="arm", obj_name="apple",
@@ -28,8 +29,26 @@ and move.
      })
    - right_arm_action: null
 
-2. Move the arm upward while holding the apple:
+2. Move the held apple about 10 cm toward the nearby pre-place pose:
    - left_arm_action: move(robot_name="arm",
-     x=-0.04736585442532049, y=1.8148307472408205, z=2.5630881156516896,
-     direction="down", sample_num=80)
+     x_offset=0.07, y_offset=-0.07, sample_num=80)
    - right_arm_action: null
+
+3. Place the apple at the nearby tabletop target:
+   - target end-effector pose: keep the current grasp orientation and lower the
+     end-effector by 0.05 m from the post-move pose.
+   - left_arm_action: place(robot_name="arm", obj_name="apple",
+     z_offset=-0.05,
+     lift_height=0.05, sample_num=100,
+     hand_interp_steps=8)
+   - right_arm_action: null
+
+The place action target is an end-effector pose, not an object-center pose. The
+target shifts the apple by about 7 cm along x and -7 cm along y, for a total
+planar displacement of about 10 cm while staying near the original apple pose.
+Do not pass the apple object-center z coordinate as the place end-effector z.
+Use z_offset=-0.05 so PlaceAction first plans to the current post-move pose
+because it internally adds lift_height before lowering to the place pose.
+Do not set direction for move or place in this task: preserving the grasp pose
+orientation selected by pick_up avoids forcing the IK solver to reach an
+unrelated fixed end-effector orientation.

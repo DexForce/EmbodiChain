@@ -376,6 +376,12 @@ def move(
     is_success, trajectory = _run_atomic_action(env, cfg, target)
     if not is_success:
         log_error(f"Atomic move failed for {robot_name}.")
+    _, _, hand_control_part = _control_parts(robot_name)
+    hand_joint_ids = env.robot.get_joint_ids(name=hand_control_part)
+    if hand_joint_ids:
+        _, _, _, _, current_gripper_state = get_arm_states(env, robot_name)
+        hand_qpos = _hand_qpos(env, hand_control_part, current_gripper_state)
+        trajectory[:, :, hand_joint_ids] = hand_qpos
     actions = _actions_from_atomic_trajectory(env, robot_name, trajectory)
     log_info(
         f"Total generated trajectory number for atomic move: {len(actions)}.",
