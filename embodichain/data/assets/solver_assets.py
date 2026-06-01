@@ -13,12 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+from __future__ import annotations
 
-from .base_solver import SolverCfg, BaseSolver
-from .pytorch_solver import PytorchSolverCfg, PytorchSolver
-from .pinocchio_solver import PinocchioSolverCfg, PinocchioSolver
-from .differential_solver import DifferentialSolverCfg, DifferentialSolver
-from .pink_solver import PinkSolverCfg, PinkSolver
-from .opw_solver import OPWSolverCfg, OPWSolver
-from .srs_solver import SRSSolverCfg, SRSSolver
-from .neural_ik_solver import NeuralIKSolverCfg, NeuralIKSolver
+from huggingface_hub import hf_hub_download
+
+
+def download_neural_ik_checkpoint(
+    repo_id: str = "dexforce/neural_ik_solver",
+    filename: str = "franka.pt",
+) -> str:
+    """Download a neural IK solver checkpoint from HuggingFace.
+
+    Returns:
+        str: Local path to the downloaded checkpoint file.
+    """
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+    )
