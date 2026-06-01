@@ -428,7 +428,8 @@ class BaseSolver(metaclass=ABCMeta):
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
         qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
-
+        if qpos.dim() == 1:
+            qpos = qpos.unsqueeze(0)
         if self.pk_serial_chain is None:
             logger.log_error("Kinematic chain is not initialized.")
             return torch.eye(4, device=self.device)
