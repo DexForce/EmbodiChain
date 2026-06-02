@@ -1,0 +1,92 @@
+### Atom Functions for UR10 Single-Arm Cup Transfer
+Each atomic function returns a list of joint-space trajectories (list[np.ndarray]).
+Only use robot_name='right_arm'. Never use robot_name='left_arm'.
+When generating graph edges, always set left_arm_action to null and put the actual action in right_arm_action.
+
+All functions support an optional argument:
+
+force_valid: bool
+    If True, the system will automatically correct an invalid target pose by
+    projecting it to the nearest valid pose. Use this option carefully:
+    enable it only for actions where small spatial deviations are acceptable
+    and will not compromise task correctness. Default is False.
+
+Use the following functions exactly as defined. Do not invent new APIs or parameters.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Moves the right arm to the target object's affordance-based grasp pose and closes the gripper.
+
+    Example:
+        grasp(robot_name='right_arm', obj_name='cup', pre_grasp_dis=0.08)
+
+"place_on_table":
+    def place_on_table(robot_name: str, obj_name: str, x: float, y: float, pre_place_dis: float, **kwargs) -> list[np.ndarray]
+
+    Moves the right arm with the held object to the desired [x, y] table location and opens the gripper to place it.
+    The z-coordinate is automatically adjusted based on the object height.
+    For this task, place the cup at x=0.75 and y=-0.18.
+
+    Example:
+        place_on_table(robot_name='right_arm', obj_name='cup', x=0.75, y=-0.18, pre_place_dis=0.08)
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str, obj_name: str,
+                                x_offset=0, y_offset=0, z_offset=0,
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the end-effector to a pose defined relative to the target object:
+        target = object_position + [x_offset, y_offset, z_offset]
+    Orientation is preserved.
+
+    Example:
+        move_relative_to_object(robot_name='right_arm', obj_name='cup',
+                                x_offset=0.0, y_offset=0.0, z_offset=0.15)
+
+"move_to_absolute_position":
+    def move_to_absolute_position(robot_name: str,
+                                  x=None, y=None, z=None,
+                                  **kwargs) -> list[np.ndarray]
+
+    Moves the end-effector to an absolute (x, y, z) position in world coordinates.
+    Any coordinate set to None remains unchanged. Orientation is preserved.
+
+    Example:
+        move_to_absolute_position(robot_name='right_arm', x=0.75, y=-0.18, z=None)
+
+"move_by_relative_offset":
+    def move_by_relative_offset(robot_name: str,
+                                dx=0.0, dy=0.0, dz=0.0, mode='extrinsic',
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the end-effector by a relative translation:
+        new_position = current_position + [dx, dy, dz]
+    The offset is applied along world axes when mode='extrinsic' and along end-effector axes when mode='intrinsic'.
+
+    Example:
+        move_by_relative_offset(robot_name='right_arm', dx=0.0, dy=0.0, dz=0.10, mode='extrinsic')
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Returns the right arm to its predefined initial joint configuration.
+
+    Example:
+        back_to_initial_pose(robot_name='right_arm')
+
+"close_gripper":
+    def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Closes the right gripper using a short gripper-only trajectory.
+
+    Example:
+        close_gripper(robot_name='right_arm')
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Opens the right gripper using a short gripper-only trajectory.
+
+    Example:
+        open_gripper(robot_name='right_arm')

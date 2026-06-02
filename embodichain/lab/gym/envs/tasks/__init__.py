@@ -38,6 +38,9 @@ from embodichain.lab.gym.envs.tasks.tableware.stack_cups import (
 from embodichain.lab.gym.envs.tasks.tableware.match_object_container import (
     MatchObjectContainerEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.atomic_actions import (
+    AtomicActionsAgentEnv,
+)
 from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
     RearrangementEnv,
     RearrangementAgentEnv,
@@ -60,6 +63,7 @@ __all__ = [
     "PlaceObjectDrawerEnv",
     "StackCupsEnv",
     "MatchObjectContainerEnv",
+    "AtomicActionsAgentEnv",
     "RearrangementEnv",
     "RearrangementAgentEnv",
     "PushCubeEnv",

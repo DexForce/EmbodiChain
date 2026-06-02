@@ -180,6 +180,7 @@ class AtomicActionEngine:
         self._semantic_analyzer = SemanticAnalyzer()
 
         # Initialize default actions
+        self._action_sequence: List[tuple[str, AtomicAction]] = []
         self._actions: Dict[str, AtomicAction] = self._init_actions(actions_cfg_list)
 
     def _init_actions(
@@ -202,6 +203,7 @@ class AtomicActionEngine:
                     logger.log_error(f"Unknown action name in config: {cfg.name}")
                     continue
                 instance = action_class(motion_generator=self.motion_generator, cfg=cfg)
+                self._action_sequence.append((cfg.name, instance))
                 actions[cfg.name] = instance
         return actions
 
@@ -214,10 +216,10 @@ class AtomicActionEngine:
         Each element in ``target_list`` corresponds to an action in the order they
         were registered via ``actions_cfg_list``.
         """
-        action_names = list(self._actions.keys())
-        if len(target_list) != len(action_names):
+        if len(target_list) != len(self._action_sequence):
             logger.log_error(
-                f"Length of target_list ({len(target_list)}) must match number of actions ({len(action_names)})."
+                f"Length of target_list ({len(target_list)}) must match number of "
+                f"actions ({len(self._action_sequence)})."
             )
         start_qpos = self.motion_generator.robot.get_qpos()
         n_envs = start_qpos.shape[0]
@@ -226,8 +228,7 @@ class AtomicActionEngine:
             size=(n_envs, 0, all_dof), dtype=torch.float32, device=self.device
         )
 
-        for action_name, target in zip(action_names, target_list):
-            atom_action = self._actions[action_name]
+        for (_, atom_action), target in zip(self._action_sequence, target_list):
             target = self._resolve_target(target)
             control_part = atom_action.control_part
             arm_joint_ids = self.motion_generator.robot.get_joint_ids(name=control_part)

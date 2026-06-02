@@ -124,13 +124,3 @@ Use the following functions exactly as defined. Do not invent new APIs or parame
     Opens the arm’s gripper using a short (10-step) gripper-only trajectory.
     Example:
         open_gripper(robot_name='right_arm')  # Opens the right gripper using a 10-step gripper-only trajectory.
-
-### Drive Function (Trajectory Synchronization)
-"drive":
-    def drive(left_arm_action=None, right_arm_action=None, **kwargs) -> list[torch.Tensor]
-    Wraps one or two arm trajectories into synchronized full-robot actions.
-    • If only one arm action is provided, the other arm stays idle.
-    • If both are provided, they are temporally aligned and executed together.
-    • The actions are obtained from the output of the above functions.
-    Example:
-        drive(left_arm_action=left_actions, right_arm_action=right_actions)

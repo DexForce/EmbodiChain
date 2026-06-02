@@ -1,0 +1,42 @@
+Task:
+Use the UR10 right arm to pick up the apple from the exported
+1779962412_gym_project tabletop scene and place it into the mug.
+
+Only the right_arm is available. Keep every left_arm_action as null/None.
+In the current config, the mug is placed at the former book position near
+[0.3616, 1.7512, 0.7520], and the book is placed at the former mug position
+near [-0.4185, 1.8601, 0.7800]. Plan to the current `mug` object pose, not the
+old mug location.
+
+Generate the shortest deterministic nominal graph that completes the task.
+Prefer exactly three semantic edges. Allow a fourth edge only for a short
+post-release retreat if needed. Do not add intermediate waypoints, staged
+horizontal transport, coarse alignment steps, separate lift steps, or
+return-to-initial steps.
+
+The public semantic grasp action already includes approach, gripper closing, and
+a small post-grasp lift. Do not add an extra lift edge after grasp.
+
+1. Grasp the apple with the right gripper:
+   - right_arm_action: grasp(robot_name="right_arm", obj_name="apple",
+     pre_grasp_dis=0.08, sample_num=80)
+   - left_arm_action: null
+
+2. Move the held apple directly to a release pose near the mug center:
+   - right_arm_action: move_relative_to_object(robot_name="right_arm",
+     obj_name="mug", x_offset=0.0, y_offset=0.0, z_offset=0.09,
+     sample_num=80)
+   - left_arm_action: null
+
+3. Release the apple into the mug:
+   - right_arm_action: open_gripper(robot_name="right_arm", sample_num=25)
+   - left_arm_action: null
+
+Optional 4th edge only if the graph needs a clear final gripper state:
+   - right_arm_action: move_by_relative_offset(robot_name="right_arm",
+     dx=0.0, dy=0.0, dz=0.10, mode="extrinsic", sample_num=40)
+   - left_arm_action: null
+
+The apple should be released near the mug center, not offset to the side. The
+goal state is the apple resting inside the mug. Do not split the transport into
+multiple `move_by_relative_offset` edges.

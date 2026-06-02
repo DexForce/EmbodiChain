@@ -1,8 +1,12 @@
-{    "TaskAgent": {
-        "prompt_name": "one_stage_prompt"
+{
+    "TaskAgent": {
+        "prompt_name": "generate_task_graph"
     },
-    "CodeAgent": {
-        "prompt_name": "one_stage_prompt_according_to_task_plan"
+    "RecoveryAgent": {
+        "prompt_name": "augment_task_graph"
+    },
+    "CompileAgent": {
+        "prompt_name": "compile_agent_graph"
     },
     "Agent": {
         "prompt_kwargs": {
@@ -18,13 +22,17 @@
                 "type": "text",
                 "name": "atom_actions.txt"
             },
-            "code_prompt": {
+            "error_functions": {
                 "type": "text",
-                "name": "code_prompt.txt"
+                "name": "error_functions.txt"
             },
-            "code_example": {
+            "monitor_functions": {
                 "type": "text",
-                "name": "code_example.txt"
+                "name": "monitor_functions.txt"
+            },
+            "recovery_rules": {
+                "type": "text",
+                "name": "recovery_rules.txt"
             }
         }
     }

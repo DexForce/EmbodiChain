@@ -25,7 +25,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
 )
 from embodichain.utils.logger import log_error
-from .run_env import main
+from embodichain.lab.scripts.run_env import main
 
 if __name__ == "__main__":
     np.set_printoptions(5, suppress=True)
@@ -51,6 +51,60 @@ if __name__ == "__main__":
         help="Whether to regenerate code if already existed.",
         default=False,
     )
+    parser.add_argument(
+        "--recovery",
+        action="store_true",
+        help="Whether to generate recovery actions.",
+        default=False,
+    )
+    parser.add_argument(
+        "--interactive_error_injection",
+        action="store_true",
+        help="Whether to enable terminal-triggered interactive error injection during drive execution.",
+        default=False,
+    )
+    parser.add_argument(
+        "--use_public_atomic_actions",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use public AtomicActionEngine-backed atom actions.",
+        default=True,
+    )
+    parser.add_argument(
+        "--require_public_atomic_actions",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to raise instead of falling back to legacy when public atomic actions fail.",
+        default=False,
+    )
+    parser.add_argument(
+        "--use_public_grasp_semantics",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use mesh semantics and AntipodalAffordance for grasp.",
+        default=True,
+    )
+    parser.add_argument(
+        "--use_public_grasp_action",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use public PickUpAction with legacy grasp_pose_obj targets.",
+        default=False,
+    )
+    parser.add_argument(
+        "--use_public_place_action",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to use public PlaceAction for place_on_table.",
+        default=True,
+    )
+    parser.add_argument(
+        "--allow_public_grasp_annotation",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to allow public grasp annotation when cache is missing.",
+        default=True,
+    )
+    parser.add_argument(
+        "--force_public_grasp_reannotate",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to force re-annotating public grasp regions even if cache exists.",
+        default=False,
+    )
 
     args = parser.parse_args()
 
@@ -58,6 +112,10 @@ if __name__ == "__main__":
     if args.num_envs != 1:
         log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
         exit(1)
+    if args.require_public_atomic_actions and not args.use_public_atomic_actions:
+        log_error(
+            "--require_public_atomic_actions requires --use_public_atomic_actions."
+        )
 
     # Load configurations
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)

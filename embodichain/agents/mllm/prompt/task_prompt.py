@@ -14,6 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from typing import Any
+
 import torch
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import (
@@ -22,33 +26,53 @@ from langchain_core.prompts import (
 )
 from embodichain.utils.utility import encode_image
 
+__all__ = ["TaskPrompt"]
+
 
 class TaskPrompt:
     @staticmethod
-    def one_stage_prompt(observations, **kwargs):
-        """
-        Hybrid one-pass prompt:
-        Step 1: VLM analyzes the image and extracts object IDs.
-        Step 2: LLM generates task instructions using only those IDs.
-        """
-        # Encode image
+    def generate_task_graph(observations: dict[str, Any], **kwargs: Any) -> Any:
+        """Build a prompt that asks the task agent for a nominal JSON graph."""
+        schema = """{
+  "task": "<short task name>",
+  "start": "v0_start",
+  "goal": "vN_done",
+  "nodes": [
+    {"id": "v0_start", "semantic": "<initial state>"},
+    {"id": "v1_<state>", "semantic": "<state after edge 1>"}
+  ],
+  "edges": [
+    {
+      "id": "e01_<action>",
+      "source": "v0_start",
+      "target": "v1_<state>",
+      "left_arm_action": {"fn": "<atomic_action>", "kwargs": {}},
+      "right_arm_action": null
+    }
+  ]
+}"""
+
         observation = (
             observations["rgb"].cpu().numpy()
             if isinstance(observations["rgb"], torch.Tensor)
             else observations["rgb"]
         )
-        kwargs.update({"observation": encode_image(observation)})
+        kwargs.update(
+            {
+                "graph_schema": schema,
+                "observation": encode_image(observation),
+            }
+        )
 
-        # Build hybrid prompt
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessage(
                     content=(
-                        "You are a precise and reliable robotic manipulation planner. "
-                        "Given a camera observation and a task description, you must generate "
-                        "a clear, step-by-step task plan for a robotic arm. "
-                        "All actions must strictly use the provided atomic API functions, "
-                        "and the plan must be executable without ambiguity."
+                        "You are a precise robotic manipulation graph planner. "
+                        "Given a camera observation and task description, produce only "
+                        "the nominal atomic-action graph. Do not add failure monitors, "
+                        "error injection, recovery branches, Python code, or prose. "
+                        "All actions must strictly use the provided atomic API functions."
                     )
                 ),
                 HumanMessagePromptTemplate.from_template(
@@ -62,83 +86,29 @@ class TaskPrompt:
                         {
                             "type": "text",
                             "text": (
-                                "Here is the latest camera observation.\n"
-                                "First, analyze the scene in the image.\n"
-                                "Then, using the context below, produce an actionable task plan.\n\n"
-                                "**Environment background:** \n{basic_background}\n\n"
-                                '**Task goal:** \n"{task_prompt}"\n\n'
-                                "**Available atomic actions:** \n{atom_actions}\n"
+                                "Use the current camera observation and context below to "
+                                "generate a nominal atomic-action graph for the task.\n\n"
+                                "**Environment background:**\n{basic_background}\n\n"
+                                '**Task goal:**\n"{task_prompt}"\n\n'
+                                "**Available atomic actions:**\n{atom_actions}\n\n"
+                                "**Required JSON schema:**\n"
+                                "{graph_schema}\n\n"
+                                "Rules:\n"
+                                "- Output exactly one JSON object and nothing else.\n"
+                                "- The nominal graph must be one deterministic start-to-goal chain with no branches, cycles, or orphan edges.\n"
+                                "- Each edge is one semantic task step from source node to target node.\n"
+                                "- Every edge must define at least one non-null arm action.\n"
+                                "- Use `null` for an idle arm action.\n"
+                                "- Put only JSON primitives inside kwargs: strings, numbers, booleans, null, arrays, or objects.\n"
+                                "- Do not include `env`, tensors, comments, validation conditions, monitors, errors, or recovery fields.\n"
+                                "- Preserve task order and use both arms on the same edge when they should act simultaneously.\n"
+                                "- Use stable ids such as `v0_start`, `v1_grasped`, `e01_grasp_objects`.\n"
+                                "- Replace `N` with the concrete final step index; do not literally output `vN_done`.\n"
+                                "- The final edge target must equal the `goal` field."
                             ),
                         },
                     ]
                 ),
             ]
         )
-
-        # Return the prompt template and kwargs to be executed by the caller
         return prompt.invoke(kwargs)
-
-    @staticmethod
-    def two_stage_prompt(observations, **kwargs):
-        # for VLM generate image descriptions
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                SystemMessage(
-                    content="You are a helpful assistant to operate a robotic arm with a camera to generate task plans according to descriptions."
-                ),
-                HumanMessagePromptTemplate.from_template(
-                    [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/jpg;base64,{observation}",
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": "What is in the image? Return answer with their potential effects.",
-                        },
-                    ]
-                ),
-            ]
-        )
-
-        observation = (
-            observations["rgb"].cpu().numpy()
-            if isinstance(observations["rgb"], torch.Tensor)
-            else observations["rgb"]
-        )
-        kwargs.update({"observation": encode_image(observation)})
-        # for LLM generate task descriptions
-        prompt_query = ChatPromptTemplate.from_messages(
-            [
-                SystemMessage(
-                    content="You are a helpful assistant to operate a robotic arm with a camera to generate task plans according to descriptions."
-                ),
-                HumanMessagePromptTemplate.from_template(
-                    [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": "data:image/jpg;base64,{observation}",
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": "Here is analysis for this image: {query}.",
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Using the context below, produce an actionable task plan.\n\n"
-                                "**Environment background:** \n{basic_background}\n\n"
-                                '**Task goal:** \n"{task_prompt}"\n\n'
-                                "**Available atomic actions:** \n{atom_actions}\n"
-                            ),
-                        },
-                    ]
-                ),
-            ]
-        )
-
-        return [prompt.invoke(kwargs), {"prompt": prompt_query, "kwargs": kwargs}]

@@ -27,6 +27,7 @@ from embodichain.lab.sim.atomic_actions.core import (
     Affordance,
     ObjectSemantics,
 )
+from embodichain.lab.sim.atomic_actions.actions import MoveActionCfg
 from embodichain.lab.sim.atomic_actions.engine import (
     AtomicActionEngine,
     SemanticAnalyzer,
@@ -183,6 +184,74 @@ class TestResolveTarget:
     def test_unsupported_type_raises(self):
         with pytest.raises(TypeError, match="target must be"):
             self.engine._resolve_target(42)
+
+
+# ---------------------------------------------------------------------------
+# AtomicActionEngine.execute_static
+# ---------------------------------------------------------------------------
+
+
+def _make_sequence_test_robot() -> Mock:
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 4
+
+    def get_qpos(name=None):
+        if name == "arm":
+            return torch.zeros(1, 2)
+        if name == "hand":
+            return torch.zeros(1, 2)
+        return torch.zeros(1, 4)
+
+    def get_joint_ids(name=None):
+        if name == "arm":
+            return [0, 1]
+        if name == "hand":
+            return [2, 3]
+        return [0, 1, 2, 3]
+
+    robot.get_qpos = get_qpos
+    robot.get_joint_ids = get_joint_ids
+    return robot
+
+
+class TestExecuteStaticSequence:
+    """Tests ordered execution independent from _actions dict keys."""
+
+    def setup_method(self):
+        self.robot = _make_sequence_test_robot()
+        self.mg = Mock()
+        self.mg.robot = self.robot
+        self.mg.device = torch.device("cpu")
+
+    def test_duplicate_move_names_preserve_sequence_order(self):
+        engine = AtomicActionEngine(
+            self.mg,
+            actions_cfg_list=[
+                MoveActionCfg(control_part="arm", sample_interval=3),
+                MoveActionCfg(control_part="hand", sample_interval=4),
+            ],
+        )
+
+        assert "move" in engine._actions
+        assert engine._actions["move"].control_part == "hand"
+        assert [action.control_part for _, action in engine._action_sequence] == [
+            "arm",
+            "hand",
+        ]
+
+        is_success, trajectory = engine.execute_static(
+            target_list=[
+                torch.tensor([1.0, 2.0]),
+                torch.tensor([0.5, 0.7]),
+            ]
+        )
+
+        assert is_success is True
+        assert trajectory.shape == (1, 7, 4)
+        assert torch.allclose(trajectory[0, 2, :2], torch.tensor([1.0, 2.0]))
+        assert torch.allclose(trajectory[0, 3, :2], torch.tensor([1.0, 2.0]))
+        assert torch.allclose(trajectory[0, -1, 2:], torch.tensor([0.5, 0.7]))
 
 
 if __name__ == "__main__":
