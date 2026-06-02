@@ -19,17 +19,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from embodichain.agents.hierarchy.agent_base import AgentBase
-from embodichain.agents.mllm.prompt import TaskPrompt
+from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
+from embodichain.gen_sim.action_agent_pipeline.prompt_builders import RecoveryPrompt
 from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.llm_json import normalize_json_content
 from embodichain.utils.utility import load_txt
 
-__all__ = ["TaskAgent"]
+__all__ = ["RecoveryAgent"]
 
 
-class TaskAgent(AgentBase):
-    """Generate the nominal atomic-action task graph."""
+class RecoveryAgent(AgentBase):
+    """Generate lightweight recovery bindings for a nominal task graph."""
 
     prompt_name: str
     prompt_kwargs: dict[str, dict[str, Any]]
@@ -49,22 +49,19 @@ class TaskAgent(AgentBase):
         log_dir = kwargs.get(
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
-        file_path = Path(log_dir) / "agent_task_graph.json"
+        file_path = Path(log_dir) / "agent_recovery_spec.json"
 
         if not kwargs.get("regenerate", False) and file_path.exists():
-            print(f"Task graph already exists at {file_path}.")
+            print(f"Recovery spec already exists at {file_path}.")
             return load_txt(file_path)
 
-        prompt = getattr(TaskPrompt, self.prompt_name)(**kwargs)
+        prompt = getattr(RecoveryPrompt, self.prompt_name)(**kwargs)
         response = self.llm.invoke(prompt)
-        print(f"\033[92m\nTask agent output:\n{response.content}\n\033[0m")
+        print(f"\033[91m\nRecovery agent output:\n{response.content}\n\033[0m")
 
         content = normalize_json_content(response.content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        print(f"Generated task graph saved to {file_path}")
+        print(f"Generated recovery spec saved to {file_path}")
 
         return content
-
-    def act(self, *args, **kwargs):
-        return super().act(*args, **kwargs)

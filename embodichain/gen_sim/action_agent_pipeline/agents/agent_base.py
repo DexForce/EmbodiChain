@@ -14,15 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from abc import ABCMeta
 import os
-from pathlib import Path
+
 from embodichain.utils.utility import load_txt
-import embodichain.agents.mllm.prompt as mllm_prompt
-from embodichain.data import database_2d_dir
 
 
-def _resolve_prompt_path(file_name: str, config_dir: str = None) -> str:
+def _resolve_prompt_path(file_name: str, config_dir: str | None = None) -> str:
     # If absolute path, use directly
     if os.path.isabs(file_name):
         if os.path.exists(file_name):
@@ -35,7 +35,7 @@ def _resolve_prompt_path(file_name: str, config_dir: str = None) -> str:
         if os.path.exists(config_path):
             return config_path
 
-    # Try agents/prompts directory (for reusable prompts)
+    # Try action_agent_pipeline/prompts directory for reusable prompts.
     agents_prompts_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts"
     )
@@ -74,7 +74,7 @@ class AgentBase(metaclass=ABCMeta):
         for key, val in self.prompt_kwargs.items():
             if val["type"] == "text":
                 file_path = _resolve_prompt_path(val["name"], config_dir)
-                val["content"] = load_txt(file_path)  # ← store content here
+                val["content"] = load_txt(file_path)
             else:
                 raise ValueError(
                     f"Now only support `text` type but {val['type']} is given."

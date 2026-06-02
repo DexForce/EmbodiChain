@@ -23,10 +23,16 @@ from embodichain.utils import logger
 class BaseAgentEnv:
 
     def _init_agents(self, agent_config, task_name, agent_config_path=None):
-        from embodichain.agents.hierarchy.task_agent import TaskAgent
-        from embodichain.agents.hierarchy.compile_agent import CompileAgent
-        from embodichain.agents.hierarchy.recovery_agent import RecoveryAgent
-        from embodichain.agents.hierarchy.llm import (
+        from embodichain.gen_sim.action_agent_pipeline.agents.task_agent import (
+            TaskAgent,
+        )
+        from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import (
+            CompileAgent,
+        )
+        from embodichain.gen_sim.action_agent_pipeline.agents.recovery_agent import (
+            RecoveryAgent,
+        )
+        from embodichain.gen_sim.action_agent_pipeline.agents.llm import (
             task_llm,
             compile_llm,
             recovery_llm,

@@ -60,7 +60,7 @@ The system operates on a closed-loop control cycle:
 ## Core Components
 
 ### TaskAgent
-*Located in:* `embodichain/agents/hierarchy/task_agent.py`
+*Located in:* `embodichain/gen_sim/action_agent_pipeline/agents/task_agent.py`
 
 Responsible for high-level graph planning. It parses visual observations and
 outputs a nominal atomic-action graph.
@@ -70,7 +70,7 @@ outputs a nominal atomic-action graph.
 * Leaves recovery bindings to `RecoveryAgent`
 
 ### RecoveryAgent
-*Located in:* `embodichain/agents/hierarchy/recovery_agent.py`
+*Located in:* `embodichain/gen_sim/action_agent_pipeline/agents/recovery_agent.py`
 
 Generates compact monitor-to-recovery bindings for the nominal graph.
 
@@ -79,7 +79,7 @@ Generates compact monitor-to-recovery bindings for the nominal graph.
 * Outputs `recovery_bindings` only; it does not write recovery nodes, recovery edges, or recovery branches
 
 ### CompileAgent
-*Located in:* `embodichain/agents/hierarchy/compile_agent.py`
+*Located in:* `embodichain/gen_sim/action_agent_pipeline/agents/compile_agent.py`
 
 Compiles generated atomic-action graph specs into an executable graph artifact.
 
@@ -91,7 +91,7 @@ Compiles generated atomic-action graph specs into an executable graph artifact.
 
 
 ### ValidationAgent
-*Located in:* `embodichain/agents/hierarchy/validation_agent.py`
+*Status:* Planned validation-loop component; no implementation is currently shipped in the repository.
 
 Closes the loop by verifying if the robot actually achieved what it planned.
 
@@ -105,7 +105,7 @@ Closes the loop by verifying if the robot actually achieved what it planned.
 The `Agent` configuration block controls the context provided to the LLMs. Prompt files are resolved in the following order:
 
 1. **Config directory**: Task-specific prompt files in the same directory as the agent configuration file (e.g., `configs/gym/agent/pour_water_agent/`)
-2. **Default prompts directory**: Reusable prompt templates in `embodichain/agents/prompts/`
+2. **Default prompts directory**: Reusable prompt templates in `embodichain/gen_sim/action_agent_pipeline/prompts/`
 
 | Parameter | Description | Typical Use |
 | :--- | :--- | :--- |

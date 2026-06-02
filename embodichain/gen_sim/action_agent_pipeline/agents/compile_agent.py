@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from embodichain.agents.hierarchy.agent_base import AgentBase
+from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
 from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.llm_json import extract_json_object, normalize_json_content
 
