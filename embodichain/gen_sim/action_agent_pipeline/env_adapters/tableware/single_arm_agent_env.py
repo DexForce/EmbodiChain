@@ -101,12 +101,10 @@ class SingleArmAgentEnv(BaseAgentEnv):
             regenerate=regenerate, recovery=recovery
         )
         public_atomic_kwargs = {
-            "use_public_atomic_actions": True,
-            "require_public_atomic_actions": False,
-            "use_public_grasp_semantics": False,
+            "use_public_grasp_semantics": True,
             "use_public_grasp_action": False,
             "use_public_place_action": True,
-            "allow_public_grasp_annotation": False,
+            "allow_public_grasp_annotation": True,
             "force_public_grasp_reannotate": False,
         }
         for key in public_atomic_kwargs:

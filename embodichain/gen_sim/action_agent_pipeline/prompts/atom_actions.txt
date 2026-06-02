@@ -1,23 +1,25 @@
 ### Atom Functions for Robot Arm Control
 Each atomic function returns a list of joint-space trajectories (list[np.ndarray]).
-All functions support an optional argument:
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`.
+If a public atomic action cannot resolve semantics, solve IK, or plan a
+trajectory, it raises an error immediately. There is no legacy fallback path and
+no automatic nearest-valid-pose correction. Do not pass `force_valid`,
+`use_public_atomic_actions`, or `require_public_atomic_actions`.
 
-force_valid: bool
-    If True, the system will automatically correct an invalid target pose by
-    projecting it to the nearest valid pose. Use this option carefully:
-    enable it only for actions where small spatial deviations are acceptable
-    and will not compromise task correctness. Default is False.
+For `grasp`, semantic grasp is the default public mode when enabled. When
+semantic grasp is disabled and public grasp action is enabled, `grasp` still
+uses public `PickUpAction`; the configured `grasp_pose_obj` is only the target
+pose source.
 
 Use the following functions exactly as defined. Do not invent new APIs or parameters.
 
 "grasp":
     def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
 
-    Moves the specified arm to the target object’s affordance-based grasp pose and executes a grasp by closing the gripper.
+    Moves the specified arm to the target object’s public grasp target and executes a grasp by closing the gripper.
 
-    The function plans a two-stage trajectory:
-    (1) from the current pose to a pre-grasp pose offset from the object, and
-    (2) from the pre-grasp pose to the final grasp pose, followed by gripper closure.
+    The public PickUpAction plans approach, gripper closing, and post-grasp lift.
 
     Upon completion, the gripper is closed and the target object is expected to be stably held by the gripper.
 
@@ -27,7 +29,7 @@ Use the following functions exactly as defined. Do not invent new APIs or parame
 "place_on_table":
     def place_on_table(robot_name: str, obj_name: str, x: float, y: float, pre_place_dis: float, **kwargs) -> list[np.ndarray]
 
-    Moves the specified robot arm with the target object to the desired [x, y] location on the table and opens the gripper to place the object.
+    Moves the specified robot arm with the target object to the desired [x, y] location on the table and opens the gripper to place the object using public PlaceAction.
     The z-coordinate is automatically adjusted based on the table height and the object’s dimensions.
     This function assumes that the robot is already holding the object and that the task is to place it on the table at the specified coordinates.
     Remember that when you need to place some objects on the table at specific coordinates, use this function without using other movement atom actions.

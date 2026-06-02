@@ -5,6 +5,11 @@ Use `robot_name="left_arm"` for the fork and `robot_name="right_arm"` for the
 spoon. The graph runtime can execute `left_arm_action` and `right_arm_action`
 on the same edge simultaneously.
 
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately; there is no legacy fallback path and no automatic
+nearest-valid-pose correction.
+
 Use the following functions exactly as defined. Do not invent new APIs or
 parameters.
 

@@ -151,8 +151,6 @@ def main(args, env, gym_config):
             ),
         }
         for public_flag in (
-            "use_public_atomic_actions",
-            "require_public_atomic_actions",
             "use_public_grasp_semantics",
             "use_public_grasp_action",
             "use_public_place_action",

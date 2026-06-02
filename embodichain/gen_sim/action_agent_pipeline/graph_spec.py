@@ -501,8 +501,6 @@ def _normalize_recovery_step(
         **_optional_step_metadata(step),
     }
     if step_type == "retry_failed_edge":
-        if "force_valid" in step:
-            base["force_valid"] = step["force_valid"]
         return base, []
 
     if step_type == "action":
@@ -515,8 +513,6 @@ def _normalize_recovery_step(
         if edge_id is None:
             return None, [f"recovery step {step_index} replay_edge needs edge_id"]
         base["edge_id"] = str(edge_id)
-        if "force_valid" in step:
-            base["force_valid"] = step["force_valid"]
         return base, []
 
     if step_type == "regrasp_both":
@@ -529,7 +525,6 @@ def _normalize_recovery_step(
             {
                 "arms": {str(robot): str(obj) for robot, obj in dict(arms).items()},
                 "pre_grasp_dis": step.get("pre_grasp_dis", 0.1),
-                "force_valid": step.get("force_valid", False),
             }
         )
         return base, []
@@ -551,7 +546,6 @@ def _normalize_recovery_step(
             "robot_name": str(robot_name),
             "obj_name": str(obj_name),
             "pre_grasp_dis": step.get("pre_grasp_dis", 0.1),
-            "force_valid": step.get("force_valid", False),
         }
     )
     return base, []
@@ -766,7 +760,6 @@ def _add_reusable_recovery_branch(
                 robot_name=hold_monitor["robot_name"],
                 obj_name=hold_monitor["obj_name"],
                 pre_grasp_dis=float(step.get("pre_grasp_dis", 0.1)),
-                force_valid=bool(step.get("force_valid", False)),
             ),
         }
         expanded["recovery_edges"].append(repair_edge)
@@ -865,19 +858,13 @@ def _expand_recovery_step_actions(
     step_type = _step_type(step)
 
     if step_type in {"retry_failed_edge", "retry_edge"}:
-        return _copy_edge_actions(
-            monitored_edge,
-            force_valid=step.get("force_valid"),
-        )
+        return _copy_edge_actions(monitored_edge)
 
     if step_type == "replay_edge":
         replay_edge_id = step["edge_id"]
         if replay_edge_id not in nominal_edges:
             raise ValueError(f"Unknown replay_edge id '{replay_edge_id}'.")
-        return _copy_edge_actions(
-            nominal_edges[replay_edge_id],
-            force_valid=step.get("force_valid"),
-        )
+        return _copy_edge_actions(nominal_edges[replay_edge_id])
 
     if step_type in {"regrasp", "regrasp_both"}:
         arms = step.get("arms")
@@ -885,13 +872,11 @@ def _expand_recovery_step_actions(
             return _multi_regrasp_actions(
                 arms,
                 pre_grasp_dis=float(step.get("pre_grasp_dis", 0.1)),
-                force_valid=bool(step.get("force_valid", False)),
             )
         return _regrasp_actions(
             robot_name=step["robot_name"],
             obj_name=step["obj_name"],
             pre_grasp_dis=float(step.get("pre_grasp_dis", 0.1)),
-            force_valid=bool(step.get("force_valid", False)),
         )
 
     if step_type == "action" or "left_arm_action" in step or "right_arm_action" in step:
@@ -903,16 +888,9 @@ def _expand_recovery_step_actions(
     raise ValueError(f"Unsupported recovery step type '{step_type}'.")
 
 
-def _copy_edge_actions(
-    edge: Mapping[str, Any],
-    *,
-    force_valid: Any = None,
-) -> dict[str, Any]:
+def _copy_edge_actions(edge: Mapping[str, Any]) -> dict[str, Any]:
     left_action = deepcopy(edge.get("left_arm_action"))
     right_action = deepcopy(edge.get("right_arm_action"))
-    if force_valid is not None:
-        _set_force_valid(left_action, bool(force_valid))
-        _set_force_valid(right_action, bool(force_valid))
     return {
         "left_arm_action": left_action,
         "right_arm_action": right_action,
@@ -924,7 +902,6 @@ def _regrasp_actions(
     robot_name: str,
     obj_name: str,
     pre_grasp_dis: float,
-    force_valid: bool,
 ) -> dict[str, Any]:
     action = {
         "fn": "grasp",
@@ -932,7 +909,6 @@ def _regrasp_actions(
             "robot_name": robot_name,
             "obj_name": obj_name,
             "pre_grasp_dis": pre_grasp_dis,
-            "force_valid": force_valid,
         },
     }
     if "left" in robot_name:
@@ -944,7 +920,6 @@ def _multi_regrasp_actions(
     arms: Mapping[str, str],
     *,
     pre_grasp_dis: float,
-    force_valid: bool,
 ) -> dict[str, Any]:
     actions = {"left_arm_action": None, "right_arm_action": None}
     for robot_name, obj_name in arms.items():
@@ -954,7 +929,6 @@ def _multi_regrasp_actions(
                 "robot_name": robot_name,
                 "obj_name": obj_name,
                 "pre_grasp_dis": pre_grasp_dis,
-                "force_valid": force_valid,
             },
         }
         if "left" in robot_name:
@@ -970,11 +944,6 @@ def _regrasp_step_objects(step: Mapping[str, Any]) -> list[str]:
         return [str(obj_name) for obj_name in arms.values()]
     obj_name = step.get("obj_name")
     return [str(obj_name)] if obj_name is not None else []
-
-
-def _set_force_valid(action: dict[str, Any] | None, value: bool) -> None:
-    if action is not None:
-        action.setdefault("kwargs", {})["force_valid"] = value
 
 
 def _first_hold_lost_monitor(binding: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -1091,7 +1060,6 @@ def _validate_recovery_authoring_spec(recovery_spec: Mapping[str, Any]) -> None:
         "obj_name",
         "arms",
         "pre_grasp_dis",
-        "force_valid",
         "edge_id",
         "left_arm_action",
         "right_arm_action",

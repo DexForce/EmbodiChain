@@ -72,13 +72,19 @@ def cli() -> None:
     parser.add_argument(
         "--use_public_atomic_actions",
         action=argparse.BooleanOptionalAction,
-        help="Whether to use public AtomicActionEngine-backed atom actions.",
+        help=(
+            "Deprecated compatibility flag. Atom actions are public-only; "
+            "--no-use_public_atomic_actions is no longer supported."
+        ),
         default=True,
     )
     parser.add_argument(
         "--require_public_atomic_actions",
         action=argparse.BooleanOptionalAction,
-        help="Whether to raise instead of falling back to legacy when public atomic actions fail.",
+        help=(
+            "Deprecated compatibility flag. Public atomic actions are always "
+            "required and failures raise immediately."
+        ),
         default=False,
     )
     parser.add_argument(
@@ -90,7 +96,7 @@ def cli() -> None:
     parser.add_argument(
         "--use_public_grasp_action",
         action=argparse.BooleanOptionalAction,
-        help="Whether to use public PickUpAction with legacy grasp_pose_obj targets.",
+        help="Whether to use public PickUpAction with configured grasp_pose_obj targets.",
         default=False,
     )
     parser.add_argument(
@@ -117,9 +123,11 @@ def cli() -> None:
     if args.num_envs != 1:
         log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
         raise SystemExit(1)
-    if args.require_public_atomic_actions and not args.use_public_atomic_actions:
+    if not args.use_public_atomic_actions:
         log_error(
-            "--require_public_atomic_actions requires --use_public_atomic_actions."
+            "--no-use_public_atomic_actions is no longer supported. "
+            "Atom actions are public-only.",
+            error_type=SystemExit,
         )
 
     env_cfg, gym_config, _ = build_env_cfg_from_args(args)

@@ -3,20 +3,23 @@ Each atomic function returns a list of joint-space trajectories (list[np.ndarray
 Only use robot_name='right_arm'. Never use robot_name='left_arm'.
 When generating graph edges, always set left_arm_action to null and put the actual action in right_arm_action.
 
-All functions support an optional argument:
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`.
+If a public atomic action cannot resolve the target, solve IK, or plan a
+trajectory, it raises an error immediately. There is no legacy fallback path and
+no automatic nearest-valid-pose correction. Do not pass `force_valid`,
+`use_public_atomic_actions`, or `require_public_atomic_actions`.
 
-force_valid: bool
-    If True, the system will automatically correct an invalid target pose by
-    projecting it to the nearest valid pose. Use this option carefully:
-    enable it only for actions where small spatial deviations are acceptable
-    and will not compromise task correctness. Default is False.
+For this task, grasp may run in public `grasp_pose_obj` mode when semantic grasp
+is disabled and public grasp action is enabled. That mode still uses public
+`PickUpAction`; `grasp_pose_obj` is only the configured target pose source.
 
 Use the following functions exactly as defined. Do not invent new APIs or parameters.
 
 "grasp":
     def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
 
-    Moves the right arm to the target object's affordance-based grasp pose and closes the gripper.
+    Moves the right arm to the target object's public grasp target and closes the gripper.
 
     Example:
         grasp(robot_name='right_arm', obj_name='cup', pre_grasp_dis=0.08)
@@ -24,7 +27,7 @@ Use the following functions exactly as defined. Do not invent new APIs or parame
 "place_on_table":
     def place_on_table(robot_name: str, obj_name: str, x: float, y: float, pre_place_dis: float, **kwargs) -> list[np.ndarray]
 
-    Moves the right arm with the held object to the desired [x, y] table location and opens the gripper to place it.
+    Moves the right arm with the held object to the desired [x, y] table location and opens the gripper to place it using public PlaceAction.
     The z-coordinate is automatically adjusted based on the object height.
     For this task, place the cup at x=0.75 and y=-0.18.
 

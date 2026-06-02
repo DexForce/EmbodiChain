@@ -4,6 +4,11 @@ Each atomic function returns a list of joint-space trajectories (`list[np.ndarra
 Only use `robot_name="right_arm"`. Never use `robot_name="left_arm"` or
 `robot_name="arm"`.
 
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately; there is no legacy fallback path and no automatic
+nearest-valid-pose correction.
+
 When generating graph edges, always set `left_arm_action` to null and put the
 actual action in `right_arm_action`.
 
@@ -14,7 +19,7 @@ parameters.
     def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
 
     Moves the right arm to the target object's grasp pose and closes the
-    gripper. With public semantic grasp enabled, this action already includes
+    gripper. With public semantic grasp enabled, this action includes
     approach, gripper closing, and a small post-grasp lift. For this task, use
     `obj_name="apple"` and `pre_grasp_dis=0.08`.
 

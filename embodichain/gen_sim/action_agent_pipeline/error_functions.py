@@ -23,11 +23,11 @@ import numpy as np
 import torch
 
 from embodichain.lab.gym.utils.misc import apply_rotation
+from embodichain.lab.sim.atomic_actions import AtomicActionEngine, MoveActionCfg
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.gen_sim.action_agent_pipeline.atom_action_utils import (
     apply_offset_to_pose,
-    finalize_actions,
-    get_qpos,
-    plan_trajectory,
+    resolve_arm_side,
 )
 from embodichain.utils.logger import log_warning
 
@@ -265,12 +265,15 @@ def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):
             f"wrong_affordance expects action with shape [T, arm_dof+2], got {action.shape}."
         )
 
-    is_left = "left" in error_arm
-    select_arm = "left_arm" if is_left else "right_arm"
+    side = resolve_arm_side(env, error_arm)
+    is_left = side == "left"
+    if hasattr(env, "get_agent_arm_control_part"):
+        select_arm = env.get_agent_arm_control_part(is_left)
+    else:
+        select_arm = "left_arm" if is_left else "right_arm"
     start_qpos = torch.as_tensor(action[0, :-2], dtype=torch.float32)
     last_qpos = torch.as_tensor(action[-1, :-2], dtype=torch.float32)
     gripper_state_traj = action[:, -1:].copy()
-    last_gripper_state = gripper_state_traj[-1]
     last_pose = env.get_arm_fk(qpos=last_qpos, is_left=is_left).clone()
 
     if error_pose is not None:
@@ -284,25 +287,33 @@ def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):
             )
         target_pose = apply_offset_to_pose(last_pose, relative_error_xyz)
 
-    _, disturbed_qpos = get_qpos(
-        env,
-        is_left,
-        select_arm,
-        target_pose,
-        last_qpos,
-        force_valid=False,
-        name="wrong affordance",
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
     )
-
-    select_qpos_traj = []
-    plan_trajectory(
-        env,
-        select_arm,
-        [start_qpos, disturbed_qpos],
-        len(action),
-        last_gripper_state,
-        select_qpos_traj,
-        [],
+    engine = AtomicActionEngine(
+        motion_generator=motion_generator,
+        actions_cfg_list=[
+            MoveActionCfg(
+                control_part=select_arm,
+                sample_interval=len(action),
+            )
+        ],
     )
+    move_action = engine._actions["move"]
+    is_success, trajectory, _ = move_action.execute(
+        target=torch.as_tensor(
+            target_pose, dtype=torch.float32, device=env.robot.device
+        ),
+        start_qpos=start_qpos.to(env.robot.device).reshape(1, -1),
+    )
+    if not is_success:
+        raise RuntimeError("Public MoveAction failed for wrong_affordance.")
 
-    return finalize_actions(select_qpos_traj, gripper_state_traj)
+    arm_traj = trajectory[0].detach().cpu().numpy()
+    if len(arm_traj) != len(gripper_state_traj):
+        raise ValueError(
+            "Public MoveAction trajectory length does not match the source action "
+            f"length: {len(arm_traj)} != {len(gripper_state_traj)}."
+        )
+
+    return np.concatenate([arm_traj, gripper_state_traj, gripper_state_traj], axis=-1)
