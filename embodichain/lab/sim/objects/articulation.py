@@ -1105,6 +1105,10 @@ class Articulation(BatchEntity):
             else:
                 qpos_set = self.body_data._qpos
 
+            if not isinstance(local_env_ids, torch.Tensor):
+                local_env_ids = torch.as_tensor(
+                    local_env_ids, dtype=torch.long, device=self.device
+                )
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set[local_env_ids[:, None], local_joint_ids] = qpos
             self._ps.gpu_apply_joint_data(
@@ -1181,6 +1185,10 @@ class Articulation(BatchEntity):
             else:
                 qvel_set = self.body_data._qvel
 
+            if not isinstance(local_env_ids, torch.Tensor):
+                local_env_ids = torch.as_tensor(
+                    local_env_ids, dtype=torch.long, device=self.device
+                )
             indices = self.body_data.gpu_indices[local_env_ids]
             qvel_set[local_env_ids[:, None], local_joint_ids] = qvel
             self._ps.gpu_apply_joint_data(

@@ -307,7 +307,7 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            # self._register_default_window_control()
+            self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -550,12 +550,12 @@ class SimulationManager:
         self._window = self._world.get_windows()
 
         # TODO: will open these features after fix the related blocking issues.
-        # self._register_default_window_control()
-        # if (
-        #     self._window_record_hotkey_cfg is not None
-        #     and self._window_record_input_control is None
-        # ):
-        #     self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        self._register_default_window_control()
+        if (
+            self._window_record_hotkey_cfg is not None
+            and self._window_record_input_control is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
