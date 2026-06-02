@@ -3,13 +3,13 @@ Only the right_arm graph slot is available in this task.
 
 The scene comes from the exported 1779962412_gym_project mesh environment. The
 interactive objects are:
-- apple: the target object to grasp and place.
-- mug: the target container for the apple, now placed at the former book
+- cup: the target object to grasp and place.
+- mug: the target container for the cup, now placed at the former book
   position near [0.3616, 1.7512, 0.7520].
 - book: a distractor object on the table, now placed at the former mug position
   near [-0.4185, 1.8601, 0.7800].
 
-Use the `grasp` atomic function for the apple, then move the held apple directly
+Use the `grasp` atomic function for the cup, then move the held cup directly
 to a mug-centered release pose with `move_relative_to_object`, and open the
 gripper. A short upward `move_by_relative_offset` retreat after release is
 optional. Keep left_arm_action null for every graph edge.

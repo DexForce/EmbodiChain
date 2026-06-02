@@ -15,7 +15,7 @@
             "arm_aim_yaw_offset": 3.141592653589793,
             "gripper_open_state": [0.0],
             "gripper_close_state": [0.04],
-            "agent_success_object": "apple",
+            "agent_success_object": "cup",
             "agent_success_container": "mug",
             "agent_success_position": null,
             "agent_success_tolerance": 0.05,
@@ -24,7 +24,7 @@
             "container_success_max_z_offset": 0.25,
             "agent_success": {
                 "type": "object_in_container",
-                "object": "apple",
+                "object": "cup",
                 "container": "mug",
                 "radius": 0.12,
                 "min_z_offset": -0.03,
@@ -32,12 +32,14 @@
             },
             "success_xy_tolerance": 0.18,
             "success_min_lift_height": 0.15,
-            "enable_apple_grasp_assist": false,
-            "grasp_assist_attach_position_tolerance": 0.1,
-            "grasp_assist_attach_orientation_tolerance": 0.6,
             "ignore_terminations_during_agent": true,
-            "force_apple_top_down_grasp_pose": true,
-            "apple_top_down_grasp_height_offset": 0.035
+            "agent_grasp_pose_overrides": [
+                {
+                    "type": "top_down",
+                    "object": "cup",
+                    "height_offset": 0.04
+                }
+            ]
         },
         "events": {
             "record_camera": {
@@ -100,12 +102,12 @@
                             "name": "grasp_pose_object",
                             "mode": "static",
                             "entity_cfg": {
-                                "uid": "apple"
+                                "uid": "cup"
                             },
                             "value": [[
                                 [0.0, 0.0, 1.0, 0.0],
                                 [1.0, 0.0, 0.0, 0.0],
-                                [0.0, 1.0, 0.0, 0.035],
+                                [0.0, 1.0, 0.0, 0.04],
                                 [0.0, 0.0, 0.0, 1.0]
                             ]]
                         }
@@ -119,7 +121,7 @@
                     "registry": [
                         {
                             "entity_cfg": {
-                                "uid": "apple"
+                                "uid": "cup"
                             },
                             "pose_register_params": {
                                 "compute_relative": false,
@@ -163,11 +165,11 @@
                         "control_freq": 25
                     },
                     "instruction": {
-                        "lang": "Pick up the apple from the table with the UR10 arm and place it into the mug."
+                        "lang": "Pick up the cup from the table with the UR10 arm and place it into the mug."
                     },
                     "extra": {
                         "scene_type": "1779962412_gym_project",
-                        "task_description": "UR10 apple-to-mug placement",
+                        "task_description": "UR10 cup-to-mug placement",
                         "data_type": "sim"
                     },
                     "use_videos": true
@@ -280,14 +282,14 @@
     ],
     "rigid_object": [
         {
-            "uid": "apple",
+            "uid": "cup",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "1779962412_gym_project/mesh_assets/apple/apple_0/apple_0.glb",
-                "compute_uv": false
+                "fpath": "PaperCup/paper_cup.ply",
+                "compute_uv": true
             },
             "attrs": {
-                "mass": 0.1,
+                "mass": 0.01,
                 "static_friction": 0.8,
                 "dynamic_friction": 0.7,
                 "linear_damping": 0.5,
@@ -299,9 +301,9 @@
                 "max_linear_velocity": 2.0,
                 "max_angular_velocity": 2.0
             },
-            "body_scale": [0.5, 0.5, 0.5],
-            "init_pos": [-0.04736585442532049, 1.8148307472408205, 0.747],
-            "init_rot": [125.08492737084423, 1.0374067602823314, -1.2144384437679427],
+            "body_scale": [0.5, 0.5, 0.7],
+            "init_pos": [-0.04736585442532049, 1.8148307472408205, 0.805],
+            "init_rot": [0.0, 0.0, 0.0],
             "body_type": "dynamic",
             "max_convex_hull_num": 8
         },
