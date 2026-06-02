@@ -17,7 +17,6 @@
 import argparse
 import base64
 import json
-import os
 import re
 from pathlib import Path
 import numpy as np
@@ -29,40 +28,23 @@ import itertools
 from scipy.spatial import ConvexHull
 from typing import Dict, Any, List
 
-
-def _load_gen_config() -> Dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[1] / "configs" / "gen_config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"gen_config.json not found: {config_path}")
-
-    with config_path.open("r", encoding="utf-8") as f:
-        raw_cfg = json.load(f)
-
-    cfg = raw_cfg.get("llm", {}).get("openai_compatible", {})
-    cfg["api_key"] = os.getenv("OPENAI_API_KEY") or cfg.get("api_key", "")
-    cfg["model"] = os.getenv("OPENAI_MODEL") or cfg.get("model", "")
-    cfg["base_url"] = os.getenv("OPENAI_BASE_URL") or cfg.get("base_url", "")
-    cfg["default_query"] = cfg.get("default_query", {})
-    if cfg["base_url"]:
-        cfg["base_url"] = cfg["base_url"].rstrip("/")
-
-    required = ["api_key", "model", "base_url"]
-    missing = [k for k in required if k not in cfg or not cfg[k]]
-    if missing:
-        raise ValueError(f"Missing required config keys: {missing}")
-
-    return cfg
+from embodichain.gen_sim.simready_pipeline.configs import (
+    get_openai_compatible_llm_config,
+)
 
 
-_GEN_CONFIG = _load_gen_config()
+_GEN_CONFIG = get_openai_compatible_llm_config(required=True)
 
 DEPLOYMENT = _GEN_CONFIG["model"]
 
-client = OpenAI(
-    api_key=_GEN_CONFIG["api_key"],
-    base_url=_GEN_CONFIG["base_url"],
-    default_query=_GEN_CONFIG.get("default_query") or None,
-)
+_CLIENT_KWARGS = {
+    "api_key": _GEN_CONFIG["api_key"],
+    "default_query": _GEN_CONFIG.get("default_query") or None,
+}
+if _GEN_CONFIG.get("base_url"):
+    _CLIENT_KWARGS["base_url"] = _GEN_CONFIG["base_url"]
+
+client = OpenAI(**_CLIENT_KWARGS)
 
 STRATEGY = None
 

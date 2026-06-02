@@ -17,51 +17,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
+from embodichain.gen_sim.simready_pipeline.configs import (
+    DEFAULT_LLM_MODEL,
+    get_openai_compatible_llm_config,
+)
 from langchain_openai import ChatOpenAI
 
 __all__ = ["create_llm", "task_llm", "recovery_llm", "compile_llm"]
-
-# ------------------------------------------------------------------------------
-# Environment configuration
-# ------------------------------------------------------------------------------
-
-DEFAULT_LLM_MODEL = "gpt-4o"
-ENV_FILE_NAMES = (Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env")
-
-
-def _load_env_file(path: Path) -> None:
-    """Load simple KEY=VALUE pairs from a local .env file if it exists."""
-    if not path.exists():
-        return
-
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-for env_file in dict.fromkeys(ENV_FILE_NAMES):
-    _load_env_file(env_file)
-
-proxy_url = os.getenv("EMBODICHAIN_LLM_PROXY") or os.getenv("LLM_PROXY_URL")
-if proxy_url:
-    os.environ["HTTP_PROXY"] = proxy_url
-    os.environ["HTTPS_PROXY"] = proxy_url
-
-
-def _get_first_env(*names: str, default: str | None = None) -> str | None:
-    for name in names:
-        value = os.getenv(name)
-        if value:
-            return value
-    return default
 
 
 # ------------------------------------------------------------------------------
@@ -70,20 +33,26 @@ def _get_first_env(*names: str, default: str | None = None) -> str | None:
 
 
 def create_llm(*, temperature=0.0, model=None):
-    api_key = _get_first_env("OPENAI_API_KEY")
+    cfg = get_openai_compatible_llm_config(required=True)
+    api_key = cfg["api_key"]
     if not api_key:
         raise ValueError(
-            "OPENAI_API_KEY is required. Set it in your shell environment or "
-            "in a local .env file copied from .env.example."
+            "OPENAI_API_KEY is required. Set it in your shell environment, "
+            "embodichain/gen_sim/simready_pipeline/configs/.env, or "
+            "embodichain/gen_sim/simready_pipeline/configs/gen_config.json."
         )
+
+    proxy_url = cfg.get("proxy_url")
+    if proxy_url:
+        os.environ["HTTP_PROXY"] = proxy_url
+        os.environ["HTTPS_PROXY"] = proxy_url
 
     kwargs = {
         "temperature": temperature,
-        "model": model
-        or _get_first_env("OPENAI_MODEL", "LLM_MODEL", default=DEFAULT_LLM_MODEL),
+        "model": model or cfg.get("model") or DEFAULT_LLM_MODEL,
         "api_key": api_key,
     }
-    base_url = _get_first_env("OPENAI_BASE_URL", "OPENAI_API_BASE", "LLM_URL")
+    base_url = cfg.get("base_url")
     if base_url:
         kwargs["base_url"] = base_url
 
