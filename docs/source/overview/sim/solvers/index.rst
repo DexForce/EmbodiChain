@@ -80,7 +80,9 @@ Choosing a solver
 - Use analytic solvers (OPW for 6-DOF arms or SRS for 7-DOF arms) when available for speed and
    determinism.
 - Use numerical solvers (PyTorch/optimization, Differential) when you need
-   flexibility..
+   flexibility.
+- Use the neural IK solver (experimental) when you have a trained checkpoint and need
+   fast batch inference on a supported robot.
 
 See also
 --------
@@ -94,3 +96,4 @@ See also
     pinocchio_solver.md
     opw_solver.md
     srs_solver.md
+    neural_ik_solver.md
