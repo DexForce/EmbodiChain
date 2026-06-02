@@ -6,9 +6,7 @@ When generating graph edges, always set left_arm_action to null and put the actu
 All atom functions are public-only wrappers backed by
 `embodichain.lab.sim.atomic_actions.AtomicActionEngine`.
 If a public atomic action cannot resolve the target, solve IK, or plan a
-trajectory, it raises an error immediately. There is no legacy fallback path and
-no automatic nearest-valid-pose correction. Do not pass `force_valid`,
-`use_public_atomic_actions`, or `require_public_atomic_actions`.
+trajectory, it raises an error immediately. Use only the parameters listed below.
 
 For this task, grasp may run in public `grasp_pose_obj` mode when semantic grasp
 is disabled and public grasp action is enabled. That mode still uses public

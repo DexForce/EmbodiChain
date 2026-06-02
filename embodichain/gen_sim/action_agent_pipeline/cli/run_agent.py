@@ -70,24 +70,6 @@ def cli() -> None:
         default=False,
     )
     parser.add_argument(
-        "--use_public_atomic_actions",
-        action=argparse.BooleanOptionalAction,
-        help=(
-            "Deprecated compatibility flag. Atom actions are public-only; "
-            "--no-use_public_atomic_actions is no longer supported."
-        ),
-        default=True,
-    )
-    parser.add_argument(
-        "--require_public_atomic_actions",
-        action=argparse.BooleanOptionalAction,
-        help=(
-            "Deprecated compatibility flag. Public atomic actions are always "
-            "required and failures raise immediately."
-        ),
-        default=False,
-    )
-    parser.add_argument(
         "--use_public_grasp_semantics",
         action=argparse.BooleanOptionalAction,
         help="Whether to use mesh semantics and AntipodalAffordance for grasp.",
@@ -123,12 +105,6 @@ def cli() -> None:
     if args.num_envs != 1:
         log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
         raise SystemExit(1)
-    if not args.use_public_atomic_actions:
-        log_error(
-            "--no-use_public_atomic_actions is no longer supported. "
-            "Atom actions are public-only.",
-            error_type=SystemExit,
-        )
 
     env_cfg, gym_config, _ = build_env_cfg_from_args(args)
     agent_config = load_config(args.agent_config)

@@ -7,8 +7,7 @@ on the same edge simultaneously.
 
 All atom functions are public-only wrappers backed by
 `embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
-raise immediately; there is no legacy fallback path and no automatic
-nearest-valid-pose correction.
+raise immediately. Use only the parameters listed below.
 
 Use the following functions exactly as defined. Do not invent new APIs or
 parameters.
