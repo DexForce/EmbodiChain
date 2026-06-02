@@ -14,20 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+import argparse
+
 import gymnasium
 import numpy as np
-import argparse
 import torch
 
-from embodichain.utils.utility import load_config
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
 )
-from embodichain.utils.logger import log_error
 from embodichain.lab.scripts.run_env import main
+from embodichain.utils.logger import log_error
+from embodichain.utils.utility import load_config
 
-if __name__ == "__main__":
+__all__ = ["cli"]
+
+
+def cli() -> None:
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
@@ -108,20 +114,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Validate arguments
     if args.num_envs != 1:
         log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
-        exit(1)
+        raise SystemExit(1)
     if args.require_public_atomic_actions and not args.use_public_atomic_actions:
         log_error(
             "--require_public_atomic_actions requires --use_public_atomic_actions."
         )
 
-    # Load configurations
-    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+    env_cfg, gym_config, _ = build_env_cfg_from_args(args)
     agent_config = load_config(args.agent_config)
 
-    # Create environment
     env = gymnasium.make(
         id=gym_config["id"],
         cfg=env_cfg,
@@ -130,8 +133,11 @@ if __name__ == "__main__":
         task_name=args.task_name,
     )
 
-    # Run main function
     main(args, env, gym_config)
 
     if args.headless:
         env.reset(options={"final": True})
+
+
+if __name__ == "__main__":
+    cli()

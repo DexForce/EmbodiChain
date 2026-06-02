@@ -30,7 +30,7 @@ an OpenAI-compatible proxy or vendor endpoint.
 Run the agent system with the following command:
 
 ```bash
-python embodichain/lab/scripts/run_agent.py \
+python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent \
     --task_name YourTask \
     --gym_config configs/gym/your_task/gym_config.yaml \
     --agent_config embodichain/gen_sim/action_agent_pipeline/configs/your_agent/agent_config.json \
