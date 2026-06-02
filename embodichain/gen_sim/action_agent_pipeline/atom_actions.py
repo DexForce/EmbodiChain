@@ -628,9 +628,12 @@ def _try_public_move_action(
 ):
     def _fail(message, exc=None):
         suffix = f" ({exc})" if exc is not None else ""
-        log_warning(f"{message}; fallback to legacy logic.{suffix}")
         if _require_public_non_grasp_actions(kwargs):
+            log_warning(
+                f"{message}; public MoveAction is required and no legacy fallback will run.{suffix}"
+            )
             raise RuntimeError(message) from exc
+        log_warning(f"{message}; fallback to legacy logic.{suffix}")
         return None
 
     if env is None:
@@ -1693,18 +1696,13 @@ def orient_eef(
     force_valid=False,
     **kwargs,
 ):
-
-    # ---------------------------------------- Prepare ----------------------------------------
-    select_qpos_traj = []
-    ee_state_list_select = []
-
     # Get arm state
     (
-        is_left,
-        select_arm,
-        select_arm_current_qpos,
+        _,
+        _,
+        _,
         select_arm_current_pose,
-        select_arm_current_gripper_state,
+        _,
     ) = get_arm_states(env, robot_name)
 
     # ---------------------------------------- Pose ----------------------------------------
@@ -1731,44 +1729,27 @@ def orient_eef(
     )
     rotation_replaced_pose[:3, :3] = rot_torch
 
-    # Solve IK for the new pose
-    rotation_replaced_pose, replace_target_qpos = get_qpos(
-        env,
-        is_left,
-        select_arm,
-        rotation_replaced_pose,
-        select_arm_current_qpos,
-        force_valid=force_valid,
-        name="replaced-rotation",
-    )
-
-    # ---------------------------------------- Update env ----------------------------------------
-    env.set_current_qpos_agent(replace_target_qpos, is_left=is_left)
-    env.set_current_xpos_agent(rotation_replaced_pose, is_left=is_left)
-
-    # ------------------------------------ Traj: init → target ------------------------------------
-    qpos_list_init_to_rotated = [select_arm_current_qpos, replace_target_qpos]
     sample_num = kwargs.get("sample_num", 20)
-
-    plan_trajectory(
+    public_kwargs = dict(kwargs)
+    public_kwargs["use_public_atomic_actions"] = True
+    public_kwargs["require_public_non_grasp_actions"] = True
+    public_actions = _try_public_move_action(
         env,
-        select_arm,
-        qpos_list_init_to_rotated,
+        robot_name,
+        rotation_replaced_pose,
         sample_num,
-        select_arm_current_gripper_state,
-        select_qpos_traj,
-        ee_state_list_select,
+        "orient eef",
+        **public_kwargs,
     )
-
-    # ---------------------------------------- Final ----------------------------------------
-    actions = finalize_actions(select_qpos_traj, ee_state_list_select)
+    if public_actions is None:
+        log_error("Public MoveAction returned no action for orient eef.")
 
     log_info(
-        f"Total generated trajectory number for orient eef: {len(actions)}.",
+        f"Total generated trajectory number for orient eef: {len(public_actions)}.",
         color="green",
     )
 
-    return actions
+    return public_actions
 
 
 def close_gripper(robot_name: str, env=None, **kwargs):
