@@ -33,7 +33,7 @@ Run the agent system with the following command:
 python embodichain/lab/scripts/run_agent.py \
     --task_name YourTask \
     --gym_config configs/gym/your_task/gym_config.yaml \
-    --agent_config configs/gym/agent/your_agent/agent_config.json \
+    --agent_config embodichain/gen_sim/action_agent_pipeline/configs/your_agent/agent_config.json \
     --regenerate False
 ```
 
@@ -104,7 +104,7 @@ Closes the loop by verifying if the robot actually achieved what it planned.
 
 The `Agent` configuration block controls the context provided to the LLMs. Prompt files are resolved in the following order:
 
-1. **Config directory**: Task-specific prompt files in the same directory as the agent configuration file (e.g., `configs/gym/agent/pour_water_agent/`)
+1. **Config directory**: Task-specific prompt files in the same directory as the agent configuration file (e.g., `embodichain/gen_sim/action_agent_pipeline/configs/pour_water_agent/`)
 2. **Default prompts directory**: Reusable prompt templates in `embodichain/gen_sim/action_agent_pipeline/prompts/`
 
 | Parameter | Description | Typical Use |

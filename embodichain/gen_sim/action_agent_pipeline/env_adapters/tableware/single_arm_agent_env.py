@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import torch
 
-from embodichain.lab.gym.envs.tasks.tableware.base_agent_env import BaseAgentEnv
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.base_agent_env import (
+    BaseAgentEnv,
+)
 
 __all__ = ["SingleArmAgentEnv"]
 

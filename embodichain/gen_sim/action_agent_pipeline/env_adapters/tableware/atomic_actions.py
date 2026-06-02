@@ -21,7 +21,9 @@ from typing import Any
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
-from embodichain.lab.gym.envs.tasks.tableware.base_agent_env import BaseAgentEnv
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.base_agent_env import (
+    BaseAgentEnv,
+)
 from embodichain.lab.gym.envs.tasks.tableware.configurable_success import (
     evaluate_configured_success,
 )

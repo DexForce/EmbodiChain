@@ -19,7 +19,6 @@ from __future__ import annotations
 # Tableware task environments
 from embodichain.lab.gym.envs.tasks.tableware.pour_water.pour_water import (
     PourWaterEnv,
-    PourWaterAgentEnv,
 )
 from embodichain.lab.gym.envs.tasks.tableware.scoop_ice import ScoopIce
 from embodichain.lab.gym.envs.tasks.tableware.stack_blocks_two import StackBlocksTwoEnv
@@ -38,11 +37,16 @@ from embodichain.lab.gym.envs.tasks.tableware.stack_cups import (
 from embodichain.lab.gym.envs.tasks.tableware.match_object_container import (
     MatchObjectContainerEnv,
 )
-from embodichain.lab.gym.envs.tasks.tableware.atomic_actions import (
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.atomic_actions import (
     AtomicActionsAgentEnv,
 )
 from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
     RearrangementEnv,
+)
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.pour_water_agent_env import (
+    PourWaterAgentEnv,
+)
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.rearrangement_agent_env import (
     RearrangementAgentEnv,
 )
 
