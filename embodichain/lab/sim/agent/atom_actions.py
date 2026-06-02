@@ -135,6 +135,28 @@ def _make_atomic_engine(env, cfg):
     )
 
 
+def _log_public_atomic_backend(
+    *,
+    wrapper_name: str,
+    action,
+    cfg,
+    target_kind: str,
+    control_part: str,
+    steps: int,
+):
+    log_info(
+        "Using public AtomicAction backend: "
+        f"wrapper={wrapper_name}, "
+        f"action={action.__class__.__name__}, "
+        f"cfg={cfg.__class__.__name__}, "
+        f"cfg_name={cfg.name}, "
+        f"target={target_kind}, "
+        f"control_part={control_part}, "
+        f"steps={steps}.",
+        color="green",
+    )
+
+
 def _state_to_hand_qpos(state, hand_dof, device):
     if hand_dof <= 0:
         return torch.empty(0, dtype=torch.float32, device=device)
@@ -389,6 +411,14 @@ def _try_public_qpos_move_action(
             return _fail("Public qpos MoveAction failed")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _log_public_atomic_backend(
+            wrapper_name=log_name,
+            action=action,
+            cfg=cfg,
+            target_kind="qpos",
+            control_part=control_part,
+            steps=len(action_np),
+        )
         _sync_agent_state_from_public_qpos_action(
             env, robot_name, action_np, control_part
         )
@@ -579,12 +609,15 @@ def _try_public_semantic_grasp_action(
             return _fail("Public semantic grasp action failed")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
-        _sync_agent_state_from_public_action(env, robot_name, action_np)
-        log_info(
-            "Using public semantic grasp action with "
-            f"{len(action_np)} trajectory steps.",
-            color="green",
+        _log_public_atomic_backend(
+            wrapper_name="grasp",
+            action=action,
+            cfg=cfg,
+            target_kind="ObjectSemantics(AntipodalAffordance)",
+            control_part=arm_part,
+            steps=len(action_np),
         )
+        _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
         return _fail("Public semantic grasp action failed", e)
@@ -641,6 +674,14 @@ def _try_public_move_action(
             return _fail(f"Public atomic action failed for {action_name}")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _log_public_atomic_backend(
+            wrapper_name=action_name,
+            action=action,
+            cfg=cfg,
+            target_kind="pose",
+            control_part=arm_part,
+            steps=len(action_np),
+        )
         _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
@@ -738,6 +779,14 @@ def _try_public_pickup_action(
             return _fail("Public atomic action failed for grasp")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _log_public_atomic_backend(
+            wrapper_name="grasp",
+            action=action,
+            cfg=cfg,
+            target_kind="pose(grasp_pose_obj)",
+            control_part=arm_part,
+            steps=len(action_np),
+        )
         _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
@@ -800,6 +849,14 @@ def _try_public_place_action(
             return _fail("Public atomic action failed for place on table")
 
         action_np = _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids)
+        _log_public_atomic_backend(
+            wrapper_name="place_on_table",
+            action=action,
+            cfg=cfg,
+            target_kind="pose",
+            control_part=arm_part,
+            steps=len(action_np),
+        )
         _sync_agent_state_from_public_action(env, robot_name, action_np)
         return action_np
     except Exception as e:
