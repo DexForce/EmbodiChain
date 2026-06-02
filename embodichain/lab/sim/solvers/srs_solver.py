@@ -1175,7 +1175,7 @@ class SRSSolver(BaseSolver):
 
         # Compute root base transform
         fk_dict = self.pk_serial_chain.forward_kinematics(
-            th=np.zeros(7), end_only=False
+            th=np.zeros(7, dtype=torch.float32, device=self.device), end_only=False
         )
         root_tf = fk_dict[list(fk_dict.keys())[0]]
         self.root_base_xpos = root_tf.get_matrix().cpu().numpy()
