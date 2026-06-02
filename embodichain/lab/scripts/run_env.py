@@ -150,15 +150,6 @@ def main(args, env, gym_config):
                 args, "interactive_error_injection", False
             ),
         }
-        for public_flag in (
-            "use_public_grasp_semantics",
-            "use_public_grasp_action",
-            "use_public_place_action",
-            "allow_public_grasp_annotation",
-            "force_public_grasp_reannotate",
-        ):
-            if hasattr(args, public_flag):
-                runtime_kwargs[public_flag] = getattr(args, public_flag)
 
         generate_function(
             env,

@@ -394,7 +394,7 @@ def _public_qpos_move_action(
 
 def _semantic_public_grasp_enabled(kwargs):
     return (
-        kwargs.get("use_public_grasp_semantics", False) is True
+        kwargs.get("use_public_grasp_semantics", True) is True
         or kwargs.get("public_grasp_strategy", None) == "semantic"
     )
 
@@ -431,7 +431,7 @@ def _build_public_grasp_semantics(env, obj_name: str, kwargs: dict):
     ):
         raise ValueError(f"Object {obj_name} has empty or invalid mesh geometry.")
 
-    allow_annotation = bool(kwargs.get("allow_public_grasp_annotation", False))
+    allow_annotation = bool(kwargs.get("allow_public_grasp_annotation", True))
     force_reannotate = bool(kwargs.get("force_public_grasp_reannotate", False))
     if force_reannotate and not allow_annotation:
         raise RuntimeError(
@@ -704,7 +704,7 @@ def _public_place_action(
     pre_place_dis,
     **kwargs,
 ):
-    if kwargs.get("use_public_place_action", False) is not True:
+    if kwargs.get("use_public_place_action", True) is not True:
         raise RuntimeError("Public PlaceAction is disabled.")
 
     _, arm_part, hand_part, _, eef_joints = _select_arm_parts(env, robot_name)

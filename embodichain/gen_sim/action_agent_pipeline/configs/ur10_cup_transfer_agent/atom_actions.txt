@@ -8,9 +8,9 @@ All atom functions are public-only wrappers backed by
 If a public atomic action cannot resolve the target, solve IK, or plan a
 trajectory, it raises an error immediately. Use only the parameters listed below.
 
-For this task, grasp may run in public `grasp_pose_obj` mode when semantic grasp
-is disabled and public grasp action is enabled. That mode still uses public
-`PickUpAction`; `grasp_pose_obj` is only the configured target pose source.
+For this task, grasp defaults to public semantic grasp. It uses public
+`PickUpAction` with `ObjectSemantics(AntipodalAffordance)`; the caller does not
+need to pass any public backend flags.
 
 Use the following functions exactly as defined. Do not invent new APIs or parameters.
 
