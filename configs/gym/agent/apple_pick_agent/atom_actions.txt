@@ -1,4 +1,4 @@
-### Atom Functions for UR10 Single-Arm Cup-to-Mug Placement
+### Atom Functions for UR10 Single-Arm Apple-to-Mug Placement
 
 Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
 Only use `robot_name="right_arm"`. Never use `robot_name="left_arm"` or
@@ -16,10 +16,10 @@ parameters.
     Moves the right arm to the target object's grasp pose and closes the
     gripper. With public semantic grasp enabled, this action already includes
     approach, gripper closing, and a small post-grasp lift. For this task, use
-    `obj_name="cup"` and `pre_grasp_dis=0.08`.
+    `obj_name="apple"` and `pre_grasp_dis=0.08`.
 
     Example:
-        grasp(robot_name="right_arm", obj_name="cup", pre_grasp_dis=0.08, sample_num=80)
+        grasp(robot_name="right_arm", obj_name="apple", pre_grasp_dis=0.08, sample_num=80)
 
 "move_by_relative_offset":
     def move_by_relative_offset(robot_name: str,
@@ -27,8 +27,8 @@ parameters.
                                 **kwargs) -> list[np.ndarray]
 
     Moves the right end-effector by a relative translation. The offset is applied
-    along world axes when `mode="extrinsic"`. For the cup-to-mug task, use
-    this only for a short optional retreat after releasing the cup. Do not use
+    along world axes when `mode="extrinsic"`. For the apple-to-mug task, use
+    this only for a short optional retreat after releasing the apple. Do not use
     it to split the carry motion into staged horizontal moves.
 
     Example:
@@ -43,14 +43,14 @@ parameters.
 
     Moves the right end-effector to a pose centered on a target object plus a
     world-frame xyz offset while preserving the current end-effector
-    orientation. For this task, use `obj_name="mug"` to move the held cup
-    directly to a release pose near the mug center. This follows the current
-    swapped mug pose from the environment config; do not hard-code the old mug
-    location.
+    orientation. For this task, use `obj_name="mug"` to move the held apple
+    directly to an elevated release pose above the mug center. This follows the
+    current mug object pose from the environment config; do not hard-code mug or
+    book coordinates from previous configs.
 
     Examples:
         move_relative_to_object(robot_name="right_arm", obj_name="mug",
-                                x_offset=0.0, y_offset=0.0, z_offset=0.09,
+                                x_offset=0.0, y_offset=0.0, z_offset=0.14,
                                 sample_num=80)
 
 "move_to_absolute_position":
@@ -62,15 +62,14 @@ parameters.
     its current orientation. Prefer `move_relative_to_object` for mug placement
     so the graph follows the mug pose.
 
-    Example:
-        move_to_absolute_position(robot_name="right_arm", x=0.12, y=1.84, z=1.0, sample_num=80)
+    Do not use this for nominal mug placement.
 
 "back_to_initial_pose":
     def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
 
     Returns the right arm to its predefined initial joint configuration. Do not
-    use this for the nominal cup-to-mug graph, because the task goal is simply
-    the cup placed in the mug.
+    use this for the nominal apple-to-mug graph, because the task goal is simply
+    the apple placed in the mug.
 
     Example:
         back_to_initial_pose(robot_name="right_arm")
