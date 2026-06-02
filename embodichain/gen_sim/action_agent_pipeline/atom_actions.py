@@ -50,7 +50,7 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
 )
 
 # Import utility functions for atom actions
-from embodichain.lab.sim.agent.atom_action_utils import (
+from embodichain.gen_sim.action_agent_pipeline.atom_action_utils import (
     draw_axis,
     get_arm_states,
     find_nearest_valid_pose,
@@ -64,13 +64,13 @@ from embodichain.lab.sim.agent.atom_action_utils import (
     resolve_arm_side,
     sync_agent_state_from_robot,
 )
-from embodichain.lab.sim.agent.error_functions import (
+from embodichain.gen_sim.action_agent_pipeline.error_functions import (
     inject_interactive_error,
     interactive_error_requested,
     restore_interactive_error_input,
     setup_interactive_error_input,
 )
-from embodichain.lab.sim.agent.monitor_functions import *
+from embodichain.gen_sim.action_agent_pipeline.monitor_functions import *
 
 """
 --------------------------------------------Atom action functions----------------------------------------------------

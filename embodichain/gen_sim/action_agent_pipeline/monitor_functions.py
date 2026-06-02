@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from embodichain.utils.logger import log_error
-from embodichain.lab.sim.agent.monitor_utils import (
+from embodichain.gen_sim.action_agent_pipeline.monitor_utils import (
     _as_pose_matrix,
     _get_object_pose,
     get_arm_object_distance,

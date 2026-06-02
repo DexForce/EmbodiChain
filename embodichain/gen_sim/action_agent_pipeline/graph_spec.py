@@ -1153,16 +1153,18 @@ def _resolve_runtime(
 ) -> tuple[type, Any, Any]:
     if graph_cls is None:
         graph_cls = _resolve_attr(
-            importlib.import_module("embodichain.lab.sim.agent.agent_graph"),
+            importlib.import_module(
+                "embodichain.gen_sim.action_agent_pipeline.agent_graph"
+            ),
             "AgentTaskGraph",
         )
     if action_module is None:
         action_module = importlib.import_module(
-            "embodichain.lab.sim.agent.atom_actions"
+            "embodichain.gen_sim.action_agent_pipeline.atom_actions"
         )
     if monitor_module is None:
         monitor_module = importlib.import_module(
-            "embodichain.lab.sim.agent.monitor_functions"
+            "embodichain.gen_sim.action_agent_pipeline.monitor_functions"
         )
     return graph_cls, action_module, monitor_module
 

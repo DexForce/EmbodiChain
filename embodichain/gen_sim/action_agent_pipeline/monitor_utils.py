@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from embodichain.lab.sim.agent.atom_action_utils import get_arm_states
+from embodichain.gen_sim.action_agent_pipeline.atom_action_utils import get_arm_states
 from embodichain.utils.logger import log_error
 from embodichain.utils.math import matrix_from_quat
 

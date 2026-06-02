@@ -23,7 +23,7 @@ import numpy as np
 import torch
 
 from embodichain.lab.gym.utils.misc import apply_rotation
-from embodichain.lab.sim.agent.atom_action_utils import (
+from embodichain.gen_sim.action_agent_pipeline.atom_action_utils import (
     apply_offset_to_pose,
     finalize_actions,
     get_qpos,

@@ -20,7 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from embodichain.lab.sim.agent.atom_actions import drive
+from embodichain.gen_sim.action_agent_pipeline.atom_actions import drive
 
 __all__ = [
     "AgentGraphEdge",
