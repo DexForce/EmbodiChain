@@ -130,7 +130,7 @@ class RigidBodyData:
 
     @property
     def pose(self) -> torch.Tensor:
-        if self.body_view.is_ready:
+        if self.body_view.can_fetch_pose:
             self.body_view.fetch_pose(self._pose)
             return self._pose
 
@@ -212,7 +212,6 @@ class RigidObject(BatchEntity):
         cfg: RigidObjectCfg,
         entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
-        auto_reset: bool = True,
     ) -> None:
         self.body_type = cfg.body_type
 
@@ -252,15 +251,12 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        super().__init__(cfg, entities, device, auto_reset=auto_reset)
+        super().__init__(cfg, entities, device)
 
         # set default collision filter
         self._set_default_collision_filter()
 
-        if auto_reset and device.type == "cuda":
-            self._world.update(0.001)
-        if auto_reset:
-            self.reset()
+        self._apply_initial_state()
 
         # update default center of mass pose (only for non-static bodies with body data).
         if self._data is not None:
@@ -453,10 +449,10 @@ class RigidObject(BatchEntity):
             )
             return
 
-        # Use backend view if available and ready.
+        # Use backend view when pose writes are supported (Newton BUILDER/READY).
         if (
             self._data is not None
-            and self._data.body_view.is_ready
+            and self._data.body_view.can_apply_pose
             and not self.is_static
         ):
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -1244,13 +1240,9 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             self._entities[env_idx].set_visible(visible)
 
-    def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-        num_instances = len(local_env_ids)
-
-        if not is_newton_scene(self._ps):
-            self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
-
+    def _build_cfg_init_pose(self, env_ids: Sequence[int]) -> torch.Tensor:
+        """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
+        num_instances = len(env_ids)
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
         )
@@ -1269,7 +1261,36 @@ class RigidObject(BatchEntity):
         )
         pose[:, :3, 3] = pos
         pose[:, :3, :3] = mat
-        self.set_local_pose(pose, env_ids=local_env_ids)
+        return pose
+
+    def _apply_initial_state(self) -> None:
+        """Apply cfg initial pose after construction.
+
+        PhysX/default backends run a full reset. Newton applies init pose in
+        ``BUILDER`` via the scene batch API; velocities are cleared after
+        finalization through :meth:`SimulationManager.finalize_newton_physics`.
+        """
+        if is_newton_scene(self._ps):
+            if self._newton_lifecycle_state() == "BUILDER":
+                self.set_local_pose(
+                    self._build_cfg_init_pose(self._all_indices),
+                    env_ids=self._all_indices,
+                )
+            return
+
+        if self.device.type == "cuda":
+            self._world.update(0.001)
+        self.reset()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if not is_newton_scene(self._ps):
+            self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
+
+        self.set_local_pose(
+            self._build_cfg_init_pose(local_env_ids), env_ids=local_env_ids
+        )
 
         self.clear_dynamics(env_ids=local_env_ids)
 

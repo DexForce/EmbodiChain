@@ -771,7 +771,9 @@ class BaseRigidObjectTest:
         - Partial ``env_ids`` reset: only the specified instance is restored.
         """
         # Move duck far from origin and give it velocity.
-        pose_far = torch.eye(4, device=self.sim.device).unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        pose_far = (
+            torch.eye(4, device=self.sim.device).unsqueeze(0).repeat(NUM_ARENAS, 1, 1)
+        )
         pose_far[:, 2, 3] = 5.0
         self.duck.set_local_pose(pose_far)
 
@@ -849,9 +851,11 @@ class BaseRigidObjectTest:
         ), "Matrix translation column should match 7-vec xyz"
 
         # Last row must be [0, 0, 0, 1].
-        last_row = torch.tensor(
-            [0.0, 0.0, 0.0, 1.0], device=self.sim.device
-        ).unsqueeze(0).repeat(NUM_ARENAS, 1)
+        last_row = (
+            torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.sim.device)
+            .unsqueeze(0)
+            .repeat(NUM_ARENAS, 1)
+        )
         assert torch.allclose(
             pose_mat[:, 3, :], last_row, atol=1e-5
         ), "Last row of pose matrix should be [0, 0, 0, 1]"

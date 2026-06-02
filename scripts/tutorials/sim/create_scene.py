@@ -111,7 +111,7 @@ def main():
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
-        
+
     # Run the simulation
     run_simulation(sim, max_steps=args.max_steps)
 

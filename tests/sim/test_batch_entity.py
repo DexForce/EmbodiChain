@@ -23,14 +23,13 @@ from embodichain.lab.sim.common import BatchEntity
 
 
 class _BatchEntityForTest(BatchEntity):
-    def __init__(self, auto_reset: bool = True) -> None:
+    def __init__(self) -> None:
         self.reset_calls = 0
         cfg = SimpleNamespace(uid="test_entity")
         super().__init__(
             cfg=cfg,
             entities=[object()],
             device=torch.device("cpu"),
-            auto_reset=auto_reset,
         )
 
     def set_local_pose(self, pose, env_ids=None) -> None:
@@ -43,13 +42,14 @@ class _BatchEntityForTest(BatchEntity):
         self.reset_calls += 1
 
 
-def test_batch_entity_auto_resets_by_default() -> None:
+def test_batch_entity_does_not_reset_in_constructor() -> None:
     entity = _BatchEntityForTest()
 
-    assert entity.reset_calls == 1
-
-
-def test_batch_entity_can_defer_constructor_reset() -> None:
-    entity = _BatchEntityForTest(auto_reset=False)
-
     assert entity.reset_calls == 0
+
+
+def test_batch_entity_reset_is_explicit() -> None:
+    entity = _BatchEntityForTest()
+    entity.reset()
+
+    assert entity.reset_calls == 1

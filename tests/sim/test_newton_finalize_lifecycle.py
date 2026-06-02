@@ -64,7 +64,7 @@ def test_finalize_newton_physics_resets_entities_after_ready() -> None:
 
     assert manager.start_calls == 1
     assert rigid_obj.reset_calls == 1
-    assert rigid_obj_group.reset_calls == 1
+    assert rigid_obj_group.reset_calls == 0
     assert sim._is_finalized_newton_physics
     assert sim._is_initialized_gpu_physics
 
@@ -77,7 +77,7 @@ def test_finalize_newton_physics_does_not_repeat_deferred_reset() -> None:
 
     assert manager.start_calls == 1
     assert rigid_obj.reset_calls == 1
-    assert rigid_obj_group.reset_calls == 1
+    assert rigid_obj_group.reset_calls == 0
 
 
 def test_newton_invalidation_allows_next_finalize_to_reset_again() -> None:
@@ -89,4 +89,4 @@ def test_newton_invalidation_allows_next_finalize_to_reset_again() -> None:
 
     assert manager.start_calls == 1
     assert rigid_obj.reset_calls == 2
-    assert rigid_obj_group.reset_calls == 2
+    assert rigid_obj_group.reset_calls == 0

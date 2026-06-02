@@ -128,6 +128,9 @@ class ClothObject(BatchEntity):
         self._world.update(0.001)
 
         super().__init__(cfg=cfg, entities=entities, device=device)
+
+        self.reset()
+
         self._set_default_collision_filter()
 
     def _set_default_collision_filter(self) -> None:

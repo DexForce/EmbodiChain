@@ -561,8 +561,7 @@ class SimulationManager:
 
         for rigid_obj in self._rigid_objects.values():
             rigid_obj.reset()
-        # for rigid_obj_group in self._rigid_object_groups.values():
-        #     rigid_obj_group.reset()
+        # Rigid object groups are not supported on the Newton backend yet.
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1026,7 +1025,6 @@ class SimulationManager:
             cfg=cfg,
             entities=obj_list,
             device=self.device,
-            auto_reset=not self.is_newton_backend,
         )
 
         if cfg.shape.visual_material:
@@ -1049,7 +1047,8 @@ class SimulationManager:
         """
         if self.is_newton_backend:
             logger.log_error(
-                "Soft object support for the Newton backend is not enabled in EmbodiChain yet.",
+                "Soft object support for the Newton backend is not enabled "
+                "in EmbodiChain yet.",
                 error_type=NotImplementedError,
             )
 
@@ -1085,7 +1084,8 @@ class SimulationManager:
         """
         if self.is_newton_backend:
             logger.log_error(
-                "Cloth object support for the Newton backend is not enabled in EmbodiChain yet.",
+                "Cloth object support for the Newton backend is not enabled "
+                "in EmbodiChain yet.",
                 error_type=NotImplementedError,
             )
 
@@ -1182,6 +1182,13 @@ class SimulationManager:
         Args:
             cfg (RigidObjectGroupCfg): Configuration for the rigid object group.
         """
+        if self.is_newton_backend:
+            logger.log_error(
+                "Rigid object group support for the Newton backend is not enabled "
+                "in EmbodiChain yet.",
+                error_type=NotImplementedError,
+            )
+
         from embodichain.lab.sim.utility.sim_utils import (
             load_mesh_objects_from_cfg,
         )
@@ -1214,7 +1221,6 @@ class SimulationManager:
             cfg=cfg,
             entities=obj_group_list,
             device=self.device,
-            auto_reset=not self.is_newton_backend,
         )
 
         self._rigid_object_groups[uid] = rigid_obj_group
@@ -1291,7 +1297,8 @@ class SimulationManager:
         """
         if self.is_newton_backend:
             logger.log_error(
-                "Newton articulation support is under development in DexSim and is not enabled in EmbodiChain yet.",
+                "Articulation support for the Newton backend is not enabled "
+                "in EmbodiChain yet.",
                 error_type=NotImplementedError,
             )
 
@@ -1376,7 +1383,8 @@ class SimulationManager:
         """
         if self.is_newton_backend:
             logger.log_error(
-                "Newton robot support depends on DexSim Newton articulation support and is not enabled in EmbodiChain yet.",
+                "Robot support for the Newton backend is not enabled "
+                "in EmbodiChain yet.",
                 error_type=NotImplementedError,
             )
 

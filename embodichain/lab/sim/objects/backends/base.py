@@ -39,6 +39,16 @@ class RigidBodyViewBase(ABC):
         """Whether the backend simulation is finalized and data can be accessed."""
         ...
 
+    @property
+    def can_apply_pose(self) -> bool:
+        """Whether world poses can be written through the backend view."""
+        return self.is_ready
+
+    @property
+    def can_fetch_pose(self) -> bool:
+        """Whether world poses can be read through the backend view."""
+        return self.is_ready
+
     # -- Body ID Management -------------------------------------------------
 
     @cached_property

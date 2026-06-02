@@ -102,6 +102,19 @@ class NewtonRigidBodyView(RigidBodyViewBase):
             == "READY"
         )
 
+    @property
+    def _lifecycle_state_name(self) -> str:
+        manager = getattr(self.scene, "manager", None)
+        return getattr(getattr(manager, "lifecycle_state", None), "name", "")
+
+    @property
+    def can_apply_pose(self) -> bool:
+        return self._lifecycle_state_name in ("BUILDER", "READY")
+
+    @property
+    def can_fetch_pose(self) -> bool:
+        return self._lifecycle_state_name in ("BUILDER", "READY")
+
     # -- RigidBodyViewBase: body IDs -----------------------------------------
 
     def _ensure_body_ids(self) -> None:
@@ -277,9 +290,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
             self._ensure_body_ids()
             return self._body_ids_tensor  # type: ignore[return-value]
         if not isinstance(body_ids, torch.Tensor):
-            body_ids = torch.as_tensor(
-                body_ids, dtype=torch.int32, device=self.device
-            )
+            body_ids = torch.as_tensor(body_ids, dtype=torch.int32, device=self.device)
         return body_ids
 
     def _fetch_buffer(self, data: torch.Tensor) -> torch.Tensor:

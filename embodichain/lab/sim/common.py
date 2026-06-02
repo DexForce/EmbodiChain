@@ -54,7 +54,6 @@ class BatchEntity(ABC):
         cfg: ObjectBaseCfg,
         entities: List[T] = None,
         device: torch.device = torch.device("cpu"),
-        auto_reset: bool = True,
     ) -> None:
 
         if entities is None or len(entities) == 0:
@@ -67,8 +66,7 @@ class BatchEntity(ABC):
         self._entities = entities
         self.device = device
 
-        if auto_reset:
-            self.reset()
+        self.reset()
 
     def __str__(self) -> str:
         return f"{self.__class__}: managing {self.num_instances} {self._entities[0].__class__} objects | uid: {self.uid} | device: {self.device}"
