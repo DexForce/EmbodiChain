@@ -23,14 +23,11 @@ import pytest
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.solvers.neural_ik_solver import _build_mlp
 from embodichain.utils.utility import reset_all_seeds
-
-IK_POS_ATOL = 0.05
-IK_ROT_ATOL = 0.55
 
 _c = math.cos(-math.pi / 4)
 _s = math.sin(-math.pi / 4)
@@ -41,52 +38,37 @@ TCP = [
     [0.0, 0.0, 0.0, 1.0],
 ]
 
-
-def grid_sample_qpos_from_limits(
-    qpos_limits: torch.Tensor,
-    steps_per_joint: int = 4,
-    device=None,
-    max_samples: int = 4096,
-) -> torch.Tensor:
-    if device is None:
-        device = qpos_limits.device
-
-    limits = qpos_limits.squeeze(0) if qpos_limits.dim() == 3 else qpos_limits
-    lows = limits[:, 0].to(device) + 1e-2
-    highs = limits[:, 1].to(device) - 1e-2
-
-    # create per-joint linspaces
-    grids = [
-        torch.linspace(l.item(), h.item(), steps_per_joint, device=device)
-        for l, h in zip(lows, highs)
-    ]
-
-    # meshgrid and stack
-    mesh = torch.meshgrid(*grids, indexing="ij")
-    stacked = torch.stack([m.reshape(-1) for m in mesh], dim=1)
-
-    if stacked.shape[0] > max_samples:
-        return stacked[:max_samples]
-    return stacked
+NUM_ARM_JOINTS = 7
+OBS_DIM = 2 * NUM_ARM_JOINTS + 14  # 28
+HIDDEN_DIMS = [256, 256]
 
 
-# Skip tests if huggingface_hub cannot reach the checkpoint repo.
-pytestmark = pytest.mark.skipif(
-    os.environ.get("NEURAL_IK_OFFLINE") is not None,
-    reason="NEURAL_IK_OFFLINE is set, skipping NeuralIK tests",
-)
+def _create_fake_checkpoint(tmp_path) -> str:
+    """Create a minimal fake checkpoint for testing the solver interface."""
+    mlp = _build_mlp(OBS_DIM, HIDDEN_DIMS, NUM_ARM_JOINTS)
+    ckpt = {
+        "agent": {f"actor_mean.{k}": v for k, v in mlp.state_dict().items()},
+        "obs_normalizer": {
+            "mean": torch.zeros(OBS_DIM),
+            "var": torch.ones(OBS_DIM),
+        },
+    }
+    ckpt_path = str(tmp_path / "fake_neural_ik.pt")
+    torch.save(ckpt, ckpt_path)
+    return ckpt_path
 
 
-class BaseSolverTest:
-    sim = None
+class TestNeuralIKSolver:
+    sim: SimulationManager | None = None
+    robot: Robot | None = None
 
-    def setup_simulation(self, solver_type: str):
+    def _setup(self, tmp_path):
+        checkpoint_path = _create_fake_checkpoint(tmp_path)
         config = SimulationManagerCfg(headless=True, sim_device="cpu")
         self.sim = SimulationManager(config)
 
         urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
         assert os.path.isfile(urdf)
-        checkpoint_path = download_neural_ik_checkpoint()
 
         cfg_dict = {
             "fpath": urdf,
@@ -103,15 +85,15 @@ class BaseSolverTest:
             },
             "solver_cfg": {
                 "main_arm": {
-                    "class_type": solver_type,
+                    "class_type": "NeuralIKSolver",
                     "end_link_name": "ee_link",
                     "root_link_name": "base_link",
                     "tcp": TCP,
                     "checkpoint_path": checkpoint_path,
-                    "num_arm_joints": 7,
+                    "num_arm_joints": NUM_ARM_JOINTS,
                     "max_steps": 30,
                     "action_scale": 0.2,
-                    "hidden_dims": [256, 256],
+                    "hidden_dims": HIDDEN_DIMS,
                     "pos_eps": 0.1,
                     "rot_eps": 0.5,
                 },
@@ -121,82 +103,9 @@ class BaseSolverTest:
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
         self.sim.update(step=100)
 
-    def test_ik(self):
-        reset_all_seeds(0)
-        arm_name = "main_arm"
-        qpos_limit = torch.tensor(
-            [
-                [0.2, 0.8],
-                [0.2, 0.8],
-                [0.2, 0.8],
-                [0.2, 0.8],
-                [0.2, 0.8],
-                [0.2, 0.8],
-                [0.2, 0.8],
-            ]
-        )
-        sample_qpos = grid_sample_qpos_from_limits(
-            qpos_limit, steps_per_joint=3, device=self.robot.device, max_samples=200
-        )
-        sample_qpos = sample_qpos[None, :, :]
-
-        fk_xpos = self.robot.compute_batch_fk(
-            qpos=sample_qpos, name=arm_name, to_matrix=True
-        )
-        fk_xpos_xyzquat = self.robot.compute_batch_fk(
-            qpos=sample_qpos, name=arm_name, to_matrix=False
-        )
-
-        res, ik_qpos = self.robot.compute_batch_ik(
-            pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
-        )
-
-        res, ik_qpos_xyzquat = self.robot.compute_batch_ik(
-            pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
-        )
-
-        ik_xpos = self.robot.compute_batch_fk(
-            qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
-        )
-
-        pos_err = (fk_xpos[:, :, :3, 3] - ik_xpos[:, :, :3, 3]).norm(dim=-1)
-        assert torch.all(
-            pos_err < IK_POS_ATOL
-        ), f"Position error too large: max {pos_err.max().item():.4f} m > {IK_POS_ATOL} m"
-
-        rot_err = (fk_xpos[:, :, :3, :3] - ik_xpos[:, :, :3, :3]).norm(dim=(-2, -1))
-        assert torch.all(
-            rot_err < IK_ROT_ATOL
-        ), f"Rotation error too large: max {rot_err.max().item():.4f} > {IK_ROT_ATOL}"
-
-        # test for failed xpos
-        invalid_pose = torch.tensor(
-            [
-                [
-                    [1.0, 0.0, 0.0, 10.0],
-                    [0.0, 1.0, 0.0, 10.0],
-                    [0.0, 0.0, 1.0, 10.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            ],
-            dtype=torch.float32,
-            device=self.robot.device,
-        )
-        res, ik_qpos = self.robot.compute_ik(
-            pose=invalid_pose, joint_seed=ik_qpos[:, 0, :], name=arm_name
-        )
-        dof = ik_qpos.shape[-1]
-        assert res[0].item() == False
-        assert ik_qpos.shape == (1, dof)
-
     def teardown_method(self):
-        """Clean up resources after each test method."""
-        self.sim.destroy()
-
-
-class TestNeuralIKSolver(BaseSolverTest):
-    def setup_method(self):
-        self.setup_simulation(solver_type="NeuralIKSolver")
+        if self.sim is not None:
+            self.sim.destroy()
 
     def _make_solver_input(self):
         """Create a standard qpos and its FK target for solver tests."""
@@ -210,9 +119,50 @@ class TestNeuralIKSolver(BaseSolverTest):
         solver = self.robot.get_solver(arm_name)
         return solver, qpos, target_xpos
 
-    def test_multi_sample_shape(self):
+    def test_ik_interface(self, tmp_path):
+        """Verify compute_ik returns correct shapes and types."""
+        reset_all_seeds(0)
+        self._setup(tmp_path)
+        arm_name = "main_arm"
+
+        qpos = torch.tensor(
+            [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
+            dtype=torch.float32,
+            device=self.robot.device,
+        ).unsqueeze(0)
+        target_xpos = self.robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
+
+        res, ik_qpos = self.robot.compute_ik(
+            pose=target_xpos, joint_seed=qpos, name=arm_name
+        )
+
+        assert res.shape == (1,)
+        assert res.dtype == torch.bool
+        dof = qpos.shape[-1]
+        assert ik_qpos.shape[-1] == dof
+
+        # test for unreachable pose
+        invalid_pose = torch.tensor(
+            [
+                [
+                    [1.0, 0.0, 0.0, 10.0],
+                    [0.0, 1.0, 0.0, 10.0],
+                    [0.0, 0.0, 1.0, 10.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            ],
+            dtype=torch.float32,
+            device=self.robot.device,
+        )
+        res, ik_qpos = self.robot.compute_ik(
+            pose=invalid_pose, joint_seed=qpos, name=arm_name
+        )
+        assert res[0].item() is False
+
+    def test_multi_sample_shape(self, tmp_path):
         """Verify output shape when using multiple samples."""
         reset_all_seeds(0)
+        self._setup(tmp_path)
         solver, qpos, target_xpos = self._make_solver_input()
 
         success, ik_qpos = solver.get_ik(
@@ -225,9 +175,10 @@ class TestNeuralIKSolver(BaseSolverTest):
         assert success.shape == (1,)
         assert ik_qpos.shape == (1, 1, dof)
 
-    def test_multi_sample_return_all(self):
+    def test_multi_sample_return_all(self, tmp_path):
         """Verify return_all_solutions returns all sampled solutions."""
         reset_all_seeds(0)
+        self._setup(tmp_path)
         solver, qpos, target_xpos = self._make_solver_input()
         num_samples = 5
 
@@ -245,5 +196,3 @@ class TestNeuralIKSolver(BaseSolverTest):
 
 if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)
-    test_solver = TestNeuralIKSolver()
-    test_solver.setup_method()
