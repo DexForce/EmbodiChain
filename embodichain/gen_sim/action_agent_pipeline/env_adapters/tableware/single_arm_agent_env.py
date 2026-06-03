@@ -64,10 +64,12 @@ class SingleArmAgentEnv(BaseAgentEnv):
         self.open_state = torch.as_tensor(
             getattr(self, "gripper_open_state", [0.05]),
             dtype=self.init_qpos.dtype,
+            device=self.init_qpos.device,
         ).flatten()
         self.close_state = torch.as_tensor(
             getattr(self, "gripper_close_state", [0.0]),
             dtype=self.init_qpos.dtype,
+            device=self.init_qpos.device,
         ).flatten()
         self.left_arm_current_gripper_state = self.open_state.new_empty(0)
         self.right_arm_current_gripper_state = self.open_state

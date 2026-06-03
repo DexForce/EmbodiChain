@@ -20,9 +20,7 @@ from .constants import EMBODICHAIN_DEFAULT_DATABASE_ROOT
 
 database_dir = EMBODICHAIN_DEFAULT_DATABASE_ROOT
 database_2d_dir = os.path.join(database_dir, "2dasset")
-database_agent_prompt_dir = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "database/agent_generated_content")
-)
+database_agent_prompt_dir = os.path.join(database_dir, "agent_generated_content")
 database_demo_dir = os.path.join(database_dir, "demostration")
 
 from . import assets

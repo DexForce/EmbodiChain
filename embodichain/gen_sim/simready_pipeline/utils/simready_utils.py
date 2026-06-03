@@ -32,7 +32,6 @@ from embodichain.gen_sim.simready_pipeline.configs import (
     get_openai_compatible_llm_config,
 )
 
-
 _GEN_CONFIG = get_openai_compatible_llm_config(required=True)
 
 DEPLOYMENT = _GEN_CONFIG["model"]

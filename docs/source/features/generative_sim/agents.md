@@ -1,6 +1,6 @@
 # EmbodiAgent
 
-EmbodiAgent is a hierarchical multi-agent system that enables robots to perform complex manipulation tasks through closed-loop planning, graph compilation, and validation. The system combines vision-language models (VLMs) and large language models (LLMs) to translate high-level goals into executable robot actions.
+EmbodiAgent is a hierarchical multi-agent system that enables robots to perform complex manipulation tasks through graph planning, graph compilation, runtime recovery, and environment-based success evaluation. The system combines vision-language models (VLMs) and large language models (LLMs) to translate high-level goals into executable robot actions.
 
 ## Quick Start
 
@@ -52,8 +52,8 @@ The system operates on a closed-loop control cycle:
 - **Recover**: The `RecoveryAgent` writes lightweight monitor-to-recovery bindings.
 - **Compile**: The `CompileAgent` expands bindings into an executable recovery graph artifact.
 - **Execute**: The graph runtime executes atomic actions and switches to recovery branches when monitors trigger.
-- **Validate**: The `ValidationAgent` analyzes the result images, selects the best camera angle, and judges success.
-- **Refine**: If validation fails, feedback is sent back to the agents to regenerate the graph artifacts.
+- **Evaluate**: After execution, the environment reports task success through predicates such as `env.is_task_success()` and configurable success specs.
+- **Regenerate**: When graph artifacts are stale or need replacement, run with `--regenerate True` to rebuild them.
 
 ---
 
@@ -90,13 +90,14 @@ Compiles generated atomic-action graph specs into an executable graph artifact.
 * Does not call an LLM to generate Python control code
 
 
-### ValidationAgent
-*Status:* Planned validation-loop component; no implementation is currently shipped in the repository.
+### Success Evaluation
+*Located in:* `embodichain/lab/gym/envs/tasks/tableware/configurable_success.py`
 
-Closes the loop by verifying if the robot actually achieved what it planned.
+Reports whether the executed graph achieved the task goal. The current baseline uses environment predicates instead of an image-based validation agent.
 
-* Uses a specialized LLM call (`select_best_view_dir`) to analyze images from all cameras and pick the single best angle that proves the action's outcome, ignoring irrelevant views.
-* If an error occurs (runtime or logic), it generates a detailed explanation which is fed back to the `TaskAgent` or `CompileAgent` for the next attempt.
+* Calls task-level checks such as `env.is_task_success()` after graph execution
+* Supports config-driven object/container/pose predicates through `configurable_success`
+* Logs success status from the runner; it does not run an LLM-based image validation loop
 
 ---
 
@@ -121,17 +122,17 @@ The `Agent` configuration block controls the context provided to the LLMs. Promp
 ## File Structure
 
 ```text
-embodichain/agents/
-├── hierarchy/
+embodichain/gen_sim/action_agent_pipeline/
+├── agents/
 │   ├── agent_base.py          # Abstract base handling prompts & images
 │   ├── task_agent.py          # Nominal graph generation logic
-│   ├── recovery_agent.py      # Recovery graph generation logic
+│   ├── recovery_agent.py      # Recovery binding generation logic
 │   ├── compile_agent.py       # Graph compilation & execution interface
-│   ├── validation_agent.py    # Visual analysis & view selection
 │   └── llm.py                 # LLM configuration and instances
-├── mllm/
-│   └── prompt/                # Prompt templates (LangChain)
-└── prompts/                   # Agent prompt templates
+├── env_adapters/tableware/    # Tableware task adapters and success predicates
+├── prompt_builders/           # Prompt templates
+├── prompts/                   # Reusable agent prompt context
+└── graph_spec.py              # Graph schema and normalization helpers
 ```
 
 ---
@@ -140,5 +141,5 @@ embodichain/agents/
 
 - [Online Data Streaming](../online_data.md) — Streaming live simulation data for training
 - [RL Architecture](../../overview/rl/index.rst) — RL training pipeline and algorithms
-- [Atomic Actions Tutorial](../../tutorial/atomic_actions.rst) — Action primitives used by the CodeAgent
+- [Atomic Actions Tutorial](../../tutorial/atomic_actions.rst) — Action primitives used by the graph runtime
 - [Supported Tasks](../../resources/task/index.rst) — Available task environments
