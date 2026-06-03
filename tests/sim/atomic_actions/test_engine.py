@@ -235,7 +235,7 @@ class TestExecuteStaticSequence:
 
         assert "move" in engine._actions
         assert engine._actions["move"].control_part == "hand"
-        assert [action.control_part for _, action in engine._action_sequence] == [
+        assert [action.control_part for _, action in engine._ordered_actions] == [
             "arm",
             "hand",
         ]

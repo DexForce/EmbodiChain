@@ -203,6 +203,6 @@ embodichain/VERSION
 scripts/benchmark/rl/reports/*
 
 # Local/generated assets
-obj/asset_simready.obj
-1779962412_gym_project/
-backup_database/
+obj/
+*_gym_project/
+backup_*/

@@ -38,8 +38,8 @@ def create_llm(*, temperature=0.0, model=None):
     if not api_key:
         raise ValueError(
             "OPENAI_API_KEY is required. Set it in your shell environment, "
-            "embodichain/gen_sim/simready_pipeline/configs/.env, or "
-            "embodichain/gen_sim/simready_pipeline/configs/gen_config.json."
+            ".env, embodichain/gen_sim/simready_pipeline/configs/.env, "
+            "or embodichain/gen_sim/simready_pipeline/configs/gen_config.json."
         )
 
     proxy_url = cfg.get("proxy_url")

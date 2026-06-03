@@ -25,13 +25,23 @@ __all__ = [
     "DEFAULT_LLM_MODEL",
     "GEN_CONFIG_PATH",
     "LLM_ENV_PATH",
+    "LEGACY_LLM_ENV_PATH",
     "get_openai_compatible_llm_config",
 ]
 
 DEFAULT_LLM_MODEL = "gpt-4o"
 CONFIG_DIR = Path(__file__).resolve().parent
 GEN_CONFIG_PATH = CONFIG_DIR / "gen_config.json"
-LLM_ENV_PATH = CONFIG_DIR / ".env"
+PROJECT_ROOT = next(
+    (
+        parent
+        for parent in CONFIG_DIR.parents
+        if (parent / "setup.py").exists() and (parent / "embodichain").exists()
+    ),
+    CONFIG_DIR.parents[3],
+)
+LLM_ENV_PATH = PROJECT_ROOT / ".env"
+LEGACY_LLM_ENV_PATH = CONFIG_DIR / ".env"
 
 
 def _load_env_file(path: Path | None = None) -> dict[str, str]:
@@ -50,6 +60,14 @@ def _load_env_file(path: Path | None = None) -> dict[str, str]:
         value = value.strip().strip("\"'")
         if key:
             env_values[key] = value
+    return env_values
+
+
+def _load_env_files(paths: tuple[Path, ...] | None = None) -> dict[str, str]:
+    """Read local env files, with later paths taking precedence."""
+    env_values: dict[str, str] = {}
+    for path in paths or (LEGACY_LLM_ENV_PATH, LLM_ENV_PATH):
+        env_values.update(_load_env_file(path))
     return env_values
 
 
@@ -85,7 +103,7 @@ def get_openai_compatible_llm_config(
     default_model: str = DEFAULT_LLM_MODEL,
 ) -> dict[str, Any]:
     """Return shared OpenAI-compatible LLM config for agents and gen-sim."""
-    local_env = _load_env_file()
+    local_env = _load_env_files()
     json_cfg = _load_gen_config()
 
     cfg = {
@@ -122,7 +140,7 @@ def get_openai_compatible_llm_config(
             raise ValueError(
                 f"Missing required LLM config keys: {missing}. "
                 f"Set them in shell environment variables, {LLM_ENV_PATH}, "
-                f"or {GEN_CONFIG_PATH}."
+                f"{LEGACY_LLM_ENV_PATH}, or {GEN_CONFIG_PATH}."
             )
 
     return cfg

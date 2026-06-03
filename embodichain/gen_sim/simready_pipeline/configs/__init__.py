@@ -20,6 +20,7 @@ from embodichain.gen_sim.simready_pipeline.configs.llm_config import (
     DEFAULT_LLM_MODEL,
     GEN_CONFIG_PATH,
     LLM_ENV_PATH,
+    LEGACY_LLM_ENV_PATH,
     get_openai_compatible_llm_config,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "DEFAULT_LLM_MODEL",
     "GEN_CONFIG_PATH",
     "LLM_ENV_PATH",
+    "LEGACY_LLM_ENV_PATH",
     "get_openai_compatible_llm_config",
 ]
