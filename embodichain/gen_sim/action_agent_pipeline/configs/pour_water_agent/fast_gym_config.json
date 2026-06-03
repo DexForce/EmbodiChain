@@ -22,35 +22,13 @@
                     "cameras": [
                         {
                             "uid": "valid_cam_1",
-                            "width": 1280,
-                            "height": 960,
+                            "width": 640,
+                            "height": 480,
                             "enable_mask": false,
-                            "intrinsics": [1400, 1400, 640, 480],
+                            "intrinsics": [700, 700, 320, 240],
                             "extrinsics": {
                                 "eye": [1.7, 0, 2.3],
                                 "target": [0.6, 0, 0.8]
-                            }
-                        },
-                        {
-                            "uid": "valid_cam_2",
-                            "width": 1280,
-                            "height": 960,
-                            "enable_mask": false,
-                            "intrinsics": [1400, 1400, 640, 480],
-                            "extrinsics": {
-                                "eye": [2.0, 0, 1.8],
-                                "target": [0.7, 0, 0.9]
-                            }
-                        },
-                        {
-                            "uid": "valid_cam_3",
-                            "width": 1280,
-                            "height": 960,
-                            "enable_mask": false,
-                            "intrinsics": [1400, 1400, 640, 480],
-                            "extrinsics": {
-                                "eye": [2.0, 0, 1.3],
-                                "target": [0.7, 0, 0.9]
                             }
                         }
                     ]
@@ -205,7 +183,7 @@
                 "params": {
                     "entity_cfg": {"uid": "table"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/WoodTable"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_bottle_material": {
@@ -215,7 +193,7 @@
                 "params": {
                     "entity_cfg": {"uid": "bottle"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/Bottle"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_cup_material": {
@@ -225,7 +203,7 @@
                 "params": {
                     "entity_cfg": {"uid": "cup"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/Cup"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_robot_init_eef_pose": {

@@ -28,6 +28,10 @@ from embodichain.lab.gym.utils.registration import register_env
 __all__ = ["PourWaterAgentEnv"]
 
 
+class _AlreadyExecutedActionList(list):
+    already_executed = True
+
+
 @register_env("PourWaterAgent-v3", max_episode_steps=600)
 class PourWaterAgentEnv(BaseAgentEnv, PourWaterEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
@@ -38,3 +42,29 @@ class PourWaterAgentEnv(BaseAgentEnv, PourWaterEnv):
         obs, info = super().reset(seed=seed, options=options)
         super().get_states()
         return obs, info
+
+    def create_demo_action_list(
+        self, regenerate=False, recovery=False, *args, **kwargs
+    ):
+        graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
+            regenerate=regenerate, recovery=recovery
+        )
+        public_atomic_kwargs = {
+            "use_public_grasp_semantics": False,
+            "use_public_grasp_action": True,
+            "use_public_place_action": True,
+            "allow_public_grasp_annotation": True,
+            "force_public_grasp_reannotate": False,
+            "public_grasp_strategy": "grasp_pose_obj",
+        }
+        for key in public_atomic_kwargs:
+            if key in kwargs:
+                public_atomic_kwargs[key] = kwargs[key]
+        compile_kwargs.update(public_atomic_kwargs)
+        compile_kwargs["interactive_error_injection"] = kwargs.get(
+            "interactive_error_injection", False
+        )
+        action_list = self.compile_agent.act(graph_file_path, **compile_kwargs)
+        if getattr(action_list, "already_executed", False):
+            return _AlreadyExecutedActionList(action_list)
+        return action_list
