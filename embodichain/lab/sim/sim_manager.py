@@ -140,7 +140,17 @@ class SimulationManagerCfg:
         if physics_dt is not None:
             self.physics_cfg.physics_dt = physics_dt
         if device is not None:
-            self.physics_cfg.device = device
+            # Env tensors may use CPU while Newton/Warp sim stays on CUDA for GPU render sync.
+            if isinstance(self.physics_cfg, NewtonPhysicsCfg):
+                torch_device = (
+                    torch.device(device)
+                    if isinstance(device, str)
+                    else device
+                )
+                if torch_device.type != "cpu":
+                    self.physics_cfg.device = device
+            else:
+                self.physics_cfg.device = device
 
         self.__post_init__()
 

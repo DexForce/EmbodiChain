@@ -168,6 +168,9 @@ class DefaultPhysicsCfg(PhysicsCfg):
 class NewtonPhysicsCfg(PhysicsCfg):
     """Configuration for DexSim Newton physics backend."""
 
+    device: str | torch.device = "cuda:0"
+    """The device for Newton physics simulation (e.g. ``cuda:0``)."""
+
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step."""
 
