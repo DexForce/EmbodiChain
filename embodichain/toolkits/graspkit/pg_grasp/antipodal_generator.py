@@ -73,11 +73,14 @@ class GraspGeneratorCfg:
     number of sampled surface points, ray perturbation angle, and gripper jaw
     distance limits. See :class:`AntipodalSamplerCfg` for details."""
 
-    max_deviation_angle: float = np.pi / 6
+    max_deviation_angle: float = np.pi / 12
     """Maximum allowed angle (in radians) between the specified approach
     direction and the axis connecting an antipodal point pair. Pairs that
     deviate more than this threshold from perpendicular to the approach are
     discarded during grasp pose computation."""
+
+    n_deviated_approach_directions: int = 4
+    """Number of approach directions with evenly deviated angles when sampling grasp poses."""
 
     is_partial_annotate: bool = False
     """When ``True``, the annotator allows selecting a partial region of the 
@@ -601,40 +604,12 @@ class GraspGenerator:
         t = transform[:3, 3]
         return points @ r.T + t
 
-    def get_grasp_poses(
+    def _get_valid_grasp_poses(
         self,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         visualize_collision: bool = False,
-        visualize_pose: bool = False,
-    ) -> tuple[bool, torch.Tensor, float]:
-        """Get grasp pose given approach direction.
-
-        Uses the antipodal point pairs stored in ``self._hit_point_pairs``
-        (populated by :meth:`generate` or :meth:`annotate`).
-
-        TODO:
-            1. Support Top-k grasp poses selection.
-            2. Support more selection criteria.
-
-        Args:
-            object_pose: ``(4, 4)`` homogeneous transformation matrix
-                representing the pose of the object in the world frame.
-            approach_direction: ``(3,)`` unit vector representing the desired
-                approach direction of the gripper in the world frame.
-            visualize_collision: If ``True``, enable visual collision checking.
-            visualize_pose: If ``True``, visualize the best grasp pose using Open3D
-                after computation.
-
-        Returns:
-            is_success (bool): Whether a valid grasp pose is found.
-            best_grasp_pose (torch.Tensor): If a valid grasp pose is found, a tensor of shape (4, 4) representing the homogeneous transformation matrix of the best grasp pose in the world frame. Otherwise, an identity matrix.
-            best_open_length (float): If a valid grasp pose is found, a scalar representing the optimal gripper opening length. Otherwise, a zero tensor.
-
-        Raises:
-            RuntimeError: If :meth:`generate` or :meth:`annotate` has not
-                been called yet.
-        """
+    ):
         if self._hit_point_pairs is None:
             logger.log_warning(
                 "No antipodal point pairs available. "
@@ -663,14 +638,28 @@ class GraspGenerator:
 
         valid_grasp_x = grasp_x[valid_mask]
         valid_centers = centers[valid_mask]
-
-        # compute grasp poses using antipodal point pairs and approach direction
-        # TODO: get grasp poses with multiple approach directions
-        valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
-            valid_grasp_x, approach_direction, valid_centers
-        )
         valid_open_lengths = torch.norm(
             origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
+        )
+
+        # compute grasp poses using antipodal point pairs and approach direction
+        approach_directions = [approach_direction]
+        for i in range(self.cfg.n_deviated_approach_directions - 1):
+            rota_direction = AntipodalSampler._random_rotate_unit_vectors(
+                approach_direction.unsqueeze(0), self.cfg.max_deviation_angle
+            )
+            approach_directions.append(rota_direction[0])
+        valid_grasp_poses_list = []
+        for direct in approach_directions:
+            valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
+                valid_grasp_x, direct, valid_centers
+            )
+            valid_grasp_poses_list.append(valid_grasp_poses)
+        valid_grasp_poses = torch.vstack(valid_grasp_poses_list)
+        valid_grasp_x = valid_grasp_x.repeat(self.cfg.n_deviated_approach_directions, 1)
+        valid_centers = valid_centers.repeat(self.cfg.n_deviated_approach_directions, 1)
+        valid_open_lengths = valid_open_lengths.repeat(
+            self.cfg.n_deviated_approach_directions
         )
 
         # remove near grasp poses using non-maximum suppression
@@ -711,6 +700,45 @@ class GraspGenerator:
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.3 * angle_cost + 0.3 * length_cost + 0.4 * center_cost
+        return valid_grasp_poses, valid_open_lengths, total_cost
+
+    def get_grasp_poses(
+        self,
+        object_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        visualize_collision: bool = False,
+        visualize_pose: bool = False,
+    ) -> tuple[bool, torch.Tensor, float]:
+        """Get grasp pose given approach direction.
+
+        Uses the antipodal point pairs stored in ``self._hit_point_pairs``
+        (populated by :meth:`generate` or :meth:`annotate`).
+
+        TODO:
+            1. Support Top-k grasp poses selection.
+            2. Support more selection criteria.
+
+        Args:
+            object_pose: ``(4, 4)`` homogeneous transformation matrix
+                representing the pose of the object in the world frame.
+            approach_direction: ``(3,)`` unit vector representing the desired
+                approach direction of the gripper in the world frame.
+            visualize_collision: If ``True``, enable visual collision checking.
+            visualize_pose: If ``True``, visualize the best grasp pose using Open3D
+                after computation.
+
+        Returns:
+            is_success (bool): Whether a valid grasp pose is found.
+            best_grasp_pose (torch.Tensor): If a valid grasp pose is found, a tensor of shape (4, 4) representing the homogeneous transformation matrix of the best grasp pose in the world frame. Otherwise, an identity matrix.
+            best_open_length (float): If a valid grasp pose is found, a scalar representing the optimal gripper opening length. Otherwise, a zero tensor.
+
+        Raises:
+            RuntimeError: If :meth:`generate` or :meth:`annotate` has not
+                been called yet.
+        """
+        valid_grasp_poses, valid_open_lengths, total_cost = self._get_valid_grasp_poses(
+            object_pose, approach_direction, visualize_collision
+        )
         best_idx = torch.argmin(total_cost)
         best_grasp_pose = valid_grasp_poses[best_idx]
         best_open_length = valid_open_lengths[best_idx]
