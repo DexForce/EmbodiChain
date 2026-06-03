@@ -31,11 +31,11 @@ from typing import Any, cast
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
+from embodichain.utils.math import pose_nms
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
 )
-from embodichain.utils import configclass
 from embodichain.toolkits.graspkit.pg_grasp import (
     GripperCollisionChecker,
     GripperCollisionCfg,
@@ -665,12 +665,24 @@ class GraspGenerator:
         valid_centers = centers[valid_mask]
 
         # compute grasp poses using antipodal point pairs and approach direction
+        # TODO: get grasp poses with multiple approach directions
         valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
             valid_grasp_x, approach_direction, valid_centers
         )
         valid_open_lengths = torch.norm(
             origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
         )
+
+        # remove near grasp poses using non-maximum suppression
+        nms_grasp_poses, nms_indices = pose_nms(
+            valid_grasp_poses,
+            angle_th=np.pi / 30,
+            dist_th=0.005,
+        )
+        valid_grasp_poses = valid_grasp_poses[nms_indices]
+        valid_open_lengths = valid_open_lengths[nms_indices]
+        valid_centers = valid_centers[nms_indices]
+
         # select non-collide grasp poses
         is_colliding, max_penetration = self._collision_checker.query(
             object_pose,
@@ -681,8 +693,9 @@ class GraspGenerator:
             collision_threshold=0.0,
         )
         if is_colliding.logical_not().sum() == 0:
-            logger.log_warning("No valid antipodal pairs after angle filtering.")
+            logger.log_warning("No valid antipodal pairs after collision filtering.")
             return False, torch.eye(4, device=self.device), 0.0
+
         # get best grasp pose
         valid_grasp_poses = valid_grasp_poses[~is_colliding]
         valid_open_lengths = valid_open_lengths[~is_colliding]

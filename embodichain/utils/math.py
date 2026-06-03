@@ -2265,3 +2265,65 @@ def get_offset_pose(
         return pose_to_change
 
     return offset_pose
+
+
+def pose_nms(
+    poses: torch.Tensor,
+    angle_th: float = np.pi / 36,
+    dist_th: float = 0.003,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Remove poses that are too close in translation and rotation.
+
+    Args:
+        poses: Input pose matrices. Shape is (N, 4, 4).
+        angle_th: Rotation threshold in radians. Poses with angular distance
+            below this value are considered close. Defaults to pi / 36.
+        dist_th: Translation distance threshold. Poses with Euclidean distance
+            below this value are considered close. Defaults to 0.003.
+
+    Returns:
+        Filtered pose matrices preserving the input order. Shape is (M, 4, 4),
+        where M <= N.
+
+        keep_indices: Indices of the poses that are kept after NMS. Shape is (M,).
+
+    Raises:
+        ValueError: If ``poses`` is not shaped as (N, 4, 4).
+    """
+    if poses.ndim != 3 or poses.shape[-2:] != (4, 4):
+        raise ValueError(f"Invalid input shape {poses.shape}, expected (N, 4, 4).")
+
+    if poses.shape[0] == 0:
+        keep_indices = torch.empty(0, dtype=torch.long, device=poses.device)
+        return poses.clone(), keep_indices
+
+    keep_indices_list: list[int] = []
+
+    for pose_idx in range(poses.shape[0]):
+        if not keep_indices_list:
+            keep_indices_list.append(pose_idx)
+            continue
+
+        current_rotation = poses[pose_idx, :3, :3]
+        current_translation = poses[pose_idx, :3, 3]
+        kept_poses = poses[keep_indices_list]
+
+        relative_rotations = current_rotation.unsqueeze(0) @ kept_poses[
+            :, :3, :3
+        ].transpose(-1, -2)
+        rotation_cosines = (
+            (relative_rotations.diagonal(dim1=-2, dim2=-1).sum(-1) - 1.0) * 0.5
+        ).clamp(min=-1.0, max=1.0)
+        rotation_distances = torch.abs(torch.acos(rotation_cosines))
+        translation_distances = torch.linalg.norm(
+            kept_poses[:, :3, 3] - current_translation, dim=-1
+        )
+
+        is_close = (rotation_distances < angle_th) & (translation_distances < dist_th)
+        if not torch.any(is_close):
+            keep_indices_list.append(pose_idx)
+
+    keep_indices = torch.tensor(
+        keep_indices_list, dtype=torch.long, device=poses.device
+    )
+    return poses[keep_indices], keep_indices
