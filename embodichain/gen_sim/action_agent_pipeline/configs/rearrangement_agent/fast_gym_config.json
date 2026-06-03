@@ -203,7 +203,7 @@
                 "params": {
                     "entity_cfg": {"uid": "table"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/WoodTable"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_plate_material": {
@@ -213,7 +213,7 @@
                 "params": {
                     "entity_cfg": {"uid": "plate"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/Plate"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_fork_material": {
@@ -223,7 +223,7 @@
                 "params": {
                     "entity_cfg": {"uid": "fork"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/Spoon"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_spoon_material": {
@@ -233,7 +233,7 @@
                 "params": {
                     "entity_cfg": {"uid": "spoon"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/Spoon"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_robot_init_eef_pose": {
