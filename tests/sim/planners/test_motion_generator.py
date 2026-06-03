@@ -259,6 +259,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         plan_result = self.motion_gen.generate(
             target_states=target_states, options=options
         )
+        assert plan_result.success, "Motion planning failed"
         out_qpos_list = to_numpy(plan_result.positions)
         assert (
             len(out_qpos_list) == self.sample_num
@@ -307,6 +308,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         plan_result = self.motion_gen.generate(
             target_states=target_states, options=options
         )
+        assert plan_result.success, "Motion planning failed"
         out_qpos_list = to_numpy(plan_result.positions)
         assert (
             len(out_qpos_list) == self.sample_num
