@@ -125,7 +125,7 @@
                 "params": {
                     "entity_cfg": {"uid": "table"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/WoodTable"
+                    "texture_path": "CocoBackground/coco"
                 }
             },
             "random_cup_material": {
@@ -135,7 +135,7 @@
                 "params": {
                     "entity_cfg": {"uid": "cup"},
                     "random_texture_prob": 1.0,
-                    "texture_path": "DexsimMaterials/Cup"
+                    "texture_path": "CocoBackground/coco"
                 }
             }
         },
