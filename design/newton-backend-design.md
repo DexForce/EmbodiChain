@@ -1,240 +1,204 @@
 # EmbodiChain Newton Backend Integration Design
 
-This memory records the intended design for adding DexSim Newton physics backend support to EmbodiChain.
-Use `default` to refer to the existing DexSim physics backend everywhere in new EmbodiChain code and docs. Low-level DexSim implementation details should not leak into EmbodiChain-facing backend names.
+This document records the current EmbodiChain integration state for the DexSim
+Newton physics backend and the remaining work needed to complete it.
 
-## Scope
+Use these EmbodiChain backend names consistently:
 
-Primary files to update:
+- `default`: the existing DexSim default physics backend.
+- `newton`: the DexSim Newton physics backend.
 
-- `/root/sources/EmbodiChain/embodichain/lab/sim/cfg.py`
-- `/root/sources/EmbodiChain/embodichain/lab/sim/sim_manager.py`
-- `/root/sources/EmbodiChain/embodichain/lab/sim/objects/`
-- `/root/sources/EmbodiChain/embodichain/lab/gym/envs/`
+Avoid exposing lower-level DexSim implementation names in EmbodiChain-facing
+configuration, docs, and conditionals.
 
-Relevant DexSim Newton files:
+## Current State
 
-- `/root/sources/dexsim/python/dexsim/engine/newton_physics/__init__.py`
-- `/root/sources/dexsim/python/dexsim/engine/newton_physics/newton_cfg.py`
-- `/root/sources/dexsim/python/dexsim/engine/newton_physics/newton_manager.py`
-- `/root/sources/dexsim/python/dexsim/engine/newton_physics/newton_physics_scene.py`
-- `/root/sources/dexsim/python/dexsim/engine/newton_physics/gradient_rollout.py`
+### Configuration
 
-Reference design from IsaacLab:
+Backend selection is currently inferred from `SimulationManagerCfg.physics_cfg`:
 
-- `/root/sources/IsaacLab/source/isaaclab/isaaclab/physics/physics_manager.py`
-- `/root/sources/IsaacLab/source/isaaclab/isaaclab/sim/simulation_context.py`
-- `/root/sources/IsaacLab/source/isaaclab_newton/isaaclab_newton/physics/newton_manager.py`
-- `/root/sources/IsaacLab/source/isaaclab_newton/isaaclab_newton/physics/newton_manager_cfg.py`
+- `DefaultPhysicsCfg` selects the `default` backend.
+- `NewtonPhysicsCfg` selects the `newton` backend.
+- `physics_cfg_for_backend("default" | "newton")` returns the matching config.
+- `physics_backend_from_cfg(...)` maps a config instance to its backend name.
 
-## Backend Names
+`DefaultPhysicsCfg` owns default-backend PhysX settings and GPU-memory settings.
+`NewtonPhysicsCfg` owns Newton settings: `physics_dt`, `device`, `num_substeps`,
+`requires_grad`, `use_cuda_graph`, `debug_mode`, `solver_type`, `broad_phase`,
+and `visualizer_enabled`.
 
-EmbodiChain backend names:
+`NewtonPhysicsCfg.to_dexsim_cfg(...)` creates a DexSim `NewtonCfg`, uses
+`physics_dt` for `NewtonCfg.dt`, disables CUDA graph when gradient mode is
+enabled, and requires `solver_type="semi_implicit"` for gradient mode.
 
-- `"default"`: the existing DexSim backend and current behavior.
-- `"newton"`: DexSim Newton backend.
+### SimulationManager
 
-Do not introduce older backend-specific names into user-facing EmbodiChain config, docs, or conditionals.
+`SimulationManager` now tracks the active backend with:
 
-## Configuration Design
+- `physics_backend`
+- `is_default_backend`
+- `is_newton_backend`
+- `newton_manager`
 
-Group the original physics-related configuration under a default-backend config, then add a new Newton config to `SimulationManagerCfg`.
+For the `default` backend, manager initialization keeps the existing DexSim
+behavior:
 
-Recommended structure in `embodichain/lab/sim/cfg.py`:
+- apply `DefaultPhysicsCfg.to_dexsim_args()`
+- apply default-backend GPU-memory config
+- enable default GPU simulation only when the selected device is CUDA
 
-```python
-@configclass
-class DefaultPhysicsCfg:
-    # Move or alias the existing PhysicsCfg fields here.
-    # Keep backwards compatibility by preserving PhysicsCfg as an alias or subclass during transition.
-    gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
-    bounce_threshold_velocity: float = 0.2
-    enable_pcm: bool = True
-    enable_tgs: bool = True
-    enable_ccd: bool = False
-    enable_enhanced_determinism: bool = False
-    friction_offset_threshold: float = 0.04
-    friction_correlation_distance: float = 0.025
-    length_tolerance: float = 1.0
-    speed_tolerance: float = 1.0
+For the `newton` backend, manager initialization:
 
-    def to_dexsim_args(self) -> dict:
-        ...
+- imports DexSim Newton lazily during world-config conversion
+- sets `world_config.newton_cfg`
+- obtains the per-world Newton manager through `get_newton_manager(self._world)`
+- avoids default-backend GPU flags and default GPU memory APIs
 
+Newton finalization is separate from default-backend GPU initialization:
 
-# Transitional compatibility option:
-PhysicsCfg = DefaultPhysicsCfg
-```
+- `finalize_newton_physics()` prepares or rebuilds the Newton model until the
+  manager reaches `READY`.
+- `update(...)` finalizes Newton before stepping.
+- `init_gpu_physics()` delegates to `finalize_newton_physics()` when Newton is
+  active.
+- `set_manual_update(False)` is ignored for Newton because the backend does not
+  support switching to automatic update.
 
-Add:
+Scene mutation invalidates Newton finalization with `_invalidate_newton_physics()`.
+After finalization, `_reset_newton_entities_after_finalize()` reapplies rigid
+object reset state. Rigid object groups are not yet supported on Newton.
 
-```python
-@configclass
-class NewtonPhysicsCfg:
-    num_substeps: int = 10
-    device: str | None = None
-    requires_grad: bool = False
-    use_cuda_graph: bool = True
-    debug_mode: bool = False
-    solver_type: str = "mjwarp"  # allowed: mjwarp, xpbd, semi_implicit, featherstone
-    broad_phase: str = "sap"     # allowed: nxn, sap, explicit
-    visualizer_enabled: bool = False
+### Object Backend Adapters
 
-    def to_dexsim_cfg(self, physics_dt: float, device: str, gpu_id: int):
-        # Import dexsim.engine.newton_physics lazily so default backend users do not pay import/setup cost.
-        ...
-```
-
-Update `SimulationManagerCfg`:
-
-```python
-@configclass
-class SimulationManagerCfg:
-    physics_backend: Literal["default", "newton"] = "default"
-    default_physics_cfg: DefaultPhysicsCfg = DefaultPhysicsCfg()
-    newton_physics_cfg: NewtonPhysicsCfg = NewtonPhysicsCfg()
-    gpu_memory_config: GPUMemoryCfg = GPUMemoryCfg()
-    ...
-```
-
-`gpu_memory_config` is only meaningful for the default backend. It should be ignored or warned about under Newton.
-
-`NewtonPhysicsCfg.to_dexsim_cfg(...)` should set `NewtonCfg.dt` from `SimulationManagerCfg.physics_dt`. Avoid duplicating `dt` in both configs unless an explicit override is required later.
-
-For gradient mode:
-
-- `requires_grad=True`
-- `solver_type="semi_implicit"`
-- CUDA graph should be disabled by DexSim Newton or by the config conversion when needed.
-
-## SimulationManager Design
-
-In `embodichain/lab/sim/sim_manager.py`, route world creation through the backend name.
-
-For `physics_backend == "default"`:
-
-- Keep current behavior.
-- Set `world_config.enable_gpu_sim` and `world_config.direct_gpu_api` when `device` is CUDA.
-- Call `dexsim.set_physics_config(**cfg.default_physics_cfg.to_dexsim_args())`.
-- Call `dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory_config.to_dict())`.
-
-For `physics_backend == "newton"`:
-
-- Lazily import `dexsim.engine.newton_physics`.
-- Set `world_config.newton_cfg = cfg.newton_physics_cfg.to_dexsim_cfg(...)` before creating `dexsim.World`.
-- Do not set `world_config.enable_gpu_sim` or `world_config.direct_gpu_api`; those are default-backend GPU API flags.
-- Do not call `dexsim.set_physics_gpu_memory_config(...)`.
-- Avoid default-backend-only GPU APIs such as `gpu_fetch_rigid_body_data` and `gpu_apply_rigid_body_data`.
-- Obtain the manager through `dexsim.engine.newton_physics.get_newton_manager(self._world)`.
-
-Add properties:
-
-```python
-@property
-def is_default_backend(self) -> bool: ...
-
-@property
-def is_newton_backend(self) -> bool: ...
-
-@property
-def newton_manager(self): ...
-
-@property
-def newton_scene(self): ...
-```
-
-Track Newton scene finalization separately from default-backend GPU physics initialization:
-
-```python
-def finalize_newton_physics(self):
-    if not self._is_finalized_newton_physics:
-        self.newton_manager.start_simulation()
-        self._is_finalized_newton_physics = True
-```
-
-`SimulationManager.update(...)` should:
-
-- Call `init_gpu_physics()` only for default-backend GPU physics.
-- For Newton, call `finalize_newton_physics()` before stepping; DexSim Newton handles stepping and render synchronization after the model is ready.
-
-Destroy/cleanup:
-
-- Be careful with `dexsim.engine.newton_physics.teardown_newton_physics()` because DexSim Newton currently monkey-patches classes globally.
-- Do not call global teardown while another world may still be using Newton.
-- Prefer a per-world manager clear API if DexSim exposes one later.
-
-## Object Layer Design
-
-Keep the public EmbodiChain object classes stable, but route backend-specific data access through adapters.
-
-Recommended package:
+Rigid-body data access is routed through:
 
 ```text
 embodichain/lab/sim/objects/backends/
-    __init__.py
     base.py
     default.py
     newton.py
 ```
 
-The public classes stay in place:
+`RigidBodyViewBase` defines the backend-neutral rigid-body API. The default
+adapter handles existing CPU/default-GPU paths. The Newton adapter uses DexSim
+Newton batch APIs for body data and collision filters.
 
-- `RigidObject`
-- `RigidObjectGroup`
-- `Articulation`
-- `Robot`
+EmbodiChain public rigid-body tensor convention is:
 
-For now, implement Newton support only for rigid objects and rigid object groups.
-
-Newton articulation support in DexSim is still under development. Do not implement EmbodiChain Newton `Articulation` or `Robot` support yet. Add an explicit fail-fast error if a user attempts to create an articulation or robot with `physics_backend == "newton"`:
-
-```python
-raise NotImplementedError(
-    "Newton articulation support is under development in DexSim and is not enabled in EmbodiChain yet."
-)
+```text
+(x, y, z, qx, qy, qz, qw)
 ```
 
-Rigid object Newton adapter:
+Current Newton rigid-object support includes:
 
-- Map each DexSim `MeshObject` to Newton body IDs.
-- Prefer a public DexSim API if available, such as `manager.get_body_id(mesh_object)`.
-- If no public API exists yet, request one from DexSim rather than relying permanently on private mappings.
+- dynamic and kinematic single `RigidObject` creation
+- static single `RigidObject` creation
+- local pose get/set
+- body state get
+- linear/angular velocity get/set
+- linear/angular acceleration get
+- force and torque at center of mass
+- clear dynamics
+- reset
+- center-of-mass local pose get/set for dynamic rigid objects
+- mass get/set
+- friction get/set
+- inertia diagonal get/set
+- collision filter set for dynamic, kinematic, static, and pre-finalize bodies
+- visual material, visibility, geometry, scale, and user-id APIs through the
+  existing MeshObject paths
 
-Use `manager.newton_scene` APIs:
+Static Newton bodies do not have `RigidBodyData`; static collision-filter writes
+therefore use DexSim's per-entity metadata hook when a Newton body ID is not
+available yet.
 
-- `fetch_pose(body_ids, out)`
-- `apply_pose(body_ids, data)`
-- `fetch_vec3(body_ids, data_type, out)`
-- `apply_vec3(body_ids, data_type, data)`
-- `fetch_force(body_ids, force_type, out)`
-- `apply_force(body_ids, force_type, data)`
+### Currently Unsupported Newton APIs
 
-Pose format conversion:
+`SimulationManager` explicitly rejects these asset types on Newton:
 
-- Newton scene pose: `(qx, qy, qz, qw, x, y, z)`
-- EmbodiChain pose: `(x, y, z, qw, qx, qy, qz)`
+- `add_soft_object(...)`
+- `add_cloth_object(...)`
+- `add_rigid_object_group(...)`
+- `add_articulation(...)`
+- `add_robot(...)`
 
-Runtime behavior:
+`RigidObject` still does not support these runtime updates on Newton:
 
-- Before Newton model finalization, either use DexSim object setters or call `sim.finalize_newton_physics()` before data access.
-- After finalization, prefer direct `newton_scene` reads/writes to avoid default-backend GPU APIs.
-- Runtime changes to shape, mass, COM, or collision settings may mark the Newton model stale and trigger a rebuild on the next update. Prefer doing these changes before finalization or during reset.
+- `set_attrs(...)`
+- `set_body_type(...)`
+- `set_damping(...)`
 
-Default plane:
+`RigidObject.add_force_torque(pos=...)` ignores `pos` and applies force/torque at
+the center of mass.
 
-- The current default plane is implemented as a visual plane plus hidden collision cube.
-- For Newton, prefer a true static plane or explicit static box if DexSim Newton supports it cleanly.
+Newton kinematic pose locking is not complete. The rigid-object test suite keeps
+a Newton-specific allowance for kinematic bodies changing after stepping.
 
-## Gym Env Integration
+Newton SDF rigid mesh support is not validated in EmbodiChain. The SDF rigid
+object test is skipped for Newton.
 
-In `embodichain/lab/gym/envs/base_env.py`, replace CUDA-based backend initialization:
+### Verified Tests
 
-```python
-if self.device.type == "cuda":
-    self.sim.init_gpu_physics()
+The current rigid-object test file passes after the latest Newton integration
+fixes:
+
+```bash
+pytest -q tests/sim/objects/test_rigid_object.py
 ```
 
-with:
+Observed result:
+
+```text
+62 passed, 1 skipped, 41 warnings
+```
+
+## Improvements To Make
+
+### API Clarity
+
+- Add explicit capability checks for backend-specific support instead of relying
+  on scattered `is_newton_scene(...)` checks.
+- Make unsupported Newton APIs fail consistently with either `NotImplementedError`
+  or a documented warning/no-op policy.
+- Separate `is_use_gpu_physics` into clearer concepts:
+  - selected tensor/device location
+  - default-backend GPU API availability
+  - Newton GPU execution
+
+### Newton Lifecycle
+
+- Keep `finalize_newton_physics()` as the single Newton preparation API.
+- Do not add a separate non-stepping synchronization method until DexSim exposes
+  a real Newton synchronization API.
+- Track dirty scene/model state more explicitly so mutations after finalization
+  can choose between live batch updates and model rebuilds.
+- Avoid global Newton teardown while another world may still use monkey-patched
+  DexSim classes.
+
+### RigidObject
+
+- Implement Newton `set_attrs(...)` by decomposing supported fields into batch
+  property updates and rejecting unsupported fields explicitly.
+- Implement Newton damping get/set through DexSim Newton if a runtime API exists;
+  otherwise keep it metadata-only before finalization and document that runtime
+  damping changes require rebuild.
+- Implement `set_body_type(...)` for Newton or keep a hard unsupported error if
+  DexSim cannot safely switch dynamic/kinematic/static bodies at runtime.
+- Implement force-at-position when DexSim Newton exposes the needed API.
+- Validate SDF rigid mesh creation and collision behavior on Newton.
+- Fix or document kinematic pose-lock semantics.
+
+### Object Groups, Articulations, Robots, Soft, Cloth
+
+- Add Newton rigid-object-group support after single-object support is stable.
+- Keep articulations and robots fail-fast until DexSim Newton articulation APIs
+  are ready and tested.
+- Keep soft and cloth fail-fast until there is an explicit Newton design and
+  test coverage for those object types.
+
+### Gym Env Integration
+
+Use backend-specific initialization in env setup:
 
 ```python
 if self.sim.is_default_backend and self.sim.is_use_gpu_physics:
@@ -243,112 +207,82 @@ elif self.sim.is_newton_backend:
     self.sim.finalize_newton_physics()
 ```
 
-This keeps default-backend GPU buffer initialization separate from Newton scene finalization.
-
-In `BaseEnv.step(...)`, keep the current high-level flow, but leave room for a backend-neutral write hook:
+For stepping, keep the existing high-level flow:
 
 ```python
 self._preprocess_action(action)
 self._step_action(action)
-self.sim.write_data_to_physics()  # no-op initially; useful later
 self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
 ```
 
-In `BaseEnv.reset(...)`, after resetting object state and initializing the episode, refresh Newton state before reading observations:
+For reset, call object/manager reset methods and finalize Newton before reading
+observations when the backend is Newton. Do not rely on a separate sync API.
 
-```python
-if self.sim.is_newton_backend:
-    self.sim.forward_physics()
-```
+## Completion Plan
 
-`forward_physics()` can initially call into DexSim Newton manager full forward kinematics/state sync if available. It can be optimized later with dirty masks.
+1. Stabilize the single-rigid-object Newton API and keep
+   `tests/sim/objects/test_rigid_object.py` green.
+2. Add backend capability declarations and use them in public object APIs.
+3. Finish Newton `RigidObject` parity for attributes, damping, body type,
+   force-at-position, SDF meshes, and kinematic pose semantics.
+4. Add tests for Newton lifecycle rebuild after scene mutation and runtime
+   property mutation after finalization.
+5. Implement and test Newton `RigidObjectGroup`.
+6. Update gym env initialization/reset paths to use `finalize_newton_physics()`
+   directly.
+7. Add rigid-only Newton gym smoke tests.
+8. Add gradient rollout wrapper and a minimal differentiable Newton smoke test.
+9. Add articulation and robot support only after DexSim Newton exposes stable
+   articulation APIs.
+10. Add soft/cloth support only after a dedicated Newton object design and tests.
 
-Because articulation is skipped for now, gym environments that require `Robot` or `Articulation` should fail fast under Newton with a clear message.
-
-## Gradient Mode
-
-Expose gradient mode only through Newton.
-
-Recommended API:
-
-```python
-rollout = sim.newton_manager.create_gradient_rollout(record_steps=...)
-```
-
-or a higher-level wrapper:
-
-```python
-rollout = env.create_gradient_rollout(record_steps, loss_fn, optimizer_step)
-```
-
-Constraints:
-
-- `newton_physics_cfg.requires_grad` must be true.
-- `newton_physics_cfg.solver_type` must be `semi_implicit`.
-- Observations and rewards used for differentiable training must avoid CPU getters, NumPy conversion, and detached tensors.
-- Rendering and randomization should be disabled inside differentiable rollout unless explicitly made gradient-safe.
-
-## IsaacLab-Inspired Improvements
-
-Apply these IsaacLab ideas in EmbodiChain:
-
-- Add a small backend manager abstraction instead of scattering backend checks everywhere.
-- Use lifecycle events or hooks such as `MODEL_INIT`, `PHYSICS_READY`, and `STOP`.
-- Replace object-constructor warmup calls like `world.update(0.001)` with backend-specific initialization after scene construction.
-- Add backend-specific object data adapters.
-- Add task/backend presets later, because Newton often needs different `physics_dt`, substeps, solver, and contact settings from the default backend.
-- Add mask/index write APIs for vectorized envs and CUDA graph safety.
-- Track dirty FK/render state instead of synchronizing every write.
-
-## Implementation Milestones
-
-1. Add `physics_backend`, `DefaultPhysicsCfg`, and `NewtonPhysicsCfg`.
-2. Update `SimulationManager` world creation and backend properties.
-3. Add Newton scene finalization and update gym env initialization to use it.
-4. Add Newton rigid object adapter.
-5. Add Newton rigid object group adapter.
-6. Add clear fail-fast errors for Newton articulation/robot creation.
-7. Add rigid-object Newton smoke tests.
-8. Add gym smoke tests for rigid-only Newton environments.
-9. Add gradient rollout wrapper and a minimal gradient smoke test.
-10. Add articulation/robot support later after DexSim Newton articulation API is ready.
-
-## Tests To Add
+## Tests To Maintain
 
 Configuration:
 
-- `SimulationManagerCfg(physics_backend="default")` preserves current behavior.
-- `SimulationManagerCfg(physics_backend="newton")` creates a DexSim world with Newton manager.
-- Newton config conversion sets `dt` from `physics_dt`.
+- `SimulationManagerCfg(physics_cfg=DefaultPhysicsCfg())` preserves current
+  default-backend behavior.
+- `SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())` creates a Newton world.
+- `physics_cfg_for_backend(...)` and `physics_backend_from_cfg(...)` return the
+  expected backend mapping.
 
 Simulation:
 
-- Newton world can be created and stepped headlessly.
-- `finalize_newton_physics()` finalizes Newton without calling default-backend GPU APIs.
-- Destroying a Newton simulation does not break subsequent default-backend simulation creation.
+- Newton world can be created, finalized, stepped, destroyed, and recreated.
+- Default-backend GPU initialization does not run for Newton.
+- Newton finalization does not call default-backend GPU fetch/apply APIs.
+- Destroying a Newton simulation does not break subsequent default-backend
+  simulation creation.
 
 Rigid object:
 
-- Dynamic cube falls under Newton.
-- Pose and velocity tensors have the same EmbodiChain layout as default backend.
-- `set_local_pose`, `set_velocity`, `add_force_torque`, and `clear_dynamics` work.
-- Multi-env rigid object group fetch/write reshapes correctly.
+- Dynamic rigid bodies fall under Newton.
+- Static and kinematic rigid bodies can be created under Newton.
+- Pose, velocity, acceleration, force/torque, reset, COM pose, mass, friction,
+  inertia, collision filters, and geometry APIs behave consistently with the
+  documented support matrix.
+- Unsupported APIs produce the documented warning or exception.
 
 Gym:
 
-- BaseEnv with Newton and no robot initializes, steps, and resets.
-- Robot/articulation env under Newton raises the expected `NotImplementedError`.
+- Rigid-only Newton env initializes, steps, resets, and reads observations.
+- Robot/articulation env under Newton raises the expected unsupported error.
 
 Gradient:
 
-- `requires_grad=True` plus `solver_type="semi_implicit"` can create a gradient rollout.
-- A simple loss can backpropagate through the rollout without CPU/NumPy observation paths.
+- `requires_grad=True` plus `solver_type="semi_implicit"` can create a gradient
+  rollout.
+- A simple loss can backpropagate through a rollout without CPU/NumPy observation
+  paths.
 
 ## Known Risks
 
-- DexSim Newton monkey-patches global classes. Avoid global teardown while other worlds exist.
-- DexSim Newton gravity handling may need a full gravity-vector API to match EmbodiChain's existing default config.
-- Public body/articulation ID mapping APIs may be needed in DexSim.
-- The current `is_use_gpu_physics` concept conflates CUDA device with default-backend GPU APIs and should be replaced.
-- Current object constructors may finalize physics too early by calling `world.update(0.001)`; avoid this under Newton.
-- Newton articulation is intentionally skipped until DexSim support is ready.
+- DexSim Newton monkey-patches global classes. Global teardown can affect other
+  worlds if used at the wrong time.
+- Public body/articulation ID mapping APIs may still need DexSim improvements.
+- Newton gravity and contact configuration may not yet match every default-backend
+  setting.
+- Some object constructors still contain default-backend assumptions such as
+  warmup updates; keep Newton guarded from those paths.
+- Runtime shape/property mutations may require model rebuilds rather than live
+  updates.

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from typing import Sequence
+import numpy as np
 import torch
 
 from dexsim.models import MeshObject
@@ -55,22 +56,31 @@ def _collision_filter_rows(filter_data: torch.Tensor) -> torch.Tensor:
     return rows
 
 
-def _resolve_body_ids_for_entities(
+def _resolve_body_ids_and_filter_rows_for_entities(
     manager: object,
     entities: Sequence[MeshObject],
-) -> torch.Tensor:
+    filter_data: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
     body_ids: list[int] = []
-    for entity in entities:
+    rows: list[torch.Tensor] = []
+    for i, entity in enumerate(entities):
         entity_handle = _normalize_native_handle(
             entity.get_native_handle(), "MeshObject"
         )
         body_id = manager.body_id_for_entity(entity_handle)
         if body_id is None:
-            logger.log_error(
-                "Newton collision filter batch apply found an entity without a body id."
+            entity.set_collision_filter_data(
+                filter_data[i].detach().cpu().numpy().astype(np.int64)
             )
+            continue
         body_ids.append(int(body_id))
-    return torch.as_tensor(body_ids, dtype=torch.int32)
+        rows.append(filter_data[i])
+
+    if len(rows) == 0:
+        empty_rows = filter_data.new_empty((0, filter_data.shape[-1]))
+        return torch.as_tensor(body_ids, dtype=torch.int32), empty_rows
+
+    return torch.as_tensor(body_ids, dtype=torch.int32), torch.stack(rows, dim=0)
 
 
 def apply_collision_filter_for_entities(
@@ -92,9 +102,13 @@ def apply_collision_filter_for_entities(
         )
 
     rows = _collision_filter_rows(filter_data)
-    body_ids = _resolve_body_ids_for_entities(scene.manager, entities)
+    body_ids, valid_rows = _resolve_body_ids_and_filter_rows_for_entities(
+        scene.manager, entities, rows
+    )
+    if len(body_ids) == 0:
+        return
     body_ids = body_ids.to(device=rows.device)
-    scene.apply_collision_filter(body_ids, rows)
+    scene.apply_collision_filter(body_ids, valid_rows.to(device=rows.device))
 
 
 def apply_collision_filter_for_envs(

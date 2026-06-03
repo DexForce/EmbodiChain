@@ -412,7 +412,9 @@ class RigidObject(BatchEntity):
             )
 
         if is_newton_scene(self._ps):
-            if isinstance(self._data.body_view, NewtonRigidBodyView):
+            if self._data is not None and isinstance(
+                self._data.body_view, NewtonRigidBodyView
+            ):
                 self._data.body_view.apply_collision_filter(filter_data, local_env_ids)
             else:
                 entities = [self._entities[env_idx] for env_idx in local_env_ids]
@@ -1296,11 +1298,11 @@ class RigidObject(BatchEntity):
         if not is_newton_scene(self._ps):
             self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
+        self.clear_dynamics(env_ids=local_env_ids)
+
         self.set_local_pose(
             self._build_cfg_init_pose(local_env_ids), env_ids=local_env_ids
         )
-
-        self.clear_dynamics(env_ids=local_env_ids)
 
     def destroy(self) -> None:
         env = self._world.get_env()

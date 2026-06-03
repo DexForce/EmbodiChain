@@ -584,7 +584,6 @@ class BaseRigidObjectTest:
         com_pose = _make_test_com_pose(self.sim.device)
 
         self.duck.set_com_pose(com_pose)
-        self.sim.forward_physics()
 
         actual_com_pose = self.duck.body_data.com_pose
         assert isinstance(
@@ -608,7 +607,6 @@ class BaseRigidObjectTest:
         expected_com_pose[1] = partial_com_pose[0]
 
         self.duck.set_com_pose(partial_com_pose, env_ids=[1])
-        self.sim.forward_physics()
 
         actual_com_pose = self.duck.body_data.com_pose
         assert torch.allclose(actual_com_pose, expected_com_pose, atol=1e-5), (
@@ -619,7 +617,6 @@ class BaseRigidObjectTest:
         assert self.chair.body_data is not None
         chair_com_pose_before = self.chair.body_data.com_pose.clone()
         self.chair.set_com_pose(com_pose)
-        self.sim.forward_physics()
         assert torch.allclose(
             self.chair.body_data.com_pose, chair_com_pose_before, atol=1e-5
         ), "Kinematic rigid object COM pose should not change"
@@ -786,7 +783,6 @@ class BaseRigidObjectTest:
 
         # Full reset.
         self.duck.reset()
-        self.sim.forward_physics()
 
         pos_after = self.duck.get_local_pose()[:, :3]
         origin = torch.zeros(NUM_ARENAS, 3, device=self.sim.device)
@@ -804,7 +800,6 @@ class BaseRigidObjectTest:
         # --- Partial reset: move duck again, reset only env 0 ---
         self.duck.set_local_pose(pose_far)
         self.duck.reset(env_ids=[0])
-        self.sim.forward_physics()
 
         pos_partial = self.duck.get_local_pose()[:, :3]
         assert torch.allclose(
