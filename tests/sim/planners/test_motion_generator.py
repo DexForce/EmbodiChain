@@ -45,6 +45,36 @@ def to_numpy(tensor):
     return np.array(tensor)
 
 
+def test_interpolate_trajectory_joint_space_uses_waypoint_axis():
+    motion_gen = MotionGenerator.__new__(MotionGenerator)
+    motion_gen.device = torch.device("cpu")
+    motion_gen.robot = None
+
+    qpos_list = torch.tensor(
+        [
+            [0.0, 0.0],
+            [1.0, 2.0],
+        ],
+        dtype=torch.float32,
+    )
+    original_shape = qpos_list.shape
+
+    trajectory, feasible_pose_targets = motion_gen.interpolate_trajectory(
+        control_part="arm",
+        qpos_list=qpos_list,
+        options=MotionGenOptions(
+            is_linear=False,
+            interpolate_nums=4,
+        ),
+    )
+
+    assert qpos_list.shape == original_shape
+    assert feasible_pose_targets is None
+    assert trajectory.shape == (5, 2)
+    assert torch.allclose(trajectory[0], qpos_list[0])
+    assert torch.allclose(trajectory[-1], qpos_list[-1])
+
+
 class BaseTestMotionGenerator(object):
     def setup_simulation(self):
         cls = type(self)

@@ -8,14 +8,10 @@ EmbodiAgent is a hierarchical multi-agent system that enables robots to perform 
 Ensure you have access to OpenAI or an OpenAI-compatible LLM endpoint. Do not
 commit credentials to the repository.
 
-```bash
-# Create a local credential file. .env is ignored by git.
-cp .env.example .env
-```
+EmbodiAgent uses the shared gen-sim MLLM entry point
+`embodichain.gen_sim.mllm`. Configure it with shell environment variables:
 
-Fill in the local `.env` file:
-
-```bash
+```shell
 OPENAI_API_KEY="<your-api-key>"
 OPENAI_BASE_URL="<optional-openai-compatible-base-url>"
 OPENAI_MODEL="gpt-4o"
@@ -24,6 +20,10 @@ EMBODICHAIN_LLM_PROXY=""
 
 `OPENAI_BASE_URL` is optional for the default OpenAI endpoint. Set it when using
 an OpenAI-compatible proxy or vendor endpoint.
+
+The same entry point also reads the gen-sim LLM config at
+`embodichain/gen_sim/simready_pipeline/configs/gen_config.json`, plus local
+ignored `.env` files when present.
 
 ### Run the System
 

@@ -124,9 +124,8 @@ class MoveAction(AtomicAction):
         arm_dof = self.dof if arm_dof is None else arm_dof
         if start_qpos is None:
             start_qpos = self.robot.get_qpos(name=self.cfg.control_part)
-        start_qpos = torch.as_tensor(
-            start_qpos, dtype=torch.float32, device=self.device
-        )
+        if not isinstance(start_qpos, torch.Tensor):
+            logger.log_error("start_qpos must be a torch.Tensor.", TypeError)
         if start_qpos.shape == (arm_dof,):
             start_qpos = start_qpos.unsqueeze(0).repeat(self.n_envs, 1)
         if start_qpos.shape != (self.n_envs, arm_dof):
@@ -138,7 +137,8 @@ class MoveAction(AtomicAction):
 
     def _resolve_qpos_target(self, target: torch.Tensor, *, name: str) -> torch.Tensor:
         """Resolve a qpos target into batched control-part joint positions."""
-        target = torch.as_tensor(target, dtype=torch.float32, device=self.device)
+        if not isinstance(target, torch.Tensor):
+            logger.log_error(f"{name} must be a torch.Tensor.", TypeError)
         if target.shape == (4, 4):
             logger.log_error(
                 f"{name} shape (4, 4) is reserved for pose targets.",
@@ -154,25 +154,43 @@ class MoveAction(AtomicAction):
             )
         return target
 
-    def _interpolate_qpos(
+    def _interpolate_qpos_with_motion_generator(
         self,
         start_qpos: torch.Tensor,
         target_qpos: torch.Tensor,
         n_waypoints: int,
     ) -> torch.Tensor:
-        """Linearly interpolate control-part joint positions."""
+        """Interpolate control-part qpos through the shared motion generator."""
         if n_waypoints < 2:
             logger.log_error(
                 "n_waypoints must be at least 2 to include start and target qpos.",
                 ValueError,
             )
-        weights = torch.linspace(
-            0, 1, steps=n_waypoints, dtype=torch.float32, device=self.device
-        ).view(1, n_waypoints, 1)
-        return (
-            start_qpos.unsqueeze(1)
-            + (target_qpos.unsqueeze(1) - start_qpos.unsqueeze(1)) * weights
+
+        trajectories = []
+        options = MotionGenOptions(
+            control_part=self.cfg.control_part,
+            is_linear=False,
+            interpolate_nums=n_waypoints - 1,
         )
+        for env_id in range(self.n_envs):
+            qpos_list = torch.stack(
+                [start_qpos[env_id], target_qpos[env_id]],
+                dim=0,
+            )
+            trajectory, _ = self.motion_generator.interpolate_trajectory(
+                control_part=self.cfg.control_part,
+                qpos_list=qpos_list,
+                options=options,
+            )
+            if trajectory.shape != (n_waypoints, self.dof):
+                logger.log_error(
+                    "Joint-space interpolation returned shape "
+                    f"{trajectory.shape}, expected ({n_waypoints}, {self.dof}).",
+                    ValueError,
+                )
+            trajectories.append(trajectory)
+        return torch.stack(trajectories, dim=0)
 
     def _compute_three_phase_waypoints(
         self,
@@ -309,7 +327,7 @@ class MoveAction(AtomicAction):
             if is_qpos_shape and not is_pose_shape:
                 start_qpos = self._resolve_start_qpos(start_qpos)
                 target_qpos = self._resolve_qpos_target(target, name="target_qpos")
-                trajectory = self._interpolate_qpos(
+                trajectory = self._interpolate_qpos_with_motion_generator(
                     start_qpos,
                     target_qpos,
                     int(self.cfg.sample_interval),

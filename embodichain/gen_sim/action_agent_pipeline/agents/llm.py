@@ -16,13 +16,7 @@
 
 from __future__ import annotations
 
-import os
-
-from embodichain.gen_sim.simready_pipeline.configs import (
-    DEFAULT_LLM_MODEL,
-    get_openai_compatible_llm_config,
-)
-from langchain_openai import ChatOpenAI
+from embodichain.gen_sim.mllm import create_chat_openai
 
 __all__ = ["create_llm", "task_llm", "recovery_llm", "compile_llm"]
 
@@ -33,30 +27,7 @@ __all__ = ["create_llm", "task_llm", "recovery_llm", "compile_llm"]
 
 
 def create_llm(*, temperature=0.0, model=None):
-    cfg = get_openai_compatible_llm_config(required=True)
-    api_key = cfg["api_key"]
-    if not api_key:
-        raise ValueError(
-            "OPENAI_API_KEY is required. Set it in your shell environment, "
-            ".env, embodichain/gen_sim/simready_pipeline/configs/.env, "
-            "or embodichain/gen_sim/simready_pipeline/configs/gen_config.json."
-        )
-
-    proxy_url = cfg.get("proxy_url")
-    if proxy_url:
-        os.environ["HTTP_PROXY"] = proxy_url
-        os.environ["HTTPS_PROXY"] = proxy_url
-
-    kwargs = {
-        "temperature": temperature,
-        "model": model or cfg.get("model") or DEFAULT_LLM_MODEL,
-        "api_key": api_key,
-    }
-    base_url = cfg.get("base_url")
-    if base_url:
-        kwargs["base_url"] = base_url
-
-    return ChatOpenAI(**kwargs)
+    return create_chat_openai(temperature=temperature, model=model)
 
 
 # ------------------------------------------------------------------------------

@@ -179,10 +179,6 @@ class AtomicActionEngine:
         # Semantic analyzer for object understanding
         self._semantic_analyzer = SemanticAnalyzer()
 
-        # Keep ordered instances separately from name lookup because configs may
-        # contain repeated action names, e.g. multiple "move" actions for
-        # different control parts.
-        self._ordered_actions: List[tuple[str, AtomicAction]] = []
         self._actions: Dict[str, AtomicAction] = self._init_actions(actions_cfg_list)
 
     def _init_actions(
@@ -198,6 +194,11 @@ class AtomicActionEngine:
         }
         if actions_cfg_list is not None:
             for cfg in actions_cfg_list:
+                if cfg.name in actions:
+                    logger.log_error(
+                        f"Duplicate action name in config: {cfg.name}. "
+                        "Action names must be unique for AtomicActionEngine."
+                    )
                 action_class = builtin_action_map.get(
                     cfg.name
                 ) or _global_action_registry.get(cfg.name)
@@ -205,7 +206,6 @@ class AtomicActionEngine:
                     logger.log_error(f"Unknown action name in config: {cfg.name}")
                     continue
                 instance = action_class(motion_generator=self.motion_generator, cfg=cfg)
-                self._ordered_actions.append((cfg.name, instance))
                 actions[cfg.name] = instance
         return actions
 
@@ -218,10 +218,11 @@ class AtomicActionEngine:
         Each element in ``target_list`` corresponds to an action in the order they
         were registered via ``actions_cfg_list``.
         """
-        if len(target_list) != len(self._ordered_actions):
+        action_names = list(self._actions.keys())
+        if len(target_list) != len(action_names):
             logger.log_error(
                 f"Length of target_list ({len(target_list)}) must match number of "
-                f"actions ({len(self._ordered_actions)})."
+                f"actions ({len(action_names)})."
             )
         start_qpos = self.motion_generator.robot.get_qpos()
         n_envs = start_qpos.shape[0]
@@ -230,7 +231,8 @@ class AtomicActionEngine:
             size=(n_envs, 0, all_dof), dtype=torch.float32, device=self.device
         )
 
-        for (_, atom_action), target in zip(self._ordered_actions, target_list):
+        for action_name, target in zip(action_names, target_list):
+            atom_action = self._actions[action_name]
             target = self._resolve_target(target)
             control_part = atom_action.control_part
             arm_joint_ids = self.motion_generator.robot.get_joint_ids(name=control_part)

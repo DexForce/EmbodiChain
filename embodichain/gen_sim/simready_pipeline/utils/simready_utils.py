@@ -23,12 +23,12 @@ import numpy as np
 import trimesh
 import pyrender
 from PIL import Image
-from openai import OpenAI
 import itertools
 from scipy.spatial import ConvexHull
 from typing import Dict, Any, List
 
-from embodichain.gen_sim.simready_pipeline.configs import (
+from embodichain.gen_sim.mllm import (
+    create_openai_client,
     get_openai_compatible_llm_config,
 )
 
@@ -36,14 +36,7 @@ _GEN_CONFIG = get_openai_compatible_llm_config(required=True)
 
 DEPLOYMENT = _GEN_CONFIG["model"]
 
-_CLIENT_KWARGS = {
-    "api_key": _GEN_CONFIG["api_key"],
-    "default_query": _GEN_CONFIG.get("default_query") or None,
-}
-if _GEN_CONFIG.get("base_url"):
-    _CLIENT_KWARGS["base_url"] = _GEN_CONFIG["base_url"]
-
-client = OpenAI(**_CLIENT_KWARGS)
+client = create_openai_client(config=_GEN_CONFIG)
 
 STRATEGY = None
 

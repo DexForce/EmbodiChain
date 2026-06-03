@@ -202,7 +202,6 @@ embodichain/VERSION
 # benchmark results
 scripts/benchmark/rl/reports/*
 
-# Local/generated assets
-obj/
+# generated scene assets
 *_gym_project/
 backup_*/

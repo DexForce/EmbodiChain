@@ -38,10 +38,9 @@ class TaskAgent(AgentBase):
         super().__init__(**kwargs)
         if llm is None:
             raise ValueError(
-                "LLM is None. Please set the following environment variables:\n"
-                "  - OPENAI_API_KEY\n"
-                "  - OPENAI_MODEL (optional)\n"
-                "  - OPENAI_BASE_URL (optional for OpenAI-compatible endpoints)"
+                "LLM is None. Configure the shared MLLM entry point "
+                "`embodichain.gen_sim.mllm` with OPENAI_API_KEY, optional "
+                "OPENAI_MODEL/OPENAI_BASE_URL, or the gen-sim LLM config."
             )
         self.llm = llm
 

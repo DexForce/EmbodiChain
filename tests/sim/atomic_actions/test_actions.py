@@ -101,6 +101,19 @@ def _make_mock_motion_generator(robot: Mock | None = None) -> Mock:
     mg = Mock()
     mg.robot = robot or _make_mock_robot()
     mg.device = mg.robot.device
+
+    def interpolate_trajectory(control_part=None, qpos_list=None, options=None):
+        weights = torch.linspace(
+            0,
+            1,
+            steps=options.interpolate_nums + 1,
+            dtype=qpos_list.dtype,
+            device=qpos_list.device,
+        ).view(-1, 1)
+        trajectory = qpos_list[0] + (qpos_list[-1] - qpos_list[0]) * weights
+        return trajectory, None
+
+    mg.interpolate_trajectory = Mock(side_effect=interpolate_trajectory)
     return mg
 
 
@@ -156,6 +169,10 @@ class TestMoveActionHelpers:
         for i in range(NUM_ENVS):
             assert torch.equal(result[i], single)
 
+    def test_resolve_start_qpos_rejects_non_tensor(self):
+        with pytest.raises(TypeError, match="torch.Tensor"):
+            self.action._resolve_start_qpos([0.0] * ARM_DOF)
+
     def test_compute_three_phase_waypoints_sums_to_sample_interval(self):
         hand_interp_steps = 5
         first, second, third = self.action._compute_three_phase_waypoints(
@@ -205,10 +222,13 @@ class TestMoveActionHelpers:
             target_qpos.unsqueeze(0).repeat(NUM_ENVS, 1),
         )
         assert joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
+        assert self.mg.interpolate_trajectory.call_count == NUM_ENVS
 
-    def test_interpolate_qpos_requires_start_and_target_waypoints(self):
+    def test_motion_generator_qpos_interpolation_requires_start_and_target_waypoints(
+        self,
+    ):
         with pytest.raises(ValueError, match="at least 2"):
-            self.action._interpolate_qpos(
+            self.action._interpolate_qpos_with_motion_generator(
                 torch.zeros(NUM_ENVS, ARM_DOF),
                 torch.ones(NUM_ENVS, ARM_DOF),
                 1,

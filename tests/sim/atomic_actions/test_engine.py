@@ -27,7 +27,7 @@ from embodichain.lab.sim.atomic_actions.core import (
     Affordance,
     ObjectSemantics,
 )
-from embodichain.lab.sim.atomic_actions.actions import MoveActionCfg
+from embodichain.lab.sim.atomic_actions.actions import MoveAction, MoveActionCfg
 from embodichain.lab.sim.atomic_actions.engine import (
     AtomicActionEngine,
     SemanticAnalyzer,
@@ -216,7 +216,7 @@ def _make_sequence_test_robot() -> Mock:
 
 
 class TestExecuteStaticSequence:
-    """Tests ordered execution independent from _actions dict keys."""
+    """Tests execute_static with configured action order."""
 
     def setup_method(self):
         self.robot = _make_sequence_test_robot()
@@ -224,21 +224,49 @@ class TestExecuteStaticSequence:
         self.mg.robot = self.robot
         self.mg.device = torch.device("cpu")
 
-    def test_duplicate_move_names_preserve_sequence_order(self):
+        def interpolate_trajectory(control_part=None, qpos_list=None, options=None):
+            weights = torch.linspace(
+                0,
+                1,
+                steps=options.interpolate_nums + 1,
+                dtype=qpos_list.dtype,
+                device=qpos_list.device,
+            ).view(-1, 1)
+            trajectory = qpos_list[0] + (qpos_list[-1] - qpos_list[0]) * weights
+            return trajectory, None
+
+        self.mg.interpolate_trajectory = Mock(side_effect=interpolate_trajectory)
+
+    def teardown_method(self):
+        unregister_action("_test_hand_move")
+
+    def test_duplicate_move_names_are_rejected(self):
+        with pytest.raises(RuntimeError, match="Duplicate action name"):
+            AtomicActionEngine(
+                self.mg,
+                actions_cfg_list=[
+                    MoveActionCfg(control_part="arm", sample_interval=3),
+                    MoveActionCfg(control_part="hand", sample_interval=4),
+                ],
+            )
+
+    def test_execute_static_uses_action_config_order(self):
+        register_action("_test_hand_move", MoveAction)
         engine = AtomicActionEngine(
             self.mg,
             actions_cfg_list=[
                 MoveActionCfg(control_part="arm", sample_interval=3),
-                MoveActionCfg(control_part="hand", sample_interval=4),
+                MoveActionCfg(
+                    name="_test_hand_move",
+                    control_part="hand",
+                    sample_interval=4,
+                ),
             ],
         )
 
         assert "move" in engine._actions
-        assert engine._actions["move"].control_part == "hand"
-        assert [action.control_part for _, action in engine._ordered_actions] == [
-            "arm",
-            "hand",
-        ]
+        assert "_test_hand_move" in engine._actions
+        assert list(engine._actions) == ["move", "_test_hand_move"]
 
         is_success, trajectory = engine.execute_static(
             target_list=[
