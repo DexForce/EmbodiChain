@@ -184,6 +184,7 @@
             "gripper_close_state": [0.04],
             "target_xy": [0.75, -0.18],
             "success_tolerance": 0.04,
+            "ignore_terminations_during_agent": true,
             "agent_success": {
                 "op": "all",
                 "terms": [
