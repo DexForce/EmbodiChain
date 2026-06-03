@@ -16,6 +16,7 @@
 
 import os
 import torch
+torch._dynamo.config.cache_size_limit = 128  # recompile_limit
 import pytest
 import numpy as np
 
