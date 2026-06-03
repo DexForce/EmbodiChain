@@ -260,20 +260,32 @@ def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):
         raise ValueError("wrong_affordance requires a compiled arm action ndarray.")
 
     action = np.array(action, copy=True)
-    if action.ndim != 2 or action.shape[1] < 3:
+    if action.ndim != 2 or action.shape[0] == 0:
         raise ValueError(
-            f"wrong_affordance expects action with shape [T, arm_dof+2], got {action.shape}."
+            "wrong_affordance expects action with shape [T, arm_dof+eef_dof], "
+            f"got {action.shape}."
         )
 
     side = resolve_arm_side(env, error_arm)
     is_left = side == "left"
+    arm_joints = env.left_arm_joints if is_left else env.right_arm_joints
+    eef_joints = env.left_eef_joints if is_left else env.right_eef_joints
+    arm_dof = len(arm_joints)
+    eef_dof = len(eef_joints)
+    expected_width = arm_dof + eef_dof
+    if action.shape[1] != expected_width:
+        raise ValueError(
+            "wrong_affordance expects action with shape [T, arm_dof+eef_dof] "
+            f"({expected_width} columns for {arm_dof} arm joints and {eef_dof} "
+            f"eef joints), got {action.shape}."
+        )
     if hasattr(env, "get_agent_arm_control_part"):
         select_arm = env.get_agent_arm_control_part(is_left)
     else:
         select_arm = "left_arm" if is_left else "right_arm"
-    start_qpos = torch.as_tensor(action[0, :-2], dtype=torch.float32)
-    last_qpos = torch.as_tensor(action[-1, :-2], dtype=torch.float32)
-    gripper_state_traj = action[:, -1:].copy()
+    start_qpos = torch.as_tensor(action[0, :arm_dof], dtype=torch.float32)
+    last_qpos = torch.as_tensor(action[-1, :arm_dof], dtype=torch.float32)
+    gripper_state_traj = action[:, arm_dof:expected_width].copy()
     last_pose = env.get_arm_fk(qpos=last_qpos, is_left=is_left).clone()
 
     if error_pose is not None:
@@ -316,4 +328,4 @@ def wrong_affordance(env, action, error_arm, error_pose, relative_error_xyz):
             f"length: {len(arm_traj)} != {len(gripper_state_traj)}."
         )
 
-    return np.concatenate([arm_traj, gripper_state_traj, gripper_state_traj], axis=-1)
+    return np.concatenate([arm_traj, gripper_state_traj], axis=-1)

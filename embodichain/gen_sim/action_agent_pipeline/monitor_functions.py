@@ -47,9 +47,13 @@ def monitor_object_moved(
         ``True`` if the monitored failure occurs, i.e. the object moved more than
         the threshold.
     """
-    if last_frame_pose is None:
-        last_frame_pose = env.obj_info.get(obj_name).get("pose")
     current_pose = _get_object_pose(env, obj_name)
+    if last_frame_pose is None:
+        obj_info = getattr(env, "obj_info", {}) or {}
+        obj_state = obj_info.get(obj_name, {}) or {}
+        last_frame_pose = obj_state.get("pose")
+        if last_frame_pose is None:
+            last_frame_pose = current_pose
     previous_pose = _as_pose_matrix(last_frame_pose, device=current_pose.device)
     movement = torch.norm(current_pose[:3, 3] - previous_pose[:3, 3]).item()
     return movement > threshold
