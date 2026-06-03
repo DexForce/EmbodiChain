@@ -1,0 +1,324 @@
+version: 1
+defaults:
+  contexts:
+    - conventions/writing-style.md
+    - conventions/naming.md
+    - conventions/topic-lifecycle.md
+topics:
+  - id: env-framework
+    title: Environment Framework
+    aliases:
+      - env framework
+      - environment framework
+      - base env
+      - embodied env
+      - task environment
+      - gym environment
+      - register env
+      - task registration
+      - 环境框架
+      - 任务环境
+    keywords:
+      - env
+      - environment
+      - base_env
+      - embodied_env
+      - EmbodiedEnv
+      - BaseEnv
+      - register_env
+      - gym
+      - task
+      - step
+      - reset
+      - wrapper
+    paths:
+      - topics/env-framework/env-framework.md
+    source_of_truth:
+      - embodichain/lab/gym/envs/base_env.py
+      - embodichain/lab/gym/envs/embodied_env.py
+      - embodichain/lab/gym/envs/tasks/
+      - embodichain/lab/gym/utils/
+    related_topics:
+      - manager-functor
+    status: active
+
+  - id: manager-functor
+    title: Manager & Functor Pattern
+    aliases:
+      - manager functor
+      - functor pattern
+      - manager pattern
+      - observation manager
+      - reward manager
+      - event manager
+      - action manager
+      - dataset manager
+      - functor cfg
+    keywords:
+      - manager
+      - functor
+      - FunctorCfg
+      - ObservationManager
+      - RewardManager
+      - EventManager
+      - ActionManager
+      - DatasetManager
+      - observation
+      - reward
+      - event
+      - action
+      - dataset
+    paths:
+      - topics/manager-functor/manager-functor.md
+    source_of_truth:
+      - embodichain/lab/gym/envs/managers/manager_base.py
+      - embodichain/lab/gym/envs/managers/cfg.py
+      - embodichain/lab/gym/envs/managers/observation_manager.py
+      - embodichain/lab/gym/envs/managers/reward_manager.py
+      - embodichain/lab/gym/envs/managers/event_manager.py
+    related_topics:
+      - env-framework
+      - randomization
+    status: active
+
+  - id: ik-solvers
+    title: IK Solver System
+    aliases:
+      - ik solver
+      - inverse kinematics
+      - solver system
+      - srs solver
+      - opw solver
+      - pink solver
+      - pinocchio solver
+      - pytorch solver
+      - differential solver
+      - 逆运动学
+      - IK求解器
+    keywords:
+      - ik
+      - solver
+      - inverse kinematics
+      - SRS
+      - OPW
+      - pink
+      - pinocchio
+      - pytorch
+      - differential
+      - kinematics
+      - joint
+      - tcp
+      - end effector
+    paths:
+      - topics/ik-solvers/ik-solvers.md
+    source_of_truth:
+      - embodichain/lab/sim/solvers/base_solver.py
+      - embodichain/lab/sim/solvers/srs_solver.py
+      - embodichain/lab/sim/solvers/opw_solver.py
+      - embodichain/lab/sim/solvers/pink_solver.py
+      - embodichain/lab/sim/solvers/pinocchio_solver.py
+      - embodichain/lab/sim/solvers/pytorch_solver.py
+      - embodichain/lab/sim/solvers/differential_solver.py
+    related_topics:
+      - robot-system
+      - motion-planning
+    status: active
+
+  - id: robot-system
+    title: Robot System
+    aliases:
+      - robot
+      - robot config
+      - robot cfg
+      - robot system
+      - dexforce w1
+      - cobotmagic
+      - control parts
+      - drive properties
+      - 机器人系统
+      - 机器人配置
+    keywords:
+      - robot
+      - RobotCfg
+      - Robot
+      - control
+      - drive
+      - joint
+      - urdf
+      - cobotmagic
+      - dexforce_w1
+      - gripper
+      - arm
+    paths:
+      - topics/robot-system/robot-system.md
+    source_of_truth:
+      - embodichain/lab/sim/objects/robot.py
+      - embodichain/lab/sim/robots/
+      - embodichain/lab/sim/cfg.py
+    related_topics:
+      - ik-solvers
+      - motion-planning
+      - sensor-system
+    status: active
+
+  - id: sensor-system
+    title: Sensor System
+    aliases:
+      - sensor
+      - camera
+      - stereo camera
+      - contact sensor
+      - sensor system
+      - 传感器
+      - 相机
+    keywords:
+      - sensor
+      - camera
+      - stereo
+      - contact
+      - BaseSensor
+      - Camera
+      - StereoCamera
+      - ContactSensor
+      - rgb
+      - depth
+      - pointcloud
+    paths:
+      - topics/sensor-system/sensor-system.md
+    source_of_truth:
+      - embodichain/lab/sim/sensors/base_sensor.py
+      - embodichain/lab/sim/sensors/camera.py
+      - embodichain/lab/sim/sensors/stereo.py
+      - embodichain/lab/sim/sensors/contact_sensor.py
+    related_topics:
+      - robot-system
+      - env-framework
+    status: active
+
+  - id: motion-planning
+    title: Motion Planning
+    aliases:
+      - motion planning
+      - motion planner
+      - toppra
+      - motion generator
+      - trajectory planning
+      - 运动生成
+      - 运动规划
+      - 轨迹规划
+    keywords:
+      - planner
+      - planning
+      - trajectory
+      - toppra
+      - motion generator
+      - path
+      - waypoint
+      - velocity
+      - acceleration
+    paths:
+      - topics/motion-planning/motion-planning.md
+    source_of_truth:
+      - embodichain/lab/sim/planners/base_planner.py
+      - embodichain/lab/sim/planners/toppra_planner.py
+      - embodichain/lab/sim/planners/motion_generator.py
+    related_topics:
+      - robot-system
+      - ik-solvers
+    status: active
+
+  - id: rl-training
+    title: RL Training Pipeline
+    aliases:
+      - rl training
+      - reinforcement learning
+      - ppo
+      - rl agent
+      - actor critic
+      - rollout buffer
+      - 强化学习
+      - RL训练
+    keywords:
+      - rl
+      - reinforcement
+      - ppo
+      - actor
+      - critic
+      - buffer
+      - rollout
+      - training
+      - collector
+      - policy
+      - reward
+    paths:
+      - topics/rl-training/rl-training.md
+    source_of_truth:
+      - embodichain/agents/rl/train.py
+      - embodichain/agents/rl/algo/
+      - embodichain/agents/rl/buffer/
+      - embodichain/agents/rl/models/
+      - embodichain/agents/rl/collector/
+    related_topics:
+      - env-framework
+      - manager-functor
+    status: active
+
+  - id: configclass-pattern
+    title: Configclass Pattern
+    aliases:
+      - configclass
+      - config class
+      - configuration pattern
+      - MISSING sentinel
+      - 配置类
+      - 配置模式
+    keywords:
+      - configclass
+      - config
+      - configuration
+      - MISSING
+      - dataclass
+      - decorator
+      - cfg
+      - nested
+    paths:
+      - topics/configclass-pattern/configclass-pattern.md
+    source_of_truth:
+      - embodichain/utils/configclass.py
+    related_topics:
+      - env-framework
+      - manager-functor
+      - robot-system
+    status: active
+
+  - id: randomization
+    title: Domain Randomization
+    aliases:
+      - randomization
+      - domain randomization
+      - physics randomization
+      - visual randomization
+      - spatial randomization
+      - geometry randomization
+      - 域随机化
+      - 随机化
+    keywords:
+      - randomization
+      - randomize
+      - physics
+      - visual
+      - spatial
+      - geometry
+      - domain
+      - EventCfg
+      - startup
+      - reset
+    paths:
+      - topics/randomization/randomization.md
+    source_of_truth:
+      - embodichain/lab/gym/envs/managers/randomization/
+      - embodichain/lab/gym/envs/managers/events.py
+    related_topics:
+      - manager-functor
+      - env-framework
+    status: active
