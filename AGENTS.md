@@ -1,5 +1,29 @@
 # EmbodiChain — Developer Reference
 
+## Project Agent Context Routing
+
+EmbodiChain keeps agent-facing context in a structured topic registry:
+
+- `agent_context/` — agent-readable Markdown context, indexed by `agent_context/MAP.yaml`
+- `docs/source/` — human-facing Sphinx documentation
+- `skills/project-dev-context/` — the skill that routes "reference project context" requests
+
+When a request says things like:
+
+- `reference project development docs`
+- `reference project context`
+
+the agent should:
+
+1. Read `agent_context/MAP.yaml` first
+2. Resolve the topic by `id`, `aliases`, then `keywords`
+3. Load only the matched Markdown files under `agent_context/`
+4. Avoid reading `docs/source/` unless the user explicitly asks for the Sphinx documentation
+
+Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `rl-training`, `configclass-pattern`, `randomization`.
+
+---
+
 ## Package Name
 
 **IMPORTANT**: The Python package name is `embodichain` (all lowercase, one word).
