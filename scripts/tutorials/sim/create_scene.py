@@ -93,7 +93,7 @@ def main():
             shape=MeshCfg(fpath=path),
             body_type="dynamic",
             attrs=RigidBodyAttributesCfg(
-                mass=3.0,
+                mass=10.0,
             ),
             body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.5],
@@ -104,9 +104,6 @@ def main():
     print("[INFO]: Scene setup complete!")
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")
-
-    if sim.is_newton_backend:
-        sim.finalize_newton_physics()
 
     # Open window when the scene has been set up
     if not args.headless:

@@ -16,11 +16,18 @@
 
 from .base import RigidBodyViewBase
 from .default import DefaultRigidBodyView
-from .newton import NewtonRigidBodyView, is_newton_scene
+from .newton import (
+    NewtonRigidBodyView,
+    apply_collision_filter_for_entities,
+    apply_collision_filter_for_envs,
+    is_newton_scene,
+)
 
 __all__ = [
     "RigidBodyViewBase",
     "DefaultRigidBodyView",
     "NewtonRigidBodyView",
+    "apply_collision_filter_for_entities",
+    "apply_collision_filter_for_envs",
     "is_newton_scene",
 ]

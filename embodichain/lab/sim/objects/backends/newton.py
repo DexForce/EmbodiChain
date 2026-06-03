@@ -19,10 +19,16 @@ from typing import Sequence
 import torch
 
 from dexsim.models import MeshObject
+from dexsim.engine.newton_physics import NewtonPhysicsScene
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.utils import logger
 
-__all__ = ["NewtonRigidBodyView", "is_newton_scene"]
+__all__ = [
+    "NewtonRigidBodyView",
+    "apply_collision_filter_for_entities",
+    "apply_collision_filter_for_envs",
+    "is_newton_scene",
+]
 
 _UINT64_MAX = (1 << 64) - 1
 _INT32_MAX = (1 << 31) - 1
@@ -37,6 +43,83 @@ def _normalize_native_handle(handle: int, owner: str) -> int:
     return value
 
 
+def _collision_filter_rows(filter_data: torch.Tensor) -> torch.Tensor:
+    """Return contiguous ``(N, 4)`` int32 rows for the Newton scene API."""
+    rows = filter_data.to(dtype=torch.int32)
+    if rows.ndim != 2 or rows.shape[-1] != 4:
+        logger.log_error(
+            "Collision filter data must have shape (N, 4), " f"got {tuple(rows.shape)}."
+        )
+    if not rows.is_contiguous():
+        rows = rows.contiguous()
+    return rows
+
+
+def _resolve_body_ids_for_entities(
+    manager: object,
+    entities: Sequence[MeshObject],
+) -> torch.Tensor:
+    body_ids: list[int] = []
+    for entity in entities:
+        entity_handle = _normalize_native_handle(
+            entity.get_native_handle(), "MeshObject"
+        )
+        body_id = manager.body_id_for_entity(entity_handle)
+        if body_id is None:
+            logger.log_error(
+                "Newton collision filter batch apply found an entity without a body id."
+            )
+        body_ids.append(int(body_id))
+    return torch.as_tensor(body_ids, dtype=torch.int32)
+
+
+def apply_collision_filter_for_entities(
+    scene: NewtonPhysicsScene,
+    entities: Sequence[MeshObject],
+    filter_data: torch.Tensor,
+) -> None:
+    """Batch-apply collision filters for a list of MeshObjects.
+
+    Uses DexSim ``NewtonPhysicsScene.apply_collision_filter`` (vectorized meta
+    and shape-group writes on the DexSim side).
+    """
+    if len(entities) == 0:
+        return
+    if len(entities) != len(filter_data):
+        logger.log_error(
+            "Entity count does not match collision filter row count "
+            f"({len(entities)} vs {len(filter_data)})."
+        )
+
+    rows = _collision_filter_rows(filter_data)
+    body_ids = _resolve_body_ids_for_entities(scene.manager, entities)
+    body_ids = body_ids.to(device=rows.device)
+    scene.apply_collision_filter(body_ids, rows)
+
+
+def apply_collision_filter_for_envs(
+    scene: NewtonPhysicsScene,
+    entities_by_env: Sequence[Sequence[MeshObject]],
+    filter_data: torch.Tensor,
+    env_indices: Sequence[int],
+) -> None:
+    """Batch-apply collision filters with one filter row per environment.
+
+    Expands each env row to every ``MeshObject`` in that env (e.g. rigid groups).
+    """
+    entities: list[MeshObject] = []
+    rows: list[torch.Tensor] = []
+    for i, env_idx in enumerate(env_indices):
+        row = filter_data[i]
+        for entity in entities_by_env[env_idx]:
+            entities.append(entity)
+            rows.append(row)
+    if not entities:
+        return
+    stacked = torch.stack(rows, dim=0)
+    apply_collision_filter_for_entities(scene, entities, stacked)
+
+
 def is_newton_scene(scene: object) -> bool:
     """Return whether *scene* looks like a DexSim Newton scene view."""
     return (
@@ -44,6 +127,8 @@ def is_newton_scene(scene: object) -> bool:
         and hasattr(scene, "manager")
         and hasattr(scene, "batch_fetch_rigid_body_data")
         and hasattr(scene, "batch_apply_rigid_body_data")
+        and hasattr(scene, "apply_collision_filter")
+        and hasattr(scene, "fetch_collision_filter")
     )
 
 
@@ -61,7 +146,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def __init__(
         self,
         entities: Sequence[MeshObject],
-        scene: object,
+        scene: NewtonPhysicsScene,
         device: torch.device,
     ) -> None:
         self.entities = list(entities)
@@ -259,6 +344,32 @@ class NewtonRigidBodyView(RigidBodyViewBase):
 
     def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().RESTITUTION, data)
+
+    # -- Collision filter ----------------------------------------------------
+
+    def fetch_collision_filter(
+        self,
+        data: torch.Tensor,
+        env_indices: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Fetch collision filter rows into ``data`` with shape ``(N, 4)``."""
+        if env_indices is None:
+            env_indices = torch.arange(len(self.entities), device=self.device)
+        body_ids = self._resolve_body_ids(self.select_body_ids(env_indices))
+        out = self._fetch_buffer(data)
+        self.scene.fetch_collision_filter(body_ids, out)
+
+    def apply_collision_filter(
+        self,
+        filter_data: torch.Tensor,
+        env_indices: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Apply DexSim collision filter rows for selected env instances."""
+        if env_indices is None:
+            env_indices = torch.arange(len(self.entities), device=self.device)
+        body_ids = self._resolve_body_ids(self.select_body_ids(env_indices))
+        rows = _collision_filter_rows(filter_data.to(device=self.device))
+        self.scene.apply_collision_filter(body_ids, rows)
 
     # -- Internal helpers ----------------------------------------------------
 

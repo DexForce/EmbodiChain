@@ -143,9 +143,7 @@ class SimulationManagerCfg:
             # Env tensors may use CPU while Newton/Warp sim stays on CUDA for GPU render sync.
             if isinstance(self.physics_cfg, NewtonPhysicsCfg):
                 torch_device = (
-                    torch.device(device)
-                    if isinstance(device, str)
-                    else device
+                    torch.device(device) if isinstance(device, str) else device
                 )
                 if torch_device.type != "cpu":
                     self.physics_cfg.device = device
@@ -600,7 +598,7 @@ class SimulationManager:
     def init_gpu_physics(self) -> None:
         """Initialize the GPU physics simulation."""
         if self.is_newton_backend:
-            logger.log_warning(
+            logger.log_debug(
                 "GPU physics initialization is handled by the Newton backend. Forcing finalization of Newton physics."
             )
             self.finalize_newton_physics()
@@ -691,19 +689,13 @@ class SimulationManager:
 
         self._world.render_camera_group(group_ids)
 
-    def update(self, physics_dt: float | None = None, step: int | None = None) -> None:
+    def update(self, physics_dt: float | None = None, step: int = 1) -> None:
         """Update the physics.
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
-            step (int | None, optional): the number of :meth:`World.update` calls per invocation.
-                Defaults to ``1`` for the Newton backend (each call already runs
-                ``NewtonPhysicsCfg.num_substeps`` solver substeps) and ``10`` for
-                the default PhysX backend.
+            step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 1.
         """
-        if step is None:
-            step = 1 if self.is_newton_backend else 10
-
         if self.is_newton_backend:
             self.finalize_newton_physics()
         elif self.is_use_gpu_physics and not self._is_initialized_gpu_physics:

@@ -30,6 +30,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
 from embodichain.lab.sim.objects.backends import (
     DefaultRigidBodyView,
     NewtonRigidBodyView,
+    apply_collision_filter_for_entities,
     is_newton_scene,
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
@@ -251,7 +252,7 @@ class RigidObject(BatchEntity):
                 first_entity.get_physical_attr().as_dict()
             )
 
-        super().__init__(cfg, entities, device)
+        super().__init__(cfg, entities, device, auto_reset=False)
 
         # set default collision filter
         self._set_default_collision_filter()
@@ -410,13 +411,19 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match pose length {len(filter_data)}."
             )
 
+        if is_newton_scene(self._ps):
+            if isinstance(self._data.body_view, NewtonRigidBodyView):
+                self._data.body_view.apply_collision_filter(filter_data, local_env_ids)
+            else:
+                entities = [self._entities[env_idx] for env_idx in local_env_ids]
+                apply_collision_filter_for_entities(self._ps, entities, filter_data)
+            return
+
         filter_data_np = filter_data.cpu().numpy().astype(np.uint32)
         for i, env_idx in enumerate(local_env_ids):
-            entity = self._entities[env_idx]
-            if is_newton_scene(self._ps):
-                entity.set_collision_filter_data(filter_data_np[i])
-            else:
-                entity.get_physical_body().set_collision_filter_data(filter_data_np[i])
+            self._entities[env_idx].get_physical_body().set_collision_filter_data(
+                filter_data_np[i]
+            )
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -1285,6 +1292,7 @@ class RigidObject(BatchEntity):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        # TODO: support attributes setter for newton.
         if not is_newton_scene(self._ps):
             self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 

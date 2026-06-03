@@ -21,6 +21,7 @@ from functools import cached_property
 import torch
 
 from dexsim.models import MeshObject
+from dexsim.engine import PhysicsScene
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.utils.math import convert_quat, matrix_from_quat
@@ -40,7 +41,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
     def __init__(
         self,
         entities: Sequence[MeshObject],
-        ps: object,
+        ps: PhysicsScene,
         device: torch.device,
     ) -> None:
         self.entities = list(entities)
