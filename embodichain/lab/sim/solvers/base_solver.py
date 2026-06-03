@@ -177,6 +177,14 @@ class BaseSolver(metaclass=ABCMeta):
                 fullgraph=True,
                 dynamic=True,
             )
+            # Warm up on the solver device so Dynamo guards match CUDA/CPU at init
+            # instead of on the first get_fk call (avoids recompile_limit hits in CI).
+            if self.dof > 0:
+                with torch.no_grad():
+                    warmup_qpos = torch.zeros(
+                        1, self.dof, device=self.device, dtype=torch.float32
+                    )
+                    self.compiled_fk(warmup_qpos)
 
         self._init_qpos_limits()
 
