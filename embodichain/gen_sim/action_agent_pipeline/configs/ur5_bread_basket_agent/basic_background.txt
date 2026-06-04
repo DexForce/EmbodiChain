@@ -22,14 +22,19 @@ The interactive objects are:
 - wicker_basket: the target basket near the center of the table
   (source object basket_3).
 
-The nominal task order is left first, then right. The left UR10 must grasp
-left_bread_roll and place it into wicker_basket before the right UR10 starts
-grasping right_bread_roll. To change the insertion order later, edit the task
-prompt sequence and keep the same atomic action API.
+The nominal task starts with simultaneous dual-arm grasping. The left UR10 must
+grasp left_bread_roll while the right UR10 grasps right_bread_roll in the same
+graph edge. After both bread rolls are held, placement is sequential: the left
+UR10 places left_bread_roll into wicker_basket and returns to its initial pose,
+then the right UR10 places right_bread_roll into wicker_basket and returns to
+its initial pose. To change the insertion order later, edit the task prompt
+sequence and keep the same atomic action API.
 
 The wicker_basket area is a shared workspace. After a UR10 releases a bread
 roll, it should retreat upward and return to its initial pose before the other
 UR10 moves to the basket, otherwise the two arms may collide near the basket.
+The right UR10 should keep holding right_bread_roll while the left UR10 performs
+its placement and return-to-initial sequence.
 
 A bread roll at a high pose above `wicker_basket` is only staged, not placed.
 Each arm must lower the held bread roll into the basket release pose and open

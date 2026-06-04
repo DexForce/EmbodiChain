@@ -7,14 +7,18 @@ Each atomic function returns a list of joint-space trajectories (`list[np.ndarra
 Use `robot_name="left_arm"` only for `left_bread_roll` and use
 `robot_name="right_arm"` only for `right_bread_roll`.
 
-The nominal task is sequential, not simultaneous:
-- Left-side steps put the actual action in `left_arm_action` and set
-  `right_arm_action` to null.
-- Right-side steps put the actual action in `right_arm_action` and set
+The nominal task starts with simultaneous dual-arm grasping, then switches to
+sequential placement:
+- The first nominal edge must call `grasp` in both `left_arm_action` and
+  `right_arm_action`.
+- After both bread rolls are grasped, left-side placement steps put the actual
+  action in `left_arm_action` and set `right_arm_action` to null while the right
+  arm keeps holding right_bread_roll.
+- After the left arm releases left_bread_roll, first move it upward to clear the
+  basket, then use `back_to_initial_pose` before the right arm enters the shared
+  basket workspace.
+- Right-side placement steps put the actual action in `right_arm_action` and set
   `left_arm_action` to null.
-- After an arm releases a bread roll, first move it upward to clear the basket,
-  then use `back_to_initial_pose` before the other arm enters the shared basket
-  workspace.
 - `back_to_initial_pose` must never be used for an arm that is still holding a
   bread roll. The same arm must first execute `open_gripper` at the basket
   release pose.

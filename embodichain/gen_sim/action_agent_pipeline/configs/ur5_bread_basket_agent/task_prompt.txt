@@ -2,9 +2,12 @@ Task:
 UR5BreadBasket prototype: use the current two-UR10 probe configuration to place
 two bread objects into the basket.
 
-The task must be executed sequentially, not simultaneously:
-first the left UR10 places the left bread roll into the basket, then the right
-UR10 places the right bread roll into the basket.
+The task starts with both arms acting simultaneously:
+the left UR10 grasps the left bread roll while the right UR10 grasps the right
+bread roll in the same nominal graph edge. After both bread rolls are grasped,
+the placement phase must be sequential: the left UR10 places its bread roll into
+the basket and returns to its initial pose, then the right UR10 places its bread
+roll into the basket and returns to its initial pose.
 
 Object and arm mapping:
 - left_arm must only manipulate `left_bread_roll`.
@@ -14,10 +17,10 @@ Object and arm mapping:
 Generate one deterministic nominal graph with the following semantic sequence.
 Do not add extra alignment, search, recovery, or monitor steps. Do include the
 specified post-release retreat and return-to-initial steps so the arm that just
-placed an object leaves the shared basket workspace before the other arm starts.
-Generate exactly 12 nominal edges, one edge for each numbered step below. Do not
-merge, reorder, or omit the lower-to-release, open-gripper, upward-retreat, or
-return-to-initial edges.
+placed an object leaves the shared basket workspace before the next placement.
+Generate exactly 11 nominal edges, one edge for each numbered step below. Do not
+split the simultaneous grasp into separate edges. Do not merge, reorder, or omit
+the lower-to-release, open-gripper, upward-retreat, or return-to-initial edges.
 
 A bread roll is not considered placed when it is only above the wicker basket.
 For each arm, the placement order must be: move to a high staging pose above
@@ -26,69 +29,65 @@ the empty gripper upward, then return the arm to its initial pose. Never call
 `back_to_initial_pose` for an arm that has not already executed `open_gripper`
 for its held bread roll.
 
-1. Grasp the left bread roll with the left UR10:
+1. Grasp both bread rolls simultaneously:
    - left_arm_action: grasp(robot_name="left_arm",
      obj_name="left_bread_roll", pre_grasp_dis=0.08, sample_num=90)
-   - right_arm_action: null
+   - right_arm_action: grasp(robot_name="right_arm",
+     obj_name="right_bread_roll", pre_grasp_dis=0.08, sample_num=90)
 
 2. Move the held left bread roll directly above the left half of the wicker
-   basket:
+   basket while the right arm keeps holding its bread roll:
    - left_arm_action: move_relative_to_object(robot_name="left_arm",
      obj_name="wicker_basket", x_offset=-0.04, y_offset=0.0,
      z_offset=0.22, sample_num=90)
-   - right_arm_action: null
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
 3. Lower the held left bread roll to the left release pose inside the wicker
    basket:
    - left_arm_action: move_relative_to_object(robot_name="left_arm",
      obj_name="wicker_basket", x_offset=-0.04, y_offset=0.0,
      z_offset=0.12, sample_num=60)
-   - right_arm_action: null
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
 4. Release the left bread roll into the wicker basket:
    - left_arm_action: open_gripper(robot_name="left_arm",
      sample_num=30, open_threshold=-1.0, settle_steps=50)
-   - right_arm_action: null
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
 5. Move the empty left gripper upward to clear the basket:
    - left_arm_action: move_by_relative_offset(robot_name="left_arm",
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
-   - right_arm_action: null
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
 6. Return the left UR10 to its initial pose to keep the basket workspace clear:
    - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
-   - right_arm_action: null
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
-7. Grasp the right bread roll with the right UR10:
-   - left_arm_action: null
-   - right_arm_action: grasp(robot_name="right_arm",
-     obj_name="right_bread_roll", pre_grasp_dis=0.08, sample_num=90)
-
-8. Move the held right bread roll directly above the right half of the wicker
-   basket:
+7. Move the held right bread roll directly above the right half of the wicker
+   basket after the left arm has returned:
    - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
      z_offset=0.22, sample_num=90)
 
-9. Lower the held right bread roll to the right release pose inside the wicker
+8. Lower the held right bread roll to the right release pose inside the wicker
    basket:
    - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
      z_offset=0.12, sample_num=60)
 
-10. Release the right bread roll into the wicker basket:
+9. Release the right bread roll into the wicker basket:
    - left_arm_action: null
    - right_arm_action: open_gripper(robot_name="right_arm",
      sample_num=30, open_threshold=-1.0, settle_steps=50)
 
-11. Move the empty right gripper upward to clear the basket:
+10. Move the empty right gripper upward to clear the basket:
    - left_arm_action: null
    - right_arm_action: move_by_relative_offset(robot_name="right_arm",
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
 
-12. Return the right UR10 to its initial pose after releasing the bread roll:
+11. Return the right UR10 to its initial pose after releasing the bread roll:
    - left_arm_action: null
    - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=60)
 
