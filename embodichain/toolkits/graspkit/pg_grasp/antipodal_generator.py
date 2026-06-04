@@ -82,6 +82,9 @@ class GraspGeneratorCfg:
     n_deviated_approach_directions: int = 4
     """Number of approach directions with evenly deviated angles when sampling grasp poses."""
 
+    n_top_grasps: int = 50
+    """Number of top-ranked grasp poses to return based on the scoring cost."""
+
     is_partial_annotate: bool = False
     """When ``True``, the annotator allows selecting a partial region of the 
     mesh for grasp sampling. If ``False``, the entire mesh is used."""
@@ -715,7 +718,25 @@ class GraspGenerator:
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.3 * angle_cost + 0.3 * length_cost + 0.4 * center_cost
-        return True, valid_grasp_poses, valid_open_lengths, total_cost
+
+        n_valid = valid_grasp_poses.shape[0]
+        if n_valid == 0:
+            # no valid grasp pose
+            return False, valid_grasp_poses, valid_open_lengths, total_cost
+        if n_valid > self.cfg.n_top_grasps:
+            # select only top-k grasps
+            topk_indices = torch.topk(
+                total_cost, self.cfg.n_top_grasps, largest=False
+            ).indices
+            top_grasp_poses = valid_grasp_poses[topk_indices]
+            top_open_lengths = valid_open_lengths[topk_indices]
+            top_total_cost = total_cost[topk_indices]
+        else:
+            top_grasp_poses = valid_grasp_poses
+            top_open_lengths = valid_open_lengths
+            top_total_cost = total_cost
+
+        return True, top_grasp_poses, top_open_lengths, top_total_cost
 
     def get_grasp_poses(
         self,
