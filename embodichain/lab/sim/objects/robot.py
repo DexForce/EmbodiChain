@@ -801,6 +801,7 @@ class Robot(Articulation):
         max_effort: torch.Tensor | None = None,
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
+        armature: torch.Tensor | None = None,
         drive_type: str = "force",
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
@@ -814,6 +815,7 @@ class Robot(Articulation):
             max_effort (torch.Tensor): The maximum effort of the joint drive with shape (len(env_ids), len(joint_ids)).
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
+            armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
             drive_type (str, optional): The type of drive to apply. Defaults to "force".
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
@@ -824,6 +826,7 @@ class Robot(Articulation):
             max_effort=max_effort,
             max_velocity=max_velocity,
             friction=friction,
+            armature=armature,
             drive_type=drive_type,
             joint_ids=joint_ids,
             env_ids=env_ids,
@@ -840,6 +843,7 @@ class Robot(Articulation):
             ("max_effort", self.default_joint_max_effort),
             ("max_velocity", self.default_joint_max_velocity),
             ("friction", self.default_joint_friction),
+            ("armature", self.default_joint_armature),
         ]
 
         for prop_name, default_array in drive_props:
@@ -894,6 +898,7 @@ class Robot(Articulation):
             max_effort=self.default_joint_max_effort,
             max_velocity=self.default_joint_max_velocity,
             friction=self.default_joint_friction,
+            armature=self.default_joint_armature,
             drive_type=drive_type,
         )
 
