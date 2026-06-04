@@ -20,6 +20,7 @@ Usage examples::
 
     python -m embodichain preview-asset --asset_path /path/to/asset.usda --preview
     python -m embodichain run-env --env_name my_env
+    python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
     python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
 """
 
@@ -74,6 +75,15 @@ def main() -> None:
     )
 
     annotate_grasp_parser.set_defaults(func=annotate_grasp_cli)
+
+    # -- train-rl ------------------------------------------------------------
+    train_rl_parser = subparsers.add_parser(
+        "train-rl",
+        help="Train an RL agent from a config file (.json, .yaml, or .yml).",
+    )
+    from embodichain.agents.rl.train import cli as train_rl_cli
+
+    train_rl_parser.set_defaults(func=train_rl_cli)
 
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.

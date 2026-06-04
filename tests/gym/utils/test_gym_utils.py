@@ -27,7 +27,10 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     init_rollout_buffer_from_config,
     merge_args_with_gym_config,
+    config_to_cfg,
+    DEFAULT_MANAGER_MODULES,
 )
+from embodichain.utils.utility import load_config, save_config
 
 
 def test_env_launcher_args_include_physics():
@@ -361,6 +364,42 @@ class TestInitRolloutBufferFromConfig:
         )
 
         assert buffer["obs"]["extra_data"].shape == (4, 200, 2)
+
+
+class TestConfigToCfgFromYaml:
+    def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "max_episode_steps": 100,
+            "env": {
+                "events": {},
+                "observations": {},
+                "rewards": {},
+            },
+            "robot": {
+                "uid": "TestRobot",
+                "urdf_cfg": {
+                    "components": [
+                        {
+                            "component_type": "arm",
+                            "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+                        }
+                    ]
+                },
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "init_qpos": [0.0] * 6,
+            },
+        }
+
+        config_path = tmp_path / "gym_config.yaml"
+        save_config(config_path, config)
+
+        loaded = load_config(config_path)
+        cfg = config_to_cfg(loaded, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert cfg.max_episode_steps == 100
+        assert cfg.robot.uid == "TestRobot"
 
 
 if __name__ == "__main__":

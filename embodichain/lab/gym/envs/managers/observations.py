@@ -1149,12 +1149,15 @@ class get_articulation_joint_drive(Functor):
                     "friction": torch.zeros(
                         (env.num_envs, 1), dtype=torch.float32, device=env.device
                     ),
+                    "armature": torch.zeros(
+                        (env.num_envs, 1), dtype=torch.float32, device=env.device
+                    ),
                 },
                 batch_size=[env.num_envs],
                 device=env.device,
             )
         else:
-            stiffness, damping, max_effort, max_velocity, friction = (
+            stiffness, damping, max_effort, max_velocity, friction, armature = (
                 art.get_joint_drive()
             )
             result = TensorDict(
@@ -1164,6 +1167,7 @@ class get_articulation_joint_drive(Functor):
                     "max_effort": max_effort,
                     "max_velocity": max_velocity,
                     "friction": friction,
+                    "armature": armature,
                 },
                 batch_size=[env.num_envs],
                 device=env.device,

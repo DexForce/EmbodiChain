@@ -19,8 +19,40 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
 | `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
 | `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
-| `attrs` | `RigidBodyAttributesCfg` | `...` | Rigid body attributes configuration. |
+| `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
+| `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
+
+### Per-link physics (`link_attrs`)
+
+By default, `attrs` applies the same rigid-body physics to every link. Use `link_attrs` to
+override specific links (matched by regex, same rules as joint drive dict keys):
+
+```python
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    LinkPhysicsOverrideCfg,
+    RigidBodyAttributesCfg,
+    RigidBodyAttributesOverrideCfg,
+)
+
+art_cfg = ArticulationCfg(
+    fpath="path/to/robot.urdf",
+    attrs=RigidBodyAttributesCfg(static_friction=0.5),
+    link_attrs={
+        "eef": LinkPhysicsOverrideCfg(
+            link_names_expr=[".*(hand|finger|ee).*"],
+            attrs=RigidBodyAttributesOverrideCfg(
+                static_friction=0.95,
+                contact_offset=0.001,
+            ),
+        ),
+    },
+)
+```
+
+At runtime, use `articulation.set_link_physical_attr(...)` and `get_link_physical_attr(...)`
+for the same partial-override behavior.
 
 ### Drive Configuration
 
@@ -33,6 +65,7 @@ The `drive_props` parameter controls the joint physics behavior. It is defined u
 | `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
 | `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
 | `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
+| `armature` | `float` / `Dict` | `0.0` | Joint armature added to joint-space inertia ($kg$ for prismatic, $kg \cdot m^2$ for revolute). |
 | `drive_type` | `str` | `"none"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
 
 ### Setup & Initialization
@@ -106,7 +139,7 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
-| `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction)`, each shaped `(N, dof)`. |
+| `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
 
 ```python
 # Example: Accessing state

@@ -71,9 +71,9 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
             "Provide a valid path via --config."
         )
 
-    from embodichain.utils.utility import load_json
+    from embodichain.utils.utility import load_config
 
-    gym_config = load_json(config_path)
+    gym_config = load_config(config_path)
 
     gym_config["headless"] = True
     gym_config.setdefault("renderer", True)

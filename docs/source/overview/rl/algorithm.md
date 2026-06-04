@@ -33,7 +33,7 @@ This module contains the core implementations of reinforcement learning algorith
 
 ### Config Classes
 - `AlgorithmCfg`, `PPOCfg`, `GRPOCfg`: Centralized management of learning rate, batch size, clip_coef, ent_coef, vf_coef, and other parameters.
-- Supports automatic loading from JSON config files for batch experiments and parameter tuning.
+- Supports automatic loading from JSON or YAML config files for batch experiments and parameter tuning.
 - Can be extended via inheritance for multiple algorithms and tasks.
 
 ## Code Example
@@ -48,7 +48,7 @@ class PPO(BaseAlgorithm):
 ```
 
 ## Usage Recommendations
-- It is recommended to manage all algorithm parameters via config classes and JSON config files for reproducibility and tuning.
+- It is recommended to manage all algorithm parameters via config classes and JSON or YAML config files for reproducibility and tuning.
 - Supports multi-environment parallel collection to improve sampling efficiency.
 - Custom algorithm classes can be implemented to extend new RL methods.
 - **GRPO**: Use `actor_only` policy (no Critic). Set `kl_coef=0` for from-scratch training (CartPole, dense reward); set `kl_coef=0.02` for VLA/LLM fine-tuning.

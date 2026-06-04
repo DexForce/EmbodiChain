@@ -305,7 +305,6 @@ class SimulationManager:
         self._world: dexsim.World = dexsim.World(world_config)
 
         self._window: Windows | None = None
-        self._is_registered_window_control = False
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
         wr = sim_config.window_record
@@ -383,7 +382,6 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            # self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -753,13 +751,11 @@ class SimulationManager:
         self._world.open_window()
         self._window = self._world.get_windows()
 
-        # TODO: will open these features after fix the related blocking issues.
-        # self._register_default_window_control()
-        # if (
-        #     self._window_record_hotkey_cfg is not None
-        #     and self._window_record_input_control is None
-        # ):
-        #     self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            self._window_record_hotkey_cfg is not None
+            and self._window_record_input_control is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
@@ -1882,26 +1878,6 @@ class SimulationManager:
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
-
-    def _register_default_window_control(self) -> None:
-        """Register default window controls for better simulation interaction."""
-        from dexsim.types import InputKey
-
-        if self._is_registered_window_control:
-            return
-
-        class WindowDefaultEvent(ObjectManipulator):
-
-            def on_key_down(self, key):
-                if key == InputKey.SCANCODE_C.value:
-                    print(f"Raycast distance: {self.selected_distance}")
-                    print(f"Hit position: {self.selected_position}")
-
-        manipulator = WindowDefaultEvent()
-        manipulator.enable_selection_cache(True)
-        self._window.add_input_control(manipulator)
-
-        self._is_registered_window_control = True
 
     def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
         """Add one or more custom window input controls.

@@ -435,6 +435,106 @@ class RigidBodyAttributesCfg:
 
 
 @configclass
+class RigidBodyAttributesOverrideCfg:
+    """Partial rigid-body attribute overrides for per-link physics configuration.
+
+    Fields set to ``None`` are not applied and retain values from the base
+    :class:`RigidBodyAttributesCfg`.
+    """
+
+    mass: float | None = None
+    density: float | None = None
+    angular_damping: float | None = None
+    linear_damping: float | None = None
+    max_depenetration_velocity: float | None = None
+    sleep_threshold: float | None = None
+    min_position_iters: int | None = None
+    min_velocity_iters: int | None = None
+    max_linear_velocity: float | None = None
+    max_angular_velocity: float | None = None
+    enable_ccd: bool | None = None
+    contact_offset: float | None = None
+    rest_offset: float | None = None
+    enable_collision: bool | None = None
+    restitution: float | None = None
+    dynamic_friction: float | None = None
+    static_friction: float | None = None
+
+    def merge_with(self, base: RigidBodyAttributesCfg) -> PhysicalAttr:
+        """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides."""
+        merged = RigidBodyAttributesCfg()
+        for field_name in merged.__dataclass_fields__:
+            override_val = getattr(self, field_name)
+            if override_val is not None:
+                setattr(merged, field_name, override_val)
+            else:
+                setattr(merged, field_name, getattr(base, field_name))
+        return merged.attr()
+
+    @classmethod
+    def from_dict(
+        cls, init_dict: Dict[str, Union[str, float, int, bool]]
+    ) -> RigidBodyAttributesOverrideCfg:
+        """Initialize the configuration from a dictionary."""
+        cfg = cls()
+        for key, value in init_dict.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+            else:
+                logger.log_warning(
+                    f"Key '{key}' not found in {cfg.__class__.__name__}."
+                )
+        return cfg
+
+
+@configclass
+class LinkPhysicsOverrideCfg:
+    """Per-link physics override matched by regex on articulation link names."""
+
+    link_names_expr: list[str] = MISSING
+    """Regex patterns matched against link names (full match)."""
+
+    attrs: RigidBodyAttributesOverrideCfg = RigidBodyAttributesOverrideCfg()
+    """Partial attribute overrides applied on top of :attr:`ArticulationCfg.attrs`."""
+
+    replace_inertial: bool = False
+    """Whether to recompute inertia when mass is overridden (DexSim flag)."""
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> LinkPhysicsOverrideCfg:
+        """Initialize the configuration from a dictionary."""
+        cfg = cls()
+        for key, value in init_dict.items():
+            if key == "attrs" and isinstance(value, dict):
+                setattr(cfg, key, RigidBodyAttributesOverrideCfg.from_dict(value))
+            elif hasattr(cfg, key):
+                setattr(cfg, key, value)
+            else:
+                logger.log_warning(
+                    f"Key '{key}' not found in {cfg.__class__.__name__}."
+                )
+        return cfg
+
+
+def link_attrs_from_dict(
+    value: dict[str, Any],
+) -> dict[str, LinkPhysicsOverrideCfg]:
+    """Parse a ``link_attrs`` mapping from YAML/JSON-style dicts."""
+    link_attrs: dict[str, LinkPhysicsOverrideCfg] = {}
+    for group_name, group_cfg in value.items():
+        if isinstance(group_cfg, LinkPhysicsOverrideCfg):
+            link_attrs[group_name] = group_cfg
+        elif isinstance(group_cfg, dict):
+            link_attrs[group_name] = LinkPhysicsOverrideCfg.from_dict(group_cfg)
+        else:
+            raise TypeError(
+                f"link_attrs['{group_name}'] must be a dict or "
+                f"LinkPhysicsOverrideCfg, got {type(group_cfg)}."
+            )
+    return link_attrs
+
+
+@configclass
 class SoftbodyVoxelAttributesCfg:
     # voxel config
     triangle_remesh_resolution: int = 8
@@ -721,6 +821,15 @@ class JointDrivePropertiesCfg:
 
     friction: Union[Dict[str, float], float] = 0.0
     """Friction coefficient of the joint"""
+
+    armature: Union[Dict[str, float], float] = 0.0
+    """Joint armature added to joint-space spatial inertia.
+
+    Units depend on the joint model:
+
+    * For prismatic (linear) joints, the unit is mass [kg].
+    * For revolute (angular) joints, the unit is mass * scene_length^2 [kg-m^2].
+    """
 
     @classmethod
     def from_dict(
@@ -1392,6 +1501,13 @@ class ArticulationCfg(ObjectBaseCfg):
     The mass and density in attrs will only be used if specified.
     """
 
+    link_attrs: dict[str, LinkPhysicsOverrideCfg] | None = None
+    """Named per-link physics override groups keyed by regex on link names.
+
+    Each group applies :attr:`LinkPhysicsOverrideCfg.attrs` on top of :attr:`attrs` for
+    matched links only. A link must not match more than one group.
+    """
+
     fix_base: bool = True
     """Whether to fix the base of the articulation.
 
@@ -1434,6 +1550,43 @@ class ArticulationCfg(ObjectBaseCfg):
     When False (default): Override USD properties with config values (URDF behavior).
     Only effective for USD files, ignored for URDF files.
     """
+
+    @classmethod
+    def from_dict(
+        cls, init_dict: Dict[str, Union[str, float, tuple, dict]]
+    ) -> ArticulationCfg:
+        """Initialize the configuration from a dictionary."""
+        cfg = cls()
+        for key, value in init_dict.items():
+            if key == "link_attrs" and isinstance(value, dict):
+                cfg.link_attrs = link_attrs_from_dict(value)
+            elif hasattr(cfg, key):
+                attr = getattr(cfg, key)
+                if is_configclass(attr):
+                    setattr(cfg, key, attr.from_dict(value))
+                else:
+                    setattr(cfg, key, value)
+            else:
+                logger.log_warning(
+                    f"Key '{key}' not found in {cfg.__class__.__name__}."
+                )
+
+        if cfg.init_local_pose is None:
+            from scipy.spatial.transform import Rotation as R
+
+            T = np.eye(4)
+            T[:3, 3] = np.array(cfg.init_pos)
+            T[:3, :3] = R.from_euler("xyz", np.deg2rad(cfg.init_rot)).as_matrix()
+            cfg.init_local_pose = T
+        else:
+            from scipy.spatial.transform import Rotation as R
+
+            cfg.init_pos = tuple(cfg.init_local_pose[:3, 3])
+            cfg.init_rot = tuple(
+                R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)
+            )
+
+        return cfg
 
 
 @configclass
@@ -1483,7 +1636,9 @@ class RobotCfg(ArticulationCfg):
 
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
+            if key == "link_attrs" and isinstance(value, dict):
+                cfg.link_attrs = link_attrs_from_dict(value)
+            elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
                 if key == "urdf_cfg":
                     from embodichain.lab.sim.cfg import URDFCfg

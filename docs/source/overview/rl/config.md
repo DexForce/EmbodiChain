@@ -16,7 +16,7 @@ This module defines configuration classes for RL algorithms, centralizing the ma
 - Supports inheritance and extension (e.g., PPOCfg adds clip_coef, ent_coef, vf_coef; GRPOCfg adds group_size, kl_coef, truncate_at_first_done).
 
 ### Automatic Loading
-- Supports automatic parsing of JSON config files; the main training script injects parameters automatically.
+- Supports automatic parsing of JSON and YAML config files; the main training script injects parameters automatically.
 - Decouples config from code, making batch experiments and parameter tuning easier.
 
 ## Usage Example
@@ -76,7 +76,7 @@ GRPO example (for Embodied AI / from-scratch training):
 - Supports parameter validation, default values, and type hints.
 
 ## Practical Tips
-- It is recommended to manage all experiment parameters via JSON config files for reproducibility and tuning.
+- It is recommended to manage all experiment parameters via JSON or YAML config files for reproducibility and tuning.
 - Supports multi-algorithm config for easy comparison and automation.
 
 ---

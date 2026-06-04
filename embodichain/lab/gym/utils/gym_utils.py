@@ -799,12 +799,15 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--gym_config",
         type=str,
-        help="Path to gym config file.",
+        help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
         required=False,
     )
     parser.add_argument(
-        "--action_config", type=str, help="Path to action config file.", default=None
+        "--action_config",
+        type=str,
+        help="Path to action config file (.json, .yaml, or .yml).",
+        default=None,
     )
     parser.add_argument(
         "--preview",
@@ -861,12 +864,12 @@ def build_env_cfg_from_args(
         tuple[EmbodiedEnvCfg, dict, dict]: A tuple containing the environment configuration object,
             the original gym configuration dictionary, and the action configuration dictionary.
     """
-    from embodichain.utils.utility import load_json
+    from embodichain.utils.utility import load_config
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
 
-    gym_config = load_json(args.gym_config)
+    gym_config = load_config(args.gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
 
     cfg: EmbodiedEnvCfg = config_to_cfg(
@@ -881,7 +884,7 @@ def build_env_cfg_from_args(
 
     action_config = {}
     if args.action_config is not None:
-        action_config = load_json(args.action_config)
+        action_config = load_config(args.action_config)
         action_config["action_config"] = action_config
 
     cfg.sim_cfg = SimulationManagerCfg(

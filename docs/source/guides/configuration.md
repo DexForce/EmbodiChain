@@ -1,6 +1,6 @@
 # Configuration Guide
 
-EmbodiChain uses a declarative configuration system built on Python dataclasses. This guide explains the key patterns: `@configclass`, `FunctorCfg`, and JSON configuration files.
+EmbodiChain uses a declarative configuration system built on Python dataclasses. This guide explains the key patterns: `@configclass`, `FunctorCfg`, and JSON/YAML configuration files.
 
 ---
 
@@ -121,11 +121,22 @@ class MyEventCfg:
 
 ---
 
-## JSON Configuration
+## JSON and YAML Configuration
 
-For RL training and data generation, EmbodiChain uses JSON config files. The JSON config mirrors the Python config structure but uses string names instead of direct function references.
+For RL training and data generation, EmbodiChain uses file-based configs (`.json`, `.yaml`, or `.yml`). The file format mirrors the Python config structure but uses string names instead of direct function references.
 
-### Environment Config (`gym_config.json`)
+Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
+
+Example paths in the repository:
+
+| Use case | JSON example | YAML example |
+|---|---|---|
+| Gym environment | `configs/gym/cobotmagic.json` | `configs/gym/cobotmagic.yaml` |
+| RL training | `configs/agents/rl/basic/cart_pole/train_config.json` | `configs/agents/rl/basic/cart_pole/train_config.yaml` |
+
+When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
+
+### Environment Config (`gym_config.json` / `gym_config.yaml`)
 
 ```json
 {
@@ -202,7 +213,7 @@ For RL training and data generation, EmbodiChain uses JSON config files. The JSO
 }
 ```
 
-### RL Training Config (`train_config.json`)
+### RL Training Config (`train_config.json` / `train_config.yaml`)
 
 ```json
 {
@@ -250,11 +261,36 @@ For RL training and data generation, EmbodiChain uses JSON config files. The JSO
 }
 ```
 
+The same structure in YAML:
+
+```yaml
+trainer:
+  exp_name: push_cube
+  seed: 42
+  device: cuda:0
+  iterations: 500
+  buffer_size: 1024
+  gym_config: configs/agents/rl/basic/cart_pole/gym_config.yaml
+policy:
+  name: actor_critic
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [256, 256]
+      activation: relu
+algorithm:
+  name: ppo
+  cfg:
+    learning_rate: 0.0001
+    batch_size: 64
+    gamma: 0.99
+```
+
 ---
 
 ## String-Based Function Resolution
 
-In JSON configs, functor functions are specified by name (string). EmbodiChain resolves these strings at runtime by searching registered modules. For example:
+In JSON and YAML configs, functor functions are specified by name (string). EmbodiChain resolves these strings at runtime by searching registered modules. For example:
 
 - `"distance_between_objects"` resolves to `embodichain.lab.gym.envs.managers.rewards.distance_between_objects`
 - `"DeltaQposTerm"` resolves to `embodichain.lab.gym.envs.managers.actions.DeltaQposTerm`
@@ -264,9 +300,9 @@ When writing custom functors, make sure they are imported in the module's `__ini
 
 ---
 
-## `SceneEntityCfg` in JSON
+## `SceneEntityCfg` in Config Files
 
-When referencing scene entities in JSON, use a dictionary with a `uid` key:
+When referencing scene entities in JSON or YAML, use a dictionary with a `uid` key:
 
 ```json
 {"uid": "my_cube"}
@@ -278,11 +314,11 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 ## Tips
 
-1. **Start from an existing config.** Copy a config file from `configs/gym/` and modify it for your task.
+1. **Start from an existing config.** Copy a config file from `configs/gym/` or `configs/agents/rl/` and modify it for your task.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
-3. **Use JSON configs for experiments.** They are easier to version, diff, and share.
+3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
-5. **Keep config pairs together.** For action-bank tasks, version `gym_config.json` and `action_config.json` together.
+5. **Keep config pairs together.** For action-bank tasks, version `gym_config` and `action_config` together (either format).
 
 ---
 
