@@ -237,9 +237,14 @@ class BaseArticulationTest:
 
     def test_get_joint_drive_with_joint_ids(self):
         """Test get_joint_drive supports joint_ids and env_ids filtering."""
-        all_stiffness, all_damping, all_max_effort, all_max_velocity, all_friction = (
-            self.art.get_joint_drive()
-        )
+        (
+            all_stiffness,
+            all_damping,
+            all_max_effort,
+            all_max_velocity,
+            all_friction,
+            all_armature,
+        ) = self.art.get_joint_drive()
 
         assert all_stiffness.shape == (
             NUM_ARENAS,
@@ -259,6 +264,7 @@ class BaseArticulationTest:
             max_effort,
             max_velocity,
             friction,
+            armature,
         ) = self.art.get_joint_drive(joint_ids=joint_ids, env_ids=env_ids)
 
         expected_stiffness = all_stiffness[env_ids][:, joint_ids]
@@ -266,6 +272,7 @@ class BaseArticulationTest:
         expected_max_effort = all_max_effort[env_ids][:, joint_ids]
         expected_max_velocity = all_max_velocity[env_ids][:, joint_ids]
         expected_friction = all_friction[env_ids][:, joint_ids]
+        expected_armature = all_armature[env_ids][:, joint_ids]
 
         expected_shape = (len(env_ids), len(joint_ids))
         assert (
@@ -286,6 +293,9 @@ class BaseArticulationTest:
         assert torch.allclose(
             friction, expected_friction, atol=1e-5
         ), "FAIL: friction does not match expected filtered values"
+        assert torch.allclose(
+            armature, expected_armature, atol=1e-5
+        ), "FAIL: armature does not match expected filtered values"
 
     def teardown_method(self):
         """Clean up resources after each test method."""
