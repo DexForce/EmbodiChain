@@ -372,7 +372,7 @@ class ManagerBase(ABC):
         * Resolving the scene entity configuration for the functor.
         * Initializing the functor if it is a class.
 
-        Since the above steps rely on PhysX to parse over the simulation scene, they are deferred
+        Since the above steps rely on dexsim to parse over the simulation scene, they are deferred
         until the simulation starts playing.
 
         Args:
