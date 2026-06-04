@@ -347,7 +347,7 @@ class PickUpAction(MoveAction):
 
         # Resolve grasp pose
         if isinstance(target, ObjectSemantics):
-            is_success, grasp_xpos, open_length = self._resolve_grasp_pose(target)
+            is_success, grasp_xpos = self._resolve_grasp_pose(target)
         else:
             is_success, grasp_xpos = self._resolve_pose_target(
                 target, action_name=self.__class__.__name__
@@ -470,10 +470,43 @@ class PickUpAction(MoveAction):
             )
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
 
-        is_success, grasp_xpos, open_length = semantics.affordance.get_best_grasp_poses(
+        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses, approach_direction=self.approach_direction
         )
-        return is_success, grasp_xpos, open_length
+
+        # Get best grasp pose for each object
+        n_envs = obj_poses.shape[0]
+        init_qpos = self.robot.get_qpos(name=self.cfg.control_part)
+        grasp_xpos_list = []
+        is_success_list = []
+        for i in range(n_envs):
+            grasp_poses = grasp_poses_result[i][0]
+            grasp_costs = grasp_poses_result[i][1]
+            n_poses = grasp_poses.shape[0]
+            init_qpos_repeat = init_qpos[:, None, :].repeat(1, n_poses, 1)
+            grasp_poses_repeat = grasp_poses[None, :, :].repeat(n_envs, 1, 1, 1)
+            ik_success, qpos = self.robot.compute_batch_ik(
+                pose=grasp_poses_repeat,
+                name=self.cfg.control_part,
+                joint_seed=init_qpos_repeat,
+            )
+            if ik_success.sum() == 0:
+                is_success_list.append(False)
+                grasp_xpos_list.append(
+                    torch.zeros(4, 4, dtype=torch.float32, device=self.device)
+                )
+                continue
+            valid_mask = ik_success[0]
+            valid_poses = grasp_poses[valid_mask]
+            valid_costs = grasp_costs[valid_mask]
+            best_idx = torch.argmin(valid_costs)
+            best_grasp_xpos = valid_poses[best_idx]
+            is_success_list.append(True)
+            grasp_xpos_list.append(best_grasp_xpos)
+        is_success = torch.tensor(is_success_list, device=self.device)
+        grasp_xpos = torch.stack(grasp_xpos_list, dim=0)
+
+        return is_success, grasp_xpos
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action

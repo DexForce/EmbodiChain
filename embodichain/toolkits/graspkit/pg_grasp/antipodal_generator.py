@@ -604,7 +604,7 @@ class GraspGenerator:
         t = transform[:3, 3]
         return points @ r.T + t
 
-    def _get_valid_grasp_poses(
+    def get_valid_grasp_poses(
         self,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
@@ -615,7 +615,12 @@ class GraspGenerator:
                 "No antipodal point pairs available. "
                 "Call generate() or annotate() first."
             )
-            return False, torch.eye(4, device=self.device), 0.0
+            return (
+                False,
+                torch.eye(4, device=self.device),
+                0.0,
+                torch.zeros(1, device=self.device),
+            )
         origin_points = self._hit_point_pairs[:, 0, :]
         hit_points = self._hit_point_pairs[:, 1, :]
         origin_points_ = self._apply_transform(origin_points, object_pose)
@@ -634,7 +639,12 @@ class GraspGenerator:
         ).abs() <= self.cfg.max_deviation_angle
         if valid_mask.sum() == 0:
             logger.log_warning("No valid antipodal pairs after angle filtering.")
-            return False, torch.eye(4, device=self.device), 0.0
+            return (
+                False,
+                torch.eye(4, device=self.device),
+                0.0,
+                torch.zeros(1, device=self.device),
+            )
 
         valid_grasp_x = grasp_x[valid_mask]
         valid_centers = centers[valid_mask]
@@ -683,7 +693,12 @@ class GraspGenerator:
         )
         if is_colliding.logical_not().sum() == 0:
             logger.log_warning("No valid antipodal pairs after collision filtering.")
-            return False, torch.eye(4, device=self.device), 0.0
+            return (
+                False,
+                torch.eye(4, device=self.device),
+                0.0,
+                torch.zeros(1, device=self.device),
+            )
 
         # get best grasp pose
         valid_grasp_poses = valid_grasp_poses[~is_colliding]
@@ -700,7 +715,7 @@ class GraspGenerator:
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.3 * angle_cost + 0.3 * length_cost + 0.4 * center_cost
-        return valid_grasp_poses, valid_open_lengths, total_cost
+        return True, valid_grasp_poses, valid_open_lengths, total_cost
 
     def get_grasp_poses(
         self,
@@ -736,9 +751,13 @@ class GraspGenerator:
             RuntimeError: If :meth:`generate` or :meth:`annotate` has not
                 been called yet.
         """
-        valid_grasp_poses, valid_open_lengths, total_cost = self._get_valid_grasp_poses(
-            object_pose, approach_direction, visualize_collision
+        is_success, valid_grasp_poses, valid_open_lengths, total_cost = (
+            self.get_valid_grasp_poses(
+                object_pose, approach_direction, visualize_collision
+            )
         )
+        if not is_success:
+            return False, torch.eye(4, device=self.device), 0.0
         best_idx = torch.argmin(total_cost)
         best_grasp_pose = valid_grasp_poses[best_idx]
         best_open_length = valid_open_lengths[best_idx]

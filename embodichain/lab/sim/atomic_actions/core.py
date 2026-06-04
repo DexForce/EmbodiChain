@@ -144,6 +144,27 @@ class AntipodalAffordance(Affordance):
             if self.generator._hit_point_pairs is None:
                 self.generator.annotate()
 
+    def get_valid_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        if self.generator is None:
+            self._init_generator()
+        results = []
+        for i, obj_pose in enumerate(obj_poses):
+            is_success, grasp_poses, _, costs = self.generator.get_valid_grasp_poses(
+                obj_pose, approach_direction
+            )
+            if not is_success:
+                logger.log_warning(
+                    f"Failed to find valid grasp poses for {i}-th object."
+                )
+            results.append((grasp_poses, costs))
+        return results
+
     def get_best_grasp_poses(
         self,
         obj_poses: torch.Tensor,
