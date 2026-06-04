@@ -1,6 +1,6 @@
 The scene comes from the exported 1780537314_gym_project mesh environment.
 
-The robot is a dual-UR10 composite robot with two independent parallel
+The robot is a dual-UR10 composite robot with two parallel
 grippers:
 - left_arm is the UR10 outside the left side of the table's near long edge.
 - right_arm is the UR10 outside the right side of the table's near long edge.
@@ -18,6 +18,14 @@ The nominal task order is left first, then right. The left UR10 must grasp
 left_bread_roll and place it into wicker_basket before the right UR10 starts
 grasping right_bread_roll. To change the insertion order later, edit the task
 prompt sequence and keep the same atomic action API.
+
+The wicker_basket area is a shared workspace. After a UR10 releases a bread
+roll, it should retreat upward and return to its initial pose before the other
+UR10 moves to the basket, otherwise the two arms may collide near the basket.
+
+A bread roll at a high pose above `wicker_basket` is only staged, not placed.
+Each arm must lower the held bread roll into the basket release pose and open
+the gripper before any return-to-initial motion.
 
 Always plan to the current `wicker_basket` object pose from the environment
 config. Do not hard-code basket coordinates in generated graph actions.

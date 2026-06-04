@@ -1361,6 +1361,17 @@ def _validate_recovery_branch_path(
 def _compile_action(spec: Any, action_module: Any) -> Any:
     if spec is None:
         return None
+    if isinstance(spec, str) and spec.strip().lower() in {"", "none", "null"}:
+        return None
+    if isinstance(spec, Mapping):
+        fn = spec.get("fn")
+        if fn is None or (
+            isinstance(fn, str) and fn.strip().lower() in {"", "none", "null"}
+        ):
+            return None
+    else:
+        raise TypeError(f"Action spec must be a mapping or null, but got {type(spec)}.")
+
     return _compile_call(spec, action_module)
 
 

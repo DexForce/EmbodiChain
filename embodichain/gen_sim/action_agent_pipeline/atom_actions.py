@@ -350,6 +350,23 @@ def _current_agent_action(env, robot_name):
     return action.unsqueeze(0).detach().cpu().numpy().astype(np.float32)
 
 
+def _append_hold_steps(action_np, hold_steps: int, log_name: str):
+    hold_steps = int(hold_steps)
+    if hold_steps <= 0:
+        return action_np
+    if action_np is None or len(action_np) == 0:
+        raise ValueError(f"{log_name} action is empty; cannot append hold steps.")
+
+    hold_actions = np.repeat(action_np[-1:], hold_steps, axis=0)
+    action_np = np.concatenate([action_np, hold_actions], axis=0)
+    log_info(
+        f"Append {hold_steps} hold steps after {log_name}; "
+        f"total trajectory length is {len(action_np)}.",
+        color="green",
+    )
+    return action_np
+
+
 def _public_qpos_move_action(
     *,
     env,
@@ -1197,6 +1214,11 @@ def open_gripper(robot_name: str, env=None, **kwargs):
         sample_num=sample_num,
         kwargs=kwargs,
         log_name="open gripper",
+    )
+    actions = _append_hold_steps(
+        actions,
+        kwargs.get("settle_steps", kwargs.get("hold_steps", 0)),
+        "open gripper",
     )
 
     log_info(
