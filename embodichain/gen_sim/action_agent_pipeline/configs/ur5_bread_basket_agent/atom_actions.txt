@@ -6,6 +6,8 @@ existing atomic action API and gripper semantics in this configuration.
 Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
 Use `robot_name="left_arm"` only for `left_bread_roll` and use
 `robot_name="right_arm"` only for `right_bread_roll`.
+Do not use any atomic function on the passive clutter objects `scope` or
+`popcorn_cup`.
 
 The nominal task starts with simultaneous dual-arm grasping, then switches to
 sequential placement:

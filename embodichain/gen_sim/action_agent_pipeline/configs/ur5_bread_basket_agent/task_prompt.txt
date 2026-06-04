@@ -13,6 +13,9 @@ Object and arm mapping:
 - left_arm must only manipulate `left_bread_roll`.
 - right_arm must only manipulate `right_bread_roll`.
 - Both bread rolls must be released into `wicker_basket`.
+- `scope` and `popcorn_cup` are passive scene clutter. Do not grasp them, move
+  relative to them, release objects into them, or include them in success
+  reasoning.
 
 Generate one deterministic nominal graph with the following semantic sequence.
 Do not add extra alignment, search, recovery, or monitor steps. Do include the

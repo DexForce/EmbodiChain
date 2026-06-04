@@ -118,7 +118,7 @@
                         {
                             "name": "object_lengths",
                             "mode": "callable",
-                            "entity_uids": "all_objects",
+                            "entity_uids": ["left_bread_roll", "right_bread_roll", "wicker_basket"],
                             "func_name": "compute_object_length",
                             "func_kwargs": {
                                 "is_svd_frame": true,
@@ -354,6 +354,54 @@
             "body_type": "kinematic",
             "init_pos": [8.55084738055796e-05, -3.277785787236809e-06, 0.3626395862169485],
             "init_rot": [-0.023628178509204664, -0.022414180129759546, -178.47157816446378]
+        },
+        {
+            "uid": "scope",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "1780562836_gym_project/formatted_tabletop_scene/1780562836_gym_project/mesh_assets/clutter/scope/scope_simplified.glb",
+                "compute_uv": false
+            },
+            "attrs": {
+                "mass": 0.05,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.01,
+                "max_depenetration_velocity": 10.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "body_type": "static",
+            "init_pos": [-0.2, 0.3, 0.734],
+            "init_rot": [0.0, 0.0, -12.0],
+            "body_scale": [1.0, 1.0, 1.0],
+            "max_convex_hull_num": 1
+        },
+        {
+            "uid": "popcorn_cup",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "1780562836_gym_project/formatted_tabletop_scene/1780562836_gym_project/mesh_assets/clutter/popcorn_cup/popcorn_cup_simplified.glb",
+                "compute_uv": false
+            },
+            "attrs": {
+                "mass": 0.02,
+                "contact_offset": 0.003,
+                "rest_offset": 0.001,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.01,
+                "max_depenetration_velocity": 10.0,
+                "min_position_iters": 32,
+                "min_velocity_iters": 8
+            },
+            "body_type": "static",
+            "init_pos": [0.25, 0.3, 0.734],
+            "init_rot": [0.0, 0.0, 8.0],
+            "body_scale": [1.0, 1.0, 1.0],
+            "max_convex_hull_num": 1
         }
     ],
     "rigid_object": [

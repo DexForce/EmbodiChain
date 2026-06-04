@@ -20,6 +20,14 @@ The interactive objects are:
 - wicker_basket: the target basket near the center of the table
   (source object basket_3).
 
+Additional passive clutter objects are present on the far side of the table:
+- scope: a static high-poly clutter mesh, not a target and not a container.
+- popcorn_cup: a static high-poly clutter mesh, not a target and not a
+  container.
+
+Do not manipulate the passive clutter objects. They are included only to make
+the scene more realistic while leaving the bread-to-basket task unchanged.
+
 The nominal task starts with simultaneous dual-arm grasping. The left UR5 must
 grasp left_bread_roll while the right UR5 grasps right_bread_roll in the same
 graph edge. After both bread rolls are held, placement is sequential: the left

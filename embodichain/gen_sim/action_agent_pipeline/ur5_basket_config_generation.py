@@ -291,16 +291,40 @@ def _pick_left_right_targets(
     if len(target_candidates) == 2:
         picked = target_candidates
     else:
-        picked = sorted(
-            target_candidates,
-            key=lambda obj: abs(_vector3(obj.config.get("init_pos", [0, 0, 0]))[0]),
-            reverse=True,
-        )[:2]
+        grouped: dict[str, list[_SceneObject]] = {}
+        for obj in target_candidates:
+            grouped.setdefault(_base_name(obj), []).append(obj)
+        repeated_groups = [group for group in grouped.values() if len(group) >= 2]
+        if repeated_groups:
+            picked = sorted(
+                repeated_groups,
+                key=_target_group_sort_key,
+            )[0]
+            if len(picked) > 2:
+                picked = sorted(
+                    picked,
+                    key=lambda obj: abs(
+                        _vector3(obj.config.get("init_pos", [0, 0, 0]))[0]
+                    ),
+                    reverse=True,
+                )[:2]
+        else:
+            picked = sorted(
+                target_candidates,
+                key=lambda obj: abs(_vector3(obj.config.get("init_pos", [0, 0, 0]))[0]),
+                reverse=True,
+            )[:2]
     left, right = sorted(
         picked,
         key=lambda obj: _vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))[0],
     )
     return left, right
+
+
+def _target_group_sort_key(group: list[_SceneObject]) -> tuple[float, int]:
+    xs = [_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))[0] for obj in group]
+    x_spread = max(xs) - min(xs)
+    return -x_spread, -len(group)
 
 
 def _target_noun(left_target: _SceneObject, right_target: _SceneObject) -> str:
@@ -469,6 +493,21 @@ def _build_ur5_basket_bundle(
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     target_scale = _target_body_scale_vector(target_body_scale)
+    task_source_uids = {
+        roles.container_source_uid,
+        roles.left_target_source_uid,
+        roles.right_target_source_uid,
+    }
+    extra_rigid_objects = [
+        obj
+        for obj in scene_objects
+        if obj.source_role == "rigid_object" and obj.source_uid not in task_source_uids
+    ]
+    extra_background_objects = [
+        obj
+        for obj in scene_objects
+        if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
+    ]
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -484,7 +523,11 @@ def _build_ur5_basket_bundle(
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
-            _make_background_config(scene_dir, by_uid[roles.table_source_uid])
+            _make_background_config(scene_dir, by_uid[roles.table_source_uid]),
+            *[
+                _make_extra_background_config(scene_dir, obj)
+                for obj in extra_background_objects
+            ],
         ],
         "rigid_object": [
             _make_target_object_config(
@@ -504,6 +547,10 @@ def _build_ur5_basket_bundle(
                 by_uid[roles.container_source_uid],
                 roles.container_runtime_uid,
             ),
+            *[
+                _make_extra_rigid_object_config(scene_dir, obj)
+                for obj in extra_rigid_objects
+            ],
         ],
     }
     return {
@@ -890,6 +937,21 @@ def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any
     }
 
 
+def _make_extra_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any]:
+    config = {
+        "uid": _normalize_runtime_uid(obj.source_uid),
+        "shape": _make_shape_config(scene_dir, obj.config),
+        "attrs": copy.deepcopy(dict(obj.config.get("attrs", _BACKGROUND_ATTRS))),
+        "body_scale": _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0])),
+        "body_type": str(obj.config.get("body_type", "static")),
+        "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
+        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
+    }
+    if "max_convex_hull_num" in obj.config:
+        config["max_convex_hull_num"] = int(obj.config["max_convex_hull_num"])
+    return config
+
+
 def _make_target_object_config(
     scene_dir: Path,
     obj: _SceneObject,
@@ -912,21 +974,35 @@ def _make_container_object_config(
     )
 
 
+def _make_extra_rigid_object_config(
+    scene_dir: Path, obj: _SceneObject
+) -> dict[str, Any]:
+    return _make_rigid_object_config(
+        scene_dir,
+        obj,
+        _normalize_runtime_uid(obj.source_uid),
+        obj.config.get("body_scale", [1.0, 1.0, 1.0]),
+    )
+
+
 def _make_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
 ) -> dict[str, Any]:
-    return {
+    config = {
         "uid": runtime_uid,
         "shape": _make_shape_config(scene_dir, obj.config),
         "attrs": dict(_RIGID_OBJECT_ATTRS),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
         "body_scale": _clean_vector3(body_scale),
-        "max_convex_hull_num": 8,
+        "max_convex_hull_num": int(obj.config.get("max_convex_hull_num", 8)),
     }
+    if "body_type" in obj.config:
+        config["body_type"] = str(obj.config["body_type"])
+    return config
 
 
 def _make_shape_config(
