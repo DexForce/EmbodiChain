@@ -2267,6 +2267,85 @@ def get_offset_pose(
     return offset_pose
 
 
+def pose_nms_indices(
+    poses: torch.Tensor,
+    angle_th: float = np.pi / 36,
+    dist_th: float = 0.003,
+    preserve_order: bool = False,
+) -> torch.Tensor:
+    """Return pose indices after removing poses that are too close.
+
+    This builds pairwise translation and rotation closeness matrices, then greedily
+    keeps either input-order poses or poses with fewer close neighbors first. The
+    non-order-preserving mode is usually faster for large candidate sets, but it
+    allocates O(N^2) temporary tensors.
+
+    Args:
+        poses: Input pose matrices. Shape is (N, 4, 4).
+        angle_th: Rotation threshold in radians. Poses with angular distance
+            below this value are considered close. Defaults to pi / 36.
+        dist_th: Translation distance threshold. Poses with Euclidean distance
+            below this value are considered close. Defaults to 0.003.
+        preserve_order: Whether to apply the same input-order greedy selection
+            as :func:`pose_nms`. If False, poses with fewer close neighbors are
+            selected first. Defaults to False.
+
+    Returns:
+        Indices of selected poses. Shape is (M,), where M <= N.
+
+    Raises:
+        ValueError: If ``poses`` is not shaped as (N, 4, 4).
+    """
+    if poses.ndim != 3 or poses.shape[-2:] != (4, 4):
+        raise ValueError(f"Invalid input shape {poses.shape}, expected (N, 4, 4).")
+
+    num_poses = poses.shape[0]
+    if num_poses == 0:
+        return torch.empty(0, dtype=torch.long, device=poses.device)
+
+    if angle_th <= 0.0 or dist_th <= 0.0:
+        return torch.arange(num_poses, dtype=torch.long, device=poses.device)
+
+    rotations = poses[:, :3, :3].reshape(num_poses, -1)
+    translations = poses[:, :3, 3]
+
+    rotation_cosines = ((rotations @ rotations.T - 1.0) * 0.5).clamp(min=-1.0, max=1.0)
+    if angle_th > math.pi:
+        rotation_close = torch.ones_like(rotation_cosines, dtype=torch.bool)
+    else:
+        rotation_close = rotation_cosines > math.cos(float(angle_th))
+
+    translation_norms = (translations * translations).sum(dim=1)
+    translation_distances_sq = (
+        translation_norms[:, None]
+        + translation_norms[None, :]
+        - 2.0 * (translations @ translations.T)
+    ).clamp_min(0.0)
+    translation_close = translation_distances_sq < dist_th * dist_th
+
+    close = rotation_close & translation_close
+    close.fill_diagonal_(False)
+
+    if preserve_order:
+        visit_order = torch.arange(num_poses, dtype=torch.long, device=poses.device)
+    else:
+        tie_breaker = torch.arange(num_poses, dtype=torch.long, device=poses.device)
+        visit_priority = close.sum(dim=1) * (num_poses + 1) + tie_breaker
+        visit_order = torch.argsort(visit_priority)
+
+    suppressed = torch.zeros(num_poses, dtype=torch.bool, device=poses.device)
+    keep_indices_list: list[int] = []
+
+    for pose_idx in visit_order.tolist():
+        if suppressed[pose_idx]:
+            continue
+        keep_indices_list.append(pose_idx)
+        suppressed |= close[pose_idx]
+        suppressed[pose_idx] = True
+
+    return torch.tensor(keep_indices_list, dtype=torch.long, device=poses.device)
+
+
 def pose_nms(
     poses: torch.Tensor,
     angle_th: float = np.pi / 36,
@@ -2290,40 +2369,10 @@ def pose_nms(
     Raises:
         ValueError: If ``poses`` is not shaped as (N, 4, 4).
     """
-    if poses.ndim != 3 or poses.shape[-2:] != (4, 4):
-        raise ValueError(f"Invalid input shape {poses.shape}, expected (N, 4, 4).")
-
-    if poses.shape[0] == 0:
-        keep_indices = torch.empty(0, dtype=torch.long, device=poses.device)
-        return poses.clone(), keep_indices
-
-    keep_indices_list: list[int] = []
-
-    for pose_idx in range(poses.shape[0]):
-        if not keep_indices_list:
-            keep_indices_list.append(pose_idx)
-            continue
-
-        current_rotation = poses[pose_idx, :3, :3]
-        current_translation = poses[pose_idx, :3, 3]
-        kept_poses = poses[keep_indices_list]
-
-        relative_rotations = current_rotation.unsqueeze(0) @ kept_poses[
-            :, :3, :3
-        ].transpose(-1, -2)
-        rotation_cosines = (
-            (relative_rotations.diagonal(dim1=-2, dim2=-1).sum(-1) - 1.0) * 0.5
-        ).clamp(min=-1.0, max=1.0)
-        rotation_distances = torch.abs(torch.acos(rotation_cosines))
-        translation_distances = torch.linalg.norm(
-            kept_poses[:, :3, 3] - current_translation, dim=-1
-        )
-
-        is_close = (rotation_distances < angle_th) & (translation_distances < dist_th)
-        if not torch.any(is_close):
-            keep_indices_list.append(pose_idx)
-
-    keep_indices = torch.tensor(
-        keep_indices_list, dtype=torch.long, device=poses.device
+    keep_indices = pose_nms_indices(
+        poses,
+        angle_th=angle_th,
+        dist_th=dist_th,
+        preserve_order=True,
     )
     return poses[keep_indices], keep_indices

@@ -31,7 +31,7 @@ from typing import Any, cast
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
-from embodichain.utils.math import pose_nms
+from embodichain.utils.math import pose_nms_indices
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
@@ -673,10 +673,10 @@ class GraspGenerator:
         )
 
         # remove near grasp poses using non-maximum suppression
-        nms_grasp_poses, nms_indices = pose_nms(
+        nms_indices = pose_nms_indices(
             valid_grasp_poses,
-            angle_th=np.pi / 30,
-            dist_th=0.005,
+            angle_th=np.pi / 18,
+            dist_th=0.01,
         )
         valid_grasp_poses = valid_grasp_poses[nms_indices]
         valid_open_lengths = valid_open_lengths[nms_indices]
