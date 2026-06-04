@@ -197,15 +197,15 @@
                 "mode": "save",
                 "params": {
                     "robot_meta": {
-                        "robot_type": "DualUR10",
+                        "robot_type": "DualUR5",
                         "control_freq": 25
                     },
                     "instruction": {
-                        "lang": "Use the left UR10 to place the left bread roll into the wicker basket, then use the right UR10 to place the right bread roll into the wicker basket."
+                        "lang": "Use the left UR5 to place the left bread roll into the wicker basket, then use the right UR5 to place the right bread roll into the wicker basket."
                     },
                     "extra": {
                         "scene_type": "1780562836_gym_project",
-                        "task_description": "UR5BreadBasket prototype with temporary Dual UR10 bread-to-basket placement",
+                        "task_description": "Dual UR5 bread-to-basket placement",
                         "data_type": "sim"
                     },
                     "use_videos": true
@@ -214,16 +214,16 @@
         }
     },
     "robot": {
-        "uid": "DualUR10",
+        "uid": "DualUR5",
         "urdf_cfg": {
-            "fname": "dual_ur10_ur5_bread_basket_probe",
+            "fname": "dual_ur5_dh_pgi_bread_basket",
             "components": [
                 {
                     "component_type": "left_arm",
-                    "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+                    "urdf_path": "UniversalRobots/UR5/UR5.urdf",
                     "transform": [
-                        [0.411976, -0.911195, 0.0, -0.6],
-                        [0.911195, 0.411976, 0.0, -1.3],
+                        [0.411976, -0.911195, 0.0, -0.3],
+                        [0.911195, 0.411976, 0.0, -1.45],
                         [0.0, 0.0, 1.0, 0.4],
                         [0.0, 0.0, 0.0, 1.0]
                     ]
@@ -234,10 +234,10 @@
                 },
                 {
                     "component_type": "right_arm",
-                    "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+                    "urdf_path": "UniversalRobots/UR5/UR5.urdf",
                     "transform": [
-                        [-0.416356, -0.909202, 0.0, 0.6],
-                        [0.909202, -0.416356, 0.0, -1.3],
+                        [-0.416356, -0.909202, 0.0, 0.3],
+                        [0.909202, -0.416356, 0.0, -1.45],
                         [0.0, 0.0, 1.0, 0.4],
                         [0.0, 0.0, 0.0, 1.0]
                     ]
@@ -248,7 +248,7 @@
                 }
             ]
         },
-        "init_pos": [0.0, 2.0, 0.0],
+        "init_pos": [0.0, 2.0, 0.4],
         "init_rot": [0.0, 0.0, 0.0],
         "init_qpos": [
             0.0, 0.0,
@@ -376,7 +376,7 @@
             },
             "init_pos": [0.3796981028131374, -0.11269737287847215, 0.7581176280151587],
             "init_rot": [0.4334005146105173, -2.0743225241027208, 142.38030797177274],
-            "body_scale": [0.8, 0.8, 0.8],
+            "body_scale": [0.7, 0.7, 0.7],
             "max_convex_hull_num": 8
         },
         {
@@ -397,7 +397,7 @@
             },
             "init_pos": [-0.391506673749347, -0.12338544165101806, 0.7558156732658421],
             "init_rot": [-0.7551443321742625, 2.7587306189781517, 162.57091355516118],
-            "body_scale": [0.8, 0.8, 0.8],
+            "body_scale": [0.7, 0.7, 0.7],
             "max_convex_hull_num": 8
         },
         {

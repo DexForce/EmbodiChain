@@ -1,12 +1,12 @@
 Task:
-UR5BreadBasket prototype: use the current two-UR10 probe configuration to place
+UR5BreadBasket: use the current two-UR5 configuration to place
 two bread objects into the basket.
 
 The task starts with both arms acting simultaneously:
-the left UR10 grasps the left bread roll while the right UR10 grasps the right
+the left UR5 grasps the left bread roll while the right UR5 grasps the right
 bread roll in the same nominal graph edge. After both bread rolls are grasped,
-the placement phase must be sequential: the left UR10 places its bread roll into
-the basket and returns to its initial pose, then the right UR10 places its bread
+the placement phase must be sequential: the left UR5 places its bread roll into
+the basket and returns to its initial pose, then the right UR5 places its bread
 roll into the basket and returns to its initial pose.
 
 Object and arm mapping:
@@ -59,7 +59,7 @@ for its held bread roll.
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
    - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
-6. Return the left UR10 to its initial pose to keep the basket workspace clear:
+6. Return the left UR5 to its initial pose to keep the basket workspace clear:
    - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
    - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
@@ -87,7 +87,7 @@ for its held bread roll.
    - right_arm_action: move_by_relative_offset(robot_name="right_arm",
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
 
-11. Return the right UR10 to its initial pose after releasing the bread roll:
+11. Return the right UR5 to its initial pose after releasing the bread roll:
    - left_arm_action: null
    - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=60)
 

@@ -1,7 +1,7 @@
-### Atom Functions for UR5BreadBasket Dual-UR10 Probe Placement
+### Atom Functions for UR5BreadBasket Dual-UR5 Placement
 
-This is the temporary Dual-UR10 probe for the target UR5BreadBasket task. Use
-the existing UR10 action API and gripper semantics in this configuration.
+This is the Dual-UR5 configuration for the UR5BreadBasket task. Use the
+existing atomic action API and gripper semantics in this configuration.
 
 Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
 Use `robot_name="left_arm"` only for `left_bread_roll` and use
@@ -12,8 +12,9 @@ sequential placement:
 - The first nominal edge must call `grasp` in both `left_arm_action` and
   `right_arm_action`.
 - After both bread rolls are grasped, left-side placement steps put the actual
-  action in `left_arm_action` and set `right_arm_action` to null while the right
-  arm keeps holding right_bread_roll.
+  placement action in `left_arm_action` and keep `right_arm_action` closed with
+  `close_gripper(robot_name="right_arm", sample_num=20)` so the right arm keeps
+  holding right_bread_roll.
 - After the left arm releases left_bread_roll, first move it upward to clear the
   basket, then use `back_to_initial_pose` before the right arm enters the shared
   basket workspace.
@@ -33,7 +34,7 @@ parameters.
 "grasp":
     def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
 
-    Moves the selected UR10 to the target bread roll, closes the gripper, and
+    Moves the selected UR5 to the target bread roll, closes the gripper, and
     performs the public semantic post-grasp lift. Use:
     - `grasp(robot_name="left_arm", obj_name="left_bread_roll",
       pre_grasp_dis=0.08, sample_num=90)`
@@ -95,8 +96,8 @@ parameters.
 "back_to_initial_pose":
     def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
 
-    Returns the selected UR10 arm to its initial joint configuration. In the
+    Returns the selected UR5 arm to its initial joint configuration. In the
     nominal graph, use this after the selected arm releases and retreats upward
-    so it does not block the other UR10 near the wicker basket. Do not use this
+    so it does not block the other UR5 near the wicker basket. Do not use this
     immediately after `move_relative_to_object`; the arm would still be holding
     the bread roll.
