@@ -77,7 +77,8 @@ class MockRobot:
         max_effort = torch.ones((num_envs, joints), device=self.device) * 50.0
         max_velocity = torch.ones((num_envs, joints), device=self.device) * 5.0
         friction = torch.ones((num_envs, joints), device=self.device) * 1.0
-        return stiffness, damping, max_effort, max_velocity, friction
+        armature = torch.ones((num_envs, joints), device=self.device) * 0.5
+        return stiffness, damping, max_effort, max_velocity, friction, armature
 
 
 class MockRigidObject:
@@ -673,12 +674,14 @@ class TestGetArticulationJointDrive:
         assert "max_effort" in result.keys()
         assert "max_velocity" in result.keys()
         assert "friction" in result.keys()
+        assert "armature" in result.keys()
 
         assert result["stiffness"].shape == (4, 6)
         assert result["damping"].shape == (4, 6)
         assert result["max_effort"].shape == (4, 6)
         assert result["max_velocity"].shape == (4, 6)
         assert result["friction"].shape == (4, 6)
+        assert result["armature"].shape == (4, 6)
 
     def test_returns_correct_values(self):
         """Test that the functor returns expected mock values."""
@@ -695,6 +698,7 @@ class TestGetArticulationJointDrive:
         assert torch.allclose(result["max_effort"], torch.ones(4, 6) * 50.0)
         assert torch.allclose(result["max_velocity"], torch.ones(4, 6) * 5.0)
         assert torch.allclose(result["friction"], torch.ones(4, 6) * 1.0)
+        assert torch.allclose(result["armature"], torch.ones(4, 6) * 0.5)
 
     def test_returns_zeros_for_nonexistent_object(self):
         """Test that zeros are returned for non-existent objects."""
@@ -711,6 +715,7 @@ class TestGetArticulationJointDrive:
         assert torch.allclose(result["max_effort"], torch.zeros(4, 1))
         assert torch.allclose(result["max_velocity"], torch.zeros(4, 1))
         assert torch.allclose(result["friction"], torch.zeros(4, 1))
+        assert torch.allclose(result["armature"], torch.zeros(4, 1))
 
     def test_caches_data_across_calls(self):
         """Test that fetched data is cached for subsequent calls."""
@@ -718,6 +723,7 @@ class TestGetArticulationJointDrive:
         # Verify the robot gets called
         env.sim._robots["robot"].get_joint_drive = MagicMock(
             return_value=(
+                torch.ones(4, 6),
                 torch.ones(4, 6),
                 torch.ones(4, 6),
                 torch.ones(4, 6),
@@ -743,6 +749,7 @@ class TestGetArticulationJointDrive:
         env = MockEnv(num_envs=4)
         env.sim._robots["robot"].get_joint_drive = MagicMock(
             return_value=(
+                torch.ones(4, 6),
                 torch.ones(4, 6),
                 torch.ones(4, 6),
                 torch.ones(4, 6),

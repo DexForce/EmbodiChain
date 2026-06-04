@@ -693,6 +693,15 @@ class JointDrivePropertiesCfg:
     friction: Union[Dict[str, float], float] = 0.0
     """Friction coefficient of the joint"""
 
+    armature: Union[Dict[str, float], float] = 0.0
+    """Joint armature added to joint-space spatial inertia.
+
+    Units depend on the joint model:
+
+    * For prismatic (linear) joints, the unit is mass [kg].
+    * For revolute (angular) joints, the unit is mass * scene_length^2 [kg-m^2].
+    """
+
     @classmethod
     def from_dict(
         cls, init_dict: Dict[str, Union[str, float, int]]

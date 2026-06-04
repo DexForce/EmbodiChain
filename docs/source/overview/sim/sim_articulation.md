@@ -65,6 +65,7 @@ The `drive_props` parameter controls the joint physics behavior. It is defined u
 | `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
 | `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
 | `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
+| `armature` | `float` / `Dict` | `0.0` | Joint armature added to joint-space inertia ($kg$ for prismatic, $kg \cdot m^2$ for revolute). |
 | `drive_type` | `str` | `"none"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
 
 ### Setup & Initialization
@@ -138,7 +139,7 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
-| `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction)`, each shaped `(N, dof)`. |
+| `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
 
 ```python
 # Example: Accessing state
