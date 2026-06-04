@@ -21,12 +21,6 @@
             "gripper_open_state": [0.0],
             "gripper_close_state": [0.04],
             "ignore_terminations_during_agent": true,
-            "debug_robot_state_on_reset": true,
-            "debug_gripper_release": true,
-            "debug_gripper_release_objects": {
-                "left": "left_bread_roll",
-                "right": "right_bread_roll"
-            },
             "agent_success": {
                 "op": "all",
                 "terms": [

@@ -91,7 +91,6 @@ class BaseAgentEnv:
         self.right_arm_current_gripper_state = self._initial_gripper_state("right")
 
         self.update_obj_info()
-        self._dump_robot_state_on_reset_if_requested()
 
     def _resolve_agent_arm_slots(self) -> dict[str, dict[str, str | None] | None]:
         configured_slots = getattr(self, "agent_arm_slots", None)
@@ -187,71 +186,6 @@ class BaseAgentEnv:
         if len(getattr(self, f"{side}_eef_joints", []) or []) == 0:
             return self.open_state.new_empty(0)
         return self.open_state
-
-    def _dump_robot_state_on_reset_if_requested(self) -> None:
-        if not bool(getattr(self, "debug_robot_state_on_reset", False)):
-            return
-
-        qpos = self.robot.get_qpos().squeeze(0).detach().cpu()
-        joint_names = list(getattr(self.robot, "joint_names", []))
-        lines = [
-            "Robot reset state dump",
-            f"robot_uid={getattr(self.robot, 'uid', None)} dof={getattr(self.robot, 'dof', None)}",
-            f"root_pose={self._format_tensor(self.robot.body_data.root_pose.squeeze(0))}",
-            "joint qpos by articulation order:",
-        ]
-        for joint_id, value in enumerate(qpos.tolist()):
-            joint_name = joint_names[joint_id] if joint_id < len(joint_names) else "<missing>"
-            lines.append(f"  [{joint_id:02d}] {joint_name}: {value:.6f}")
-
-        lines.append("control parts:")
-        for part_name in getattr(self.robot, "control_parts", {}) or {}:
-            joint_ids = list(self.robot.get_joint_ids(name=part_name))
-            part_qpos = qpos[joint_ids] if joint_ids else qpos.new_empty(0)
-            part_joint_names = [
-                joint_names[joint_id] if joint_id < len(joint_names) else "<missing>"
-                for joint_id in joint_ids
-            ]
-            lines.append(
-                f"  {part_name}: ids={joint_ids} names={part_joint_names} "
-                f"qpos={self._format_tensor(part_qpos)}"
-            )
-
-        lines.append("agent arm slots:")
-        for side in ("left", "right"):
-            arm_part = self.get_agent_arm_control_part(side == "left")
-            eef_part = self.get_agent_eef_control_part(side == "left")
-            arm_qpos = getattr(self, f"{side}_arm_init_qpos", qpos.new_empty(0))
-            eef_joint_ids = list(getattr(self, f"{side}_eef_joints", []) or [])
-            eef_qpos = qpos[eef_joint_ids] if eef_joint_ids else qpos.new_empty(0)
-            lines.append(
-                f"  {side}: arm={arm_part} arm_ids={getattr(self, f'{side}_arm_joints', [])} "
-                f"arm_qpos={self._format_tensor(arm_qpos)} eef={eef_part} "
-                f"eef_ids={eef_joint_ids} eef_qpos={self._format_tensor(eef_qpos)}"
-            )
-            lines.append(
-                f"  {side}_base_pose={self._format_pose(getattr(self, f'{side}_arm_base_pose', None))}"
-            )
-            lines.append(
-                f"  {side}_eef_pose={self._format_pose(getattr(self, f'{side}_arm_init_xpos', None))}"
-            )
-
-        logger.log_info("\n".join(lines), color="cyan")
-
-    def _format_tensor(self, value: torch.Tensor | None) -> str:
-        if value is None:
-            return "None"
-        tensor = torch.as_tensor(value).detach().cpu().flatten()
-        return "[" + ", ".join(f"{item:.6f}" for item in tensor.tolist()) + "]"
-
-    def _format_pose(self, pose: torch.Tensor | None) -> str:
-        if pose is None:
-            return "None"
-        tensor = torch.as_tensor(pose).detach().cpu()
-        if tensor.ndim == 2 and tensor.shape[-2:] == (4, 4):
-            xyz = tensor[:3, 3]
-            return f"xyz={self._format_tensor(xyz)} matrix={self._format_tensor(tensor)}"
-        return self._format_tensor(tensor)
 
     def update_obj_info(self):
         # store some useful obj information
