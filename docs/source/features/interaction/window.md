@@ -2,20 +2,48 @@
 
 This section describes the default window interaction controls available in the simulation. These controls allow users to interact with the simulation environment using keyboard, mouse, and customizable input events.
 
-## Default Window Events
+The main visualization window is provided by **DexSim**. When `SimConfig.headless=False` or `SimulationManager.open_window()` is called, DexSim creates the viewer with **ORBIT** camera control by default.
 
-The simulation window comes with a set of default controls that enable users to perform various actions, such as selecting objects, manipulating the camera view, and triggering specific events. These controls are implemented using the `ObjectManipulator` class (provided by `dexsim`).
+## Default Window Controls
 
-| Events                        | Description                                                                                                                                      |
-|---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Raycast Information Display** | Press the right mouse button to select a point and the 'C' key to print the raycast distance and hit position of a surface (world coordinates) to the console. Useful for debugging and checking the position of objects in the simulation. |
-| **Viewer recording (toggle)** | Press **`r`** to **start** recording what the interactive viewer shows, and press **`r`** again to **stop** and save as MP4 videos. Recording uses a hidden camera that follows the live viewer camera pose, so the exported videos match the on-screen view. Useful for debugging and recording the demos.|
+### Mouse Controls
 
-> **Note:** We will add more interaction features in future releases. Stay tuned for updates!
+| Input | Operation |
+|-------|-----------|
+| Left drag / Middle drag | Rotate around the current target point. |
+| Right drag | Pan the camera and target together. |
+| Mouse wheel | Dolly the camera closer to or farther from the target. |
+
+### Keyboard Controls
+
+| Input | Operation |
+|-------|-----------|
+| Space | Reset the window camera to its home view. |
+| Left Ctrl + W / S | Temporarily translate the view forward / backward. |
+| Left Ctrl + A / D | Temporarily translate the view left / right. |
+| Left Ctrl + Q / E | Temporarily translate the view down / up. |
+
+In ORBIT mode, plain `W/A/S/D/Q/E` does not move the view. Hold **Left Ctrl** while pressing those keys to translate both the camera eye and target.
+
+### Selection and Focus
+
+| Input | Operation |
+|-------|-----------|
+| Left click | Select the object under the cursor in the main visualization window. |
+| F | Focus the selected object and frame it in the view. |
+| L | Toggle selection log output in the terminal. Selection logs are disabled by default. When enabled, left-clicking an object prints its id, name, world position, and rotation. |
+
+### EmbodiChain Extensions
+
+| Input | Operation |
+|-------|-----------|
+| **Viewer recording (toggle)** | Press **`r`** to **start** recording what the interactive viewer shows, and press **`r`** again to **stop** and save as MP4 videos. Recording uses a hidden camera that follows the live viewer camera pose, so the exported videos match the on-screen view. Useful for debugging and recording demos. |
+
+Recording hotkey registration is controlled by `SimConfig.window_record.enable_hotkey` (enabled by default). You can also call `SimulationManager.start_window_record()`, `stop_window_record()`, or `toggle_window_record()` programmatically.
 
 ## Customizing Window Events
 
-Users can create their own custom window interaction controls by subclassing the `ObjectManipulator` class. This allows for the implementation of specific behaviors and responses to user inputs.
+Users can create their own custom window interaction controls by subclassing the `ObjectManipulator` class (provided by `dexsim`). This allows for the implementation of specific behaviors and responses to user inputs.
 
 Here's an example of how to create a custom window event that responds to key presses:
 
@@ -34,10 +62,11 @@ class CustomWindowEvent(ObjectManipulator):
 # sim_manager = SimulationManager(...)
 
 # Register the custom window event handler with the simulation:
-sim_manager.add_custom_window_control(CustomWindowEvent())
+sim_manager.add_custom_window_control([CustomWindowEvent()])
 ```
 
 The functions table below summarizes the key methods available in the `ObjectManipulator` class for customizing window events:
+
 | Method               | Description                                                                                       |
 |----------------------|---------------------------------------------------------------------------------------------------|
 | `on_key_down(key)`   | Triggered when a key is pressed down. The `key` parameter indicates which key was pressed. |
@@ -46,3 +75,4 @@ The functions table below summarizes the key methods available in the `ObjectMan
 | `on_mouse_down(button, x, y)` | Triggered when a mouse button is pressed. The `button` parameter indicates which button was pressed, and `x`, `y` indicate the mouse position. |
 | `on_mouse_up(button, x, y)`   | Triggered when a mouse button is released. The `button` parameter indicates which button was released, and `x`, `y` indicate the mouse position. |
 | `on_mouse_wheel(delta)` | Triggered when the mouse wheel is scrolled. The `delta` parameter indicates the amount of scroll. |
+| `enable_selection_cache(enable)` | When enabled, caches the last raycast selection so `selected_object`, `selected_position`, and `selected_distance` are available in callbacks. |
