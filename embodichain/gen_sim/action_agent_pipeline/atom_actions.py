@@ -367,6 +367,144 @@ def _append_hold_steps(action_np, hold_steps: int, log_name: str):
     return action_np
 
 
+def _format_debug_vector(value) -> str:
+    value = torch.as_tensor(value).detach().cpu().flatten()
+    return "[" + ", ".join(f"{item:.6f}" for item in value.tolist()) + "]"
+
+
+def _resolve_release_debug_object(env, side: str) -> str | None:
+    configured = getattr(env, "debug_gripper_release_objects", None)
+    if isinstance(configured, dict):
+        obj_name = configured.get(side)
+        if obj_name:
+            return obj_name
+
+    candidates = [f"{side}_bread_roll", f"{side}_object"]
+    object_uids = set(env.sim.get_rigid_object_uid_list())
+    for obj_name in candidates:
+        if obj_name in object_uids:
+            return obj_name
+    return None
+
+
+def _build_gripper_release_debug_specs(env, arm_actions):
+    if not bool(getattr(env, "debug_gripper_release", False)):
+        return []
+
+    specs = []
+    for side, action in arm_actions.items():
+        if action is None:
+            continue
+
+        arm_joints = list(getattr(env, f"{side}_arm_joints", []) or [])
+        eef_joints = list(getattr(env, f"{side}_eef_joints", []) or [])
+        if not eef_joints:
+            continue
+
+        arm_dof = len(arm_joints)
+        eef_traj = action[:, arm_dof : arm_dof + len(eef_joints)]
+        if eef_traj.shape[-1] != len(eef_joints):
+            continue
+
+        arm_traj = action[:, :arm_dof]
+        arm_delta = float(np.max(np.abs(arm_traj - arm_traj[0]))) if arm_dof else 0.0
+        eef_delta = float(np.max(np.abs(eef_traj - eef_traj[0])))
+        if arm_delta > 1e-4 or eef_delta <= 1e-4:
+            continue
+
+        open_qpos = (
+            _state_to_hand_qpos(env.open_state, len(eef_joints), env.robot.device)
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        if float(np.max(np.abs(eef_traj[-1] - open_qpos))) > 0.005:
+            continue
+
+        eef_step_delta = np.linalg.norm(np.diff(eef_traj, axis=0), axis=1)
+        changed_steps = np.flatnonzero(eef_step_delta > 1e-5)
+        last_change_step = (
+            int(changed_steps[-1] + 1) if len(changed_steps) else len(action) - 1
+        )
+
+        checkpoints = {
+            last_change_step: ["after_open_target"],
+            len(action) - 1: ["after_settle"],
+        }
+        if last_change_step == len(action) - 1:
+            checkpoints[last_change_step] = ["after_open_target", "after_settle"]
+
+        specs.append(
+            {
+                "side": side,
+                "arm_joints": arm_joints,
+                "eef_joints": eef_joints,
+                "arm_part": env.get_agent_arm_control_part(side == "left"),
+                "object_name": _resolve_release_debug_object(env, side),
+                "eef_traj": eef_traj,
+                "checkpoints": checkpoints,
+            }
+        )
+
+    return specs
+
+
+def _log_gripper_release_debug(env, specs, label: str, step_index: int) -> None:
+    if not specs:
+        return
+
+    qpos = env.robot.get_qpos().squeeze(0).detach()
+    try:
+        target_qpos = env.robot.get_qpos(target=True).squeeze(0).detach()
+    except Exception:
+        target_qpos = None
+
+    lines = [
+        f"Gripper release debug: label={label} step_index={step_index}",
+    ]
+    for spec in specs:
+        side = spec["side"]
+        eef_ids = spec["eef_joints"]
+        arm_ids = spec["arm_joints"]
+        actual_eef_qpos = qpos[eef_ids] if eef_ids else qpos.new_empty(0)
+        target_eef_qpos = (
+            target_qpos[eef_ids] if target_qpos is not None and eef_ids else None
+        )
+        expected_index = min(max(step_index, 0), len(spec["eef_traj"]) - 1)
+        expected_eef_qpos = spec["eef_traj"][expected_index]
+
+        arm_qpos = qpos[arm_ids] if arm_ids else qpos.new_empty(0)
+        eef_pose = env.robot.compute_fk(
+            qpos=arm_qpos, name=spec["arm_part"], to_matrix=True
+        ).squeeze(0)
+        eef_xyz = eef_pose[:3, 3]
+
+        obj_text = "object=None"
+        obj_name = spec["object_name"]
+        if obj_name is not None:
+            obj = env.sim.get_rigid_object(obj_name)
+            obj_pose = obj.get_local_pose(to_matrix=True).squeeze(0)
+            obj_xyz = obj_pose[:3, 3]
+            distance = torch.linalg.norm(
+                torch.as_tensor(obj_xyz, dtype=eef_xyz.dtype, device=eef_xyz.device)
+                - eef_xyz
+            )
+            obj_text = (
+                f"object={obj_name} obj_xyz={_format_debug_vector(obj_xyz)} "
+                f"eef_obj_dist={float(distance):.6f}"
+            )
+
+        lines.append(
+            f"  {side}: eef_ids={eef_ids} "
+            f"actual_eef_qpos={_format_debug_vector(actual_eef_qpos)} "
+            f"target_eef_qpos={_format_debug_vector(target_eef_qpos) if target_eef_qpos is not None else 'None'} "
+            f"expected_eef_qpos={_format_debug_vector(expected_eef_qpos)} "
+            f"eef_xyz={_format_debug_vector(eef_xyz)} {obj_text}"
+        )
+
+    log_info("\n".join(lines), color="cyan")
+
+
 def _public_qpos_move_action(
     *,
     env,
@@ -1284,12 +1422,34 @@ def drive(
     actions = torch.from_numpy(actions).to(dtype=torch.float32).unsqueeze(1)
     actions = list(actions.unbind(dim=0))
 
+    release_debug_specs = _build_gripper_release_debug_specs(env, arm_actions)
+    _log_gripper_release_debug(
+        env, release_debug_specs, label="before_open", step_index=-1
+    )
+
     interactive_input = setup_interactive_error_input(interactive_error_injection)
     try:
         for i in tqdm(range(len(actions))):
             action = actions[i]
 
             env.step(action)
+
+            if release_debug_specs:
+                for label in sorted(
+                    {
+                        checkpoint_label
+                        for spec in release_debug_specs
+                        for checkpoint_label in spec["checkpoints"].get(i, [])
+                    }
+                ):
+                    label_specs = [
+                        spec
+                        for spec in release_debug_specs
+                        if label in spec["checkpoints"].get(i, [])
+                    ]
+                    _log_gripper_release_debug(
+                        env, label_specs, label=label, step_index=i
+                    )
 
             if interactive_error_requested(interactive_input):
                 restore_interactive_error_input(interactive_input)

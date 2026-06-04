@@ -1,0 +1,39 @@
+The scene comes from the exported 1780562836_gym_project mesh environment.
+
+This configuration directory is named for the target UR5BreadBasket task, but
+the current probe configuration still uses the existing dual-UR10 robot and
+DH_PGI_140_80 grippers. The UR5 robot and DH_PGC_140_50_M grippers will be
+introduced after the scene-level task is validated.
+
+The robot is a dual-UR10 composite robot with two parallel
+grippers:
+- left_arm is the UR10 outside the left side of the table's near long edge.
+- right_arm is the UR10 outside the right side of the table's near long edge.
+
+Both UR10 bases are on the same long side of the table and face inward toward
+the central wicker_basket. The bases are intentionally kept outside the table
+edge to avoid initial robot-table contact.
+
+The interactive objects are:
+- left_bread_roll: the bread mesh initially on the negative-x side
+  (source object bread_2).
+- right_bread_roll: the bread mesh initially on the positive-x side
+  (source object bread_1).
+- wicker_basket: the target basket near the center of the table
+  (source object basket_3).
+
+The nominal task order is left first, then right. The left UR10 must grasp
+left_bread_roll and place it into wicker_basket before the right UR10 starts
+grasping right_bread_roll. To change the insertion order later, edit the task
+prompt sequence and keep the same atomic action API.
+
+The wicker_basket area is a shared workspace. After a UR10 releases a bread
+roll, it should retreat upward and return to its initial pose before the other
+UR10 moves to the basket, otherwise the two arms may collide near the basket.
+
+A bread roll at a high pose above `wicker_basket` is only staged, not placed.
+Each arm must lower the held bread roll into the basket release pose and open
+the gripper before any return-to-initial motion.
+
+Always plan to the current `wicker_basket` object pose from the environment
+config. Do not hard-code basket coordinates in generated graph actions.

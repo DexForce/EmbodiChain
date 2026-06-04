@@ -1,0 +1,98 @@
+### Atom Functions for UR5BreadBasket Dual-UR10 Probe Placement
+
+This is the temporary Dual-UR10 probe for the target UR5BreadBasket task. Use
+the existing UR10 action API and gripper semantics in this configuration.
+
+Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
+Use `robot_name="left_arm"` only for `left_bread_roll` and use
+`robot_name="right_arm"` only for `right_bread_roll`.
+
+The nominal task is sequential, not simultaneous:
+- Left-side steps put the actual action in `left_arm_action` and set
+  `right_arm_action` to null.
+- Right-side steps put the actual action in `right_arm_action` and set
+  `left_arm_action` to null.
+- After an arm releases a bread roll, first move it upward to clear the basket,
+  then use `back_to_initial_pose` before the other arm enters the shared basket
+  workspace.
+- `back_to_initial_pose` must never be used for an arm that is still holding a
+  bread roll. The same arm must first execute `open_gripper` at the basket
+  release pose.
+
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately. Use only the parameters listed below.
+
+Use the following functions exactly as defined. Do not invent new APIs or
+parameters.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Moves the selected UR10 to the target bread roll, closes the gripper, and
+    performs the public semantic post-grasp lift. Use:
+    - `grasp(robot_name="left_arm", obj_name="left_bread_roll",
+      pre_grasp_dis=0.08, sample_num=90)`
+    - `grasp(robot_name="right_arm", obj_name="right_bread_roll",
+      pre_grasp_dis=0.08, sample_num=90)`
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str,
+                                obj_name: str,
+                                x_offset=0.0,
+                                y_offset=0.0,
+                                z_offset=0.0,
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the selected end-effector to a pose centered on a target object plus a
+    world-frame xyz offset while preserving the current end-effector orientation.
+    Use `obj_name="wicker_basket"` twice for each placement:
+    - First move to a high staging pose above the basket:
+      left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.22`;
+      right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.22`.
+    - Then lower to the release pose inside the basket:
+      left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.12`;
+      right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.12`.
+
+"move_by_relative_offset":
+    def move_by_relative_offset(robot_name: str,
+                                dx=0.0,
+                                dy=0.0,
+                                dz=0.0,
+                                mode="extrinsic",
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the selected end-effector by a relative translation. The offset is
+    applied along world axes when `mode="extrinsic"`. Use this for the short
+    upward retreat after releasing a bread roll, before returning the arm to its
+    initial pose.
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Opens the selected gripper to release the held bread roll. For basket
+    release steps, always call this at the low release pose before any upward
+    retreat or return-to-initial action:
+    - `open_gripper(robot_name="left_arm", sample_num=30,
+      open_threshold=-1.0, settle_steps=50)`
+    - `open_gripper(robot_name="right_arm", sample_num=30,
+      open_threshold=-1.0, settle_steps=50)`
+    The negative `open_threshold` forces the open trajectory to be generated
+    even if a stale cached gripper state incorrectly looks open. `settle_steps`
+    keeps the gripper open and stationary after release so the bread roll can
+    fall out before the arm retreats.
+
+"close_gripper":
+    def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Closes the selected gripper. Do not use this separately in the nominal
+    graph, because `grasp` already closes the gripper.
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Returns the selected UR10 arm to its initial joint configuration. In the
+    nominal graph, use this after the selected arm releases and retreats upward
+    so it does not block the other UR10 near the wicker basket. Do not use this
+    immediately after `move_relative_to_object`; the arm would still be holding
+    the bread roll.

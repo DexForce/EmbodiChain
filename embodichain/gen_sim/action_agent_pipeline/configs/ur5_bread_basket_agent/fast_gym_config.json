@@ -22,11 +22,6 @@
             "gripper_close_state": [0.04],
             "ignore_terminations_during_agent": true,
             "debug_robot_state_on_reset": true,
-            "debug_gripper_release": true,
-            "debug_gripper_release_objects": {
-                "left": "left_bread_roll",
-                "right": "right_bread_roll"
-            },
             "agent_success": {
                 "op": "all",
                 "terms": [
@@ -209,8 +204,8 @@
                         "lang": "Use the left UR10 to place the left bread roll into the wicker basket, then use the right UR10 to place the right bread roll into the wicker basket."
                     },
                     "extra": {
-                        "scene_type": "1780537314_gym_project",
-                        "task_description": "Dual UR10 bread-roll-to-wicker-basket placement",
+                        "scene_type": "1780562836_gym_project",
+                        "task_description": "UR5BreadBasket prototype with temporary Dual UR10 bread-to-basket placement",
                         "data_type": "sim"
                     },
                     "use_videos": true
@@ -221,7 +216,7 @@
     "robot": {
         "uid": "DualUR10",
         "urdf_cfg": {
-            "fname": "dual_ur10_bread_roll_basket",
+            "fname": "dual_ur10_ur5_bread_basket_probe",
             "components": [
                 {
                     "component_type": "left_arm",
@@ -347,7 +342,7 @@
             "uid": "table",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "../../1780537314_gym_project/mesh_assets/table/table_1.glb",
+                "fpath": "1780562836_gym_project/formatted_tabletop_scene/1780562836_gym_project/mesh_assets/table/table_0.glb",
                 "compute_uv": false
             },
             "attrs": {
@@ -358,8 +353,8 @@
             },
             "body_scale": [1.0, 1.0, 1.0],
             "body_type": "kinematic",
-            "init_pos": [-8.080742493019044e-05, -0.00028939259353388813, 0.31778964085436834],
-            "init_rot": [0.006446937151776698, 0.013766040720139754, 177.46700533227127]
+            "init_pos": [8.55084738055796e-05, -3.277785787236809e-06, 0.3626395862169485],
+            "init_rot": [-0.023628178509204664, -0.022414180129759546, -178.47157816446378]
         }
     ],
     "rigid_object": [
@@ -367,7 +362,7 @@
             "uid": "right_bread_roll",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "../../1780537314_gym_project/mesh_assets/bread_roll/bread_roll_2/bread_roll_2.glb",
+                "fpath": "1780562836_gym_project/formatted_tabletop_scene/1780562836_gym_project/mesh_assets/bread/bread_1/bread_1.glb",
                 "compute_uv": false
             },
             "attrs": {
@@ -379,8 +374,8 @@
                 "min_position_iters": 32,
                 "min_velocity_iters": 8
             },
-            "init_pos": [0.32247014871141266, -0.04597785575444968, 0.6639984598735238],
-            "init_rot": [1.0349932957302734, 0.05464509829397848, -175.16269908117627],
+            "init_pos": [0.3796981028131374, -0.11269737287847215, 0.7581176280151587],
+            "init_rot": [0.4334005146105173, -2.0743225241027208, 142.38030797177274],
             "body_scale": [1.0, 1.0, 1.0],
             "max_convex_hull_num": 8
         },
@@ -388,7 +383,7 @@
             "uid": "left_bread_roll",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "../../1780537314_gym_project/mesh_assets/bread_roll/bread_roll_3/bread_roll_3.glb",
+                "fpath": "1780562836_gym_project/formatted_tabletop_scene/1780562836_gym_project/mesh_assets/bread/bread_2/bread_2.glb",
                 "compute_uv": false
             },
             "attrs": {
@@ -400,8 +395,8 @@
                 "min_position_iters": 32,
                 "min_velocity_iters": 8
             },
-            "init_pos": [-0.31931620982613096, -0.01254965140662656, 0.6634606334974498],
-            "init_rot": [0.023593545380701283, -1.2754621292274495, -178.64482858463003],
+            "init_pos": [-0.391506673749347, -0.12338544165101806, 0.7558156732658421],
+            "init_rot": [-0.7551443321742625, 2.7587306189781517, 162.57091355516118],
             "body_scale": [1.0, 1.0, 1.0],
             "max_convex_hull_num": 8
         },
@@ -409,7 +404,7 @@
             "uid": "wicker_basket",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "../../1780537314_gym_project/mesh_assets/wicker_basket/wicker_basket_0/wicker_basket_0.glb",
+                "fpath": "1780562836_gym_project/formatted_tabletop_scene/1780562836_gym_project/mesh_assets/basket/basket_3/basket_3.glb",
                 "compute_uv": false
             },
             "attrs": {
@@ -421,8 +416,8 @@
                 "min_position_iters": 32,
                 "min_velocity_iters": 8
             },
-            "init_pos": [-0.003940649289733908, 0.017057948513724108, 0.6616692481081428],
-            "init_rot": [0.3673742978005943, 0.11809491761843942, -93.67960462460033],
+            "init_pos": [-0.030911798203129576, 0.07327229243700906, 0.7532930223611258],
+            "init_rot": [-0.0746004405576402, 0.09689220919860507, -178.0897772738299],
             "body_scale": [1.0, 1.0, 1.0],
             "max_convex_hull_num": 8
         }
