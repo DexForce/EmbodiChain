@@ -1,0 +1,101 @@
+Task:
+UR5TextBasket: use the current two-UR5 configuration to place
+two apple objects into the wicker_basket.
+
+The task starts with both arms acting simultaneously:
+the left UR5 grasps the left apple while the right UR5 grasps the right
+apple in the same nominal graph edge. After both apples are
+grasped, the placement phase must be sequential: the left UR5 places its
+apple into the wicker_basket and returns to its initial
+pose, then the right UR5 places its apple into the
+wicker_basket and returns to its initial pose.
+
+Object and arm mapping:
+- left_arm must only manipulate `left_apple`.
+- right_arm must only manipulate `right_apple`.
+- Both target objects must be released into `wicker_basket`.
+
+Generate one deterministic nominal graph with the following semantic sequence.
+Do not add extra alignment, search, recovery, or monitor steps. Do include the
+specified post-release retreat and return-to-initial steps so the arm that just
+placed an object leaves the shared basket workspace before the next placement.
+Generate exactly 11 nominal edges, one edge for each numbered step below. Do not
+split the simultaneous grasp into separate edges. Do not merge, reorder, or omit
+the lower-to-release, open-gripper, upward-retreat, or return-to-initial edges.
+
+A target object is not considered placed when it is only above the
+wicker_basket. For each arm, the placement order must be: move
+to a high staging pose above the container, lower to the release pose inside the
+container, open the gripper, move the empty gripper upward, then return the arm
+to its initial pose. Never call `back_to_initial_pose` for an arm that has not
+already executed `open_gripper` for its held target object.
+
+1. Grasp both target objects simultaneously:
+   - left_arm_action: grasp(robot_name="left_arm",
+     obj_name="left_apple", pre_grasp_dis=0.08,
+     sample_num=90)
+   - right_arm_action: grasp(robot_name="right_arm",
+     obj_name="right_apple", pre_grasp_dis=0.08,
+     sample_num=90)
+
+2. Move the held left target object directly above the left half of the
+   wicker_basket while the right arm keeps holding its target:
+   - left_arm_action: move_relative_to_object(robot_name="left_arm",
+     obj_name="wicker_basket", x_offset=-0.04, y_offset=0.0,
+     z_offset=0.22, sample_num=90)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+
+3. Lower the held left target object to the left release pose inside the
+   wicker_basket:
+   - left_arm_action: move_relative_to_object(robot_name="left_arm",
+     obj_name="wicker_basket", x_offset=-0.04, y_offset=0.0,
+     z_offset=0.12, sample_num=60)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+
+4. Release the left target object into the wicker_basket:
+   - left_arm_action: open_gripper(robot_name="left_arm",
+     sample_num=30, open_threshold=-1.0, settle_steps=50)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+
+5. Move the empty left gripper upward to clear the container:
+   - left_arm_action: move_by_relative_offset(robot_name="left_arm",
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+
+6. Return the left UR5 to its initial pose to keep the container workspace clear:
+   - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+
+7. Move the held right target object directly above the right half of the
+   wicker_basket after the left arm has returned:
+   - left_arm_action: null
+   - right_arm_action: move_relative_to_object(robot_name="right_arm",
+     obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
+     z_offset=0.22, sample_num=90)
+
+8. Lower the held right target object to the right release pose inside the
+   wicker_basket:
+   - left_arm_action: null
+   - right_arm_action: move_relative_to_object(robot_name="right_arm",
+     obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
+     z_offset=0.12, sample_num=60)
+
+9. Release the right target object into the wicker_basket:
+   - left_arm_action: null
+   - right_arm_action: open_gripper(robot_name="right_arm",
+     sample_num=30, open_threshold=-1.0, settle_steps=50)
+
+10. Move the empty right gripper upward to clear the container:
+   - left_arm_action: null
+   - right_arm_action: move_by_relative_offset(robot_name="right_arm",
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
+
+11. Return the right UR5 to its initial pose after releasing the target object:
+   - left_arm_action: null
+   - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=60)
+
+The final state is both `left_apple` and
+`right_apple` resting inside `wicker_basket`,
+with both arms moved away from the container workspace. Always plan to the
+current `wicker_basket` object pose from the exported
+1779900000_gym_project environment config.
