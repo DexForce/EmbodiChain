@@ -1,0 +1,23 @@
+The scene comes from the exported 1780537314_gym_project mesh environment.
+
+The robot is a dual-UR10 composite robot with two independent parallel
+grippers:
+- left_arm is the UR10 outside the left side of the table's near long edge.
+- right_arm is the UR10 outside the right side of the table's near long edge.
+
+Both UR10 bases are on the same long side of the table and face inward toward
+the central wicker_basket. The bases are intentionally kept outside the table
+edge to avoid initial robot-table contact.
+
+The interactive objects are:
+- left_bread_roll: the bread roll initially on the negative-x side.
+- right_bread_roll: the bread roll initially on the positive-x side.
+- wicker_basket: the target container near the center of the table.
+
+The nominal task order is left first, then right. The left UR10 must grasp
+left_bread_roll and place it into wicker_basket before the right UR10 starts
+grasping right_bread_roll. To change the insertion order later, edit the task
+prompt sequence and keep the same atomic action API.
+
+Always plan to the current `wicker_basket` object pose from the environment
+config. Do not hard-code basket coordinates in generated graph actions.

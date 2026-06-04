@@ -1,0 +1,60 @@
+Task:
+Use two UR10 manipulators to place two bread rolls into the wicker basket.
+
+The task must be executed sequentially, not simultaneously:
+first the left UR10 places the left bread roll into the basket, then the right
+UR10 places the right bread roll into the basket.
+
+Object and arm mapping:
+- left_arm must only manipulate `left_bread_roll`.
+- right_arm must only manipulate `right_bread_roll`.
+- Both bread rolls must be released into `wicker_basket`.
+
+Generate one deterministic nominal graph with the following semantic sequence.
+Do not add extra alignment, search, recovery, monitor, or return-to-initial
+steps.
+
+1. Grasp the left bread roll with the left UR10:
+   - left_arm_action: grasp(robot_name="left_arm",
+     obj_name="left_bread_roll", pre_grasp_dis=0.08, sample_num=90)
+   - right_arm_action: null
+
+2. Move the held left bread roll directly above the left half of the wicker
+   basket:
+   - left_arm_action: move_relative_to_object(robot_name="left_arm",
+     obj_name="wicker_basket", x_offset=-0.04, y_offset=0.0,
+     z_offset=0.22, sample_num=90)
+   - right_arm_action: null
+
+3. Release the left bread roll into the wicker basket:
+   - left_arm_action: open_gripper(robot_name="left_arm", sample_num=25)
+   - right_arm_action: null
+
+4. Move the left gripper upward to clear the basket:
+   - left_arm_action: move_by_relative_offset(robot_name="left_arm",
+     dx=0.0, dy=0.0, dz=0.12, mode="extrinsic", sample_num=40)
+   - right_arm_action: null
+
+5. Grasp the right bread roll with the right UR10:
+   - left_arm_action: null
+   - right_arm_action: grasp(robot_name="right_arm",
+     obj_name="right_bread_roll", pre_grasp_dis=0.08, sample_num=90)
+
+6. Move the held right bread roll directly above the right half of the wicker
+   basket:
+   - left_arm_action: null
+   - right_arm_action: move_relative_to_object(robot_name="right_arm",
+     obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
+     z_offset=0.22, sample_num=90)
+
+7. Release the right bread roll into the wicker basket:
+   - left_arm_action: null
+   - right_arm_action: open_gripper(robot_name="right_arm", sample_num=25)
+
+8. Move the right gripper upward to clear the basket:
+   - left_arm_action: null
+   - right_arm_action: move_by_relative_offset(robot_name="right_arm",
+     dx=0.0, dy=0.0, dz=0.12, mode="extrinsic", sample_num=40)
+
+The final state is both `left_bread_roll` and `right_bread_roll` resting inside
+`wicker_basket`.
