@@ -1,0 +1,48 @@
+### Atom Functions for Dual-Arm Rearrangement
+
+Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
+Use `robot_name="left_arm"` for the fork and `robot_name="right_arm"` for the
+spoon. The graph runtime can execute `left_arm_action` and `right_arm_action`
+on the same edge simultaneously.
+
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately. Use only the parameters listed below.
+
+Use the following functions exactly as defined. Do not invent new APIs or
+parameters.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Moves the selected arm to the target object's grasp pose and closes the
+    gripper. Use `obj_name="fork"` for the left arm and `obj_name="spoon"` for
+    the right arm.
+
+"orient_eef":
+    def orient_eef(robot_name: str, direction: str, **kwargs) -> list[np.ndarray]
+
+    Reorients the selected end-effector while preserving its current position.
+    For this task, use `direction="down"` before moving to the plate targets.
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str,
+                                obj_name: str,
+                                x_offset=0.0,
+                                y_offset=0.0,
+                                z_offset=0.0,
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the selected end-effector to a pose relative to `obj_name` while
+    preserving orientation. Use `obj_name="plate"`, `y_offset=0.16` for the
+    fork, and `y_offset=-0.16` for the spoon.
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Opens the selected gripper to release the held object.
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Returns the selected arm to its predefined initial joint configuration.

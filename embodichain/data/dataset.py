@@ -158,7 +158,9 @@ def get_data_path(data_path_in_config: str) -> str:
         2. If a matching file/directory exists under ``EMBODICHAIN_DEFAULT_DATA_ROOT``
            (which can be overridden via the ``EMBODICHAIN_DATA_ROOT`` environment
            variable), return that path.
-        3. Otherwise, resolve via the registered data-class download mechanism.
+        3. If a matching file/directory exists under the repository root, return
+           that path.
+        4. Otherwise, resolve via the registered data-class download mechanism.
 
     Args:
         data_path_in_config (str): The dataset path in the format
@@ -176,6 +178,11 @@ def get_data_path(data_path_in_config: str) -> str:
     local_path = os.path.join(EMBODICHAIN_DEFAULT_DATA_ROOT, data_path_in_config)
     if os.path.exists(local_path):
         return local_path
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    repo_path = os.path.join(repo_root, data_path_in_config)
+    if os.path.exists(repo_path):
+        return repo_path
 
     # Fall back to the data-class download mechanism
     split_str = data_path_in_config.split("/")

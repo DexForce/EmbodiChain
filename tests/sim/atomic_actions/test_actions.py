@@ -101,6 +101,19 @@ def _make_mock_motion_generator(robot: Mock | None = None) -> Mock:
     mg = Mock()
     mg.robot = robot or _make_mock_robot()
     mg.device = mg.robot.device
+
+    def interpolate_trajectory(control_part=None, qpos_list=None, options=None):
+        weights = torch.linspace(
+            0,
+            1,
+            steps=options.interpolate_nums + 1,
+            dtype=qpos_list.dtype,
+            device=qpos_list.device,
+        ).view(-1, 1)
+        trajectory = qpos_list[0] + (qpos_list[-1] - qpos_list[0]) * weights
+        return trajectory, None
+
+    mg.interpolate_trajectory = Mock(side_effect=interpolate_trajectory)
     return mg
 
 
@@ -156,6 +169,10 @@ class TestMoveActionHelpers:
         for i in range(NUM_ENVS):
             assert torch.equal(result[i], single)
 
+    def test_resolve_start_qpos_rejects_non_tensor(self):
+        with pytest.raises(TypeError, match="torch.Tensor"):
+            self.action._resolve_start_qpos([0.0] * ARM_DOF)
+
     def test_compute_three_phase_waypoints_sums_to_sample_interval(self):
         hand_interp_steps = 5
         first, second, third = self.action._compute_three_phase_waypoints(
@@ -185,6 +202,37 @@ class TestMoveActionHelpers:
         result = self.action._interpolate_hand_qpos(start, end, n_waypoints)
         expected_mid = torch.tensor([0.5, 0.5])
         assert torch.allclose(result[1], expected_mid, atol=1e-6)
+
+    def test_execute_accepts_hand_qpos_target(self):
+        cfg = MoveActionCfg(control_part="hand", sample_interval=5)
+        action = MoveAction(self.mg, cfg=cfg)
+        start_qpos = torch.tensor([[0.0, 0.1], [0.2, 0.3]])
+        target_qpos = torch.tensor([0.8, 0.9])
+
+        is_success, trajectory, joint_ids = action.execute(
+            target=target_qpos,
+            start_qpos=start_qpos,
+        )
+
+        assert is_success is True
+        assert trajectory.shape == (NUM_ENVS, cfg.sample_interval, HAND_DOF)
+        assert torch.allclose(trajectory[:, 0], start_qpos)
+        assert torch.allclose(
+            trajectory[:, -1],
+            target_qpos.unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
+        assert joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
+        assert self.mg.interpolate_trajectory.call_count == NUM_ENVS
+
+    def test_motion_generator_qpos_interpolation_requires_start_and_target_waypoints(
+        self,
+    ):
+        with pytest.raises(ValueError, match="at least 2"):
+            self.action._interpolate_qpos_with_motion_generator(
+                torch.zeros(NUM_ENVS, ARM_DOF),
+                torch.ones(NUM_ENVS, ARM_DOF),
+                1,
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -241,8 +241,7 @@
                     "use_videos": true
                 }
             }
-        },
-        "control_parts": ["left_arm", "left_eef", "right_arm", "right_eef"]
+        }
     },
     "robot": {
         "uid": "CobotMagic",

@@ -1,0 +1,55 @@
+RecoveryAgent writes a lightweight authoring spec. CompileAgent expands it into
+the executable recovery graph.
+
+Top-level rules:
+- Output only `task` and `recovery_bindings`.
+- Do not output `recovery_nodes`, `recovery_edges`, `recovery_branches`, Python
+  code, injected errors, probabilities, comments, or prose.
+- The nominal task graph is fixed input. Do not rewrite, reorder, merge, or
+  delete its nodes or edges.
+- Skip an edge when it has no high-value, supported, recoverable failure.
+
+Binding rules:
+- Each binding attaches one recoverable failure policy to one nominal edge.
+- `edge_id` must be an existing nominal edge id.
+- `failure_name` should be short and stable.
+- `monitors` is a list of monitor templates. Supported types are:
+  - `object_moved`: fields `objects` or `obj_name`, optional `threshold`
+  - `hold_lost`: fields `robot_name`, `obj_name`, optional `threshold`
+- The compiler canonicalizes common aliases and can infer simple fields from
+  the nominal edge: grasped object names for `object_moved`, both grasp arms for
+  `regrasp_both`, and single-object grasp targets when unambiguous.
+- `recovery` is an ordered list of policy steps. Supported step types are:
+  - `regrasp`: fields `robot_name`, `obj_name`, optional `pre_grasp_dis`
+  - `regrasp_both`: field `arms`, mapping robot names to object names, optional
+    `pre_grasp_dis`
+  - `retry_failed_edge`
+  - `replay_edge`: field `edge_id`
+  - `action`: optional `left_arm_action`, optional `right_arm_action`
+- Use `action` only when the named templates are not enough.
+- `merge` must be `target` when recovery completes the failed edge state, or
+  `source` when recovery only restores the failed edge precondition and the
+  failed edge should be retried.
+- Set `repeat_until_success` to true for normal recoverable failures. The
+  compiler will make generated recovery edges self-monitoring and reusable.
+
+Monitor guidance:
+- All monitor templates use `True` = failure occurred.
+- Use `object_moved` when an object is expected to remain still, such as before
+  or during grasping.
+- Use `hold_lost` only when the object should already be held by an arm.
+- If different failures need different recovery policies, create separate
+  bindings instead of mixing them in one binding.
+
+Recovery guidance:
+- Prefer short policies that either complete the failed edge or restore its
+  precondition.
+- Use `regrasp_both` when two arms can re-grasp independently and
+  simultaneously.
+- If one recovery step depends on the physical result of a previous step, put
+  them as separate ordered policy steps.
+- If an object is lost during a step whose source precondition required the
+  object to be lifted or positioned, recovery must restore that precondition
+  before completing or retrying the failed step.
+- During grasping, do not use `hold_lost`; the object is not guaranteed to be
+  held until grasp completes. Use `object_moved` for grasp-phase displacement.

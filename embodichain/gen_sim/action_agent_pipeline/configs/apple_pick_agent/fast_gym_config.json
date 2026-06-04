@@ -1,0 +1,361 @@
+{
+    "id": "AtomicActionsAgent-v3",
+    "max_episodes": 1,
+    "max_episode_steps": 600,
+    "env": {
+        "extensions": {
+            "single_arm_name": "right_arm",
+            "single_eef_name": "right_eef",
+            "agent_arm_slots": {
+                "right": {
+                    "arm": "right_arm",
+                    "eef": "right_eef"
+                }
+            },
+            "arm_aim_yaw_offset": 3.141592653589793,
+            "gripper_open_state": [0.0],
+            "gripper_close_state": [0.04],
+            "agent_success_object": "apple",
+            "agent_success_container": "mug",
+            "agent_success_position": null,
+            "agent_success_tolerance": 0.05,
+            "container_success_radius": 0.12,
+            "container_success_min_z_offset": -0.03,
+            "container_success_max_z_offset": 0.25,
+            "agent_success": {
+                "type": "object_in_container",
+                "object": "apple",
+                "container": "mug",
+                "radius": 0.12,
+                "min_z_offset": -0.03,
+                "max_z_offset": 0.25
+            },
+            "success_xy_tolerance": 0.18,
+            "success_min_lift_height": 0.15,
+            "enable_apple_grasp_assist": false,
+            "grasp_assist_attach_position_tolerance": 0.1,
+            "grasp_assist_attach_orientation_tolerance": 0.6,
+            "ignore_terminations_during_agent": true,
+            "force_apple_top_down_grasp_pose": true,
+            "apple_top_down_grasp_height_offset": 0.035
+        },
+        "events": {
+            "record_camera": {
+                "func": "record_camera_data",
+                "mode": "interval",
+                "interval_step": 1,
+                "params": {
+                    "name": "cam1",
+                    "resolution": [320, 240],
+                    "eye": [-1.25, 1.05, 1.55],
+                    "target": [0.12, 1.84, 0.78]
+                }
+            },
+            "validation_cameras": {
+                "func": "validation_cameras",
+                "mode": "trigger",
+                "params": {
+                    "cameras": [
+                        {
+                            "uid": "valid_cam_1",
+                            "width": 1280,
+                            "height": 960,
+                            "enable_mask": false,
+                            "intrinsics": [1400, 1400, 640, 480],
+                            "extrinsics": {
+                                "eye": [-1.25, 1.05, 1.55],
+                                "target": [0.12, 1.84, 0.78]
+                            }
+                        },
+                        {
+                            "uid": "valid_cam_2",
+                            "width": 1280,
+                            "height": 960,
+                            "enable_mask": false,
+                            "intrinsics": [1400, 1400, 640, 480],
+                            "extrinsics": {
+                                "eye": [1.1, 2.65, 1.35],
+                                "target": [0.12, 1.84, 0.78]
+                            }
+                        }
+                    ]
+                }
+            },
+            "prepare_extra_attr": {
+                "func": "prepare_extra_attr",
+                "mode": "reset",
+                "params": {
+                    "attrs": [
+                        {
+                            "name": "object_lengths",
+                            "mode": "callable",
+                            "entity_uids": "all_objects",
+                            "func_name": "compute_object_length",
+                            "func_kwargs": {
+                                "is_svd_frame": true,
+                                "sample_points": 5000
+                            }
+                        },
+                        {
+                            "name": "grasp_pose_object",
+                            "mode": "static",
+                            "entity_cfg": {
+                                "uid": "apple"
+                            },
+                            "value": [[
+                                [0.0, 0.0, 1.0, 0.0],
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.035],
+                                [0.0, 0.0, 0.0, 1.0]
+                            ]]
+                        }
+                    ]
+                }
+            },
+            "register_info_to_env": {
+                "func": "register_info_to_env",
+                "mode": "reset",
+                "params": {
+                    "registry": [
+                        {
+                            "entity_cfg": {
+                                "uid": "apple"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        },
+                        {
+                            "entity_cfg": {
+                                "uid": "mug"
+                            },
+                            "pose_register_params": {
+                                "compute_relative": false,
+                                "compute_pose_object_to_arena": true,
+                                "to_matrix": true
+                            }
+                        }
+                    ],
+                    "registration": "affordance_datas",
+                    "sim_update": true
+                }
+            }
+        },
+        "observations": {
+            "norm_robot_eef_joint": {
+                "func": "normalize_robot_joint_data",
+                "mode": "modify",
+                "name": "robot/qpos",
+                "params": {
+                    "joint_ids": [6, 7]
+                }
+            }
+        },
+        "dataset": {
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "UR10",
+                        "control_freq": 25
+                    },
+                    "instruction": {
+                        "lang": "Pick up the apple from the table with the UR10 arm and place it into the mug."
+                    },
+                    "extra": {
+                        "scene_type": "1779962412_gym_project",
+                        "task_description": "UR10 apple-to-mug placement",
+                        "data_type": "sim"
+                    },
+                    "use_videos": true
+                }
+            }
+        }
+    },
+    "robot": {
+        "uid": "UR10",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+                }
+            ]
+        },
+        "drive_pros": {
+            "stiffness": {
+                "JOINT[1-6]": 10000.0,
+                "GRIPPER_FINGER[1-2]_JOINT_1": 100.0
+            },
+            "damping": {
+                "JOINT[1-6]": 1000.0,
+                "GRIPPER_FINGER[1-2]_JOINT_1": 10.0
+            },
+            "max_effort": {
+                "JOINT[1-6]": 100000.0,
+                "GRIPPER_FINGER[1-2]_JOINT_1": 1000.0
+            }
+        },
+        "control_parts": {
+            "right_arm": ["JOINT[1-6]"],
+            "right_eef": ["GRIPPER_FINGER[1-2]_JOINT_1"]
+        },
+        "solver_cfg": {
+            "right_arm": {
+                "class_type": "PytorchSolver",
+                "end_link_name": "ee_link",
+                "root_link_name": "base_link",
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.16],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "init_qpos": [0.0, -1.5707963268, -1.5707963268, 1.5707963268, -1.5707963268, 0.0, 0.0, 0.0],
+        "init_pos": [0.12261117696922513, 2.5676632450195546, 0.4],
+        "init_rot": [0.0, 0.0, -90.0]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 960,
+            "height": 540,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 480, 270],
+            "extrinsics": {
+                "eye": [-1.25, 1.05, 1.55],
+                "target": [0.12, 1.84, 0.78],
+                "up": [0.0, 0.0, 1.0]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "main_light",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 80.0,
+                "init_pos": [0.15, 1.95, 2.2],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "1779962412_gym_project/mesh_assets/table/table_1.glb",
+                "compute_uv": false
+            },
+            "attrs": {
+                "mass": 10.0,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "linear_damping": 0.5,
+                "angular_damping": 0.5,
+                "contact_offset": 0.002,
+                "rest_offset": 0.001,
+                "restitution": 0.01,
+                "max_depenetration_velocity": 3.0,
+                "max_linear_velocity": 2.0,
+                "max_angular_velocity": 2.0
+            },
+            "body_scale": [1.0, 1.0, 1.0],
+            "init_pos": [0.03896546771464756, 1.7457992850796398, 0.4],
+            "init_rot": [131.05959670540122, -0.5408456205882278, -0.9485794437136701],
+            "body_type": "kinematic",
+            "max_convex_hull_num": 20
+        }
+    ],
+    "rigid_object": [
+        {
+            "uid": "apple",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "1779962412_gym_project/mesh_assets/apple/apple_0/apple_0.glb",
+                "compute_uv": false
+            },
+            "attrs": {
+                "mass": 0.1,
+                "static_friction": 0.8,
+                "dynamic_friction": 0.7,
+                "linear_damping": 0.5,
+                "angular_damping": 0.5,
+                "contact_offset": 0.002,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 3.0,
+                "max_linear_velocity": 2.0,
+                "max_angular_velocity": 2.0
+            },
+            "body_scale": [0.5, 0.5, 0.5],
+            "init_pos": [-0.04736585442532049, 1.8148307472408205, 0.747],
+            "init_rot": [125.08492737084423, 1.0374067602823314, -1.2144384437679427],
+            "body_type": "dynamic",
+            "max_convex_hull_num": 8
+        },
+        {
+            "uid": "book",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "1779962412_gym_project/mesh_assets/book/book_3/book_3.glb",
+                "compute_uv": false
+            },
+            "attrs": {
+                "mass": 1.0,
+                "static_friction": 0.8,
+                "dynamic_friction": 0.7,
+                "linear_damping": 0.5,
+                "angular_damping": 0.5,
+                "contact_offset": 0.002,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 3.0,
+                "max_linear_velocity": 2.0,
+                "max_angular_velocity": 2.0
+            },
+            "body_scale": [1.0, 1.0, 1.0],
+            "init_pos": [-0.4185391008388205, 1.8600997137531323, 0.78],
+            "init_rot": [118.25698889958119, 2.564185886002991, -1.449663917070915],
+            "body_type": "dynamic",
+            "max_convex_hull_num": 8
+        },
+        {
+            "uid": "mug",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "1779962412_gym_project/mesh_assets/mug/mug_2/mug_2.glb",
+                "compute_uv": false
+            },
+            "attrs": {
+                "mass": 1.0,
+                "static_friction": 0.8,
+                "dynamic_friction": 0.7,
+                "linear_damping": 0.5,
+                "angular_damping": 0.5,
+                "contact_offset": 0.002,
+                "rest_offset": 0.001,
+                "restitution": 0.1,
+                "max_depenetration_velocity": 3.0,
+                "max_linear_velocity": 2.0,
+                "max_angular_velocity": 2.0
+            },
+            "body_scale": [1.0, 1.0, 1.0],
+            "init_pos": [0.25, 1.6, 0.752],
+            "init_rot": [128.7027542588752, -3.0681629006467284, 2.2439660166022253],
+            "body_type": "dynamic",
+            "max_convex_hull_num": 8
+        }
+    ]
+}

@@ -1,0 +1,39 @@
+{
+    "TaskAgent": {
+        "prompt_name": "generate_task_graph"
+    },
+    "RecoveryAgent": {
+        "prompt_name": "augment_task_graph"
+    },
+    "CompileAgent": {
+        "prompt_name": "compile_agent_graph"
+    },
+    "Agent": {
+        "prompt_kwargs": {
+            "task_prompt": {
+                "type": "text",
+                "name": "task_prompt.txt"
+            },
+            "basic_background": {
+                "type": "text",
+                "name": "basic_background.txt"
+            },
+            "atom_actions": {
+                "type": "text",
+                "name": "atom_actions.txt"
+            },
+            "error_functions": {
+                "type": "text",
+                "name": "error_functions.txt"
+            },
+            "monitor_functions": {
+                "type": "text",
+                "name": "monitor_functions.txt"
+            },
+            "recovery_rules": {
+                "type": "text",
+                "name": "recovery_rules.txt"
+            }
+        }
+    }
+}

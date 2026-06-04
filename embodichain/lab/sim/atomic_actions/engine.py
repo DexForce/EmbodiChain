@@ -179,7 +179,6 @@ class AtomicActionEngine:
         # Semantic analyzer for object understanding
         self._semantic_analyzer = SemanticAnalyzer()
 
-        # Initialize default actions
         self._actions: Dict[str, AtomicAction] = self._init_actions(actions_cfg_list)
 
     def _init_actions(
@@ -195,6 +194,11 @@ class AtomicActionEngine:
         }
         if actions_cfg_list is not None:
             for cfg in actions_cfg_list:
+                if cfg.name in actions:
+                    logger.log_error(
+                        f"Duplicate action name in config: {cfg.name}. "
+                        "Action names must be unique for AtomicActionEngine."
+                    )
                 action_class = builtin_action_map.get(
                     cfg.name
                 ) or _global_action_registry.get(cfg.name)
@@ -217,7 +221,8 @@ class AtomicActionEngine:
         action_names = list(self._actions.keys())
         if len(target_list) != len(action_names):
             logger.log_error(
-                f"Length of target_list ({len(target_list)}) must match number of actions ({len(action_names)})."
+                f"Length of target_list ({len(target_list)}) must match number of "
+                f"actions ({len(action_names)})."
             )
         start_qpos = self.motion_generator.robot.get_qpos()
         n_envs = start_qpos.shape[0]

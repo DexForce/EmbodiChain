@@ -124,6 +124,8 @@ class MoveAction(AtomicAction):
         arm_dof = self.dof if arm_dof is None else arm_dof
         if start_qpos is None:
             start_qpos = self.robot.get_qpos(name=self.cfg.control_part)
+        if not isinstance(start_qpos, torch.Tensor):
+            logger.log_error("start_qpos must be a torch.Tensor.", TypeError)
         if start_qpos.shape == (arm_dof,):
             start_qpos = start_qpos.unsqueeze(0).repeat(self.n_envs, 1)
         if start_qpos.shape != (self.n_envs, arm_dof):
@@ -132,6 +134,63 @@ class MoveAction(AtomicAction):
                 ValueError,
             )
         return start_qpos
+
+    def _resolve_qpos_target(self, target: torch.Tensor, *, name: str) -> torch.Tensor:
+        """Resolve a qpos target into batched control-part joint positions."""
+        if not isinstance(target, torch.Tensor):
+            logger.log_error(f"{name} must be a torch.Tensor.", TypeError)
+        if target.shape == (4, 4):
+            logger.log_error(
+                f"{name} shape (4, 4) is reserved for pose targets.",
+                ValueError,
+            )
+        if target.shape == (self.dof,):
+            target = target.unsqueeze(0).repeat(self.n_envs, 1)
+        if target.shape != (self.n_envs, self.dof):
+            logger.log_error(
+                f"{name} must have shape ({self.dof},) or ({self.n_envs}, {self.dof}), "
+                f"but got {target.shape}",
+                ValueError,
+            )
+        return target
+
+    def _interpolate_qpos_with_motion_generator(
+        self,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate control-part qpos through the shared motion generator."""
+        if n_waypoints < 2:
+            logger.log_error(
+                "n_waypoints must be at least 2 to include start and target qpos.",
+                ValueError,
+            )
+
+        trajectories = []
+        options = MotionGenOptions(
+            control_part=self.cfg.control_part,
+            is_linear=False,
+            interpolate_nums=n_waypoints - 1,
+        )
+        for env_id in range(self.n_envs):
+            qpos_list = torch.stack(
+                [start_qpos[env_id], target_qpos[env_id]],
+                dim=0,
+            )
+            trajectory, _ = self.motion_generator.interpolate_trajectory(
+                control_part=self.cfg.control_part,
+                qpos_list=qpos_list,
+                options=options,
+            )
+            if trajectory.shape != (n_waypoints, self.dof):
+                logger.log_error(
+                    "Joint-space interpolation returned shape "
+                    f"{trajectory.shape}, expected ({n_waypoints}, {self.dof}).",
+                    ValueError,
+                )
+            trajectories.append(trajectory)
+        return torch.stack(trajectories, dim=0)
 
     def _compute_three_phase_waypoints(
         self,
@@ -255,6 +314,26 @@ class MoveAction(AtomicAction):
             trajectory of shape (n_envs, n_waypoints, dof),
             joint_ids corresponding to trajectory
         """
+        if isinstance(target, torch.Tensor):
+            target_shape = tuple(target.shape)
+            is_pose_shape = target_shape in {
+                (4, 4),
+                (self.n_envs, 4, 4),
+            }
+            is_qpos_shape = target_shape in {
+                (self.dof,),
+                (self.n_envs, self.dof),
+            }
+            if is_qpos_shape and not is_pose_shape:
+                start_qpos = self._resolve_start_qpos(start_qpos)
+                target_qpos = self._resolve_qpos_target(target, name="target_qpos")
+                trajectory = self._interpolate_qpos_with_motion_generator(
+                    start_qpos,
+                    target_qpos,
+                    int(self.cfg.sample_interval),
+                )
+                return True, trajectory, self.arm_joint_ids
+
         is_success, move_xpos = self._resolve_pose_target(
             target, action_name=self.__class__.__name__
         )

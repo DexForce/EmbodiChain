@@ -177,10 +177,10 @@ cache
 materials
 
 embodichain/toolkits/outputs/*
-embodichain/toolkits/outputs/*
 
 embodichain/database/tmp/*
 embodichain/database/train/*
+embodichain/database/agent_generated_content/
 
 3rdparty/
 Log/
@@ -201,3 +201,7 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+# generated scene assets
+*_gym_project/
+backup_*/

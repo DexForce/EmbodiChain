@@ -27,6 +27,7 @@ dynamic = ["version"]
 # specified using PEP 508 direct references where present.
 dependencies = [
   "dexsim_engine==0.4.1",
+  "numpy>=1.26.4,<2",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
   "langchain",

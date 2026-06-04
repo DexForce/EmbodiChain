@@ -595,7 +595,11 @@ class MotionGenerator:
                 feasible_pose_targets = feasible_pose_targets[valid_mask]
         else:
             # Perform joint space interpolation directly if not linear or if end-effector poses are not provided
-            qpos_interpolated = qpos_list.unsqueeze_(0).permute(1, 0, 2)  # [N, 1, DOF]
+            if qpos_list.ndim != 2:
+                logger.log_error(
+                    "qpos_list must have shape [num_waypoints, dof] for "
+                    f"joint-space interpolation, but got {qpos_list.shape}."
+                )
 
             if isinstance(options.interpolate_nums, int):
                 interp_nums = [options.interpolate_nums] * (len(qpos_list) - 1)
@@ -606,15 +610,12 @@ class MotionGenerator:
                     )
                 interp_nums = options.interpolate_nums
 
-            interpolate_qpos_list = (
-                interpolate_with_nums(
-                    qpos_interpolated,
-                    interp_nums=interp_nums,
-                    device=self.device,
-                )
-                .permute(1, 0, 2)
-                .squeeze_(0)
-            )  # [M, DOF]
+            interpolate_qpos_list = interpolate_with_nums(
+                qpos_list.unsqueeze(0),
+                interp_nums=interp_nums,
+                device=self.device,
+            ).squeeze(0)
+            # [M, DOF]
 
             feasible_pose_targets = None
 

@@ -28,6 +28,27 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.utils.logger import log_warning, log_info, log_error
 
 
+def _log_task_success(env) -> bool | None:
+    try:
+        success_fn = (
+            env.get_wrapper_attr("is_task_success")
+            if hasattr(env, "get_wrapper_attr")
+            else env.is_task_success
+        )
+        success = success_fn()
+    except Exception as exc:
+        log_warning(f"Failed to evaluate task success after execution: {exc}")
+        return None
+
+    if isinstance(success, torch.Tensor):
+        success_value = bool(success.detach().cpu().flatten().all().item())
+    else:
+        success_value = bool(np.asarray(success).flatten().all())
+
+    log_info(f"Task success after execution: {success_value}", color="green")
+    return success_value
+
+
 def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
 
     action_list = env.get_wrapper_attr("create_demo_action_list")(
@@ -37,6 +58,11 @@ def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
         return False
+
+    if getattr(action_list, "already_executed", False):
+        log_info("Action list was already executed by the agent runtime.")
+        _log_task_success(env)
+        return True
 
     for action in tqdm.tqdm(
         action_list, desc=f"Executing action list #{idx}", unit="step"
@@ -48,6 +74,7 @@ def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
     # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
     # but truncation is useful to improve the generation efficiency.
 
+    _log_task_success(env)
     return True
 
 
@@ -113,14 +140,22 @@ def main(args, env, gym_config):
     # TODO: Support multiple trajectories per episode generation.
     num_traj = 1
     for i in range(gym_config.get("max_episodes", 1)):
+        runtime_kwargs = {
+            "save_path": getattr(args, "save_path", ""),
+            "save_video": getattr(args, "save_video", False),
+            "debug_mode": getattr(args, "debug_mode", False),
+            "regenerate": getattr(args, "regenerate", False),
+            "recovery": getattr(args, "recovery", False),
+            "interactive_error_injection": getattr(
+                args, "interactive_error_injection", False
+            ),
+        }
+
         generate_function(
             env,
             num_traj,
             i,
-            save_path=getattr(args, "save_path", ""),
-            save_video=getattr(args, "save_video", False),
-            debug_mode=getattr(args, "debug_mode", False),
-            regenerate=getattr(args, "regenerate", False),
+            **runtime_kwargs,
         )
 
     # Final reset.

@@ -7,3 +7,5 @@ Generative Simulation collects EmbodiChain features for generating simulation-re
    :maxdepth: 2
 
    SimReady Asset Pipeline <simready_pipeline.md>
+   EmbodiAgent <agents.md>
+   Failure Monitor Recovery <../failure_monitor_recovery.md>
