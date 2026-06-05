@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from embodichain.gen_sim.action_agent_pipeline.ur5_basket_config_generation import (
     generate_ur5_basket_config_from_project,
@@ -54,6 +55,21 @@ def cli() -> None:
         help="Task name passed to run_agent.",
     )
     parser.add_argument(
+        "--task_description",
+        type=str,
+        default=None,
+        help=(
+            "Simple natural-language relative-placement task. Providing this "
+            "uses the LLM to generate a constrained config-level prompt/spec."
+        ),
+    )
+    parser.add_argument(
+        "--task_file",
+        type=str,
+        default=None,
+        help="Optional text file containing --task_description.",
+    )
+    parser.add_argument(
         "--use_llm_roles",
         action="store_true",
         default=False,
@@ -73,7 +89,8 @@ def cli() -> None:
         type=float,
         default=0.7,
         help=(
-            "Uniform body_scale for the two target objects, e.g. 0.5, 0.6, " "or 1.0."
+            "Uniform body_scale for every generated non-table object, e.g. "
+            "0.5, 0.6, or 1.0."
         ),
     )
     parser.add_argument(
@@ -95,11 +112,13 @@ def cli() -> None:
         help="max_episode_steps value written to fast_gym_config.json.",
     )
     args = parser.parse_args()
+    task_description = _resolve_task_description(args)
 
     paths = generate_ur5_basket_config_from_project(
         gym_project=args.gym_project,
         output_dir=args.output_dir,
         task_name=args.task_name,
+        task_description=task_description,
         use_llm_roles=args.use_llm_roles,
         llm_model=args.llm_model,
         target_body_scale=args.target_body_scale,
@@ -113,6 +132,10 @@ def cli() -> None:
     print(f"Generated task prompt: {paths.task_prompt}")
     print(f"Generated basic background: {paths.basic_background}")
     print(f"Generated atom actions: {paths.atom_actions}")
+    if paths.summary:
+        print("Generation summary:")
+        for key, value in paths.summary.items():
+            print(f"  {key}: {value}")
     print(
         "Run with:\n"
         "python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent "
@@ -121,6 +144,16 @@ def cli() -> None:
         f'--agent_config "{paths.agent_config}" '
         "--regenerate"
     )
+
+
+def _resolve_task_description(args: argparse.Namespace) -> str | None:
+    if args.task_description and args.task_file:
+        raise ValueError("Use either --task_description or --task_file, not both.")
+    if args.task_file:
+        return Path(args.task_file).expanduser().read_text(encoding="utf-8").strip()
+    if args.task_description:
+        return args.task_description.strip()
+    return None
 
 
 if __name__ == "__main__":

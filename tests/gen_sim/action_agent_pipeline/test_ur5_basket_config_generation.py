@@ -19,8 +19,15 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
+import pytest
+import torch
+
+from embodichain.gen_sim.action_agent_pipeline import ur5_basket_config_generation
 from embodichain.gen_sim.action_agent_pipeline.ur5_basket_config_generation import (
     generate_ur5_basket_config_from_project,
+)
+from embodichain.lab.gym.envs.tasks.tableware.configurable_success import (
+    evaluate_configured_success,
 )
 
 
@@ -38,10 +45,13 @@ def test_ur5_basket_generator_uses_parallel_handoff(
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
     assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
     assert rigid_objects["left_apple"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
     assert {term["object"] for term in success_terms} == {"left_apple", "right_apple"}
@@ -70,6 +80,221 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert 'move_relative_to_object(robot_name="right_arm"' in handoff_edge
     assert 'close_gripper(robot_name="right_arm"' not in handoff_edge
     assert "left_arm_action: null" not in handoff_edge
+    assert paths.summary["mode"] == "basket_template"
+
+
+def test_task_description_generates_relative_left_of_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == "把 apple_2 放到 basket_3 左边"
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+            "task_prompt_summary": "Move apple_2 to the left of basket_3.",
+            "basic_background_notes": "The basket is the spatial reference.",
+            "action_sketch": [
+                "grasp apple_2",
+                "move to the left side of basket_3",
+                "release on the table",
+            ],
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_relative_agent",
+        task_name="AppleLeftOfBasket",
+        task_description="把 apple_2 放到 basket_3 左边",
+        target_body_scale=0.5,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert rigid_objects["apple_2"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert rigid_objects["apple_1"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["op"] == "all"
+    axis_terms = {
+        (term.get("axis"), term.get("offset"))
+        for term in success["terms"]
+        if term["type"] == "object_axis_offset_near"
+    }
+    assert ("x", -0.16) in axis_terms
+    assert ("y", 0.0) in axis_terms
+
+    grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
+    assert grasp_overrides == [
+        {
+            "type": "top_down",
+            "object": "apple_2",
+            "side": "left",
+            "height_offset": 0.036,
+        }
+    ]
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert "Move apple_2 to the left of basket_3." in task_prompt
+    assert (
+        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        in task_prompt
+    )
+    assert 'grasp(robot_name="left_arm",\n     obj_name="apple_2"' in task_prompt
+    assert "right_arm_action: null" in task_prompt
+    assert "Generate exactly 10 nominal edges" not in task_prompt
+
+    assert paths.summary == {
+        "mode": "relative_placement",
+        "moved_object": "apple_2",
+        "reference_object": "wicker_basket",
+        "relation": "left_of",
+        "active_arm": "left_arm",
+        "release_offset": [-0.16, 0.0, 0.12],
+    }
+
+
+def test_task_description_on_container_is_compiled_as_inside(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_1",
+            "reference_object": "basket_3",
+            "goal_relation": "on",
+            "task_prompt_summary": "Release apple_1 above basket_3.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_above_container_agent",
+        task_description="把 apple_1 放到 basket_3 上方然后松手",
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["type"] == "object_in_container"
+    assert success["object"] == "apple_1"
+    assert success["container"] == "wicker_basket"
+    assert paths.summary["relation"] == "inside"
+
+
+def test_task_description_on_object_uses_object_on_object_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "apple_1",
+            "goal_relation": "on",
+            "task_prompt_summary": "Stack apple_2 on apple_1.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_stack_agent",
+        task_description="把 apple_2 放到 apple_1 上方并松手",
+        target_body_scale=0.6,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    assert rigid_objects["apple_2"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["apple_1"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [0.6, 0.6, 0.6]
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["type"] == "object_on_object"
+    assert success["object"] == "apple_2"
+    assert success["support"] == "apple_1"
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert "on top of `apple_1`" in task_prompt
+
+
+def test_task_description_rejects_unknown_llm_uid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "missing_bread",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    with pytest.raises(ValueError, match="unknown moved_object"):
+        generate_ur5_basket_config_from_project(
+            project_dir,
+            tmp_path / "bad_agent",
+            task_description="把 missing_bread 放到 basket_3 左边",
+        )
+
+
+def test_object_on_object_success_predicate() -> None:
+    env = _FakeEnv(
+        {
+            "apple_2": [0.0, 0.0, 0.15],
+            "apple_1": [0.02, 0.01, 0.0],
+        }
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "object_on_object",
+            "object": "apple_2",
+            "support": "apple_1",
+            "xy_radius": 0.08,
+            "min_z_offset": 0.02,
+            "max_z_offset": 0.35,
+        },
+    )
+
+    assert bool(success.item()) is True
 
 
 def _write_project(project_dir: Path) -> None:
@@ -137,3 +362,31 @@ def _mesh_object(
         "init_rot": init_rot,
         "body_scale": [1.0, 1.0, 1.0],
     }
+
+
+class _FakeEnv:
+    num_envs = 1
+    device = torch.device("cpu")
+
+    def __init__(self, positions: dict[str, list[float]]) -> None:
+        self.sim = _FakeSim(positions)
+
+
+class _FakeSim:
+    def __init__(self, positions: dict[str, list[float]]) -> None:
+        self._objects = {
+            uid: _FakeRigidObject(position) for uid, position in positions.items()
+        }
+
+    def get_rigid_object(self, uid: str):
+        return self._objects[uid]
+
+
+class _FakeRigidObject:
+    def __init__(self, position: list[float]) -> None:
+        self._position = torch.tensor(position, dtype=torch.float32)
+
+    def get_local_pose(self, to_matrix: bool = True) -> torch.Tensor:
+        pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
+        pose[:, :3, 3] = self._position.reshape(1, 3)
+        return pose

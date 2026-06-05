@@ -43,6 +43,61 @@ _CONTAINER_KEYWORDS = (
     "crate",
 )
 
+_RELATIVE_RELATIONS = {
+    "inside",
+    "on",
+    "left_of",
+    "right_of",
+    "front_of",
+    "behind",
+}
+
+_RELATION_ALIASES = {
+    "in": "inside",
+    "into": "inside",
+    "inside": "inside",
+    "放入": "inside",
+    "放进": "inside",
+    "里面": "inside",
+    "on": "on",
+    "onto": "on",
+    "on_top": "on",
+    "on_top_of": "on",
+    "above": "on",
+    "top": "on",
+    "上": "on",
+    "上方": "on",
+    "上面": "on",
+    "叠放": "on",
+    "left": "left_of",
+    "left_of": "left_of",
+    "to_the_left_of": "left_of",
+    "左": "left_of",
+    "左边": "left_of",
+    "右": "right_of",
+    "右边": "right_of",
+    "right": "right_of",
+    "right_of": "right_of",
+    "to_the_right_of": "right_of",
+    "front": "front_of",
+    "front_of": "front_of",
+    "in_front_of": "front_of",
+    "前": "front_of",
+    "前方": "front_of",
+    "前面": "front_of",
+    "back": "behind",
+    "behind": "behind",
+    "back_of": "behind",
+    "后": "behind",
+    "后方": "behind",
+    "后面": "behind",
+}
+
+_SIDE_RELATION_DISTANCE = 0.16
+_SIDE_RELEASE_Z_OFFSET = 0.12
+_STAGING_Z_DELTA = 0.10
+_ON_RELEASE_Z_OFFSET = 0.14
+
 _BACKGROUND_ATTRS = {
     "mass": 10.0,
     "static_friction": 0.95,
@@ -71,6 +126,7 @@ class GeneratedUR5BasketConfigPaths:
     task_prompt: Path
     basic_background: Path
     atom_actions: Path
+    summary: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -93,11 +149,29 @@ class _BasketTaskRoles:
     container_noun: str
 
 
+@dataclass(frozen=True)
+class _RelativePlacementSpec:
+    table_source_uid: str
+    moved_source_uid: str
+    reference_source_uid: str
+    moved_runtime_uid: str
+    reference_runtime_uid: str
+    relation: str
+    active_side: str
+    task_description: str
+    task_prompt_summary: str
+    basic_background_notes: str
+    action_sketch: list[str]
+    release_offset: list[float]
+    high_offset: list[float]
+
+
 def generate_ur5_basket_config_from_project(
     gym_project: str | Path,
     output_dir: str | Path,
     *,
     task_name: str = "UR5BreadBasket",
+    task_description: str | None = None,
     use_llm_roles: bool = False,
     llm_model: str | None = None,
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
@@ -116,10 +190,13 @@ def generate_ur5_basket_config_from_project(
         gym_project: Project root, formatted scene folder, or ``gym_config.json``.
         output_dir: Destination config directory.
         task_name: Name passed to ``run_agent``.
+        task_description: Optional natural-language relative-placement task.
+            When provided, the generator asks the shared LLM for a constrained
+            config-level task spec and generates prompts from that spec.
         use_llm_roles: If true, use an LLM only to refine object role mapping.
         llm_model: Optional model override for role refinement.
-        target_body_scale: Uniform or xyz scale applied to the two target
-            objects. Use ``1.0`` to keep source-sized target objects.
+        target_body_scale: Uniform or xyz scale applied to generated non-table
+            scene objects. Use ``1.0`` to keep source-sized objects.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -135,6 +212,30 @@ def generate_ur5_basket_config_from_project(
     project_name = _infer_project_name(input_path, scene_dir)
 
     scene_objects = _collect_scene_objects(source_config)
+    if task_description:
+        spec = _build_relative_placement_spec_with_llm(
+            scene_objects=scene_objects,
+            project_name=project_name,
+            task_description=task_description,
+            model=llm_model,
+        )
+        bundle = _build_relative_placement_bundle(
+            scene_dir=scene_dir,
+            source_config=source_config,
+            spec=spec,
+            project_name=project_name,
+            task_name=task_name,
+            target_body_scale=target_body_scale,
+            max_episodes=max_episodes,
+            max_episode_steps=max_episode_steps,
+        )
+        _validate_relative_bundle(bundle, spec)
+        return _write_config_bundle(
+            output_dir=Path(output_dir).expanduser().resolve(),
+            bundle=bundle,
+            overwrite=overwrite,
+        )
+
     roles = _infer_basket_task_roles(scene_objects)
     if use_llm_roles:
         roles = _refine_roles_with_llm(
@@ -479,6 +580,327 @@ def _call_role_llm(
     return extract_json_object(content)
 
 
+def _build_relative_placement_spec_with_llm(
+    *,
+    scene_objects: list[_SceneObject],
+    project_name: str,
+    task_description: str,
+    model: str | None,
+) -> _RelativePlacementSpec:
+    background_objects = [
+        obj for obj in scene_objects if obj.source_role == "background"
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    if not background_objects:
+        raise ValueError("Relative placement generation requires a background table.")
+    if len(rigid_objects) < 2:
+        raise ValueError(
+            "Relative placement generation requires at least two rigid objects."
+        )
+
+    table = _pick_table(background_objects)
+    response = _call_relative_task_llm(
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=[
+            {
+                "source_uid": obj.source_uid,
+                "role": obj.source_role,
+                "object_type": _base_name(obj),
+                "is_container_like": _is_container_like(obj),
+                "mesh": obj.config.get("shape", {}).get("fpath"),
+                "init_pos": obj.config.get("init_pos"),
+            }
+            for obj in scene_objects
+        ],
+        model=model,
+    )
+    return _apply_relative_task_response(
+        response=response,
+        table_source_uid=table.source_uid,
+        rigid_objects=rigid_objects,
+        task_description=task_description,
+    )
+
+
+def _call_relative_task_llm(
+    *,
+    project_name: str,
+    task_description: str,
+    scene_summary: list[dict[str, Any]],
+    model: str | None,
+) -> dict[str, Any]:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from embodichain.gen_sim.mllm import create_chat_openai
+    from embodichain.utils.llm_json import extract_json_object
+
+    prompt = (
+        "Parse a simple Dual-UR5 tabletop relative-placement task and produce "
+        "a constrained config-level JSON spec. This JSON is used to generate "
+        "task_prompt.txt, basic_background.txt, atom_actions.txt, and "
+        "agent_success; a second LLM will later read those prompts to generate "
+        "the executable graph JSON.\n\n"
+        "Return exactly one JSON object with this schema:\n"
+        "{\n"
+        '  "moved_object": "<source_uid from rigid_object>",\n'
+        '  "reference_object": "<different source_uid from rigid_object>",\n'
+        '  "goal_relation": '
+        '"inside|on|left_of|right_of|front_of|behind",\n'
+        '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
+        '  "basic_background_notes": "<short scene/task notes>",\n'
+        '  "action_sketch": [\n'
+        '    "grasp moved_object",\n'
+        '    "move above the relation target pose",\n'
+        '    "lower to the release pose",\n'
+        '    "open gripper",\n'
+        '    "retreat upward"\n'
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "- Use only source_uid values from rigid_object entries.\n"
+        "- moved_object is the object to grasp and move.\n"
+        "- reference_object is the object used as the spatial reference, "
+        "container, or support.\n"
+        "- The two objects must be different.\n"
+        "- For Chinese/English left/right/front/back, use the relation enums. "
+        "front_of means negative world-y, closer to the Dual-UR5 bases; "
+        "behind means positive world-y.\n"
+        "- If the task says to release an object above a basket/container so it "
+        "falls into it, use goal_relation='inside'.\n"
+        "- If the task says to stack/place one object on another non-container "
+        "support, use goal_relation='on'.\n"
+        "- Do not return numeric offsets, object poses, scales, success JSON, "
+        "robot config, or full prompt files. The generator computes those "
+        "deterministically.\n\n"
+        f"Project: {project_name}\n"
+        f"Task description:\n{task_description}\n"
+        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    )
+    llm = create_chat_openai(temperature=0.0, model=model)
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "You produce strict JSON specs for simulation config "
+                    "generation. Do not include markdown."
+                )
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
+    content = getattr(response, "content", response)
+    return extract_json_object(content)
+
+
+def _apply_relative_task_response(
+    *,
+    response: Mapping[str, Any],
+    table_source_uid: str,
+    rigid_objects: list[_SceneObject],
+    task_description: str,
+) -> _RelativePlacementSpec:
+    moved_source_uid = _resolve_rigid_source_uid(
+        response.get("moved_object"),
+        rigid_objects,
+        field_name="moved_object",
+    )
+    reference_source_uid = _resolve_rigid_source_uid(
+        response.get("reference_object"),
+        rigid_objects,
+        field_name="reference_object",
+    )
+    if moved_source_uid == reference_source_uid:
+        raise ValueError(
+            "Relative placement requires distinct moved/reference objects."
+        )
+
+    by_uid = {obj.source_uid: obj for obj in rigid_objects}
+    reference_obj = by_uid[reference_source_uid]
+    relation = _normalize_relative_relation(response.get("goal_relation"))
+    if relation == "on" and _is_container_like(reference_obj):
+        relation = "inside"
+
+    runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
+    moved_runtime_uid = runtime_uids[moved_source_uid]
+    reference_runtime_uid = runtime_uids[reference_source_uid]
+    if moved_runtime_uid == reference_runtime_uid:
+        raise ValueError(
+            f"Relative placement produced duplicate runtime uid {moved_runtime_uid!r}."
+        )
+
+    release_offset = _relative_release_offset(relation)
+    high_offset = list(release_offset)
+    high_offset[2] += _STAGING_Z_DELTA
+    moved_x = _vector3(by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0]))[0]
+    active_side = "left" if moved_x < 0 else "right"
+    summary = str(response.get("task_prompt_summary", "")).strip()
+    if not summary:
+        summary = _default_relative_task_summary(
+            moved_runtime_uid,
+            reference_runtime_uid,
+            relation,
+        )
+    background_notes = str(response.get("basic_background_notes", "")).strip()
+    action_sketch = _string_list(response.get("action_sketch"))
+    if not action_sketch:
+        action_sketch = [
+            f"grasp {moved_runtime_uid}",
+            f"move above the {relation} release pose relative to {reference_runtime_uid}",
+            "lower to the release pose",
+            "open the gripper",
+            "retreat upward",
+        ]
+
+    return _RelativePlacementSpec(
+        table_source_uid=table_source_uid,
+        moved_source_uid=moved_source_uid,
+        reference_source_uid=reference_source_uid,
+        moved_runtime_uid=moved_runtime_uid,
+        reference_runtime_uid=reference_runtime_uid,
+        relation=relation,
+        active_side=active_side,
+        task_description=task_description,
+        task_prompt_summary=summary,
+        basic_background_notes=background_notes,
+        action_sketch=action_sketch,
+        release_offset=release_offset,
+        high_offset=high_offset,
+    )
+
+
+def _resolve_rigid_source_uid(
+    value: Any,
+    rigid_objects: list[_SceneObject],
+    *,
+    field_name: str,
+) -> str:
+    if value is None:
+        raise ValueError(f"LLM response missing required {field_name}.")
+    text = str(value).strip()
+    by_uid = {obj.source_uid: obj for obj in rigid_objects}
+    if text in by_uid:
+        return text
+
+    normalized = _normalize_runtime_uid(text)
+    matches = [
+        obj.source_uid
+        for obj in rigid_objects
+        if _normalize_runtime_uid(obj.source_uid) == normalized
+        or _base_name(obj) == normalized
+        or _candidate_relative_runtime_uid(obj) == normalized
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError(f"LLM returned unknown {field_name}: {text!r}.")
+    raise ValueError(
+        f"LLM returned ambiguous {field_name}: {text!r}; candidates: {matches}."
+    )
+
+
+def _normalize_relative_relation(value: Any) -> str:
+    relation = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    relation = _RELATION_ALIASES.get(relation, relation)
+    if relation not in _RELATIVE_RELATIONS:
+        raise ValueError(
+            f"Unsupported relative placement relation {value!r}; expected one "
+            f"of {sorted(_RELATIVE_RELATIONS)}."
+        )
+    return relation
+
+
+def _relative_release_offset(relation: str) -> list[float]:
+    relation = _normalize_relative_relation(relation)
+    if relation == "inside":
+        return [0.0, 0.0, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "on":
+        return [0.0, 0.0, _ON_RELEASE_Z_OFFSET]
+    if relation == "left_of":
+        return [-_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "right_of":
+        return [_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "front_of":
+        return [0.0, -_SIDE_RELATION_DISTANCE, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "behind":
+        return [0.0, _SIDE_RELATION_DISTANCE, _SIDE_RELEASE_Z_OFFSET]
+    raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
+
+
+def _relative_runtime_uid_mapping(
+    rigid_objects: list[_SceneObject],
+) -> dict[str, str]:
+    candidates: dict[str, str] = {}
+    for obj in rigid_objects:
+        if _is_container_like(obj):
+            candidates[obj.source_uid] = _container_runtime_uid(obj)
+            continue
+
+        base = _target_runtime_suffix(_base_name(obj))
+        base_count = sum(
+            1 for other in rigid_objects if _base_name(other) == _base_name(obj)
+        )
+        candidates[obj.source_uid] = (
+            base if base_count == 1 else _normalize_runtime_uid(obj.source_uid)
+        )
+
+    counts: dict[str, int] = {}
+    for runtime_uid in candidates.values():
+        counts[runtime_uid] = counts.get(runtime_uid, 0) + 1
+    return {
+        source_uid: (
+            runtime_uid
+            if counts[runtime_uid] == 1
+            else _normalize_runtime_uid(source_uid)
+        )
+        for source_uid, runtime_uid in candidates.items()
+    }
+
+
+def _candidate_relative_runtime_uid(obj: _SceneObject) -> str:
+    if _is_container_like(obj):
+        return _container_runtime_uid(obj)
+    return _target_runtime_suffix(_base_name(obj))
+
+
+def _is_container_like(obj: _SceneObject) -> bool:
+    return any(keyword in _object_text(obj) for keyword in _CONTAINER_KEYWORDS)
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _default_relative_task_summary(
+    moved_uid: str,
+    reference_uid: str,
+    relation: str,
+) -> str:
+    return (
+        f"Move `{moved_uid}` so its final state is "
+        f"{_relative_relation_phrase(relation)} `{reference_uid}`."
+    )
+
+
+def _relative_relation_phrase(relation: str) -> str:
+    relation = _normalize_relative_relation(relation)
+    if relation == "inside":
+        return "inside"
+    if relation == "on":
+        return "on top of"
+    if relation == "left_of":
+        return "to the left of"
+    if relation == "right_of":
+        return "to the right of"
+    if relation == "front_of":
+        return "in front of"
+    if relation == "behind":
+        return "behind"
+    raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
+
+
 def _build_ur5_basket_bundle(
     *,
     scene_dir: Path,
@@ -492,7 +914,7 @@ def _build_ur5_basket_bundle(
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
-    target_scale = _target_body_scale_vector(target_body_scale)
+    object_scale = _target_body_scale_vector(target_body_scale)
     task_source_uids = {
         roles.container_source_uid,
         roles.left_target_source_uid,
@@ -525,7 +947,7 @@ def _build_ur5_basket_bundle(
         "background": [
             _make_background_config(scene_dir, by_uid[roles.table_source_uid]),
             *[
-                _make_extra_background_config(scene_dir, obj)
+                _make_extra_background_config(scene_dir, obj, object_scale)
                 for obj in extra_background_objects
             ],
         ],
@@ -534,21 +956,22 @@ def _build_ur5_basket_bundle(
                 scene_dir,
                 by_uid[roles.right_target_source_uid],
                 roles.right_target_runtime_uid,
-                target_scale,
+                object_scale,
             ),
             _make_target_object_config(
                 scene_dir,
                 by_uid[roles.left_target_source_uid],
                 roles.left_target_runtime_uid,
-                target_scale,
+                object_scale,
             ),
             _make_container_object_config(
                 scene_dir,
                 by_uid[roles.container_source_uid],
                 roles.container_runtime_uid,
+                object_scale,
             ),
             *[
-                _make_extra_rigid_object_config(scene_dir, obj)
+                _make_extra_rigid_object_config(scene_dir, obj, object_scale)
                 for obj in extra_rigid_objects
             ],
         ],
@@ -559,6 +982,80 @@ def _build_ur5_basket_bundle(
         "task_prompt": _make_task_prompt(task_name, project_name, roles),
         "basic_background": _make_basic_background(project_name, roles),
         "atom_actions": _make_atom_actions_prompt(roles),
+        "summary": {
+            "mode": "basket_template",
+            "left_target": roles.left_target_runtime_uid,
+            "right_target": roles.right_target_runtime_uid,
+            "container": roles.container_runtime_uid,
+        },
+    }
+
+
+def _build_relative_placement_bundle(
+    *,
+    scene_dir: Path,
+    source_config: Mapping[str, Any],
+    spec: _RelativePlacementSpec,
+    project_name: str,
+    task_name: str,
+    target_body_scale: float | list[float] | tuple[float, float, float],
+    max_episodes: int,
+    max_episode_steps: int,
+) -> dict[str, Any]:
+    scene_objects = _collect_scene_objects(source_config)
+    background_objects = [
+        obj for obj in scene_objects if obj.source_role == "background"
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    by_uid = {obj.source_uid: obj for obj in scene_objects}
+    runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
+    object_scale = _target_body_scale_vector(target_body_scale)
+
+    gym_config = {
+        "id": "AtomicActionsAgent-v3",
+        "max_episodes": int(max_episodes),
+        "max_episode_steps": int(max_episode_steps),
+        "env": {
+            "extensions": _make_relative_extensions_config(spec),
+            "events": _make_relative_events_config(spec, list(runtime_uids.values())),
+            "observations": _make_observations_config(),
+            "dataset": _make_relative_dataset_config(project_name, spec),
+        },
+        "robot": _make_dual_ur5_robot_config(),
+        "sensor": _make_sensor_config(),
+        "light": _make_light_config(),
+        "background": [
+            _make_background_config(scene_dir, by_uid[spec.table_source_uid]),
+            *[
+                _make_extra_background_config(scene_dir, obj, object_scale)
+                for obj in background_objects
+                if obj.source_uid != spec.table_source_uid
+            ],
+        ],
+        "rigid_object": [
+            _make_relative_rigid_object_config(
+                scene_dir=scene_dir,
+                obj=obj,
+                runtime_uid=runtime_uids[obj.source_uid],
+                body_scale=object_scale,
+            )
+            for obj in rigid_objects
+        ],
+    }
+    return {
+        "gym_config": gym_config,
+        "agent_config": _make_agent_config(),
+        "task_prompt": _make_relative_task_prompt(task_name, project_name, spec),
+        "basic_background": _make_relative_basic_background(project_name, spec),
+        "atom_actions": _make_relative_atom_actions_prompt(spec),
+        "summary": {
+            "mode": "relative_placement",
+            "moved_object": spec.moved_runtime_uid,
+            "reference_object": spec.reference_runtime_uid,
+            "relation": spec.relation,
+            "active_arm": f"{spec.active_side}_arm",
+            "release_offset": spec.release_offset,
+        },
     }
 
 
@@ -628,6 +1125,175 @@ def _object_in_container_success(object_uid: str, container_uid: str) -> dict[st
         "radius": 0.2,
         "min_z_offset": -0.05,
         "max_z_offset": 0.35,
+    }
+
+
+def _make_relative_extensions_config(spec: _RelativePlacementSpec) -> dict[str, Any]:
+    return {
+        "agent_arm_slots": {
+            "left": {
+                "arm": "left_arm",
+                "eef": "left_eef",
+            },
+            "right": {
+                "arm": "right_arm",
+                "eef": "right_eef",
+            },
+        },
+        "arm_aim_yaw_offset": {
+            "left": 0.0,
+            "right": 3.141592653589793,
+        },
+        "gripper_open_state": [0.0],
+        "gripper_close_state": [0.04],
+        "ignore_terminations_during_agent": True,
+        "agent_success": _make_relative_success_spec(spec),
+        "agent_grasp_pose_overrides": [
+            {
+                "type": "top_down",
+                "object": spec.moved_runtime_uid,
+                "side": spec.active_side,
+                "height_offset": 0.036,
+            },
+        ],
+    }
+
+
+def _make_relative_success_spec(spec: _RelativePlacementSpec) -> dict[str, Any]:
+    if spec.relation == "inside":
+        return _object_in_container_success(
+            spec.moved_runtime_uid,
+            spec.reference_runtime_uid,
+        )
+    if spec.relation == "on":
+        return {
+            "type": "object_on_object",
+            "object": spec.moved_runtime_uid,
+            "support": spec.reference_runtime_uid,
+            "xy_radius": 0.08,
+            "min_z_offset": 0.02,
+            "max_z_offset": 0.35,
+        }
+
+    primary_axis, primary_offset, secondary_axis = _side_relation_axes(spec.relation)
+    return {
+        "op": "all",
+        "terms": [
+            {
+                "type": "object_axis_offset_near",
+                "object": spec.moved_runtime_uid,
+                "reference": spec.reference_runtime_uid,
+                "axis": primary_axis,
+                "offset": primary_offset,
+                "tolerance": 0.05,
+            },
+            {
+                "type": "object_axis_offset_near",
+                "object": spec.moved_runtime_uid,
+                "reference": spec.reference_runtime_uid,
+                "axis": secondary_axis,
+                "offset": 0.0,
+                "tolerance": 0.06,
+            },
+            {
+                "type": "object_not_fallen",
+                "object": spec.moved_runtime_uid,
+                "max_tilt": 0.9,
+            },
+        ],
+    }
+
+
+def _side_relation_axes(relation: str) -> tuple[str, float, str]:
+    if relation == "left_of":
+        return "x", -_SIDE_RELATION_DISTANCE, "y"
+    if relation == "right_of":
+        return "x", _SIDE_RELATION_DISTANCE, "y"
+    if relation == "front_of":
+        return "y", -_SIDE_RELATION_DISTANCE, "x"
+    if relation == "behind":
+        return "y", _SIDE_RELATION_DISTANCE, "x"
+    raise ValueError(f"Unsupported side relation: {relation!r}.")
+
+
+def _make_relative_events_config(
+    spec: _RelativePlacementSpec,
+    rigid_runtime_uids: list[str],
+) -> dict[str, Any]:
+    return {
+        "record_camera": {
+            "func": "record_camera_data",
+            "mode": "interval",
+            "interval_step": 1,
+            "params": {
+                "name": "cam1",
+                "resolution": [320, 240],
+                "eye": [0.0, -1.8, 1.45],
+                "target": [0.0, 0.0, 0.72],
+            },
+        },
+        "validation_cameras": {
+            "func": "validation_cameras",
+            "mode": "trigger",
+            "params": {
+                "cameras": [
+                    _validation_camera(
+                        "valid_cam_front",
+                        eye=[0.0, -1.8, 1.45],
+                    ),
+                    _validation_camera(
+                        "valid_cam_left",
+                        eye=[-1.4, -0.7, 1.35],
+                    ),
+                    _validation_camera(
+                        "valid_cam_right",
+                        eye=[1.4, -0.7, 1.35],
+                    ),
+                ]
+            },
+        },
+        "prepare_extra_attr": {
+            "func": "prepare_extra_attr",
+            "mode": "reset",
+            "params": {
+                "attrs": [
+                    {
+                        "name": "object_lengths",
+                        "mode": "callable",
+                        "entity_uids": "all_objects",
+                        "func_name": "compute_object_length",
+                        "func_kwargs": {
+                            "is_svd_frame": True,
+                            "sample_points": 5000,
+                        },
+                    },
+                    {
+                        "name": "grasp_pose_object",
+                        "mode": "static",
+                        "entity_uids": [spec.moved_runtime_uid],
+                        "value": [
+                            [
+                                [0.0, 0.0, 1.0, 0.0],
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.036],
+                                [0.0, 0.0, 0.0, 1.0],
+                            ]
+                        ],
+                    },
+                ]
+            },
+        },
+        "register_info_to_env": {
+            "func": "register_info_to_env",
+            "mode": "reset",
+            "params": {
+                "registry": [
+                    _object_registry_entry(uid) for uid in sorted(rigid_runtime_uids)
+                ],
+                "registration": "affordance_datas",
+                "sim_update": True,
+            },
+        },
     }
 
 
@@ -790,6 +1456,38 @@ def _make_dataset_config(
     }
 
 
+def _make_relative_dataset_config(
+    project_name: str,
+    spec: _RelativePlacementSpec,
+) -> dict[str, Any]:
+    return {
+        "lerobot": {
+            "func": "LeRobotRecorder",
+            "mode": "save",
+            "params": {
+                "robot_meta": {
+                    "robot_type": "DualUR5",
+                    "control_freq": 25,
+                },
+                "instruction": {
+                    "lang": (
+                        f"Use the {spec.active_side} UR5 to move "
+                        f"{spec.moved_runtime_uid} "
+                        f"{_relative_relation_phrase(spec.relation)} "
+                        f"{spec.reference_runtime_uid}."
+                    ),
+                },
+                "extra": {
+                    "scene_type": project_name,
+                    "task_description": spec.task_description,
+                    "data_type": "sim",
+                },
+                "use_videos": True,
+            },
+        }
+    }
+
+
 def _make_dual_ur5_robot_config() -> dict[str, Any]:
     return {
         "uid": "DualUR5",
@@ -937,12 +1635,20 @@ def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any
     }
 
 
-def _make_extra_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any]:
+def _make_extra_background_config(
+    scene_dir: Path,
+    obj: _SceneObject,
+    body_scale: Any | None = None,
+) -> dict[str, Any]:
     config = {
         "uid": _normalize_runtime_uid(obj.source_uid),
         "shape": _make_shape_config(scene_dir, obj.config),
         "attrs": copy.deepcopy(dict(obj.config.get("attrs", _BACKGROUND_ATTRS))),
-        "body_scale": _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0])),
+        "body_scale": _clean_vector3(
+            obj.config.get("body_scale", [1.0, 1.0, 1.0])
+            if body_scale is None
+            else body_scale
+        ),
         "body_type": str(obj.config.get("body_type", "static")),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
@@ -965,24 +1671,32 @@ def _make_container_object_config(
     scene_dir: Path,
     obj: _SceneObject,
     runtime_uid: str,
+    body_scale: Any,
 ) -> dict[str, Any]:
-    return _make_rigid_object_config(
-        scene_dir,
-        obj,
-        runtime_uid,
-        obj.config.get("body_scale", [1.0, 1.0, 1.0]),
-    )
+    return _make_rigid_object_config(scene_dir, obj, runtime_uid, body_scale)
 
 
 def _make_extra_rigid_object_config(
-    scene_dir: Path, obj: _SceneObject
+    scene_dir: Path,
+    obj: _SceneObject,
+    body_scale: Any,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
         obj,
         _normalize_runtime_uid(obj.source_uid),
-        obj.config.get("body_scale", [1.0, 1.0, 1.0]),
+        body_scale,
     )
+
+
+def _make_relative_rigid_object_config(
+    *,
+    scene_dir: Path,
+    obj: _SceneObject,
+    runtime_uid: str,
+    body_scale: Any,
+) -> dict[str, Any]:
+    return _make_rigid_object_config(scene_dir, obj, runtime_uid, body_scale)
 
 
 def _make_rigid_object_config(
@@ -1084,6 +1798,216 @@ def _make_agent_config() -> dict[str, Any]:
             }
         },
     }
+
+
+def _make_relative_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _RelativePlacementSpec,
+) -> str:
+    active_arm = f"{spec.active_side}_arm"
+    inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
+    active_slot = f"{spec.active_side}_arm_action"
+    inactive_slot = (
+        "right_arm_action" if spec.active_side == "left" else "left_arm_action"
+    )
+    high_x, high_y, high_z = spec.high_offset
+    rel_x, rel_y, rel_z = spec.release_offset
+    action_sketch = _format_action_sketch(spec.action_sketch)
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from a simple task description by the config-stage
+LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Config-stage LLM interpretation:
+{action_sketch}
+
+Object and arm mapping:
+- Move `{spec.moved_runtime_uid}`. Source object: `{spec.moved_source_uid}`.
+- Use `{spec.reference_runtime_uid}` as the spatial reference. Source object:
+  `{spec.reference_source_uid}`.
+- Goal relation: `{spec.relation}` ({_relative_relation_phrase(spec.relation)}).
+- Active arm: `{active_arm}`.
+- Keep every `{inactive_slot}` as null.
+
+Coordinate convention for relative placement:
+- `left_of` means negative world x relative to the reference object.
+- `right_of` means positive world x relative to the reference object.
+- `front_of` means negative world y, closer to the Dual-UR5 bases.
+- `behind` means positive world y, farther from the Dual-UR5 bases.
+- `inside` and `on` use the reference object's xy center.
+
+Generate one deterministic nominal graph with exactly 6 nominal edges. Use only
+the atomic actions shown below. Do not add recovery, monitor, search, alignment,
+or extra lift edges. The inactive arm must remain null in every edge.
+
+1. Grasp the moved object:
+   - {active_slot}: grasp(robot_name="{active_arm}",
+     obj_name="{spec.moved_runtime_uid}", pre_grasp_dis=0.08, sample_num=90)
+   - {inactive_slot}: null
+
+2. Move the held object to the high staging pose relative to the reference:
+   - {active_slot}: move_relative_to_object(robot_name="{active_arm}",
+     obj_name="{spec.reference_runtime_uid}", x_offset={_format_prompt_float(high_x)},
+     y_offset={_format_prompt_float(high_y)},
+     z_offset={_format_prompt_float(high_z)}, sample_num=90)
+   - {inactive_slot}: null
+
+3. Lower the held object to the release pose:
+   - {active_slot}: move_relative_to_object(robot_name="{active_arm}",
+     obj_name="{spec.reference_runtime_uid}", x_offset={_format_prompt_float(rel_x)},
+     y_offset={_format_prompt_float(rel_y)},
+     z_offset={_format_prompt_float(rel_z)}, sample_num=60)
+   - {inactive_slot}: null
+
+4. Release the moved object:
+   - {active_slot}: open_gripper(robot_name="{active_arm}",
+     sample_num=30, open_threshold=-1.0, settle_steps=50)
+   - {inactive_slot}: null
+
+5. Move the empty gripper upward to clear the object:
+   - {active_slot}: move_by_relative_offset(robot_name="{active_arm}",
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
+   - {inactive_slot}: null
+
+6. Return the active arm to its initial pose:
+   - {active_slot}: back_to_initial_pose(robot_name="{active_arm}", sample_num=60)
+   - {inactive_slot}: null
+
+Final state: `{spec.moved_runtime_uid}` must be
+{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}`. Always
+plan to the current object poses from the exported {project_name} environment
+config. Do not hard-code absolute object coordinates in the generated graph.
+"""
+
+
+def _make_relative_basic_background(
+    project_name: str,
+    spec: _RelativePlacementSpec,
+) -> str:
+    active_arm = f"{spec.active_side}_arm"
+    inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 relative-placement task generated
+from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the UR5 outside the left side of the table's near long edge.
+- right_arm is the UR5 outside the right side of the table's near long edge.
+
+The active arm for this task is `{active_arm}`. The inactive arm
+`{inactive_arm}` must stay null in the nominal graph.
+
+Interactive task objects:
+- {spec.moved_runtime_uid}: moved object from source `{spec.moved_source_uid}`.
+- {spec.reference_runtime_uid}: reference object from source
+  `{spec.reference_source_uid}`.
+
+Config-stage LLM notes:
+{notes}
+
+The execution-stage LLM should generate graph JSON that grasps the moved object,
+moves it to a high staging pose relative to the current reference object pose,
+lowers to the release pose, opens the gripper, retreats upward, and returns the
+active arm to its initial pose.
+"""
+
+
+def _make_relative_atom_actions_prompt(spec: _RelativePlacementSpec) -> str:
+    active_arm = f"{spec.active_side}_arm"
+    inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
+    high_x, high_y, high_z = spec.high_offset
+    rel_x, rel_y, rel_z = spec.release_offset
+    return f"""### Atom Functions for Dual-UR5 Relative Placement
+
+Use the existing atomic action API and gripper semantics in this configuration.
+The active arm is `{active_arm}`. Do not call atomic actions for `{inactive_arm}`
+in the nominal graph.
+
+Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately. Use only the parameters listed below.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Use exactly:
+    `grasp(robot_name="{active_arm}", obj_name="{spec.moved_runtime_uid}",
+    pre_grasp_dis=0.08, sample_num=90)`.
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str,
+                                obj_name: str,
+                                x_offset=0.0,
+                                y_offset=0.0,
+                                z_offset=0.0,
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the selected end-effector to the current reference object pose plus a
+    world-frame xyz offset while preserving the current end-effector orientation.
+    For this task, use `obj_name="{spec.reference_runtime_uid}"`.
+
+    High staging pose:
+    `move_relative_to_object(robot_name="{active_arm}",
+    obj_name="{spec.reference_runtime_uid}",
+    x_offset={_format_prompt_float(high_x)}, y_offset={_format_prompt_float(high_y)},
+    z_offset={_format_prompt_float(high_z)}, sample_num=90)`.
+
+    Release pose:
+    `move_relative_to_object(robot_name="{active_arm}",
+    obj_name="{spec.reference_runtime_uid}",
+    x_offset={_format_prompt_float(rel_x)}, y_offset={_format_prompt_float(rel_y)},
+    z_offset={_format_prompt_float(rel_z)}, sample_num=60)`.
+
+"move_by_relative_offset":
+    def move_by_relative_offset(robot_name: str,
+                                dx=0.0,
+                                dy=0.0,
+                                dz=0.0,
+                                mode="extrinsic",
+                                **kwargs) -> list[np.ndarray]
+
+    Use this only for the short upward retreat after releasing the object:
+    `move_by_relative_offset(robot_name="{active_arm}", dx=0.0, dy=0.0,
+    dz=0.14, mode="extrinsic", sample_num=40)`.
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Opens the selected gripper to release the held object. Use:
+    `open_gripper(robot_name="{active_arm}", sample_num=30,
+    open_threshold=-1.0, settle_steps=50)`.
+
+"close_gripper":
+    def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Do not use this separately in the nominal graph, because `grasp` already
+    closes the gripper.
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Returns the selected UR5 arm to its initial joint configuration. Use it only
+    after `open_gripper` and the upward retreat:
+    `back_to_initial_pose(robot_name="{active_arm}", sample_num=60)`.
+"""
+
+
+def _format_action_sketch(action_sketch: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in action_sketch)
+
+
+def _format_prompt_float(value: float) -> str:
+    return f"{float(value):.12g}"
 
 
 def _make_task_prompt(
@@ -1398,6 +2322,65 @@ def _validate_bundle(bundle: Mapping[str, Any], roles: _BasketTaskRoles) -> None
             raise ValueError(f"Invalid success term uid reference: {term}")
 
 
+def _validate_relative_bundle(
+    bundle: Mapping[str, Any],
+    spec: _RelativePlacementSpec,
+) -> None:
+    gym_config = bundle["gym_config"]
+    if gym_config.get("id") != "AtomicActionsAgent-v3":
+        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("robot", {}).get("uid") != "DualUR5":
+        raise ValueError("Generated relative placement config must use DualUR5.")
+
+    rigid_uids = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
+    if len(rigid_uids) != len(set(rigid_uids)):
+        raise ValueError(f"Duplicate rigid object runtime uid(s): {rigid_uids}")
+    required = {spec.moved_runtime_uid, spec.reference_runtime_uid}
+    missing = required - set(rigid_uids)
+    if missing:
+        raise ValueError(
+            f"Generated relative config missing rigid object(s): {missing}"
+        )
+
+    _validate_success_uids(
+        gym_config["env"]["extensions"]["agent_success"],
+        set(rigid_uids),
+    )
+    registry = gym_config["env"]["events"]["register_info_to_env"]["params"]["registry"]
+    registered = {entry["entity_cfg"]["uid"] for entry in registry}
+    if not required.issubset(registered):
+        raise ValueError(
+            f"Relative config registry missing: {sorted(required - registered)}"
+        )
+
+
+def _validate_success_uids(success: Mapping[str, Any], rigid_uids: set[str]) -> None:
+    if success.get("op") in {"all", "and", "any", "or"}:
+        for term in success.get("terms", []):
+            _validate_success_uids(term, rigid_uids)
+        return
+
+    success_type = str(success.get("type", success.get("func", ""))).lower()
+    if success_type == "object_in_container":
+        required_keys = ("object", "container")
+    elif success_type in {"object_on_object", "object_on", "on_object"}:
+        required_keys = ("object", "support")
+    elif success_type in {
+        "object_axis_offset_near",
+        "object_relative_axis_near",
+    }:
+        required_keys = ("object", "reference")
+    elif success_type in {"object_not_fallen", "not_fallen"}:
+        required_keys = ("object",)
+    else:
+        raise ValueError(f"Unsupported generated success term: {success_type!r}.")
+
+    for key in required_keys:
+        uid = success.get(key)
+        if uid not in rigid_uids:
+            raise ValueError(f"Invalid success uid reference {key}={uid!r}.")
+
+
 def _write_config_bundle(
     *,
     output_dir: Path,
@@ -1411,6 +2394,7 @@ def _write_config_bundle(
         task_prompt=output_dir / "task_prompt.txt",
         basic_background=output_dir / "basic_background.txt",
         atom_actions=output_dir / "atom_actions.txt",
+        summary=dict(bundle.get("summary", {})),
     )
     output_files = [
         paths.gym_config,

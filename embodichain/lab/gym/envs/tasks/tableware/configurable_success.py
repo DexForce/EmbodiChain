@@ -105,6 +105,8 @@ def _evaluate_spec(
         return _object_xy_near(env, spec)
     if term_type == "object_in_container":
         return _object_in_container(env, spec)
+    if term_type in {"object_on_object", "object_on", "on_object"}:
+        return _object_on_object(env, spec)
     if term_type in {"object_not_fallen", "not_fallen"}:
         return _object_not_fallen(env, spec)
     if term_type in {"object_axis_offset_near", "object_relative_axis_near"}:
@@ -192,6 +194,32 @@ def _object_in_container(env, spec: Mapping[str, Any]) -> torch.Tensor:
         object_position[:, :2] - container_position[:, :2], dim=-1
     )
     z_offset = object_position[:, 2] - container_position[:, 2]
+    return (
+        (xy_distance <= radius)
+        & (z_offset >= min_z_offset)
+        & (z_offset <= max_z_offset)
+    )
+
+
+def _object_on_object(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    object_position = _position(env, _object_name(spec))
+    support_position = _position(
+        env,
+        str(
+            spec.get(
+                "support",
+                spec.get("support_uid", spec.get("reference", spec.get("container"))),
+            )
+        ),
+    )
+    radius = float(spec.get("xy_radius", spec.get("radius", 0.08)))
+    min_z_offset = float(spec.get("min_z_offset", 0.02))
+    max_z_offset = float(spec.get("max_z_offset", 0.35))
+
+    xy_distance = torch.linalg.norm(
+        object_position[:, :2] - support_position[:, :2], dim=-1
+    )
+    z_offset = object_position[:, 2] - support_position[:, 2]
     return (
         (xy_distance <= radius)
         & (z_offset >= min_z_offset)
