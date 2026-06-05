@@ -26,6 +26,9 @@ from embodichain.utils import configclass, logger
 if TYPE_CHECKING:
     from typing import Self
 
+    import pinocchio as pin
+    import pytorch_kinematics as pk
+
 from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pytorch_kinematics,
 )
@@ -107,8 +110,11 @@ def create_pk_serial_chain(
                     root_link_name=root_link_name,
                 ).to(device=device)
     else:
+        chain_for_serial = deepcopy(chain).to(device=torch.device("cpu"))
         return pk.SerialChain(
-            chain=chain, end_frame_name=end_link_name, root_frame_name=root_link_name
+            chain=chain_for_serial,
+            end_frame_name=end_link_name,
+            root_frame_name=root_link_name,
         ).to(device=device)
 
 
