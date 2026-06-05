@@ -9,8 +9,8 @@ Use `robot_name="left_arm"` only for `left_bread_roll` and use
 Do not use any atomic function on the passive clutter objects `scope` or
 `popcorn_cup`.
 
-The nominal task starts with simultaneous dual-arm grasping, then switches to
-sequential placement:
+The nominal task starts with simultaneous dual-arm grasping, followed by a
+left-first placement with an overlapped handoff to the right arm:
 - The first nominal edge must call `grasp` in both `left_arm_action` and
   `right_arm_action`.
 - After both bread rolls are grasped, left-side placement steps put the actual
@@ -18,10 +18,14 @@ sequential placement:
   `close_gripper(robot_name="right_arm", sample_num=20)` so the right arm keeps
   holding right_bread_roll.
 - After the left arm releases left_bread_roll, first move it upward to clear the
-  basket, then use `back_to_initial_pose` before the right arm enters the shared
-  basket workspace.
-- Right-side placement steps put the actual action in `right_arm_action` and set
-  `left_arm_action` to null.
+  basket.
+- The next nominal edge must pair
+  `back_to_initial_pose(robot_name="left_arm", sample_num=60)` in
+  `left_arm_action` with the right arm's high-staging
+  `move_relative_to_object` action in `right_arm_action`. Do not split this
+  parallel handoff into separate edges.
+- After the parallel handoff edge, the remaining right-side placement steps put
+  the actual action in `right_arm_action` and set `left_arm_action` to null.
 - `back_to_initial_pose` must never be used for an arm that is still holding a
   bread roll. The same arm must first execute `open_gripper` at the basket
   release pose.
@@ -57,6 +61,8 @@ parameters.
     - First move to a high staging pose above the basket:
       left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.22`;
       right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.22`.
+      The right-arm high-staging action must execute in the same graph edge as
+      the left arm's `back_to_initial_pose` action.
     - Then lower to the release pose inside the basket:
       left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.12`;
       right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.12`.
@@ -99,7 +105,7 @@ parameters.
     def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
 
     Returns the selected UR5 arm to its initial joint configuration. In the
-    nominal graph, use this after the selected arm releases and retreats upward
-    so it does not block the other UR5 near the wicker basket. Do not use this
-    immediately after `move_relative_to_object`; the arm would still be holding
-    the bread roll.
+    nominal graph, use this after the selected arm releases and retreats upward.
+    The left arm's return-to-initial action must execute concurrently with the
+    right arm's high-staging action. Do not use this immediately after
+    `move_relative_to_object`; the arm would still be holding the bread roll.

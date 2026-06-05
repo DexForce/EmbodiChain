@@ -30,17 +30,22 @@ the scene more realistic while leaving the bread-to-basket task unchanged.
 
 The nominal task starts with simultaneous dual-arm grasping. The left UR5 must
 grasp left_bread_roll while the right UR5 grasps right_bread_roll in the same
-graph edge. After both bread rolls are held, placement is sequential: the left
-UR5 places left_bread_roll into wicker_basket and returns to its initial pose,
-then the right UR5 places right_bread_roll into wicker_basket and returns to
-its initial pose. To change the insertion order later, edit the task prompt
-sequence and keep the same atomic action API.
+graph edge. After both bread rolls are held, the left UR5 places
+left_bread_roll into wicker_basket, releases it, and retreats upward. The next
+graph edge is a parallel handoff: the left UR5 returns to its initial pose while
+the right UR5 simultaneously moves its already-grasped right_bread_roll to the
+high staging pose above wicker_basket. The right UR5 then lowers and releases
+right_bread_roll, retreats upward, and returns to its initial pose. To change
+the insertion order later, edit the task prompt sequence and keep the same
+atomic action API.
 
 The wicker_basket area is a shared workspace. After a UR5 releases a bread
-roll, it should retreat upward and return to its initial pose before the other
-UR5 moves to the basket, otherwise the two arms may collide near the basket.
-The right UR5 should keep holding right_bread_roll while the left UR5 performs
-its placement and return-to-initial sequence.
+roll, it should retreat upward before the other UR5 moves to the basket,
+otherwise the two arms may collide near the basket. The right UR5 should keep
+holding right_bread_roll while the left UR5 performs its placement and upward
+retreat. Once that retreat is complete, the right UR5 may move toward the
+basket while the left UR5 simultaneously returns to its initial pose; it must
+not wait for the left return-to-initial motion to finish.
 
 A bread roll at a high pose above `wicker_basket` is only staged, not placed.
 Each arm must lower the held bread roll into the basket release pose and open

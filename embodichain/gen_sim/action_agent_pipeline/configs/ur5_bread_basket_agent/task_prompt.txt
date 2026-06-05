@@ -5,9 +5,11 @@ two bread objects into the basket.
 The task starts with both arms acting simultaneously:
 the left UR5 grasps the left bread roll while the right UR5 grasps the right
 bread roll in the same nominal graph edge. After both bread rolls are grasped,
-the placement phase must be sequential: the left UR5 places its bread roll into
-the basket and returns to its initial pose, then the right UR5 places its bread
-roll into the basket and returns to its initial pose.
+the left UR5 places its bread roll into the basket and retreats upward. While
+the left UR5 returns to its initial pose, the right UR5 must simultaneously
+begin placing its already-grasped bread roll by moving it to the high staging
+pose above the basket. The right UR5 then completes its placement and returns
+to its initial pose.
 
 Object and arm mapping:
 - left_arm must only manipulate `left_bread_roll`.
@@ -19,11 +21,14 @@ Object and arm mapping:
 
 Generate one deterministic nominal graph with the following semantic sequence.
 Do not add extra alignment, search, recovery, or monitor steps. Do include the
-specified post-release retreat and return-to-initial steps so the arm that just
-placed an object leaves the shared basket workspace before the next placement.
-Generate exactly 11 nominal edges, one edge for each numbered step below. Do not
-split the simultaneous grasp into separate edges. Do not merge, reorder, or omit
-the lower-to-release, open-gripper, upward-retreat, or return-to-initial edges.
+specified post-release retreat and return-to-initial steps. The left arm must
+finish its upward retreat before the right arm enters the shared basket
+workspace, but the left return-to-initial action and the right high-staging
+action must execute simultaneously in one graph edge. Generate exactly 10
+nominal edges, one edge for each numbered step below. Do not split the
+simultaneous grasp or the simultaneous left-return/right-staging action into
+separate edges. Do not merge, reorder, or omit the lower-to-release,
+open-gripper, upward-retreat, or final right return-to-initial edges.
 
 A bread roll is not considered placed when it is only above the wicker basket.
 For each arm, the placement order must be: move to a high staging pose above
@@ -62,35 +67,33 @@ for its held bread roll.
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
    - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
-6. Return the left UR5 to its initial pose to keep the basket workspace clear:
+6. After the left gripper has retreated upward, return the left UR5 to its
+   initial pose while simultaneously moving the held right bread roll directly
+   above the right half of the wicker basket. This parallel handoff must remain
+   one graph edge:
    - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
-   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
-
-7. Move the held right bread roll directly above the right half of the wicker
-   basket after the left arm has returned:
-   - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
      z_offset=0.22, sample_num=90)
 
-8. Lower the held right bread roll to the right release pose inside the wicker
+7. Lower the held right bread roll to the right release pose inside the wicker
    basket:
    - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="wicker_basket", x_offset=0.04, y_offset=0.0,
      z_offset=0.12, sample_num=60)
 
-9. Release the right bread roll into the wicker basket:
+8. Release the right bread roll into the wicker basket:
    - left_arm_action: null
    - right_arm_action: open_gripper(robot_name="right_arm",
      sample_num=30, open_threshold=-1.0, settle_steps=50)
 
-10. Move the empty right gripper upward to clear the basket:
+9. Move the empty right gripper upward to clear the basket:
    - left_arm_action: null
    - right_arm_action: move_by_relative_offset(robot_name="right_arm",
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
 
-11. Return the right UR5 to its initial pose after releasing the bread roll:
+10. Return the right UR5 to its initial pose after releasing the bread roll:
    - left_arm_action: null
    - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=60)
 

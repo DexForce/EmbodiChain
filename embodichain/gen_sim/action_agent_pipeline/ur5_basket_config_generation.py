@@ -1100,10 +1100,12 @@ two {target_text} objects into the {roles.container_runtime_uid}.
 The task starts with both arms acting simultaneously:
 the left UR5 grasps the left {target_text} while the right UR5 grasps the right
 {target_text} in the same nominal graph edge. After both {target_plural} are
-grasped, the placement phase must be sequential: the left UR5 places its
-{target_text} into the {roles.container_runtime_uid} and returns to its initial
-pose, then the right UR5 places its {target_text} into the
-{roles.container_runtime_uid} and returns to its initial pose.
+grasped, the left UR5 places its {target_text} into the
+{roles.container_runtime_uid} and retreats upward. While the left UR5 returns
+to its initial pose, the right UR5 must simultaneously begin placing its
+already-grasped {target_text} by moving it to the high staging pose above the
+{roles.container_runtime_uid}. The right UR5 then completes its placement and
+returns to its initial pose.
 
 Object and arm mapping:
 - left_arm must only manipulate `{roles.left_target_runtime_uid}`.
@@ -1112,11 +1114,14 @@ Object and arm mapping:
 
 Generate one deterministic nominal graph with the following semantic sequence.
 Do not add extra alignment, search, recovery, or monitor steps. Do include the
-specified post-release retreat and return-to-initial steps so the arm that just
-placed an object leaves the shared basket workspace before the next placement.
-Generate exactly 11 nominal edges, one edge for each numbered step below. Do not
-split the simultaneous grasp into separate edges. Do not merge, reorder, or omit
-the lower-to-release, open-gripper, upward-retreat, or return-to-initial edges.
+specified post-release retreat and return-to-initial steps. The left arm must
+finish its upward retreat before the right arm enters the shared container
+workspace, but the left return-to-initial action and the right high-staging
+action must execute simultaneously in one graph edge. Generate exactly 10
+nominal edges, one edge for each numbered step below. Do not split the
+simultaneous grasp or the simultaneous left-return/right-staging action into
+separate edges. Do not merge, reorder, or omit the lower-to-release,
+open-gripper, upward-retreat, or final right return-to-initial edges.
 
 A target object is not considered placed when it is only above the
 {roles.container_runtime_uid}. For each arm, the placement order must be: move
@@ -1157,35 +1162,33 @@ already executed `open_gripper` for its held target object.
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
    - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
-6. Return the left UR5 to its initial pose to keep the container workspace clear:
+6. After the left gripper has retreated upward, return the left UR5 to its
+   initial pose while simultaneously moving the held right target object
+   directly above the right half of the {roles.container_runtime_uid}. This
+   parallel handoff must remain one graph edge:
    - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
-   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
-
-7. Move the held right target object directly above the right half of the
-   {roles.container_runtime_uid} after the left arm has returned:
-   - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="{roles.container_runtime_uid}", x_offset=0.04, y_offset=0.0,
      z_offset=0.22, sample_num=90)
 
-8. Lower the held right target object to the right release pose inside the
+7. Lower the held right target object to the right release pose inside the
    {roles.container_runtime_uid}:
    - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="{roles.container_runtime_uid}", x_offset=0.04, y_offset=0.0,
      z_offset=0.12, sample_num=60)
 
-9. Release the right target object into the {roles.container_runtime_uid}:
+8. Release the right target object into the {roles.container_runtime_uid}:
    - left_arm_action: null
    - right_arm_action: open_gripper(robot_name="right_arm",
      sample_num=30, open_threshold=-1.0, settle_steps=50)
 
-10. Move the empty right gripper upward to clear the container:
+9. Move the empty right gripper upward to clear the container:
    - left_arm_action: null
    - right_arm_action: move_by_relative_offset(robot_name="right_arm",
      dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
 
-11. Return the right UR5 to its initial pose after releasing the target object:
+10. Return the right UR5 to its initial pose after releasing the target object:
    - left_arm_action: null
    - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=60)
 
@@ -1225,19 +1228,24 @@ The interactive objects are:
 The nominal task starts with simultaneous dual-arm grasping. The left UR5 must
 grasp {roles.left_target_runtime_uid} while the right UR5 grasps
 {roles.right_target_runtime_uid} in the same graph edge. After both
-{target_plural} are held, placement is sequential: the left UR5 places
-{roles.left_target_runtime_uid} into {roles.container_runtime_uid} and returns
-to its initial pose, then the right UR5 places {roles.right_target_runtime_uid}
-into {roles.container_runtime_uid} and returns to its initial pose. To change
-the insertion order later, edit the task prompt sequence and keep the same
-atomic action API.
+{target_plural} are held, the left UR5 places
+{roles.left_target_runtime_uid} into {roles.container_runtime_uid}, releases
+it, and retreats upward. The next graph edge is a parallel handoff: the left
+UR5 returns to its initial pose while the right UR5 simultaneously moves its
+already-grasped {roles.right_target_runtime_uid} to the high staging pose above
+{roles.container_runtime_uid}. The right UR5 then lowers and releases
+{roles.right_target_runtime_uid}, retreats upward, and returns to its initial
+pose. To change the insertion order later, edit the task prompt sequence and
+keep the same atomic action API.
 
 The {roles.container_runtime_uid} area is a shared workspace. After a UR5
-releases a target object, it should retreat upward and return to its initial
-pose before the other UR5 moves to the container, otherwise the two arms may
-collide near the container. The right UR5 should keep holding
-{roles.right_target_runtime_uid} while the left UR5 performs its placement and
-return-to-initial sequence.
+releases a target object, it should retreat upward before the other UR5 moves
+to the container, otherwise the two arms may collide near the container. The
+right UR5 should keep holding {roles.right_target_runtime_uid} while the left
+UR5 performs its placement and upward retreat. Once that retreat is complete,
+the right UR5 may move toward the container while the left UR5 simultaneously
+returns to its initial pose; it must not wait for the left return-to-initial
+motion to finish.
 
 A target object at a high pose above `{roles.container_runtime_uid}` is only
 staged, not placed. Each arm must lower the held object into the container
@@ -1260,8 +1268,8 @@ Each atomic function returns a list of joint-space trajectories (`list[np.ndarra
 Use `robot_name="left_arm"` only for `{roles.left_target_runtime_uid}` and use
 `robot_name="right_arm"` only for `{roles.right_target_runtime_uid}`.
 
-The nominal task starts with simultaneous dual-arm grasping, then switches to
-sequential placement:
+The nominal task starts with simultaneous dual-arm grasping, followed by a
+left-first placement with an overlapped handoff to the right arm:
 - The first nominal edge must call `grasp` in both `left_arm_action` and
   `right_arm_action`.
 - After both target objects are grasped, left-side placement steps put the
@@ -1269,10 +1277,14 @@ sequential placement:
   closed with `close_gripper(robot_name="right_arm", sample_num=20)` so the
   right arm keeps holding `{roles.right_target_runtime_uid}`.
 - After the left arm releases `{roles.left_target_runtime_uid}`, first move it
-  upward to clear the container, then use `back_to_initial_pose` before the
-  right arm enters the shared container workspace.
-- Right-side placement steps put the actual action in `right_arm_action` and set
-  `left_arm_action` to null.
+  upward to clear the container.
+- The next nominal edge must pair
+  `back_to_initial_pose(robot_name="left_arm", sample_num=60)` in
+  `left_arm_action` with the right arm's high-staging
+  `move_relative_to_object` action in `right_arm_action`. Do not split this
+  parallel handoff into separate edges.
+- After the parallel handoff edge, the remaining right-side placement steps put
+  the actual action in `right_arm_action` and set `left_arm_action` to null.
 - `back_to_initial_pose` must never be used for an arm that is still holding a
   target object. The same arm must first execute `open_gripper` at the container
   release pose.
@@ -1308,6 +1320,8 @@ parameters.
     - First move to a high staging pose above the container:
       left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.22`;
       right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.22`.
+      The right-arm high-staging action must execute in the same graph edge as
+      the left arm's `back_to_initial_pose` action.
     - Then lower to the release pose inside the container:
       left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.12`;
       right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.12`.
@@ -1350,10 +1364,10 @@ parameters.
     def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
 
     Returns the selected UR5 arm to its initial joint configuration. In the
-    nominal graph, use this after the selected arm releases and retreats upward
-    so it does not block the other UR5 near the container. Do not use this
-    immediately after `move_relative_to_object`; the arm would still be holding
-    the target object.
+    nominal graph, use this after the selected arm releases and retreats upward.
+    The left arm's return-to-initial action must execute concurrently with the
+    right arm's high-staging action. Do not use this immediately after
+    `move_relative_to_object`; the arm would still be holding the target object.
 """
 
 
