@@ -200,7 +200,7 @@ class PourWaterActionBank(ActionBank):
                 ),
             )
 
-            return ret.positions.numpy().T
+            return ret.positions.detach().cpu().numpy().T
 
     @staticmethod
     @tag_edge

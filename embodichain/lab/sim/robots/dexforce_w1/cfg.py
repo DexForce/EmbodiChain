@@ -22,7 +22,7 @@ import numpy as np
 import typing
 import torch
 
-from typing import Dict
+from typing import TYPE_CHECKING, Dict
 
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1HandBrand,
@@ -42,6 +42,9 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass, logger
+
+if TYPE_CHECKING:
+    import pytorch_kinematics as pk
 
 
 @configclass
@@ -340,7 +343,6 @@ class DexforceW1Cfg(RobotCfg):
         self, device: torch.device = torch.device("cpu"), **kwargs
     ) -> Dict[str, "pk.SerialChain"]:
         from embodichain.lab.sim.utility.solver_utils import (
-            create_pk_chain,
             create_pk_serial_chain,
         )
 
@@ -349,14 +351,18 @@ class DexforceW1Cfg(RobotCfg):
         elif DexforceW1ArmKind.ANTHROPOMORPHIC == self.arm_kind:
             urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
 
-        chain = create_pk_chain(urdf_path, device)
-
         left_arm_chain = create_pk_serial_chain(
-            chain=chain, end_link_name="left_ee", root_link_name="left_arm_base"
-        ).to(device=device)
+            urdf_path=urdf_path,
+            device=device,
+            end_link_name="left_ee",
+            root_link_name="left_arm_base",
+        )
         right_arm_chain = create_pk_serial_chain(
-            chain=chain, end_link_name="right_ee", root_link_name="right_arm_base"
-        ).to(device=device)
+            urdf_path=urdf_path,
+            device=device,
+            end_link_name="right_ee",
+            root_link_name="right_arm_base",
+        )
 
         return {
             "left_arm": left_arm_chain,
