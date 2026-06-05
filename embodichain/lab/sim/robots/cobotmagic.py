@@ -14,12 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""CobotMagic robot definition using the RobotDef protocol."""
+
 from __future__ import annotations
 
 import torch
 import numpy as np
 
-from typing import Dict, List, Any, Union
+from typing import Dict, Union
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -28,32 +30,39 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.solvers import SolverCfg, OPWSolverCfg
-from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+from embodichain.lab.sim.robots.protocol import RobotDef
+from embodichain.lab.sim.robots.registry import register_robot
 from embodichain.data import get_data_path
-from embodichain.utils import configclass
-from embodichain.utils import logger
+
+__all__ = ["CobotMagicDef", "CobotMagicCfg"]
 
 
-@configclass
-class CobotMagicCfg(RobotCfg):
-    urdf_cfg: URDFCfg = None
-    control_parts: Dict[str, List[str]] | None = None
-    solver_cfg: Dict[str, "SolverCfg"] | None = None
+@register_robot("CobotMagic")
+class CobotMagicDef:
+    """Robot definition for the CobotMagic dual-arm robot.
 
-    @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:
+    This class satisfies the :class:`~embodichain.lab.sim.robots.protocol.RobotDef`
+    protocol and is registered in the global robot registry under the name
+    ``"CobotMagic"``.
 
-        cfg = cls()
-        default_cfgs = cls()._build_default_cfgs()
-        for key, value in default_cfgs.items():
-            setattr(cfg, key, value)
+    Attributes:
+        name: Unique identifier string for this robot.
+        urdf_cfg: URDF assembly configuration for both arms.
+        control_parts: Mapping from part name to joint name lists.
+        solver_cfg: OPW IK solver configuration for each arm.
+        drive_pros: Joint drive properties (stiffness, damping, max_effort).
+        attrs: Rigid-body physics attributes.
+        min_position_iters: Minimum position iterations for the solver.
+        min_velocity_iters: Minimum velocity iterations for the solver.
+    """
 
-        cfg = merge_robot_cfg(cfg, init_dict)
+    name: str = "CobotMagic"
 
-        return cfg
+    # -- URDF configuration ----------------------------------------------------
 
-    @staticmethod
-    def _build_default_cfgs() -> Dict[str, Any]:
+    @property
+    def urdf_cfg(self) -> URDFCfg:
+        """URDF assembly configuration for both arms."""
         arm_urdf = get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf")
         left_arm_xpos = np.array(
             [
@@ -71,7 +80,7 @@ class CobotMagicCfg(RobotCfg):
                 [0.0, 0.0, 0.0, 1.000],
             ]
         )
-        urdf_cfg = URDFCfg(
+        return URDFCfg(
             components=[
                 {
                     "component_type": "left_arm",
@@ -85,83 +94,106 @@ class CobotMagicCfg(RobotCfg):
                 },
             ]
         )
-        return {
-            "uid": "CobotMagic",
-            "urdf_cfg": urdf_cfg,
-            "control_parts": {
-                "left_arm": [
-                    "LEFT_JOINT1",
-                    "LEFT_JOINT2",
-                    "LEFT_JOINT3",
-                    "LEFT_JOINT4",
-                    "LEFT_JOINT5",
-                    "LEFT_JOINT6",
-                ],
-                "left_eef": ["LEFT_JOINT7", "LEFT_JOINT8"],
-                "right_arm": [
-                    "RIGHT_JOINT1",
-                    "RIGHT_JOINT2",
-                    "RIGHT_JOINT3",
-                    "RIGHT_JOINT4",
-                    "RIGHT_JOINT5",
-                    "RIGHT_JOINT6",
-                ],
-                "right_eef": ["RIGHT_JOINT7", "RIGHT_JOINT8"],
-            },
-            "solver_cfg": {
-                "left_arm": OPWSolverCfg(
-                    end_link_name="left_link6",
-                    root_link_name="left_arm_base",
-                    tcp=np.array(
-                        [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
-                    ),
-                ),
-                "right_arm": OPWSolverCfg(
-                    end_link_name="right_link6",
-                    root_link_name="right_arm_base",
-                    tcp=np.array(
-                        [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
-                    ),
-                ),
-            },
-            "min_position_iters": 8,
-            "min_velocity_iters": 2,
-            "drive_pros": JointDrivePropertiesCfg(
-                stiffness={
-                    "LEFT_JOINT[1-6]": 7e4,
-                    "RIGHT_JOINT[1-6]": 7e4,
-                    "LEFT_JOINT[7-8]": 3e2,
-                    "RIGHT_JOINT[7-8]": 3e2,
-                },
-                damping={
-                    "LEFT_JOINT[1-6]": 1e3,
-                    "RIGHT_JOINT[1-6]": 1e3,
-                    "LEFT_JOINT[7-8]": 3e1,
-                    "RIGHT_JOINT[7-8]": 3e1,
-                },
-                max_effort={
-                    "LEFT_JOINT[1-6]": 3e6,
-                    "RIGHT_JOINT[1-6]": 3e6,
-                    "LEFT_JOINT[7-8]": 3e3,
-                    "RIGHT_JOINT[7-8]": 3e3,
-                },
+
+    # -- Control parts ---------------------------------------------------------
+
+    control_parts: dict[str, list[str]] = {
+        "left_arm": [
+            "LEFT_JOINT1",
+            "LEFT_JOINT2",
+            "LEFT_JOINT3",
+            "LEFT_JOINT4",
+            "LEFT_JOINT5",
+            "LEFT_JOINT6",
+        ],
+        "left_eef": ["LEFT_JOINT7", "LEFT_JOINT8"],
+        "right_arm": [
+            "RIGHT_JOINT1",
+            "RIGHT_JOINT2",
+            "RIGHT_JOINT3",
+            "RIGHT_JOINT4",
+            "RIGHT_JOINT5",
+            "RIGHT_JOINT6",
+        ],
+        "right_eef": ["RIGHT_JOINT7", "RIGHT_JOINT8"],
+    }
+
+    # -- Solver configuration --------------------------------------------------
+
+    solver_cfg: dict[str, SolverCfg] = {
+        "left_arm": OPWSolverCfg(
+            end_link_name="left_link6",
+            root_link_name="left_arm_base",
+            tcp=np.array(
+                [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
             ),
-            "attrs": RigidBodyAttributesCfg(
-                mass=0.1,
-                static_friction=0.95,
-                dynamic_friction=0.9,
-                linear_damping=0.7,
-                angular_damping=0.7,
-                contact_offset=0.001,
-                rest_offset=0.001,
-                restitution=0.01,
-                max_depenetration_velocity=1e1,
+        ),
+        "right_arm": OPWSolverCfg(
+            end_link_name="right_link6",
+            root_link_name="right_arm_base",
+            tcp=np.array(
+                [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
             ),
-        }
+        ),
+    }
+
+    # -- Drive properties ------------------------------------------------------
+
+    drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(
+        stiffness={
+            "LEFT_JOINT[1-6]": 7e4,
+            "RIGHT_JOINT[1-6]": 7e4,
+            "LEFT_JOINT[7-8]": 3e2,
+            "RIGHT_JOINT[7-8]": 3e2,
+        },
+        damping={
+            "LEFT_JOINT[1-6]": 1e3,
+            "RIGHT_JOINT[1-6]": 1e3,
+            "LEFT_JOINT[7-8]": 3e1,
+            "RIGHT_JOINT[7-8]": 3e1,
+        },
+        max_effort={
+            "LEFT_JOINT[1-6]": 3e6,
+            "RIGHT_JOINT[1-6]": 3e6,
+            "LEFT_JOINT[7-8]": 3e3,
+            "RIGHT_JOINT[7-8]": 3e3,
+        },
+    )
+
+    # -- Rigid-body attributes -------------------------------------------------
+
+    attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg(
+        mass=0.1,
+        static_friction=0.95,
+        dynamic_friction=0.9,
+        linear_damping=0.7,
+        angular_damping=0.7,
+        contact_offset=0.001,
+        rest_offset=0.001,
+        restitution=0.01,
+        max_depenetration_velocity=1e1,
+    )
+
+    # -- Extra fields ----------------------------------------------------------
+
+    min_position_iters: int = 8
+    min_velocity_iters: int = 2
+
+    # -- Methods ---------------------------------------------------------------
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
     ) -> Dict[str, "pk.SerialChain"]:
+        """Build pytorch-kinematics serial chains for each arm.
+
+        Args:
+            device: Torch device to place chains on.
+            **kwargs: Additional keyword arguments (unused).
+
+        Returns:
+            Dictionary mapping ``"left_arm"`` and ``"right_arm"`` to their
+            respective serial chain objects.
+        """
         from embodichain.lab.sim.utility.solver_utils import (
             create_pk_chain,
             create_pk_serial_chain,
@@ -178,11 +210,49 @@ class CobotMagicCfg(RobotCfg):
         ).to(device=device)
         return {"left_arm": left_arm_chain, "right_arm": right_arm_chain}
 
+    def build_cfg(self, **overrides: object) -> RobotCfg:
+        """Build a :class:`RobotCfg` from this robot definition.
+
+        Delegates to :meth:`RobotDef.build_cfg` for the default
+        implementation.
+
+        Args:
+            **overrides: Optional overrides applied on top of the defaults.
+
+        Returns:
+            A fully-populated :class:`RobotCfg`.
+        """
+        return RobotDef.build_cfg(self, **overrides)
+
+
+class CobotMagicCfg(RobotCfg):
+    """Backward-compatible wrapper around :class:`CobotMagicDef`.
+
+    Existing code that calls ``CobotMagicCfg.from_dict(...)`` continues to
+    work via this thin shim that delegates to the registered
+    :class:`CobotMagicDef`.
+    """
+
+    urdf_cfg: URDFCfg = None
+    control_parts: Dict[str, list[str]] | None = None
+    solver_cfg: Dict[str, "SolverCfg"] | None = None
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:
+        """Create a :class:`RobotCfg` via :class:`CobotMagicDef`.
+
+        Args:
+            init_dict: Dictionary of configuration overrides.
+
+        Returns:
+            A fully-populated :class:`RobotCfg` with overrides applied.
+        """
+        return CobotMagicDef().build_cfg(**init_dict)
+
 
 if __name__ == "__main__":
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg
-    from embodichain.lab.sim.robots import CobotMagicCfg
 
     torch.set_printoptions(precision=5, sci_mode=False)
 
@@ -194,11 +264,11 @@ if __name__ == "__main__":
     )
     sim = SimulationManager(config)
 
-    config = {
+    overrides = {
         "init_pos": [0.0, 0.0, 1.0],
     }
 
-    cfg = CobotMagicCfg.from_dict(config)
+    cfg = CobotMagicDef().build_cfg(**overrides)
     robot = sim.add_robot(cfg=cfg)
 
     print("CobotMagic added to the simulation.")

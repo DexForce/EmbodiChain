@@ -58,39 +58,29 @@ class DexforceW1Cfg(RobotCfg):
     ) -> DexforceW1Cfg:
         """Initialize DexforceW1Cfg from a dictionary.
 
+        Delegates to :class:`DexforceW1Def` for backward compatibility.
+
         Args:
             init_dict (Dict[str, str | float | tuple | dict): Dictionary of configuration parameters.
 
         Returns:
             DexforceW1Cfg: An instance of DexforceW1Cfg with parameters set.
         """
+        from embodichain.lab.sim.robots.dexforce_w1.robot_def import DexforceW1Def
 
-        init_dict_m = init_dict.copy()
-        version = init_dict_m.get("version", "v021")
-        arm_kind = init_dict_m.get("arm_kind", "anthropomorphic")
-        with_default_eef = init_dict_m.get("with_default_eef", True)
-        init_dict_m.pop("version", None)
-        init_dict_m.pop("arm_kind", None)
-        init_dict_m.pop("with_default_eef", None)
-
-        cfg: DexforceW1Cfg = cls()._build_default_cfg(
-            version=version, arm_kind=arm_kind, with_default_eef=with_default_eef
-        )
-
-        default_physics_cfgs = cls()._build_default_physics_cfgs(
-            arm_kind=arm_kind, with_default_eef=with_default_eef
-        )
-        for key, value in default_physics_cfgs.items():
-            setattr(cfg, key, value)
-
-        default_solver_cfg = cls()._build_default_solver_cfg(
-            is_industrial=(arm_kind == "industrial")
-        )
-        cfg.solver_cfg = default_solver_cfg
-
-        cfg = merge_robot_cfg(cfg, init_dict_m)
-
-        return cfg
+        version = init_dict.get("version", "v021")
+        arm_kind = init_dict.get("arm_kind", "anthropomorphic")
+        with_default_eef = init_dict.get("with_default_eef", True)
+        remaining = {
+            k: v
+            for k, v in init_dict.items()
+            if k not in ("version", "arm_kind", "with_default_eef")
+        }
+        return DexforceW1Def(
+            version=version,
+            arm_kind=arm_kind,
+            include_hand=with_default_eef,
+        ).build_cfg(**remaining)
 
     @staticmethod
     def _build_default_solver_cfg(is_industrial: bool) -> SolverCfg:
