@@ -1,0 +1,2684 @@
+{
+  "id": "popcorn_real2sim",
+  "max_episodes": 10,
+  "max_episode_steps": 650,
+  "dexgen": {
+    "switch": true,
+    "table": "A modern office desk, 180cm wide and 90cm deep.",
+    "interact": "only a penholder on the desk, at a x range of[0, 30], y range of [65,90]",
+    "pipeline_config": "gen_config.json",
+    "is_generated": "dexgen/506848f1-35a6-4e6a-85d8-edb70b2d5fe5_ec_project",
+    "random_percent": 1
+  },
+  "env": {
+    "is_preview": true,
+    "robot_home_joint_cfg": {
+      "mode": "sample",
+      "sample_config": {
+        "use_trajectory_init": true,
+        "add_noise": true,
+        "noise_std": 0.01
+      }
+    },
+    "events": {
+      "random_robot_init_qpos_pose": {
+        "func": "real2sim_init_qpos_strategy",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "dexforce_w1"
+          }
+        }
+      },
+      "drop_bmh": {
+        "func": "restore_changed_rigid_object_group_objects",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "bmh"
+          },
+          "drop_position": [
+            0.8,
+            0,
+            1.1
+          ],
+          "position_range": [
+            [
+              -0.05,
+              -0.2,
+              0
+            ],
+            [
+              0.12,
+              0.2,
+              0
+            ]
+          ],
+          "physics_step": 5
+        }
+      },
+      "randomize_chanzi_pose": {
+        "func": "randomize_rigid_object_pose",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "chanzi"
+          },
+          "position_range": [
+            [
+              -0.08,
+              -0.08,
+              0.0
+            ],
+            [
+              0.02,
+              0.03,
+              0.0
+            ]
+          ],
+          "rotation_range": [
+            [
+              0.0,
+              0.0,
+              -20.0
+            ],
+            [
+              0.0,
+              0.0,
+              20.0
+            ]
+          ],
+          "relative_position": true,
+          "relative_rotation": true
+        }
+      },
+      "randomize_popcorn_cup_pose": {
+        "func": "randomize_rigid_object_pose",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "interact_cup"
+          },
+          "position_range": [
+            [
+              -0.03,
+              -0.03,
+              0.0
+            ],
+            [
+              0.03,
+              0.03,
+              0.0
+            ]
+          ],
+          "rotation_range": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "relative_position": true,
+          "relative_rotation": true
+        }
+      },
+      "random_light": {
+        "func": "randomize_light",
+        "mode": "interval",
+        "interval_step": 10,
+        "params": {
+          "entity_cfg": {
+            "uid": "light1"
+          },
+          "position_range": [
+            [
+              -0.5,
+              -0.5,
+              2
+            ],
+            [
+              0.5,
+              0.5,
+              2
+            ]
+          ],
+          "color_range": [
+            [
+              0.6,
+              0.6,
+              0.6
+            ],
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          "intensity_range": [
+            50.0,
+            100.0
+          ]
+        }
+      },
+      "random_plane_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 2,
+        "params": {
+          "entity_cfg": {
+            "uid": "default_plane"
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_table_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 2,
+        "params": {
+          "entity_cfg": {
+            "uid": "machine_table"
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_table2_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 2,
+        "params": {
+          "entity_cfg": {
+            "uid": "table"
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_machine_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 2,
+        "params": {
+          "entity_cfg": {
+            "uid": "popcorn_machine"
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_popcorn_cup_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 2,
+        "params": {
+          "entity_cfg": {
+            "uid": "interact_cup"
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_chanzi_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 2,
+        "params": {
+          "entity_cfg": {
+            "uid": "chanzi"
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "set_bmh_material": {
+        "func": "set_rigid_object_group_visual_material",
+        "mode": "startup",
+        "params": {
+          "entity_cfg": {
+            "uid": "bmh"
+          },
+          "mat_cfg": {
+            "uid": "bmh_mat",
+            "base_color_texture": "Real2SimTestPopcorn/popcorn_objects/bmh_ply/1b9dd677336a24b395fc05fff2c32af0_texture.png"
+          }
+        }
+      },
+      "random_robot_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 5,
+        "params": {
+          "entity_cfg": {
+            "uid": "dexforce_w1",
+            "link_names": [
+              "(right|left)_j[0-9]|(ankle|knee|buttock|waist)"
+            ]
+          },
+          "random_texture_prob": 0.5,
+          "texture_path": "CocoBackground/coco",
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_robot_hand_material": {
+        "func": "randomize_visual_material",
+        "mode": "interval",
+        "interval_step": 5,
+        "params": {
+          "entity_cfg": {
+            "uid": "dexforce_w1",
+            "link_names": [
+              "(right|left)_[a-z|_]+"
+            ]
+          },
+          "random_texture_prob": 0.5,
+          "base_color_range": [
+            [
+              0.2,
+              0.2,
+              0.2
+            ],
+            [
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        }
+      },
+      "random_camera_left_wrist_intrinsics": {
+        "func": "randomize_camera_intrinsics",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_left_wrist"
+          },
+          "focal_x_range": [
+            -50,
+            50
+          ],
+          "focal_y_range": [
+            -50,
+            50
+          ]
+        }
+      },
+      "random_camera_right_wrist_intrinsics": {
+        "func": "randomize_camera_intrinsics",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_right_wrist"
+          },
+          "focal_x_range": [
+            -50,
+            50
+          ],
+          "focal_y_range": [
+            -50,
+            50
+          ]
+        }
+      },
+      "random_camera_high_intrinsics": {
+        "func": "randomize_camera_intrinsics",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_high"
+          },
+          "focal_x_range": [
+            -50,
+            50
+          ],
+          "focal_y_range": [
+            -50,
+            50
+          ]
+        }
+      },
+      "random_camera_left_wrist_extrinsics": {
+        "func": "randomize_camera_extrinsics",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_left_wrist"
+          },
+          "pos_range": [
+            [
+              -0.03,
+              -0.03,
+              -0.03
+            ],
+            [
+              0.03,
+              0.03,
+              0.03
+            ]
+          ],
+          "euler_range": [
+            [
+              -0.1,
+              -0.1,
+              -0.1
+            ],
+            [
+              0.1,
+              0.1,
+              0.1
+            ]
+          ]
+        }
+      },
+      "random_camera_right_wrist_extrinsics": {
+        "func": "randomize_camera_extrinsics",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_right_wrist"
+          },
+          "pos_range": [
+            [
+              -0.03,
+              -0.03,
+              -0.03
+            ],
+            [
+              0.03,
+              0.03,
+              0.03
+            ]
+          ],
+          "euler_range": [
+            [
+              -0.1,
+              -0.1,
+              -0.1
+            ],
+            [
+              0.1,
+              0.1,
+              0.1
+            ]
+          ]
+        }
+      },
+      "random_camera_high_extrinsics": {
+        "func": "randomize_camera_extrinsics",
+        "mode": "reset",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_high"
+          },
+          "euler_range": [
+            [
+              -0.1,
+              -0.1,
+              -0.1
+            ],
+            [
+              0.1,
+              0.1,
+              0.1
+            ]
+          ]
+        }
+      },
+      "record_camera": {
+        "func": "record_camera_data",
+        "mode": "interval",
+        "interval_step": 1,
+        "params": {
+          "name": "cam1",
+          "resolution": [
+            1280,
+            960
+          ],
+          "eye": [
+            -0.2,
+            -0.5,
+            1.8
+          ],
+          "target": [
+            0.3,
+            -0.15,
+            0.8
+          ],
+          "save_path": "./popcorn_dexhand_videos"
+        }
+      },
+      "dexgen_randomize_scene": {
+        "func": "dexgen_randomize_scene",
+        "mode": "reset",
+        "params": {
+          "random_percent": 0.0,
+          "cached_objects": []
+        }
+      }
+    },
+    "observations": {
+      "progress": {
+        "func": "progress_data",
+        "mode": "add",
+        "name": "robot/progress",
+        "params": {
+          "progress": [
+            0.0
+          ],
+          "fitting_function": ""
+        }
+      },
+      "popcorn_cup_pose": {
+        "func": "get_rigid_object_pose",
+        "mode": "add",
+        "name": "popcorn_cup_pose",
+        "params": {
+          "entity_cfg": {
+            "uid": "interact_cup"
+          }
+        }
+      },
+      "chanzi_pose": {
+        "func": "get_rigid_object_pose",
+        "mode": "add",
+        "name": "chanzi_pose",
+        "params": {
+          "entity_cfg": {
+            "uid": "chanzi"
+          }
+        }
+      },
+      "cam_high_semantic_mask_l": {
+        "func": "compute_semantic_mask",
+        "mode": "add",
+        "name": "sensor/cam_high/semantic_mask_l",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_high"
+          },
+          "foreground_uids": [
+            "interact_cup",
+            "chanzi"
+          ]
+        }
+      },
+      "cam_high_semantic_mask_r": {
+        "func": "compute_semantic_mask",
+        "mode": "add",
+        "name": "sensor/cam_high/semantic_mask_r",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_high"
+          },
+          "foreground_uids": [
+            "interact_cup",
+            "chanzi"
+          ],
+          "is_right": true
+        }
+      },
+      "cam_left_semantic_mask": {
+        "func": "compute_semantic_mask",
+        "mode": "add",
+        "name": "sensor/cam_left_wrist/semantic_mask_l",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_left_wrist"
+          },
+          "foreground_uids": [
+            "interact_cup",
+            "chanzi"
+          ]
+        }
+      },
+      "cam_right_semantic_mask": {
+        "func": "compute_semantic_mask",
+        "mode": "add",
+        "name": "sensor/cam_right_wrist/semantic_mask_l",
+        "params": {
+          "entity_cfg": {
+            "uid": "cam_right_wrist"
+          },
+          "foreground_uids": [
+            "interact_cup",
+            "chanzi"
+          ]
+        }
+      },
+      "exteroception": {
+        "func": "compute_exteroception",
+        "mode": "add",
+        "name": "exteroception",
+        "params": {
+          "descriptor": {
+            "cam_high": [
+              {
+                "type": "robot",
+                "control_part": "left_arm"
+              },
+              {
+                "type": "robot",
+                "control_part": "right_arm"
+              }
+            ]
+          },
+          "x_interval": 0.02,
+          "y_interval": 0.05,
+          "kpnts_number": 2,
+          "groups": 2
+        }
+      }
+    },
+    "dataset": {
+      "hdf5": {
+        "func": "HDF5Recorder",
+        "mode": "save",
+        "params": {
+          "robot_meta": {
+            "robot_type": "DexforceW1",
+            "arm_dofs": 14,
+            "control_freq": 25,
+            "control_parts": [
+              "left_arm",
+              "right_arm",
+              "left_eef",
+              "right_eef",
+              "waist",
+              "head"
+            ],
+            "min_len_steps": 30,
+            "observation": {
+              "vision": {
+                "cam_high": [
+                  "mask"
+                ],
+                "cam_right_wrist": [
+                  "mask"
+                ],
+                "cam_left_wrist": [
+                  "mask"
+                ]
+              },
+              "states": [
+                "qpos"
+              ],
+              "exteroception": [
+                "cam_high",
+                "cam_right_wrist",
+                "cam_left_wrist"
+              ]
+            },
+            "actions": "qpos_with_eef_pose"
+          },
+          "instruction": {
+            "lang": "Pick up the popcorn cup with the left hand and scoop the popcorn into it with the right hand."
+          },
+          "save_path": "./popcorn_dexhand_hdf5"
+        }
+      }
+    },
+    "success_params": {
+      "strict": false
+    },
+    "domain_randomization": {
+      "enable": true
+    }
+  },
+  "robot": {
+    "uid": "dexforce_w1",
+    "robot_type": "DexforceW1",
+    "init_pos": [
+      0.04,
+      0.0,
+      0.04
+    ],
+    "init_qpos": [
+      0.7,
+      -1.4,
+      0.7,
+      0,
+      0,
+      -0.8,
+      0,
+      0,
+      -0.58,
+      0.58,
+      0,
+      0,
+      -1.57,
+      1.57,
+      -1.2,
+      1.2,
+      0.4,
+      -0.4,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1.4,
+      0,
+      0,
+      0,
+      0,
+      1.4,
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      0,
+      0,
+      0,
+      0,
+      0.5
+    ],
+    "gesture_map": {
+      "open": {
+        "THUMB2": 0.9,
+        "THUMB1": 0.0,
+        "INDEX": 0.0,
+        "MIDDLE": 0.0,
+        "RING": 0.0,
+        "PINKY": 0.0
+      },
+      "close": {
+        "THUMB2": 0.9,
+        "THUMB1": 0.55,
+        "INDEX": 0.9,
+        "MIDDLE": 0.9,
+        "RING": 0.9,
+        "PINKY": 0.9
+      },
+      "grasp": {
+        "THUMB2": 0.9,
+        "THUMB1": 0.1,
+        "INDEX": 0.5,
+        "MIDDLE": 0.5,
+        "RING": 0.5,
+        "PINKY": 0.5
+      },
+      "fist": {
+        "THUMB2": 0.9,
+        "THUMB1": 0.9,
+        "INDEX": 0.9,
+        "MIDDLE": 0.9,
+        "RING": 0.9,
+        "PINKY": 0.9
+      }
+    },
+    "solver_cfg": {
+      "left_arm": {
+        "ik_nearest_weight": [
+          5,
+          5,
+          1,
+          5,
+          1,
+          1,
+          1
+        ],
+        "tcp": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.04
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.14
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "right_arm": {
+        "ik_nearest_weight": [
+          5,
+          5,
+          1,
+          5,
+          1,
+          1,
+          1
+        ],
+        "tcp": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.04
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.14
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "left_arm_body": {
+        "class_type": "WholeBodyIKSolver",
+        "end_link_name": "left_ee",
+        "root_link_name": "base_link",
+        "tcp": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.04
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.14
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "backend": "dls",
+        "max_iterations": 200,
+        "w_pos": 50.0,
+        "w_rot": 1.0,
+        "w_regularization": 0.02,
+        "w_smooth": 0.1,
+        "leg_mode": 2,
+        "pos_eps": 0.005,
+        "rot_eps": 0.1
+      },
+      "right_arm_body": {
+        "class_type": "WholeBodyIKSolver",
+        "end_link_name": "right_ee",
+        "root_link_name": "base_link",
+        "tcp": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.04
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.14
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "backend": "dls",
+        "max_iterations": 200,
+        "w_pos": 50.0,
+        "w_rot": 1.0,
+        "w_regularization": 0.02,
+        "w_smooth": 0.1,
+        "leg_mode": 2,
+        "pos_eps": 0.005,
+        "rot_eps": 0.1
+      }
+    },
+    "control_parts": {
+      "left_arm_body": [
+        "WAIST",
+        "LEFT_J1",
+        "LEFT_J2",
+        "LEFT_J3",
+        "LEFT_J4",
+        "LEFT_J5",
+        "LEFT_J6",
+        "LEFT_J7"
+      ],
+      "right_arm_body": [
+        "WAIST",
+        "RIGHT_J1",
+        "RIGHT_J2",
+        "RIGHT_J3",
+        "RIGHT_J4",
+        "RIGHT_J5",
+        "RIGHT_J6",
+        "RIGHT_J7"
+      ]
+    },
+    "urdf_cfg": {
+      "components": [
+        {
+          "component_type": "left_hand",
+          "urdf_path": "BrainCoHandCamera3/BrainCoLeftHandCamera3/BrainCoLeftHand.urdf",
+          "transform": [
+            [
+              -1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        {
+          "component_type": "right_hand",
+          "urdf_path": "BrainCoHandCamera3/BrainCoRightHandCamera3/BrainCoRightHand.urdf",
+          "transform": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              -1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      ]
+    },
+    "drive_pros": {
+      "stiffness": {
+        "(RIGHT|LEFT)_J[0-9]": 10000.0,
+        "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)": 20.0,
+        "(ANKLE|KNEE|BUTTOCK|WAIST)": 10000000.0
+      },
+      "damping": {
+        "(RIGHT|LEFT)_J[0-9]": 1000.0,
+        "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)": 10.0,
+        "(ANKLE|KNEE|BUTTOCK|WAIST)": 10000.0
+      },
+      "max_effort": {
+        "(RIGHT|LEFT)_J[0-9]": 1000.0,
+        "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)": 1000.0,
+        "(ANKLE|KNEE|BUTTOCK|WAIST)": 10000000000.0
+      }
+    }
+  },
+  "sensor": [
+    {
+      "sensor_type": "Camera",
+      "uid": "cam_left_wrist",
+      "sensor_name": "cam_left_wrist",
+      "width": 640,
+      "height": 360,
+      "intrinsics": [
+        387.247,
+        290.43525,
+        318.966,
+        183.08175
+      ],
+      "enable_mask": true,
+      "extrinsics": {
+        "parent": "left_ee",
+        "pos": [
+          0.099,
+          0.006,
+          0.053
+        ],
+        "quat": [
+          0.4591,
+          0.4077,
+          0.7722,
+          0.1628
+        ]
+      },
+      "set_near": 0.005,
+      "set_far": 50
+    },
+    {
+      "sensor_type": "Camera",
+      "uid": "cam_right_wrist",
+      "sensor_name": "cam_right_wrist",
+      "width": 640,
+      "height": 360,
+      "intrinsics": [
+        387.247,
+        290.43525,
+        318.966,
+        183.08175
+      ],
+      "enable_mask": true,
+      "extrinsics": {
+        "parent": "right_ee",
+        "pos": [
+          0.096,
+          -0.024,
+          0.04
+        ],
+        "quat": [
+          0.1779,
+          0.7609,
+          0.4566,
+          0.4253
+        ]
+      },
+      "set_near": 0.005,
+      "set_far": 50
+    },
+    {
+      "sensor_type": "StereoCamera",
+      "uid": "cam_high",
+      "width": 640,
+      "height": 360,
+      "enable_mask": true,
+      "enable_depth": true,
+      "left_to_right_pos": [
+        0.059846004,
+        0.00019311,
+        1.6868e-05
+      ],
+      "intrinsics": [
+        327.314916865903,
+        327.2645946506327,
+        317.8475987238427,
+        192.17018443181033
+      ],
+      "intrinsics_right": [
+        328.2160761034453,
+        328.0920035841713,
+        319.781645986797,
+        177.49007788394866
+      ],
+      "extrinsics": {
+        "parent": "eyes"
+      }
+    }
+  ],
+  "light": {
+    "direct": [
+      {
+        "uid": "light1",
+        "light_type": "point",
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "intensity": 100,
+        "init_pos": [
+          0,
+          0,
+          2
+        ]
+      }
+    ]
+  },
+  "background": [
+    {
+      "uid": "machine_table",
+      "shape": {
+        "shape_type": "Mesh",
+        "fpath": "popcorn_objects/machine_table.ply",
+        "compute_uv": true
+      },
+      "body_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "init_local_pose": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.7
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.1
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.4
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "body_type": "kinematic",
+      "max_convex_hull_num": 1,
+      "affordance_points_object": {
+        "place": {
+          "common": [
+            [
+              [
+                0.9989900006269871,
+                -0.04490701393240602,
+                -0.00015932138755702304,
+                -0.22373999999999994
+              ],
+              [
+                0.04490398606765009,
+                0.9989599993721868,
+                -0.008261899818386837,
+                -0.30111
+              ],
+              [
+                0.0005301686124503413,
+                0.008246400181612927,
+                0.9999700000012796,
+                0.4013
+              ],
+              [
+                0,
+                0,
+                0,
+                1
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "uid": "table",
+      "shape": {
+        "shape_type": "Mesh",
+        "fpath": "popcorn_objects/cup_table.ply",
+        "compute_uv": true
+      },
+      "body_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "init_local_pose": [
+        [
+          0.0,
+          -1.0,
+          0.0,
+          0.33
+        ],
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.8
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.365
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "body_type": "kinematic",
+      "max_convex_hull_num": 1,
+      "affordance_points_object": {
+        "place": {
+          "common": [
+            [
+              [
+                0.6368567973952115,
+                0.6359350748902143,
+                1.3046174489213922e-05,
+                -0.23373670371293626
+              ],
+              [
+                -0.6359350749657317,
+                0.6368567974217912,
+                3.136122801475282e-06,
+                -0.01849454903809226
+              ],
+              [
+                -6.3141744151172045e-06,
+                -1.0293781075338039e-05,
+                0.9999999999183996,
+                0.4186552196767973
+              ],
+              [
+                0,
+                0,
+                0,
+                1
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "uid": "popcorn_machine",
+      "shape": {
+        "shape_type": "Mesh",
+        "fpath": "popcorn_objects/popcorn_machine_full.ply",
+        "compute_uv": true
+      },
+      "body_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "init_local_pose": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.85
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.08
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.77
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "max_convex_hull_num": 32,
+      "body_type": "kinematic"
+    }
+  ],
+  "rigid_object": [
+    {
+      "uid": "interact_cup",
+      "shape": {
+        "shape_type": "Mesh",
+        "fpath": "popcorn_objects/popcorn_cup.ply",
+        "compute_uv": true
+      },
+      "attrs": {
+        "mass": 0.2,
+        "static_friction": 0.95,
+        "dynamic_friction": 0.9,
+        "linear_damping": 0.7,
+        "angular_damping": 0.7,
+        "contact_offset": 0.002,
+        "rest_offset": 0.001,
+        "restitution": 0.05,
+        "max_depenetration_velocity": 5.0,
+        "max_linear_velocity": 1.0,
+        "max_angular_velocity": 1.0
+      },
+      "body_scale": [
+        0.9,
+        0.9,
+        1.0
+      ],
+      "init_local_pose": [
+        [
+          0.70710678118,
+          -0.70710678118,
+          0.0,
+          0.17
+        ],
+        [
+          0.70710678118,
+          0.70710678118,
+          0.0,
+          0.6
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.78
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "max_convex_hull_num": 24,
+      "affordance_points_object": {
+        "grasp": {
+          "left_hand": [
+            [
+              [
+                0.14104613495290208,
+                0.09997317933447127,
+                0.9849423085788354,
+                -0.004003339639344114
+              ],
+              [
+                -0.14958157665420183,
+                -0.9813145288548444,
+                0.12102539974748469,
+                0.01471358414243601
+              ],
+              [
+                0.9786374914852236,
+                -0.1643993882961642,
+                -0.12345647568012064,
+                0.00967437090365819
+              ],
+              [
+                0,
+                0,
+                0,
+                1
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "uid": "chanzi",
+      "shape": {
+        "shape_type": "Mesh",
+        "fpath": "popcorn_objects/chanzi.ply",
+        "compute_uv": true
+      },
+      "attrs": {
+        "mass": 0.2,
+        "static_friction": 0.95,
+        "dynamic_friction": 0.9,
+        "linear_damping": 0.7,
+        "angular_damping": 0.7,
+        "contact_offset": 0.002,
+        "rest_offset": 0.001,
+        "restitution": 0.05,
+        "max_depenetration_velocity": 5.0,
+        "max_linear_velocity": 1.0,
+        "max_angular_velocity": 1.0
+      },
+      "body_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "init_local_pose": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.5
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.3
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.8
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "max_convex_hull_num": 24,
+      "affordance_points_object": {
+        "grasp": {
+          "right_hand": [
+            [
+              [
+                0.02908012310399699,
+                0.6359029556239788,
+                0.7712209653976898,
+                0.0019690916899252676
+              ],
+              [
+                0.9989560005273934,
+                -0.045682699245056746,
+                -3.3306690738754696e-16,
+                -0.10927426446669981
+              ],
+              [
+                0.03523145541374467,
+                0.7704158111165514,
+                -0.6365675317914476,
+                0.03099519936476314
+              ],
+              [
+                0,
+                0,
+                0,
+                1
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "rigid_object_group": [
+    {
+      "uid": "bmh",
+      "max_num": 30,
+      "folder_path": "popcorn_objects/bmh",
+      "ext": ".obj",
+      "rigid_objects": {
+        "obj": {
+          "attrs": {
+            "mass": 0.1,
+            "contact_offset": 0.001,
+            "rest_offset": 0,
+            "dynamic_friction": 0.99,
+            "static_friction": 0.99,
+            "restitution": 0.0,
+            "min_position_iters": 32,
+            "min_velocity_iters": 8,
+            "max_depenetration_velocity": 1.0
+          },
+          "shape": {
+            "shape_type": "Mesh",
+            "compute_uv": true
+          },
+          "init_pos": [
+            -110,
+            0,
+            2
+          ],
+          "body_scale": [
+            0.04,
+            0.04,
+            0.04
+          ]
+        }
+      }
+    }
+  ],
+  "task": {
+    "name": "popcorn",
+    "task_dir": "/home/dex/Work/test_real2sim_scene/Real2SimTestPopcorn",
+    "task_check_config": [
+      {
+        "func": "grasp",
+        "name_pattern": "grasp",
+        "buffer_after": 10,
+        "scope": "left_arm",
+        "kwargs": {
+          "support_zdist_min": 0.2,
+          "eef_dist_max": 0.1,
+          "target_uid": "interact_cup",
+          "support_uid": "table"
+        }
+      },
+      {
+        "func": "grasp",
+        "name_pattern": "grasp",
+        "buffer_after": 10,
+        "scope": "right_arm",
+        "kwargs": {
+          "support_zdist_min": 0.2,
+          "eef_dist_max": 0.15,
+          "target_uid": "chanzi",
+          "support_uid": "machine_table"
+        }
+      },
+      {
+        "func": "place",
+        "name_pattern": "place",
+        "buffer_after": 30,
+        "scope": "left_arm",
+        "kwargs": {
+          "delta_x_range": [
+            -0.1,
+            0.1
+          ],
+          "delta_y_range": [
+            -0.1,
+            0.1
+          ],
+          "delta_z_range": [
+            -0.03,
+            0.03
+          ],
+          "target_uid": "interact_cup",
+          "support_uid": "table"
+        }
+      },
+      {
+        "func": "place",
+        "name_pattern": "place",
+        "buffer_after": 30,
+        "scope": "right_arm",
+        "kwargs": {
+          "delta_x_range": [
+            -0.1,
+            0.1
+          ],
+          "delta_y_range": [
+            -0.2,
+            0.2
+          ],
+          "delta_z_range": [
+            -0.03,
+            0.03
+          ],
+          "target_uid": "chanzi",
+          "support_uid": "machine_table"
+        }
+      }
+    ],
+    "data": {
+      "0": {
+        "trajectory": {
+          "path": "20260313_150905",
+          "sample_ratio": 0.2,
+          "scope": {
+            "right_arm": [
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ],
+            "left_arm": [
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12
+            ],
+            "left_eef": [
+              13
+            ],
+            "right_eef": [
+              21
+            ],
+            "head": [
+              4,
+              5
+            ],
+            "waist": [
+              3
+            ]
+          }
+        },
+        "node": {
+          "left_arm": [
+            {
+              "0": {
+                "affordance_name": "left_arm_pre_grasp_qpos",
+                "master": "",
+                "slaver": "interact_cup",
+                "timestep": 232,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    -0.12,
+                    0.0,
+                    0.107,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "left_arm_grasp_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_grasp_cup_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "1": {
+                "affordance_name": "left_arm_grasp_qpos",
+                "master": "",
+                "slaver": "interact_cup",
+                "timestep": 314,
+                "mimicable": false,
+                "editor_config": {
+                  "affordance_adjust": {
+                    "type": "grasp"
+                  },
+                  "ref_scope_node": {
+                    "waist": "waist_grasp_cup_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "2": {
+                "affordance_name": "left_arm_lift_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 340,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.03,
+                    0.03,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "left_arm_grasp_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_grasp_cup_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "3": {
+                "affordance_name": "left_arm_pre_pour_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 830,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "4": {
+                "affordance_name": "left_arm_pour_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 943,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "5": {
+                "affordance_name": "left_arm_pour2_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 1150,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.0,
+                    -0.01,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "left_arm_pour_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "6": {
+                "affordance_name": "left_arm_pre_place_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 1330,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    -0.02,
+                    0.04,
+                    0.04,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "left_arm_pre_place_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_place_cup_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "7": {
+                "affordance_name": "left_arm_place_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 1370,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    -0.02,
+                    0.04,
+                    0.01,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "left_arm_place_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_place_cup_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "8": {
+                "affordance_name": "left_arm_after_place_qpos",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 1438,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    -0.05,
+                    0.01,
+                    0.06,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "left_arm_place_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_place_cup_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              }
+            }
+          ],
+          "left_eef": [
+            {
+              "0": {
+                "affordance_name": "left_close",
+                "master": "",
+                "slaver": "interact_cup",
+                "timestep": 164,
+                "mimicable": false,
+                "duration": 40,
+                "trajectory": {
+                  "name": "execute_close",
+                  "kwargs": {
+                    "gesture": "grasp"
+                  }
+                }
+              },
+              "1": {
+                "affordance_name": "left_open",
+                "master": "interact_cup",
+                "slaver": "",
+                "timestep": 1370,
+                "mimicable": false,
+                "duration": 40,
+                "trajectory": {
+                  "name": "execute_open",
+                  "kwargs": {}
+                }
+              }
+            }
+          ],
+          "right_arm": [
+            {
+              "0": {
+                "affordance_name": "right_arm_pre0_grasp_qpos",
+                "master": "",
+                "slaver": "chanzi",
+                "timestep": 400,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "1": {
+                "affordance_name": "right_arm_pre_grasp_qpos",
+                "master": "",
+                "slaver": "chanzi",
+                "timestep": 500,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.0,
+                    0.08,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_grasp_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_grasp_chanzi_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "2": {
+                "affordance_name": "right_arm_grasp_qpos",
+                "master": "",
+                "slaver": "chanzi",
+                "timestep": 575,
+                "mimicable": false,
+                "editor_config": {
+                  "affordance_adjust": {
+                    "type": "grasp"
+                  },
+                  "ref_scope_node": {
+                    "waist": "waist_grasp_chanzi_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "3": {
+                "affordance_name": "right_arm_lift_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 640,
+                "editor_config": {
+                  "delta_xpos": [
+                    -0.05,
+                    0.05,
+                    0.05,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_grasp_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_grasp_chanzi_qpos"
+                  }
+                },
+                "mimicable": false,
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "4": {
+                "affordance_name": "right_arm_pre_scoop_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 730,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.17,
+                    0.16,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_pre_scoop_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "5": {
+                "affordance_name": "right_arm_scoop1_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 780,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.0,
+                    -0.15,
+                    -30.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_pre_scoop_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "6": {
+                "affordance_name": "right_arm_scoop2_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 850,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.18,
+                    0.0,
+                    20.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_scoop1_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "7": {
+                "affordance_name": "right_arm_scoop_lift_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 900,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.0,
+                    0.08,
+                    20.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_scoop2_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "8": {
+                "affordance_name": "right_arm_pre_pour_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 965,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    -0.05,
+                    -0.04,
+                    0.03,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_scoop_lift_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "9": {
+                "affordance_name": "right_arm_pour_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 1120,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    0.05,
+                    0.04,
+                    -50.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_pre_pour_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "10": {
+                "affordance_name": "right_arm_after_pour_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 1180,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    -0.05,
+                    -0.04,
+                    45.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_pour_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_pour_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "11": {
+                "affordance_name": "right_arm_pre_place_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 1600,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.05,
+                    0.0,
+                    0.02,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_pre_place_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_place_chanzi_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "12": {
+                "affordance_name": "right_arm_place_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 1670,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.05,
+                    0.0,
+                    0.01,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_place_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_place_chanzi_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "13": {
+                "affordance_name": "right_arm_after_place_qpos",
+                "master": "chanzi",
+                "slaver": "",
+                "timestep": 1730,
+                "mimicable": false,
+                "editor_config": {
+                  "delta_xpos": [
+                    0.0,
+                    -0.02,
+                    0.04,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "ref_node": "right_arm_place_qpos",
+                  "ref_scope_node": {
+                    "waist": "waist_place_chanzi_qpos"
+                  }
+                },
+                "trajectory": {
+                  "name": "load_trajectory",
+                  "kwargs": {}
+                }
+              }
+            }
+          ],
+          "right_eef": [
+            {
+              "0": {
+                "affordance_name": "right_close",
+                "master": "",
+                "slaver": "chanzi",
+                "timestep": 575,
+                "mimicable": false,
+                "duration": 40,
+                "trajectory": {
+                  "name": "execute_close",
+                  "kwargs": {
+                    "gesture": "fist"
+                  }
+                }
+              },
+              "1": {
+                "affordance_name": "right_open",
+                "master": "",
+                "slaver": "chanzi",
+                "timestep": 1670,
+                "mimicable": false,
+                "duration": 40,
+                "trajectory": {
+                  "name": "execute_open",
+                  "kwargs": {}
+                }
+              },
+              "2": {
+                "affordance_name": "right_keep_pour",
+                "master": "",
+                "slaver": "",
+                "timestep": 1120,
+                "mimicable": false,
+                "duration": 50,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              }
+            }
+          ],
+          "head": [
+            {
+              "0": {
+                "affordance_name": "head_grasp_cup_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 314,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "1": {
+                "affordance_name": "head_grasp_cup2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 340,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "2": {
+                "affordance_name": "head_grasp_chanzi_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 500,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "3": {
+                "affordance_name": "head_grasp_chanzi2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 575,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "4": {
+                "affordance_name": "head_pour_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 690,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "5": {
+                "affordance_name": "head_pour2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1160,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "6": {
+                "affordance_name": "head_place_cup_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1314,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "7": {
+                "affordance_name": "head_place_cup2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1438,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "8": {
+                "affordance_name": "head_place_chanzi_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1600,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "9": {
+                "affordance_name": "head_place_chanzi2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1787,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              }
+            }
+          ],
+          "waist": [
+            {
+              "0": {
+                "affordance_name": "waist_grasp_cup_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 314,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "1": {
+                "affordance_name": "waist_grasp_cup2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 340,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "2": {
+                "affordance_name": "waist_grasp_chanzi_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 500,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "3": {
+                "affordance_name": "waist_grasp_chanzi2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 575,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "4": {
+                "affordance_name": "waist_pour_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 690,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "5": {
+                "affordance_name": "waist_pour2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1160,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "6": {
+                "affordance_name": "waist_place_cup_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1314,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "7": {
+                "affordance_name": "waist_place_cup2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1438,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              },
+              "8": {
+                "affordance_name": "waist_place_chanzi_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1600,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {}
+                }
+              },
+              "9": {
+                "affordance_name": "waist_place_chanzi2_qpos",
+                "master": "",
+                "slaver": "",
+                "timestep": 1787,
+                "mimicable": false,
+                "trajectory": {
+                  "name": "plan_trajectory",
+                  "kwargs": {
+                    "keep_still": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "sync": {
+          "left_eefhand_init_qpos": {
+            "depend_tasks": [
+              "left_arm_grasp_qpos"
+            ]
+          },
+          "left_arm_grasp_qpos": {
+            "depend_tasks": [
+              "left_close"
+            ]
+          },
+          "left_arm_pre_grasp_qpos": {
+            "depend_tasks": [
+              "waist_grasp_cup_qpos",
+              "head_grasp_cup_qpos"
+            ]
+          },
+          "waist_grasp_cup2_qpos": {
+            "depend_tasks": [
+              "left_arm_lift_qpos"
+            ]
+          },
+          "head_grasp_cup2_qpos": {
+            "depend_tasks": [
+              "left_arm_lift_qpos"
+            ]
+          },
+          "right_arm_grasp_qpos": {
+            "depend_tasks": [
+              "right_close"
+            ]
+          },
+          "right_eefhand_init_qpos": {
+            "depend_tasks": [
+              "right_arm_grasp_qpos"
+            ]
+          },
+          "right_arm_pre0_grasp_qpos": {
+            "depend_tasks": [
+              "waist_grasp_chanzi_qpos",
+              "head_grasp_chanzi_qpos"
+            ]
+          },
+          "waist_grasp_chanzi2_qpos": {
+            "depend_tasks": [
+              "right_arm_lift_qpos"
+            ]
+          },
+          "head_grasp_chanzi2_qpos": {
+            "depend_tasks": [
+              "right_arm_lift_qpos"
+            ]
+          },
+          "left_arm_pre_pour_qpos": {
+            "depend_tasks": [
+              "waist_pour_qpos",
+              "head_pour_qpos",
+              "right_arm_pre_pour_qpos"
+            ]
+          },
+          "right_arm_pre_pour_qpos": {
+            "depend_tasks": [
+              "left_arm_pour_qpos"
+            ]
+          },
+          "right_arm_pre_shovel_qpos": {
+            "depend_tasks": [
+              "waist_pour_qpos",
+              "head_pour_qpos"
+            ]
+          },
+          "left_arm_pour2_qpos": {
+            "depend_tasks": [
+              "right_arm_after_pour_qpos"
+            ]
+          },
+          "waist_pour2_qpos": {
+            "depend_tasks": [
+              "left_arm_pour2_qpos",
+              "right_arm_after_pour_qpos"
+            ]
+          },
+          "head_pour2_qpos": {
+            "depend_tasks": [
+              "left_arm_pour2_qpos",
+              "right_arm_after_pour_qpos"
+            ]
+          },
+          "left_close": {
+            "depend_tasks": [
+              "left_arm_place_qpos"
+            ]
+          },
+          "left_arm_place_qpos": {
+            "depend_tasks": [
+              "left_open"
+            ]
+          },
+          "waist_place_cup2_qpos": {
+            "depend_tasks": [
+              "left_arm_after_place_qpos"
+            ]
+          },
+          "head_place_cup2_qpos": {
+            "depend_tasks": [
+              "left_arm_after_place_qpos"
+            ]
+          },
+          "left_arm_pre_place_qpos": {
+            "depend_tasks": [
+              "waist_place_cup_qpos",
+              "head_place_cup_qpos"
+            ]
+          },
+          "right_arm_pre_place_qpos": {
+            "depend_tasks": [
+              "waist_place_chanzi_qpos",
+              "head_place_chanzi_qpos"
+            ]
+          },
+          "right_arm_place_qpos": {
+            "depend_tasks": [
+              "right_open"
+            ]
+          },
+          "right_keep_pour": {
+            "depend_tasks": [
+              "right_arm_place_qpos"
+            ]
+          },
+          "waist_place_chanzi2_qpos": {
+            "depend_tasks": [
+              "right_arm_after_place_qpos"
+            ]
+          },
+          "head_place_chanzi2_qpos": {
+            "depend_tasks": [
+              "right_arm_after_place_qpos"
+            ]
+          },
+          "right_close": {
+            "depend_tasks": [
+              "right_arm_pour_qpos"
+            ]
+          },
+          "right_arm_pour_qpos": {
+            "depend_tasks": [
+              "right_keep_pour"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

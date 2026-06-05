@@ -274,6 +274,31 @@ def test_task_description_rejects_unknown_llm_uid(
         )
 
 
+def test_high_tabletop_scene_adjusts_robot_height_and_light(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    gym_config_path = project_dir / "gym_config.json"
+    source_config = json.loads(gym_config_path.read_text(encoding="utf-8"))
+    for obj_config in source_config["rigid_object"]:
+        obj_config["init_pos"][2] = 1.39
+    gym_config_path.write_text(
+        json.dumps(source_config, indent=2),
+        encoding="utf-8",
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_high_table_agent",
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    assert gym_config["robot"]["init_pos"][2] == pytest.approx(1.2)
+    assert gym_config["light"]["direct"][0]["intensity"] == 40.0
+
+
 def test_object_on_object_success_predicate() -> None:
     env = _FakeEnv(
         {

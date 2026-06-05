@@ -97,6 +97,9 @@ _SIDE_RELATION_DISTANCE = 0.16
 _SIDE_RELEASE_Z_OFFSET = 0.12
 _STAGING_Z_DELTA = 0.10
 _ON_RELEASE_Z_OFFSET = 0.14
+_DUAL_UR5_LEGACY_INIT_Z = 0.4
+_DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
+_DUAL_UR5_TABLETOP_Z_OFFSET = 0.19
 
 _BACKGROUND_ATTRS = {
     "mass": 10.0,
@@ -930,6 +933,7 @@ def _build_ur5_basket_bundle(
         for obj in scene_objects
         if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
     ]
+    robot_init_z = _estimate_dual_ur5_init_z(scene_objects)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -941,7 +945,7 @@ def _build_ur5_basket_bundle(
             "observations": _make_observations_config(),
             "dataset": _make_dataset_config(project_name, roles),
         },
-        "robot": _make_dual_ur5_robot_config(),
+        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
@@ -1010,6 +1014,7 @@ def _build_relative_placement_bundle(
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
     object_scale = _target_body_scale_vector(target_body_scale)
+    robot_init_z = _estimate_dual_ur5_init_z(scene_objects)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1021,7 +1026,7 @@ def _build_relative_placement_bundle(
             "observations": _make_observations_config(),
             "dataset": _make_relative_dataset_config(project_name, spec),
         },
-        "robot": _make_dual_ur5_robot_config(),
+        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
@@ -1066,6 +1071,39 @@ def _target_body_scale_vector(
         value = float(target_body_scale)
         return [value, value, value]
     return _clean_vector3(target_body_scale)
+
+
+def _estimate_dual_ur5_init_z(scene_objects: list[_SceneObject]) -> float:
+    """Estimate robot base height from source tabletop object heights."""
+
+    rigid_z_values = []
+    for obj in scene_objects:
+        if obj.source_role != "rigid_object":
+            continue
+        init_pos = obj.config.get("init_pos")
+        if not isinstance(init_pos, (list, tuple)) or len(init_pos) < 3:
+            continue
+        try:
+            rigid_z_values.append(float(init_pos[2]))
+        except (TypeError, ValueError):
+            continue
+
+    if not rigid_z_values:
+        return _DUAL_UR5_LEGACY_INIT_Z
+
+    sorted_z = sorted(rigid_z_values)
+    mid = len(sorted_z) // 2
+    if len(sorted_z) % 2:
+        tabletop_z = sorted_z[mid]
+    else:
+        tabletop_z = (sorted_z[mid - 1] + sorted_z[mid]) / 2.0
+
+    if tabletop_z <= _DUAL_UR5_HIGH_TABLETOP_THRESHOLD:
+        return _DUAL_UR5_LEGACY_INIT_Z
+    return max(
+        _DUAL_UR5_LEGACY_INIT_Z,
+        tabletop_z - _DUAL_UR5_TABLETOP_Z_OFFSET,
+    )
 
 
 def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:
@@ -1488,7 +1526,7 @@ def _make_relative_dataset_config(
     }
 
 
-def _make_dual_ur5_robot_config() -> dict[str, Any]:
+def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
     return {
         "uid": "DualUR5",
         "urdf_cfg": {
@@ -1524,7 +1562,7 @@ def _make_dual_ur5_robot_config() -> dict[str, Any]:
                 },
             ],
         },
-        "init_pos": [0.0, 2.0, 0.4],
+        "init_pos": [0.0, 2.0, float(robot_init_z)],
         "init_rot": [0.0, 0.0, 0.0],
         "init_qpos": [
             0.0,
@@ -1615,7 +1653,7 @@ def _make_light_config() -> dict[str, Any]:
                 "uid": "main_light",
                 "light_type": "point",
                 "color": [1.0, 1.0, 1.0],
-                "intensity": 80.0,
+                "intensity": 40.0,
                 "init_pos": [0.0, -0.4, 2.2],
                 "radius": 10.0,
             }
