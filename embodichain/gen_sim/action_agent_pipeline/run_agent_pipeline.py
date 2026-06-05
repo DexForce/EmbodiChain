@@ -43,11 +43,14 @@ _DEFAULT_IMAGE = (
     _REPO_ROOT
     / "embodichain/gen_sim/action_agent_pipeline/gym_project_api/image/demo5.jpg"
 )
+_DEFAULT_IMAGE_DIR = _DEFAULT_IMAGE.parent
 _DEFAULT_GYM_PROJECT_ROOT = _REPO_ROOT / "gym_project"
+_DEFAULT_EXISTING_GYM_PROJECT = _DEFAULT_GYM_PROJECT_ROOT / "1780562837_gym_project"
 _DEFAULT_CONFIG_OUTPUT_DIR = (
     _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/demo3_text"
 )
 _DEFAULT_TASK_NAME = "Depm3_Text"
+_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -57,10 +60,21 @@ def _build_parser() -> argparse.ArgumentParser:
             "configs from that project, then run the generated task."
         )
     )
-    parser.add_argument(
+    image_group = parser.add_mutually_exclusive_group()
+    image_group.add_argument(
         "--image",
-        default=str(_DEFAULT_IMAGE),
-        help=f"Input image path. Defaults to {_DEFAULT_IMAGE.as_posix()}",
+        default=None,
+        help=f"Input image path. If omitted, defaults to {_DEFAULT_IMAGE.as_posix()}",
+    )
+    image_group.add_argument(
+        "--image-name",
+        "--image_name",
+        dest="image_name",
+        default=None,
+        help=(
+            "Image file name under the default image directory. The suffix is "
+            'optional, e.g. "demo6" resolves to demo6.jpg.'
+        ),
     )
     parser.add_argument(
         "--server",
@@ -73,6 +87,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Directory where Image2Tabletop generated gym projects are written. "
             f"Defaults to {_DEFAULT_GYM_PROJECT_ROOT.as_posix()}"
+        ),
+    )
+    parser.add_argument(
+        "--use-existing-gym-project",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip Image2Tabletop API and start from --gym-project. Defaults to "
+            "false."
+        ),
+    )
+    parser.add_argument(
+        "--gym-project",
+        "--gym_project",
+        dest="gym_project",
+        default=str(_DEFAULT_EXISTING_GYM_PROJECT),
+        help=(
+            "Existing gym project used with --use-existing-gym-project. "
+            f"Defaults to {_DEFAULT_EXISTING_GYM_PROJECT.as_posix()}"
         ),
     )
     parser.add_argument(
@@ -165,6 +198,71 @@ def _resolve_single_image(
     return image_paths[0]
 
 
+def _resolve_image_input(args: argparse.Namespace) -> Path:
+    if args.image_name:
+        return _resolve_image_name(args.image_name)
+    if args.image:
+        return Path(args.image)
+    return _DEFAULT_IMAGE
+
+
+def _resolve_image_name(image_name: str) -> Path:
+    image_path = Path(image_name)
+    if image_path.parent != Path("."):
+        raise ValueError(
+            "--image-name only accepts a file name under "
+            f"{_DEFAULT_IMAGE_DIR.as_posix()}. Use --image for a full path."
+        )
+    if image_path.suffix:
+        return _DEFAULT_IMAGE_DIR / image_path
+
+    matches = [
+        _DEFAULT_IMAGE_DIR / f"{image_name}{suffix}" for suffix in _IMAGE_SUFFIXES
+    ]
+    existing = [path for path in matches if path.exists()]
+    if len(existing) == 1:
+        return existing[0]
+    if not existing:
+        candidates = ", ".join(path.name for path in matches)
+        raise FileNotFoundError(
+            f"Image name {image_name!r} was not found. Tried: {candidates}"
+        )
+
+    matched = ", ".join(path.name for path in existing)
+    raise ValueError(
+        f"Image name {image_name!r} is ambiguous. Use --image-name with a suffix: "
+        f"{matched}"
+    )
+
+
+def _resolve_gym_project(args: argparse.Namespace) -> Path:
+    if args.use_existing_gym_project:
+        project_path = Path(args.gym_project).expanduser().resolve()
+        if not project_path.exists():
+            raise FileNotFoundError(f"gym project not found: {project_path}")
+        print(f"Using existing gym project: {project_path}", flush=True)
+        return project_path
+
+    from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
+        check_health,
+        collect_image_paths,
+        process_image,
+    )
+
+    image_input = _resolve_image_input(args)
+    image_path = _resolve_single_image(str(image_input), collect_image_paths)
+    if not args.skip_health_check:
+        check_health(args.server)
+
+    return process_image(
+        server=args.server,
+        image_path=image_path,
+        output_root=Path(args.gym_project_root),
+        poll_interval=args.poll_interval,
+        overwrite=args.overwrite_gym_project,
+    )
+
+
 def _run_agent_command(
     *,
     task_name: str,
@@ -195,26 +293,11 @@ def main() -> int:
     args = _build_parser().parse_args()
 
     _ensure_repo_on_pythonpath()
-    from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
-        check_health,
-        collect_image_paths,
-        process_image,
-    )
     from embodichain.gen_sim.action_agent_pipeline.ur5_basket_config_generation import (
         generate_ur5_basket_config_from_project,
     )
 
-    image_path = _resolve_single_image(args.image, collect_image_paths)
-    if not args.skip_health_check:
-        check_health(args.server)
-
-    project_path = process_image(
-        server=args.server,
-        image_path=image_path,
-        output_root=Path(args.gym_project_root),
-        poll_interval=args.poll_interval,
-        overwrite=args.overwrite_gym_project,
-    )
+    project_path = _resolve_gym_project(args)
 
     paths = generate_ur5_basket_config_from_project(
         gym_project=project_path,
