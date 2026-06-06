@@ -705,6 +705,156 @@
             "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
             "overwrite_gym_project": false,
             "index": 10
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T07:14:54+08:00",
+            "task_name": "Demo1_Text",
+            "source_mode": "image2scene",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/gym_config_merged.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/gym_config_merged.json",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo1_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo1_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo1_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo1_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo1_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo1_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.7,
+            "target_replacements": [],
+            "sync_replacement_names": false,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "basket_template",
+                "left_target": "left_interact_cracker",
+                "right_target": "right_interact_cracker",
+                "container": "wicker_basket",
+                "target_replacements": [],
+                "coacd_cache": [
+                    {
+                        "uid": "right_interact_cracker",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/cracker/cracker_2/cracker_2.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/40575f76a89e32c48dcbd1173aa89f50_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "left_interact_cracker",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/cracker/cracker_3/cracker_3.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/c7fd4911dba995ce77bb5631e3365650_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "wicker_basket",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/basket/basket_1/basket_1.glb",
+                        "max_convex_hull_num": 8,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/a708943a407ecdc4aea80e373f8e6e9f_8.obj",
+                        "status": "generated"
+                    }
+                ]
+            },
+            "image_name": "demo1",
+            "server": "http://192.168.3.23:4523",
+            "background": "a tiny penholder to the right of the right bread,a tiny vase at the front side of the left bread",
+            "image2scene_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop",
+            "image2scene_download_dir": "./downloads",
+            "image2scene_output_root": "./generated",
+            "image2scene_gen_config": "./gen_config.json",
+            "image2scene_llm_config": "./gen_config.json",
+            "index": 11
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T07:21:41+08:00",
+            "task_name": "Demo2_Text",
+            "source_mode": "history",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/gym_config_merged.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/gym_config_merged.json",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo2_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo2_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo2_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo2_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo2_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo2_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.8,
+            "target_replacements": [
+                {
+                    "source_uid": "interact_cracker_3",
+                    "prompt": "An orange",
+                    "output_dir_name": "new1"
+                },
+                {
+                    "source_uid": "interact_cracker_2",
+                    "prompt": "An apple",
+                    "output_dir_name": "new2"
+                }
+            ],
+            "sync_replacement_names": true,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "basket_template",
+                "left_target": "left_orange",
+                "right_target": "right_apple",
+                "container": "wicker_basket",
+                "target_replacements": [
+                    {
+                        "source_uid": "interact_cracker_3",
+                        "prompt": "An orange",
+                        "output_dir_name": "new1",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/new1/orange.glb",
+                        "runtime_noun": "orange",
+                        "reused": false
+                    },
+                    {
+                        "source_uid": "interact_cracker_2",
+                        "prompt": "An apple",
+                        "output_dir_name": "new2",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/new2/apple.glb",
+                        "runtime_noun": "apple",
+                        "reused": false
+                    }
+                ],
+                "coacd_cache": [
+                    {
+                        "uid": "right_apple",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/new2/apple.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/bb71d73bd587bc06677f39f9e6444428_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "left_orange",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/new1/orange.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/0a7ac5336cfd83ea2d25b87778bb76bd_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "wicker_basket",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/mesh_assets/basket/basket_1/basket_1.glb",
+                        "max_convex_hull_num": 8,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/a708943a407ecdc4aea80e373f8e6e9f_8.obj",
+                        "status": "hit"
+                    }
+                ]
+            },
+            "base_task_name": "Demo1_Text",
+            "base_history_index": 11,
+            "base_history_task_name": "Demo1_Text",
+            "base_history_source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/gym_config_merged.json",
+            "index": 12
         }
     ]
 }
