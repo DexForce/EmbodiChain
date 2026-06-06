@@ -2322,35 +2322,35 @@ or extra lift edges. The inactive arm must remain null in every edge.
 
 1. Grasp the moved object:
    - {active_slot}: grasp(robot_name="{active_arm}",
-     obj_name="{spec.moved_runtime_uid}", pre_grasp_dis=0.08, sample_num=90)
+     obj_name="{spec.moved_runtime_uid}", pre_grasp_dis=0.08, sample_num=45)
    - {inactive_slot}: null
 
 2. Move the held object to the high staging pose relative to the reference:
    - {active_slot}: move_relative_to_object(robot_name="{active_arm}",
      obj_name="{spec.reference_runtime_uid}", x_offset={_format_prompt_float(high_x)},
      y_offset={_format_prompt_float(high_y)},
-     z_offset={_format_prompt_float(high_z)}, sample_num=90)
+     z_offset={_format_prompt_float(high_z)}, sample_num=45)
    - {inactive_slot}: null
 
 3. Lower the held object to the release pose:
    - {active_slot}: move_relative_to_object(robot_name="{active_arm}",
      obj_name="{spec.reference_runtime_uid}", x_offset={_format_prompt_float(rel_x)},
      y_offset={_format_prompt_float(rel_y)},
-     z_offset={_format_prompt_float(rel_z)}, sample_num=60)
+     z_offset={_format_prompt_float(rel_z)}, sample_num=30)
    - {inactive_slot}: null
 
 4. Release the moved object:
    - {active_slot}: open_gripper(robot_name="{active_arm}",
-     sample_num=30, open_threshold=-1.0, settle_steps=50)
+     sample_num=15, open_threshold=-1.0, settle_steps=25)
    - {inactive_slot}: null
 
 5. Move the empty gripper upward to clear the object:
    - {active_slot}: move_by_relative_offset(robot_name="{active_arm}",
-     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=20)
    - {inactive_slot}: null
 
 6. Return the active arm to its initial pose:
-   - {active_slot}: back_to_initial_pose(robot_name="{active_arm}", sample_num=60)
+   - {active_slot}: back_to_initial_pose(robot_name="{active_arm}", sample_num=30)
    - {inactive_slot}: null
 
 Final state: `{spec.moved_runtime_uid}` must be
@@ -2417,7 +2417,7 @@ raise immediately. Use only the parameters listed below.
 
     Use exactly:
     `grasp(robot_name="{active_arm}", obj_name="{spec.moved_runtime_uid}",
-    pre_grasp_dis=0.08, sample_num=90)`.
+    pre_grasp_dis=0.08, sample_num=45)`.
 
 "move_relative_to_object":
     def move_relative_to_object(robot_name: str,
@@ -2435,13 +2435,13 @@ raise immediately. Use only the parameters listed below.
     `move_relative_to_object(robot_name="{active_arm}",
     obj_name="{spec.reference_runtime_uid}",
     x_offset={_format_prompt_float(high_x)}, y_offset={_format_prompt_float(high_y)},
-    z_offset={_format_prompt_float(high_z)}, sample_num=90)`.
+    z_offset={_format_prompt_float(high_z)}, sample_num=45)`.
 
     Release pose:
     `move_relative_to_object(robot_name="{active_arm}",
     obj_name="{spec.reference_runtime_uid}",
     x_offset={_format_prompt_float(rel_x)}, y_offset={_format_prompt_float(rel_y)},
-    z_offset={_format_prompt_float(rel_z)}, sample_num=60)`.
+    z_offset={_format_prompt_float(rel_z)}, sample_num=30)`.
 
 "move_by_relative_offset":
     def move_by_relative_offset(robot_name: str,
@@ -2453,14 +2453,14 @@ raise immediately. Use only the parameters listed below.
 
     Use this only for the short upward retreat after releasing the object:
     `move_by_relative_offset(robot_name="{active_arm}", dx=0.0, dy=0.0,
-    dz=0.14, mode="extrinsic", sample_num=40)`.
+    dz=0.14, mode="extrinsic", sample_num=20)`.
 
 "open_gripper":
     def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
 
     Opens the selected gripper to release the held object. Use:
-    `open_gripper(robot_name="{active_arm}", sample_num=30,
-    open_threshold=-1.0, settle_steps=50)`.
+    `open_gripper(robot_name="{active_arm}", sample_num=15,
+    open_threshold=-1.0, settle_steps=25)`.
 
 "close_gripper":
     def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
@@ -2473,7 +2473,7 @@ raise immediately. Use only the parameters listed below.
 
     Returns the selected UR5 arm to its initial joint configuration. Use it only
     after `open_gripper` and the upward retreat:
-    `back_to_initial_pose(robot_name="{active_arm}", sample_num=60)`.
+    `back_to_initial_pose(robot_name="{active_arm}", sample_num=30)`.
 """
 
 
@@ -2534,64 +2534,64 @@ already executed `open_gripper` for its held target object.
 1. Grasp both target objects simultaneously:
    - left_arm_action: grasp(robot_name="left_arm",
      obj_name="{roles.left_target_runtime_uid}", pre_grasp_dis=0.08,
-     sample_num=90)
+     sample_num=45)
    - right_arm_action: grasp(robot_name="right_arm",
      obj_name="{roles.right_target_runtime_uid}", pre_grasp_dis=0.08,
-     sample_num=90)
+     sample_num=45)
 
 2. Move the held left target object directly above the left half of the
    {roles.container_runtime_uid} while the right arm keeps holding its target:
    - left_arm_action: move_relative_to_object(robot_name="left_arm",
      obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=-0.04,
-     z_offset=0.22, sample_num=90)
-   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+     z_offset=0.22, sample_num=45)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=10)
 
 3. Lower the held left target object to the left release pose inside the
    {roles.container_runtime_uid}:
    - left_arm_action: move_relative_to_object(robot_name="left_arm",
      obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=-0.04,
-     z_offset=0.12, sample_num=60)
-   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+     z_offset=0.12, sample_num=30)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=10)
 
 4. Release the left target object into the {roles.container_runtime_uid}:
    - left_arm_action: open_gripper(robot_name="left_arm",
-     sample_num=30, open_threshold=-1.0, settle_steps=50)
-   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+     sample_num=15, open_threshold=-1.0, settle_steps=25)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=10)
 
 5. Move the empty left gripper upward to clear the container:
    - left_arm_action: move_by_relative_offset(robot_name="left_arm",
-     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
-   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=20)
+   - right_arm_action: close_gripper(robot_name="right_arm", sample_num=10)
 
 6. After the left gripper has retreated upward, return the left UR5 to its
    initial pose while simultaneously moving the held right target object
    directly above the right half of the {roles.container_runtime_uid}. This
    parallel handoff must remain one graph edge:
-   - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
+   - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=30)
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=0.04,
-     z_offset=0.22, sample_num=90)
+     z_offset=0.22, sample_num=45)
 
 7. Lower the held right target object to the right release pose inside the
    {roles.container_runtime_uid}:
    - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
      obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=0.04,
-     z_offset=0.12, sample_num=60)
+     z_offset=0.12, sample_num=30)
 
 8. Release the right target object into the {roles.container_runtime_uid}:
    - left_arm_action: null
    - right_arm_action: open_gripper(robot_name="right_arm",
-     sample_num=30, open_threshold=-1.0, settle_steps=50)
+     sample_num=15, open_threshold=-1.0, settle_steps=25)
 
 9. Move the empty right gripper upward to clear the container:
    - left_arm_action: null
    - right_arm_action: move_by_relative_offset(robot_name="right_arm",
-     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=40)
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=20)
 
 10. Return the right UR5 to its initial pose after releasing the target object:
    - left_arm_action: null
-   - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=60)
+   - right_arm_action: back_to_initial_pose(robot_name="right_arm", sample_num=30)
 
 The final state is both `{roles.left_target_runtime_uid}` and
 `{roles.right_target_runtime_uid}` resting inside `{roles.container_runtime_uid}`,
@@ -2676,12 +2676,12 @@ left-first placement with an overlapped handoff to the right arm:
   `right_arm_action`.
 - After both target objects are grasped, left-side placement steps put the
   actual placement action in `left_arm_action` and keep `right_arm_action`
-  closed with `close_gripper(robot_name="right_arm", sample_num=20)` so the
+  closed with `close_gripper(robot_name="right_arm", sample_num=10)` so the
   right arm keeps holding `{roles.right_target_runtime_uid}`.
 - After the left arm releases `{roles.left_target_runtime_uid}`, first move it
   upward to clear the container.
 - The next nominal edge must pair
-  `back_to_initial_pose(robot_name="left_arm", sample_num=60)` in
+  `back_to_initial_pose(robot_name="left_arm", sample_num=30)` in
   `left_arm_action` with the right arm's high-staging
   `move_relative_to_object` action in `right_arm_action`. Do not split this
   parallel handoff into separate edges.
@@ -2704,9 +2704,9 @@ parameters.
     Moves the selected UR5 to the target {target_text}, closes the gripper, and
     performs the public semantic post-grasp lift. Use:
     - `grasp(robot_name="left_arm", obj_name="{roles.left_target_runtime_uid}",
-      pre_grasp_dis=0.08, sample_num=90)`
+      pre_grasp_dis=0.08, sample_num=45)`
     - `grasp(robot_name="right_arm", obj_name="{roles.right_target_runtime_uid}",
-      pre_grasp_dis=0.08, sample_num=90)`
+      pre_grasp_dis=0.08, sample_num=45)`
 
 "move_relative_to_object":
     def move_relative_to_object(robot_name: str,
@@ -2747,10 +2747,10 @@ parameters.
     Opens the selected gripper to release the held target object. For container
     release steps, always call this at the low release pose before any upward
     retreat or return-to-initial action:
-    - `open_gripper(robot_name="left_arm", sample_num=30,
-      open_threshold=-1.0, settle_steps=50)`
-    - `open_gripper(robot_name="right_arm", sample_num=30,
-      open_threshold=-1.0, settle_steps=50)`
+    - `open_gripper(robot_name="left_arm", sample_num=15,
+      open_threshold=-1.0, settle_steps=25)`
+    - `open_gripper(robot_name="right_arm", sample_num=15,
+      open_threshold=-1.0, settle_steps=25)`
     The negative `open_threshold` forces the open trajectory to be generated
     even if a stale cached gripper state incorrectly looks open. `settle_steps`
     keeps the gripper open and stationary after release so the object can fall
