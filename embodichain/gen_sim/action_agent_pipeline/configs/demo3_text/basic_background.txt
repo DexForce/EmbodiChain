@@ -1,0 +1,24 @@
+The scene comes from the exported 1780776055634_gym_project mesh environment.
+
+This configuration directory is for a Dual-UR5 relative-placement task generated
+from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the UR5 outside the left side of the table's near long edge.
+- right_arm is the UR5 outside the right side of the table's near long edge.
+
+The active arm for this task is `left_arm`. The inactive arm
+`right_arm` must stay null in the nominal graph.
+
+Interactive task objects:
+- interact_snack_bag: moved object from source `interact_snack_bag_3`.
+- target_interact_tray: reference object from source
+  `interact_tray_2`.
+
+Config-stage LLM notes:
+Dual-UR5 tabletop scene with a snack bag, cup, and tray-like mat on the table. The snack bag is the object to move, and the tray/mat is the placement support.
+
+The execution-stage LLM should generate graph JSON that grasps the moved object,
+moves it to a high staging pose relative to the current reference object pose,
+lowers to the release pose, opens the gripper, retreats upward, and returns the
+active arm to its initial pose.

@@ -1,0 +1,73 @@
+### Atom Functions for Dual-UR5 Relative Placement
+
+Use the existing atomic action API and gripper semantics in this configuration.
+The active arm is `left_arm`. Do not call atomic actions for `right_arm`
+in the nominal graph.
+
+Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately. Use only the parameters listed below.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Use exactly:
+    `grasp(robot_name="left_arm", obj_name="interact_snack_bag",
+    pre_grasp_dis=0.08, sample_num=45)`.
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str,
+                                obj_name: str,
+                                x_offset=0.0,
+                                y_offset=0.0,
+                                z_offset=0.0,
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the selected end-effector to the current reference object pose plus a
+    world-frame xyz offset while preserving the current end-effector orientation.
+    For this task, use `obj_name="target_interact_tray"`.
+
+    High staging pose:
+    `move_relative_to_object(robot_name="left_arm",
+    obj_name="target_interact_tray",
+    x_offset=0, y_offset=0,
+    z_offset=0.22, sample_num=45)`.
+
+    Release pose:
+    `move_relative_to_object(robot_name="left_arm",
+    obj_name="target_interact_tray",
+    x_offset=0, y_offset=0,
+    z_offset=0.12, sample_num=30)`.
+
+"move_by_relative_offset":
+    def move_by_relative_offset(robot_name: str,
+                                dx=0.0,
+                                dy=0.0,
+                                dz=0.0,
+                                mode="extrinsic",
+                                **kwargs) -> list[np.ndarray]
+
+    Use this only for the short upward retreat after releasing the object:
+    `move_by_relative_offset(robot_name="left_arm", dx=0.0, dy=0.0,
+    dz=0.14, mode="extrinsic", sample_num=20)`.
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Opens the selected gripper to release the held object. Use:
+    `open_gripper(robot_name="left_arm", sample_num=15,
+    open_threshold=-1.0, settle_steps=25)`.
+
+"close_gripper":
+    def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Do not use this separately in the nominal graph, because `grasp` already
+    closes the gripper.
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Returns the selected UR5 arm to its initial joint configuration. Use it only
+    after `open_gripper` and the upward retreat:
+    `back_to_initial_pose(robot_name="left_arm", sample_num=30)`.

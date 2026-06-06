@@ -451,6 +451,64 @@
             },
             "gym_project": "gym_project/environment/image2tabletop/downloads/1780746986206_gym_project",
             "index": 6
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T04:11:48+08:00",
+            "task_name": "Depm3_Text",
+            "source_mode": "image2tabletop",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780776055634_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780776055634_gym_project/gym_config.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780776055634_gym_project",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.5,
+            "target_replacements": [],
+            "sync_replacement_names": false,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "relative_placement",
+                "moved_object": "interact_snack_bag",
+                "reference_object": "target_interact_tray",
+                "relation": "inside",
+                "active_arm": "left_arm",
+                "release_offset": [
+                    0.0,
+                    0.0,
+                    0.12
+                ],
+                "coacd_cache": [
+                    {
+                        "uid": "interact_snack_bag",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780776055634_gym_project/mesh_assets/snack_bag/snack_bag_3/snack_bag_3.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/654793617963bc52c1e473813f35598d_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "target_interact_tray",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780776055634_gym_project/mesh_assets/tray/tray_2/tray_2.glb",
+                        "max_convex_hull_num": 8,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/5a6373bc0b4ceb2dde225057945b666d_8.obj",
+                        "status": "generated"
+                    }
+                ]
+            },
+            "task_description": "用左臂抓薯片袋子放到垫子上",
+            "image_name": "demo9",
+            "server": "http://192.168.3.23:4523",
+            "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
+            "overwrite_gym_project": false,
+            "index": 7
         }
     ]
 }
