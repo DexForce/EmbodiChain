@@ -52,6 +52,8 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["wicker_basket"]["body_scale"] == [0.6, 0.6, 0.6]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.4]
+    assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
     assert {term["object"] for term in success_terms} == {"left_apple", "right_apple"}

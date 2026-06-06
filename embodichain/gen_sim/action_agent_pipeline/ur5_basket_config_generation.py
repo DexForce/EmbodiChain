@@ -1562,8 +1562,8 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
                 },
             ],
         },
-        "init_pos": [0.0, 2.0, float(robot_init_z)],
-        "init_rot": [0.0, 0.0, 0.0],
+        "init_pos": [-2.0, 0.0, float(robot_init_z)],
+        "init_rot": [0.0, 0.0, 90.0],
         "init_qpos": [
             0.0,
             0.0,
