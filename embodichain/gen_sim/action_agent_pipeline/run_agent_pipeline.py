@@ -185,6 +185,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--use-latest-image2scene-gym-project",
+        "--use-latest-image2scene-gym_project",
+        dest="use_latest_image2scene_gym_project",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip image generation and start from the newest "
+            "gym_config_merged.json under --image2scene-download-dir."
+        ),
+    )
+    parser.add_argument(
         "--gym-project",
         "--gym_project",
         dest="gym_project",
@@ -505,8 +516,16 @@ def _run_image2scene_pipeline(args: argparse.Namespace) -> Path:
 
 
 def _resolve_gym_project(args: argparse.Namespace) -> Path:
-    if args.use_image2scene and args.use_existing_gym_project:
-        raise ValueError("Use either --use-image2scene or --use-existing-gym-project.")
+    selected_modes = [
+        args.use_image2scene,
+        args.use_existing_gym_project,
+        args.use_latest_image2scene_gym_project,
+    ]
+    if sum(bool(mode) for mode in selected_modes) > 1:
+        raise ValueError(
+            "Use only one of --use-image2scene, --use-existing-gym-project, "
+            "or --use-latest-image2scene-gym-project."
+        )
 
     if args.use_existing_gym_project:
         project_path = Path(args.gym_project).expanduser().resolve()
@@ -517,6 +536,9 @@ def _resolve_gym_project(args: argparse.Namespace) -> Path:
 
     if args.use_image2scene:
         return _run_image2scene_pipeline(args)
+
+    if args.use_latest_image2scene_gym_project:
+        return _resolve_latest_image2scene_gym_config(args)
 
     from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
         check_health,
@@ -536,6 +558,23 @@ def _resolve_gym_project(args: argparse.Namespace) -> Path:
         poll_interval=args.poll_interval,
         overwrite=args.overwrite_gym_project,
     )
+
+
+def _resolve_latest_image2scene_gym_config(args: argparse.Namespace) -> Path:
+    image2scene_root = Path(args.image2scene_root).expanduser().resolve()
+    download_dir = _resolve_under_root(image2scene_root, args.image2scene_download_dir)
+    if download_dir is None:
+        raise ValueError("--image2scene-download-dir must not be empty.")
+
+    merged_configs = _collect_merged_gym_configs(download_dir)
+    if not merged_configs:
+        raise FileNotFoundError(
+            f"gym_config_merged.json not found under: {download_dir}"
+        )
+
+    merged_config = _latest_path(merged_configs)
+    print(f"Using latest image2scene merged gym config: {merged_config}", flush=True)
+    return merged_config
 
 
 def _resolve_target_replacements(
