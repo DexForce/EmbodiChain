@@ -34,6 +34,7 @@ _DIGIT_SUFFIX_RE = re.compile(r"_[0-9]+$")
 _INVALID_UID_CHARS_RE = re.compile(r"[^0-9a-zA-Z_]+")
 _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
+_GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 
 _CONTAINER_KEYWORDS = (
     "basket",
@@ -98,8 +99,8 @@ _RELATION_ALIASES = {
 _SIDE_RELATION_DISTANCE = 0.16
 _SIDE_RELEASE_Z_OFFSET = 0.12
 _STAGING_Z_DELTA = 0.10
-_ON_RELEASE_Z_OFFSET = 0.14
-_DUAL_UR5_LEGACY_INIT_Z = 0.4
+_ON_RELEASE_Z_OFFSET = 0.05
+_DUAL_UR5_LEGACY_INIT_Z = 0.5
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
 _DUAL_UR5_TABLETOP_Z_OFFSET = 0.05
 _DUAL_UR5_SIDE_AXIS_INDEX = 1
@@ -327,26 +328,55 @@ def _resolve_gym_config_path(input_path: Path) -> Path:
             raise ValueError(f"Expected one of {expected}, got: {input_path}")
         return input_path
 
-    direct = input_path / "gym_config.json"
-    if direct.exists():
+    direct = _preferred_gym_config_in_dir(input_path)
+    if direct is not None:
         return direct
 
-    formatted_matches = sorted(
-        input_path.glob("formatted_tabletop_scene/*/gym_config.json")
+    formatted_scene_dirs = sorted(
+        {
+            path.parent
+            for filename in _GYM_CONFIG_FILENAMES
+            for path in input_path.glob(f"formatted_tabletop_scene/*/{filename}")
+        }
     )
+    formatted_matches = [
+        path
+        for scene_dir in formatted_scene_dirs
+        if (path := _preferred_gym_config_in_dir(scene_dir)) is not None
+    ]
     if len(formatted_matches) == 1:
         return formatted_matches[0]
     if len(formatted_matches) > 1:
         matches = ", ".join(path.as_posix() for path in formatted_matches)
-        raise ValueError(f"Multiple formatted gym_config.json files found: {matches}")
+        raise ValueError(f"Multiple formatted gym config files found: {matches}")
 
-    recursive_matches = sorted(input_path.rglob("gym_config.json"))
+    recursive_scene_dirs = sorted(
+        {
+            path.parent
+            for filename in _GYM_CONFIG_FILENAMES
+            for path in input_path.rglob(filename)
+        }
+    )
+    recursive_matches = [
+        path
+        for scene_dir in recursive_scene_dirs
+        if (path := _preferred_gym_config_in_dir(scene_dir)) is not None
+    ]
     if len(recursive_matches) == 1:
         return recursive_matches[0]
     if not recursive_matches:
-        raise FileNotFoundError(f"gym_config.json not found under: {input_path}")
+        expected = " or ".join(_GYM_CONFIG_PREFERENCE)
+        raise FileNotFoundError(f"{expected} not found under: {input_path}")
     matches = ", ".join(path.as_posix() for path in recursive_matches)
-    raise ValueError(f"Multiple gym_config.json files found: {matches}")
+    raise ValueError(f"Multiple gym config files found: {matches}")
+
+
+def _preferred_gym_config_in_dir(scene_dir: Path) -> Path | None:
+    for filename in _GYM_CONFIG_PREFERENCE:
+        path = scene_dir / filename
+        if path.is_file():
+            return path
+    return None
 
 
 def _infer_project_name(input_path: Path, scene_dir: Path) -> str:
@@ -1262,7 +1292,7 @@ def _build_ur5_basket_bundle(
         "background": [
             _make_background_config(scene_dir, by_uid[roles.table_source_uid]),
             *[
-                _make_extra_background_config(scene_dir, obj, object_scale)
+                _make_extra_background_config(scene_dir, obj)
                 for obj in extra_background_objects
             ],
         ],
@@ -1288,7 +1318,7 @@ def _build_ur5_basket_bundle(
                 container_scale,
             ),
             *[
-                _make_extra_rigid_object_config(scene_dir, obj, object_scale)
+                _make_extra_rigid_object_config(scene_dir, obj, _source_body_scale(obj))
                 for obj in extra_rigid_objects
             ],
         ],
@@ -1886,8 +1916,8 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
                     "component_type": "left_arm",
                     "urdf_path": "UniversalRobots/UR5/UR5.urdf",
                     "transform": [
-                        [0.411976, -0.911195, 0.0, -0.3],
-                        [0.911195, 0.411976, 0.0, -1.45],
+                        [0.0, -1.0, 0.0, -0.3],
+                        [1.0, 0.0, 0.0, -1.45],
                         [0.0, 0.0, 1.0, 0.4],
                         [0.0, 0.0, 0.0, 1.0],
                     ],
@@ -1900,8 +1930,8 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
                     "component_type": "right_arm",
                     "urdf_path": "UniversalRobots/UR5/UR5.urdf",
                     "transform": [
-                        [-0.416356, -0.909202, 0.0, 0.3],
-                        [0.909202, -0.416356, 0.0, -1.45],
+                        [0.0, -1.0, 0.0, 0.3],
+                        [1.0, 0.0, 0.0, -1.45],
                         [0.0, 0.0, 1.0, 0.4],
                         [0.0, 0.0, 0.0, 1.0],
                     ],
@@ -1988,11 +2018,44 @@ def _make_sensor_config() -> list[dict[str, Any]]:
             "height": 540,
             "intrinsics": [488.1665344238281, 488.1665344238281, 480, 270],
             "extrinsics": {
-                "eye": [0.0, -1.8, 1.45],
-                "target": [0.0, 0.0, 0.72],
-                "up": [0.0, 0.0, 1.0],
+                "pos": [0.02, 0.13, 1.71],
+                "quat": [0, 0, 0.9996550532166887, -0.095845],
             },
-        }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_wrist_left",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [600, 600, 320, 240],
+            "extrinsics": {
+                "parent": "left_ee_link",
+                "pos": [0.0, 0.12, 0.08],
+                "quat": [
+                    -0.0012598701,
+                    -0.029051816664441618998,
+                    0.9094039177564813,
+                    0.41489627504330695,
+                ],
+            },
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_wrist_right",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [600, 600, 320, 240],
+            "extrinsics": {
+                "parent": "right_ee_link",
+                "pos": [0.0, 0.12, 0.08],
+                "quat": [
+                    -0.0012598701,
+                    -0.029051816664441618998,
+                    0.9094039177564813,
+                    0.41489627504330695,
+                ],
+            },
+        },
     ]
 
 

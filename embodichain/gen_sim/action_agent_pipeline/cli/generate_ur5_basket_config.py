@@ -40,7 +40,8 @@ def cli() -> None:
         required=True,
         help=(
             "Path to a project root, formatted tabletop scene folder, or "
-            "gym_config.json/gym_config_merged.json."
+            "gym_config.json/gym_config_merged.json. Directory inputs prefer "
+            "gym_config_merged.json when available."
         ),
     )
     parser.add_argument(

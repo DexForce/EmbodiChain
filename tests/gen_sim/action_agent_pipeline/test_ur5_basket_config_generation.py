@@ -181,6 +181,55 @@ def test_target_replacements_can_sync_runtime_names(
     assert "- right_apple: the apple mesh initially" in basic_background
 
 
+def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+    background_mesh = project_dir / "mesh_assets/backgrounds/vase_0.glb"
+    background_mesh.parent.mkdir(parents=True, exist_ok=True)
+    background_mesh.write_bytes(b"")
+
+    merged_config_path = project_dir / "gym_config_merged.json"
+    source_config = json.loads(
+        (project_dir / "gym_config.json").read_text(encoding="utf-8")
+    )
+    extra_scene_object = _mesh_object(
+        "vase_0",
+        "mesh_assets/backgrounds/vase_0.glb",
+        [0.16, -0.44, 0.77],
+        [0.0, 0.0, -90.0],
+    )
+    extra_scene_object["body_scale"] = [1.2, 1.1, 0.9]
+    source_config["rigid_object"].append(extra_scene_object)
+    merged_config_path.write_text(
+        json.dumps(source_config, indent=2),
+        encoding="utf-8",
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_agent",
+        target_body_scale=0.8,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+
+    assert set(rigid_objects) == {
+        "left_apple",
+        "right_apple",
+        "wicker_basket",
+        "vase_0",
+    }
+    assert rigid_objects["left_apple"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert rigid_objects["right_apple"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert rigid_objects["vase_0"]["body_scale"] == [1.2, 1.1, 0.9]
+    assert rigid_objects["vase_0"]["shape"]["fpath"].endswith(
+        "mesh_assets/backgrounds/vase_0.glb"
+    )
+
+
 def test_task_description_generates_relative_left_of_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
