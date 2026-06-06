@@ -99,10 +99,10 @@ _RELATION_ALIASES = {
 _SIDE_RELATION_DISTANCE = 0.16
 _SIDE_RELEASE_Z_OFFSET = 0.12
 _STAGING_Z_DELTA = 0.10
-_ON_RELEASE_Z_OFFSET = 0.05
+_ON_RELEASE_Z_OFFSET = -0.2
 _DUAL_UR5_LEGACY_INIT_Z = 0.5
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
-_DUAL_UR5_TABLETOP_Z_OFFSET = 0.05
+_DUAL_UR5_HIGH_TABLETOP_INIT_Z = 0.8
 _DUAL_UR5_SIDE_AXIS_INDEX = 1
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
@@ -1479,10 +1479,7 @@ def _estimate_dual_ur5_init_z(scene_objects: list[_SceneObject]) -> float:
 
     if tabletop_z <= _DUAL_UR5_HIGH_TABLETOP_THRESHOLD:
         return _DUAL_UR5_LEGACY_INIT_Z
-    return max(
-        _DUAL_UR5_LEGACY_INIT_Z,
-        tabletop_z - _DUAL_UR5_TABLETOP_Z_OFFSET,
-    )
+    return _DUAL_UR5_HIGH_TABLETOP_INIT_Z
 
 
 def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:

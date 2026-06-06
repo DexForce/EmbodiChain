@@ -59,7 +59,7 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
         "mesh_assets/apple/apple_1/apple_1.glb"
     )
-    assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.4]
+    assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.5]
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
@@ -453,7 +453,7 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
-    assert gym_config["robot"]["init_pos"][2] == pytest.approx(1.2)
+    assert gym_config["robot"]["init_pos"][2] == pytest.approx(0.7)
     assert gym_config["light"]["direct"][0]["intensity"] == 40.0
 
 
