@@ -361,6 +361,84 @@ def test_task_description_on_container_is_compiled_as_inside(
     ]
 
 
+def test_task_description_respects_explicit_left_arm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_1",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+            "arm": "left",
+            "task_prompt_summary": "Use the left arm to move apple_1.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_left_arm_agent",
+        task_description="左臂把 apple_1 放到 basket_3 左边",
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
+    assert grasp_overrides[0]["object"] == "apple_1"
+    assert grasp_overrides[0]["side"] == "left"
+    assert paths.summary["active_arm"] == "left_arm"
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert 'grasp(robot_name="left_arm",\n     obj_name="apple_1"' in task_prompt
+    assert "right_arm_action: null" in task_prompt
+
+
+def test_task_description_respects_explicit_right_arm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "basket_3",
+            "goal_relation": "right_of",
+            "arm": "right",
+            "task_prompt_summary": "Use the right arm to move apple_2.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_right_arm_agent",
+        task_description="右臂把 apple_2 放到 basket_3 右边",
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
+    assert grasp_overrides[0]["object"] == "apple_2"
+    assert grasp_overrides[0]["side"] == "right"
+    assert paths.summary["active_arm"] == "right_arm"
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert 'grasp(robot_name="right_arm",\n     obj_name="apple_2"' in task_prompt
+    assert "left_arm_action: null" in task_prompt
+
+
 def test_task_description_on_object_uses_object_on_object_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -453,7 +531,9 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
-    assert gym_config["robot"]["init_pos"][2] == pytest.approx(0.7)
+    assert gym_config["robot"]["init_pos"][2] == pytest.approx(
+        ur5_basket_config_generation._DUAL_UR5_HIGH_TABLETOP_INIT_Z
+    )
     assert gym_config["light"]["direct"][0]["intensity"] == 40.0
 
 

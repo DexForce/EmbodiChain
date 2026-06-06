@@ -984,6 +984,7 @@ def _call_relative_task_llm(
         '  "reference_object": "<different source_uid from rigid_object>",\n'
         '  "goal_relation": '
         '"inside|on|left_of|right_of|front_of|behind",\n'
+        '  "arm": "left|right|auto",\n'
         '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
         '  "basic_background_notes": "<short scene/task notes>",\n'
         '  "action_sketch": [\n'
@@ -1000,6 +1001,11 @@ def _call_relative_task_llm(
         "- reference_object is the object used as the spatial reference, "
         "container, or support.\n"
         "- The two objects must be different.\n"
+        "- arm selects the single UR5 arm that should manipulate moved_object. "
+        "Use arm='left' for explicit left-arm instructions such as 左臂, 左机械臂, "
+        "left arm, or left UR5; use arm='right' for explicit right-arm "
+        "instructions such as 右臂, 右机械臂, right arm, or right UR5; use "
+        "arm='auto' when the task does not specify an arm.\n"
         "- For Chinese/English left/right/front/back, use the relation enums. "
         "front_of means negative world-y, closer to the Dual-UR5 bases; "
         "behind means positive world-y.\n"
@@ -1072,7 +1078,12 @@ def _apply_relative_task_response(
     moved_position = _vector3(
         by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0])
     )
-    active_side = _arm_side_for_position(moved_position)
+    requested_side = _normalize_relative_arm(response.get("arm"))
+    active_side = (
+        _arm_side_for_position(moved_position)
+        if requested_side == "auto"
+        else requested_side
+    )
     summary = str(response.get("task_prompt_summary", "")).strip()
     if not summary:
         summary = _default_relative_task_summary(
@@ -1147,6 +1158,52 @@ def _normalize_relative_relation(value: Any) -> str:
             f"of {sorted(_RELATIVE_RELATIONS)}."
         )
     return relation
+
+
+def _normalize_relative_arm(value: Any) -> str:
+    if value is None:
+        return "auto"
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {
+        "",
+        "auto",
+        "automatic",
+        "unspecified",
+        "none",
+        "null",
+        "default",
+        "自动",
+        "默认",
+        "未指定",
+        "不指定",
+    }:
+        return "auto"
+    if text in {
+        "left",
+        "left_arm",
+        "left_ur5",
+        "左",
+        "左臂",
+        "左机械臂",
+        "左手",
+        "左手臂",
+    }:
+        return "left"
+    if text in {
+        "right",
+        "right_arm",
+        "right_ur5",
+        "右",
+        "右臂",
+        "右机械臂",
+        "右手",
+        "右手臂",
+    }:
+        return "right"
+    raise ValueError(
+        f"Unsupported relative placement arm {value!r}; expected 'left', "
+        "'right', or 'auto'."
+    )
 
 
 def _relative_release_offset(relation: str) -> list[float]:
@@ -1896,22 +1953,22 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
         "init_pos": [-2.0, 0.0, float(robot_init_z)],
         "init_rot": [0.0, 0.0, 90.0],
         "init_qpos": [
-            -3.14,
-            -3.14,
-            -1.57,
-            -1.57,
+              0,
+            0,
             -1.57,
             -1.57,
             1.57,
             1.57,
             -1.57,
             -1.57,
+            -1.57,
+            -1.57,
             0.0,
             0.0,
             0.0,
             0.0,
             0.0,
-            0.0,
+            0.0
         ],
         "drive_pros": {
             "stiffness": {
