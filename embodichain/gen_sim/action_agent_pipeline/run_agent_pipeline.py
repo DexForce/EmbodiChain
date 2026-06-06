@@ -46,6 +46,13 @@ _DEFAULT_IMAGE = (
 _DEFAULT_IMAGE_DIR = _DEFAULT_IMAGE.parent
 _DEFAULT_GYM_PROJECT_ROOT = _REPO_ROOT / "gym_project"
 _DEFAULT_EXISTING_GYM_PROJECT = _DEFAULT_GYM_PROJECT_ROOT / "1780562837_gym_project"
+_DEFAULT_IMAGE2SCENE_ROOT = (
+    _REPO_ROOT / "gym_project/environment/image2tabletop"
+)
+_DEFAULT_IMAGE2SCENE_IMAGE = "scene_image/robotwin_example.png"
+_DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR = "./downloads"
+_DEFAULT_IMAGE2SCENE_OUTPUT_ROOT = "./generated"
+_DEFAULT_IMAGE2SCENE_CONFIG = "./gen_config.json"
 _DEFAULT_CONFIG_OUTPUT_DIR = (
     _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/demo3_text"
 )
@@ -64,7 +71,10 @@ def _build_parser() -> argparse.ArgumentParser:
     image_group.add_argument(
         "--image",
         default=None,
-        help=f"Input image path. If omitted, defaults to {_DEFAULT_IMAGE.as_posix()}",
+        help=(
+            f"Input image path. If omitted, defaults to {_DEFAULT_IMAGE.as_posix()} "
+            f"or {_DEFAULT_IMAGE2SCENE_IMAGE} with --use-image2scene."
+        ),
     )
     image_group.add_argument(
         "--image-name",
@@ -80,6 +90,84 @@ def _build_parser() -> argparse.ArgumentParser:
         "--server",
         default=_DEFAULT_SERVER,
         help=f"Image2Tabletop API server. Defaults to {_DEFAULT_SERVER}",
+    )
+    parser.add_argument(
+        "--use-image2scene",
+        action="store_true",
+        default=False,
+        help=(
+            "Use gym_project/environment/image2tabletop/demo_api/client/"
+            "image2scene_pipeline.py as the first stage and continue from its "
+            "gym_config_merged.json output."
+        ),
+    )
+    parser.add_argument(
+        "--background",
+        default=None,
+        help=(
+            "Background description passed to image2scene_pipeline.py. Required "
+            "with --use-image2scene."
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-root",
+        default=str(_DEFAULT_IMAGE2SCENE_ROOT),
+        help=(
+            "Working directory for image2scene_pipeline.py. Defaults to "
+            f"{_DEFAULT_IMAGE2SCENE_ROOT.as_posix()}"
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-download-dir",
+        default=_DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR,
+        help=(
+            "Download directory passed to image2scene_pipeline.py. Relative "
+            "paths are interpreted under --image2scene-root. Defaults to "
+            f"{_DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR}."
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-output-root",
+        default=_DEFAULT_IMAGE2SCENE_OUTPUT_ROOT,
+        help=(
+            "Generated EC project directory passed to image2scene_pipeline.py. "
+            "Relative paths are interpreted under --image2scene-root. Defaults "
+            f"to {_DEFAULT_IMAGE2SCENE_OUTPUT_ROOT}."
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-gen-config",
+        default=_DEFAULT_IMAGE2SCENE_CONFIG,
+        help=(
+            "Generation config passed to image2scene_pipeline.py. Relative "
+            "paths are interpreted under --image2scene-root. Defaults to "
+            f"{_DEFAULT_IMAGE2SCENE_CONFIG}."
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-llm-config",
+        default=_DEFAULT_IMAGE2SCENE_CONFIG,
+        help=(
+            "LLM config passed to image2scene_pipeline.py. Relative paths are "
+            "interpreted under --image2scene-root. Defaults to "
+            f"{_DEFAULT_IMAGE2SCENE_CONFIG}."
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-extract-dir",
+        default=None,
+        help=(
+            "Optional extract directory passed to image2scene_pipeline.py. "
+            "Relative paths are interpreted under --image2scene-root."
+        ),
+    )
+    parser.add_argument(
+        "--image2scene-merged-output",
+        default=None,
+        help=(
+            "Optional merged output path passed to image2scene_pipeline.py. "
+            "Relative paths are interpreted under --image2scene-root."
+        ),
     )
     parser.add_argument(
         "--gym-project-root",
@@ -238,13 +326,167 @@ def _resolve_image_name(image_name: str) -> Path:
     )
 
 
+def _resolve_under_root(root: Path, path_input: str | None) -> Path | None:
+    if path_input is None:
+        return None
+    path = Path(path_input).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (root / path).resolve()
+
+
+def _collect_merged_gym_configs(download_dir: Path) -> list[Path]:
+    if not download_dir.exists():
+        return []
+    return sorted(
+        path.resolve() for path in download_dir.rglob("gym_config_merged.json")
+    )
+
+
+def _latest_path(paths: list[Path]) -> Path:
+    return max(paths, key=lambda path: path.stat().st_mtime)
+
+
+def _resolve_image2scene_image(args: argparse.Namespace, image2scene_root: Path) -> Path:
+    if args.image_name:
+        image_name = Path(args.image_name)
+        if image_name.parent != Path("."):
+            raise ValueError(
+                "--image-name only accepts a file name under "
+                f"{_DEFAULT_IMAGE_DIR.as_posix()} with "
+                "--use-image2scene. Use --image for a full path."
+            )
+        if image_name.suffix:
+            return (_DEFAULT_IMAGE_DIR / image_name).resolve()
+
+        matches = [
+            _DEFAULT_IMAGE_DIR / f"{args.image_name}{suffix}"
+            for suffix in _IMAGE_SUFFIXES
+        ]
+        existing = [path.resolve() for path in matches if path.exists()]
+        if len(existing) == 1:
+            return existing[0]
+        if not existing:
+            candidates = ", ".join(path.name for path in matches)
+            raise FileNotFoundError(
+                f"Image name {args.image_name!r} was not found. Tried: {candidates}"
+            )
+
+        matched = ", ".join(path.name for path in existing)
+        raise ValueError(
+            f"Image name {args.image_name!r} is ambiguous. Use --image-name "
+            f"with a suffix: {matched}"
+        )
+
+    image_input = args.image or _DEFAULT_IMAGE2SCENE_IMAGE
+    image_path = Path(image_input).expanduser()
+    if image_path.is_absolute():
+        return image_path.resolve()
+    return (image2scene_root / image_path).resolve()
+
+
+def _run_image2scene_pipeline(args: argparse.Namespace) -> Path:
+    if not args.background:
+        raise ValueError("--background is required with --use-image2scene.")
+
+    image2scene_root = Path(args.image2scene_root).expanduser().resolve()
+    if not image2scene_root.is_dir():
+        raise FileNotFoundError(f"image2scene root not found: {image2scene_root}")
+
+    script_path = image2scene_root / "demo_api/client/image2scene_pipeline.py"
+    if not script_path.is_file():
+        raise FileNotFoundError(f"image2scene pipeline not found: {script_path}")
+
+    image_path = _resolve_image2scene_image(args, image2scene_root)
+    download_dir = _resolve_under_root(
+        image2scene_root, args.image2scene_download_dir
+    )
+    output_root = _resolve_under_root(image2scene_root, args.image2scene_output_root)
+    gen_config = _resolve_under_root(image2scene_root, args.image2scene_gen_config)
+    llm_config = _resolve_under_root(image2scene_root, args.image2scene_llm_config)
+    extract_dir = _resolve_under_root(image2scene_root, args.image2scene_extract_dir)
+    merged_output = _resolve_under_root(
+        image2scene_root, args.image2scene_merged_output
+    )
+
+    if (
+        download_dir is None
+        or output_root is None
+        or gen_config is None
+        or llm_config is None
+    ):
+        raise ValueError("image2scene paths must not be empty.")
+
+    before_configs = set(_collect_merged_gym_configs(download_dir))
+    command = [
+        sys.executable,
+        str(script_path),
+        "--server",
+        args.server,
+        "--image",
+        str(image_path),
+        "--download-dir",
+        str(download_dir),
+        "--background",
+        args.background,
+        "--output-root",
+        str(output_root),
+        "--gen-config",
+        str(gen_config),
+        "--llm-config",
+        str(llm_config),
+        "--poll-interval",
+        str(args.poll_interval),
+    ]
+    if extract_dir is not None:
+        command.extend(["--extract-dir", str(extract_dir)])
+    if merged_output is not None:
+        command.extend(["--merged-output", str(merged_output)])
+
+    print("Running image2scene pipeline:")
+    print(shlex.join(command), flush=True)
+    completed = subprocess.run(command, cwd=image2scene_root, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"image2scene pipeline failed with exit code {completed.returncode}"
+        )
+
+    if merged_output is not None:
+        if not merged_output.is_file():
+            raise FileNotFoundError(
+                f"image2scene merged output not found: {merged_output}"
+            )
+        print(f"Using image2scene merged gym config: {merged_output}", flush=True)
+        return merged_output
+
+    after_configs = _collect_merged_gym_configs(download_dir)
+    new_configs = [path for path in after_configs if path not in before_configs]
+    if new_configs:
+        merged_config = _latest_path(new_configs)
+    elif after_configs:
+        merged_config = _latest_path(after_configs)
+    else:
+        raise FileNotFoundError(
+            f"gym_config_merged.json not found under: {download_dir}"
+        )
+
+    print(f"Using image2scene merged gym config: {merged_config}", flush=True)
+    return merged_config
+
+
 def _resolve_gym_project(args: argparse.Namespace) -> Path:
+    if args.use_image2scene and args.use_existing_gym_project:
+        raise ValueError("Use either --use-image2scene or --use-existing-gym-project.")
+
     if args.use_existing_gym_project:
         project_path = Path(args.gym_project).expanduser().resolve()
         if not project_path.exists():
             raise FileNotFoundError(f"gym project not found: {project_path}")
         print(f"Using existing gym project: {project_path}", flush=True)
         return project_path
+
+    if args.use_image2scene:
+        return _run_image2scene_pipeline(args)
 
     from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
         check_health,
@@ -311,7 +553,7 @@ def main() -> int:
         overwrite=args.overwrite_config,
     )
 
-    print(f"Generated gym project: {project_path}", flush=True)
+    print(f"Using gym project/config: {project_path}", flush=True)
     print(f"Generated gym config: {paths.gym_config}", flush=True)
     print(f"Generated agent config: {paths.agent_config}", flush=True)
     if args.skip_run_agent:

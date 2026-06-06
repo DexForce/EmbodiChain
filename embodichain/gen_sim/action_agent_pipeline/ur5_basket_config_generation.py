@@ -32,6 +32,7 @@ __all__ = [
 _DIGIT_SUFFIX_RE = re.compile(r"_[0-9]+$")
 _INVALID_UID_CHARS_RE = re.compile(r"[^0-9a-zA-Z_]+")
 _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
+_GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
 
 _CONTAINER_KEYWORDS = (
     "basket",
@@ -99,7 +100,7 @@ _STAGING_Z_DELTA = 0.10
 _ON_RELEASE_Z_OFFSET = 0.14
 _DUAL_UR5_LEGACY_INIT_Z = 0.4
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
-_DUAL_UR5_TABLETOP_Z_OFFSET = 0.19
+_DUAL_UR5_TABLETOP_Z_OFFSET = 0.05
 _DUAL_UR5_SIDE_AXIS_INDEX = 1
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 4
@@ -195,7 +196,8 @@ def generate_ur5_basket_config_from_project(
     basket-like container.
 
     Args:
-        gym_project: Project root, formatted scene folder, or ``gym_config.json``.
+        gym_project: Project root, formatted scene folder, ``gym_config.json``,
+            or ``gym_config_merged.json``.
         output_dir: Destination config directory.
         task_name: Name passed to ``run_agent``.
         task_description: Optional natural-language relative-placement task.
@@ -273,8 +275,9 @@ def generate_ur5_basket_config_from_project(
 
 def _resolve_gym_config_path(input_path: Path) -> Path:
     if input_path.is_file():
-        if input_path.name != "gym_config.json":
-            raise ValueError(f"Expected gym_config.json, got: {input_path}")
+        if input_path.name not in _GYM_CONFIG_FILENAMES:
+            expected = ", ".join(sorted(_GYM_CONFIG_FILENAMES))
+            raise ValueError(f"Expected one of {expected}, got: {input_path}")
         return input_path
 
     direct = input_path / "gym_config.json"

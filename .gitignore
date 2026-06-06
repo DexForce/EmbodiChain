@@ -204,4 +204,5 @@ scripts/benchmark/rl/reports/*
 
 # generated scene assets
 *_gym_project/
+gym_project/environment/
 backup_*/
