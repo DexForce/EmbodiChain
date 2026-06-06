@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import struct
 
 import pytest
 import torch
@@ -257,6 +258,11 @@ def test_task_description_generates_relative_left_of_config(
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
 
     paths = generate_ur5_basket_config_from_project(
         project_dir,
@@ -264,6 +270,7 @@ def test_task_description_generates_relative_left_of_config(
         task_name="AppleLeftOfBasket",
         task_description="把 apple_2 放到 basket_3 左边",
         target_body_scale=0.5,
+        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -282,8 +289,8 @@ def test_task_description_generates_relative_left_of_config(
         for term in success["terms"]
         if term["type"] == "object_axis_offset_near"
     }
-    assert ("x", -0.16) in axis_terms
-    assert ("y", 0.0) in axis_terms
+    assert ("y", -0.16) in axis_terms
+    assert ("x", 0.0) in axis_terms
 
     grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
     assert grasp_overrides == [
@@ -311,6 +318,71 @@ def test_task_description_generates_relative_left_of_config(
         "reference_object": "wicker_basket",
         "relation": "left_of",
         "active_arm": "left_arm",
+        "release_offset": [0.0, -0.16, 0.12],
+    }
+
+
+def test_task_description_generates_relative_front_of_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == "用右臂把 apple_1 放到 apple_2 前边"
+        return {
+            "moved_object": "apple_1",
+            "reference_object": "apple_2",
+            "goal_relation": "front_of",
+            "arm": "right",
+            "task_prompt_summary": "Move apple_1 in front of apple_2.",
+            "basic_background_notes": "The apple_2 object is the spatial reference.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_front_relative_agent",
+        task_name="AppleFrontOfApple",
+        task_description="用右臂把 apple_1 放到 apple_2 前边",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["op"] == "all"
+    axis_terms = {
+        (term.get("axis"), term.get("offset"))
+        for term in success["terms"]
+        if term["type"] == "object_axis_offset_near"
+    }
+    assert ("x", -0.16) in axis_terms
+    assert ("y", 0.0) in axis_terms
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert "x_offset=-0.16" in task_prompt
+    assert "y_offset=0" in task_prompt
+    assert "x_offset=-0.16" in atom_actions
+    assert "y_offset=0" in atom_actions
+
+    assert paths.summary == {
+        "mode": "relative_placement",
+        "moved_object": "apple_1",
+        "reference_object": "apple_2",
+        "relation": "front_of",
+        "active_arm": "right_arm",
         "release_offset": [-0.16, 0.0, 0.12],
     }
 
@@ -334,6 +406,11 @@ def test_task_description_on_container_is_compiled_as_inside(
         ur5_basket_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
     )
 
     paths = generate_ur5_basket_config_from_project(
@@ -381,6 +458,11 @@ def test_task_description_respects_explicit_left_arm(
         ur5_basket_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
     )
 
     paths = generate_ur5_basket_config_from_project(
@@ -437,6 +519,226 @@ def test_task_description_respects_explicit_right_arm(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     assert 'grasp(robot_name="right_arm",\n     obj_name="apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
+
+
+def test_task_description_generates_dual_arm_relative_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == (
+            "左臂把 apple_2 放到 basket_3 左边，右臂把 apple_1 放到 basket_3 右边"
+        )
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "left_of",
+                    "arm": "left",
+                },
+                {
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "right_of",
+                    "arm": "right",
+                },
+            ],
+            "task_prompt_summary": "Use both arms for two side placements.",
+            "basic_background_notes": "Both arms have explicit work.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_relative_agent",
+        task_description=(
+            "左臂把 apple_2 放到 basket_3 左边，右臂把 apple_1 放到 basket_3 右边"
+        ),
+        target_body_scale=0.7,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
+    assert grasp_overrides == [
+        {
+            "type": "top_down",
+            "object": "apple_2",
+            "side": "left",
+            "height_offset": 0.036,
+        },
+        {
+            "type": "top_down",
+            "object": "apple_1",
+            "side": "right",
+            "height_offset": 0.036,
+        },
+    ]
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["op"] == "all"
+    assert len(success["terms"]) == 2
+    axis_terms = {
+        (term["object"], term["axis"], term["offset"])
+        for placement_success in success["terms"]
+        for term in placement_success["terms"]
+        if term["type"] == "object_axis_offset_near"
+    }
+    assert ("apple_2", "y", -0.16) in axis_terms
+    assert ("apple_1", "y", 0.16) in axis_terms
+
+    grasp_pose_attr = next(
+        attr
+        for attr in gym_config["env"]["events"]["prepare_extra_attr"]["params"]["attrs"]
+        if attr["name"] == "grasp_pose_object"
+    )
+    assert grasp_pose_attr["entity_uids"] == ["apple_2", "apple_1"]
+    assert len(grasp_pose_attr["value"]) == 1
+
+    assert paths.summary == {
+        "mode": "dual_arm_relative_placement",
+        "placements": [
+            {
+                "moved_object": "apple_2",
+                "reference_object": "wicker_basket",
+                "relation": "left_of",
+                "active_arm": "left_arm",
+                "release_offset": [0.0, -0.16, 0.12],
+            },
+            {
+                "moved_object": "apple_1",
+                "reference_object": "wicker_basket",
+                "relation": "right_of",
+                "active_arm": "right_arm",
+                "release_offset": [0.0, 0.16, 0.12],
+            },
+        ],
+    }
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    basic_background = paths.basic_background.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert "Generate one deterministic nominal graph with exactly 10 nominal edges" in (
+        task_prompt
+    )
+    assert 'left_arm_action: grasp(robot_name="left_arm"' in task_prompt
+    assert 'right_arm_action: grasp(robot_name="right_arm"' in task_prompt
+    assert 'close_gripper(robot_name="right_arm", sample_num=10)' in task_prompt
+    assert "The inactive arm must remain null" not in task_prompt
+    assert "Both arms participate" in basic_background
+    assert "left_arm moves `apple_2`" in basic_background
+    assert "right_arm moves `apple_1`" in basic_background
+    assert 'grasp(robot_name="left_arm", obj_name="apple_2"' in atom_actions
+    assert 'grasp(robot_name="right_arm", obj_name="apple_1"' in atom_actions
+
+
+def test_task_description_rejects_dual_relative_same_arm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "left_of",
+                    "arm": "left",
+                },
+                {
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "right_of",
+                    "arm": "left",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    with pytest.raises(ValueError, match="one left arm and one right arm"):
+        generate_ur5_basket_config_from_project(
+            project_dir,
+            tmp_path / "bad_dual_relative_agent",
+            task_description="双臂分别移动两个苹果",
+        )
+
+
+def test_task_description_dual_auto_assigns_complementary_arms(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    gym_config_path = project_dir / "gym_config.json"
+    source_config = json.loads(gym_config_path.read_text(encoding="utf-8"))
+    for obj_config in source_config["rigid_object"]:
+        if obj_config["uid"] == "apple_1":
+            obj_config["init_pos"][1] = -0.03
+    gym_config_path.write_text(
+        json.dumps(source_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "left_of",
+                    "arm": "auto",
+                },
+                {
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "right_of",
+                    "arm": "auto",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_auto_relative_agent",
+        task_description="双臂分别移动两个苹果",
+        prewarm_coacd_cache=False,
+    )
+
+    active_arms = [placement["active_arm"] for placement in paths.summary["placements"]]
+    assert active_arms == ["left_arm", "right_arm"]
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
+    assert [override["side"] for override in grasp_overrides] == ["left", "right"]
 
 
 def test_task_description_on_object_uses_object_on_object_success(
@@ -512,6 +814,7 @@ def test_task_description_rejects_unknown_llm_uid(
 
 def test_high_tabletop_scene_adjusts_robot_height_and_light(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
@@ -519,10 +822,24 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     gym_config_path = project_dir / "gym_config.json"
     source_config = json.loads(gym_config_path.read_text(encoding="utf-8"))
     for obj_config in source_config["rigid_object"]:
-        obj_config["init_pos"][2] = 1.39
+        obj_config["init_pos"][2] = 0.12
     gym_config_path.write_text(
         json.dumps(source_config, indent=2),
         encoding="utf-8",
+    )
+
+    def fake_resolve_table_mesh_world_zmax(
+        scene_dir: Path,
+        table_obj,
+    ) -> float:
+        assert scene_dir == project_dir
+        assert table_obj.source_uid == "table"
+        return 1.18
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        fake_resolve_table_mesh_world_zmax,
     )
 
     paths = generate_ur5_basket_config_from_project(
@@ -531,10 +848,40 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    expected_init_z = (
+        1.18
+        + ur5_basket_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
+        - ur5_basket_config_generation._DUAL_UR5_ARM_COMPONENT_Z
+    )
     assert gym_config["robot"]["init_pos"][2] == pytest.approx(
-        ur5_basket_config_generation._DUAL_UR5_HIGH_TABLETOP_INIT_Z
+        expected_init_z
     )
     assert gym_config["light"]["direct"][0]["intensity"] == 40.0
+
+
+def test_table_mesh_world_zmax_reads_glb_vertices(tmp_path: Path) -> None:
+    scene_dir = tmp_path / "1790000000_gym_project"
+    mesh_path = scene_dir / "mesh_assets/table/table_0.glb"
+    _write_minimal_glb(
+        mesh_path,
+        [(-0.5, -0.5, 0.0), (0.5, -0.5, 1.2), (0.0, 0.5, 0.4)],
+    )
+    table_obj = ur5_basket_config_generation._SceneObject(
+        source_uid="table",
+        source_role="background",
+        config=_mesh_object(
+            "table",
+            "mesh_assets/table/table_0.glb",
+            [0.0, 0.0, 0.1],
+            [0.0, 0.0, 0.0],
+        ),
+    )
+    table_obj.config["body_scale"] = [1.0, 1.0, 2.0]
+
+    assert ur5_basket_config_generation._resolve_table_mesh_world_zmax(
+        scene_dir,
+        table_obj,
+    ) == pytest.approx(2.5)
 
 
 def test_object_on_object_success_predicate() -> None:
@@ -625,6 +972,53 @@ def _mesh_object(
         "init_rot": init_rot,
         "body_scale": [1.0, 1.0, 1.0],
     }
+
+
+def _write_minimal_glb(
+    path: Path,
+    vertices: list[tuple[float, float, float]],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    binary = b"".join(struct.pack("<fff", *vertex) for vertex in vertices)
+    mins = [min(vertex[axis] for vertex in vertices) for axis in range(3)]
+    maxs = [max(vertex[axis] for vertex in vertices) for axis in range(3)]
+    doc = {
+        "asset": {"version": "2.0"},
+        "buffers": [{"byteLength": len(binary)}],
+        "bufferViews": [
+            {
+                "buffer": 0,
+                "byteOffset": 0,
+                "byteLength": len(binary),
+                "target": 34962,
+            }
+        ],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "componentType": 5126,
+                "count": len(vertices),
+                "type": "VEC3",
+                "min": mins,
+                "max": maxs,
+            }
+        ],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+        "nodes": [{"mesh": 0}],
+        "scenes": [{"nodes": [0]}],
+        "scene": 0,
+    }
+    json_chunk = json.dumps(doc, separators=(",", ":")).encode("utf-8")
+    json_chunk += b" " * ((4 - len(json_chunk) % 4) % 4)
+    binary_chunk = binary + b"\x00" * ((4 - len(binary) % 4) % 4)
+    total_length = 12 + 8 + len(json_chunk) + 8 + len(binary_chunk)
+    path.write_bytes(
+        struct.pack("<4sII", b"glTF", 2, total_length)
+        + struct.pack("<II", len(json_chunk), 0x4E4F534A)
+        + json_chunk
+        + struct.pack("<II", len(binary_chunk), 0x004E4942)
+        + binary_chunk
+    )
 
 
 def _patch_prompt2geometry(monkeypatch: pytest.MonkeyPatch) -> list:

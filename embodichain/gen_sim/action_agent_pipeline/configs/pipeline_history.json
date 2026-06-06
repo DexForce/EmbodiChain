@@ -509,6 +509,202 @@
             "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
             "overwrite_gym_project": false,
             "index": 7
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T06:27:34+08:00",
+            "task_name": "Depm3_Text",
+            "source_mode": "image2tabletop",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780784472218_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780784472218_gym_project/gym_config.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780784472218_gym_project",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.8,
+            "target_replacements": [],
+            "sync_replacement_names": false,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "relative_placement",
+                "moved_object": "interact_beverage_can",
+                "reference_object": "interact_fork",
+                "relation": "front_of",
+                "active_arm": "right_arm",
+                "release_offset": [
+                    -0.16,
+                    0.0,
+                    0.12
+                ],
+                "coacd_cache": [
+                    {
+                        "uid": "interact_beverage_can",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780784472218_gym_project/mesh_assets/beverage_can/beverage_can_1/beverage_can_1.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/25560e26f90753443af29f64a2e265ef_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "interact_fork",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780784472218_gym_project/mesh_assets/fork/fork_3/fork_3.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/007c53faf74a3857f3706154bee5df73_16.obj",
+                        "status": "generated"
+                    }
+                ]
+            },
+            "task_description": "用右臂把罐头放到叉子前边",
+            "image_name": "demo10",
+            "server": "http://192.168.3.23:4523",
+            "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
+            "overwrite_gym_project": false,
+            "index": 8
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T06:37:50+08:00",
+            "task_name": "Depm3_Text",
+            "source_mode": "image2tabletop",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785015983_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785015983_gym_project/gym_config.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785015983_gym_project",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.8,
+            "target_replacements": [],
+            "sync_replacement_names": false,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "relative_placement",
+                "moved_object": "interact_soda_can",
+                "reference_object": "interact_notebook",
+                "relation": "front_of",
+                "active_arm": "left_arm",
+                "release_offset": [
+                    -0.16,
+                    0.0,
+                    0.12
+                ],
+                "coacd_cache": [
+                    {
+                        "uid": "interact_notebook",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785015983_gym_project/mesh_assets/notebook/notebook_2/notebook_2.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/41d38da7cdc5cb1eb75f0cd9c3cf5813_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "interact_soda_can",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785015983_gym_project/mesh_assets/soda_can/soda_can_3/soda_can_3.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/d9fc8dc9c5003b08460d58de04bdea14_16.obj",
+                        "status": "generated"
+                    }
+                ]
+            },
+            "task_description": "用左臂把罐头放到书本前面",
+            "image_name": "demo13",
+            "server": "http://192.168.3.23:4523",
+            "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
+            "overwrite_gym_project": false,
+            "index": 9
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T06:50:21+08:00",
+            "task_name": "Demo3_Text",
+            "source_mode": "image2tabletop",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785677594_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785677594_gym_project/gym_config.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785677594_gym_project",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.8,
+            "target_replacements": [],
+            "sync_replacement_names": false,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "dual_arm_relative_placement",
+                "placements": [
+                    {
+                        "moved_object": "interact_tape_roll_1",
+                        "reference_object": "interact_notebook",
+                        "relation": "right_of",
+                        "active_arm": "right_arm",
+                        "release_offset": [
+                            0.0,
+                            0.16,
+                            0.12
+                        ]
+                    },
+                    {
+                        "moved_object": "interact_tape_roll_2",
+                        "reference_object": "interact_notebook",
+                        "relation": "on",
+                        "active_arm": "left_arm",
+                        "release_offset": [
+                            0.0,
+                            0.0,
+                            -0.2
+                        ]
+                    }
+                ],
+                "coacd_cache": [
+                    {
+                        "uid": "interact_notebook",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785677594_gym_project/mesh_assets/notebook/notebook_3/notebook_3.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/da7844ef36520238f1d17ef865555ea7_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "interact_tape_roll_1",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785677594_gym_project/mesh_assets/tape_roll/tape_roll_1/tape_roll_1.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/1141307dafdf82c3198ca635fbe3b8a2_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "interact_tape_roll_2",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780785677594_gym_project/mesh_assets/tape_roll/tape_roll_2/tape_roll_2.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/ea84b8f440c84bffddd10b2f0300d35b_16.obj",
+                        "status": "generated"
+                    }
+                ]
+            },
+            "task_description": "用右臂把胶带本子右边,用左臂把罐头放到本子上面",
+            "image_name": "demo14",
+            "server": "http://192.168.3.23:4523",
+            "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
+            "overwrite_gym_project": false,
+            "index": 10
         }
     ]
 }

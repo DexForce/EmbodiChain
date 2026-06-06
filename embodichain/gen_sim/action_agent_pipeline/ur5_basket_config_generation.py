@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Any
 import copy
 import json
+import math
 import re
+import struct
 
 __all__ = [
     "GeneratedUR5BasketConfigPaths",
@@ -104,11 +106,30 @@ _ON_RELEASE_Z_OFFSET = -0.2
 _DUAL_UR5_LEGACY_INIT_Z = 0.5
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
 _DUAL_UR5_HIGH_TABLETOP_INIT_Z = 0.8
+_DUAL_UR5_ARM_COMPONENT_Z = 0.4
+_DUAL_UR5_TABLETOP_CLEARANCE = 0.25
 _DUAL_UR5_SIDE_AXIS_INDEX = 1
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
+_GLB_JSON_CHUNK_TYPE = 0x4E4F534A
+_GLB_BINARY_CHUNK_TYPE = 0x004E4942
+_GLTF_COMPONENT_FORMATS = {
+    5120: ("b", 1),
+    5121: ("B", 1),
+    5122: ("h", 2),
+    5123: ("H", 2),
+    5125: ("I", 4),
+    5126: ("f", 4),
+}
+_GLTF_TYPE_COMPONENT_COUNTS = {
+    "SCALAR": 1,
+    "VEC2": 2,
+    "VEC3": 3,
+    "VEC4": 4,
+    "MAT4": 16,
+}
 
 _BACKGROUND_ATTRS = {
     "mass": 10.0,
@@ -183,6 +204,18 @@ class _ResolvedTargetReplacement:
 
 
 @dataclass(frozen=True)
+class _RelativePlacementStepSpec:
+    moved_source_uid: str
+    reference_source_uid: str
+    moved_runtime_uid: str
+    reference_runtime_uid: str
+    relation: str
+    active_side: str
+    release_offset: list[float]
+    high_offset: list[float]
+
+
+@dataclass(frozen=True)
 class _RelativePlacementSpec:
     table_source_uid: str
     moved_source_uid: str
@@ -197,6 +230,7 @@ class _RelativePlacementSpec:
     action_sketch: list[str]
     release_offset: list[float]
     high_offset: list[float]
+    placements: tuple[_RelativePlacementStepSpec, ...]
 
 
 def generate_ur5_basket_config_from_project(
@@ -1074,11 +1108,15 @@ def _call_relative_task_llm(
         "the executable graph JSON.\n\n"
         "Return exactly one JSON object with this schema:\n"
         "{\n"
-        '  "moved_object": "<source_uid from rigid_object>",\n'
-        '  "reference_object": "<different source_uid from rigid_object>",\n'
-        '  "goal_relation": '
+        '  "placements": [\n'
+        "    {\n"
+        '      "moved_object": "<source_uid from rigid_object>",\n'
+        '      "reference_object": "<different source_uid from rigid_object>",\n'
+        '      "goal_relation": '
         '"inside|on|left_of|right_of|front_of|behind",\n'
-        '  "arm": "left|right|auto",\n'
+        '      "arm": "left|right|auto"\n'
+        "    }\n"
+        "  ],\n"
         '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
         '  "basic_background_notes": "<short scene/task notes>",\n'
         '  "action_sketch": [\n'
@@ -1091,18 +1129,28 @@ def _call_relative_task_llm(
         "}\n\n"
         "Rules:\n"
         "- Use only source_uid values from rigid_object entries.\n"
+        "- Return one placement for a single-arm task and exactly two placements "
+        "for a dual-arm task.\n"
+        "- Treat the task as dual-arm when it explicitly says 双臂, 两臂, both "
+        "arms, two arms, or when it describes separate work for the left arm and "
+        "the right arm even if it does not literally say 双臂.\n"
+        "- Do not invent a second placement when the task only moves one object.\n"
         "- moved_object is the object to grasp and move.\n"
         "- reference_object is the object used as the spatial reference, "
         "container, or support.\n"
-        "- The two objects must be different.\n"
+        "- Within each placement, moved_object and reference_object must be "
+        "different.\n"
+        "- For dual-arm tasks, the placements must use two different moved_object "
+        "values and one left arm plus one right arm. Use arm='auto' only when "
+        "the user did not specify which arm handles that placement.\n"
         "- arm selects the single UR5 arm that should manipulate moved_object. "
         "Use arm='left' for explicit left-arm instructions such as 左臂, 左机械臂, "
         "left arm, or left UR5; use arm='right' for explicit right-arm "
         "instructions such as 右臂, 右机械臂, right arm, or right UR5; use "
         "arm='auto' when the task does not specify an arm.\n"
         "- For Chinese/English left/right/front/back, use the relation enums. "
-        "front_of means negative world-y, closer to the Dual-UR5 bases; "
-        "behind means positive world-y.\n"
+        "front_of means negative world-x; behind means positive world-x; "
+        "left_of means negative world-y; right_of means positive world-y.\n"
         "- If the task says to release an object above a basket/container so it "
         "falls into it, use goal_relation='inside'.\n"
         "- If the task says to stack/place one object on another non-container "
@@ -1137,13 +1185,131 @@ def _apply_relative_task_response(
     rigid_objects: list[_SceneObject],
     task_description: str,
 ) -> _RelativePlacementSpec:
+    by_uid = {obj.source_uid: obj for obj in rigid_objects}
+    runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
+
+    placement_entries = _relative_placement_entries(response)
+    if len(placement_entries) > 2:
+        raise ValueError("Relative placement supports at most two arm placements.")
+
+    forced_arm_sides = _relative_forced_arm_sides(
+        placement_entries,
+        by_uid=by_uid,
+        rigid_objects=rigid_objects,
+    )
+    placements = tuple(
+        _build_relative_placement_step(
+            entry=entry,
+            by_uid=by_uid,
+            rigid_objects=rigid_objects,
+            runtime_uids=runtime_uids,
+            forced_side=forced_side,
+        )
+        for entry, forced_side in zip(placement_entries, forced_arm_sides)
+    )
+    _validate_relative_placements(placements)
+
+    summary = str(response.get("task_prompt_summary", "")).strip()
+    if not summary:
+        summary = _default_relative_plan_summary(placements)
+    background_notes = str(response.get("basic_background_notes", "")).strip()
+    action_sketch = _string_list(response.get("action_sketch"))
+    if not action_sketch:
+        action_sketch = _default_relative_action_sketch(placements)
+
+    primary = placements[0]
+
+    return _RelativePlacementSpec(
+        table_source_uid=table_source_uid,
+        moved_source_uid=primary.moved_source_uid,
+        reference_source_uid=primary.reference_source_uid,
+        moved_runtime_uid=primary.moved_runtime_uid,
+        reference_runtime_uid=primary.reference_runtime_uid,
+        relation=primary.relation,
+        active_side=primary.active_side,
+        task_description=task_description,
+        task_prompt_summary=summary,
+        basic_background_notes=background_notes,
+        action_sketch=action_sketch,
+        release_offset=primary.release_offset,
+        high_offset=primary.high_offset,
+        placements=placements,
+    )
+
+
+def _relative_placement_entries(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    placements = response.get("placements")
+    if placements is None:
+        return [response]
+    if not isinstance(placements, list) or not placements:
+        raise ValueError("LLM response placements must be a non-empty list.")
+    entries: list[Mapping[str, Any]] = []
+    for index, placement in enumerate(placements):
+        if not isinstance(placement, Mapping):
+            raise ValueError(f"Placement {index} must be a JSON object.")
+        entries.append(placement)
+    return entries
+
+
+def _relative_forced_arm_sides(
+    placement_entries: list[Mapping[str, Any]],
+    *,
+    by_uid: Mapping[str, _SceneObject],
+    rigid_objects: list[_SceneObject],
+) -> list[str | None]:
+    if len(placement_entries) != 2:
+        return [None for _ in placement_entries]
+
+    requested_sides = [
+        _normalize_relative_arm(entry.get("arm")) for entry in placement_entries
+    ]
+    explicit_sides = [side for side in requested_sides if side != "auto"]
+    if len(explicit_sides) == 2:
+        return [None, None]
+    if len(explicit_sides) == 1:
+        complement = "right" if explicit_sides[0] == "left" else "left"
+        return [
+            requested_side if requested_side != "auto" else complement
+            for requested_side in requested_sides
+        ]
+
+    moved_source_uids = [
+        _resolve_rigid_source_uid(
+            entry.get("moved_object"),
+            rigid_objects,
+            field_name="moved_object",
+        )
+        for entry in placement_entries
+    ]
+    positions = [
+        _vector3(by_uid[source_uid].config.get("init_pos", [0.0, 0.0, 0.0]))
+        for source_uid in moved_source_uids
+    ]
+    inferred_sides = [_arm_side_for_position(position) for position in positions]
+    if set(inferred_sides) == {"left", "right"}:
+        return inferred_sides
+
+    side_values = [_position_side_axis_value(position) for position in positions]
+    if side_values[0] <= side_values[1]:
+        return ["left", "right"]
+    return ["right", "left"]
+
+
+def _build_relative_placement_step(
+    *,
+    entry: Mapping[str, Any],
+    by_uid: Mapping[str, _SceneObject],
+    rigid_objects: list[_SceneObject],
+    runtime_uids: Mapping[str, str],
+    forced_side: str | None,
+) -> _RelativePlacementStepSpec:
     moved_source_uid = _resolve_rigid_source_uid(
-        response.get("moved_object"),
+        entry.get("moved_object"),
         rigid_objects,
         field_name="moved_object",
     )
     reference_source_uid = _resolve_rigid_source_uid(
-        response.get("reference_object"),
+        entry.get("reference_object"),
         rigid_objects,
         field_name="reference_object",
     )
@@ -1152,13 +1318,11 @@ def _apply_relative_task_response(
             "Relative placement requires distinct moved/reference objects."
         )
 
-    by_uid = {obj.source_uid: obj for obj in rigid_objects}
     reference_obj = by_uid[reference_source_uid]
-    relation = _normalize_relative_relation(response.get("goal_relation"))
+    relation = _normalize_relative_relation(entry.get("goal_relation"))
     if relation == "on" and _is_container_like(reference_obj):
         relation = "inside"
 
-    runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
     moved_runtime_uid = runtime_uids[moved_source_uid]
     reference_runtime_uid = runtime_uids[reference_source_uid]
     if moved_runtime_uid == reference_runtime_uid:
@@ -1172,45 +1336,43 @@ def _apply_relative_task_response(
     moved_position = _vector3(
         by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0])
     )
-    requested_side = _normalize_relative_arm(response.get("arm"))
+    requested_side = _normalize_relative_arm(entry.get("arm"))
     active_side = (
-        _arm_side_for_position(moved_position)
-        if requested_side == "auto"
-        else requested_side
-    )
-    summary = str(response.get("task_prompt_summary", "")).strip()
-    if not summary:
-        summary = _default_relative_task_summary(
-            moved_runtime_uid,
-            reference_runtime_uid,
-            relation,
+        forced_side
+        if forced_side is not None
+        else (
+            _arm_side_for_position(moved_position)
+            if requested_side == "auto"
+            else requested_side
         )
-    background_notes = str(response.get("basic_background_notes", "")).strip()
-    action_sketch = _string_list(response.get("action_sketch"))
-    if not action_sketch:
-        action_sketch = [
-            f"grasp {moved_runtime_uid}",
-            f"move above the {relation} release pose relative to {reference_runtime_uid}",
-            "lower to the release pose",
-            "open the gripper",
-            "retreat upward",
-        ]
+    )
 
-    return _RelativePlacementSpec(
-        table_source_uid=table_source_uid,
+    return _RelativePlacementStepSpec(
         moved_source_uid=moved_source_uid,
         reference_source_uid=reference_source_uid,
         moved_runtime_uid=moved_runtime_uid,
         reference_runtime_uid=reference_runtime_uid,
         relation=relation,
         active_side=active_side,
-        task_description=task_description,
-        task_prompt_summary=summary,
-        basic_background_notes=background_notes,
-        action_sketch=action_sketch,
         release_offset=release_offset,
         high_offset=high_offset,
     )
+
+
+def _validate_relative_placements(
+    placements: tuple[_RelativePlacementStepSpec, ...],
+) -> None:
+    if not placements:
+        raise ValueError("Relative placement requires at least one placement.")
+    moved_source_uids = [placement.moved_source_uid for placement in placements]
+    if len(moved_source_uids) != len(set(moved_source_uids)):
+        raise ValueError("Relative placements must use distinct moved_object values.")
+    if len(placements) == 2:
+        active_sides = {placement.active_side for placement in placements}
+        if active_sides != {"left", "right"}:
+            raise ValueError(
+                "Dual-arm relative placement requires one left arm and one right arm."
+            )
 
 
 def _resolve_rigid_source_uid(
@@ -1307,13 +1469,13 @@ def _relative_release_offset(relation: str) -> list[float]:
     if relation == "on":
         return [0.0, 0.0, _ON_RELEASE_Z_OFFSET]
     if relation == "left_of":
-        return [-_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
-    if relation == "right_of":
-        return [_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
-    if relation == "front_of":
         return [0.0, -_SIDE_RELATION_DISTANCE, _SIDE_RELEASE_Z_OFFSET]
-    if relation == "behind":
+    if relation == "right_of":
         return [0.0, _SIDE_RELATION_DISTANCE, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "front_of":
+        return [-_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "behind":
+        return [_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
     raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
 
 
@@ -1374,6 +1536,57 @@ def _default_relative_task_summary(
     )
 
 
+def _default_relative_plan_summary(
+    placements: Sequence[_RelativePlacementStepSpec],
+) -> str:
+    if len(placements) == 1:
+        placement = placements[0]
+        return _default_relative_task_summary(
+            placement.moved_runtime_uid,
+            placement.reference_runtime_uid,
+            placement.relation,
+        )
+    placement_text = "; ".join(
+        f"use the {placement.active_side} UR5 to move "
+        f"`{placement.moved_runtime_uid}` "
+        f"{_relative_relation_phrase(placement.relation)} "
+        f"`{placement.reference_runtime_uid}`"
+        for placement in placements
+    )
+    return f"Use both UR5 arms for a dual-arm relative placement: {placement_text}."
+
+
+def _default_relative_action_sketch(
+    placements: Sequence[_RelativePlacementStepSpec],
+) -> list[str]:
+    if len(placements) == 1:
+        placement = placements[0]
+        return [
+            f"grasp {placement.moved_runtime_uid}",
+            (
+                f"move above the {placement.relation} release pose relative to "
+                f"{placement.reference_runtime_uid}"
+            ),
+            "lower to the release pose",
+            "open the gripper",
+            "retreat upward",
+        ]
+    sketch = ["grasp both moved objects with their assigned arms"]
+    for placement in placements:
+        sketch.extend(
+            [
+                (
+                    f"use {placement.active_side}_arm to move "
+                    f"{placement.moved_runtime_uid} above the release pose relative "
+                    f"to {placement.reference_runtime_uid}"
+                ),
+                f"lower and release {placement.moved_runtime_uid}",
+                f"retreat {placement.active_side}_arm upward",
+            ]
+        )
+    return sketch
+
+
 def _relative_relation_phrase(relation: str) -> str:
     relation = _normalize_relative_relation(relation)
     if relation == "inside":
@@ -1425,7 +1638,10 @@ def _build_ur5_basket_bundle(
         for obj in scene_objects
         if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
     ]
-    robot_init_z = _estimate_dual_ur5_init_z(scene_objects)
+    robot_init_z = _estimate_dual_ur5_init_z(
+        scene_dir,
+        by_uid[roles.table_source_uid],
+    )
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1529,7 +1745,10 @@ def _build_relative_placement_bundle(
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
     object_scale = _target_body_scale_vector(target_body_scale)
-    robot_init_z = _estimate_dual_ur5_init_z(scene_objects)
+    robot_init_z = _estimate_dual_ur5_init_z(
+        scene_dir,
+        by_uid[spec.table_source_uid],
+    )
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1575,14 +1794,7 @@ def _build_relative_placement_bundle(
         "task_prompt": _make_relative_task_prompt(task_name, project_name, spec),
         "basic_background": _make_relative_basic_background(project_name, spec),
         "atom_actions": _make_relative_atom_actions_prompt(spec),
-        "summary": {
-            "mode": "relative_placement",
-            "moved_object": spec.moved_runtime_uid,
-            "reference_object": spec.reference_runtime_uid,
-            "relation": spec.relation,
-            "active_arm": f"{spec.active_side}_arm",
-            "release_offset": spec.release_offset,
-        },
+        "summary": _make_relative_summary(spec),
     }
 
 
@@ -1614,34 +1826,400 @@ def _is_container_object(obj: _SceneObject) -> bool:
     return any(keyword in text for keyword in _CONTAINER_KEYWORDS)
 
 
-def _estimate_dual_ur5_init_z(scene_objects: list[_SceneObject]) -> float:
-    """Estimate robot base height from source tabletop object heights."""
+def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
+    if len(spec.placements) == 1:
+        return {
+            "mode": "relative_placement",
+            "moved_object": spec.moved_runtime_uid,
+            "reference_object": spec.reference_runtime_uid,
+            "relation": spec.relation,
+            "active_arm": f"{spec.active_side}_arm",
+            "release_offset": spec.release_offset,
+        }
+    return {
+        "mode": "dual_arm_relative_placement",
+        "placements": [
+            {
+                "moved_object": placement.moved_runtime_uid,
+                "reference_object": placement.reference_runtime_uid,
+                "relation": placement.relation,
+                "active_arm": f"{placement.active_side}_arm",
+                "release_offset": placement.release_offset,
+            }
+            for placement in spec.placements
+        ],
+    }
 
-    rigid_z_values = []
-    for obj in scene_objects:
-        if obj.source_role != "rigid_object":
-            continue
-        init_pos = obj.config.get("init_pos")
-        if not isinstance(init_pos, (list, tuple)) or len(init_pos) < 3:
-            continue
+
+def _estimate_dual_ur5_init_z(scene_dir: Path, table_obj: _SceneObject) -> float:
+    """Estimate robot root height from the table mesh top surface."""
+
+    table_top_z = _resolve_table_mesh_world_zmax(scene_dir, table_obj)
+    if table_top_z is None:
+        return _DUAL_UR5_LEGACY_INIT_Z
+
+    init_z = (
+        table_top_z
+        + _DUAL_UR5_TABLETOP_CLEARANCE
+        - _DUAL_UR5_ARM_COMPONENT_Z
+    )
+    return round(max(_DUAL_UR5_LEGACY_INIT_Z, init_z), 6)
+
+
+def _resolve_table_mesh_world_zmax(
+    scene_dir: Path,
+    table_obj: _SceneObject,
+) -> float | None:
+    shape = table_obj.config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    if shape.get("shape_type") != "Mesh" or not shape.get("fpath"):
+        return None
+
+    mesh_path = _source_asset_path(scene_dir, str(shape["fpath"]))
+    try:
+        vertices = _load_mesh_vertices(mesh_path)
+    except (
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        struct.error,
+    ):
+        return None
+    if not vertices:
+        return None
+
+    world_matrix = _table_mesh_world_matrix(table_obj.config)
+    return max(_transform_point(world_matrix, vertex)[2] for vertex in vertices)
+
+
+def _source_asset_path(scene_dir: Path, fpath: str) -> Path:
+    raw_path = Path(fpath)
+    if raw_path.is_absolute():
+        return raw_path.resolve()
+
+    scene_candidate = (scene_dir / raw_path).resolve()
+    if scene_candidate.exists():
+        return scene_candidate
+
+    repo_candidate = (_repo_root() / raw_path).resolve()
+    if repo_candidate.exists():
+        return repo_candidate
+    return scene_candidate
+
+
+def _load_mesh_vertices(mesh_path: Path) -> list[tuple[float, float, float]] | None:
+    if mesh_path.suffix.lower() == ".glb":
         try:
-            rigid_z_values.append(float(init_pos[2]))
-        except (TypeError, ValueError):
-            continue
+            return list(_iter_glb_world_position_vertices(mesh_path))
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            struct.error,
+        ):
+            return _load_mesh_vertices_with_trimesh(mesh_path)
+    return _load_mesh_vertices_with_trimesh(mesh_path)
 
-    if not rigid_z_values:
-        return _DUAL_UR5_LEGACY_INIT_Z
 
-    sorted_z = sorted(rigid_z_values)
-    mid = len(sorted_z) // 2
-    if len(sorted_z) % 2:
-        tabletop_z = sorted_z[mid]
+def _load_mesh_vertices_with_trimesh(
+    mesh_path: Path,
+) -> list[tuple[float, float, float]] | None:
+    try:
+        import trimesh
+    except ImportError:
+        return None
+
+    scene_or_mesh = trimesh.load(str(mesh_path), force="scene")
+    try:
+        mesh = scene_or_mesh.dump(concatenate=True)
+    except AttributeError:
+        mesh = scene_or_mesh
+    vertices = getattr(mesh, "vertices", None)
+    if vertices is None or len(vertices) == 0:
+        return None
+    return [
+        (float(vertex[0]), float(vertex[1]), float(vertex[2]))
+        for vertex in vertices
+    ]
+
+
+def _iter_glb_world_position_vertices(
+    mesh_path: Path,
+):
+    doc, binary_chunk = _read_glb(mesh_path)
+    nodes = doc.get("nodes", [])
+    if not isinstance(nodes, list):
+        raise ValueError("GLB nodes must be a list.")
+
+    scenes = doc.get("scenes", [])
+    if scenes:
+        scene_index = int(doc.get("scene", 0))
+        root_node_ids = scenes[scene_index].get("nodes", [])
     else:
-        tabletop_z = (sorted_z[mid - 1] + sorted_z[mid]) / 2.0
+        root_node_ids = list(range(len(nodes)))
 
-    if tabletop_z <= _DUAL_UR5_HIGH_TABLETOP_THRESHOLD:
-        return _DUAL_UR5_LEGACY_INIT_Z
-    return _DUAL_UR5_HIGH_TABLETOP_INIT_Z
+    stack = [(int(node_id), _identity_matrix4()) for node_id in root_node_ids]
+    while stack:
+        node_id, parent_matrix = stack.pop()
+        node = nodes[node_id]
+        node_matrix = _matrix_multiply(parent_matrix, _gltf_node_matrix(node))
+        mesh_index = node.get("mesh")
+        if mesh_index is not None:
+            for vertex in _iter_gltf_mesh_position_vertices(
+                doc,
+                binary_chunk,
+                int(mesh_index),
+            ):
+                yield _transform_point(node_matrix, vertex)
+        for child_id in node.get("children", []) or []:
+            stack.append((int(child_id), node_matrix))
+
+
+def _read_glb(mesh_path: Path) -> tuple[dict[str, Any], bytes]:
+    data = mesh_path.read_bytes()
+    if len(data) < 20:
+        raise ValueError("GLB file is too small.")
+
+    magic, version, total_length = struct.unpack_from("<4sII", data, 0)
+    if magic != b"glTF" or version != 2:
+        raise ValueError("Only GLB version 2 files are supported.")
+    if total_length > len(data):
+        raise ValueError("GLB length header exceeds file size.")
+
+    doc: dict[str, Any] | None = None
+    binary_chunk = b""
+    offset = 12
+    while offset + 8 <= total_length:
+        chunk_length, chunk_type = struct.unpack_from("<II", data, offset)
+        offset += 8
+        chunk_end = offset + chunk_length
+        if chunk_end > total_length:
+            raise ValueError("GLB chunk exceeds file size.")
+        chunk = data[offset:chunk_end]
+        offset = chunk_end
+        if chunk_type == _GLB_JSON_CHUNK_TYPE:
+            doc = json.loads(chunk.decode("utf-8").rstrip("\x00 "))
+        elif chunk_type == _GLB_BINARY_CHUNK_TYPE:
+            binary_chunk = chunk
+
+    if doc is None:
+        raise ValueError("GLB file does not contain a JSON chunk.")
+    return doc, binary_chunk
+
+
+def _iter_gltf_mesh_position_vertices(
+    doc: Mapping[str, Any],
+    binary_chunk: bytes,
+    mesh_index: int,
+):
+    meshes = doc.get("meshes", [])
+    accessors = doc.get("accessors", [])
+    mesh = meshes[mesh_index]
+    for primitive in mesh.get("primitives", []) or []:
+        attributes = primitive.get("attributes", {})
+        position_accessor = attributes.get("POSITION")
+        if position_accessor is None:
+            continue
+        if int(position_accessor) >= len(accessors):
+            raise ValueError("POSITION accessor index is out of range.")
+        yield from _iter_gltf_accessor_vec3(doc, binary_chunk, int(position_accessor))
+
+
+def _iter_gltf_accessor_vec3(
+    doc: Mapping[str, Any],
+    binary_chunk: bytes,
+    accessor_index: int,
+):
+    accessor = doc["accessors"][accessor_index]
+    if accessor.get("sparse"):
+        raise ValueError("Sparse GLB accessors are not supported.")
+    if accessor.get("type") != "VEC3":
+        raise ValueError("POSITION accessor must be VEC3.")
+    if "bufferView" not in accessor:
+        raise ValueError("POSITION accessor must reference a bufferView.")
+
+    component_type = int(accessor["componentType"])
+    if component_type not in _GLTF_COMPONENT_FORMATS:
+        raise ValueError(f"Unsupported GLB component type: {component_type}.")
+    component_format, component_size = _GLTF_COMPONENT_FORMATS[component_type]
+    component_count = _GLTF_TYPE_COMPONENT_COUNTS[accessor["type"]]
+    buffer_view = doc["bufferViews"][int(accessor["bufferView"])]
+    if int(buffer_view.get("buffer", 0)) != 0:
+        raise ValueError("Only GLB embedded binary buffers are supported.")
+
+    stride = int(buffer_view.get("byteStride", component_size * component_count))
+    offset = int(buffer_view.get("byteOffset", 0)) + int(accessor.get("byteOffset", 0))
+    element_format = "<" + component_format * component_count
+    for index in range(int(accessor["count"])):
+        values = struct.unpack_from(
+            element_format,
+            binary_chunk,
+            offset + index * stride,
+        )
+        yield (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _table_mesh_world_matrix(table_config: Mapping[str, Any]) -> list[list[float]]:
+    scale = _vector3(table_config.get("body_scale", [1.0, 1.0, 1.0]))
+    init_local_pose = table_config.get("init_local_pose")
+    if init_local_pose is not None:
+        root_matrix = _matrix4(init_local_pose)
+    else:
+        root_matrix = _euler_xyz_degrees_matrix(
+            _vector3(table_config.get("init_rot", [0.0, 0.0, 0.0])),
+            _vector3(table_config.get("init_pos", [0.0, 0.0, 0.0])),
+        )
+    return _matrix_multiply(root_matrix, _scale_matrix4(scale))
+
+
+def _gltf_node_matrix(node: Mapping[str, Any]) -> list[list[float]]:
+    if "matrix" in node:
+        values = [float(value) for value in node["matrix"]]
+        if len(values) != 16:
+            raise ValueError("GLB node matrix must contain 16 values.")
+        return [
+            [values[column * 4 + row] for column in range(4)]
+            for row in range(4)
+        ]
+
+    translation = [
+        float(value) for value in node.get("translation", [0.0, 0.0, 0.0])
+    ]
+    scale = [float(value) for value in node.get("scale", [1.0, 1.0, 1.0])]
+    rotation = [
+        float(value) for value in node.get("rotation", [0.0, 0.0, 0.0, 1.0])
+    ]
+    if len(translation) != 3 or len(scale) != 3 or len(rotation) != 4:
+        raise ValueError("Invalid GLB node TRS transform.")
+
+    x, y, z, w = rotation
+    xx, yy, zz = x * x, y * y, z * z
+    xy, xz, yz = x * y, x * z, y * z
+    wx, wy, wz = w * x, w * y, w * z
+    matrix = [
+        [
+            (1.0 - 2.0 * (yy + zz)) * scale[0],
+            (2.0 * (xy - wz)) * scale[1],
+            (2.0 * (xz + wy)) * scale[2],
+            translation[0],
+        ],
+        [
+            (2.0 * (xy + wz)) * scale[0],
+            (1.0 - 2.0 * (xx + zz)) * scale[1],
+            (2.0 * (yz - wx)) * scale[2],
+            translation[1],
+        ],
+        [
+            (2.0 * (xz - wy)) * scale[0],
+            (2.0 * (yz + wx)) * scale[1],
+            (1.0 - 2.0 * (xx + yy)) * scale[2],
+            translation[2],
+        ],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    return matrix
+
+
+def _euler_xyz_degrees_matrix(
+    rotation_deg: Sequence[float],
+    translation: Sequence[float],
+) -> list[list[float]]:
+    rx, ry, rz = (math.radians(float(value)) for value in rotation_deg)
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
+    rot_x = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, cx, -sx, 0.0],
+        [0.0, sx, cx, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    rot_y = [
+        [cy, 0.0, sy, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [-sy, 0.0, cy, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    rot_z = [
+        [cz, -sz, 0.0, 0.0],
+        [sz, cz, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    matrix = _matrix_multiply(_matrix_multiply(rot_z, rot_y), rot_x)
+    matrix[0][3] = float(translation[0])
+    matrix[1][3] = float(translation[1])
+    matrix[2][3] = float(translation[2])
+    return matrix
+
+
+def _identity_matrix4() -> list[list[float]]:
+    return [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _scale_matrix4(scale: Sequence[float]) -> list[list[float]]:
+    return [
+        [float(scale[0]), 0.0, 0.0, 0.0],
+        [0.0, float(scale[1]), 0.0, 0.0],
+        [0.0, 0.0, float(scale[2]), 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _matrix4(value: Any) -> list[list[float]]:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ValueError(f"Expected a 4x4 matrix, got {value!r}.")
+    matrix = []
+    for row in value:
+        if not isinstance(row, (list, tuple)) or len(row) != 4:
+            raise ValueError(f"Expected a 4x4 matrix, got {value!r}.")
+        matrix.append([float(item) for item in row])
+    return matrix
+
+
+def _matrix_multiply(
+    left: Sequence[Sequence[float]],
+    right: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    return [
+        [
+            sum(
+                float(left[row][inner]) * float(right[inner][column])
+                for inner in range(4)
+            )
+            for column in range(4)
+        ]
+        for row in range(4)
+    ]
+
+
+def _transform_point(
+    matrix: Sequence[Sequence[float]],
+    point: Sequence[float],
+) -> tuple[float, float, float]:
+    x, y, z = (float(point[0]), float(point[1]), float(point[2]))
+    return (
+        float(matrix[0][0]) * x
+        + float(matrix[0][1]) * y
+        + float(matrix[0][2]) * z
+        + float(matrix[0][3]),
+        float(matrix[1][0]) * x
+        + float(matrix[1][1]) * y
+        + float(matrix[1][2]) * z
+        + float(matrix[1][3]),
+        float(matrix[2][0]) * x
+        + float(matrix[2][1]) * y
+        + float(matrix[2][2]) * z
+        + float(matrix[2][3]),
+    )
 
 
 def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:
@@ -1727,53 +2305,70 @@ def _make_relative_extensions_config(spec: _RelativePlacementSpec) -> dict[str, 
         "agent_grasp_pose_overrides": [
             {
                 "type": "top_down",
-                "object": spec.moved_runtime_uid,
-                "side": spec.active_side,
+                "object": placement.moved_runtime_uid,
+                "side": placement.active_side,
                 "height_offset": 0.036,
-            },
+            }
+            for placement in spec.placements
         ],
     }
 
 
 def _make_relative_success_spec(spec: _RelativePlacementSpec) -> dict[str, Any]:
-    if spec.relation == "inside":
+    if len(spec.placements) == 1:
+        return _make_relative_placement_success_spec(spec.placements[0])
+    return {
+        "op": "all",
+        "terms": [
+            _make_relative_placement_success_spec(placement)
+            for placement in spec.placements
+        ],
+    }
+
+
+def _make_relative_placement_success_spec(
+    placement: _RelativePlacementStepSpec,
+) -> dict[str, Any]:
+    if placement.relation == "inside":
         return _object_in_container_success(
-            spec.moved_runtime_uid,
-            spec.reference_runtime_uid,
+            placement.moved_runtime_uid,
+            placement.reference_runtime_uid,
         )
-    if spec.relation == "on":
+    if placement.relation == "on":
         return {
             "type": "object_on_object",
-            "object": spec.moved_runtime_uid,
-            "support": spec.reference_runtime_uid,
+            "object": placement.moved_runtime_uid,
+            "support": placement.reference_runtime_uid,
             "xy_radius": 0.08,
             "min_z_offset": 0.02,
             "max_z_offset": 0.35,
         }
 
-    primary_axis, primary_offset, secondary_axis = _side_relation_axes(spec.relation)
+    primary_axis, primary_offset, secondary_axis = _side_relation_axes(
+        placement.relation
+    )
     return {
         "op": "all",
         "terms": [
             {
                 "type": "object_axis_offset_near",
-                "object": spec.moved_runtime_uid,
-                "reference": spec.reference_runtime_uid,
+                "object": placement.moved_runtime_uid,
+                "reference": placement.reference_runtime_uid,
                 "axis": primary_axis,
                 "offset": primary_offset,
                 "tolerance": 0.05,
             },
             {
                 "type": "object_axis_offset_near",
-                "object": spec.moved_runtime_uid,
-                "reference": spec.reference_runtime_uid,
+                "object": placement.moved_runtime_uid,
+                "reference": placement.reference_runtime_uid,
                 "axis": secondary_axis,
                 "offset": 0.0,
                 "tolerance": 0.06,
             },
             {
                 "type": "object_not_fallen",
-                "object": spec.moved_runtime_uid,
+                "object": placement.moved_runtime_uid,
                 "max_tilt": 0.9,
             },
         ],
@@ -1782,13 +2377,13 @@ def _make_relative_success_spec(spec: _RelativePlacementSpec) -> dict[str, Any]:
 
 def _side_relation_axes(relation: str) -> tuple[str, float, str]:
     if relation == "left_of":
-        return "x", -_SIDE_RELATION_DISTANCE, "y"
-    if relation == "right_of":
-        return "x", _SIDE_RELATION_DISTANCE, "y"
-    if relation == "front_of":
         return "y", -_SIDE_RELATION_DISTANCE, "x"
-    if relation == "behind":
+    if relation == "right_of":
         return "y", _SIDE_RELATION_DISTANCE, "x"
+    if relation == "front_of":
+        return "x", -_SIDE_RELATION_DISTANCE, "y"
+    if relation == "behind":
+        return "x", _SIDE_RELATION_DISTANCE, "y"
     raise ValueError(f"Unsupported side relation: {relation!r}.")
 
 
@@ -1830,7 +2425,9 @@ def _make_relative_events_config(
                     {
                         "name": "grasp_pose_object",
                         "mode": "static",
-                        "entity_uids": [spec.moved_runtime_uid],
+                        "entity_uids": [
+                            placement.moved_runtime_uid for placement in spec.placements
+                        ],
                         "value": [
                             [
                                 [0.0, 0.0, 1.0, 0.0],
@@ -2001,12 +2598,7 @@ def _make_relative_dataset_config(
                     "control_freq": 25,
                 },
                 "instruction": {
-                    "lang": (
-                        f"Use the {spec.active_side} UR5 to move "
-                        f"{spec.moved_runtime_uid} "
-                        f"{_relative_relation_phrase(spec.relation)} "
-                        f"{spec.reference_runtime_uid}."
-                    ),
+                    "lang": _relative_dataset_instruction(spec),
                 },
                 "extra": {
                     "scene_type": project_name,
@@ -2017,6 +2609,24 @@ def _make_relative_dataset_config(
             },
         }
     }
+
+
+def _relative_dataset_instruction(spec: _RelativePlacementSpec) -> str:
+    if len(spec.placements) == 1:
+        placement = spec.placements[0]
+        return (
+            f"Use the {placement.active_side} UR5 to move "
+            f"{placement.moved_runtime_uid} "
+            f"{_relative_relation_phrase(placement.relation)} "
+            f"{placement.reference_runtime_uid}."
+        )
+    return " ".join(
+        f"Use the {placement.active_side} UR5 to move "
+        f"{placement.moved_runtime_uid} "
+        f"{_relative_relation_phrase(placement.relation)} "
+        f"{placement.reference_runtime_uid}."
+        for placement in spec.placements
+    )
 
 
 def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
@@ -2340,9 +2950,18 @@ def _relative_rigid_object_max_convex_hull_num(
     runtime_uid: str,
     spec: _RelativePlacementSpec,
 ) -> int:
-    if spec.relation == "inside" and runtime_uid == spec.reference_runtime_uid:
-        return _CONTAINER_MAX_CONVEX_HULL_NUM
-    if runtime_uid in {spec.moved_runtime_uid, spec.reference_runtime_uid}:
+    for placement in spec.placements:
+        if (
+            placement.relation == "inside"
+            and runtime_uid == placement.reference_runtime_uid
+        ):
+            return _CONTAINER_MAX_CONVEX_HULL_NUM
+    task_uids = {
+        uid
+        for placement in spec.placements
+        for uid in (placement.moved_runtime_uid, placement.reference_runtime_uid)
+    }
+    if runtime_uid in task_uids:
         return _TARGET_MAX_CONVEX_HULL_NUM
     return _EXTRA_RIGID_MAX_CONVEX_HULL_NUM
 
@@ -2439,6 +3058,9 @@ def _make_relative_task_prompt(
     project_name: str,
     spec: _RelativePlacementSpec,
 ) -> str:
+    if len(spec.placements) > 1:
+        return _make_dual_relative_task_prompt(task_name, project_name, spec)
+
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
     active_slot = f"{spec.active_side}_arm_action"
@@ -2469,10 +3091,10 @@ Object and arm mapping:
 - Keep every `{inactive_slot}` as null.
 
 Coordinate convention for relative placement:
-- `left_of` means negative world x relative to the reference object.
-- `right_of` means positive world x relative to the reference object.
-- `front_of` means negative world y, closer to the Dual-UR5 bases.
-- `behind` means positive world y, farther from the Dual-UR5 bases.
+- `left_of` means negative world y relative to the reference object.
+- `right_of` means positive world y relative to the reference object.
+- `front_of` means negative world x relative to the reference object.
+- `behind` means positive world x relative to the reference object.
 - `inside` and `on` use the reference object's xy center.
 
 Generate one deterministic nominal graph with exactly 6 nominal edges. Use only
@@ -2519,10 +3141,136 @@ config. Do not hard-code absolute object coordinates in the generated graph.
 """
 
 
+def _make_dual_relative_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _RelativePlacementSpec,
+) -> str:
+    first, second = spec.placements
+    first_arm = f"{first.active_side}_arm"
+    second_arm = f"{second.active_side}_arm"
+    first_slot = f"{first.active_side}_arm_action"
+    second_slot = f"{second.active_side}_arm_action"
+    first_high_x, first_high_y, first_high_z = first.high_offset
+    first_rel_x, first_rel_y, first_rel_z = first.release_offset
+    second_high_x, second_high_y, second_high_z = second.high_offset
+    second_rel_x, second_rel_y, second_rel_z = second.release_offset
+    action_sketch = _format_action_sketch(spec.action_sketch)
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from a simple task description by the config-stage
+LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Config-stage LLM interpretation:
+{action_sketch}
+
+Object and arm mapping:
+- {first_slot} must manipulate `{first.moved_runtime_uid}`. Source object:
+  `{first.moved_source_uid}`.
+- {second_slot} must manipulate `{second.moved_runtime_uid}`. Source object:
+  `{second.moved_source_uid}`.
+- `{first.reference_runtime_uid}` is the spatial reference for
+  `{first.moved_runtime_uid}`. Goal relation: `{first.relation}`
+  ({_relative_relation_phrase(first.relation)}).
+- `{second.reference_runtime_uid}` is the spatial reference for
+  `{second.moved_runtime_uid}`. Goal relation: `{second.relation}`
+  ({_relative_relation_phrase(second.relation)}).
+
+Coordinate convention for relative placement:
+- `left_of` means negative world y relative to the reference object.
+- `right_of` means positive world y relative to the reference object.
+- `front_of` means negative world x relative to the reference object.
+- `behind` means positive world x relative to the reference object.
+- `inside` and `on` use the reference object's xy center.
+
+Generate one deterministic nominal graph with exactly 10 nominal edges. Use only
+the atomic actions shown below. Do not add recovery, monitor, search, alignment,
+or extra lift edges.
+
+1. Grasp both moved objects simultaneously:
+   - {first_slot}: grasp(robot_name="{first_arm}",
+     obj_name="{first.moved_runtime_uid}", pre_grasp_dis=0.08, sample_num=45)
+   - {second_slot}: grasp(robot_name="{second_arm}",
+     obj_name="{second.moved_runtime_uid}", pre_grasp_dis=0.08, sample_num=45)
+
+2. Move `{first.moved_runtime_uid}` to the high staging pose while the other arm
+   keeps holding `{second.moved_runtime_uid}`:
+   - {first_slot}: move_relative_to_object(robot_name="{first_arm}",
+     obj_name="{first.reference_runtime_uid}",
+     x_offset={_format_prompt_float(first_high_x)},
+     y_offset={_format_prompt_float(first_high_y)},
+     z_offset={_format_prompt_float(first_high_z)}, sample_num=45)
+   - {second_slot}: close_gripper(robot_name="{second_arm}", sample_num=10)
+
+3. Lower `{first.moved_runtime_uid}` to the release pose:
+   - {first_slot}: move_relative_to_object(robot_name="{first_arm}",
+     obj_name="{first.reference_runtime_uid}",
+     x_offset={_format_prompt_float(first_rel_x)},
+     y_offset={_format_prompt_float(first_rel_y)},
+     z_offset={_format_prompt_float(first_rel_z)}, sample_num=30)
+   - {second_slot}: close_gripper(robot_name="{second_arm}", sample_num=10)
+
+4. Release `{first.moved_runtime_uid}`:
+   - {first_slot}: open_gripper(robot_name="{first_arm}",
+     sample_num=15, open_threshold=-1.0, settle_steps=25)
+   - {second_slot}: close_gripper(robot_name="{second_arm}", sample_num=10)
+
+5. Move the empty `{first_arm}` gripper upward to clear the workspace:
+   - {first_slot}: move_by_relative_offset(robot_name="{first_arm}",
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=20)
+   - {second_slot}: close_gripper(robot_name="{second_arm}", sample_num=10)
+
+6. Return `{first_arm}` to its initial pose while moving `{second.moved_runtime_uid}`
+   to the high staging pose:
+   - {first_slot}: back_to_initial_pose(robot_name="{first_arm}", sample_num=30)
+   - {second_slot}: move_relative_to_object(robot_name="{second_arm}",
+     obj_name="{second.reference_runtime_uid}",
+     x_offset={_format_prompt_float(second_high_x)},
+     y_offset={_format_prompt_float(second_high_y)},
+     z_offset={_format_prompt_float(second_high_z)}, sample_num=45)
+
+7. Lower `{second.moved_runtime_uid}` to the release pose:
+   - {first_slot}: null
+   - {second_slot}: move_relative_to_object(robot_name="{second_arm}",
+     obj_name="{second.reference_runtime_uid}",
+     x_offset={_format_prompt_float(second_rel_x)},
+     y_offset={_format_prompt_float(second_rel_y)},
+     z_offset={_format_prompt_float(second_rel_z)}, sample_num=30)
+
+8. Release `{second.moved_runtime_uid}`:
+   - {first_slot}: null
+   - {second_slot}: open_gripper(robot_name="{second_arm}",
+     sample_num=15, open_threshold=-1.0, settle_steps=25)
+
+9. Move the empty `{second_arm}` gripper upward to clear the workspace:
+   - {first_slot}: null
+   - {second_slot}: move_by_relative_offset(robot_name="{second_arm}",
+     dx=0.0, dy=0.0, dz=0.14, mode="extrinsic", sample_num=20)
+
+10. Return `{second_arm}` to its initial pose:
+   - {first_slot}: null
+   - {second_slot}: back_to_initial_pose(robot_name="{second_arm}", sample_num=30)
+
+Final state: `{first.moved_runtime_uid}` must be
+{_relative_relation_phrase(first.relation)} `{first.reference_runtime_uid}`, and
+`{second.moved_runtime_uid}` must be {_relative_relation_phrase(second.relation)}
+`{second.reference_runtime_uid}`. Always plan to the current object poses from the
+exported {project_name} environment config. Do not hard-code absolute object
+coordinates in the generated graph.
+"""
+
+
 def _make_relative_basic_background(
     project_name: str,
     spec: _RelativePlacementSpec,
 ) -> str:
+    if len(spec.placements) > 1:
+        return _make_dual_relative_basic_background(project_name, spec)
+
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
     notes = spec.basic_background_notes or (
@@ -2555,7 +3303,45 @@ active arm to its initial pose.
 """
 
 
+def _make_dual_relative_basic_background(
+    project_name: str,
+    spec: _RelativePlacementSpec,
+) -> str:
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    placement_lines = "\n".join(
+        f"- {placement.active_side}_arm moves `{placement.moved_runtime_uid}` "
+        f"{_relative_relation_phrase(placement.relation)} "
+        f"`{placement.reference_runtime_uid}`."
+        for placement in spec.placements
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 dual-arm relative-placement task
+generated from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the UR5 outside the left side of the table's near long edge.
+- right_arm is the UR5 outside the right side of the table's near long edge.
+
+Both arms participate in the nominal graph:
+{placement_lines}
+
+Config-stage LLM notes:
+{notes}
+
+The execution-stage LLM should generate graph JSON that grasps both moved
+objects, places the first moved object, retreats the first arm, then places the
+second moved object while the first arm returns to its initial pose. Each arm
+must release its moved object before returning to its initial pose.
+"""
+
+
 def _make_relative_atom_actions_prompt(spec: _RelativePlacementSpec) -> str:
+    if len(spec.placements) > 1:
+        return _make_dual_relative_atom_actions_prompt(spec)
+
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
     high_x, high_y, high_z = spec.high_offset
@@ -2633,6 +3419,109 @@ raise immediately. Use only the parameters listed below.
     Returns the selected UR5 arm to its initial joint configuration. Use it only
     after `open_gripper` and the upward retreat:
     `back_to_initial_pose(robot_name="{active_arm}", sample_num=30)`.
+"""
+
+
+def _make_dual_relative_atom_actions_prompt(spec: _RelativePlacementSpec) -> str:
+    first, second = spec.placements
+    first_arm = f"{first.active_side}_arm"
+    second_arm = f"{second.active_side}_arm"
+    first_high_x, first_high_y, first_high_z = first.high_offset
+    first_rel_x, first_rel_y, first_rel_z = first.release_offset
+    second_high_x, second_high_y, second_high_z = second.high_offset
+    second_rel_x, second_rel_y, second_rel_z = second.release_offset
+    return f"""### Atom Functions for Dual-UR5 Dual-Arm Relative Placement
+
+Use the existing atomic action API and gripper semantics in this configuration.
+Both assigned arms participate in the nominal graph:
+- `{first_arm}` manipulates `{first.moved_runtime_uid}`.
+- `{second_arm}` manipulates `{second.moved_runtime_uid}`.
+
+Each atomic function returns a list of joint-space trajectories (`list[np.ndarray]`).
+All atom functions are public-only wrappers backed by
+`embodichain.lab.sim.atomic_actions.AtomicActionEngine`. Public action failures
+raise immediately. Use only the parameters listed below.
+
+"grasp":
+    def grasp(robot_name: str, obj_name: str, pre_grasp_dis: float, **kwargs) -> list[np.ndarray]
+
+    Use exactly:
+    - `grasp(robot_name="{first_arm}", obj_name="{first.moved_runtime_uid}",
+      pre_grasp_dis=0.08, sample_num=45)`.
+    - `grasp(robot_name="{second_arm}", obj_name="{second.moved_runtime_uid}",
+      pre_grasp_dis=0.08, sample_num=45)`.
+
+"move_relative_to_object":
+    def move_relative_to_object(robot_name: str,
+                                obj_name: str,
+                                x_offset=0.0,
+                                y_offset=0.0,
+                                z_offset=0.0,
+                                **kwargs) -> list[np.ndarray]
+
+    Moves the selected end-effector to the current reference object pose plus a
+    world-frame xyz offset while preserving the current end-effector orientation.
+
+    First placement high staging:
+    `move_relative_to_object(robot_name="{first_arm}",
+    obj_name="{first.reference_runtime_uid}",
+    x_offset={_format_prompt_float(first_high_x)},
+    y_offset={_format_prompt_float(first_high_y)},
+    z_offset={_format_prompt_float(first_high_z)}, sample_num=45)`.
+
+    First placement release:
+    `move_relative_to_object(robot_name="{first_arm}",
+    obj_name="{first.reference_runtime_uid}",
+    x_offset={_format_prompt_float(first_rel_x)},
+    y_offset={_format_prompt_float(first_rel_y)},
+    z_offset={_format_prompt_float(first_rel_z)}, sample_num=30)`.
+
+    Second placement high staging:
+    `move_relative_to_object(robot_name="{second_arm}",
+    obj_name="{second.reference_runtime_uid}",
+    x_offset={_format_prompt_float(second_high_x)},
+    y_offset={_format_prompt_float(second_high_y)},
+    z_offset={_format_prompt_float(second_high_z)}, sample_num=45)`.
+
+    Second placement release:
+    `move_relative_to_object(robot_name="{second_arm}",
+    obj_name="{second.reference_runtime_uid}",
+    x_offset={_format_prompt_float(second_rel_x)},
+    y_offset={_format_prompt_float(second_rel_y)},
+    z_offset={_format_prompt_float(second_rel_z)}, sample_num=30)`.
+
+"move_by_relative_offset":
+    def move_by_relative_offset(robot_name: str,
+                                dx=0.0,
+                                dy=0.0,
+                                dz=0.0,
+                                mode="extrinsic",
+                                **kwargs) -> list[np.ndarray]
+
+    Use this only for the short upward retreat after releasing an object:
+    `move_by_relative_offset(robot_name="<assigned_arm>", dx=0.0, dy=0.0,
+    dz=0.14, mode="extrinsic", sample_num=20)`.
+
+"open_gripper":
+    def open_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Opens the selected gripper to release the held object. Use:
+    `open_gripper(robot_name="<assigned_arm>", sample_num=15,
+    open_threshold=-1.0, settle_steps=25)`.
+
+"close_gripper":
+    def close_gripper(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Use this only to keep the not-yet-placing arm holding its object while the
+    other arm is placing:
+    `close_gripper(robot_name="<holding_arm>", sample_num=10)`.
+
+"back_to_initial_pose":
+    def back_to_initial_pose(robot_name: str, **kwargs) -> list[np.ndarray]
+
+    Returns the selected UR5 arm to its initial joint configuration. Use it only
+    after that arm has released its moved object and retreated upward:
+    `back_to_initial_pose(robot_name="<released_arm>", sample_num=30)`.
 """
 
 
@@ -2972,7 +3861,11 @@ def _validate_relative_bundle(
     rigid_uids = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
     if len(rigid_uids) != len(set(rigid_uids)):
         raise ValueError(f"Duplicate rigid object runtime uid(s): {rigid_uids}")
-    required = {spec.moved_runtime_uid, spec.reference_runtime_uid}
+    required = {
+        uid
+        for placement in spec.placements
+        for uid in (placement.moved_runtime_uid, placement.reference_runtime_uid)
+    }
     missing = required - set(rigid_uids)
     if missing:
         raise ValueError(

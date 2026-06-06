@@ -60,9 +60,11 @@ _DEFAULT_CONFIG_OUTPUT_DIR = (
     _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/demo3_text"
 )
 _DEFAULT_PIPELINE_HISTORY = (
-    _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json"
+    _REPO_ROOT
+    / "embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json"
 )
 _DEFAULT_TASK_NAME = "Depm3_Text"
+_DEFAULT_TASK_TEMPLATE_NAMES = frozenset({"Demo1_Text"})
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 _PIPELINE_HISTORY_SCHEMA_VERSION = 1
@@ -268,7 +270,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--task-description",
         dest="task_description",
         default="",
-        help='Task description passed to config generation. Defaults to "".',
+        help=(
+            'Task description passed to config generation. Defaults to "". '
+            "Ignored for default-template tasks such as Demo1_Text."
+        ),
     )
     parser.add_argument(
         "--target_body_scale",
@@ -441,6 +446,19 @@ def _resolve_under_root(root: Path, path_input: str | None) -> Path | None:
     return (root / path).resolve()
 
 
+def _resolve_task_description_for_generation(args: argparse.Namespace) -> str | None:
+    task_description = str(args.task_description or "").strip()
+    if args.task_name in _DEFAULT_TASK_TEMPLATE_NAMES:
+        if task_description:
+            print(
+                f"Ignoring --task_description for {args.task_name}; "
+                "using the default basket task template.",
+                flush=True,
+            )
+        return None
+    return task_description or None
+
+
 def _collect_merged_gym_configs(download_dir: Path) -> list[Path]:
     if not download_dir.exists():
         return []
@@ -601,7 +619,9 @@ def _resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
         return ProjectResolution(path=project_path, mode="existing_gym_project")
 
     if args.use_image2scene:
-        return ProjectResolution(path=_run_image2scene_pipeline(args), mode="image2scene")
+        return ProjectResolution(
+            path=_run_image2scene_pipeline(args), mode="image2scene"
+        )
 
     if use_history:
         history_entry = _resolve_base_history_entry(args)
@@ -695,9 +715,7 @@ def _read_pipeline_history(history_path: Path) -> dict[str, Any]:
     if not isinstance(runs, list):
         raise ValueError(f"Pipeline history must contain a runs list: {history_path}")
     return {
-        "schema_version": data.get(
-            "schema_version", _PIPELINE_HISTORY_SCHEMA_VERSION
-        ),
+        "schema_version": data.get("schema_version", _PIPELINE_HISTORY_SCHEMA_VERSION),
         "runs": runs,
     }
 
@@ -730,9 +748,7 @@ def _path_from_history_entry(entry: dict[str, Any]) -> Path:
         )
     path = Path(str(source)).expanduser().resolve()
     if not path.exists():
-        raise FileNotFoundError(
-            f"Pipeline history source path does not exist: {path}"
-        )
+        raise FileNotFoundError(f"Pipeline history source path does not exist: {path}")
     return path
 
 
@@ -867,7 +883,10 @@ def _auto_replacement_source_uid(
             f"{candidates}. Use SOURCE_UID PROMPT to disambiguate."
         )
 
-    if abs(float(positioned_objects[0]["y"]) - float(positioned_objects[1]["y"])) < 1e-9:
+    if (
+        abs(float(positioned_objects[0]["y"]) - float(positioned_objects[1]["y"]))
+        < 1e-9
+    ):
         candidates = _format_duplicate_group_candidates(duplicate_groups)
         raise ValueError(
             f"{option_name} auto-selection requires distinct y coordinates in "
@@ -985,9 +1004,7 @@ def _resolve_replacement_source_uid(
 
     keyword, alias_index = alias
     matches = [
-        obj
-        for obj in rigid_objects
-        if _rigid_object_matches_keyword(obj, keyword)
+        obj for obj in rigid_objects if _rigid_object_matches_keyword(obj, keyword)
     ]
     if alias_index > len(matches):
         candidates = _format_rigid_object_candidates(matches or rigid_objects)
@@ -1129,16 +1146,16 @@ def _build_pipeline_record(
         "input_path": resolution.path.as_posix(),
         "config_output_dir": Path(generated_paths.output_dir).resolve().as_posix(),
         "generated_gym_config": Path(generated_paths.gym_config).resolve().as_posix(),
-        "generated_agent_config": Path(
-            generated_paths.agent_config
-        ).resolve().as_posix(),
+        "generated_agent_config": Path(generated_paths.agent_config)
+        .resolve()
+        .as_posix(),
         "generated_task_prompt": Path(generated_paths.task_prompt).resolve().as_posix(),
-        "generated_basic_background": Path(
-            generated_paths.basic_background
-        ).resolve().as_posix(),
-        "generated_atom_actions": Path(
-            generated_paths.atom_actions
-        ).resolve().as_posix(),
+        "generated_basic_background": Path(generated_paths.basic_background)
+        .resolve()
+        .as_posix(),
+        "generated_atom_actions": Path(generated_paths.atom_actions)
+        .resolve()
+        .as_posix(),
         "pipeline_history_path": history_path.as_posix(),
         "target_body_scale": args.target_body_scale,
         "target_replacements": _target_replacement_records(
@@ -1260,7 +1277,9 @@ def _resolve_source_gym_config(input_path: Path) -> Path:
         expected = " or ".join(_GYM_CONFIG_PREFERENCE)
         raise FileNotFoundError(f"{expected} not found under: {input_path}")
     match_text = ", ".join(path.as_posix() for path in unique_matches)
-    raise ValueError(f"Multiple gym config files found under {input_path}: {match_text}")
+    raise ValueError(
+        f"Multiple gym config files found under {input_path}: {match_text}"
+    )
 
 
 def _append_pipeline_history(
@@ -1268,14 +1287,13 @@ def _append_pipeline_history(
 ) -> dict[str, Any]:
     history = _read_pipeline_history(history_path)
     runs = history["runs"]
-    next_index = max(
-        (
-            _history_entry_index(entry)
-            for entry in runs
-            if isinstance(entry, dict)
-        ),
-        default=0,
-    ) + 1
+    next_index = (
+        max(
+            (_history_entry_index(entry) for entry in runs if isinstance(entry, dict)),
+            default=0,
+        )
+        + 1
+    )
     record = dict(record)
     record["index"] = next_index
 
@@ -1330,12 +1348,14 @@ def main() -> int:
         TargetReplacementSpec,
         resolution.path,
     )
+    task_description = _resolve_task_description_for_generation(args)
+    args.task_description = task_description or ""
 
     paths = generate_ur5_basket_config_from_project(
         gym_project=resolution.path,
         output_dir=args.config_output_dir,
         task_name=args.task_name,
-        task_description=args.task_description,
+        task_description=task_description,
         target_body_scale=args.target_body_scale,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
