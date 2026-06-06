@@ -284,25 +284,25 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target_replacement1",
         "--target-replacement1",
-        nargs=2,
-        metavar=("SOURCE_UID", "PROMPT"),
+        nargs="+",
+        metavar="SOURCE_OR_PROMPT",
         default=None,
         help=(
-            "Generate <gym_project>/mesh_assets/new1 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config. SOURCE_UID may be "
-            "an actual rigid object uid or an indexed alias such as bread1."
+            "Generate <gym_project>/mesh_assets/new1 from PROMPT. Accepts either "
+            "PROMPT, which auto-selects the lower-numbered duplicated rigid "
+            "object, or SOURCE_UID PROMPT for explicit selection."
         ),
     )
     parser.add_argument(
         "--target_replacement2",
         "--target-replacement2",
-        nargs=2,
-        metavar=("SOURCE_UID", "PROMPT"),
+        nargs="+",
+        metavar="SOURCE_OR_PROMPT",
         default=None,
         help=(
-            "Generate <gym_project>/mesh_assets/new2 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config. SOURCE_UID may be "
-            "an actual rigid object uid or an indexed alias such as bread2."
+            "Generate <gym_project>/mesh_assets/new2 from PROMPT. Accepts either "
+            "PROMPT, which auto-selects the higher-numbered duplicated rigid "
+            "object, or SOURCE_UID PROMPT for explicit selection."
         ),
     )
     parser.add_argument(
@@ -744,12 +744,12 @@ def _resolve_target_replacements(
     replacements = []
     alias_config = None
     if args.target_replacement1:
-        source_uid, prompt = args.target_replacement1
         alias_config = alias_config or _load_replacement_alias_config(gym_project)
-        source_uid = _resolve_replacement_source_uid(
-            source_uid,
+        source_uid, prompt = _resolve_target_replacement_arg(
+            args.target_replacement1,
             alias_config,
             option_name="--target_replacement1",
+            replacement_number=1,
         )
         replacements.append(
             target_replacement_spec_cls(
@@ -759,12 +759,12 @@ def _resolve_target_replacements(
             )
         )
     if args.target_replacement2:
-        source_uid, prompt = args.target_replacement2
         alias_config = alias_config or _load_replacement_alias_config(gym_project)
-        source_uid = _resolve_replacement_source_uid(
-            source_uid,
+        source_uid, prompt = _resolve_target_replacement_arg(
+            args.target_replacement2,
             alias_config,
             option_name="--target_replacement2",
+            replacement_number=2,
         )
         replacements.append(
             target_replacement_spec_cls(
@@ -774,6 +774,42 @@ def _resolve_target_replacements(
             )
         )
     return replacements
+
+
+def _resolve_target_replacement_arg(
+    values: list[str],
+    gym_config: dict[str, Any],
+    *,
+    option_name: str,
+    replacement_number: int,
+) -> tuple[str, str]:
+    if len(values) == 1:
+        prompt = str(values[0]).strip()
+        if not prompt:
+            raise ValueError(f"{option_name} prompt must be non-empty.")
+        source_uid = _auto_replacement_source_uid(
+            gym_config,
+            replacement_number=replacement_number,
+            option_name=option_name,
+        )
+        return source_uid, prompt
+
+    if len(values) == 2:
+        source_uid, prompt = values
+        prompt = str(prompt).strip()
+        if not prompt:
+            raise ValueError(f"{option_name} prompt must be non-empty.")
+        source_uid = _resolve_replacement_source_uid(
+            source_uid,
+            gym_config,
+            option_name=option_name,
+        )
+        return source_uid, prompt
+
+    raise ValueError(
+        f"{option_name} expects either PROMPT or SOURCE_UID PROMPT, got "
+        f"{len(values)} values: {values!r}. Quote multi-word prompts."
+    )
 
 
 def _load_replacement_alias_config(gym_project: Path) -> dict[str, Any]:
@@ -801,6 +837,103 @@ def _resolve_replacement_alias_gym_config(input_path: Path) -> Path:
     if sibling_gym_config.is_file():
         return sibling_gym_config.resolve()
     return source_config
+
+
+def _auto_replacement_source_uid(
+    gym_config: dict[str, Any],
+    *,
+    replacement_number: int,
+    option_name: str,
+) -> str:
+    if replacement_number not in {1, 2}:
+        raise ValueError(f"Unsupported replacement number: {replacement_number}")
+
+    duplicate_groups = _duplicated_numbered_rigid_object_groups(gym_config)
+    if len(duplicate_groups) != 1:
+        candidates = _format_duplicate_group_candidates(duplicate_groups)
+        raise ValueError(
+            f"{option_name} was given without an explicit source uid, so the "
+            "pipeline expected exactly one duplicated numbered rigid_object "
+            f"group in gym_config.json. Found {len(duplicate_groups)} group(s): "
+            f"{candidates}. Use SOURCE_UID PROMPT to disambiguate."
+        )
+
+    base_name, numbered_objects = duplicate_groups[0]
+    if len(numbered_objects) != 2:
+        candidates = _format_duplicate_group_candidates(duplicate_groups)
+        raise ValueError(
+            f"{option_name} auto-selection requires exactly two objects in the "
+            f"duplicated group {base_name!r}, found {len(numbered_objects)}: "
+            f"{candidates}. Use SOURCE_UID PROMPT to disambiguate."
+        )
+
+    selected = numbered_objects[replacement_number - 1]
+    source_uid = selected["object"]["uid"]
+    print(
+        f"Resolved {option_name} auto source -> {source_uid!r} "
+        f"from duplicated rigid_object group {base_name!r}",
+        flush=True,
+    )
+    return source_uid
+
+
+def _duplicated_numbered_rigid_object_groups(
+    gym_config: dict[str, Any],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for obj in _rigid_objects(gym_config):
+        parsed = _parse_numbered_rigid_object_uid(obj["uid"])
+        if parsed is None:
+            continue
+        base_name, number = parsed
+        grouped.setdefault(base_name, []).append(
+            {
+                "number": number,
+                "object": obj,
+            }
+        )
+
+    duplicate_groups = []
+    for base_name, entries in grouped.items():
+        if len(entries) < 2:
+            continue
+        duplicate_groups.append(
+            (
+                base_name,
+                sorted(
+                    entries,
+                    key=lambda entry: (
+                        int(entry["number"]),
+                        str(entry["object"]["uid"]),
+                    ),
+                ),
+            )
+        )
+    return sorted(duplicate_groups, key=lambda item: item[0])
+
+
+def _parse_numbered_rigid_object_uid(uid: str) -> tuple[str, int] | None:
+    match = re.match(r"^(?P<base>.+?)[_-]?(?P<number>[0-9]+)$", uid)
+    if match is None:
+        return None
+    base_name = match.group("base").strip("_-")
+    if not base_name:
+        return None
+    return base_name, int(match.group("number"))
+
+
+def _format_duplicate_group_candidates(
+    groups: list[tuple[str, list[dict[str, Any]]]],
+) -> str:
+    if not groups:
+        return "<none>"
+    parts = []
+    for base_name, entries in groups:
+        values = ", ".join(
+            f"{entry['object']['uid']}#{entry['number']}" for entry in entries
+        )
+        parts.append(f"{base_name}: {values}")
+    return "; ".join(parts)
 
 
 def _resolve_replacement_source_uid(
@@ -1060,7 +1193,7 @@ def _target_replacement_records(
             ("new1", args.target_replacement1),
             ("new2", args.target_replacement2),
         )
-        if replacement
+        if replacement and len(replacement) == 2
     }
     records = []
     for replacement in target_replacements:
