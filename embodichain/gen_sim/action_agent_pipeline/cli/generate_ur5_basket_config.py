@@ -89,8 +89,8 @@ def cli() -> None:
         type=float,
         default=0.7,
         help=(
-            "Uniform body_scale for every generated non-table object, e.g. "
-            "0.5, 0.6, or 1.0."
+            "Uniform body_scale for generated target objects. Basket-like "
+            "containers keep their source body_scale."
         ),
     )
     parser.add_argument(

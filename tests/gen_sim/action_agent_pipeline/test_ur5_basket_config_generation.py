@@ -50,7 +50,7 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
     assert rigid_objects["left_apple"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
-    assert rigid_objects["wicker_basket"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
     assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.4]
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
@@ -127,7 +127,7 @@ def test_task_description_generates_relative_left_of_config(
     assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
     assert rigid_objects["apple_2"]["body_scale"] == [0.5, 0.5, 0.5]
     assert rigid_objects["apple_1"]["body_scale"] == [0.5, 0.5, 0.5]
-    assert rigid_objects["wicker_basket"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
 
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -237,7 +237,7 @@ def test_task_description_on_object_uses_object_on_object_success(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     assert rigid_objects["apple_2"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["apple_1"]["body_scale"] == [0.6, 0.6, 0.6]
-    assert rigid_objects["wicker_basket"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["type"] == "object_on_object"

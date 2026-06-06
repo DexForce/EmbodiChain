@@ -100,6 +100,10 @@ _ON_RELEASE_Z_OFFSET = 0.14
 _DUAL_UR5_LEGACY_INIT_Z = 0.4
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
 _DUAL_UR5_TABLETOP_Z_OFFSET = 0.19
+_BACKGROUND_MAX_CONVEX_HULL_NUM = 1
+_TARGET_MAX_CONVEX_HULL_NUM = 4
+_CONTAINER_MAX_CONVEX_HULL_NUM = 8
+_EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
 
 _BACKGROUND_ATTRS = {
     "mass": 10.0,
@@ -198,8 +202,8 @@ def generate_ur5_basket_config_from_project(
             config-level task spec and generates prompts from that spec.
         use_llm_roles: If true, use an LLM only to refine object role mapping.
         llm_model: Optional model override for role refinement.
-        target_body_scale: Uniform or xyz scale applied to generated non-table
-            scene objects. Use ``1.0`` to keep source-sized objects.
+        target_body_scale: Uniform or xyz scale applied to generated target
+            objects. Basket-like containers keep their source ``body_scale``.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -918,6 +922,7 @@ def _build_ur5_basket_bundle(
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     object_scale = _target_body_scale_vector(target_body_scale)
+    container_scale = _source_body_scale(by_uid[roles.container_source_uid])
     task_source_uids = {
         roles.container_source_uid,
         roles.left_target_source_uid,
@@ -972,7 +977,7 @@ def _build_ur5_basket_bundle(
                 scene_dir,
                 by_uid[roles.container_source_uid],
                 roles.container_runtime_uid,
-                object_scale,
+                container_scale,
             ),
             *[
                 _make_extra_rigid_object_config(scene_dir, obj, object_scale)
@@ -1042,7 +1047,14 @@ def _build_relative_placement_bundle(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=object_scale,
+                body_scale=_relative_object_body_scale(
+                    obj,
+                    target_scale=object_scale,
+                ),
+                max_convex_hull_num=_relative_rigid_object_max_convex_hull_num(
+                    runtime_uids[obj.source_uid],
+                    spec,
+                ),
             )
             for obj in rigid_objects
         ],
@@ -1071,6 +1083,25 @@ def _target_body_scale_vector(
         value = float(target_body_scale)
         return [value, value, value]
     return _clean_vector3(target_body_scale)
+
+
+def _source_body_scale(obj: _SceneObject) -> list[float]:
+    return _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0]))
+
+
+def _relative_object_body_scale(
+    obj: _SceneObject,
+    *,
+    target_scale: list[float],
+) -> list[float]:
+    if _is_container_object(obj):
+        return _source_body_scale(obj)
+    return target_scale
+
+
+def _is_container_object(obj: _SceneObject) -> bool:
+    text = _object_text(obj)
+    return any(keyword in text for keyword in _CONTAINER_KEYWORDS)
 
 
 def _estimate_dual_ur5_init_z(scene_objects: list[_SceneObject]) -> float:
@@ -1670,6 +1701,10 @@ def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any
         "body_type": "kinematic",
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
+        "max_convex_hull_num": _role_limited_max_convex_hull_num(
+            obj,
+            _BACKGROUND_MAX_CONVEX_HULL_NUM,
+        ),
     }
 
 
@@ -1690,9 +1725,11 @@ def _make_extra_background_config(
         "body_type": str(obj.config.get("body_type", "static")),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
+        "max_convex_hull_num": _role_limited_max_convex_hull_num(
+            obj,
+            _BACKGROUND_MAX_CONVEX_HULL_NUM,
+        ),
     }
-    if "max_convex_hull_num" in obj.config:
-        config["max_convex_hull_num"] = int(obj.config["max_convex_hull_num"])
     return config
 
 
@@ -1702,7 +1739,16 @@ def _make_target_object_config(
     runtime_uid: str,
     target_scale: list[float],
 ) -> dict[str, Any]:
-    return _make_rigid_object_config(scene_dir, obj, runtime_uid, target_scale)
+    return _make_rigid_object_config(
+        scene_dir,
+        obj,
+        runtime_uid,
+        target_scale,
+        max_convex_hull_num=_role_limited_max_convex_hull_num(
+            obj,
+            _TARGET_MAX_CONVEX_HULL_NUM,
+        ),
+    )
 
 
 def _make_container_object_config(
@@ -1711,7 +1757,16 @@ def _make_container_object_config(
     runtime_uid: str,
     body_scale: Any,
 ) -> dict[str, Any]:
-    return _make_rigid_object_config(scene_dir, obj, runtime_uid, body_scale)
+    return _make_rigid_object_config(
+        scene_dir,
+        obj,
+        runtime_uid,
+        body_scale,
+        max_convex_hull_num=_role_limited_max_convex_hull_num(
+            obj,
+            _CONTAINER_MAX_CONVEX_HULL_NUM,
+        ),
+    )
 
 
 def _make_extra_rigid_object_config(
@@ -1724,6 +1779,10 @@ def _make_extra_rigid_object_config(
         obj,
         _normalize_runtime_uid(obj.source_uid),
         body_scale,
+        max_convex_hull_num=_role_limited_max_convex_hull_num(
+            obj,
+            _EXTRA_RIGID_MAX_CONVEX_HULL_NUM,
+        ),
     )
 
 
@@ -1733,8 +1792,18 @@ def _make_relative_rigid_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
+    max_convex_hull_num: int,
 ) -> dict[str, Any]:
-    return _make_rigid_object_config(scene_dir, obj, runtime_uid, body_scale)
+    return _make_rigid_object_config(
+        scene_dir,
+        obj,
+        runtime_uid,
+        body_scale,
+        max_convex_hull_num=_role_limited_max_convex_hull_num(
+            obj,
+            max_convex_hull_num,
+        ),
+    )
 
 
 def _make_rigid_object_config(
@@ -1742,6 +1811,7 @@ def _make_rigid_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
+    max_convex_hull_num: int,
 ) -> dict[str, Any]:
     config = {
         "uid": runtime_uid,
@@ -1750,11 +1820,32 @@ def _make_rigid_object_config(
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
         "body_scale": _clean_vector3(body_scale),
-        "max_convex_hull_num": int(obj.config.get("max_convex_hull_num", 8)),
+        "max_convex_hull_num": int(max_convex_hull_num),
     }
     if "body_type" in obj.config:
         config["body_type"] = str(obj.config["body_type"])
     return config
+
+
+def _role_limited_max_convex_hull_num(
+    obj: _SceneObject,
+    role_max_convex_hull_num: int,
+) -> int:
+    source_max_convex_hull_num = obj.config.get("max_convex_hull_num")
+    if source_max_convex_hull_num is None:
+        return role_max_convex_hull_num
+    return max(1, min(int(source_max_convex_hull_num), role_max_convex_hull_num))
+
+
+def _relative_rigid_object_max_convex_hull_num(
+    runtime_uid: str,
+    spec: _RelativePlacementSpec,
+) -> int:
+    if spec.relation == "inside" and runtime_uid == spec.reference_runtime_uid:
+        return _CONTAINER_MAX_CONVEX_HULL_NUM
+    if runtime_uid in {spec.moved_runtime_uid, spec.reference_runtime_uid}:
+        return _TARGET_MAX_CONVEX_HULL_NUM
+    return _EXTRA_RIGID_MAX_CONVEX_HULL_NUM
 
 
 def _make_shape_config(

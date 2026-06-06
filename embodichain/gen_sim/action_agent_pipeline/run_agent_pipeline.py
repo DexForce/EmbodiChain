@@ -138,7 +138,10 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="target_body_scale",
         type=float,
         default=0.8,
-        help="Uniform body_scale for generated non-table objects. Defaults to 0.8.",
+        help=(
+            "Uniform body_scale for generated target objects. Basket-like "
+            "containers keep their source body_scale. Defaults to 0.8."
+        ),
     )
     parser.add_argument(
         "--poll-interval",
