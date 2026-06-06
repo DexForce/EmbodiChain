@@ -289,7 +289,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new1 from PROMPT. Accepts either "
-            "PROMPT, which auto-selects the lower-numbered duplicated rigid "
+            "PROMPT, which auto-selects the lower-y duplicated rigid "
             "object, or SOURCE_UID PROMPT for explicit selection."
         ),
     )
@@ -301,7 +301,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new2 from PROMPT. Accepts either "
-            "PROMPT, which auto-selects the higher-numbered duplicated rigid "
+            "PROMPT, which auto-selects the higher-y duplicated rigid "
             "object, or SOURCE_UID PROMPT for explicit selection."
         ),
     )
@@ -858,20 +858,28 @@ def _auto_replacement_source_uid(
             f"{candidates}. Use SOURCE_UID PROMPT to disambiguate."
         )
 
-    base_name, numbered_objects = duplicate_groups[0]
-    if len(numbered_objects) != 2:
+    base_name, positioned_objects = duplicate_groups[0]
+    if len(positioned_objects) != 2:
         candidates = _format_duplicate_group_candidates(duplicate_groups)
         raise ValueError(
             f"{option_name} auto-selection requires exactly two objects in the "
-            f"duplicated group {base_name!r}, found {len(numbered_objects)}: "
+            f"duplicated group {base_name!r}, found {len(positioned_objects)}: "
             f"{candidates}. Use SOURCE_UID PROMPT to disambiguate."
         )
 
-    selected = numbered_objects[replacement_number - 1]
+    if abs(float(positioned_objects[0]["y"]) - float(positioned_objects[1]["y"])) < 1e-9:
+        candidates = _format_duplicate_group_candidates(duplicate_groups)
+        raise ValueError(
+            f"{option_name} auto-selection requires distinct y coordinates in "
+            f"duplicated group {base_name!r}: {candidates}. Use SOURCE_UID PROMPT "
+            "to disambiguate."
+        )
+
+    selected = positioned_objects[replacement_number - 1]
     source_uid = selected["object"]["uid"]
     print(
         f"Resolved {option_name} auto source -> {source_uid!r} "
-        f"from duplicated rigid_object group {base_name!r}",
+        f"from duplicated rigid_object group {base_name!r} by y={selected['y']}",
         flush=True,
     )
     return source_uid
@@ -889,6 +897,7 @@ def _duplicated_numbered_rigid_object_groups(
         grouped.setdefault(base_name, []).append(
             {
                 "number": number,
+                "y": _rigid_object_y_coordinate(obj),
                 "object": obj,
             }
         )
@@ -903,7 +912,7 @@ def _duplicated_numbered_rigid_object_groups(
                 sorted(
                     entries,
                     key=lambda entry: (
-                        int(entry["number"]),
+                        float(entry["y"]),
                         str(entry["object"]["uid"]),
                     ),
                 ),
@@ -922,6 +931,22 @@ def _parse_numbered_rigid_object_uid(uid: str) -> tuple[str, int] | None:
     return base_name, int(match.group("number"))
 
 
+def _rigid_object_y_coordinate(obj: dict[str, Any]) -> float:
+    init_pos = obj.get("init_pos")
+    if not isinstance(init_pos, (list, tuple)) or len(init_pos) < 2:
+        raise ValueError(
+            "Auto replacement source selection requires each duplicated "
+            f"rigid_object to define init_pos with a y value, got {obj.get('uid')!r}."
+        )
+    try:
+        return float(init_pos[1])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Auto replacement source selection requires numeric init_pos[1], "
+            f"got {obj.get('uid')!r}: {init_pos[1]!r}"
+        ) from exc
+
+
 def _format_duplicate_group_candidates(
     groups: list[tuple[str, list[dict[str, Any]]]],
 ) -> str:
@@ -930,7 +955,8 @@ def _format_duplicate_group_candidates(
     parts = []
     for base_name, entries in groups:
         values = ", ".join(
-            f"{entry['object']['uid']}#{entry['number']}" for entry in entries
+            f"{entry['object']['uid']}#number={entry['number']},y={entry['y']}"
+            for entry in entries
         )
         parts.append(f"{base_name}: {values}")
     return "; ".join(parts)
