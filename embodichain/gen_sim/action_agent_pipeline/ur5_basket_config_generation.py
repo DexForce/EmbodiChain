@@ -1643,30 +1643,14 @@ def _make_relative_events_config(
             "mode": "interval",
             "interval_step": 1,
             "params": {
-                "name": "cam1",
-                "resolution": [320, 240],
-                "eye": [0.0, -1.8, 1.45],
-                "target": [0.0, 0.0, 0.72],
+                "sensor_uid": "cam_high",
             },
         },
         "validation_cameras": {
             "func": "validation_cameras",
             "mode": "trigger",
             "params": {
-                "cameras": [
-                    _validation_camera(
-                        "valid_cam_front",
-                        eye=[0.0, -1.8, 1.45],
-                    ),
-                    _validation_camera(
-                        "valid_cam_left",
-                        eye=[-1.4, -0.7, 1.35],
-                    ),
-                    _validation_camera(
-                        "valid_cam_right",
-                        eye=[1.4, -0.7, 1.35],
-                    ),
-                ]
+                "sensor_uids": ["cam_high"],
             },
         },
         "prepare_extra_attr": {
@@ -1721,30 +1705,14 @@ def _make_events_config(roles: _BasketTaskRoles) -> dict[str, Any]:
             "mode": "interval",
             "interval_step": 1,
             "params": {
-                "name": "cam1",
-                "resolution": [320, 240],
-                "eye": [0.0, -1.8, 1.45],
-                "target": [0.0, 0.0, 0.72],
+                "sensor_uid": "cam_high",
             },
         },
         "validation_cameras": {
             "func": "validation_cameras",
             "mode": "trigger",
             "params": {
-                "cameras": [
-                    _validation_camera(
-                        "valid_cam_front",
-                        eye=[0.0, -1.8, 1.45],
-                    ),
-                    _validation_camera(
-                        "valid_cam_left",
-                        eye=[-1.4, -0.7, 1.35],
-                    ),
-                    _validation_camera(
-                        "valid_cam_right",
-                        eye=[1.4, -0.7, 1.35],
-                    ),
-                ]
+                "sensor_uids": ["cam_high"],
             },
         },
         "prepare_extra_attr": {
@@ -1793,20 +1761,6 @@ def _make_events_config(roles: _BasketTaskRoles) -> dict[str, Any]:
                 "registration": "affordance_datas",
                 "sim_update": True,
             },
-        },
-    }
-
-
-def _validation_camera(uid: str, *, eye: list[float]) -> dict[str, Any]:
-    return {
-        "uid": uid,
-        "width": 1280,
-        "height": 960,
-        "enable_mask": False,
-        "intrinsics": [1400, 1400, 640, 480],
-        "extrinsics": {
-            "eye": eye,
-            "target": [0.0, 0.0, 0.72],
         },
     }
 

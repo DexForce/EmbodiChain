@@ -30,6 +30,22 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
+def _get_existing_camera(env: EmbodiedEnv, sensor_uid: str) -> Camera:
+    camera = env.sim.get_sensor(sensor_uid)
+    if camera is None:
+        raise ValueError(f"Camera sensor '{sensor_uid}' does not exist.")
+    if not isinstance(camera, Camera):
+        raise TypeError(f"Sensor '{sensor_uid}' is not a Camera.")
+    return camera
+
+
+def _add_camera_group_id_once(env: EmbodiedEnv, group_id: int) -> None:
+    group_ids = getattr(env, "_camera_group_ids", None)
+    if group_ids is not None and group_id in group_ids:
+        return
+    env.add_camera_group_id(group_id)
+
+
 class record_camera_data(Functor):
     """Record camera data in the environment. The camera is usually setup with third-person view, and
     is used to record the scene during the episode. It is helpful for debugging and visualization.
@@ -59,28 +75,33 @@ class record_camera_data(Functor):
         """
         super().__init__(cfg, env)
 
-        # extract the used quantities (to enable type-hinting)
-        self._name = cfg.params.get("name", "default")
-        resolution = cfg.params.get("resolution", (640, 480))
-        eye = cfg.params.get("eye", (0, 0, 2))
-        target = cfg.params.get("target", (0, 0, 0))
-        up = cfg.params.get("up", (0, 0, 1))
-        intrinsics = cfg.params.get(
-            "intrinsics", (600, 600, int(resolution[0] / 2), int(resolution[1] / 2))
-        )
-
-        self.camera: Camera = env.sim.add_sensor(
-            sensor_cfg=CameraCfg(
-                uid=self._name,
-                width=resolution[0],
-                height=resolution[1],
-                extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target, up=up),
-                intrinsics=intrinsics,
+        sensor_uid = cfg.params.get("sensor_uid")
+        self._name = cfg.params.get("name", sensor_uid or "default")
+        if sensor_uid is not None:
+            self.camera = _get_existing_camera(env, sensor_uid)
+        else:
+            # extract the used quantities (to enable type-hinting)
+            resolution = cfg.params.get("resolution", (640, 480))
+            eye = cfg.params.get("eye", (0, 0, 2))
+            target = cfg.params.get("target", (0, 0, 0))
+            up = cfg.params.get("up", (0, 0, 1))
+            intrinsics = cfg.params.get(
+                "intrinsics",
+                (600, 600, int(resolution[0] / 2), int(resolution[1] / 2)),
             )
-        )
+
+            self.camera: Camera = env.sim.add_sensor(
+                sensor_cfg=CameraCfg(
+                    uid=self._name,
+                    width=resolution[0],
+                    height=resolution[1],
+                    extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target, up=up),
+                    intrinsics=intrinsics,
+                )
+            )
 
         # Add this camera's group ID to the environment for batch rendering when RT is enabled.
-        env.add_camera_group_id(self.camera.group_id)
+        _add_camera_group_id_once(env, self.camera.group_id)
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
         self._current_episode = 0
@@ -143,7 +164,7 @@ class record_camera_data(Functor):
         self,
         env: EmbodiedEnv,
         env_ids: Union[torch.Tensor, None],
-        name: str,
+        name: str = "default",
         resolution: tuple[int, int] = (640, 480),
         eye: tuple[float, float, float] = (0, 0, 2),
         target: tuple[float, float, float] = (0, 0, 0),
@@ -156,6 +177,7 @@ class record_camera_data(Functor):
         ),
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
+        sensor_uid: str | None = None,
     ):
         self.camera.update(fetch_only=True)
         data = self.camera.get_data()
@@ -259,6 +281,16 @@ class validation_cameras(Functor):
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
+        sensor_uids = cfg.params.get("sensor_uids")
+        if isinstance(sensor_uids, str):
+            sensor_uids = [sensor_uids]
+        if sensor_uids is not None:
+            self.camera_uids = []
+            for sensor_uid in sensor_uids:
+                _get_existing_camera(env, sensor_uid)
+                self.camera_uids.append(sensor_uid)
+            return
+
         # Store camera configurations
         self.cameras_cfg = cfg.params.get("cameras", [])
         # Create each camera in __init__
@@ -289,6 +321,8 @@ class validation_cameras(Functor):
         self,
         env: EmbodiedEnv,
         env_ids: Union[torch.Tensor, None],
+        cameras: list[dict] | None = None,
+        sensor_uids: list[str] | str | None = None,
     ):
         """Update cameras and return their data."""
         camera_data = {}
