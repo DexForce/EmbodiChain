@@ -430,6 +430,29 @@ def _public_grasp_cache_path(mesh_vertices, mesh_triangles):
     return os.path.join(GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{md5_hash}.npy")
 
 
+def _rigid_object_mesh_path(obj) -> str | None:
+    shape = getattr(getattr(obj, "cfg", None), "shape", None)
+    fpath = getattr(shape, "fpath", None)
+    return str(fpath) if fpath else None
+
+
+def _rigid_object_body_scale(obj) -> list[float] | None:
+    body_scale = obj.get_body_scale(env_ids=[0])[0]
+    return body_scale.detach().to("cpu", dtype=torch.float32).tolist()
+
+
+def _public_grasp_max_decomposition_hulls(target_obj, kwargs: dict) -> int:
+    if "grasp_max_decomposition_hulls" in kwargs:
+        return int(kwargs["grasp_max_decomposition_hulls"])
+
+    max_convex_hull_num = getattr(
+        getattr(target_obj, "cfg", None), "max_convex_hull_num", None
+    )
+    if max_convex_hull_num is not None and int(max_convex_hull_num) > 1:
+        return int(max_convex_hull_num)
+    return 8
+
+
 def _build_public_grasp_semantics(env, obj_name: str, kwargs: dict):
     """Build ObjectSemantics for tutorial-style AntipodalAffordance grasp."""
     target_obj = env.sim.get_rigid_object(obj_name)
@@ -486,6 +509,7 @@ def _build_public_grasp_semantics(env, obj_name: str, kwargs: dict):
             },
         )
     )
+    max_decomposition_hulls = _public_grasp_max_decomposition_hulls(target_obj, kwargs)
     gripper_collision_cfg = GripperCollisionCfg(
         **_cfg_supported_kwargs(
             GripperCollisionCfg,
@@ -493,9 +517,9 @@ def _build_public_grasp_semantics(env, obj_name: str, kwargs: dict):
                 "max_open_length": kwargs.get("grasp_max_open_length", 0.088),
                 "finger_length": kwargs.get("grasp_finger_length", 0.078),
                 "point_sample_dense": kwargs.get("grasp_point_sample_dense", 0.012),
-                "max_decomposition_hulls": int(
-                    kwargs.get("grasp_max_decomposition_hulls", 8)
-                ),
+                "max_decomposition_hulls": max_decomposition_hulls,
+                "env_coacd_source_mesh_path": _rigid_object_mesh_path(target_obj),
+                "env_coacd_body_scale": _rigid_object_body_scale(target_obj),
             },
         )
     )

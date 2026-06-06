@@ -24,13 +24,13 @@ import os
 import pickle
 import open3d as o3d
 
-from typing import List, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 from dexsim.kit.meshproc import convex_decomposition_coacd
 
 from embodichain.utils.warp import convex_signed_distance_kernel
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.math import transform_points_mat
-from embodichain.utils import configclass
+from embodichain.utils import configclass, logger
 
 __all__ = ["ConvexCollisionCheckerCfg", "ConvexCollisionChecker"]
 
@@ -57,6 +57,8 @@ class ConvexCollisionChecker:
         base_mesh_verts: torch.Tensor,
         base_mesh_faces: torch.Tensor,
         max_decomposition_hulls: int = 32,
+        env_coacd_source_mesh_path: str | os.PathLike | None = None,
+        env_coacd_body_scale: Sequence[float] | None = None,
     ):
         """Initialize the ConvexCollisionChecker by performing convex decomposition on the input mesh and extracting plane equations for the convex hulls. The plane equations are cached to disk to avoid redundant computation in future runs.
 
@@ -64,6 +66,8 @@ class ConvexCollisionChecker:
             base_mesh_verts: [N, 3] vertex positions of the input mesh.
             base_mesh_faces: [M, 3] triangle indices of the input mesh.
             max_decomposition_hulls: maximum number of convex hulls to decompose into. A higher number allows for a more accurate approximation of the original mesh but increases computation time and memory usage. The optimal number may depend on the complexity of the mesh and the required precision of collision checking.
+            env_coacd_source_mesh_path: Original mesh path used to derive the environment-side CoACD cache. If provided, the checker first tries to reuse the matching ``<file_md5>_<hull>.obj`` before running CoACD.
+            env_coacd_body_scale: Body scale applied to the reused environment-side CoACD mesh so it matches ``base_mesh_verts``.
         """
         from embodichain.lab.sim import CONVEX_DECOMP_DIR
 
@@ -88,39 +92,22 @@ class ConvexCollisionChecker:
         )
 
         if not os.path.isfile(self.cache_path):
-            # [n_convex, n_max_faces, 4]: plane equations, normals(3) and offsets(1), padded with zeros if a hull has less than n_max_faces
-            # [n_convex, ]: number of faces for each convex hull
+            plane_equations_np = ConvexCollisionChecker._load_env_coacd_plane_equations(
+                env_coacd_source_mesh_path,
+                CONVEX_DECOMP_DIR,
+                max_decomposition_hulls,
+                env_coacd_body_scale,
+            )
 
-            # generate convex hulls and extract plane equations, then cache to disk
-            plane_equations_np = ConvexCollisionChecker._compute_plane_equations(
-                base_mesh_verts_np, base_mesh_faces_np, max_decomposition_hulls
-            )
-            # pack as a single tensor
-            n_convex = len(plane_equations_np)
-            n_max_equation = max(len(normals) for normals, _ in plane_equations_np)
-            plane_equations = torch.zeros(
-                size=(n_convex, n_max_equation, 4),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            plane_equations_counts = torch.zeros(
-                n_convex, dtype=torch.int32, device=self.device
-            )
-            for i in range(n_convex):
-                n_equation = plane_equations_np[i][0].shape[0]
-                # plane normals
-                plane_equations[i, :n_equation, :3] = torch.tensor(
-                    plane_equations_np[i][0], device=self.device
+            if plane_equations_np is None:
+                # Generate convex hulls and extract plane equations, then cache to disk.
+                plane_equations_np = ConvexCollisionChecker._compute_plane_equations(
+                    base_mesh_verts_np, base_mesh_faces_np, max_decomposition_hulls
                 )
-                # plane offsets
-                plane_equations[i, :n_equation, 3] = torch.tensor(
-                    plane_equations_np[i][1], device=self.device
-                )
-                plane_equations_counts[i] = n_equation
-            self.plane_equations = {
-                "plane_equations": plane_equations,
-                "plane_equation_counts": plane_equations_counts,
-            }
+
+            self.plane_equations = ConvexCollisionChecker._pack_plane_equations(
+                plane_equations_np, self.device
+            )
             pickle.dump(self.plane_equations, open(self.cache_path, "wb"))
         else:
             self.plane_equations = pickle.load(open(self.cache_path, "rb"))
@@ -130,6 +117,170 @@ class ConvexCollisionChecker:
             self.plane_equations["plane_equation_counts"] = self.plane_equations[
                 "plane_equation_counts"
             ].to(self.device)
+
+    @staticmethod
+    def _pack_plane_equations(
+        plane_equations_np: List[Tuple[np.ndarray, np.ndarray]],
+        device: torch.device,
+    ) -> dict[str, torch.Tensor]:
+        # [n_convex, n_max_faces, 4]: normals(3) and offsets(1), padded with zeros.
+        # [n_convex, ]: number of faces for each convex hull.
+        n_convex = len(plane_equations_np)
+        n_max_equation = max(len(normals) for normals, _ in plane_equations_np)
+        plane_equations = torch.zeros(
+            size=(n_convex, n_max_equation, 4),
+            dtype=torch.float32,
+            device=device,
+        )
+        plane_equation_counts = torch.zeros(n_convex, dtype=torch.int32, device=device)
+        for i in range(n_convex):
+            n_equation = plane_equations_np[i][0].shape[0]
+            plane_equations[i, :n_equation, :3] = torch.tensor(
+                plane_equations_np[i][0], device=device
+            )
+            plane_equations[i, :n_equation, 3] = torch.tensor(
+                plane_equations_np[i][1], device=device
+            )
+            plane_equation_counts[i] = n_equation
+        return {
+            "plane_equations": plane_equations,
+            "plane_equation_counts": plane_equation_counts,
+        }
+
+    @staticmethod
+    def _load_env_coacd_plane_equations(
+        source_mesh_path: str | os.PathLike | None,
+        cache_dir: str | os.PathLike,
+        max_decomposition_hulls: int,
+        body_scale: Sequence[float] | None,
+    ) -> List[Tuple[np.ndarray, np.ndarray]] | None:
+        env_coacd_cache_path = ConvexCollisionChecker._env_coacd_cache_path(
+            source_mesh_path, cache_dir, max_decomposition_hulls
+        )
+        if env_coacd_cache_path is None or not os.path.isfile(env_coacd_cache_path):
+            return None
+
+        try:
+            convex_meshes = ConvexCollisionChecker._load_convex_meshes_from_obj(
+                env_coacd_cache_path, body_scale
+            )
+            if not convex_meshes:
+                return None
+            logger.log_info(
+                "Reusing environment CoACD cache for grasp collision: "
+                f"{env_coacd_cache_path}"
+            )
+            return extract_plane_equations(convex_meshes)
+        except Exception as exc:
+            logger.log_warning(
+                "Failed to reuse environment CoACD cache for grasp collision "
+                f"({env_coacd_cache_path}): {exc}. Falling back to CoACD."
+            )
+            return None
+
+    @staticmethod
+    def _env_coacd_cache_path(
+        source_mesh_path: str | os.PathLike | None,
+        cache_dir: str | os.PathLike,
+        max_decomposition_hulls: int,
+    ) -> str | None:
+        if source_mesh_path is None:
+            return None
+        source_mesh_path = os.fspath(source_mesh_path)
+        if not os.path.isfile(source_mesh_path):
+            return None
+
+        with open(source_mesh_path, "rb") as f:
+            mesh_md5_key = hashlib.md5(f.read()).hexdigest()
+        return os.path.join(
+            os.fspath(cache_dir), f"{mesh_md5_key}_{max_decomposition_hulls}.obj"
+        )
+
+    @staticmethod
+    def _load_convex_meshes_from_obj(
+        obj_path: str | os.PathLike,
+        body_scale: Sequence[float] | None,
+    ) -> List[Tuple[np.ndarray, np.ndarray]]:
+        vertices: list[list[float]] = []
+        object_faces: list[list[list[int]]] = []
+        current_faces: list[list[int]] = []
+
+        with open(obj_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith(("o ", "g ")):
+                    if current_faces:
+                        object_faces.append(current_faces)
+                        current_faces = []
+                    continue
+                if line.startswith("v "):
+                    parts = line.split()
+                    if len(parts) < 4:
+                        continue
+                    vertices.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    continue
+                if line.startswith("f "):
+                    face = [
+                        ConvexCollisionChecker._parse_obj_vertex_index(
+                            token, len(vertices)
+                        )
+                        for token in line.split()[1:]
+                    ]
+                    face = [idx for idx in face if idx is not None]
+                    if len(face) < 3:
+                        continue
+                    for i in range(1, len(face) - 1):
+                        current_faces.append([face[0], face[i], face[i + 1]])
+
+        if current_faces:
+            object_faces.append(current_faces)
+        if not vertices or not object_faces:
+            return []
+
+        vertices_np = np.asarray(vertices, dtype=np.float32)
+        scale_np = ConvexCollisionChecker._clean_body_scale(body_scale)
+        convex_meshes = []
+        for faces in object_faces:
+            unique_indices = sorted({idx for face in faces for idx in face})
+            if len(unique_indices) < 4:
+                continue
+            remap = {
+                global_idx: local_idx
+                for local_idx, global_idx in enumerate(unique_indices)
+            }
+            local_vertices = vertices_np[unique_indices].copy()
+            if scale_np is not None:
+                local_vertices *= scale_np
+            local_faces = np.asarray(
+                [[remap[idx] for idx in face] for face in faces],
+                dtype=np.int64,
+            )
+            if len(local_faces) > 0:
+                convex_meshes.append((local_vertices, local_faces))
+        return convex_meshes
+
+    @staticmethod
+    def _parse_obj_vertex_index(token: str, vertex_count: int) -> int | None:
+        raw_index = token.split("/", 1)[0]
+        if not raw_index:
+            return None
+        index = int(raw_index)
+        if index < 0:
+            return vertex_count + index
+        return index - 1
+
+    @staticmethod
+    def _clean_body_scale(body_scale: Sequence[float] | None) -> np.ndarray | None:
+        if body_scale is None:
+            return None
+        scale = np.asarray(body_scale, dtype=np.float32).reshape(-1)
+        if scale.size != 3:
+            return None
+        if np.allclose(scale, np.ones(3, dtype=np.float32)):
+            return None
+        return scale
 
     @staticmethod
     def batch_point_convex_query(

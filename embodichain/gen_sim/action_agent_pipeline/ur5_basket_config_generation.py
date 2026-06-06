@@ -105,7 +105,7 @@ _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
 _DUAL_UR5_TABLETOP_Z_OFFSET = 0.05
 _DUAL_UR5_SIDE_AXIS_INDEX = 1
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
-_TARGET_MAX_CONVEX_HULL_NUM = 4
+_TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
 
@@ -1899,16 +1899,16 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
         "init_pos": [-2.0, 0.0, float(robot_init_z)],
         "init_rot": [0.0, 0.0, 90.0],
         "init_qpos": [
-            0.0,
-            0.0,
+            -3.14,
+            -3.14,
+            -1.57,
+            -1.57,
             -1.57,
             -1.57,
             1.57,
             1.57,
-            1.57,
-            1.57,
-            1.57,
-            1.57,
+            -1.57,
+            -1.57,
             0.0,
             0.0,
             0.0,
@@ -2081,10 +2081,7 @@ def _make_target_object_config(
         obj,
         runtime_uid,
         target_scale,
-        max_convex_hull_num=_role_limited_max_convex_hull_num(
-            obj,
-            _TARGET_MAX_CONVEX_HULL_NUM,
-        ),
+        max_convex_hull_num=_TARGET_MAX_CONVEX_HULL_NUM,
         mesh_fpath=replacement.mesh_path if replacement else None,
     )
 
@@ -2132,15 +2129,19 @@ def _make_relative_rigid_object_config(
     body_scale: Any,
     max_convex_hull_num: int,
 ) -> dict[str, Any]:
+    if max_convex_hull_num == _TARGET_MAX_CONVEX_HULL_NUM:
+        resolved_max_convex_hull_num = max_convex_hull_num
+    else:
+        resolved_max_convex_hull_num = _role_limited_max_convex_hull_num(
+            obj,
+            max_convex_hull_num,
+        )
     return _make_rigid_object_config(
         scene_dir,
         obj,
         runtime_uid,
         body_scale,
-        max_convex_hull_num=_role_limited_max_convex_hull_num(
-            obj,
-            max_convex_hull_num,
-        ),
+        max_convex_hull_num=resolved_max_convex_hull_num,
     )
 
 

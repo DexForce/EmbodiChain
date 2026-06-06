@@ -81,6 +81,12 @@ class GripperCollisionCfg:
     uncertainties in the gripper pose or object geometry, and can be set based on the specific requirements of the application.
     """
 
+    env_coacd_source_mesh_path: str | None = None
+    """Original mesh path used by the environment-side CoACD cache."""
+
+    env_coacd_body_scale: Sequence[float] | None = None
+    """Body scale applied to the environment-side CoACD mesh before collision checks."""
+
 
 class GripperCollisionChecker:
     def __init__(
@@ -93,6 +99,8 @@ class GripperCollisionChecker:
             base_mesh_verts=object_mesh_verts,
             base_mesh_faces=object_mesh_faces,
             max_decomposition_hulls=cfg.max_decomposition_hulls,
+            env_coacd_source_mesh_path=cfg.env_coacd_source_mesh_path,
+            env_coacd_body_scale=cfg.env_coacd_body_scale,
         )
         self.obj_mesh_verts = object_mesh_verts
         self.device = object_mesh_verts.device
