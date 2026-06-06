@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -66,6 +67,9 @@ _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 _PIPELINE_HISTORY_SCHEMA_VERSION = 1
 _PIPELINE_MANIFEST_FILENAME = "pipeline_manifest.json"
+_INDEXED_REPLACEMENT_ALIAS_RE = re.compile(
+    r"^(?P<keyword>[A-Za-z][A-Za-z0-9 _-]*?)[ _-]?(?P<index>[0-9]+)$"
+)
 
 
 @dataclass(frozen=True)
@@ -285,7 +289,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new1 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config."
+            "to replace SOURCE_UID in the generated config. SOURCE_UID may be "
+            "an actual rigid object uid or an indexed alias such as bread1."
         ),
     )
     parser.add_argument(
@@ -296,7 +301,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new2 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config."
+            "to replace SOURCE_UID in the generated config. SOURCE_UID may be "
+            "an actual rigid object uid or an indexed alias such as bread2."
         ),
     )
     parser.add_argument(
@@ -733,10 +739,18 @@ def _path_from_history_entry(entry: dict[str, Any]) -> Path:
 def _resolve_target_replacements(
     args: argparse.Namespace,
     target_replacement_spec_cls: Callable[..., object],
+    gym_project: Path,
 ) -> list[object]:
     replacements = []
+    alias_config = None
     if args.target_replacement1:
         source_uid, prompt = args.target_replacement1
+        alias_config = alias_config or _load_replacement_alias_config(gym_project)
+        source_uid = _resolve_replacement_source_uid(
+            source_uid,
+            alias_config,
+            option_name="--target_replacement1",
+        )
         replacements.append(
             target_replacement_spec_cls(
                 source_uid=source_uid,
@@ -746,6 +760,12 @@ def _resolve_target_replacements(
         )
     if args.target_replacement2:
         source_uid, prompt = args.target_replacement2
+        alias_config = alias_config or _load_replacement_alias_config(gym_project)
+        source_uid = _resolve_replacement_source_uid(
+            source_uid,
+            alias_config,
+            option_name="--target_replacement2",
+        )
         replacements.append(
             target_replacement_spec_cls(
                 source_uid=source_uid,
@@ -756,11 +776,159 @@ def _resolve_target_replacements(
     return replacements
 
 
+def _load_replacement_alias_config(gym_project: Path) -> dict[str, Any]:
+    config_path = _resolve_replacement_alias_gym_config(gym_project)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Gym config must be a JSON object: {config_path}")
+    return data
+
+
+def _resolve_replacement_alias_gym_config(input_path: Path) -> Path:
+    input_path = input_path.expanduser().resolve()
+    if input_path.is_file():
+        sibling_gym_config = input_path.parent / "gym_config.json"
+        if sibling_gym_config.is_file():
+            return sibling_gym_config.resolve()
+        return _resolve_source_gym_config(input_path)
+
+    direct_gym_config = input_path / "gym_config.json"
+    if direct_gym_config.is_file():
+        return direct_gym_config.resolve()
+
+    source_config = _resolve_source_gym_config(input_path)
+    sibling_gym_config = source_config.parent / "gym_config.json"
+    if sibling_gym_config.is_file():
+        return sibling_gym_config.resolve()
+    return source_config
+
+
+def _resolve_replacement_source_uid(
+    source_input: str,
+    gym_config: dict[str, Any],
+    *,
+    option_name: str,
+) -> str:
+    source_input = str(source_input).strip()
+    rigid_objects = _rigid_objects(gym_config)
+    by_uid = {obj["uid"]: obj for obj in rigid_objects}
+    if source_input in by_uid:
+        return source_input
+
+    alias = _parse_indexed_replacement_alias(source_input)
+    if alias is None:
+        candidates = _format_rigid_object_candidates(rigid_objects)
+        raise ValueError(
+            f"{option_name} source {source_input!r} is neither a rigid object uid "
+            f"nor an indexed alias such as bread1. Rigid object candidates: "
+            f"{candidates}"
+        )
+
+    keyword, alias_index = alias
+    matches = [
+        obj
+        for obj in rigid_objects
+        if _rigid_object_matches_keyword(obj, keyword)
+    ]
+    if alias_index > len(matches):
+        candidates = _format_rigid_object_candidates(matches or rigid_objects)
+        raise ValueError(
+            f"{option_name} alias {source_input!r} requested match #{alias_index} "
+            f"for keyword {keyword!r}, but only found {len(matches)} match(es). "
+            f"Candidates: {candidates}"
+        )
+
+    resolved_uid = matches[alias_index - 1]["uid"]
+    print(
+        f"Resolved {option_name} source alias {source_input!r} -> {resolved_uid!r}",
+        flush=True,
+    )
+    return resolved_uid
+
+
+def _rigid_objects(gym_config: dict[str, Any]) -> list[dict[str, Any]]:
+    value = gym_config.get("rigid_object", [])
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        raise ValueError("gym config rigid_object must be a list or object.")
+
+    rigid_objects = []
+    for obj in value:
+        if not isinstance(obj, dict):
+            continue
+        uid = str(obj.get("uid", "")).strip()
+        if not uid:
+            continue
+        copied = dict(obj)
+        copied["uid"] = uid
+        rigid_objects.append(copied)
+    if not rigid_objects:
+        raise ValueError("No rigid_object entries found in gym config.")
+    return rigid_objects
+
+
+def _parse_indexed_replacement_alias(alias: str) -> tuple[str, int] | None:
+    match = _INDEXED_REPLACEMENT_ALIAS_RE.match(alias.strip())
+    if match is None:
+        return None
+    keyword = match.group("keyword").strip(" _-")
+    index = int(match.group("index"))
+    if not keyword or index < 1:
+        return None
+    return keyword, index
+
+
+def _rigid_object_matches_keyword(obj: dict[str, Any], keyword: str) -> bool:
+    keyword_tokens = _search_tokens(keyword)
+    if not keyword_tokens:
+        return False
+    object_tokens = set(_search_tokens(_rigid_object_search_text(obj)))
+    return all(token in object_tokens for token in keyword_tokens)
+
+
+def _rigid_object_search_text(obj: dict[str, Any]) -> str:
+    values = [
+        obj.get("uid", ""),
+        obj.get("source_uid", ""),
+        obj.get("category", ""),
+        obj.get("semantic_label", ""),
+        obj.get("name", ""),
+        obj.get("description", ""),
+    ]
+    shape = obj.get("shape", {})
+    if isinstance(shape, dict):
+        values.extend(
+            [
+                shape.get("fpath", ""),
+                shape.get("file_path", ""),
+                shape.get("category", ""),
+            ]
+        )
+    return " ".join(str(value) for value in values if value)
+
+
+def _search_tokens(value: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", str(value).lower())
+
+
+def _format_rigid_object_candidates(rigid_objects: list[dict[str, Any]]) -> str:
+    if not rigid_objects:
+        return "<none>"
+    parts = []
+    for obj in rigid_objects:
+        shape = obj.get("shape", {})
+        fpath = shape.get("fpath", "") if isinstance(shape, dict) else ""
+        parts.append(f"{obj.get('uid')} ({fpath})")
+    return ", ".join(parts)
+
+
 def _write_pipeline_manifests(
     *,
     args: argparse.Namespace,
     resolution: ProjectResolution,
     generated_paths: object,
+    target_replacements: list[object],
 ) -> dict[str, Any]:
     history_path = _pipeline_history_path(args)
     record = _build_pipeline_record(
@@ -768,6 +936,7 @@ def _write_pipeline_manifests(
         resolution=resolution,
         generated_paths=generated_paths,
         history_path=history_path,
+        target_replacements=target_replacements,
     )
     record = _append_pipeline_history(history_path, record)
 
@@ -787,6 +956,7 @@ def _build_pipeline_record(
     resolution: ProjectResolution,
     generated_paths: object,
     history_path: Path,
+    target_replacements: list[object],
 ) -> dict[str, Any]:
     source_gym_config = _resolve_source_gym_config(resolution.path)
     source_gym_project_dir = source_gym_config.parent
@@ -812,7 +982,10 @@ def _build_pipeline_record(
         ).resolve().as_posix(),
         "pipeline_history_path": history_path.as_posix(),
         "target_body_scale": args.target_body_scale,
-        "target_replacements": _target_replacement_records(args),
+        "target_replacements": _target_replacement_records(
+            args,
+            target_replacements,
+        ),
         "sync_replacement_names": args.sync_replacement_names,
         "reuse_target_replacements": args.reuse_target_replacements,
         "prewarm_coacd_cache": args.prewarm_coacd_cache,
@@ -877,21 +1050,31 @@ def _source_request_record(
     return record
 
 
-def _target_replacement_records(args: argparse.Namespace) -> list[dict[str, str]]:
+def _target_replacement_records(
+    args: argparse.Namespace,
+    target_replacements: list[object],
+) -> list[dict[str, str]]:
+    requested_by_output_dir = {
+        output_dir_name: replacement[0]
+        for output_dir_name, replacement in (
+            ("new1", args.target_replacement1),
+            ("new2", args.target_replacement2),
+        )
+        if replacement
+    }
     records = []
-    for output_dir_name, replacement in (
-        ("new1", args.target_replacement1),
-        ("new2", args.target_replacement2),
-    ):
-        if replacement:
-            source_uid, prompt = replacement
-            records.append(
-                {
-                    "source_uid": source_uid,
-                    "prompt": prompt,
-                    "output_dir_name": output_dir_name,
-                }
-            )
+    for replacement in target_replacements:
+        output_dir_name = str(getattr(replacement, "output_dir_name"))
+        source_uid = str(getattr(replacement, "source_uid"))
+        record = {
+            "source_uid": source_uid,
+            "prompt": str(getattr(replacement, "prompt")),
+            "output_dir_name": output_dir_name,
+        }
+        requested_source_uid = requested_by_output_dir.get(output_dir_name)
+        if requested_source_uid and requested_source_uid != source_uid:
+            record["requested_source_uid"] = requested_source_uid
+        records.append(record)
     return records
 
 
@@ -983,7 +1166,11 @@ def main() -> int:
     )
 
     resolution = _resolve_gym_project(args)
-    target_replacements = _resolve_target_replacements(args, TargetReplacementSpec)
+    target_replacements = _resolve_target_replacements(
+        args,
+        TargetReplacementSpec,
+        resolution.path,
+    )
 
     paths = generate_ur5_basket_config_from_project(
         gym_project=resolution.path,
@@ -1001,6 +1188,7 @@ def main() -> int:
         args=args,
         resolution=resolution,
         generated_paths=paths,
+        target_replacements=target_replacements,
     )
 
     print(f"Using gym project/config: {resolution.path}", flush=True)
