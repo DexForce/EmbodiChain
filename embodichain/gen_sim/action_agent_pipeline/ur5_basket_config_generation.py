@@ -701,14 +701,23 @@ def _run_prompt2geometry_replacement(
 ) -> dict[str, Any]:
     from embodichain.gen_sim.action_agent_pipeline.gym_project_api.prompt2geometry import (
         Prompt2GeometryRequest,
+        load_prompt2geometry_config,
         run_prompt2geometry,
     )
 
+    cfg = load_prompt2geometry_config()
     return run_prompt2geometry(
         Prompt2GeometryRequest(
             prompt=prompt,
             output_root=output_root,
             output_name=output_name,
+            zimage_base_url=cfg.zimage_base_url,
+            sam3_base_url=cfg.sam3_base_url,
+            sam3d_base_url=cfg.sam3d_base_url,
+            llm_api_key=cfg.llm_api_key,
+            llm_model=cfg.llm_model,
+            llm_base_url=cfg.llm_base_url,
+            llm_timeout_s=cfg.llm_timeout_s,
         )
     )
 

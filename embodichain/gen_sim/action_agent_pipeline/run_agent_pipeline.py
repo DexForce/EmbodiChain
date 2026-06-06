@@ -46,9 +46,7 @@ _DEFAULT_IMAGE = (
 _DEFAULT_IMAGE_DIR = _DEFAULT_IMAGE.parent
 _DEFAULT_GYM_PROJECT_ROOT = _REPO_ROOT / "gym_project"
 _DEFAULT_EXISTING_GYM_PROJECT = _DEFAULT_GYM_PROJECT_ROOT / "1780562837_gym_project"
-_DEFAULT_IMAGE2SCENE_ROOT = (
-    _REPO_ROOT / "gym_project/environment/image2tabletop"
-)
+_DEFAULT_IMAGE2SCENE_ROOT = _REPO_ROOT / "gym_project/environment/image2tabletop"
 _DEFAULT_IMAGE2SCENE_IMAGE = "scene_image/robotwin_example.png"
 _DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR = "./downloads"
 _DEFAULT_IMAGE2SCENE_OUTPUT_ROOT = "./generated"
@@ -232,6 +230,38 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--target_replacement1",
+        "--target-replacement1",
+        nargs=2,
+        metavar=("SOURCE_UID", "PROMPT"),
+        default=None,
+        help=(
+            "Generate <gym_project>/mesh_assets/new1 from PROMPT and use it "
+            "to replace SOURCE_UID in the generated config."
+        ),
+    )
+    parser.add_argument(
+        "--target_replacement2",
+        "--target-replacement2",
+        nargs=2,
+        metavar=("SOURCE_UID", "PROMPT"),
+        default=None,
+        help=(
+            "Generate <gym_project>/mesh_assets/new2 from PROMPT and use it "
+            "to replace SOURCE_UID in the generated config."
+        ),
+    )
+    parser.add_argument(
+        "--sync_replacement_names",
+        "--sync-replacement-names",
+        action="store_true",
+        default=False,
+        help=(
+            "Also update replacement target runtime UIDs and generated prompts "
+            "from the replacement prompts."
+        ),
+    )
+    parser.add_argument(
         "--poll-interval",
         type=float,
         default=10.0,
@@ -347,7 +377,9 @@ def _latest_path(paths: list[Path]) -> Path:
     return max(paths, key=lambda path: path.stat().st_mtime)
 
 
-def _resolve_image2scene_image(args: argparse.Namespace, image2scene_root: Path) -> Path:
+def _resolve_image2scene_image(
+    args: argparse.Namespace, image2scene_root: Path
+) -> Path:
     if args.image_name:
         image_name = Path(args.image_name)
         if image_name.parent != Path("."):
@@ -398,9 +430,7 @@ def _run_image2scene_pipeline(args: argparse.Namespace) -> Path:
         raise FileNotFoundError(f"image2scene pipeline not found: {script_path}")
 
     image_path = _resolve_image2scene_image(args, image2scene_root)
-    download_dir = _resolve_under_root(
-        image2scene_root, args.image2scene_download_dir
-    )
+    download_dir = _resolve_under_root(image2scene_root, args.image2scene_download_dir)
     output_root = _resolve_under_root(image2scene_root, args.image2scene_output_root)
     gen_config = _resolve_under_root(image2scene_root, args.image2scene_gen_config)
     llm_config = _resolve_under_root(image2scene_root, args.image2scene_llm_config)
@@ -508,6 +538,32 @@ def _resolve_gym_project(args: argparse.Namespace) -> Path:
     )
 
 
+def _resolve_target_replacements(
+    args: argparse.Namespace,
+    target_replacement_spec_cls: Callable[..., object],
+) -> list[object]:
+    replacements = []
+    if args.target_replacement1:
+        source_uid, prompt = args.target_replacement1
+        replacements.append(
+            target_replacement_spec_cls(
+                source_uid=source_uid,
+                prompt=prompt,
+                output_dir_name="new1",
+            )
+        )
+    if args.target_replacement2:
+        source_uid, prompt = args.target_replacement2
+        replacements.append(
+            target_replacement_spec_cls(
+                source_uid=source_uid,
+                prompt=prompt,
+                output_dir_name="new2",
+            )
+        )
+    return replacements
+
+
 def _run_agent_command(
     *,
     task_name: str,
@@ -539,10 +595,12 @@ def main() -> int:
 
     _ensure_repo_on_pythonpath()
     from embodichain.gen_sim.action_agent_pipeline.ur5_basket_config_generation import (
+        TargetReplacementSpec,
         generate_ur5_basket_config_from_project,
     )
 
     project_path = _resolve_gym_project(args)
+    target_replacements = _resolve_target_replacements(args, TargetReplacementSpec)
 
     paths = generate_ur5_basket_config_from_project(
         gym_project=project_path,
@@ -550,6 +608,8 @@ def main() -> int:
         task_name=args.task_name,
         task_description=args.task_description,
         target_body_scale=args.target_body_scale,
+        target_replacements=target_replacements,
+        sync_replacement_names=args.sync_replacement_names,
         overwrite=args.overwrite_config,
     )
 
