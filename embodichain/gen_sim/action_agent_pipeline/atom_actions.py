@@ -493,6 +493,9 @@ def _build_public_grasp_semantics(env, obj_name: str, kwargs: dict):
                 "max_open_length": kwargs.get("grasp_max_open_length", 0.088),
                 "finger_length": kwargs.get("grasp_finger_length", 0.078),
                 "point_sample_dense": kwargs.get("grasp_point_sample_dense", 0.012),
+                "max_decomposition_hulls": int(
+                    kwargs.get("grasp_max_decomposition_hulls", 8)
+                ),
             },
         )
     )

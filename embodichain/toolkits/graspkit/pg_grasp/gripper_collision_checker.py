@@ -70,7 +70,7 @@ class GripperCollisionCfg:
     on the desired balance between accuracy and efficiency for the specific application.
     """
 
-    max_decomposition_hulls: int = 16
+    max_decomposition_hulls: int = 8
     """ Maximum number of convex hulls to decompose the object mesh into for collision checking. This should be set based 
     on the complexity of the object geometry and the desired accuracy of collision checking. More hulls can provide a tighter 
     approximation of the object shape but will increase computational cost.
