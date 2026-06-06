@@ -21,10 +21,14 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+import json
 from pathlib import Path
 import shlex
 import subprocess
 import sys
+from typing import Any
 
 
 def _repo_root() -> Path:
@@ -54,8 +58,21 @@ _DEFAULT_IMAGE2SCENE_CONFIG = "./gen_config.json"
 _DEFAULT_CONFIG_OUTPUT_DIR = (
     _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/demo3_text"
 )
+_DEFAULT_PIPELINE_HISTORY = (
+    _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json"
+)
 _DEFAULT_TASK_NAME = "Depm3_Text"
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+_GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
+_PIPELINE_HISTORY_SCHEMA_VERSION = 1
+_PIPELINE_MANIFEST_FILENAME = "pipeline_manifest.json"
+
+
+@dataclass(frozen=True)
+class ProjectResolution:
+    path: Path
+    mode: str
+    base_history: dict[str, Any] | None = None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -185,14 +202,24 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--use-latest-image2scene-gym-project",
-        "--use-latest-image2scene-gym_project",
-        dest="use_latest_image2scene_gym_project",
-        action="store_true",
-        default=False,
+        "--base-task-name",
+        "--base_task_name",
+        dest="base_task_name",
+        default=None,
         help=(
-            "Skip image generation and start from the newest "
-            "gym_config_merged.json under --image2scene-download-dir."
+            "Start from the latest pipeline history entry with this task name. "
+            "Use this to chain demos, e.g. demo2 based on Demo1_Text."
+        ),
+    )
+    parser.add_argument(
+        "--base-history-index",
+        "--base_history_index",
+        dest="base_history_index",
+        type=int,
+        default=None,
+        help=(
+            "Start from a specific pipeline history index. When used with "
+            "--base-task-name, the history entry must match that task name."
         ),
     )
     parser.add_argument(
@@ -213,6 +240,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Destination directory for generated config files. Defaults to "
             f"{_DEFAULT_CONFIG_OUTPUT_DIR.as_posix()}"
+        ),
+    )
+    parser.add_argument(
+        "--pipeline-history-path",
+        "--pipeline_history_path",
+        dest="pipeline_history_path",
+        default=str(_DEFAULT_PIPELINE_HISTORY),
+        help=(
+            "Global pipeline history JSON path. Defaults to "
+            f"{_DEFAULT_PIPELINE_HISTORY.as_posix()}"
         ),
     )
     parser.add_argument(
@@ -537,16 +574,17 @@ def _run_image2scene_pipeline(args: argparse.Namespace) -> Path:
     return merged_config
 
 
-def _resolve_gym_project(args: argparse.Namespace) -> Path:
+def _resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
+    use_history = args.base_task_name is not None or args.base_history_index is not None
     selected_modes = [
         args.use_image2scene,
         args.use_existing_gym_project,
-        args.use_latest_image2scene_gym_project,
+        use_history,
     ]
     if sum(bool(mode) for mode in selected_modes) > 1:
         raise ValueError(
             "Use only one of --use-image2scene, --use-existing-gym-project, "
-            "or --use-latest-image2scene-gym-project."
+            "or --base-task-name/--base-history-index."
         )
 
     if args.use_existing_gym_project:
@@ -554,13 +592,25 @@ def _resolve_gym_project(args: argparse.Namespace) -> Path:
         if not project_path.exists():
             raise FileNotFoundError(f"gym project not found: {project_path}")
         print(f"Using existing gym project: {project_path}", flush=True)
-        return project_path
+        return ProjectResolution(path=project_path, mode="existing_gym_project")
 
     if args.use_image2scene:
-        return _run_image2scene_pipeline(args)
+        return ProjectResolution(path=_run_image2scene_pipeline(args), mode="image2scene")
 
-    if args.use_latest_image2scene_gym_project:
-        return _resolve_latest_image2scene_gym_config(args)
+    if use_history:
+        history_entry = _resolve_base_history_entry(args)
+        project_path = _path_from_history_entry(history_entry)
+        print(
+            "Using base history "
+            f"#{history_entry.get('index')} ({history_entry.get('task_name')}): "
+            f"{project_path}",
+            flush=True,
+        )
+        return ProjectResolution(
+            path=project_path,
+            mode="history",
+            base_history=history_entry,
+        )
 
     from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
         check_health,
@@ -573,30 +623,111 @@ def _resolve_gym_project(args: argparse.Namespace) -> Path:
     if not args.skip_health_check:
         check_health(args.server)
 
-    return process_image(
-        server=args.server,
-        image_path=image_path,
-        output_root=Path(args.gym_project_root),
-        poll_interval=args.poll_interval,
-        overwrite=args.overwrite_gym_project,
+    return ProjectResolution(
+        path=process_image(
+            server=args.server,
+            image_path=image_path,
+            output_root=Path(args.gym_project_root),
+            poll_interval=args.poll_interval,
+            overwrite=args.overwrite_gym_project,
+        ),
+        mode="image2tabletop",
     )
 
 
-def _resolve_latest_image2scene_gym_config(args: argparse.Namespace) -> Path:
-    image2scene_root = Path(args.image2scene_root).expanduser().resolve()
-    download_dir = _resolve_under_root(image2scene_root, args.image2scene_download_dir)
-    if download_dir is None:
-        raise ValueError("--image2scene-download-dir must not be empty.")
+def _resolve_base_history_entry(args: argparse.Namespace) -> dict[str, Any]:
+    if args.base_history_index is not None and args.base_history_index <= 0:
+        raise ValueError("--base-history-index must be a positive integer.")
 
-    merged_configs = _collect_merged_gym_configs(download_dir)
-    if not merged_configs:
-        raise FileNotFoundError(
-            f"gym_config_merged.json not found under: {download_dir}"
+    history_path = _pipeline_history_path(args)
+    history = _read_pipeline_history(history_path)
+    runs = history["runs"]
+
+    if args.base_history_index is not None:
+        entry = _find_history_entry_by_index(runs, args.base_history_index)
+        if entry is None:
+            raise ValueError(
+                f"Pipeline history index not found: {args.base_history_index}"
+            )
+        if args.base_task_name and entry.get("task_name") != args.base_task_name:
+            raise ValueError(
+                "Pipeline history entry "
+                f"#{args.base_history_index} has task_name={entry.get('task_name')!r}, "
+                f"expected {args.base_task_name!r}."
+            )
+        return dict(entry)
+
+    if not args.base_task_name:
+        raise ValueError("--base-task-name is required without --base-history-index.")
+
+    candidates = [
+        entry
+        for entry in runs
+        if entry.get("task_name") == args.base_task_name
+        and _history_entry_has_source(entry)
+    ]
+    if not candidates:
+        raise ValueError(
+            "No pipeline history entry found for task_name="
+            f"{args.base_task_name!r} in {history_path}"
         )
+    return dict(max(candidates, key=_history_entry_index))
 
-    merged_config = _latest_path(merged_configs)
-    print(f"Using latest image2scene merged gym config: {merged_config}", flush=True)
-    return merged_config
+
+def _pipeline_history_path(args: argparse.Namespace) -> Path:
+    return Path(args.pipeline_history_path).expanduser().resolve()
+
+
+def _read_pipeline_history(history_path: Path) -> dict[str, Any]:
+    if not history_path.exists():
+        return {"schema_version": _PIPELINE_HISTORY_SCHEMA_VERSION, "runs": []}
+
+    data = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Pipeline history must be a JSON object: {history_path}")
+    runs = data.get("runs")
+    if not isinstance(runs, list):
+        raise ValueError(f"Pipeline history must contain a runs list: {history_path}")
+    return {
+        "schema_version": data.get(
+            "schema_version", _PIPELINE_HISTORY_SCHEMA_VERSION
+        ),
+        "runs": runs,
+    }
+
+
+def _find_history_entry_by_index(
+    runs: list[Any], history_index: int
+) -> dict[str, Any] | None:
+    for entry in runs:
+        if isinstance(entry, dict) and _history_entry_index(entry) == history_index:
+            return entry
+    return None
+
+
+def _history_entry_index(entry: dict[str, Any]) -> int:
+    try:
+        return int(entry.get("index", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _history_entry_has_source(entry: dict[str, Any]) -> bool:
+    return bool(entry.get("source_gym_config") or entry.get("source_gym_project_dir"))
+
+
+def _path_from_history_entry(entry: dict[str, Any]) -> Path:
+    source = entry.get("source_gym_config") or entry.get("source_gym_project_dir")
+    if not source:
+        raise ValueError(
+            f"Pipeline history entry #{entry.get('index')} has no source gym path."
+        )
+    path = Path(str(source)).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Pipeline history source path does not exist: {path}"
+        )
+    return path
 
 
 def _resolve_target_replacements(
@@ -623,6 +754,197 @@ def _resolve_target_replacements(
             )
         )
     return replacements
+
+
+def _write_pipeline_manifests(
+    *,
+    args: argparse.Namespace,
+    resolution: ProjectResolution,
+    generated_paths: object,
+) -> dict[str, Any]:
+    history_path = _pipeline_history_path(args)
+    record = _build_pipeline_record(
+        args=args,
+        resolution=resolution,
+        generated_paths=generated_paths,
+        history_path=history_path,
+    )
+    record = _append_pipeline_history(history_path, record)
+
+    manifest_path = Path(generated_paths.output_dir) / _PIPELINE_MANIFEST_FILENAME
+    manifest_path.write_text(
+        json.dumps(record, ensure_ascii=False, indent=4) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Updated pipeline history: {history_path}", flush=True)
+    print(f"Wrote pipeline manifest: {manifest_path}", flush=True)
+    return record
+
+
+def _build_pipeline_record(
+    *,
+    args: argparse.Namespace,
+    resolution: ProjectResolution,
+    generated_paths: object,
+    history_path: Path,
+) -> dict[str, Any]:
+    source_gym_config = _resolve_source_gym_config(resolution.path)
+    source_gym_project_dir = source_gym_config.parent
+    record: dict[str, Any] = {
+        "schema_version": _PIPELINE_HISTORY_SCHEMA_VERSION,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "task_name": args.task_name,
+        "source_mode": resolution.mode,
+        "source_gym_project_dir": source_gym_project_dir.as_posix(),
+        "source_gym_config": source_gym_config.as_posix(),
+        "input_path": resolution.path.as_posix(),
+        "config_output_dir": Path(generated_paths.output_dir).resolve().as_posix(),
+        "generated_gym_config": Path(generated_paths.gym_config).resolve().as_posix(),
+        "generated_agent_config": Path(
+            generated_paths.agent_config
+        ).resolve().as_posix(),
+        "generated_task_prompt": Path(generated_paths.task_prompt).resolve().as_posix(),
+        "generated_basic_background": Path(
+            generated_paths.basic_background
+        ).resolve().as_posix(),
+        "generated_atom_actions": Path(
+            generated_paths.atom_actions
+        ).resolve().as_posix(),
+        "pipeline_history_path": history_path.as_posix(),
+        "target_body_scale": args.target_body_scale,
+        "target_replacements": _target_replacement_records(args),
+        "sync_replacement_names": args.sync_replacement_names,
+        "reuse_target_replacements": args.reuse_target_replacements,
+        "prewarm_coacd_cache": args.prewarm_coacd_cache,
+        "overwrite_config": args.overwrite_config,
+        "regenerate": args.regenerate,
+        "skip_run_agent": args.skip_run_agent,
+        "generation_summary": generated_paths.summary,
+    }
+    if args.task_description:
+        record["task_description"] = args.task_description
+    record.update(_source_request_record(args, resolution))
+    return record
+
+
+def _source_request_record(
+    args: argparse.Namespace, resolution: ProjectResolution
+) -> dict[str, Any]:
+    record: dict[str, Any] = {}
+    if args.image_name:
+        record["image_name"] = args.image_name
+    if args.image:
+        record["image"] = str(Path(args.image).expanduser())
+    if args.use_image2scene:
+        record.update(
+            {
+                "server": args.server,
+                "background": args.background,
+                "image2scene_root": str(
+                    Path(args.image2scene_root).expanduser().resolve()
+                ),
+                "image2scene_download_dir": str(args.image2scene_download_dir),
+                "image2scene_output_root": str(args.image2scene_output_root),
+                "image2scene_gen_config": str(args.image2scene_gen_config),
+                "image2scene_llm_config": str(args.image2scene_llm_config),
+            }
+        )
+        if args.image2scene_extract_dir is not None:
+            record["image2scene_extract_dir"] = str(args.image2scene_extract_dir)
+        if args.image2scene_merged_output is not None:
+            record["image2scene_merged_output"] = str(args.image2scene_merged_output)
+    elif resolution.mode == "image2tabletop":
+        record.update(
+            {
+                "server": args.server,
+                "gym_project_root": str(Path(args.gym_project_root).expanduser()),
+                "overwrite_gym_project": args.overwrite_gym_project,
+            }
+        )
+    elif resolution.mode == "existing_gym_project":
+        record["gym_project"] = str(Path(args.gym_project).expanduser())
+    elif resolution.mode == "history" and resolution.base_history is not None:
+        record.update(
+            {
+                "base_task_name": args.base_task_name,
+                "base_history_index": resolution.base_history.get("index"),
+                "base_history_task_name": resolution.base_history.get("task_name"),
+                "base_history_source_gym_config": resolution.base_history.get(
+                    "source_gym_config"
+                ),
+            }
+        )
+    return record
+
+
+def _target_replacement_records(args: argparse.Namespace) -> list[dict[str, str]]:
+    records = []
+    for output_dir_name, replacement in (
+        ("new1", args.target_replacement1),
+        ("new2", args.target_replacement2),
+    ):
+        if replacement:
+            source_uid, prompt = replacement
+            records.append(
+                {
+                    "source_uid": source_uid,
+                    "prompt": prompt,
+                    "output_dir_name": output_dir_name,
+                }
+            )
+    return records
+
+
+def _resolve_source_gym_config(input_path: Path) -> Path:
+    input_path = input_path.expanduser().resolve()
+    if input_path.is_file():
+        if input_path.name not in _GYM_CONFIG_PREFERENCE:
+            expected = ", ".join(_GYM_CONFIG_PREFERENCE)
+            raise ValueError(f"Expected one of {expected}, got: {input_path}")
+        return input_path
+
+    for filename in _GYM_CONFIG_PREFERENCE:
+        path = input_path / filename
+        if path.is_file():
+            return path.resolve()
+
+    matches = []
+    for filename in _GYM_CONFIG_PREFERENCE:
+        matches.extend(sorted(input_path.rglob(filename)))
+    unique_matches = sorted({path.resolve() for path in matches})
+    if len(unique_matches) == 1:
+        return unique_matches[0]
+    if not unique_matches:
+        expected = " or ".join(_GYM_CONFIG_PREFERENCE)
+        raise FileNotFoundError(f"{expected} not found under: {input_path}")
+    match_text = ", ".join(path.as_posix() for path in unique_matches)
+    raise ValueError(f"Multiple gym config files found under {input_path}: {match_text}")
+
+
+def _append_pipeline_history(
+    history_path: Path, record: dict[str, Any]
+) -> dict[str, Any]:
+    history = _read_pipeline_history(history_path)
+    runs = history["runs"]
+    next_index = max(
+        (
+            _history_entry_index(entry)
+            for entry in runs
+            if isinstance(entry, dict)
+        ),
+        default=0,
+    ) + 1
+    record = dict(record)
+    record["index"] = next_index
+
+    runs.append(record)
+    history["schema_version"] = _PIPELINE_HISTORY_SCHEMA_VERSION
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(
+        json.dumps(history, ensure_ascii=False, indent=4) + "\n",
+        encoding="utf-8",
+    )
+    return record
 
 
 def _run_agent_command(
@@ -660,11 +982,11 @@ def main() -> int:
         generate_ur5_basket_config_from_project,
     )
 
-    project_path = _resolve_gym_project(args)
+    resolution = _resolve_gym_project(args)
     target_replacements = _resolve_target_replacements(args, TargetReplacementSpec)
 
     paths = generate_ur5_basket_config_from_project(
-        gym_project=project_path,
+        gym_project=resolution.path,
         output_dir=args.config_output_dir,
         task_name=args.task_name,
         task_description=args.task_description,
@@ -675,8 +997,13 @@ def main() -> int:
         prewarm_coacd_cache=args.prewarm_coacd_cache,
         overwrite=args.overwrite_config,
     )
+    _write_pipeline_manifests(
+        args=args,
+        resolution=resolution,
+        generated_paths=paths,
+    )
 
-    print(f"Using gym project/config: {project_path}", flush=True)
+    print(f"Using gym project/config: {resolution.path}", flush=True)
     print(f"Generated gym config: {paths.gym_config}", flush=True)
     print(f"Generated agent config: {paths.agent_config}", flush=True)
     if args.skip_run_agent:
