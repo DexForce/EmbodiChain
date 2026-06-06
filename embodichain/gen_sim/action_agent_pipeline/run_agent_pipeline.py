@@ -273,6 +273,28 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--reuse-target-replacements",
+        "--reuse_target_replacements",
+        dest="reuse_target_replacements",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Reuse existing prompt-generated replacement GLBs when the prompt "
+            "and expected output name match. Defaults to true."
+        ),
+    )
+    parser.add_argument(
+        "--prewarm-coacd-cache",
+        "--prewarm_coacd_cache",
+        dest="prewarm_coacd_cache",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Precompute environment CoACD cache files during config generation. "
+            "Defaults to true."
+        ),
+    )
+    parser.add_argument(
         "--poll-interval",
         type=float,
         default=10.0,
@@ -649,6 +671,8 @@ def main() -> int:
         target_body_scale=args.target_body_scale,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
+        reuse_target_replacements=args.reuse_target_replacements,
+        prewarm_coacd_cache=args.prewarm_coacd_cache,
         overwrite=args.overwrite_config,
     )
 

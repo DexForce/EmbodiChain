@@ -35,6 +35,7 @@ _INVALID_UID_CHARS_RE = re.compile(r"[^0-9a-zA-Z_]+")
 _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
+_TARGET_REPLACEMENT_MANIFEST_FILENAME = ".embodichain_replacement_manifest.json"
 
 _CONTAINER_KEYWORDS = (
     "basket",
@@ -178,6 +179,7 @@ class _ResolvedTargetReplacement:
     output_dir_name: str
     mesh_path: Path
     runtime_noun: str
+    reused: bool = False
 
 
 @dataclass(frozen=True)
@@ -208,6 +210,8 @@ def generate_ur5_basket_config_from_project(
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
+    reuse_target_replacements: bool = True,
+    prewarm_coacd_cache: bool = True,
     overwrite: bool = False,
     max_episodes: int = 1,
     max_episode_steps: int = 1000,
@@ -237,6 +241,10 @@ def generate_ur5_basket_config_from_project(
             generated config, not the original source mesh file.
         sync_replacement_names: If true, update runtime target UIDs and prompts
             from the replacement prompts. If false, only mesh paths are replaced.
+        reuse_target_replacements: If true, reuse an existing replacement GLB
+            at the expected output path when it matches the requested prompt.
+        prewarm_coacd_cache: If true, precompute environment-side CoACD cache
+            files referenced by the generated gym config before writing it.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -276,6 +284,8 @@ def generate_ur5_basket_config_from_project(
             max_episode_steps=max_episode_steps,
         )
         _validate_relative_bundle(bundle, spec)
+        if prewarm_coacd_cache:
+            _attach_coacd_cache_summary(bundle)
         return _write_config_bundle(
             output_dir=Path(output_dir).expanduser().resolve(),
             bundle=bundle,
@@ -295,6 +305,7 @@ def generate_ur5_basket_config_from_project(
     resolved_replacements = _run_target_replacements(
         scene_dir=scene_dir,
         replacement_specs=replacement_specs,
+        reuse_target_replacements=reuse_target_replacements,
     )
     if sync_replacement_names:
         roles = _apply_replacement_names(
@@ -314,6 +325,8 @@ def generate_ur5_basket_config_from_project(
         max_episode_steps=max_episode_steps,
     )
     _validate_bundle(bundle, roles)
+    if prewarm_coacd_cache:
+        _attach_coacd_cache_summary(bundle)
     return _write_config_bundle(
         output_dir=Path(output_dir).expanduser().resolve(),
         bundle=bundle,
@@ -700,17 +713,42 @@ def _run_target_replacements(
     *,
     scene_dir: Path,
     replacement_specs: Sequence[TargetReplacementSpec],
+    reuse_target_replacements: bool,
 ) -> tuple[_ResolvedTargetReplacement, ...]:
     resolved = []
     for replacement in replacement_specs:
         runtime_noun = _replacement_runtime_noun(replacement.prompt)
         output_root = scene_dir / "mesh_assets" / replacement.output_dir_name
-        result = _run_prompt2geometry_replacement(
-            prompt=replacement.prompt,
-            output_root=output_root,
-            output_name=f"{runtime_noun}.glb",
-        )
-        mesh_path = _resolve_prompt2geometry_mesh_path(result, output_root)
+        output_name = f"{runtime_noun}.glb"
+        mesh_path = None
+        reused = False
+        if reuse_target_replacements:
+            mesh_path = _resolve_reusable_target_replacement_mesh_path(
+                output_root=output_root,
+                prompt=replacement.prompt,
+                output_name=output_name,
+            )
+            reused = mesh_path is not None
+        if mesh_path is None:
+            result = _run_prompt2geometry_replacement(
+                prompt=replacement.prompt,
+                output_root=output_root,
+                output_name=output_name,
+            )
+            mesh_path = _resolve_prompt2geometry_mesh_path(result, output_root)
+            _write_target_replacement_manifest(
+                output_root=output_root,
+                prompt=replacement.prompt,
+                output_name=output_name,
+                mesh_path=mesh_path,
+            )
+        elif reused:
+            _write_target_replacement_manifest(
+                output_root=output_root,
+                prompt=replacement.prompt,
+                output_name=output_name,
+                mesh_path=mesh_path,
+            )
         resolved.append(
             _ResolvedTargetReplacement(
                 source_uid=replacement.source_uid,
@@ -718,9 +756,65 @@ def _run_target_replacements(
                 output_dir_name=replacement.output_dir_name,
                 mesh_path=mesh_path,
                 runtime_noun=runtime_noun,
+                reused=reused,
             )
         )
     return tuple(resolved)
+
+
+def _resolve_reusable_target_replacement_mesh_path(
+    *,
+    output_root: Path,
+    prompt: str,
+    output_name: str,
+) -> Path | None:
+    expected_mesh_path = (output_root / output_name).expanduser().resolve()
+    if not expected_mesh_path.is_file():
+        return None
+
+    manifest_path = _target_replacement_manifest_path(output_root)
+    if not manifest_path.is_file():
+        return expected_mesh_path
+
+    try:
+        manifest = _read_json(manifest_path)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if manifest.get("prompt") != prompt or manifest.get("output_name") != output_name:
+        return None
+
+    manifest_mesh_path = Path(
+        str(manifest.get("mesh_path", expected_mesh_path))
+    ).expanduser()
+    if not manifest_mesh_path.is_absolute():
+        manifest_mesh_path = (output_root / manifest_mesh_path).resolve()
+    else:
+        manifest_mesh_path = manifest_mesh_path.resolve()
+    if manifest_mesh_path.is_file():
+        return manifest_mesh_path
+    return expected_mesh_path
+
+
+def _write_target_replacement_manifest(
+    *,
+    output_root: Path,
+    prompt: str,
+    output_name: str,
+    mesh_path: Path,
+) -> None:
+    _write_json(
+        _target_replacement_manifest_path(output_root),
+        {
+            "prompt": prompt,
+            "output_name": output_name,
+            "mesh_path": mesh_path.expanduser().resolve().as_posix(),
+        },
+    )
+
+
+def _target_replacement_manifest_path(output_root: Path) -> Path:
+    return output_root / _TARGET_REPLACEMENT_MANIFEST_FILENAME
 
 
 def _run_prompt2geometry_replacement(
@@ -1398,11 +1492,22 @@ def _build_ur5_basket_bundle(
                     "output_dir_name": replacement.output_dir_name,
                     "mesh_path": replacement.mesh_path.as_posix(),
                     "runtime_noun": replacement.runtime_noun,
+                    "reused": replacement.reused,
                 }
                 for replacement in target_replacements
             ],
         },
     }
+
+
+def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.coacd_cache import (
+        prewarm_coacd_cache_for_gym_config,
+    )
+
+    bundle.setdefault("summary", {})["coacd_cache"] = (
+        prewarm_coacd_cache_for_gym_config(bundle["gym_config"])
+    )
 
 
 def _build_relative_placement_bundle(
@@ -1953,7 +2058,7 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
         "init_pos": [-2.0, 0.0, float(robot_init_z)],
         "init_rot": [0.0, 0.0, 90.0],
         "init_qpos": [
-              0,
+            0,
             0,
             -1.57,
             -1.57,
@@ -1968,7 +2073,7 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
             0.0,
             0.0,
             0.0,
-            0.0
+            0.0,
         ],
         "drive_pros": {
             "stiffness": {

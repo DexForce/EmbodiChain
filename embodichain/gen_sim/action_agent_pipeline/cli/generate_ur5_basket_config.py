@@ -128,6 +128,28 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--reuse_target_replacements",
+        "--reuse-target-replacements",
+        dest="reuse_target_replacements",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Reuse existing prompt-generated replacement GLBs when the prompt "
+            "and expected output name match. Defaults to true."
+        ),
+    )
+    parser.add_argument(
+        "--prewarm_coacd_cache",
+        "--prewarm-coacd-cache",
+        dest="prewarm_coacd_cache",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Precompute environment CoACD cache files during config generation. "
+            "Defaults to true."
+        ),
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         default=False,
@@ -159,6 +181,8 @@ def cli() -> None:
         target_body_scale=args.target_body_scale,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
+        reuse_target_replacements=args.reuse_target_replacements,
+        prewarm_coacd_cache=args.prewarm_coacd_cache,
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,
         max_episode_steps=args.max_episode_steps,
