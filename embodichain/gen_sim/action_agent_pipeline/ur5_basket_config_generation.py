@@ -100,6 +100,7 @@ _ON_RELEASE_Z_OFFSET = 0.14
 _DUAL_UR5_LEGACY_INIT_Z = 0.4
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
 _DUAL_UR5_TABLETOP_Z_OFFSET = 0.19
+_DUAL_UR5_SIDE_AXIS_INDEX = 1
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 4
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
@@ -411,28 +412,37 @@ def _pick_left_right_targets(
             if len(picked) > 2:
                 picked = sorted(
                     picked,
-                    key=lambda obj: abs(
-                        _vector3(obj.config.get("init_pos", [0, 0, 0]))[0]
-                    ),
+                    key=lambda obj: abs(_side_axis_value(obj)),
                     reverse=True,
                 )[:2]
         else:
             picked = sorted(
                 target_candidates,
-                key=lambda obj: abs(_vector3(obj.config.get("init_pos", [0, 0, 0]))[0]),
+                key=lambda obj: abs(_side_axis_value(obj)),
                 reverse=True,
             )[:2]
-    left, right = sorted(
-        picked,
-        key=lambda obj: _vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))[0],
-    )
+    left, right = sorted(picked, key=_side_axis_value)
     return left, right
 
 
 def _target_group_sort_key(group: list[_SceneObject]) -> tuple[float, int]:
-    xs = [_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))[0] for obj in group]
-    x_spread = max(xs) - min(xs)
-    return -x_spread, -len(group)
+    side_values = [_side_axis_value(obj) for obj in group]
+    side_spread = max(side_values) - min(side_values)
+    return -side_spread, -len(group)
+
+
+def _side_axis_value(obj: _SceneObject) -> float:
+    return _position_side_axis_value(
+        _vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))
+    )
+
+
+def _position_side_axis_value(position: list[float]) -> float:
+    return float(position[_DUAL_UR5_SIDE_AXIS_INDEX])
+
+
+def _arm_side_for_position(position: list[float]) -> str:
+    return "left" if _position_side_axis_value(position) < 0.0 else "right"
 
 
 def _target_noun(left_target: _SceneObject, right_target: _SceneObject) -> str:
@@ -565,8 +575,8 @@ def _call_role_llm(
         "Return only one JSON object with keys: container_object, "
         "left_target_object, right_target_object, target_noun, "
         "container_runtime_uid. Use only source_uid values from the scene. The "
-        "left target starts on the negative-x side, and the right target starts "
-        "on the positive-x side.\n\n"
+        "left target starts on the negative-y side, and the right target starts "
+        "on the positive-y side.\n\n"
         f"Project: {project_name}\n"
         f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}\n"
         f"Default roles:\n{json.dumps(default_roles, ensure_ascii=False, indent=2)}"
@@ -739,8 +749,10 @@ def _apply_relative_task_response(
     release_offset = _relative_release_offset(relation)
     high_offset = list(release_offset)
     high_offset[2] += _STAGING_Z_DELTA
-    moved_x = _vector3(by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0]))[0]
-    active_side = "left" if moved_x < 0 else "right"
+    moved_position = _vector3(
+        by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0])
+    )
+    active_side = _arm_side_for_position(moved_position)
     summary = str(response.get("task_prompt_summary", "")).strip()
     if not summary:
         summary = _default_relative_task_summary(
@@ -2194,14 +2206,14 @@ already executed `open_gripper` for its held target object.
 2. Move the held left target object directly above the left half of the
    {roles.container_runtime_uid} while the right arm keeps holding its target:
    - left_arm_action: move_relative_to_object(robot_name="left_arm",
-     obj_name="{roles.container_runtime_uid}", x_offset=-0.04, y_offset=0.0,
+     obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=-0.04,
      z_offset=0.22, sample_num=90)
    - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
 3. Lower the held left target object to the left release pose inside the
    {roles.container_runtime_uid}:
    - left_arm_action: move_relative_to_object(robot_name="left_arm",
-     obj_name="{roles.container_runtime_uid}", x_offset=-0.04, y_offset=0.0,
+     obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=-0.04,
      z_offset=0.12, sample_num=60)
    - right_arm_action: close_gripper(robot_name="right_arm", sample_num=20)
 
@@ -2221,14 +2233,14 @@ already executed `open_gripper` for its held target object.
    parallel handoff must remain one graph edge:
    - left_arm_action: back_to_initial_pose(robot_name="left_arm", sample_num=60)
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
-     obj_name="{roles.container_runtime_uid}", x_offset=0.04, y_offset=0.0,
+     obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=0.04,
      z_offset=0.22, sample_num=90)
 
 7. Lower the held right target object to the right release pose inside the
    {roles.container_runtime_uid}:
    - left_arm_action: null
    - right_arm_action: move_relative_to_object(robot_name="right_arm",
-     obj_name="{roles.container_runtime_uid}", x_offset=0.04, y_offset=0.0,
+     obj_name="{roles.container_runtime_uid}", x_offset=0.0, y_offset=0.04,
      z_offset=0.12, sample_num=60)
 
 8. Release the right target object into the {roles.container_runtime_uid}:
@@ -2272,9 +2284,9 @@ outside the table edge to avoid initial robot-table contact.
 
 The interactive objects are:
 - {roles.left_target_runtime_uid}: the {target_text} mesh initially on the
-  negative-x side (source object {roles.left_target_source_uid}).
+  negative-y side (source object {roles.left_target_source_uid}).
 - {roles.right_target_runtime_uid}: the {target_text} mesh initially on the
-  positive-x side (source object {roles.right_target_source_uid}).
+  positive-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
 
@@ -2371,13 +2383,13 @@ parameters.
     world-frame xyz offset while preserving the current end-effector orientation.
     Use `obj_name="{roles.container_runtime_uid}"` twice for each placement:
     - First move to a high staging pose above the container:
-      left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.22`;
-      right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.22`.
+      left arm uses `x_offset=0.0, y_offset=-0.04, z_offset=0.22`;
+      right arm uses `x_offset=0.0, y_offset=0.04, z_offset=0.22`.
       The right-arm high-staging action must execute in the same graph edge as
       the left arm's `back_to_initial_pose` action.
     - Then lower to the release pose inside the container:
-      left arm uses `x_offset=-0.04, y_offset=0.0, z_offset=0.12`;
-      right arm uses `x_offset=0.04, y_offset=0.0, z_offset=0.12`.
+      left arm uses `x_offset=0.0, y_offset=-0.04, z_offset=0.12`;
+      right arm uses `x_offset=0.0, y_offset=0.04, z_offset=0.12`.
 
 "move_by_relative_offset":
     def move_by_relative_offset(robot_name: str,

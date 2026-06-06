@@ -52,6 +52,12 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["left_apple"]["shape"]["fpath"].endswith(
+        "mesh_assets/apple/apple_2/apple_2.glb"
+    )
+    assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
+        "mesh_assets/apple/apple_1/apple_1.glb"
+    )
     assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.4]
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
 
@@ -70,6 +76,16 @@ def test_ur5_basket_generator_uses_parallel_handoff(
 
     assert "Generate exactly 10 nominal edges" in normalized_task_prompt
     assert "Generate exactly 11 nominal edges" not in normalized_task_prompt
+    assert "negative-y side" in basic_background
+    assert "positive-y side" in basic_background
+    assert "negative-x side" not in basic_background
+    assert "positive-x side" not in basic_background
+    assert "x_offset=0.0, y_offset=-0.04" in task_prompt
+    assert "x_offset=0.0, y_offset=0.04" in task_prompt
+    assert "x_offset=-0.04, y_offset=0.0" not in task_prompt
+    assert "x_offset=0.04, y_offset=0.0" not in task_prompt
+    assert "x_offset=0.0, y_offset=-0.04" in atom_actions
+    assert "x_offset=0.0, y_offset=0.04" in atom_actions
     assert "parallel handoff" in task_prompt
     assert "parallel handoff" in basic_background
     assert "parallel handoff" in atom_actions
@@ -203,6 +219,17 @@ def test_task_description_on_container_is_compiled_as_inside(
     assert success["object"] == "apple_1"
     assert success["container"] == "wicker_basket"
     assert paths.summary["relation"] == "inside"
+    assert paths.summary["active_arm"] == "right_arm"
+
+    grasp_overrides = gym_config["env"]["extensions"]["agent_grasp_pose_overrides"]
+    assert grasp_overrides == [
+        {
+            "type": "top_down",
+            "object": "apple_1",
+            "side": "right",
+            "height_offset": 0.036,
+        }
+    ]
 
 
 def test_task_description_on_object_uses_object_on_object_success(
@@ -355,7 +382,7 @@ def _write_project(project_dir: Path) -> None:
             _mesh_object(
                 "apple_1",
                 "mesh_assets/apple/apple_1/apple_1.glb",
-                [0.38, -0.11, 0.76],
+                [0.38, 0.11, 0.76],
                 [0.0, 0.0, 140.0],
             ),
             _mesh_object(
