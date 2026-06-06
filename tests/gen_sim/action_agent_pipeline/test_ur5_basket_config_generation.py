@@ -24,6 +24,7 @@ import torch
 
 from embodichain.gen_sim.action_agent_pipeline import ur5_basket_config_generation
 from embodichain.gen_sim.action_agent_pipeline.ur5_basket_config_generation import (
+    TargetReplacementSpec,
     generate_ur5_basket_config_from_project,
 )
 from embodichain.lab.gym.envs.tasks.tableware.configurable_success import (
@@ -99,6 +100,85 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert 'close_gripper(robot_name="right_arm"' not in handoff_edge
     assert "left_arm_action: null" not in handoff_edge
     assert paths.summary["mode"] == "basket_template"
+
+
+def test_target_replacements_generate_meshes_and_replace_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+    calls = _patch_prompt2geometry(monkeypatch)
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_agent",
+        target_replacements=[
+            TargetReplacementSpec("apple_1", "A orange", "new1"),
+            TargetReplacementSpec("apple_2", "A apple", "new2"),
+        ],
+    )
+
+    assert calls == [
+        ("A orange", project_dir / "mesh_assets" / "new1", "orange.glb"),
+        ("A apple", project_dir / "mesh_assets" / "new2", "apple.glb"),
+    ]
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+
+    assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
+    assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
+        "mesh_assets/new1/orange.glb"
+    )
+    assert rigid_objects["left_apple"]["shape"]["fpath"].endswith(
+        "mesh_assets/new2/apple.glb"
+    )
+    assert paths.summary["target_replacements"][0]["source_uid"] == "apple_1"
+    assert paths.summary["target_replacements"][1]["source_uid"] == "apple_2"
+
+
+def test_target_replacements_can_sync_runtime_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+    _patch_prompt2geometry(monkeypatch)
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_agent",
+        target_replacements=[
+            TargetReplacementSpec("apple_2", "A orange", "new1"),
+            TargetReplacementSpec("apple_1", "A apple", "new2"),
+        ],
+        sync_replacement_names=True,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+
+    assert set(rigid_objects) == {"left_orange", "right_apple", "wicker_basket"}
+    assert rigid_objects["left_orange"]["shape"]["fpath"].endswith(
+        "mesh_assets/new1/orange.glb"
+    )
+    assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
+        "mesh_assets/new2/apple.glb"
+    )
+
+    success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
+    assert {term["object"] for term in success_terms} == {
+        "left_orange",
+        "right_apple",
+    }
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    basic_background = paths.basic_background.read_text(encoding="utf-8")
+    assert "the left orange and right apple into the wicker_basket" in task_prompt
+    assert "left_arm must only manipulate `left_orange`" in task_prompt
+    assert "- left_orange: the orange mesh initially" in basic_background
+    assert "- right_apple: the apple mesh initially" in basic_background
 
 
 def test_task_description_generates_relative_left_of_config(
@@ -416,6 +496,29 @@ def _mesh_object(
         "init_rot": init_rot,
         "body_scale": [1.0, 1.0, 1.0],
     }
+
+
+def _patch_prompt2geometry(monkeypatch: pytest.MonkeyPatch) -> list:
+    calls = []
+
+    def fake_run_prompt2geometry_replacement(
+        *,
+        prompt: str,
+        output_root: Path,
+        output_name: str,
+    ) -> dict:
+        output_root.mkdir(parents=True, exist_ok=True)
+        mesh_path = output_root / output_name
+        mesh_path.write_bytes(b"glb")
+        calls.append((prompt, output_root, output_name))
+        return {"scaled_mesh_path": str(mesh_path)}
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_run_prompt2geometry_replacement",
+        fake_run_prompt2geometry_replacement,
+    )
+    return calls
 
 
 class _FakeEnv:

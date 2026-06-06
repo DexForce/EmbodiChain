@@ -20,6 +20,7 @@ import argparse
 from pathlib import Path
 
 from embodichain.gen_sim.action_agent_pipeline.ur5_basket_config_generation import (
+    TargetReplacementSpec,
     generate_ur5_basket_config_from_project,
 )
 
@@ -94,6 +95,38 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--target_replacement1",
+        "--target-replacement1",
+        nargs=2,
+        metavar=("SOURCE_UID", "PROMPT"),
+        default=None,
+        help=(
+            "Generate <gym_project>/mesh_assets/new1 from PROMPT and use it "
+            "to replace SOURCE_UID in the generated config."
+        ),
+    )
+    parser.add_argument(
+        "--target_replacement2",
+        "--target-replacement2",
+        nargs=2,
+        metavar=("SOURCE_UID", "PROMPT"),
+        default=None,
+        help=(
+            "Generate <gym_project>/mesh_assets/new2 from PROMPT and use it "
+            "to replace SOURCE_UID in the generated config."
+        ),
+    )
+    parser.add_argument(
+        "--sync_replacement_names",
+        "--sync-replacement-names",
+        action="store_true",
+        default=False,
+        help=(
+            "Also update replacement target runtime UIDs and generated prompts "
+            "from the replacement prompts."
+        ),
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         default=False,
@@ -113,6 +146,7 @@ def cli() -> None:
     )
     args = parser.parse_args()
     task_description = _resolve_task_description(args)
+    target_replacements = _resolve_target_replacements(args)
 
     paths = generate_ur5_basket_config_from_project(
         gym_project=args.gym_project,
@@ -122,6 +156,8 @@ def cli() -> None:
         use_llm_roles=args.use_llm_roles,
         llm_model=args.llm_model,
         target_body_scale=args.target_body_scale,
+        target_replacements=target_replacements,
+        sync_replacement_names=args.sync_replacement_names,
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,
         max_episode_steps=args.max_episode_steps,
@@ -154,6 +190,31 @@ def _resolve_task_description(args: argparse.Namespace) -> str | None:
     if args.task_description:
         return args.task_description.strip()
     return None
+
+
+def _resolve_target_replacements(
+    args: argparse.Namespace,
+) -> list[TargetReplacementSpec]:
+    replacements = []
+    if args.target_replacement1:
+        source_uid, prompt = args.target_replacement1
+        replacements.append(
+            TargetReplacementSpec(
+                source_uid=source_uid,
+                prompt=prompt,
+                output_dir_name="new1",
+            )
+        )
+    if args.target_replacement2:
+        source_uid, prompt = args.target_replacement2
+        replacements.append(
+            TargetReplacementSpec(
+                source_uid=source_uid,
+                prompt=prompt,
+                output_dir_name="new2",
+            )
+        )
+    return replacements
 
 
 if __name__ == "__main__":

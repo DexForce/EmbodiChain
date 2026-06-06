@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,7 @@ import re
 
 __all__ = [
     "GeneratedUR5BasketConfigPaths",
+    "TargetReplacementSpec",
     "generate_ur5_basket_config_from_project",
 ]
 
@@ -139,6 +140,15 @@ class GeneratedUR5BasketConfigPaths:
 
 
 @dataclass(frozen=True)
+class TargetReplacementSpec:
+    """Prompt-to-geometry replacement for one source target object."""
+
+    source_uid: str
+    prompt: str
+    output_dir_name: str
+
+
+@dataclass(frozen=True)
 class _SceneObject:
     source_uid: str
     source_role: str
@@ -155,7 +165,18 @@ class _BasketTaskRoles:
     left_target_runtime_uid: str
     right_target_runtime_uid: str
     target_noun: str
+    left_target_noun: str
+    right_target_noun: str
     container_noun: str
+
+
+@dataclass(frozen=True)
+class _ResolvedTargetReplacement:
+    source_uid: str
+    prompt: str
+    output_dir_name: str
+    mesh_path: Path
+    runtime_noun: str
 
 
 @dataclass(frozen=True)
@@ -184,6 +205,8 @@ def generate_ur5_basket_config_from_project(
     use_llm_roles: bool = False,
     llm_model: str | None = None,
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
+    target_replacements: Sequence[TargetReplacementSpec] | None = None,
+    sync_replacement_names: bool = False,
     overwrite: bool = False,
     max_episodes: int = 1,
     max_episode_steps: int = 1000,
@@ -207,6 +230,12 @@ def generate_ur5_basket_config_from_project(
         llm_model: Optional model override for role refinement.
         target_body_scale: Uniform or xyz scale applied to generated target
             objects. Basket-like containers keep their source ``body_scale``.
+        target_replacements: Optional prompt-generated GLB replacements for
+            selected default basket target objects. Each replacement writes to
+            ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
+            generated config, not the original source mesh file.
+        sync_replacement_names: If true, update runtime target UIDs and prompts
+            from the replacement prompts. If false, only mesh paths are replaced.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -220,9 +249,15 @@ def generate_ur5_basket_config_from_project(
     scene_dir = gym_config_path.parent
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
+    replacement_specs = _normalize_target_replacements(target_replacements)
 
     scene_objects = _collect_scene_objects(source_config)
     if task_description:
+        if replacement_specs:
+            raise ValueError(
+                "target_replacements are only supported by the default basket "
+                "template. Do not combine them with task_description."
+            )
         spec = _build_relative_placement_spec_with_llm(
             scene_objects=scene_objects,
             project_name=project_name,
@@ -255,6 +290,17 @@ def generate_ur5_basket_config_from_project(
             model=llm_model,
         )
 
+    _validate_target_replacement_sources(roles, replacement_specs)
+    resolved_replacements = _run_target_replacements(
+        scene_dir=scene_dir,
+        replacement_specs=replacement_specs,
+    )
+    if sync_replacement_names:
+        roles = _apply_replacement_names(
+            roles,
+            resolved_replacements,
+        )
+
     bundle = _build_ur5_basket_bundle(
         scene_dir=scene_dir,
         source_config=source_config,
@@ -262,6 +308,7 @@ def generate_ur5_basket_config_from_project(
         project_name=project_name,
         task_name=task_name,
         target_body_scale=target_body_scale,
+        target_replacements=resolved_replacements,
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
     )
@@ -365,6 +412,8 @@ def _infer_basket_task_roles(scene_objects: list[_SceneObject]) -> _BasketTaskRo
         left_target_runtime_uid=f"left_{target_noun}",
         right_target_runtime_uid=f"right_{target_noun}",
         target_noun=target_noun,
+        left_target_noun=target_noun,
+        right_target_noun=target_noun,
         container_noun=container_noun,
     )
 
@@ -496,11 +545,238 @@ def _plural(noun: str) -> str:
     return f"{noun}s"
 
 
+def _left_target_text(roles: _BasketTaskRoles) -> str:
+    return _display_noun(roles.left_target_noun)
+
+
+def _right_target_text(roles: _BasketTaskRoles) -> str:
+    return _display_noun(roles.right_target_noun)
+
+
+def _target_pair_text(roles: _BasketTaskRoles) -> str:
+    left_text = _left_target_text(roles)
+    right_text = _right_target_text(roles)
+    if left_text == right_text:
+        return f"two {left_text} objects"
+    return f"the left {left_text} and right {right_text}"
+
+
+def _target_plural_text(roles: _BasketTaskRoles) -> str:
+    left_text = _left_target_text(roles)
+    right_text = _right_target_text(roles)
+    if left_text == right_text:
+        return _plural(left_text)
+    return "target objects"
+
+
+def _generic_target_text(roles: _BasketTaskRoles) -> str:
+    left_text = _left_target_text(roles)
+    right_text = _right_target_text(roles)
+    if left_text == right_text:
+        return left_text
+    return "target object"
+
+
+def _target_task_description_text(roles: _BasketTaskRoles) -> str:
+    left_text = _left_target_text(roles)
+    right_text = _right_target_text(roles)
+    if left_text == right_text:
+        return _plural(left_text)
+    return f"{left_text}-and-{right_text}"
+
+
 def _normalize_runtime_uid(value: str) -> str:
     uid = _INVALID_UID_CHARS_RE.sub("_", value.strip()).strip("_").lower()
     if not uid:
         raise ValueError(f"Invalid runtime uid: {value!r}")
     return uid
+
+
+def _normalize_target_replacements(
+    target_replacements: Sequence[TargetReplacementSpec] | None,
+) -> tuple[TargetReplacementSpec, ...]:
+    if not target_replacements:
+        return ()
+
+    normalized = []
+    seen_source_uids = set()
+    seen_output_dirs = set()
+    for replacement in target_replacements:
+        if not isinstance(replacement, TargetReplacementSpec):
+            raise TypeError(
+                "target_replacements must contain TargetReplacementSpec values."
+            )
+        source_uid = str(replacement.source_uid).strip()
+        prompt = str(replacement.prompt).strip()
+        output_dir_name = str(replacement.output_dir_name).strip()
+        if not source_uid:
+            raise ValueError("target replacement source_uid must be non-empty.")
+        if not prompt:
+            raise ValueError("target replacement prompt must be non-empty.")
+        if not output_dir_name:
+            raise ValueError("target replacement output_dir_name must be non-empty.")
+        output_dir_path = Path(output_dir_name)
+        if (
+            output_dir_path.is_absolute()
+            or len(output_dir_path.parts) != 1
+            or output_dir_name in {".", ".."}
+        ):
+            raise ValueError(
+                "target replacement output_dir_name must be a single relative "
+                f"directory name, got: {output_dir_name!r}"
+            )
+        if source_uid in seen_source_uids:
+            raise ValueError(f"Duplicate target replacement source uid: {source_uid}")
+        if output_dir_name in seen_output_dirs:
+            raise ValueError(
+                f"Duplicate target replacement output dir: {output_dir_name}"
+            )
+        seen_source_uids.add(source_uid)
+        seen_output_dirs.add(output_dir_name)
+        normalized.append(
+            TargetReplacementSpec(
+                source_uid=source_uid,
+                prompt=prompt,
+                output_dir_name=output_dir_name,
+            )
+        )
+    return tuple(normalized)
+
+
+def _validate_target_replacement_sources(
+    roles: _BasketTaskRoles,
+    replacement_specs: Sequence[TargetReplacementSpec],
+) -> None:
+    if not replacement_specs:
+        return
+
+    target_source_uids = {
+        roles.left_target_source_uid,
+        roles.right_target_source_uid,
+    }
+    unknown = [
+        replacement.source_uid
+        for replacement in replacement_specs
+        if replacement.source_uid not in target_source_uids
+    ]
+    if unknown:
+        raise ValueError(
+            "target_replacements must reference the selected basket target "
+            f"source uid(s) {sorted(target_source_uids)}, got: {unknown}"
+        )
+
+
+def _run_target_replacements(
+    *,
+    scene_dir: Path,
+    replacement_specs: Sequence[TargetReplacementSpec],
+) -> tuple[_ResolvedTargetReplacement, ...]:
+    resolved = []
+    for replacement in replacement_specs:
+        runtime_noun = _replacement_runtime_noun(replacement.prompt)
+        output_root = scene_dir / "mesh_assets" / replacement.output_dir_name
+        result = _run_prompt2geometry_replacement(
+            prompt=replacement.prompt,
+            output_root=output_root,
+            output_name=f"{runtime_noun}.glb",
+        )
+        mesh_path = _resolve_prompt2geometry_mesh_path(result, output_root)
+        resolved.append(
+            _ResolvedTargetReplacement(
+                source_uid=replacement.source_uid,
+                prompt=replacement.prompt,
+                output_dir_name=replacement.output_dir_name,
+                mesh_path=mesh_path,
+                runtime_noun=runtime_noun,
+            )
+        )
+    return tuple(resolved)
+
+
+def _run_prompt2geometry_replacement(
+    *,
+    prompt: str,
+    output_root: Path,
+    output_name: str,
+) -> dict[str, Any]:
+    from embodichain.gen_sim.action_agent_pipeline.gym_project_api.prompt2geometry import (
+        Prompt2GeometryRequest,
+        run_prompt2geometry,
+    )
+
+    return run_prompt2geometry(
+        Prompt2GeometryRequest(
+            prompt=prompt,
+            output_root=output_root,
+            output_name=output_name,
+        )
+    )
+
+
+def _resolve_prompt2geometry_mesh_path(
+    result: Mapping[str, Any],
+    output_root: Path,
+) -> Path:
+    raw_path = result.get("scaled_mesh_path") or result.get("mesh_path")
+    if not raw_path:
+        raise ValueError("prompt2geometry result did not include a GLB mesh path.")
+
+    mesh_path = Path(str(raw_path)).expanduser()
+    if not mesh_path.is_absolute():
+        mesh_path = (output_root / mesh_path).resolve()
+    else:
+        mesh_path = mesh_path.resolve()
+
+    if not mesh_path.is_file():
+        raise FileNotFoundError(f"Generated replacement GLB not found: {mesh_path}")
+    return mesh_path
+
+
+def _replacement_runtime_noun(prompt: str) -> str:
+    tokens = re.findall(r"[a-z0-9]+", prompt.lower())
+    while tokens and tokens[0] in {"a", "an", "the"}:
+        tokens.pop(0)
+    stem = "_".join(tokens)
+    if not stem:
+        stem = "replacement_object"
+    return _normalize_runtime_uid(stem)
+
+
+def _apply_replacement_names(
+    roles: _BasketTaskRoles,
+    resolved_replacements: Sequence[_ResolvedTargetReplacement],
+) -> _BasketTaskRoles:
+    replacement_by_uid = {
+        replacement.source_uid: replacement for replacement in resolved_replacements
+    }
+    left_replacement = replacement_by_uid.get(roles.left_target_source_uid)
+    right_replacement = replacement_by_uid.get(roles.right_target_source_uid)
+    left_target_noun = (
+        left_replacement.runtime_noun
+        if left_replacement is not None
+        else roles.left_target_noun
+    )
+    right_target_noun = (
+        right_replacement.runtime_noun
+        if right_replacement is not None
+        else roles.right_target_noun
+    )
+    target_noun = (
+        left_target_noun if left_target_noun == right_target_noun else "target_object"
+    )
+    return _BasketTaskRoles(
+        table_source_uid=roles.table_source_uid,
+        container_source_uid=roles.container_source_uid,
+        left_target_source_uid=roles.left_target_source_uid,
+        right_target_source_uid=roles.right_target_source_uid,
+        container_runtime_uid=roles.container_runtime_uid,
+        left_target_runtime_uid=f"left_{left_target_noun}",
+        right_target_runtime_uid=f"right_{right_target_noun}",
+        target_noun=target_noun,
+        left_target_noun=left_target_noun,
+        right_target_noun=right_target_noun,
+        container_noun=roles.container_noun,
+    )
 
 
 def _refine_roles_with_llm(
@@ -557,6 +833,8 @@ def _refine_roles_with_llm(
         left_target_runtime_uid=f"left_{target_noun}",
         right_target_runtime_uid=f"right_{target_noun}",
         target_noun=target_noun,
+        left_target_noun=target_noun,
+        right_target_noun=target_noun,
         container_noun=_display_noun(container_runtime_uid),
     )
 
@@ -931,11 +1209,15 @@ def _build_ur5_basket_bundle(
     project_name: str,
     task_name: str,
     target_body_scale: float | list[float] | tuple[float, float, float],
+    target_replacements: Sequence[_ResolvedTargetReplacement],
     max_episodes: int,
     max_episode_steps: int,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
+    replacement_by_source_uid = {
+        replacement.source_uid: replacement for replacement in target_replacements
+    }
     object_scale = _target_body_scale_vector(target_body_scale)
     container_scale = _source_body_scale(by_uid[roles.container_source_uid])
     task_source_uids = {
@@ -981,12 +1263,14 @@ def _build_ur5_basket_bundle(
                 by_uid[roles.right_target_source_uid],
                 roles.right_target_runtime_uid,
                 object_scale,
+                replacement_by_source_uid.get(roles.right_target_source_uid),
             ),
             _make_target_object_config(
                 scene_dir,
                 by_uid[roles.left_target_source_uid],
                 roles.left_target_runtime_uid,
                 object_scale,
+                replacement_by_source_uid.get(roles.left_target_source_uid),
             ),
             _make_container_object_config(
                 scene_dir,
@@ -1011,6 +1295,16 @@ def _build_ur5_basket_bundle(
             "left_target": roles.left_target_runtime_uid,
             "right_target": roles.right_target_runtime_uid,
             "container": roles.container_runtime_uid,
+            "target_replacements": [
+                {
+                    "source_uid": replacement.source_uid,
+                    "prompt": replacement.prompt,
+                    "output_dir_name": replacement.output_dir_name,
+                    "mesh_path": replacement.mesh_path.as_posix(),
+                    "runtime_noun": replacement.runtime_noun,
+                }
+                for replacement in target_replacements
+            ],
         },
     }
 
@@ -1508,8 +1802,9 @@ def _make_dataset_config(
     project_name: str,
     roles: _BasketTaskRoles,
 ) -> dict[str, Any]:
-    target_text = _display_noun(roles.target_noun)
-    target_plural = _plural(target_text)
+    left_target_text = _left_target_text(roles)
+    right_target_text = _right_target_text(roles)
+    target_description = _target_task_description_text(roles)
     return {
         "lerobot": {
             "func": "LeRobotRecorder",
@@ -1521,16 +1816,16 @@ def _make_dataset_config(
                 },
                 "instruction": {
                     "lang": (
-                        f"Use the left UR5 to place the left {target_text} into "
+                        f"Use the left UR5 to place the left {left_target_text} into "
                         f"the {roles.container_runtime_uid}, then use the right "
-                        f"UR5 to place the right {target_text} into the "
+                        f"UR5 to place the right {right_target_text} into the "
                         f"{roles.container_runtime_uid}."
                     ),
                 },
                 "extra": {
                     "scene_type": project_name,
                     "task_description": (
-                        f"Dual UR5 {target_plural}-to-container placement"
+                        f"Dual UR5 {target_description}-to-container placement"
                     ),
                     "data_type": "sim",
                 },
@@ -1753,6 +2048,7 @@ def _make_target_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     target_scale: list[float],
+    replacement: _ResolvedTargetReplacement | None = None,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -1763,6 +2059,7 @@ def _make_target_object_config(
             obj,
             _TARGET_MAX_CONVEX_HULL_NUM,
         ),
+        mesh_fpath=replacement.mesh_path if replacement else None,
     )
 
 
@@ -1827,10 +2124,11 @@ def _make_rigid_object_config(
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
+    mesh_fpath: str | Path | None = None,
 ) -> dict[str, Any]:
     config = {
         "uid": runtime_uid,
-        "shape": _make_shape_config(scene_dir, obj.config),
+        "shape": _make_shape_config(scene_dir, obj.config, mesh_fpath=mesh_fpath),
         "attrs": dict(_RIGID_OBJECT_ATTRS),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
@@ -1864,9 +2162,15 @@ def _relative_rigid_object_max_convex_hull_num(
 
 
 def _make_shape_config(
-    scene_dir: Path, source_config: Mapping[str, Any]
+    scene_dir: Path,
+    source_config: Mapping[str, Any],
+    *,
+    mesh_fpath: str | Path | None = None,
 ) -> dict[str, Any]:
     shape = copy.deepcopy(dict(source_config.get("shape", {})))
+    if mesh_fpath is not None:
+        shape["shape_type"] = "Mesh"
+        shape["fpath"] = str(mesh_fpath)
     if shape.get("shape_type") == "Mesh" and "fpath" in shape:
         shape["fpath"] = _asset_path_for_config(scene_dir, str(shape["fpath"]))
     shape.setdefault("compute_uv", False)
@@ -2159,21 +2463,23 @@ def _make_task_prompt(
     project_name: str,
     roles: _BasketTaskRoles,
 ) -> str:
-    target_text = _display_noun(roles.target_noun)
-    target_plural = _plural(target_text)
+    left_target_text = _left_target_text(roles)
+    right_target_text = _right_target_text(roles)
+    target_pair_text = _target_pair_text(roles)
+    target_plural = _target_plural_text(roles)
     return f"""Task:
 {task_name}: use the current two-UR5 configuration to place
-two {target_text} objects into the {roles.container_runtime_uid}.
+{target_pair_text} into the {roles.container_runtime_uid}.
 
 The task starts with both arms acting simultaneously:
-the left UR5 grasps the left {target_text} while the right UR5 grasps the right
-{target_text} in the same nominal graph edge. After both {target_plural} are
-grasped, the left UR5 places its {target_text} into the
+the left UR5 grasps the left {left_target_text} while the right UR5 grasps the
+right {right_target_text} in the same nominal graph edge. After both
+{target_plural} are grasped, the left UR5 places its {left_target_text} into the
 {roles.container_runtime_uid} and retreats upward. While the left UR5 returns
 to its initial pose, the right UR5 must simultaneously begin placing its
-already-grasped {target_text} by moving it to the high staging pose above the
-{roles.container_runtime_uid}. The right UR5 then completes its placement and
-returns to its initial pose.
+already-grasped {right_target_text} by moving it to the high staging pose above
+the {roles.container_runtime_uid}. The right UR5 then completes its placement
+and returns to its initial pose.
 
 Object and arm mapping:
 - left_arm must only manipulate `{roles.left_target_runtime_uid}`.
@@ -2269,8 +2575,9 @@ current `{roles.container_runtime_uid}` object pose from the exported
 
 
 def _make_basic_background(project_name: str, roles: _BasketTaskRoles) -> str:
-    target_text = _display_noun(roles.target_noun)
-    target_plural = _plural(target_text)
+    left_target_text = _left_target_text(roles)
+    right_target_text = _right_target_text(roles)
+    target_plural = _target_plural_text(roles)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for the UR5BreadBasket task template. The
@@ -2286,9 +2593,9 @@ the central {roles.container_runtime_uid}. The bases are intentionally kept
 outside the table edge to avoid initial robot-table contact.
 
 The interactive objects are:
-- {roles.left_target_runtime_uid}: the {target_text} mesh initially on the
+- {roles.left_target_runtime_uid}: the {left_target_text} mesh initially on the
   negative-y side (source object {roles.left_target_source_uid}).
-- {roles.right_target_runtime_uid}: the {target_text} mesh initially on the
+- {roles.right_target_runtime_uid}: the {right_target_text} mesh initially on the
   positive-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
@@ -2326,7 +2633,7 @@ actions.
 
 
 def _make_atom_actions_prompt(roles: _BasketTaskRoles) -> str:
-    target_text = _display_noun(roles.target_noun)
+    target_text = _generic_target_text(roles)
     return f"""### Atom Functions for UR5BreadBasket Dual-UR5 Placement
 
 This is the Dual-UR5 configuration for the UR5BreadBasket task template. Use the
