@@ -135,6 +135,7 @@ class BaseEnv(gym.Env):
 
         if not self.sim_cfg.headless:
             self.sim.open_window()
+            self._set_viewer_camera_from_config()
 
         self._elapsed_steps = torch.zeros(
             self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
@@ -240,6 +241,44 @@ class BaseEnv(gym.Env):
         if not hasattr(self, "_camera_group_ids"):
             self._camera_group_ids: List[int] = []
         self._camera_group_ids.append(group_id)
+
+    def _set_viewer_camera_from_config(self) -> None:
+        extensions = getattr(self.cfg, "extensions", {}) or {}
+        sensor_uid = getattr(self, "viewer_camera_uid", None) or extensions.get(
+            "viewer_camera_uid"
+        )
+        if sensor_uid is None:
+            return
+
+        sensor = self.sensors.get(sensor_uid)
+        if sensor is None:
+            logger.log_warning(f"Viewer camera sensor '{sensor_uid}' was not found.")
+            return
+        if not isinstance(sensor, Camera):
+            logger.log_warning(f"Viewer camera sensor '{sensor_uid}' is not a Camera.")
+            return
+
+        extrinsics = sensor.cfg.extrinsics
+        if extrinsics.parent is not None:
+            logger.log_warning(
+                f"Viewer camera sensor '{sensor_uid}' is attached to "
+                f"'{extrinsics.parent}', so it cannot initialize the global viewer."
+            )
+            return
+
+        pose = extrinsics.transformation.detach().cpu().numpy()
+        eye = pose[:3, 3]
+        forward = pose[:3, 2]
+        up = pose[:3, 1]
+        if np.linalg.norm(forward) < 1e-6 or np.linalg.norm(up) < 1e-6:
+            logger.log_warning(f"Viewer camera sensor '{sensor_uid}' has invalid axes.")
+            return
+
+        self.sim.set_window_look_at(
+            eye=eye,
+            look_at=eye + forward / np.linalg.norm(forward),
+            up=up / np.linalg.norm(up),
+        )
 
     def _setup_scene(self, **kwargs):
         # Init sim manager.

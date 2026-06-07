@@ -558,6 +558,23 @@ class SimulationManager:
         #     self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
+    def set_window_look_at(
+        self,
+        eye: Sequence[float],
+        look_at: Sequence[float],
+        up: Sequence[float],
+    ) -> None:
+        """Set the interactive viewer camera with eye-target-up coordinates."""
+        if self._window is None:
+            logger.log_warning("No simulation window available to set viewer camera.")
+            return
+
+        self._window.set_look_at(
+            np.asarray(eye, dtype=np.float32),
+            np.asarray(look_at, dtype=np.float32),
+            np.asarray(up, dtype=np.float32),
+        )
+
     def close_window(self) -> None:
         """Close the simulation window."""
         if self.is_window_recording():

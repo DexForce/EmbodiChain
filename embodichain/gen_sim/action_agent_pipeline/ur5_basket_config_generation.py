@@ -102,7 +102,7 @@ _RELATION_ALIASES = {
 _SIDE_RELATION_DISTANCE = 0.16
 _SIDE_RELEASE_Z_OFFSET = 0.12
 _STAGING_Z_DELTA = 0.10
-_ON_RELEASE_Z_OFFSET = -0.2
+_ON_RELEASE_Z_OFFSET = 0.2
 _DUAL_UR5_LEGACY_INIT_Z = 0.5
 _DUAL_UR5_HIGH_TABLETOP_THRESHOLD = 1.0
 _DUAL_UR5_HIGH_TABLETOP_INIT_Z = 0.8
@@ -2241,6 +2241,7 @@ def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
         "ignore_terminations_during_agent": True,
+        "viewer_camera_uid": "cam_high",
         "agent_success": {
             "op": "all",
             "terms": [
@@ -2301,6 +2302,7 @@ def _make_relative_extensions_config(spec: _RelativePlacementSpec) -> dict[str, 
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
         "ignore_terminations_during_agent": True,
+        "viewer_camera_uid": "cam_high",
         "agent_success": _make_relative_success_spec(spec),
         "agent_grasp_pose_overrides": [
             {

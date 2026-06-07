@@ -855,6 +855,86 @@
             "base_history_task_name": "Demo1_Text",
             "base_history_source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/environment/image2tabletop/downloads/1780786926610_gym_project/gym_config_merged.json",
             "index": 12
+        },
+        {
+            "schema_version": 1,
+            "created_at": "2026-06-07T07:34:59+08:00",
+            "task_name": "Demo3_Text",
+            "source_mode": "image2tabletop",
+            "source_gym_project_dir": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780788386117_gym_project",
+            "source_gym_config": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780788386117_gym_project/gym_config.json",
+            "input_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780788386117_gym_project",
+            "config_output_dir": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text",
+            "generated_gym_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/fast_gym_config.json",
+            "generated_agent_config": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/agent_config.json",
+            "generated_task_prompt": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/task_prompt.txt",
+            "generated_basic_background": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/basic_background.txt",
+            "generated_atom_actions": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/demo3_text/atom_actions.txt",
+            "pipeline_history_path": "/home/dex/桌面/EmbodiChain/baseline/embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json",
+            "target_body_scale": 0.8,
+            "target_replacements": [],
+            "sync_replacement_names": false,
+            "reuse_target_replacements": true,
+            "prewarm_coacd_cache": true,
+            "overwrite_config": true,
+            "regenerate": true,
+            "skip_run_agent": false,
+            "generation_summary": {
+                "mode": "dual_arm_relative_placement",
+                "placements": [
+                    {
+                        "moved_object": "interact_beverage_can_1",
+                        "reference_object": "interact_notebook",
+                        "relation": "front_of",
+                        "active_arm": "left_arm",
+                        "release_offset": [
+                            -0.16,
+                            0.0,
+                            0.12
+                        ]
+                    },
+                    {
+                        "moved_object": "interact_beverage_can_2",
+                        "reference_object": "interact_notebook",
+                        "relation": "behind",
+                        "active_arm": "right_arm",
+                        "release_offset": [
+                            0.16,
+                            0.0,
+                            0.12
+                        ]
+                    }
+                ],
+                "coacd_cache": [
+                    {
+                        "uid": "interact_beverage_can_1",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780788386117_gym_project/mesh_assets/beverage_can/beverage_can_1/beverage_can_1.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/3bee782d32eec1722799ff9fe3fcb0c1_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "interact_beverage_can_2",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780788386117_gym_project/mesh_assets/beverage_can/beverage_can_2/beverage_can_2.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/b176bb7a5f33482d962a21a478dfd0e9_16.obj",
+                        "status": "generated"
+                    },
+                    {
+                        "uid": "interact_notebook",
+                        "mesh_path": "/home/dex/桌面/EmbodiChain/baseline/gym_project/1780788386117_gym_project/mesh_assets/notebook/notebook_3/notebook_3.glb",
+                        "max_convex_hull_num": 16,
+                        "cache_path": "/home/dex/.cache/embodichain_cache/convex_decomposition/f382e52b8da45af11b4e0c6f409f884c_16.obj",
+                        "status": "generated"
+                    }
+                ]
+            },
+            "task_description": "左臂把左边的罐头放到本子前面,同时右臂把右边的罐头放本子后面",
+            "image_name": "demo15",
+            "server": "http://192.168.3.23:4523",
+            "gym_project_root": "/home/dex/桌面/EmbodiChain/baseline/gym_project",
+            "overwrite_gym_project": false,
+            "index": 13
         }
     ]
 }
