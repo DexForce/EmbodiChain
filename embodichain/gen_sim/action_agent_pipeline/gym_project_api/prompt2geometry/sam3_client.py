@@ -160,16 +160,16 @@ class SAM3Client:
         status_url = result.get("status_url")
         if status not in {"queued", "running"} or not isinstance(status_url, str):
             _append_progress(progress_path, result)
-            _print_progress("SAM3", result, verbose=verbose)
+            _print_progress("segmentation", result, verbose=verbose)
             return result
 
         _append_progress(progress_path, result)
-        _print_progress("SAM3", result, verbose=verbose)
+        _print_progress("segmentation", result, verbose=verbose)
         while True:
             time.sleep(self.poll_interval_s)
             job = self._get_json(status_url)
             _append_progress(progress_path, job)
-            _print_progress("SAM3", job, verbose=verbose)
+            _print_progress("segmentation", job, verbose=verbose)
             job_status = str(job.get("status") or "").lower()
             if job_status in {"queued", "running"}:
                 continue

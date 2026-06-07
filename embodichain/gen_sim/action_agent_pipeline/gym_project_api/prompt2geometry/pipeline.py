@@ -87,7 +87,7 @@ def run_prompt2geometry(request: Prompt2GeometryRequest) -> dict[str, Any]:
 
         _log_status(request, "z-image", "generating source image")
         image_path, zimage_manifest = _generate_image(request, output_root)
-        _log_status(request, "sam3", "segmenting generated image")
+        _log_status(request, "segmentation", "segmenting generated image")
         raw_mask_path, segmentation_manifest = _segment_image(
             request,
             image_path,
@@ -99,7 +99,7 @@ def run_prompt2geometry(request: Prompt2GeometryRequest) -> dict[str, Any]:
             raw_mask_path=raw_mask_path,
             output_dir=output_root / "mask_correction",
         )
-        _log_status(request, "sam3d", "generating raw mesh")
+        _log_status(request, "3D-generation", "generating raw mesh")
         generation_manifest = _generate_geometry(
             request=request,
             image_path=image_path,

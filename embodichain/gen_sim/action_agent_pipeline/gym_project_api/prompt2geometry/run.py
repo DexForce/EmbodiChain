@@ -33,7 +33,10 @@ __all__ = ["main"]
 def main() -> None:
     """Run prompt-to-geometry from the command line."""
     parser = argparse.ArgumentParser(
-        description="Generate one object mesh from a prompt via z-image, SAM3, and SAM3D."
+        description=(
+            "Generate one object mesh from a prompt via z-image, segmentation, "
+            "and 3D-generation."
+        )
     )
     parser.add_argument(
         "--prompt",
