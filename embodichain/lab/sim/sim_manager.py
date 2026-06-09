@@ -360,14 +360,15 @@ class SimulationManager:
         """Set the global default renderer used by new simulations.
 
         This updates :data:`embodichain.lab.sim.cfg.DEFAULT_RENDERER`, which is
-        consulted whenever a :class:`SimulationManagerCfg` is created with the
-        default ``render_cfg.renderer="auto"``.
+        consulted by :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`
+        when ``render_cfg.renderer="auto"`` is resolved during :class:`SimulationManager`
+        construction.
 
         Args:
             renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
                 ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
                 resolved immediately from the detected GPU via
-                :func:`select_default_renderer`.
+                :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
             gpu_id: The CUDA device index to query when ``renderer="auto"``.
 
         Returns:
