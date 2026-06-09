@@ -45,7 +45,7 @@ from .shapes import ShapeCfg, MeshCfg
 #
 # The sentinel value ``"auto"`` defers the choice to GPU-based auto-selection
 # performed lazily when a :class:`SimulationManager` is constructed (see
-# :func:`embodichain.lab.sim.sim_manager.select_default_renderer`). Assigning a
+# :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`). Assigning a
 # concrete renderer here (e.g. in test fixtures) forces that renderer and takes
 # precedence over auto-selection.
 DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
