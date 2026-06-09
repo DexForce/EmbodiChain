@@ -675,15 +675,16 @@ class GraspGenerator:
             self.cfg.n_deviated_approach_directions
         )
 
-        # remove near grasp poses using non-maximum suppression
-        nms_indices = pose_nms_indices(
-            valid_grasp_poses,
-            angle_th=np.pi / 18,
-            dist_th=0.01,
-        )
-        valid_grasp_poses = valid_grasp_poses[nms_indices]
-        valid_open_lengths = valid_open_lengths[nms_indices]
-        valid_centers = valid_centers[nms_indices]
+        # TODO: too slow
+        # # remove near grasp poses using non-maximum suppression
+        # nms_indices = pose_nms_indices(
+        #     valid_grasp_poses,
+        #     angle_th=np.pi / 18,
+        #     dist_th=0.01,
+        # )
+        # valid_grasp_poses = valid_grasp_poses[nms_indices]
+        # valid_open_lengths = valid_open_lengths[nms_indices]
+        # valid_centers = valid_centers[nms_indices]
 
         # select non-collide grasp poses
         is_colliding, max_penetration = self._collision_checker.query(
@@ -717,7 +718,7 @@ class GraspGenerator:
         center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
-        total_cost = 0.3 * angle_cost + 0.3 * length_cost + 0.4 * center_cost
+        total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:
