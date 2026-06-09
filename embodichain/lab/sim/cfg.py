@@ -41,16 +41,25 @@ from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
 
-# Global default renderer settings for simulation
-DEFAULT_RENDERER: Literal["hybrid", "fast-rt", "rt"] = "hybrid"
+# Global default renderer settings for simulation.
+#
+# The sentinel value ``"auto"`` defers the choice to GPU-based auto-selection
+# performed lazily when a :class:`SimulationManager` is constructed (see
+# :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`). Assigning a
+# concrete renderer here (e.g. in test fixtures) forces that renderer and takes
+# precedence over auto-selection.
+DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
 
 
 @configclass
 class RenderCfg:
-    renderer: Literal["hybrid", "fast-rt", "rt"] = "hybrid"
-    """Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
 
     Note:
+    - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
+        'hybrid', while datacenter cards (A100/A800, H100/H800/H200/H20) use 'fast-rt'.
+        If no CUDA device is available or the GPU is unknown, it falls back to 'hybrid'.
     - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering,
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
@@ -70,9 +79,17 @@ class RenderCfg:
             return Renderer.FASTRT
         elif self.renderer == "rt":
             return Renderer.OFFLINERT
+        elif self.renderer == "auto":
+            # 'auto' is normally resolved by the SimulationManager before this is
+            # called. If it reaches here (e.g. used standalone), fall back safely.
+            logger.log_warning(
+                "Renderer 'auto' was not resolved before converting to dexsim flags. "
+                "Falling back to 'hybrid'."
+            )
+            return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
             )
 
 
