@@ -64,9 +64,31 @@ The {class}`~cfg.RenderCfg` class controls the rendering backend and quality set
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"hybrid"` | Renderer backend to use. Options are `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
+| `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
 | `enable_denoiser` | `bool` | `True` | Whether to enable denoising. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'`. |
 | `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'` and `enable_denoiser` is `False`. |
+
+#### Automatic Renderer Selection
+
+By default (`renderer="auto"`), EmbodiChain selects the renderer based on the GPU detected at the configured `gpu_id` when the {class}`SimulationManager` is constructed:
+
+| GPU class | Examples | Selected renderer |
+| :--- | :--- | :--- |
+| RTX-series (consumer/workstation) | RTX 4090, RTX 6000 Ada | `hybrid` |
+| Datacenter accelerators | A100, A800, H100, H800, H200, H20 | `fast-rt` |
+| No CUDA device / unknown GPU | — | `hybrid` (fallback) |
+
+You can override the global default at runtime — useful for forcing a renderer across all simulations regardless of hardware:
+
+```python
+from embodichain.lab.sim import SimulationManager
+
+# Resolve the default from the current GPU, or force a specific backend.
+SimulationManager.set_default_renderer("auto")       # auto-detect from GPU
+SimulationManager.set_default_renderer("fast-rt")    # force full ray tracing
+```
+
+Setting `render_cfg.renderer` explicitly always takes precedence over auto-selection:
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
@@ -74,7 +96,7 @@ from embodichain.lab.sim.cfg import RenderCfg
 
 sim_config = SimulationManagerCfg(
     render_cfg=RenderCfg(
-        renderer="fast-rt",    # Use full ray tracing
+        renderer="fast-rt",    # Use full ray tracing (overrides auto-selection)
         enable_denoiser=True,  # Enable denoising
         spp=64,                # Samples per pixel (used when denoiser is off)
     )
