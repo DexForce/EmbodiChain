@@ -40,7 +40,7 @@ export OPENAI_BASE_URL="https://api.openai.com/v1"
 The command above runs the full parser sequence:
 
 - **Ingest**: finds the first parseable mesh (`.glb`, `.gltf`, `.obj`, `.ply`, `.stl`), archives the raw input, and writes a canonical `asset_source/asset.obj`.
-- **Visual processing**: by default, Blender remeshes the source mesh, unwraps UVs, and bakes diffuse and normal textures. With `--simple`, ingest uses trimesh only and skips Blender remesh/bake.
+- **Source preparation**: prepares the canonical source mesh according to `ingest.source_preparation.mode`. `blender` remeshes, unwraps UVs, and bakes diffuse/normal textures; `trimesh` converts through trimesh; `copy` copies a clean OBJ without remeshing.
 - **Inspection**: detects whether the normalized source is a mesh, articulation, or scene.
 - **Geometry processing**: cleans topology and applies Blender decimation to the canonical mesh.
 - **SimReady finalization**: renders multi-view images, uses the LLM to infer object orientation, physical dimensions, and semantics, then exports `asset_simready/asset_simready.obj`.
@@ -57,9 +57,7 @@ simready_car/
     |-- asset_archive/          # Raw source directory copy
     |-- asset_source/           # Canonical normalized source mesh and textures
     |   |-- asset.obj
-    |   |-- asset.mtl
-    |   |-- diffuse.png
-    |   `-- normal.png
+    |   `-- ...                  # MTL/textures depend on source preparation mode
     |-- asset_simready/         # Final oriented and scaled mesh
     |   `-- asset_simready.obj
     |-- asset_usd/              # USD export
@@ -75,11 +73,29 @@ Use `asset_simready/asset_simready.obj` or `asset_usd/` for simulation preview a
 | `--input_dir` | Directory containing the raw asset files. | **required** |
 | `--output_root` | Directory where processed assets are written. | **required** |
 | `--category` | Category hint passed into the pipeline, such as `car`, `bowl`, or `chair`. | **required** |
-| `--simple` | Use trimesh-only ingest and skip Blender remesh/bake during ingest. Geometry cleanup later in the pipeline still uses Blender. | `False` |
 
 ## Configuration
 
 Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. The main hyperparameters are as follow:
+
+### Ingest
+
+```json
+"ingest": {
+  "canonical_asset_name": "asset.obj",
+  "source_preparation": {
+    "mode": "blender"
+  },
+  "unprocessed_formats": [".urdf", ".usd"],
+  "parseable_mesh_formats": [".glb", ".gltf", ".obj", ".ply", ".stl"]
+}
+```
+
+`ingest.source_preparation.mode` controls how the canonical `asset_source/asset.obj` is prepared:
+
+- `blender`: use Blender remesh, decimation, UV unwrap, and diffuse/normal baking.
+- `trimesh`: use trimesh to load and export the source mesh without Blender remesh/bake.
+- `copy`: copy a clean source OBJ and rename it to `asset.obj` while preserving sibling MTL/texture files. This mode requires an OBJ input.
 
 ### Mesh Processing
 
@@ -119,7 +135,7 @@ Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/
 }
 ```
 
-`blender_remesh_bake` controls the default ingest path when `--simple` is not provided. It remeshes the raw mesh, decimates it, unwraps UVs, and bakes textures.
+`blender_remesh_bake` controls the `ingest.source_preparation.mode = "blender"` path. It remeshes the raw mesh, decimates it, unwraps UVs, and bakes textures.
 
 `blender_cleanup_decimate` controls the later geometry parser stage. It uses Blender mesh operators and the Blender Decimate modifier to clean and simplify the canonical mesh.
 
@@ -154,28 +170,39 @@ For Azure-style OpenAI-compatible endpoints that require an API version query pa
 }
 ```
 
-## Default vs Simple Ingest
+## Source Preparation Modes
 
-The default command uses Blender during ingest:
+The default configuration uses Blender during ingest:
 
-```bash
-python -m embodichain.gen_sim.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \
-    --output_root /path/to/output_folder \
-    --category YourCategory
+```json
+"ingest": {
+  "source_preparation": {
+    "mode": "blender"
+  }
+}
 ```
 
-Use `--simple` when you want faster trimesh-only ingest:
+Use `trimesh` when you want a faster non-Blender conversion path:
 
-```bash
-python -m embodichain.gen_sim.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \
-    --output_root /path/to/output_folder \
-    --category YourCategory \
-    --simple
+```json
+"ingest": {
+  "source_preparation": {
+    "mode": "trimesh"
+  }
+}
 ```
 
-The simple mode only affects the ingest step. The downstream geometry parser still uses Blender cleanup and decimation unless `mesh_processing.blender_cleanup_decimate.enabled` is set to `false`.
+Use `copy` when the input is already a clean, lightweight OBJ and you only need to place it into the canonical source layout:
+
+```json
+"ingest": {
+  "source_preparation": {
+    "mode": "copy"
+  }
+}
+```
+
+The source preparation mode only affects the ingest step. The downstream geometry parser still uses Blender cleanup and decimation unless `mesh_processing.blender_cleanup_decimate.enabled` is set to `false`.
 
 ## See Also
 

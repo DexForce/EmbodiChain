@@ -32,6 +32,7 @@ CONFIG_PATH = (
     / "gen_config.json"
 )
 ALLOWED_SCENE_MESH_STRATEGIES = {"first", "concatenate"}
+ALLOWED_SOURCE_PREPARATION_MODES = {"blender", "trimesh", "copy"}
 
 
 @pytest.fixture(scope="module")
@@ -62,8 +63,10 @@ def test_ingest_config_declares_canonical_mesh_formats(
 ) -> None:
     ingest_config = gen_config["ingest"]
     parseable_mesh_formats = ingest_config["parseable_mesh_formats"]
+    source_preparation = ingest_config["source_preparation"]
 
     assert ingest_config["canonical_asset_name"].endswith(".obj")
+    assert source_preparation["mode"] in ALLOWED_SOURCE_PREPARATION_MODES
     assert isinstance(parseable_mesh_formats, list)
     assert parseable_mesh_formats
     assert all(fmt.startswith(".") for fmt in parseable_mesh_formats)

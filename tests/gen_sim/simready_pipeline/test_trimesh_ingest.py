@@ -151,3 +151,47 @@ def test_trimesh_parse_ingest_passes_export_config(
     assert captured_export_kwargs["include_color"] is False
     assert captured_export_kwargs["include_texture"] is False
     assert captured_export_kwargs["write_texture"] is True
+
+
+def test_copy_obj_ingest_writes_canonical_obj_and_preserves_siblings(
+    tmp_path: Path,
+) -> None:
+    ingest_utils = _import_ingest_utils()
+    source_dir = tmp_path / "source"
+    asset_source = tmp_path / "asset_source"
+    source_dir.mkdir()
+    source_file = source_dir / "clean_mesh.obj"
+    mtl_file = source_dir / "clean_mesh.mtl"
+    texture_file = source_dir / "albedo.png"
+
+    source_file.write_text("mtllib clean_mesh.mtl\no clean_mesh\n", encoding="utf-8")
+    mtl_file.write_text("newmtl material\nmap_Kd albedo.png\n", encoding="utf-8")
+    texture_file.write_bytes(b"fake-png")
+
+    result = ingest_utils.copy_obj_ingest(
+        source_file=source_file,
+        asset_source=asset_source,
+        obj_name="asset.obj",
+    )
+
+    assert (asset_source / "asset.obj").read_text(encoding="utf-8") == (
+        "mtllib clean_mesh.mtl\no clean_mesh\n"
+    )
+    assert (asset_source / "clean_mesh.mtl").is_file()
+    assert (asset_source / "albedo.png").read_bytes() == b"fake-png"
+    assert not (asset_source / "clean_mesh.obj").exists()
+    assert result["visual_ingest"] == "canonical OBJ copy"
+    assert result["visual_source"]["copied_without_remesh"] is True
+
+
+def test_copy_obj_ingest_rejects_non_obj(tmp_path: Path) -> None:
+    ingest_utils = _import_ingest_utils()
+    source_file = tmp_path / "source.glb"
+    source_file.write_bytes(b"not-a-real-glb")
+
+    with pytest.raises(ValueError, match="requires an OBJ"):
+        ingest_utils.copy_obj_ingest(
+            source_file=source_file,
+            asset_source=tmp_path / "asset_source",
+            obj_name="asset.obj",
+        )
