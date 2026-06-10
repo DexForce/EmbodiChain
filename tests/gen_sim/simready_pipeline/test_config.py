@@ -32,7 +32,7 @@ CONFIG_PATH = (
     / "gen_config.json"
 )
 ALLOWED_SCENE_MESH_STRATEGIES = {"first", "concatenate"}
-ALLOWED_SOURCE_PREPARATION_MODES = {"blender", "trimesh", "copy"}
+ALLOWED_SOURCE_PREPARATION_MODES = {"blender", "trimesh"}
 
 
 @pytest.fixture(scope="module")

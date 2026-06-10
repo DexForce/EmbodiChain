@@ -31,7 +31,6 @@ from embodichain.gen_sim.simready_pipeline.utils.ingest_utils import (
     new_uuid,
     trimesh_parse_ingest,
     blender_parser_ingest,
-    copy_obj_ingest,
     inject_semantic_from_config,
     inject_user_extra_info,
 )
@@ -51,7 +50,7 @@ MESH_PROCESSING_CONFIG = GEN_CONFIG.get("mesh_processing", {})
 CANOCAIL_ASSET_NAME = INGEST_CONFIG.get("canonical_asset_name", "asset.obj")
 SOURCE_PREPARATION_CONFIG = INGEST_CONFIG.get("source_preparation", {})
 SOURCE_PREPARATION_MODE = SOURCE_PREPARATION_CONFIG.get("mode", "blender")
-SOURCE_PREPARATION_MODES = {"blender", "trimesh", "copy"}
+SOURCE_PREPARATION_MODES = {"blender", "trimesh"}
 UNPROCESSED_FORMATS = INGEST_CONFIG.get(
     "unprocessed_formats", [".urdf", ".usd"]
 )  # Copy these for now; parsing can be added later.
@@ -124,19 +123,10 @@ def ingest_one_asset(
         asset_name = asset_dir.stem
         visual_info = None
     else:
-        mesh_formats = (
-            [".obj"] if source_preparation_mode == "copy" else PARSEABLE_MESH_FORMATS
-        )
-        source_file = find_first_mesh_file(files, mesh_formats)
+        source_file = find_first_mesh_file(files, PARSEABLE_MESH_FORMATS)
         asset_name = source_file.stem if source_file else None
         ingest_mode = "unified"
-        if source_preparation_mode == "copy":
-            visual_info = copy_obj_ingest(
-                source_file,
-                asset_source,
-                obj_name=CANOCAIL_ASSET_NAME,
-            )
-        elif source_preparation_mode == "trimesh":
+        if source_preparation_mode == "trimesh":
             visual_info = trimesh_parse_ingest(
                 source_file,
                 asset_source,

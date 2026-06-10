@@ -24,7 +24,6 @@ from typing import Union, Dict, Any
 from embodichain.gen_sim.simready_pipeline.utils.texture_utils import classify_visual
 import hashlib
 import os
-import shutil
 from embodichain.gen_sim.simready_pipeline.core.asset import Asset
 
 
@@ -258,52 +257,6 @@ def trimesh_parse_ingest(
                     f.write(data)
 
     return {"visual_ingest": visual_ingest, "visual_source": visual}
-
-
-def copy_obj_ingest(
-    source_file: Path,
-    asset_source: Path,
-    obj_name: str = "asset.obj",
-) -> Dict[str, Any]:
-    """Copy a clean OBJ asset into the canonical source layout without remeshing.
-
-    The source OBJ is renamed to ``obj_name``. Other sibling files and directories
-    are copied as-is so existing MTL and texture references keep working.
-    """
-    source_file = Path(source_file)
-    asset_source = Path(asset_source)
-
-    if source_file.suffix.lower() != ".obj":
-        raise ValueError(f"copy source preparation requires an OBJ file: {source_file}")
-
-    asset_source.mkdir(parents=True, exist_ok=True)
-    source_dir = source_file.parent
-
-    for src in source_dir.iterdir():
-        if src.resolve() == asset_source.resolve():
-            continue
-
-        dst_name = obj_name if src.resolve() == source_file.resolve() else src.name
-        dst = asset_source / dst_name
-
-        if src.is_dir():
-            if dst.exists():
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
-        elif src.is_file():
-            shutil.copy2(src, dst)
-
-    canonical_obj = asset_source / obj_name
-    if not canonical_obj.is_file():
-        raise RuntimeError(f"Canonical OBJ was not created: {canonical_obj}")
-
-    return {
-        "visual_ingest": "canonical OBJ copy",
-        "visual_source": {
-            "source_file": source_file.name,
-            "copied_without_remesh": True,
-        },
-    }
 
 
 def modify_mtl_file(mtl_path: Path, diffuse_name: str, normal_name: str) -> None:

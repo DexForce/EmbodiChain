@@ -41,8 +41,8 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 
 Select the source preparation strategy in
 ``embodichain/gen_sim/simready_pipeline/configs/gen_config.json`` via
-``ingest.source_preparation.mode``. Supported modes are ``blender``,
-``trimesh``, and ``copy``.
+``ingest.source_preparation.mode``. Supported modes are ``blender`` and
+``trimesh``.
 
 ### Arguments
 

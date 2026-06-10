@@ -40,7 +40,7 @@ export OPENAI_BASE_URL="https://api.openai.com/v1"
 The command above runs the full parser sequence:
 
 - **Ingest**: finds the first parseable mesh (`.glb`, `.gltf`, `.obj`, `.ply`, `.stl`), archives the raw input, and writes a canonical `asset_source/asset.obj`.
-- **Source preparation**: prepares the canonical source mesh according to `ingest.source_preparation.mode`. `blender` remeshes, unwraps UVs, and bakes diffuse/normal textures; `trimesh` converts through trimesh; `copy` copies a clean OBJ without remeshing.
+- **Source preparation**: prepares the canonical source mesh according to `ingest.source_preparation.mode`. `blender` remeshes, unwraps UVs, and bakes diffuse/normal textures; `trimesh` converts the source mesh to canonical OBJ without Blender remesh/bake.
 - **Inspection**: detects whether the normalized source is a mesh, articulation, or scene.
 - **Geometry processing**: cleans topology and applies Blender decimation to the canonical mesh.
 - **SimReady finalization**: renders multi-view images, uses the LLM to infer object orientation, physical dimensions, and semantics, then exports `asset_simready/asset_simready.obj`.
@@ -95,7 +95,6 @@ Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/
 
 - `blender`: use Blender remesh, decimation, UV unwrap, and diffuse/normal baking.
 - `trimesh`: use trimesh to load and export the source mesh without Blender remesh/bake.
-- `copy`: copy a clean source OBJ and rename it to `asset.obj` while preserving sibling MTL/texture files. This mode requires an OBJ input.
 
 ### Mesh Processing
 
@@ -188,16 +187,6 @@ Use `trimesh` when you want a faster non-Blender conversion path:
 "ingest": {
   "source_preparation": {
     "mode": "trimesh"
-  }
-}
-```
-
-Use `copy` when the input is already a clean, lightweight OBJ and you only need to place it into the canonical source layout:
-
-```json
-"ingest": {
-  "source_preparation": {
-    "mode": "copy"
   }
 }
 ```
