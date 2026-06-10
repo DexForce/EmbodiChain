@@ -477,36 +477,40 @@ class PickUpAction(MoveAction):
         # Get best grasp pose for each object
         n_envs = obj_poses.shape[0]
         init_qpos = self.robot.get_qpos(name=self.cfg.control_part)
-        grasp_xpos_list = []
-        is_success_list = []
-        for i in range(n_envs):
-            grasp_poses = grasp_poses_result[i][0]
-            grasp_costs = grasp_poses_result[i][1]
-            n_poses = grasp_poses.shape[0]
-            init_qpos_repeat = init_qpos[:, None, :].repeat(1, n_poses, 1)
-            grasp_poses_repeat = grasp_poses[None, :, :].repeat(n_envs, 1, 1, 1)
-            ik_success, qpos = self.robot.compute_batch_ik(
-                pose=grasp_poses_repeat,
-                name=self.cfg.control_part,
-                joint_seed=init_qpos_repeat,
-            )
-            if ik_success.sum() == 0:
-                is_success_list.append(False)
-                grasp_xpos_list.append(
-                    torch.zeros(4, 4, dtype=torch.float32, device=self.device)
-                )
-                continue
-            valid_mask = ik_success[0]
-            valid_poses = grasp_poses[valid_mask]
-            valid_costs = grasp_costs[valid_mask]
-            best_idx = torch.argmin(valid_costs)
-            best_grasp_xpos = valid_poses[best_idx]
-            is_success_list.append(True)
-            grasp_xpos_list.append(best_grasp_xpos)
-        is_success = torch.tensor(is_success_list, device=self.device)
-        grasp_xpos = torch.stack(grasp_xpos_list, dim=0)
+        n_max_pose = 0
+        for result in grasp_poses_result:
+            n_pose = result[0].shape[0]
+            if n_pose > n_max_pose:
+                n_max_pose = n_pose
 
-        return is_success, grasp_xpos
+        grasp_xpos_padding = torch.zeros(
+            (n_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
+        )
+        grasp_cost_padding = torch.full(
+            (n_envs, n_max_pose), float("inf"), dtype=torch.float32, device=self.device
+        )
+        for i in range(n_envs):
+            n_pose = grasp_poses_result[i][0].shape[0]
+            grasp_xpos_padding[i, :n_pose] = grasp_poses_result[i][0]
+            grasp_cost_padding[i, :n_pose] = grasp_poses_result[i][1]
+            # padding with the first grasp pose, which is usually the best one, to ensure that the padded grasp poses are valid for IK computation, although they may not be optimal.
+            grasp_xpos_padding[i, n_pose:] = grasp_poses_result[i][0][0]
+            grasp_cost_padding[i, n_pose:] = grasp_poses_result[i][1][0]
+
+        init_qpos_repeat = init_qpos[:, None, :].repeat(1, n_max_pose, 1)
+        ik_success, qpos = self.robot.compute_batch_ik(
+            pose=grasp_xpos_padding,
+            name=self.cfg.control_part,
+            joint_seed=init_qpos_repeat,
+        )
+        grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
+        best_cost, best_idx = grasp_cost_masked.min(dim=1)
+        is_success = best_cost < 9999.0  # usually cost < 1.0
+        best_grasp_xpos = grasp_xpos_padding[
+            torch.arange(n_envs, device=self.device), best_idx
+        ]
+
+        return is_success, best_grasp_xpos
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
