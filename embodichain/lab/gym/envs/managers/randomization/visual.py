@@ -826,9 +826,9 @@ class randomize_indirect_lighting(Functor):
                 )
 
         # Emissive mode state
-        self._emissive_color_range: tuple[list[float], list[float]] | None = (
-            cfg.params.get("emissive_color_range", None)
-        )
+        self._emissive_color_range: tuple[
+            list[float], list[float]
+        ] | None = cfg.params.get("emissive_color_range", None)
         self._emissive_intensity_range: tuple[float, float] | None = cfg.params.get(
             "emissive_intensity_range", None
         )

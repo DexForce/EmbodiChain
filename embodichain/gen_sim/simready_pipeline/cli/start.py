@@ -25,9 +25,7 @@ from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
 from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
 
 
-def cli_ingest_single(
-    input_dir: str, output_dir: str, category: str
-):
+def cli_ingest_single(input_dir: str, output_dir: str, category: str):
     input_path = Path(input_dir)
     output_path = Path(output_dir)
 
@@ -71,9 +69,7 @@ def main():
     )
     args = parser.parse_args()
 
-    cli_ingest_single(
-        args.input_dir, args.output_root, args.category
-    )
+    cli_ingest_single(args.input_dir, args.output_root, args.category)
 
 
 if __name__ == "__main__":

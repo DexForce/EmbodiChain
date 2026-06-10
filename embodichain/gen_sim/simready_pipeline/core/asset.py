@@ -94,9 +94,7 @@ class Asset:
         identity = dict(data.get("identity") or {})
         if not identity.get("name") and (data.get("name") or data.get("display_name")):
             identity["name"] = data.get("name") or data.get("display_name")
-        if not identity.get("category") and (
-            data.get("category") or data.get("type")
-        ):
+        if not identity.get("category") and (data.get("category") or data.get("type")):
             identity["category"] = data.get("category") or data.get("type")
 
         semantics = dict(data.get("semantics") or {})

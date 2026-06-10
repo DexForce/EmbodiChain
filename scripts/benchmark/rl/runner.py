@@ -333,12 +333,12 @@ class BenchmarkRunner:
                 metric_key="eval/success_rate",
                 window_size=stable_eval_window,
             )
-            result["steps_to_success_threshold_first_hit"] = (
-                compute_steps_to_threshold_first_hit(
-                    training_record.get("eval_history", []),
-                    metric_key="eval/success_rate",
-                    threshold=float(threshold),
-                )
+            result[
+                "steps_to_success_threshold_first_hit"
+            ] = compute_steps_to_threshold_first_hit(
+                training_record.get("eval_history", []),
+                metric_key="eval/success_rate",
+                threshold=float(threshold),
             )
             result["steps_to_success_threshold"] = compute_steps_to_threshold_sustained(
                 training_record.get("eval_history", []),

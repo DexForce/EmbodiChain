@@ -259,9 +259,9 @@ class Camera(BaseSensor):
             )[..., :3]
 
         if self.cfg.enable_position:
-            self._data_buffer["position"] = (
-                self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
-            )
+            self._data_buffer[
+                "position"
+            ] = self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
 
     def _attach_to_entity(self) -> None:
         """Attach the sensor to the parent entity in each environment."""

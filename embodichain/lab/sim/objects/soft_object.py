@@ -84,9 +84,9 @@ class SoftBodyData:
         )
 
         for i, softbody in enumerate(self.softbodies):
-            self._rest_sim_position_buffer[i] = (
-                softbody.get_sim_position_inv_mass_buffer()
-            )
+            self._rest_sim_position_buffer[
+                i
+            ] = softbody.get_sim_position_inv_mass_buffer()
 
         self._collision_position = torch.zeros(
             (self.num_instances, self.n_collision_vertices, 3),

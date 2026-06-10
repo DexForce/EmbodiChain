@@ -100,9 +100,9 @@ class InternalParser(AssetParser):
         elif mesh_path_ori.exists():
             mesh_path = mesh_path_ori
         else:
-            asset.internal["error"] = (
-                "No mesh file found (neither simready nor original)"
-            )
+            asset.internal[
+                "error"
+            ] = "No mesh file found (neither simready nor original)"
             return
 
         try:
