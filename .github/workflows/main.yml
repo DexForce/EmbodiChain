@@ -16,7 +16,7 @@ jobs:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: &container_template
-      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
       volumes:
         - "/cache:/cache"
         - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"

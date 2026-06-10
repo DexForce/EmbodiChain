@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import Dict, List, Any, Union
+from typing import TYPE_CHECKING, Dict, List, Any, Union
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -32,6 +32,9 @@ from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    import pytorch_kinematics as pk
 
 
 @configclass
@@ -163,19 +166,23 @@ class CobotMagicCfg(RobotCfg):
         self, device: torch.device = torch.device("cpu"), **kwargs
     ) -> Dict[str, "pk.SerialChain"]:
         from embodichain.lab.sim.utility.solver_utils import (
-            create_pk_chain,
             create_pk_serial_chain,
         )
 
         urdf_path = get_data_path("CobotMagicArm/CobotMagicNoGripper.urdf")
-        chain = create_pk_chain(urdf_path, device)
 
         left_arm_chain = create_pk_serial_chain(
-            chain=chain, end_link_name="link6", root_link_name="base_link"
-        ).to(device=device)
+            urdf_path=urdf_path,
+            device=device,
+            end_link_name="link6",
+            root_link_name="base_link",
+        )
         right_arm_chain = create_pk_serial_chain(
-            chain=chain, end_link_name="link6", root_link_name="base_link"
-        ).to(device=device)
+            urdf_path=urdf_path,
+            device=device,
+            end_link_name="link6",
+            root_link_name="base_link",
+        )
         return {"left_arm": left_arm_chain, "right_arm": right_arm_chain}
 
 

@@ -23,49 +23,9 @@ python -m embodichain preview-asset \
 
 ## Prerequisites
 
-The full pipeline uses Blender, trimesh, pyrender, and an OpenAI-compatible multimodal chat completions endpoint. Install EmbodiChain with the `gensim` extra and enable both the EmbodiChain package index and Blender package index.
+The full pipeline uses Blender, trimesh, pyrender, and an OpenAI-compatible multimodal chat completions endpoint. Install EmbodiChain with the `gensim` extra first — see [Installation (gensim extra)](../../quick_start/install.md#optional-generative-simulation-gensim) for package indexes and install commands.
 
-Install from PyPI with `uv`:
-
-```bash
-uv pip install "embodichain[gensim]" \
-    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-    --trusted-host pyp.open3dv.site \
-    --extra-index-url https://download.blender.org/pypi/
-```
-
-Install from source with `uv`:
-
-```bash
-git clone https://github.com/DexForce/EmbodiChain.git
-cd EmbodiChain
-uv pip install -e ".[gensim]" \
-    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-    --trusted-host pyp.open3dv.site \
-    --extra-index-url https://download.blender.org/pypi/
-```
-
-Install from PyPI with `pip`:
-
-```bash
-pip install "embodichain[gensim]" \
-    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-    --trusted-host pyp.open3dv.site \
-    --extra-index-url https://download.blender.org/pypi/
-```
-
-Install from source with `pip`:
-
-```bash
-git clone https://github.com/DexForce/EmbodiChain.git
-cd EmbodiChain
-pip install -e ".[gensim]" \
-    --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-    --trusted-host pyp.open3dv.site \
-    --extra-index-url https://download.blender.org/pypi/
-```
-
-Set the OpenAI-compatible LLM api(OpenAI, Gemini, Doubao, etc.) before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. Environment variables override the JSON config.
+Set the OpenAI-compatible LLM API (OpenAI, Gemini, Doubao, etc.) before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. Environment variables override the JSON config.
 
 OpenAI-compatible API example:
 

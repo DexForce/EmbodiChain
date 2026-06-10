@@ -238,7 +238,6 @@ class SimulationManager:
         self._world: dexsim.World = dexsim.World(world_config)
 
         self._window: Windows | None = None
-        self._is_registered_window_control = False
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
         wr = sim_config.window_record
@@ -307,7 +306,6 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
-            # self._register_default_window_control()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -356,6 +354,45 @@ class SimulationManager:
             bool: True if the instance exists, False otherwise.
         """
         return instance_id in cls._instances
+
+    @classmethod
+    def set_default_renderer(cls, renderer: str = "auto", gpu_id: int = 0) -> str:
+        """Set the global default renderer used by new simulations.
+
+        This updates :data:`embodichain.lab.sim.cfg.DEFAULT_RENDERER`, which is
+        consulted by :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`
+        when ``render_cfg.renderer="auto"`` is resolved during :class:`SimulationManager`
+        construction.
+
+        Args:
+            renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
+                ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
+                resolved immediately from the detected GPU via
+                :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
+            gpu_id: The CUDA device index to query when ``renderer="auto"``.
+
+        Returns:
+            The resolved renderer name that was set as the default.
+        """
+        from embodichain.lab.sim import cfg
+        from embodichain.lab.sim.utility.render_utils import select_default_renderer
+
+        valid = {"auto", "hybrid", "fast-rt", "rt"}
+        if renderer not in valid:
+            logger.log_error(
+                f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
+            )
+
+        if renderer == "auto":
+            # Force auto-detection regardless of any previously forced default.
+            cfg.DEFAULT_RENDERER = "auto"
+            resolved = select_default_renderer(gpu_id)
+        else:
+            resolved = renderer
+
+        cfg.DEFAULT_RENDERER = resolved
+        logger.log_info(f"Default renderer set to '{resolved}'.")
+        return resolved
 
     @cached_property
     def num_envs(self) -> int:
@@ -411,6 +448,17 @@ class SimulationManager:
         world_config.cache_path = str(self._material_cache_dir)
         world_config.length_tolerance = sim_config.physics_config.length_tolerance
         world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
+
+        if sim_config.render_cfg.renderer == "auto":
+            from embodichain.lab.sim.utility.render_utils import (
+                select_default_renderer,
+            )
+
+            resolved_renderer = select_default_renderer(sim_config.gpu_id)
+            logger.log_info(
+                f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
+            )
+            sim_config.render_cfg.renderer = resolved_renderer
 
         world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
         if sim_config.render_cfg.enable_denoiser is False:
@@ -549,13 +597,11 @@ class SimulationManager:
         self._world.open_window()
         self._window = self._world.get_windows()
 
-        # TODO: will open these features after fix the related blocking issues.
-        # self._register_default_window_control()
-        # if (
-        #     self._window_record_hotkey_cfg is not None
-        #     and self._window_record_input_control is None
-        # ):
-        #     self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            self._window_record_hotkey_cfg is not None
+            and self._window_record_input_control is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
@@ -1644,26 +1690,6 @@ class SimulationManager:
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
-
-    def _register_default_window_control(self) -> None:
-        """Register default window controls for better simulation interaction."""
-        from dexsim.types import InputKey
-
-        if self._is_registered_window_control:
-            return
-
-        class WindowDefaultEvent(ObjectManipulator):
-
-            def on_key_down(self, key):
-                if key == InputKey.SCANCODE_C.value:
-                    print(f"Raycast distance: {self.selected_distance}")
-                    print(f"Hit position: {self.selected_position}")
-
-        manipulator = WindowDefaultEvent()
-        manipulator.enable_selection_cache(True)
-        self._window.add_input_control(manipulator)
-
-        self._is_registered_window_control = True
 
     def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
         """Add one or more custom window input controls.

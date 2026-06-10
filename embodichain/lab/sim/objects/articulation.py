@@ -482,6 +482,19 @@ class ArticulationData:
             device=self.device,
         )
 
+    @property
+    def joint_armature(self) -> torch.Tensor:
+        """Get the joint armature of the articulation.
+
+        Returns:
+            torch.Tensor: The joint armature of the articulation with shape (N, dof).
+        """
+        return torch.as_tensor(
+            np.array([entity.get_drive()[5] for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
     @cached_property
     def qpos_limits(self) -> torch.Tensor:
         """Get the joint position limits of the articulation.
@@ -629,12 +642,19 @@ class Articulation(BatchEntity):
                 dtype=torch.float32,
                 device=device,
             )
+            self.default_joint_armature = torch.full(
+                (num_entities, dof),
+                default_cfg.armature,
+                dtype=torch.float32,
+                device=device,
+            )
             self._set_default_joint_drive()
         else:
             # Read current properties from USD-loaded entities
             self.default_joint_stiffness = self._data.joint_stiffness.clone()
             self.default_joint_damping = self._data.joint_damping.clone()
             self.default_joint_friction = self._data.joint_friction.clone()
+            self.default_joint_armature = self._data.joint_armature.clone()
             self.default_joint_max_effort = self._data.qf_limits.clone()
             self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
@@ -648,6 +668,9 @@ class Articulation(BatchEntity):
             )
             usd_drive_pros.friction = (
                 self.default_joint_friction[0].cpu().numpy().tolist()
+            )
+            usd_drive_pros.armature = (
+                self.default_joint_armature[0].cpu().numpy().tolist()
             )
             usd_drive_pros.max_effort = (
                 self.default_joint_max_effort[0].cpu().numpy().tolist()
@@ -1105,6 +1128,10 @@ class Articulation(BatchEntity):
             else:
                 qpos_set = self.body_data._qpos
 
+            if not isinstance(local_env_ids, torch.Tensor):
+                local_env_ids = torch.as_tensor(
+                    local_env_ids, dtype=torch.long, device=self.device
+                )
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set[local_env_ids[:, None], local_joint_ids] = qpos
             self._ps.gpu_apply_joint_data(
@@ -1181,6 +1208,10 @@ class Articulation(BatchEntity):
             else:
                 qvel_set = self.body_data._qvel
 
+            if not isinstance(local_env_ids, torch.Tensor):
+                local_env_ids = torch.as_tensor(
+                    local_env_ids, dtype=torch.long, device=self.device
+                )
             indices = self.body_data.gpu_indices[local_env_ids]
             qvel_set[local_env_ids[:, None], local_joint_ids] = qvel
             self._ps.gpu_apply_joint_data(
@@ -1383,6 +1414,7 @@ class Articulation(BatchEntity):
         max_effort: torch.Tensor | None = None,
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
+        armature: torch.Tensor | None = None,
         drive_type: str = "none",
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
@@ -1395,6 +1427,7 @@ class Articulation(BatchEntity):
             max_effort (torch.Tensor): The maximum effort of the joint drive with shape (len(env_ids), len(joint_ids)).
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
+            armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
             drive_type (str, optional): The type of drive to apply. Defaults to "force".
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
@@ -1417,13 +1450,22 @@ class Articulation(BatchEntity):
                 drive_args["max_velocity"] = max_velocity[i].cpu().numpy()
             if friction is not None:
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
+            if armature is not None:
+                drive_args["armature"] = armature[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
 
     def get_joint_drive(
         self,
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         """Get the drive properties for the articulation.
 
         Args:
@@ -1433,8 +1475,8 @@ class Articulation(BatchEntity):
                 If None, gets for all environments. Defaults to None.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the stiffness,
-                damping, max_effort, max_velocity, and friction tensors with shape (N, len(joint_ids))
+            Tuple[torch.Tensor, ...]: A tuple containing the stiffness, damping, max_effort,
+                max_velocity, friction, and armature tensors with shape (N, len(joint_ids))
                 for the specified environments.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -1475,6 +1517,11 @@ class Articulation(BatchEntity):
             dtype=torch.float32,
             device=self.device,
         )
+        armature = torch.zeros(
+            (len(local_env_ids), len(local_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
         for i, env_idx in enumerate(local_env_ids):
             (
                 stiffness_i,
@@ -1482,6 +1529,7 @@ class Articulation(BatchEntity):
                 max_effort_i,
                 max_velocity_i,
                 friction_i,
+                armature_i,
                 *_,
             ) = self._entities[env_idx].get_drive()
             stiffness[i] = torch.as_tensor(
@@ -1499,7 +1547,10 @@ class Articulation(BatchEntity):
             friction[i] = torch.as_tensor(
                 friction_i, dtype=torch.float32, device=self.device
             )[local_joint_ids_tensor]
-        return stiffness, damping, max_effort, max_velocity, friction
+            armature[i] = torch.as_tensor(
+                armature_i, dtype=torch.float32, device=self.device
+            )[local_joint_ids_tensor]
+        return stiffness, damping, max_effort, max_velocity, friction, armature
 
     def get_user_ids(
         self, link_name: str | None = None, env_ids: Sequence[int] | None = None
@@ -1661,6 +1712,7 @@ class Articulation(BatchEntity):
             ("max_effort", self.default_joint_max_effort),
             ("max_velocity", self.default_joint_max_velocity),
             ("friction", self.default_joint_friction),
+            ("armature", self.default_joint_armature),
         ]
 
         for prop_name, default_array in drive_props:
@@ -1693,6 +1745,7 @@ class Articulation(BatchEntity):
             max_effort=self.default_joint_max_effort,
             max_velocity=self.default_joint_max_velocity,
             friction=self.default_joint_friction,
+            armature=self.default_joint_armature,
             drive_type=drive_type,
         )
 
