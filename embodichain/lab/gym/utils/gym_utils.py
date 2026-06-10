@@ -773,8 +773,8 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=["hybrid", "fast-rt", "rt"],
-        default="hybrid",
+        choices=["auto", "hybrid", "fast-rt", "rt"],
+        default="auto",
         help="Renderer backend to use for the simulation.",
     )
     parser.add_argument(
