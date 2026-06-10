@@ -35,6 +35,9 @@ from embodichain.lab.gym.envs.tasks.tableware.place_object_drawer import (
 from embodichain.lab.gym.envs.tasks.tableware.stack_cups import (
     StackCupsEnv,
 )
+from embodichain.lab.gym.envs.tasks.tableware.stack_bowls import (
+    StackBowlsEnv,
+)
 from embodichain.lab.gym.envs.tasks.tableware.match_object_container import (
     MatchObjectContainerEnv,
 )
@@ -59,6 +62,7 @@ __all__ = [
     "BlocksRankingSizeEnv",
     "PlaceObjectDrawerEnv",
     "StackCupsEnv",
+    "StackBowlsEnv",
     "MatchObjectContainerEnv",
     "RearrangementEnv",
     "RearrangementAgentEnv",

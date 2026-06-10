@@ -216,6 +216,18 @@ class ScannedBottle(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
+class Bowl(EmbodiChainDataset):
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            "https://hf-mirror.com/datasets/dexforce/robot_challenge_2026/resolve/main/stack_bowls/bowl.zip",
+            "723dde5a863c3eab0b920ac0fdedc86a",
+        )
+        prefix = "Bowl"
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
 class SugarBox(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
