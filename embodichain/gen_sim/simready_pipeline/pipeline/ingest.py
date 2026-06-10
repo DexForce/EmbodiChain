@@ -27,6 +27,7 @@ from typing import Iterable, Optional
 
 from embodichain.gen_sim.simready_pipeline.core.asset import Asset
 from embodichain.gen_sim.simready_pipeline.utils.ingest_utils import (
+    compute_folder_sha256,
     new_uuid,
     trimesh_parse_ingest,
     blender_parser_ingest,
@@ -70,6 +71,7 @@ def ingest_one_asset(
 ) -> Optional[Asset]:
 
     asset_dir = Path(asset_dir)  # source path
+    ingest_sha256 = compute_folder_sha256(asset_dir)
 
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -128,6 +130,7 @@ def ingest_one_asset(
 
     asset = Asset(
         asset_id=asset_id,
+        ingest_sha256=ingest_sha256,
         identity={
             "name": asset_name,
             "source_dir": asset_dir.name,
