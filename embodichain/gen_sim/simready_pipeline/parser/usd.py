@@ -120,9 +120,7 @@ class UsdParser(AssetParser):
         mesh_path = (
             mesh_path_sr
             if mesh_path_sr.exists()
-            else mesh_path_ori
-            if mesh_path_ori.exists()
-            else None
+            else mesh_path_ori if mesh_path_ori.exists() else None
         )
         out_path = asset_root / "asset_usd"
         self.build_physics(asset)

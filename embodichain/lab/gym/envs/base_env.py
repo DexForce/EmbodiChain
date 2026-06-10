@@ -142,9 +142,7 @@ class BaseEnv(gym.Env):
 
         # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
         self.max_episode_steps = (
-            self.cfg.max_episode_steps
-            if self.cfg.max_episode_steps > 0
-            else 2**31 - 1
+            self.cfg.max_episode_steps if self.cfg.max_episode_steps > 0 else 2**31 - 1
         )
 
         self._task_success = torch.zeros(
