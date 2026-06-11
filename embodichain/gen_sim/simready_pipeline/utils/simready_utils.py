@@ -66,6 +66,22 @@ client = OpenAI(
 
 STRATEGY = None
 
+
+def get_chat_completion_content(resp: Any) -> str:
+    """Return chat completion message content with a clearer URL hint on bad responses."""
+
+    try:
+        choices = resp.choices
+    except AttributeError as exc:
+        raise AttributeError(
+            "Unexpected OpenAI-compatible chat completion response: missing "
+            '`choices`. Please check OPENAI_BASE_URL. OpenAI-style chat '
+            "completion endpoints usually require the version path, for example "
+            '"https://api.openai.com/v1", and many compatible APIs also require '
+            'a "/v1" suffix.'
+        ) from exc
+    return choices[0].message.content
+
 diagonal_views = [
     ("view_from_111", np.array([1.3, 1.3, 1.3], dtype=float)),
     ("view_from_000", np.array([-0.8, -0.8, -0.8], dtype=float)),
@@ -455,7 +471,7 @@ def ask_mllm_detect_and_classify(views_data, extra_text=""):
         temperature=0.2,
         messages=[{"role": "user", "content": content}],
     )
-    raw = resp.choices[0].message.content
+    raw = get_chat_completion_content(resp)
     return extract_json(raw)
 
 
@@ -510,7 +526,7 @@ def ask_mllm_primary_surface(
         temperature=0.2,
         messages=[{"role": "user", "content": content}],
     )
-    raw = resp.choices[0].message.content
+    raw = get_chat_completion_content(resp)
     return extract_json(raw)
 
 
@@ -577,7 +593,7 @@ OUTPUT JSON ONLY:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def ask_llm_full_side_profile(object_name, views_data):
@@ -632,7 +648,7 @@ def ask_llm_full_side_profile(object_name, views_data):
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def ask_llm_upright_rotation(object_name, rotated_imgs_paths):
@@ -700,7 +716,7 @@ OUTPUT JSON ONLY:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def ask_llm_dimension(object_name, img_paths, user_text_hint, current_bbox_dims):
@@ -781,7 +797,7 @@ CRITICAL:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def rotate_image_deg(input_path, deg, output_path):
@@ -967,7 +983,7 @@ CRITICAL RULES:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def export_final_mesh(mesh, name, out_dir: Path):
