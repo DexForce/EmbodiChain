@@ -25,9 +25,7 @@ from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
 from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
 
 
-def cli_ingest_single(
-    input_dir: str, output_dir: str, category: str, simple_ingest: bool
-):
+def cli_ingest_single(input_dir: str, output_dir: str, category: str):
     input_path = Path(input_dir)
     output_path = Path(output_dir)
 
@@ -46,7 +44,6 @@ def cli_ingest_single(
         output_root=output_path,
         store=store,
         manager=manager,
-        simple_ingest=simple_ingest,
     )
 
     if asset:
@@ -70,15 +67,9 @@ def main():
         required=True,
         help="Specify the category for this asset (e.g., 'cup', 'chair')",
     )
-    parser.add_argument(
-        "--simple", action="store_true", help="trimesh only, skip Blender"
-    )
-
     args = parser.parse_args()
 
-    cli_ingest_single(
-        args.input_dir, args.output_root, args.category, simple_ingest=args.simple
-    )
+    cli_ingest_single(args.input_dir, args.output_root, args.category)
 
 
 if __name__ == "__main__":
