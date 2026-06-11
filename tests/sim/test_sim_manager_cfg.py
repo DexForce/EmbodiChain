@@ -57,3 +57,50 @@ def test_newton_physics_cfg_uses_device() -> None:
     serialized = cfg.to_dict()
     assert serialized["device"] == "cuda:1"
     assert serialized["physics_dt"] == 1.0 / 100.0
+    assert "solver_type" not in serialized
+
+
+def test_newton_physics_cfg_uses_mujoco_warp_solver_by_default() -> None:
+    from dexsim.engine.newton_physics import MJWarpSolverCfg
+
+    cfg = NewtonPhysicsCfg()
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(dexsim_cfg.solver_cfg, MJWarpSolverCfg)
+    assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
+
+
+def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
+    from dexsim.engine.newton_physics import MJWarpSolverCfg
+
+    cfg = NewtonPhysicsCfg(
+        device="cuda",
+        solver_cfg={
+            "class_type": "MJWarpSolverCfg",
+            "iterations": 12,
+            "ls_iterations": 4,
+            "use_mujoco_contacts": False,
+        },
+    )
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=2)
+
+    assert dexsim_cfg.device == "cuda:2"
+    assert isinstance(dexsim_cfg.solver_cfg, MJWarpSolverCfg)
+    assert dexsim_cfg.solver_cfg.iterations == 12
+    assert dexsim_cfg.solver_cfg.ls_iterations == 4
+    assert dexsim_cfg.solver_cfg.use_mujoco_contacts is False
+
+
+def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
+    from dexsim.engine.newton_physics import XPBDSolverCfg
+
+    solver_cfg = XPBDSolverCfg(iterations=8, enable_restitution=True)
+    cfg = NewtonPhysicsCfg(solver_cfg=solver_cfg)
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(dexsim_cfg.solver_cfg, XPBDSolverCfg)
+    assert dexsim_cfg.solver_cfg.iterations == 8
+    assert dexsim_cfg.solver_cfg.enable_restitution is True
