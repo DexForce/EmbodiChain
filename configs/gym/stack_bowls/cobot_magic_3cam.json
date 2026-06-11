@@ -89,12 +89,179 @@
             }
         },
         "observations": {
-            "norm_robot_eef_joint": {
-                "func": "normalize_robot_joint_data",
-                "mode": "modify",
-                "name": "robot/qpos",
+            "table_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "table.pose",
                 "params": {
-                    "joint_ids": [6, 13]
+                    "entity_cfg": {"uid": "table"},
+                    "to_matrix": false
+                },
+                "extra": {
+                    "shape": [7]
+                }
+            },
+            "table_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "table.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "table"}
+                }
+            },
+            "table_physics_attr": {
+                "func": "get_rigid_object_physics_attributes",
+                "mode": "add",
+                "name": "table.physics_attr",
+                "params": {
+                    "entity_cfg": {"uid": "table"}
+                }
+            },
+            "table_scale": {
+                "func": "get_object_body_scale",
+                "mode": "add",
+                "name": "table.body_scale",
+                "params": {
+                    "entity_cfg": {"uid": "table"}
+                }
+            },
+            "table_uid": {
+                "func": "get_object_uid",
+                "mode": "add",
+                "name": "table.uid",
+                "params": {
+                    "entity_cfg": {"uid": "table"}
+                }
+            },
+            "bowl_max_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bowl_max.pose",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"},
+                    "to_matrix": false
+                }
+            },
+            "bowl_max_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "bowl_max.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"}
+                }
+            },
+            "bowl_max_physics_attr": {
+                "func": "get_rigid_object_physics_attributes",
+                "mode": "add",
+                "name": "bowl_max.physics_attr",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"}
+                }
+            },
+            "bowl_max_scale": {
+                "func": "get_object_body_scale",
+                "mode": "add",
+                "name": "bowl_max.body_scale",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"}
+                }
+            },
+            "bowl_max_uid": {
+                "func": "get_object_uid",
+                "mode": "add",
+                "name": "bowl_max.uid",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_max"}
+                }
+            },
+            "bowl_mid_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bowl_mid.pose",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"},
+                    "to_matrix": false
+                }
+            },
+            "bowl_mid_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "bowl_mid.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"}
+                }
+            },
+            "bowl_mid_physics_attr": {
+                "func": "get_rigid_object_physics_attributes",
+                "mode": "add",
+                "name": "bowl_mid.physics_attr",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"}
+                }
+            },
+            "bowl_mid_scale": {
+                "func": "get_object_body_scale",
+                "mode": "add",
+                "name": "bowl_mid.body_scale",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"}
+                }
+            },
+            "bowl_mid_uid": {
+                "func": "get_object_uid",
+                "mode": "add",
+                "name": "bowl_mid.uid",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_mid"}
+                }
+            },
+            "bowl_min_pose": {
+                "func": "get_rigid_object_pose",
+                "mode": "add",
+                "name": "bowl_min.pose",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"},
+                    "to_matrix": false
+                }
+            },
+            "bowl_min_velocity": {
+                "func": "get_rigid_object_velocity",
+                "mode": "add",
+                "name": "bowl_min.velocity",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"}
+                }
+            },
+            "bowl_min_physics_attr": {
+                "func": "get_rigid_object_physics_attributes",
+                "mode": "add",
+                "name": "bowl_min.physics_attr",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"}
+                }
+            },
+            "bowl_min_scale": {
+                "func": "get_object_body_scale",
+                "mode": "add",
+                "name": "bowl_min.body_scale",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"}
+                }
+            },  
+            "bowl_min_uid": {
+                "func": "get_object_uid",
+                "mode": "add",
+                "name": "bowl_min.uid",
+                "params": {
+                    "entity_cfg": {"uid": "bowl_min"}
+                }
+            },
+            "robot_uid": {
+                "func": "get_object_uid",
+                "mode": "add",
+                "name": "robot.uid",
+                "params": {
+                    "entity_cfg": {"uid": "CobotMagic"}
                 }
             }
         },
