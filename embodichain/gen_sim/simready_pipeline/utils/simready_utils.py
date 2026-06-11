@@ -1052,21 +1052,32 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         if side_profile_result == "B":
             upright_img = render_views(mesh, front_views, out_dir, res)
             upright_img = upright_img[0]["path"]
-            flipped_path = str(
-                Path(upright_img).with_name(
-                    Path(upright_img).stem + f"_180_flipped.png"
+            rotated_imgs = []
+            rotated_imgs.append(upright_img)
+            rotate_deg = [90, 180, 270]
+            for deg in rotate_deg:
+                flipped_path = str(
+                    Path(upright_img).with_name(
+                        Path(upright_img).stem + f"_{deg}_flipped.png"
+                    )
                 )
-            )
-            rotate_image_deg(upright_img, 180, flipped_path)
-            upright_result = ask_llm_upright_2a1(object_name, upright_img, flipped_path)
-            print(upright_result)
-            try:
-                upright_choice = upright_result.get("upright_image", "A")
-            except Exception:
-                upright_choice = "A"
-            if upright_choice == "B":
-                x_flip = rot_x(180)
-                apply_rotations(mesh, x_flip)
+                rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
+            side_rotation_result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            side_rotation_result = side_rotation_result.get("upright_index", 0)
+            print("side rotation is", side_rotation_result)
+            if side_rotation_result == 0:
+                pass
+            elif side_rotation_result == 1:
+                side_r = rot_x(90)
+                apply_rotations(mesh, side_r)
+            elif side_rotation_result == 2:
+                side_r = rot_x(180)
+                apply_rotations(mesh, side_r)
+            elif side_rotation_result == 3:
+                side_r = rot_x(270)
+                apply_rotations(mesh, side_r)
+            else:
+                raise ValueError("no upright index choosen")
 
         elif side_profile_result == "A":
             upright_img = render_views(
