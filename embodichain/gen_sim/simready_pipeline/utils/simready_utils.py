@@ -75,12 +75,13 @@ def get_chat_completion_content(resp: Any) -> str:
     except AttributeError as exc:
         raise AttributeError(
             "Unexpected OpenAI-compatible chat completion response: missing "
-            '`choices`. Please check OPENAI_BASE_URL. OpenAI-style chat '
+            "`choices`. Please check OPENAI_BASE_URL. OpenAI-style chat "
             "completion endpoints usually require the version path, for example "
             '"https://api.openai.com/v1", and many compatible APIs also require '
             'a "/v1" suffix.'
         ) from exc
     return choices[0].message.content
+
 
 diagonal_views = [
     ("view_from_111", np.array([1.3, 1.3, 1.3], dtype=float)),
