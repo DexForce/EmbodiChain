@@ -61,13 +61,13 @@ class StackBowlsEnv(EmbodiedEnv):
         self.left_arm_ids = self.robot.get_joint_ids("left_arm")
         self.left_eef_ids = self.robot.get_joint_ids("left_eef")
 
-        self.right_pick_offset = torch.tensor([0.00, -0.06, 0.01], device=self.device)
-        self.left_pick_offset = torch.tensor([0.00, 0.06, 0.01], device=self.device)
+        self.right_pick_offset = torch.tensor([0.00, -0.06, 0.04], device=self.device)
+        self.left_pick_offset = torch.tensor([0.00, 0.06, 0.04], device=self.device)
         self.bowl_mid_pre_pick_offset = torch.tensor(
-            [0.0, 0.0, 0.12], device=self.device
+            [0.0, 0.0, 0.16], device=self.device
         )
         self.bowl_min_pre_pick_offset = torch.tensor(
-            [0.0, 0.0, 0.16], device=self.device
+            [0.0, 0.0, 0.20], device=self.device
         )
 
         self.right_bowl_mid_place_offset = torch.tensor(

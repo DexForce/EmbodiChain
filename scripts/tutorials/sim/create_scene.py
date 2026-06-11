@@ -74,7 +74,7 @@ def main():
     )
 
     # Add chair object to the scene
-    path = get_data_path("/home/dex/workspace/sources/EmbodiChain/sim_ready/a050fbba2e884132902fc90e22eeb278/asset_source/asset.obj")
+    path = get_data_path("Chair/chair.glb")
     chair: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="chair",
@@ -83,9 +83,9 @@ def main():
             attrs=RigidBodyAttributesCfg(
                 mass=3.0,
             ),
+            body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.2],
             init_rot=[0.0, 0.0, 0.0],
-            max_convex_hull_num=32
         )
     )
 
@@ -96,7 +96,7 @@ def main():
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
-    from IPython import embed; embed()
+
     # Run the simulation
     run_simulation(sim)
 

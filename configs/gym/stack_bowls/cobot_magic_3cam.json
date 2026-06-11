@@ -1,6 +1,6 @@
 {
     "id": "StackBowls-v1",
-    "max_episodes": 3,
+    "max_episodes": 10,
     "max_episode_steps": 300,
     "env": {
         "events": {
@@ -204,7 +204,7 @@
             "uid": "bowl_mid",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "Bowl/bowl.glb",
+                "fpath": "/home/dex/workspace/data/sim_ready/b54c8ebc085d42eeaaa6803e5805a5a1/asset_simready/asset_simready.obj",
                 "compute_uv": true
             },
             "attrs" : {
@@ -219,13 +219,14 @@
             },
             "init_pos": [0.63, 0.2, 0.8],
             "init_rot": [0, 0, 0],
-            "body_scale": [0.16, 0.16, 0.16]
+            "body_scale": [0.8, 0.8, 0.8],
+            "max_convex_hull_num": 32
         },
         {
             "uid": "bowl_max",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "Bowl/bowl.glb",
+                "fpath": "/home/dex/workspace/data/sim_ready/b54c8ebc085d42eeaaa6803e5805a5a1/asset_simready/asset_simready.obj",
                 "compute_uv": true
             },
             "attrs" : {
@@ -240,13 +241,14 @@
             },
             "init_pos": [0.63, 0.0, 0.8],
             "init_rot": [0, 0, 0],
-            "body_scale": [0.18, 0.18, 0.18]
+            "body_scale": [0.9, 0.9, 0.9],
+            "max_convex_hull_num": 32
         },
         {
             "uid": "bowl_min",
             "shape": {
                 "shape_type": "Mesh",
-                "fpath": "Bowl/bowl.glb",
+                "fpath": "/home/dex/workspace/data/sim_ready/b54c8ebc085d42eeaaa6803e5805a5a1/asset_simready/asset_simready.obj",
                 "compute_uv": true
             },
             "attrs" : {
@@ -261,7 +263,8 @@
             },
             "init_pos": [0.63, -0.2, 0.8],
             "init_rot": [0, 0, 0],
-            "body_scale": [0.15, 0.15, 0.15]
+            "body_scale": [0.7, 0.7, 0.7],
+            "max_convex_hull_num": 32
         }
     ]
 }
