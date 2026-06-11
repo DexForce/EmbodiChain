@@ -19,7 +19,6 @@ from embodichain.utils import logger
 
 
 class BaseAgentEnv:
-
     def _init_agents(self, agent_config, task_name, agent_config_path=None):
         from embodichain.agents.hierarchy.task_agent import TaskAgent
         from embodichain.agents.hierarchy.code_agent import CodeAgent

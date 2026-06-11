@@ -49,7 +49,8 @@ class JsonStore:
         registry = self.load_registry()
         registry["assets"][asset_id] = {
             "path": str(self.root / asset_id),
-            "category": asset_json.get("identity", {}).get("category"),
+            "category": asset_json.get("category")
+            or asset_json.get("identity", {}).get("category"),
         }
         self._write_registry(registry)
 
