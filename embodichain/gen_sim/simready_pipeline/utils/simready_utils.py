@@ -19,6 +19,7 @@ import base64
 import json
 import os
 import re
+import traceback
 from pathlib import Path
 import numpy as np
 import trimesh
@@ -149,6 +150,8 @@ from pathlib import Path
 
 def init_pose(mesh_input):
 
+    global STRATEGY
+
     fallback_mesh = None
     mesh: trimesh.Trimesh = None
 
@@ -196,15 +199,39 @@ def init_pose(mesh_input):
         rotations.append(Ry_neg90)
         return rotations
 
-    def compute_support_area(mesh):
-        hull = trimesh.convex.convex_hull(mesh)
-        support_poly = hull.project(plane=[0, 0, 1], origin=[0, 0, 0])
-        return support_poly.area
+    def compute_support_area(mesh, normal_thresh=0.9, z_eps=5e-2):
+
+        normals = mesh.face_normals
+        down = np.array([0, 0, -1])
+
+        dots = normals @ down
+        mask = dots > normal_thresh
+        face_ids = np.where(mask)[0]
+
+        if len(face_ids) == 0:
+            return 0.0
+
+        z_min = mesh.bounds[0][2]
+        verts = mesh.vertices
+
+        bottom_faces = []
+        for f_id in face_ids:
+            f = mesh.faces[f_id]
+            z_vals = verts[f][:, 2]
+
+            if np.all(np.abs(z_vals - z_min) < z_eps):
+                bottom_faces.append(f_id)
+
+        if len(bottom_faces) == 0:
+            return 0.0
+
+        return float(np.sum(mesh.area_faces[bottom_faces]))
 
     def stability_score(mesh):
-        area = compute_support_area(mesh)
-        com_z = mesh.center_mass[2]
-        return -(area / (com_z + 1e-6))
+        area = compute_support_area(mesh) * 1000
+        # com_z = mesh.center_mass[2]
+        # return -(area / (com_z + 1e-6))
+        return area
 
     def normalize_to_unit_cube(mesh):
         extents = mesh.extents
@@ -231,7 +258,9 @@ def init_pose(mesh_input):
             nx /= np.linalg.norm(nx)
             ny = np.cross(nz, nx)
             R_snap = np.column_stack([nx, ny, nz])
-            m.apply_transform(np.eye(4)[:3, :3] @ R_snap)
+            T_snap = np.eye(4)
+            T_snap[:3, :3] = R_snap
+            m.apply_transform(T_snap)
 
         elif align_type == "obb":
             to_origin, _ = trimesh.bounds.oriented_bounds(m)
@@ -258,23 +287,26 @@ def init_pose(mesh_input):
         return best, best_score
 
     try:
+        normalize_to_unit_cube(mesh)
         mesh_pca, score_pca = process_alignment(mesh, "pca")
         mesh_obb, score_obb = process_alignment(mesh, "obb")
-
-        area_pca = compute_support_area(mesh_pca)
-        area_obb = compute_support_area(mesh_obb)
 
         result_mesh = mesh_obb
         STRATEGY = "OBB"
 
-        if area_pca > area_obb * 1.3:
+        if score_pca > score_obb:
             result_mesh = mesh_pca
             STRATEGY = "PCA"
 
         normalize_to_unit_cube(result_mesh)
+        print(
+            f"Initial pose strategy: {STRATEGY}, PCA score: {score_pca:.4f}, OBB score: {score_obb:.4f}"
+        )
         return result_mesh
 
     except Exception as e:
+        print(f"init_pose failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
         return fallback_mesh
 
 
@@ -1030,7 +1062,9 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(exist_ok=True, parents=True)
     mesh = init_pose(file)
+    import pdb
 
+    pdb.set_trace()
     images_first = render_views(
         mesh, diagonal_views + cardinal_views + up_down_views, out_dir, res
     )
@@ -1349,6 +1383,27 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
 
     out_path = export_final_mesh(mesh, name, out_dir)
 
+    # We call the new verification function here
+    # The final mesh was exported to out_path, so we load that into pybullet
+    passed, opt_pose = verify_pose_by_physics_simulation(out_path)
+
+    if passed and opt_pose is not None:
+        mesh_corr = trimesh.load(out_path, force="mesh")
+        mesh_corr.apply_transform(opt_pose)
+        bounds = mesh_corr.bounds
+        bc = np.array(
+            [
+                (bounds[0][0] + bounds[1][0]) / 2.0,
+                (bounds[0][1] + bounds[1][1]) / 2.0,
+                bounds[0][2],
+            ]
+        )
+        T_c = np.eye(4)
+        T_c[:3, 3] = -bc
+        mesh_corr.apply_transform(T_c)
+        mesh_corr.export(out_path)
+        print(f"Corrected mesh with PyBullet final pose saved to: {out_path}")
+
     semantics_result = ask_llm_semantics_info(
         object_name=object_name,
         img_paths=dimension_views,
@@ -1360,6 +1415,104 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         "target_dims_m": target_dims,
         "semantics_result": semantics_result,
     }
+
+
+# sym:process_mesh
+
+
+def verify_pose_by_physics_simulation(mesh_path: str, max_rotation_deg: float = 50.0):
+    """
+    Load the mesh into PyBullet, drop it onto a plane, and compare the final resting
+    orientation with the initial orientation. If the angular difference is too large,
+    it raises an error indicating the initial pose is not physically stable.
+    """
+    import pybullet as p
+    import pybullet_data
+    import time
+    from scipy.spatial.transform import Rotation
+    import tempfile
+
+    # Initialize PyBullet in DIRECT mode (no GUI)
+    client_id = p.connect(p.DIRECT)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.setGravity(0, 0, -9.81)
+
+    # Load ground plane
+    plane_id = p.loadURDF("plane.urdf")
+
+    # Create collision shape from mesh
+    # Note: For non-convex shapes this might create a convex hull approximation
+    # For accurate physics, vhacd convex decomposition is preferred, but raw mesh works for basic checks
+    collision_shape_id = p.createCollisionShape(
+        shapeType=p.GEOM_MESH, fileName=str(mesh_path)
+    )
+
+    # Visual shape
+    visual_shape_id = p.createVisualShape(
+        shapeType=p.GEOM_MESH, fileName=str(mesh_path)
+    )
+
+    # Initial position slightly above ground to let it drop
+    start_pos = [0, 0, 0.05]
+    start_ori = p.getQuaternionFromEuler([0, 0, 0])
+
+    # Create the body
+    body_id = p.createMultiBody(
+        baseMass=1.0,
+        baseCollisionShapeIndex=collision_shape_id,
+        baseVisualShapeIndex=visual_shape_id,
+        basePosition=start_pos,
+        baseOrientation=start_ori,
+    )
+
+    # Change dynamics to have reasonable friction and restitution
+    p.changeDynamics(body_id, -1, lateralFriction=0.8, restitution=0.1)
+
+    # Step simulation to let the object settle
+    print("Simulating physics to verify stable pose...")
+    for _ in range(500):
+        p.stepSimulation()
+        time.sleep(1.0 / 240.0)  # Real-time visualization
+
+        # Check if object is somewhat still
+        v, omega = p.getBaseVelocity(body_id)
+        if np.linalg.norm(v) < 1e-3 and np.linalg.norm(omega) < 1e-3 and _ > 100:
+            break
+
+    # Keep it open for a brief moment to see the settled pose
+    time.sleep(1.0)
+
+    # Get final pose
+    final_pos, final_ori_quat = p.getBasePositionAndOrientation(body_id)
+    p.disconnect(client_id)
+
+    # Calculate rotational difference between initial ([0, 0, 0, 1]) and final orientations
+    r_initial = Rotation.from_quat([0, 0, 0, 1])  # start_ori is [0,0,0,1]
+    r_final = Rotation.from_quat(final_ori_quat)
+
+    # Relative rotation = R_final * R_initial^-1
+    r_diff = r_final * r_initial.inv()
+
+    # Get angle of the relative rotation
+    angle_rad = r_diff.magnitude()
+    angle_deg = np.degrees(angle_rad)
+
+    T_final = np.eye(4)
+    T_final[:3, :3] = r_final.as_matrix()
+    T_final[:3, 3] = final_pos
+
+    print(
+        f"Physics simulation complete. Angular deviation from initial pose: {angle_deg:.2f} degrees"
+    )
+
+    if angle_deg > max_rotation_deg:
+        print(
+            f"WARNING: Pose verification failed! Object settled at an angle of {angle_deg:.2f} degrees from the assigned pose, which exceeds the limit of {max_rotation_deg} degrees."
+        )
+        return False, T_final
+    else:
+        print(f"Pose verification passed. The pose is physically stable.")
+        return True, T_final
 
 
 def main():
