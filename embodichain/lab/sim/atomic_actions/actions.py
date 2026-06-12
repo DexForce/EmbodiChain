@@ -525,6 +525,13 @@ class UprightActionCfg(PickUpActionCfg):
     place_clearance: float = 0.005
     """Clearance (m) between the upright object bottom and the support plane."""
 
+    upright_axis_sign: float = 1.0
+    """Direction of the object's local Z axis after upright placement.
+
+    Use ``1.0`` to align local +Z with world +Z. Use ``-1.0`` when the mesh's
+    local +Z points toward the physical bottom and local -Z should face upward.
+    """
+
 
 class UprightAction(PickUpAction):
     def __init__(
@@ -554,8 +561,9 @@ class UprightAction(PickUpAction):
     def _build_upright_object_pose(
         self, semantics: ObjectSemantics, obj_poses: torch.Tensor
     ) -> torch.Tensor:
-        """Build a target object pose whose local Z axis points along world Z."""
+        """Build a target object pose whose configured local Z direction is upright."""
         world_z = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        axis_sign = 1.0 if self.cfg.upright_axis_sign >= 0.0 else -1.0
         projected_x = obj_poses[:, :3, 0].clone()
         projected_x[:, 2] = 0.0
         projected_x_norm = projected_x.norm(dim=1, keepdim=True)
@@ -573,7 +581,7 @@ class UprightAction(PickUpAction):
             projected_x / projected_x_norm.clamp(min=1e-6),
             torch.where(fallback_x_norm > 1e-6, fallback_x, default_x),
         )
-        upright_z = world_z.repeat(self.n_envs, 1)
+        upright_z = axis_sign * world_z.repeat(self.n_envs, 1)
         upright_y = torch.cross(upright_z, upright_x, dim=1)
         upright_y = upright_y / upright_y.norm(dim=1, keepdim=True).clamp(min=1e-6)
         upright_x = torch.cross(upright_y, upright_z, dim=1)
@@ -586,7 +594,11 @@ class UprightAction(PickUpAction):
 
         mesh_vertices = semantics.geometry.get("mesh_vertices")
         if isinstance(mesh_vertices, torch.Tensor) and mesh_vertices.numel() > 0:
-            local_bottom_z = mesh_vertices[:, 2].min()
+            mesh_vertices = mesh_vertices.to(device=self.device, dtype=torch.float32)
+            vertical_offsets = torch.matmul(
+                mesh_vertices, upright_pose[:, 2, :3].transpose(0, 1)
+            )
+            local_bottom_z = vertical_offsets.min(dim=0).values
             upright_pose[:, 2, 3] = self.cfg.place_clearance - local_bottom_z
         return upright_pose
 

@@ -1450,8 +1450,6 @@ class Articulation(BatchEntity):
                 drive_args["max_velocity"] = max_velocity[i].cpu().numpy()
             if friction is not None:
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
-            if armature is not None:
-                drive_args["armature"] = armature[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
 
     def get_joint_drive(
