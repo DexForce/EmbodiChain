@@ -355,6 +355,45 @@ class SimulationManager:
         """
         return instance_id in cls._instances
 
+    @classmethod
+    def set_default_renderer(cls, renderer: str = "auto", gpu_id: int = 0) -> str:
+        """Set the global default renderer used by new simulations.
+
+        This updates :data:`embodichain.lab.sim.cfg.DEFAULT_RENDERER`, which is
+        consulted by :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`
+        when ``render_cfg.renderer="auto"`` is resolved during :class:`SimulationManager`
+        construction.
+
+        Args:
+            renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
+                ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
+                resolved immediately from the detected GPU via
+                :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
+            gpu_id: The CUDA device index to query when ``renderer="auto"``.
+
+        Returns:
+            The resolved renderer name that was set as the default.
+        """
+        from embodichain.lab.sim import cfg
+        from embodichain.lab.sim.utility.render_utils import select_default_renderer
+
+        valid = {"auto", "hybrid", "fast-rt", "rt"}
+        if renderer not in valid:
+            logger.log_error(
+                f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
+            )
+
+        if renderer == "auto":
+            # Force auto-detection regardless of any previously forced default.
+            cfg.DEFAULT_RENDERER = "auto"
+            resolved = select_default_renderer(gpu_id)
+        else:
+            resolved = renderer
+
+        cfg.DEFAULT_RENDERER = resolved
+        logger.log_info(f"Default renderer set to '{resolved}'.")
+        return resolved
+
     @cached_property
     def num_envs(self) -> int:
         """Get the number of arenas in the simulation.
@@ -410,10 +449,21 @@ class SimulationManager:
         world_config.length_tolerance = sim_config.physics_config.length_tolerance
         world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
 
+        if sim_config.render_cfg.renderer == "auto":
+            from embodichain.lab.sim.utility.render_utils import (
+                select_default_renderer,
+            )
+
+            resolved_renderer = select_default_renderer(sim_config.gpu_id)
+            logger.log_info(
+                f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
+            )
+            sim_config.render_cfg.renderer = resolved_renderer
+
         world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
-        if sim_config.render_cfg.enable_denoiser is False:
-            world_config.raytrace_config.spp = sim_config.render_cfg.spp
-            world_config.raytrace_config.open_denoise = False
+        world_config.raytrace_config.render_iterations_per_frame = (
+            sim_config.render_cfg.spp
+        )
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
