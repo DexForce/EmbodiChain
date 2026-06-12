@@ -25,7 +25,7 @@ jobs:
         - "/tmp/.X11-unix:/tmp/.X11-unix"
         - "/dev/shm/shared:/dev/shm/shared"
         - "/usr/share/nvidia:/usr/share/nvidia"
-      options: --memory 100g --gpus device=1 --shm-size 53687091200
+      options: --memory 100g --gpus device=0 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
       - name: Code Style check
