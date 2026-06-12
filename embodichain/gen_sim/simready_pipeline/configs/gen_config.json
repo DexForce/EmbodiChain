@@ -2,7 +2,7 @@
   "ingest": {
     "canonical_asset_name": "asset.obj",
     "source_preparation": {
-      "mode": "blender"
+      "mode": "trimesh"
     },
     "unprocessed_formats": [".urdf", ".usd"],
     "parseable_mesh_formats": [".glb", ".gltf", ".obj", ".ply", ".stl"]
