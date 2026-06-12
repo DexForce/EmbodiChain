@@ -271,10 +271,7 @@ class ArticulationData:
             # Fetch target_qpos from CPU entities
             return torch.as_tensor(
                 np.array(
-                    [
-                        entity.get_current_qpos(is_target=True)
-                        for entity in self.entities
-                    ],
+                    [entity.get_target_qpos() for entity in self.entities],
                 ),
                 dtype=torch.float32,
                 device=self.device,
@@ -319,10 +316,7 @@ class ArticulationData:
             # Fetch target_qvel from CPU entities
             return torch.as_tensor(
                 np.array(
-                    [
-                        entity.get_current_qvel(is_target=True)
-                        for entity in self.entities
-                    ],
+                    [entity.get_target_qvel() for entity in self.entities],
                 ),
                 dtype=torch.float32,
                 device=self.device,
@@ -1104,9 +1098,9 @@ class Articulation(BatchEntity):
         if self.device.type == "cpu":
             for i, env_idx in enumerate(local_env_ids):
                 setter = (
-                    self._entities[env_idx].set_current_qpos
+                    self._entities[env_idx].set_target_qpos
                     if target
-                    else self._entities[env_idx].set_qpos
+                    else self._entities[env_idx].set_current_qpos
                 )
                 setter(qpos[i].numpy(), local_joint_ids.numpy())
         else:
@@ -1151,7 +1145,7 @@ class Articulation(BatchEntity):
         """
         return self.body_data.qvel if not target else self.body_data.target_qvel
 
-    def set_qvel(
+    def set_current_qvel(
         self,
         qvel: torch.Tensor,
         joint_ids: Sequence[int] | None = None,
@@ -1190,9 +1184,9 @@ class Articulation(BatchEntity):
         if self.device.type == "cpu":
             for i, env_idx in enumerate(local_env_ids):
                 setter = (
-                    self._entities[env_idx].set_current_qvel
+                    self._entities[env_idx].set_target_qvel
                     if target
-                    else self._entities[env_idx].set_qvel
+                    else self._entities[env_idx].set_current_qvel
                 )
                 setter(qvel[i].numpy(), local_joint_ids)
         else:
@@ -1587,8 +1581,8 @@ class Articulation(BatchEntity):
         if self.device.type == "cpu":
             zero_joint_data = np.zeros((len(local_env_ids), self.dof), dtype=np.float32)
             for i, env_idx in enumerate(local_env_ids):
-                self._entities[env_idx].set_qvel(zero_joint_data[i])
                 self._entities[env_idx].set_current_qvel(zero_joint_data[i])
+                self._entities[env_idx].set_target_qvel(zero_joint_data[i])
                 self._entities[env_idx].set_current_qf(zero_joint_data[i])
         else:
             zeros = torch.zeros(
