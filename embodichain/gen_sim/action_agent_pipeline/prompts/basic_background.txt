@@ -1,0 +1,20 @@
+The environment uses a right-handed world coordinate system, where 1 unit equals 1 meter.
+All robot poses are represented as 4×4 homogeneous transformation matrices.
+
+The robot base coordinate frame is the ONLY authoritative frame for all spatial reasoning, planning, and action generation.
+
+ROBOT BASE COORDINATE DEFINITIONS
+
+All directions below are defined strictly in the robot base frame:
+
+* Moving forward increases x
+* Moving backward decreases x
+* Moving left increases y
+* Moving right decreases y
+* Moving up increases z
+* Moving down decreases z
+
+ROBOT INITIALIZATION AND TERMINATION
+
+Both robot arms start in predefined initial configurations with their end-effectors open.
+At task completion, both arms must be returned to their initial poses.
