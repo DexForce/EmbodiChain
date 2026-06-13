@@ -1446,7 +1446,14 @@ class Articulation(BatchEntity):
                 drive_args["joint_friction"] = friction[i].cpu().numpy()
             if armature is not None:
                 drive_args["armature"] = armature[i].cpu().numpy()
-            self._entities[env_idx].set_drive(**drive_args)
+            try:
+                self._entities[env_idx].set_drive(**drive_args)
+            except TypeError as exc:
+                if "armature" not in drive_args or "armature" not in str(exc):
+                    raise
+                legacy_drive_args = dict(drive_args)
+                legacy_drive_args.pop("armature", None)
+                self._entities[env_idx].set_drive(**legacy_drive_args)
 
     def get_joint_drive(
         self,

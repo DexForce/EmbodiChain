@@ -1,0 +1,59 @@
+### Atomic Action Class JSON Specs for Robot Arm Control
+
+Each non-null graph edge action must be a JSON object with these common fields
+and exactly one target field:
+
+{
+  "atomic_action_class": "PickUpAction|MoveAction|PlaceAction",
+  "robot_name": "left_arm|right_arm",
+  "control": "arm|hand",
+  "cfg": {}
+}
+
+Use only these atomic action classes:
+
+1. `PickUpAction`
+   - Required target_object:
+     {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
+   - Typical cfg:
+     {"pre_grasp_distance": 0.08, "sample_interval": 45}
+
+2. `MoveAction`
+   - Use `control: "arm"` with target_pose or arm target_qpos.
+   - Use `control: "hand"` with gripper target_qpos.
+   - Supported target_pose objects:
+     {"reference": "object", "obj_name": "<object>", "offset": [x, y, z], "orientation": "current"}
+     {"reference": "absolute", "position": [x, y, z], "orientation": "current"}
+     {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef"}
+   - Supported target_qpos objects:
+     {"source": "initial"}
+     {"source": "gripper_state", "state": "open|close"}
+     {"source": "joint_delta", "joint_index": 5, "delta_degrees": -90}
+   - Typical cfg:
+     {"sample_interval": 30}
+   - For release settling after an open gripper target, use:
+     {"sample_interval": 15, "post_hold_steps": 25}
+
+3. `PlaceAction`
+   - Use this only when a single place action should lower, open, and retreat.
+   - Required target_pose. Supported pose targets are the same target_pose objects
+     accepted by `MoveAction`.
+   - Typical cfg:
+     {"sample_interval": 80, "lift_height": 0.08}
+
+Rules:
+- Do not output Python code, function calls, or `fn`/`kwargs` action objects.
+- Do not output legacy `action`-based specs.
+- Use `null` for an idle arm.
+- Keep all values JSON primitives.
+- Each non-null action must contain exactly one of `target_object`, `target_pose`,
+  or `target_qpos`.
+- Preserve current orientation by setting `"orientation": "current"` for pose targets.
+- To keep a holding arm closed while the other arm moves, use:
+  {
+    "atomic_action_class": "MoveAction",
+    "robot_name": "<holding_arm>",
+    "control": "hand",
+    "cfg": {"sample_interval": 10},
+    "target_qpos": {"source": "gripper_state", "state": "close"}
+  }
