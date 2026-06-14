@@ -25,6 +25,7 @@ import json
 import math
 import re
 import struct
+import warnings
 
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_agent_config,
@@ -48,6 +49,7 @@ _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 _TARGET_REPLACEMENT_MANIFEST_FILENAME = ".embodichain_replacement_manifest.json"
+_DEXSIM_041_GLB_LOCAL_X_CORRECTION_DEGREES = -90.0
 
 _CONTAINER_KEYWORDS = (
     "basket",
@@ -2765,14 +2767,15 @@ def _make_light_config() -> dict[str, Any]:
 
 
 def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any]:
+    shape = _make_shape_config(scene_dir, obj.config)
     return {
         "uid": "table",
-        "shape": _make_shape_config(scene_dir, obj.config),
+        "shape": shape,
         "attrs": dict(_BACKGROUND_ATTRS),
         "body_scale": _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0])),
         "body_type": "kinematic",
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
+        "init_rot": _corrected_init_rot_for_shape(obj.config, shape),
         "max_convex_hull_num": _role_limited_max_convex_hull_num(
             obj,
             _BACKGROUND_MAX_CONVEX_HULL_NUM,
@@ -2785,9 +2788,10 @@ def _make_extra_background_config(
     obj: _SceneObject,
     body_scale: Any | None = None,
 ) -> dict[str, Any]:
+    shape = _make_shape_config(scene_dir, obj.config)
     config = {
         "uid": _normalize_runtime_uid(obj.source_uid),
-        "shape": _make_shape_config(scene_dir, obj.config),
+        "shape": shape,
         "attrs": copy.deepcopy(dict(obj.config.get("attrs", _BACKGROUND_ATTRS))),
         "body_scale": _clean_vector3(
             obj.config.get("body_scale", [1.0, 1.0, 1.0])
@@ -2796,7 +2800,7 @@ def _make_extra_background_config(
         ),
         "body_type": str(obj.config.get("body_type", "static")),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
+        "init_rot": _corrected_init_rot_for_shape(obj.config, shape),
         "max_convex_hull_num": _role_limited_max_convex_hull_num(
             obj,
             _BACKGROUND_MAX_CONVEX_HULL_NUM,
@@ -2889,12 +2893,13 @@ def _make_rigid_object_config(
     max_convex_hull_num: int,
     mesh_fpath: str | Path | None = None,
 ) -> dict[str, Any]:
+    shape = _make_shape_config(scene_dir, obj.config, mesh_fpath=mesh_fpath)
     config = {
         "uid": runtime_uid,
-        "shape": _make_shape_config(scene_dir, obj.config, mesh_fpath=mesh_fpath),
+        "shape": shape,
         "attrs": dict(_RIGID_OBJECT_ATTRS),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
+        "init_rot": _corrected_init_rot_for_shape(obj.config, shape),
         "body_scale": _clean_vector3(body_scale),
         "max_convex_hull_num": int(max_convex_hull_num),
     }
@@ -2947,6 +2952,40 @@ def _make_shape_config(
         shape["fpath"] = _asset_path_for_config(scene_dir, str(shape["fpath"]))
     shape.setdefault("compute_uv", False)
     return shape
+
+
+def _corrected_init_rot_for_shape(
+    source_config: Mapping[str, Any],
+    shape_config: Mapping[str, Any],
+) -> list[float]:
+    init_rot = _clean_vector3(source_config.get("init_rot", [0.0, 0.0, 0.0]))
+    if not _is_glb_mesh_shape(shape_config):
+        return init_rot
+
+    from scipy.spatial.transform import Rotation
+
+    source_rotation = Rotation.from_euler("XYZ", init_rot, degrees=True)
+    correction = Rotation.from_euler(
+        "X",
+        _DEXSIM_041_GLB_LOCAL_X_CORRECTION_DEGREES,
+        degrees=True,
+    )
+    corrected = source_rotation * correction
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Gimbal lock detected.*",
+            category=UserWarning,
+        )
+        corrected_euler = corrected.as_euler("XYZ", degrees=True)
+    return [float(value) for value in corrected_euler]
+
+
+def _is_glb_mesh_shape(shape_config: Mapping[str, Any]) -> bool:
+    if shape_config.get("shape_type") != "Mesh":
+        return False
+    fpath = shape_config.get("fpath")
+    return isinstance(fpath, str) and Path(fpath).suffix.lower() == ".glb"
 
 
 def _asset_path_for_config(scene_dir: Path, fpath: str) -> str:
