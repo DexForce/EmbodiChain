@@ -419,7 +419,6 @@ def main():
     table = create_table(sim)
     caffe = create_caffe(sim)
     cup = create_cup(sim)
-    sim.update(step=1)
 
     # apply random perturbation
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
@@ -427,6 +426,9 @@ def main():
 
     if not args.headless:
         sim.open_window()
+
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
 
     run_simulation(sim, robot, cup, caffe)
 
