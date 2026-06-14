@@ -1145,7 +1145,7 @@ class Articulation(BatchEntity):
         """
         return self.body_data.qvel if not target else self.body_data.target_qvel
 
-    def set_current_qvel(
+    def set_qvel(
         self,
         qvel: torch.Tensor,
         joint_ids: Sequence[int] | None = None,
@@ -1578,32 +1578,13 @@ class Articulation(BatchEntity):
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
-        if self.device.type == "cpu":
-            zero_joint_data = np.zeros((len(local_env_ids), self.dof), dtype=np.float32)
-            for i, env_idx in enumerate(local_env_ids):
-                self._entities[env_idx].set_current_qvel(zero_joint_data[i])
-                self._entities[env_idx].set_target_qvel(zero_joint_data[i])
-                self._entities[env_idx].set_current_qf(zero_joint_data[i])
-        else:
-            zeros = torch.zeros(
-                (len(local_env_ids), self.dof), dtype=torch.float32, device=self.device
-            )
-            indices = self.body_data.gpu_indices[local_env_ids]
-            self._ps.gpu_apply_joint_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=ArticulationGPUAPIWriteType.JOINT_VELOCITY,
-            )
-            self._ps.gpu_apply_joint_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY,
-            )
-            self._ps.gpu_apply_joint_data(
-                data=zeros,
-                gpu_indices=indices,
-                data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
-            )
+        self.set_qvel(torch.zeros(self.dof, device=self.device), env_ids=local_env_ids)
+        self.set_qvel(
+            torch.zeros(self.dof, device=self.device),
+            env_ids=local_env_ids,
+            target=True,
+        )
+        self.set_qf(torch.zeros(self.dof, device=self.device), env_ids=local_env_ids)
 
     def reallocate_body_data(self) -> None:
         """Reallocate body data tensors to match the current articulation state in the GPU physics scene."""

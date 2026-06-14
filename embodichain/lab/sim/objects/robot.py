@@ -335,7 +335,7 @@ class Robot(Articulation):
             ValueError: If the length of `env_ids` does not match the length of `qvel`.
         """
         if name is None:
-            super().set_current_qvel(
+            super().set_qvel(
                 qvel=qvel,
                 joint_ids=joint_ids,
                 env_ids=env_ids,
@@ -350,7 +350,7 @@ class Robot(Articulation):
             if joint_ids is not None:
                 logger.log_warning(f"`joint_ids` is ignored when `name` is specified.")
 
-            super().set_current_qvel(
+            super().set_qvel(
                 qvel=qvel,
                 joint_ids=part_joint_ids,
                 env_ids=env_ids,
