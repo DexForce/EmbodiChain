@@ -1578,13 +1578,10 @@ class Articulation(BatchEntity):
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
-        self.set_qvel(torch.zeros(self.dof, device=self.device), env_ids=local_env_ids)
-        self.set_qvel(
-            torch.zeros(self.dof, device=self.device),
-            env_ids=local_env_ids,
-            target=True,
-        )
-        self.set_qf(torch.zeros(self.dof, device=self.device), env_ids=local_env_ids)
+        zeros = torch.zeros((len(local_env_ids), self.dof), device=self.device)
+        self.set_qvel(zeros, env_ids=local_env_ids)
+        self.set_qvel(zeros, env_ids=local_env_ids, target=True)
+        self.set_qf(zeros, env_ids=local_env_ids)
 
     def reallocate_body_data(self) -> None:
         """Reallocate body data tensors to match the current articulation state in the GPU physics scene."""
