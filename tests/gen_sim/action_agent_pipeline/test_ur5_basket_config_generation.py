@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import json
 import struct
 
@@ -25,6 +26,10 @@ import torch
 
 from embodichain.gen_sim.action_agent_pipeline.generation import (
     ur5_basket_config as ur5_basket_config_generation,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
+    MESH_FRAME_NORMALIZATION_POLICY_VERSION,
+    MeshFrameNormalizer,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.ur5_basket_config import (
     TargetReplacementSpec,
@@ -54,15 +59,15 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert set(rigid_objects) == {"left_apple", "right_apple"}
     assert rigid_objects["left_apple"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["left_apple"]["body_type"] == "dynamic"
+    assert rigid_objects["right_apple"]["body_type"] == "dynamic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert rigid_objects["left_apple"]["shape"]["fpath"].endswith(
-        "mesh_assets/apple/apple_2/apple_2.glb"
-    )
-    assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
-        "mesh_assets/apple/apple_1/apple_1.glb"
-    )
+    _assert_normalized_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
+    _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
+    _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
+    _assert_normalized_obj_path(background_objects["wicker_basket"]["shape"]["fpath"])
     assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.5]
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
 
@@ -94,6 +99,7 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert "parallel handoff" in task_prompt
     assert "parallel handoff" in basic_background
     assert "parallel handoff" in atom_actions
+    assert len(paths.summary["normalized_meshes"]) == 4
 
     handoff_edge = task_prompt.split("6. After the left gripper", maxsplit=1)[1].split(
         "\n7. Lower the held right target object",
@@ -112,7 +118,7 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert paths.summary["mode"] == "basket_template"
 
 
-def test_generator_applies_dexsim_041_glb_rotation_correction(
+def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
     tmp_path: Path,
 ) -> None:
     project_dir = tmp_path / "1790000000_gym_project"
@@ -127,18 +133,85 @@ def test_generator_applies_dexsim_041_glb_rotation_correction(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
-    assert background_objects["table"]["init_rot"] == pytest.approx(
-        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
+    assert background_objects["table"]["init_rot"] == [0.0, 0.0, 180.0]
+    assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
+    assert rigid_objects["right_apple"]["init_rot"] == [0.0, 0.0, 140.0]
+    assert rigid_objects["left_apple"]["init_rot"] == [0.0, 0.0, 160.0]
+    for obj_config in [
+        background_objects["table"],
+        background_objects["wicker_basket"],
+        rigid_objects["right_apple"],
+        rigid_objects["left_apple"],
+    ]:
+        _assert_normalized_obj_path(obj_config["shape"]["fpath"])
+
+    source_paths = {
+        Path(entry["source_path"]).name for entry in paths.summary["normalized_meshes"]
+    }
+    assert source_paths == {
+        "table_0.glb",
+        "basket_3.glb",
+        "apple_1.glb",
+        "apple_2.glb",
+    }
+
+
+def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
+    tmp_path: Path,
+) -> None:
+    mesh_path = tmp_path / "source" / "triangle.glb"
+    _write_minimal_glb(
+        mesh_path,
+        [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)],
+        node_translation=(1.0, 0.0, 0.0),
     )
-    assert background_objects["wicker_basket"]["init_rot"] == pytest.approx(
-        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
+    source_sha256 = hashlib.sha256(mesh_path.read_bytes()).hexdigest()
+    normalizer = MeshFrameNormalizer(output_dir=tmp_path / "normalized")
+
+    normalized_path = normalizer.normalize_path(mesh_path)
+    repeated_path = normalizer.normalize_path(mesh_path)
+
+    assert repeated_path == normalized_path
+    assert normalized_path.suffix == ".obj"
+    assert MESH_FRAME_NORMALIZATION_POLICY_VERSION not in normalized_path.name
+    assert len(normalized_path.name) <= 64
+    obj_text = normalized_path.read_text(encoding="utf-8")
+    assert f"policy_version: {MESH_FRAME_NORMALIZATION_POLICY_VERSION}" in obj_text
+    assert f"source_sha256: {source_sha256}" in obj_text
+    assert "dexsim_engine_version:" in obj_text
+    assert (
+        "transform: [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],"
+        "[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]]"
+    ) in obj_text
+    assert "mtllib material.mtl" in obj_text
+    material_text = (normalized_path.parent / "material.mtl").read_text(
+        encoding="utf-8"
     )
-    assert rigid_objects["right_apple"]["init_rot"] == pytest.approx(
-        _expected_glb_corrected_rot([0.0, 0.0, 140.0])
+    assert "newmtl material_0" in material_text
+    assert _rounded_vertex_set(_obj_vertices(normalized_path)) == {
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 0.0, 1.0),
+    }
+
+
+def test_mesh_frame_normalizer_recreates_material_library_for_reused_obj(
+    tmp_path: Path,
+) -> None:
+    mesh_path = tmp_path / "source" / "triangle.glb"
+    _write_minimal_glb(mesh_path, _default_mesh_vertices())
+    output_dir = tmp_path / "normalized"
+    normalized_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(
+        mesh_path
     )
-    assert rigid_objects["left_apple"]["init_rot"] == pytest.approx(
-        _expected_glb_corrected_rot([0.0, 0.0, 160.0])
-    )
+    material_path = normalized_path.parent / "material.mtl"
+    material_path.unlink()
+
+    reused_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(mesh_path)
+
+    assert reused_path == normalized_path
+    assert material_path.is_file()
+    assert "newmtl material_0" in material_path.read_text(encoding="utf-8")
 
 
 def test_target_replacements_generate_meshes_and_replace_paths(
@@ -171,12 +244,18 @@ def test_target_replacements_generate_meshes_and_replace_paths(
     assert set(rigid_objects) == {"left_apple", "right_apple"}
     assert "wicker_basket" in background_objects
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
-        "mesh_assets/new1/orange.glb"
-    )
-    assert rigid_objects["left_apple"]["shape"]["fpath"].endswith(
-        "mesh_assets/new2/apple.glb"
-    )
+    _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
+    _assert_normalized_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
+    normalized_sources = {
+        Path(entry["source_path"]).as_posix()
+        for entry in paths.summary["normalized_meshes"]
+    }
+    assert (
+        project_dir / "mesh_assets" / "new1" / "orange.glb"
+    ).as_posix() in normalized_sources
+    assert (
+        project_dir / "mesh_assets" / "new2" / "apple.glb"
+    ).as_posix() in normalized_sources
     assert paths.summary["target_replacements"][0]["source_uid"] == "apple_1"
     assert paths.summary["target_replacements"][1]["source_uid"] == "apple_2"
 
@@ -207,12 +286,8 @@ def test_target_replacements_can_sync_runtime_names(
     assert set(rigid_objects) == {"left_orange", "right_apple"}
     assert "wicker_basket" in background_objects
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert rigid_objects["left_orange"]["shape"]["fpath"].endswith(
-        "mesh_assets/new1/orange.glb"
-    )
-    assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
-        "mesh_assets/new2/apple.glb"
-    )
+    _assert_normalized_obj_path(rigid_objects["left_orange"]["shape"]["fpath"])
+    _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
     assert {term["object"] for term in success_terms} == {
@@ -234,8 +309,7 @@ def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
     background_mesh = project_dir / "mesh_assets/backgrounds/vase_0.glb"
-    background_mesh.parent.mkdir(parents=True, exist_ok=True)
-    background_mesh.write_bytes(b"")
+    _write_minimal_glb(background_mesh, _default_mesh_vertices())
 
     merged_config_path = project_dir / "gym_config_merged.json"
     source_config = json.loads(
@@ -274,9 +348,7 @@ def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
     assert rigid_objects["left_apple"]["body_scale"] == [0.8, 0.8, 0.8]
     assert rigid_objects["right_apple"]["body_scale"] == [0.8, 0.8, 0.8]
     assert rigid_objects["vase_0"]["body_scale"] == [1.2, 1.1, 0.9]
-    assert rigid_objects["vase_0"]["shape"]["fpath"].endswith(
-        "mesh_assets/backgrounds/vase_0.glb"
-    )
+    _assert_normalized_obj_path(rigid_objects["vase_0"]["shape"]["fpath"])
 
 
 def test_task_description_generates_relative_left_of_config(
@@ -324,15 +396,15 @@ def test_task_description_generates_relative_left_of_config(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_1", "apple_2"}
+    assert set(rigid_objects) == {"apple_2"}
     assert rigid_objects["apple_2"]["body_scale"] == [0.5, 0.5, 0.5]
-    assert rigid_objects["apple_1"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert rigid_objects["apple_2"]["body_type"] == "dynamic"
+    assert background_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["apple_1"]["body_type"] == "kinematic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["init_rot"] == pytest.approx(
-        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
-    )
+    assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
@@ -357,7 +429,7 @@ def test_task_description_generates_relative_left_of_config(
     assert "right_arm_action: null" in task_prompt
     assert "Generate exactly 10 nominal edges" not in task_prompt
 
-    assert paths.summary == {
+    assert _stable_summary(paths.summary) == {
         "mode": "relative_placement",
         "moved_object": "apple_2",
         "reference_object": "wicker_basket",
@@ -405,6 +477,13 @@ def test_task_description_generates_relative_front_of_config(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"apple_1"}
+    assert rigid_objects["apple_1"]["body_type"] == "dynamic"
+    assert background_objects["apple_2"]["body_type"] == "kinematic"
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
     axis_terms = {
@@ -420,7 +499,7 @@ def test_task_description_generates_relative_front_of_config(
     assert '"offset":[-0.16,0.0,0.22]' in task_prompt
     assert '"offset":[-0.16,0.0,0.22]' in atom_actions
 
-    assert paths.summary == {
+    assert _stable_summary(paths.summary) == {
         "mode": "relative_placement",
         "moved_object": "apple_1",
         "reference_object": "apple_2",
@@ -509,11 +588,11 @@ def test_task_description_respects_explicit_left_arm(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_1", "apple_2"}
+    assert set(rigid_objects) == {"apple_1"}
+    assert rigid_objects["apple_1"]["body_type"] == "dynamic"
+    assert background_objects["apple_2"]["body_type"] == "kinematic"
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["init_rot"] == pytest.approx(
-        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
-    )
+    assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
     assert paths.summary["active_arm"] == "left_arm"
 
@@ -552,6 +631,12 @@ def test_task_description_respects_explicit_right_arm(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"apple_2"}
+    assert rigid_objects["apple_2"]["body_type"] == "dynamic"
+    assert background_objects["apple_1"]["body_type"] == "kinematic"
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
     assert paths.summary["active_arm"] == "right_arm"
 
@@ -561,6 +646,60 @@ def test_task_description_respects_explicit_right_arm(
     )
     assert '"obj_name":"apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
+
+
+def test_demo3_relative_placement_uses_role_aware_scene_partition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_demo3_role_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == "用右臂把咖啡杯子放到垫子上"
+        return {
+            "moved_object": "cup_1",
+            "reference_object": "pad_1",
+            "goal_relation": "on",
+            "arm": "right",
+            "task_prompt_summary": "Place the cup on the pad.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_demo3_relative_agent",
+        task_description="用右臂把咖啡杯子放到垫子上",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"cup"}
+    assert rigid_objects["cup"]["body_type"] == "dynamic"
+    assert rigid_objects["cup"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert background_objects["pad"]["body_type"] == "kinematic"
+    assert background_objects["pad"]["body_scale"] == [1.2, 1.0, 0.4]
+    assert background_objects["fork"]["body_type"] == "kinematic"
+    assert background_objects["fork"]["body_scale"] == [0.7, 0.7, 0.7]
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["type"] == "object_on_object"
+    assert success["object"] == "cup"
+    assert success["support"] == "pad"
+
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert atom_actions.count('"atomic_action_class":"PickUpAction"') == 1
+    assert '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in atom_actions
+    assert '"obj_name":"cup"' in atom_actions
+    assert _stable_summary(paths.summary)["relation"] == "on"
 
 
 def test_task_description_generates_dual_arm_relative_config(
@@ -615,6 +754,12 @@ def test_task_description_generates_dual_arm_relative_config(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"apple_1", "apple_2"}
+    assert rigid_objects["apple_1"]["body_type"] == "dynamic"
+    assert rigid_objects["apple_2"]["body_type"] == "dynamic"
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
 
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -635,7 +780,7 @@ def test_task_description_generates_dual_arm_relative_config(
     }
     assert "grasp_pose_object" not in attr_names
 
-    assert paths.summary == {
+    assert _stable_summary(paths.summary) == {
         "mode": "dual_arm_relative_placement",
         "placements": [
             {
@@ -811,9 +956,14 @@ def test_task_description_on_object_uses_object_on_object_success(
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"apple_2"}
     assert rigid_objects["apple_2"]["body_scale"] == [0.6, 0.6, 0.6]
-    assert rigid_objects["apple_1"]["body_scale"] == [0.6, 0.6, 0.6]
-    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["apple_2"]["body_type"] == "dynamic"
+    assert background_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["apple_1"]["body_type"] == "kinematic"
+    assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["type"] == "object_on_object"
@@ -854,10 +1004,13 @@ def test_task_description_rejects_unknown_llm_uid(
 
 def test_high_tabletop_scene_adjusts_robot_height_and_light(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
+    _write_minimal_glb(
+        project_dir / "mesh_assets/table/table_0.glb",
+        [(-0.5, 0.0, 0.82), (0.5, 0.0, 0.82), (0.0, -0.82, 0.82)],
+    )
 
     gym_config_path = project_dir / "gym_config.json"
     source_config = json.loads(gym_config_path.read_text(encoding="utf-8"))
@@ -866,20 +1019,6 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     gym_config_path.write_text(
         json.dumps(source_config, indent=2),
         encoding="utf-8",
-    )
-
-    def fake_resolve_table_mesh_world_zmax(
-        scene_dir: Path,
-        table_obj,
-    ) -> float:
-        assert scene_dir == project_dir
-        assert table_obj.source_uid == "table"
-        return 1.18
-
-    monkeypatch.setattr(
-        ur5_basket_config_generation,
-        "_resolve_table_mesh_world_zmax",
-        fake_resolve_table_mesh_world_zmax,
     )
 
     paths = generate_ur5_basket_config_from_project(
@@ -895,6 +1034,33 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     )
     assert gym_config["robot"]["init_pos"][2] == pytest.approx(expected_init_z)
     assert gym_config["light"]["direct"][0]["intensity"] == 40.0
+
+
+def test_tabletop_z_placement_uses_normalized_mesh_bounds(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_z_agent",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    table_config = next(obj for obj in gym_config["background"] if obj["uid"] == "table")
+    table_top_z = ur5_basket_config_generation._mesh_config_world_zmax(table_config)
+    expected_min_z = (
+        table_top_z + ur5_basket_config_generation._TABLETOP_OBJECT_CLEARANCE
+    )
+    for obj_config in [
+        *[obj for obj in gym_config["background"] if obj["uid"] != "table"],
+        *gym_config["rigid_object"],
+    ]:
+        min_z, _ = ur5_basket_config_generation._mesh_config_world_z_bounds(obj_config)
+        assert min_z == pytest.approx(expected_min_z)
 
 
 def test_table_mesh_world_zmax_reads_glb_vertices(tmp_path: Path) -> None:
@@ -953,8 +1119,7 @@ def _write_project(project_dir: Path) -> None:
         "mesh_assets/apple/apple_2/apple_2.glb",
     ):
         mesh_path = project_dir / rel_path
-        mesh_path.parent.mkdir(parents=True, exist_ok=True)
-        mesh_path.write_bytes(b"")
+        _write_minimal_glb(mesh_path, _default_mesh_vertices())
 
     gym_config = {
         "id": "Image2Tabletop-1790000000-v0",
@@ -993,6 +1158,54 @@ def _write_project(project_dir: Path) -> None:
     )
 
 
+def _write_demo3_role_project(project_dir: Path) -> None:
+    for rel_path in (
+        "mesh_assets/table/table_0.glb",
+        "mesh_assets/cup/cup_1/cup_1.glb",
+        "mesh_assets/pad/pad_1/pad_1.glb",
+        "mesh_assets/fork/fork_1/fork_1.glb",
+    ):
+        _write_minimal_glb(project_dir / rel_path, _default_mesh_vertices())
+
+    cup = _mesh_object(
+        "cup_1",
+        "mesh_assets/cup/cup_1/cup_1.glb",
+        [0.18, 0.22, 0.76],
+        [0.0, 0.0, 25.0],
+    )
+    pad = _mesh_object(
+        "pad_1",
+        "mesh_assets/pad/pad_1/pad_1.glb",
+        [-0.1, -0.15, 0.74],
+        [0.0, 0.0, -10.0],
+    )
+    pad["body_scale"] = [1.2, 1.0, 0.4]
+    fork = _mesh_object(
+        "fork_1",
+        "mesh_assets/fork/fork_1/fork_1.glb",
+        [0.32, -0.18, 0.75],
+        [0.0, 0.0, 90.0],
+    )
+    fork["body_scale"] = [0.7, 0.7, 0.7]
+
+    gym_config = {
+        "id": "Image2Tabletop-1790000000-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 180.0],
+            )
+        ],
+        "rigid_object": [cup, pad, fork],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _mesh_object(
     uid: str,
     fpath: str,
@@ -1012,29 +1225,72 @@ def _mesh_object(
     }
 
 
-def _expected_glb_corrected_rot(init_rot: list[float]) -> list[float]:
-    from scipy.spatial.transform import Rotation
+def _assert_normalized_obj_path(fpath: str) -> None:
+    path = Path(fpath)
+    assert path.suffix == ".obj"
+    assert "mesh_assets/normalized" in path.as_posix()
+    assert MESH_FRAME_NORMALIZATION_POLICY_VERSION not in path.name
+    assert len(path.name) <= 64
+    assert path.is_file()
+    assert (path.parent / "material.mtl").is_file()
 
-    source_rotation = Rotation.from_euler("XYZ", init_rot, degrees=True)
-    correction = Rotation.from_euler(
-        "X",
-        ur5_basket_config_generation._DEXSIM_041_GLB_LOCAL_X_CORRECTION_DEGREES,
-        degrees=True,
-    )
-    return [
-        float(value)
-        for value in (source_rotation * correction).as_euler("XYZ", degrees=True)
-    ]
+
+def _stable_summary(summary: dict) -> dict:
+    return {
+        key: value
+        for key, value in summary.items()
+        if key not in {"normalized_meshes", "coacd_cache"}
+    }
+
+
+def _obj_vertices(path: Path) -> list[tuple[float, float, float]]:
+    vertices = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("v "):
+            continue
+        _, x, y, z = line.split(maxsplit=3)
+        vertices.append((float(x), float(y), float(z)))
+    return vertices
+
+
+def _rounded_vertex_set(
+    vertices: list[tuple[float, float, float]],
+) -> set[tuple[float, float, float]]:
+    return {
+        (round(vertex[0], 6), round(vertex[1], 6), round(vertex[2], 6))
+        for vertex in vertices
+    }
+
+
+def _default_mesh_vertices() -> list[tuple[float, float, float]]:
+    return [(-0.05, 0.0, 0.0), (0.05, 0.0, 0.0), (0.0, -0.04, 0.0)]
 
 
 def _write_minimal_glb(
     path: Path,
     vertices: list[tuple[float, float, float]],
+    *,
+    node_translation: tuple[float, float, float] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    binary = b"".join(struct.pack("<fff", *vertex) for vertex in vertices)
+    if len(vertices) < 3:
+        raise ValueError("Minimal GLB test mesh requires at least three vertices.")
+    position_binary = b"".join(struct.pack("<fff", *vertex) for vertex in vertices)
+    position_binary_padded = position_binary + b"\x00" * (
+        (4 - len(position_binary) % 4) % 4
+    )
+    indices = (0, 1, 2)
+    index_binary = b"".join(struct.pack("<H", index) for index in indices)
+    index_binary_padded = index_binary + b"\x00" * (
+        (4 - len(index_binary) % 4) % 4
+    )
+    binary = position_binary_padded + index_binary_padded
+    index_offset = len(position_binary_padded)
     mins = [min(vertex[axis] for vertex in vertices) for axis in range(3)]
     maxs = [max(vertex[axis] for vertex in vertices) for axis in range(3)]
+    node = {"mesh": 0}
+    if node_translation is not None:
+        node["translation"] = [float(value) for value in node_translation]
     doc = {
         "asset": {"version": "2.0"},
         "buffers": [{"byteLength": len(binary)}],
@@ -1042,9 +1298,15 @@ def _write_minimal_glb(
             {
                 "buffer": 0,
                 "byteOffset": 0,
-                "byteLength": len(binary),
+                "byteLength": len(position_binary),
                 "target": 34962,
-            }
+            },
+            {
+                "buffer": 0,
+                "byteOffset": index_offset,
+                "byteLength": len(index_binary),
+                "target": 34963,
+            },
         ],
         "accessors": [
             {
@@ -1054,23 +1316,30 @@ def _write_minimal_glb(
                 "type": "VEC3",
                 "min": mins,
                 "max": maxs,
-            }
+            },
+            {
+                "bufferView": 1,
+                "componentType": 5123,
+                "count": len(indices),
+                "type": "SCALAR",
+                "min": [min(indices)],
+                "max": [max(indices)],
+            },
         ],
-        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
-        "nodes": [{"mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+        "nodes": [node],
         "scenes": [{"nodes": [0]}],
         "scene": 0,
     }
     json_chunk = json.dumps(doc, separators=(",", ":")).encode("utf-8")
     json_chunk += b" " * ((4 - len(json_chunk) % 4) % 4)
-    binary_chunk = binary + b"\x00" * ((4 - len(binary) % 4) % 4)
-    total_length = 12 + 8 + len(json_chunk) + 8 + len(binary_chunk)
+    total_length = 12 + 8 + len(json_chunk) + 8 + len(binary)
     path.write_bytes(
         struct.pack("<4sII", b"glTF", 2, total_length)
         + struct.pack("<II", len(json_chunk), 0x4E4F534A)
         + json_chunk
-        + struct.pack("<II", len(binary_chunk), 0x004E4942)
-        + binary_chunk
+        + struct.pack("<II", len(binary), 0x004E4942)
+        + binary
     )
 
 
@@ -1085,7 +1354,7 @@ def _patch_prompt2geometry(monkeypatch: pytest.MonkeyPatch) -> list:
     ) -> dict:
         output_root.mkdir(parents=True, exist_ok=True)
         mesh_path = output_root / output_name
-        mesh_path.write_bytes(b"glb")
+        _write_minimal_glb(mesh_path, _default_mesh_vertices())
         calls.append((prompt, output_root, output_name))
         return {"scaled_mesh_path": str(mesh_path)}
 
