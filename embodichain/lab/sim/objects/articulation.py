@@ -932,7 +932,6 @@ class Articulation(BatchEntity):
                 )
             # TODO: in manual physics mode, the update should be explicitly called after
             # setting the pose to synchronize the state to renderer.
-            self._world.update(0.001)
 
         else:
             if pose.dim() == 2 and pose.shape[1] == 7:
@@ -956,6 +955,7 @@ class Articulation(BatchEntity):
                 data_type=ArticulationGPUAPIWriteType.ROOT_GLOBAL_POSE,
             )
             self._ps.gpu_compute_articulation_kinematic(gpu_indices=indices)
+        self._world.update(0.001)
 
     def get_local_pose(self, to_matrix=False) -> torch.Tensor:
         """Get local pose (root link pose) of the articulation.
@@ -1670,8 +1670,7 @@ class Articulation(BatchEntity):
             self._ps.gpu_compute_articulation_kinematic(
                 gpu_indices=self.body_data.gpu_indices[local_env_ids]
             )
-        else:
-            self._world.update(0.001)
+        self._world.update(0.001)
 
     def _set_default_joint_drive(self) -> None:
         """Set default joint drive parameters based on the configuration."""
