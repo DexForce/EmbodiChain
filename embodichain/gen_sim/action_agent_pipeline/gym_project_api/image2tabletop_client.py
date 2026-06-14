@@ -46,8 +46,9 @@ def _repo_root() -> Path:
     return Path.cwd().resolve()
 
 
-_DEFAULT_IMAGE_INPUT = Path(__file__).resolve().parent / "image"
-_DEFAULT_OUTPUT_ROOT = _repo_root() / "gym_project"
+_REPO_ROOT = _repo_root()
+_DEFAULT_OUTPUT_ROOT = _REPO_ROOT / "gym_project"
+_DEFAULT_IMAGE_INPUT = _DEFAULT_OUTPUT_ROOT / "action_agent_pipeline/images"
 
 
 def _server_url(base_url: str, path: str) -> str:

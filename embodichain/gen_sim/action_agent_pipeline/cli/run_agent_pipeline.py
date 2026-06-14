@@ -59,24 +59,19 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_records import (
 )
 
 _DEFAULT_SERVER = "http://192.168.3.23:4523"
-_DEFAULT_IMAGE = (
-    _REPO_ROOT
-    / "embodichain/gen_sim/action_agent_pipeline/gym_project_api/image/demo5.jpg"
-)
-_DEFAULT_IMAGE_DIR = _DEFAULT_IMAGE.parent
 _DEFAULT_GYM_PROJECT_ROOT = _REPO_ROOT / "gym_project"
+_DEFAULT_ACTION_AGENT_WORKSPACE = _DEFAULT_GYM_PROJECT_ROOT / "action_agent_pipeline"
+_DEFAULT_IMAGE = _DEFAULT_ACTION_AGENT_WORKSPACE / "images/demo1.jpg"
+_DEFAULT_IMAGE_DIR = _DEFAULT_IMAGE.parent
 _DEFAULT_EXISTING_GYM_PROJECT = _DEFAULT_GYM_PROJECT_ROOT / "1780562837_gym_project"
 _DEFAULT_IMAGE2SCENE_ROOT = _REPO_ROOT / "gym_project/environment/image2tabletop"
 _DEFAULT_IMAGE2SCENE_IMAGE = "scene_image/robotwin_example.png"
 _DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR = "./downloads"
 _DEFAULT_IMAGE2SCENE_OUTPUT_ROOT = "./generated"
 _DEFAULT_IMAGE2SCENE_CONFIG = "./gen_config.json"
-_DEFAULT_CONFIG_OUTPUT_DIR = (
-    _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/demo3_text"
-)
+_DEFAULT_CONFIG_OUTPUT_DIR = _DEFAULT_ACTION_AGENT_WORKSPACE / "configs/demo3_text"
 _DEFAULT_PIPELINE_HISTORY = (
-    _REPO_ROOT
-    / "embodichain/gen_sim/action_agent_pipeline/configs/pipeline_history.json"
+    _DEFAULT_ACTION_AGENT_WORKSPACE / "configs/pipeline_history.json"
 )
 _DEFAULT_TASK_NAME = "Demo3_Text"
 _DEFAULT_TASK_TEMPLATE_NAMES = frozenset({"Demo1_Text"})
