@@ -111,6 +111,35 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert paths.summary["mode"] == "basket_template"
 
 
+def test_generator_applies_dexsim_041_glb_rotation_correction(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_agent",
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+
+    assert background_objects["table"]["init_rot"] == pytest.approx(
+        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
+    )
+    assert rigid_objects["wicker_basket"]["init_rot"] == pytest.approx(
+        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
+    )
+    assert rigid_objects["right_apple"]["init_rot"] == pytest.approx(
+        _expected_glb_corrected_rot([0.0, 0.0, 140.0])
+    )
+    assert rigid_objects["left_apple"]["init_rot"] == pytest.approx(
+        _expected_glb_corrected_rot([0.0, 0.0, 160.0])
+    )
+
+
 def test_target_replacements_generate_meshes_and_replace_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -959,6 +988,21 @@ def _mesh_object(
         "init_rot": init_rot,
         "body_scale": [1.0, 1.0, 1.0],
     }
+
+
+def _expected_glb_corrected_rot(init_rot: list[float]) -> list[float]:
+    from scipy.spatial.transform import Rotation
+
+    source_rotation = Rotation.from_euler("XYZ", init_rot, degrees=True)
+    correction = Rotation.from_euler(
+        "X",
+        ur5_basket_config_generation._DEXSIM_041_GLB_LOCAL_X_CORRECTION_DEGREES,
+        degrees=True,
+    )
+    return [
+        float(value)
+        for value in (source_rotation * correction).as_euler("XYZ", degrees=True)
+    ]
 
 
 def _write_minimal_glb(
