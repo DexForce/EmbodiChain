@@ -26,6 +26,7 @@ import math
 import re
 
 __all__ = [
+    "GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES",
     "GLB_LOCAL_X_CORRECTION_DEGREES",
     "MESH_FRAME_NORMALIZATION_POLICY_VERSION",
     "MeshFrameNormalizer",
@@ -33,8 +34,9 @@ __all__ = [
 ]
 
 
-MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_rx_minus_90_obj_v1"
-GLB_LOCAL_X_CORRECTION_DEGREES = -90.0
+MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_obj_v2"
+GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 0.0
+GLB_LOCAL_X_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES
 
 _SAFE_STEM_RE = re.compile(r"[^0-9a-zA-Z_.-]+")
 
@@ -69,7 +71,7 @@ class MeshFrameNormalizer:
         self,
         *,
         output_dir: str | Path,
-        local_x_correction_degrees: float = GLB_LOCAL_X_CORRECTION_DEGREES,
+        local_x_correction_degrees: float = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES,
     ) -> None:
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.local_x_correction_degrees = float(local_x_correction_degrees)
@@ -91,6 +93,11 @@ class MeshFrameNormalizer:
 
         cached = self._results_by_source.get(path)
         if cached is not None:
+            if cached.normalized_path.is_file():
+                obj_text = _repair_obj_material_reference(cached.normalized_path)
+                self._ensure_material_library(
+                    _obj_material_names(obj_text) or {"material_0"}
+                )
             return cached.normalized_path
 
         source_sha256 = _file_sha256(path)
@@ -98,6 +105,11 @@ class MeshFrameNormalizer:
         status = "reused" if normalized_path.is_file() else "generated"
         if status == "generated":
             self._write_normalized_obj(path, normalized_path, source_sha256)
+        else:
+            obj_text = _repair_obj_material_reference(normalized_path)
+            self._ensure_material_library(
+                _obj_material_names(obj_text) or {"material_0"}
+            )
 
         result = NormalizedMeshResult(
             source_path=path,
@@ -113,11 +125,54 @@ class MeshFrameNormalizer:
 
     def _normalized_path_for(self, mesh_path: Path, source_sha256: str) -> Path:
         stem = _SAFE_STEM_RE.sub("_", mesh_path.stem).strip("._") or "mesh"
-        filename = (
-            f"{stem}_{source_sha256[:12]}_"
-            f"{MESH_FRAME_NORMALIZATION_POLICY_VERSION}.obj"
+        stem = stem[:32].strip("._") or "mesh"
+        runtime_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "source_sha256": source_sha256,
+                    "policy_version": MESH_FRAME_NORMALIZATION_POLICY_VERSION,
+                    "dexsim_engine_version": self.dexsim_engine_version,
+                    "transform": self.transform,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        return self.output_dir / f"{stem}_{runtime_hash[:16]}.obj"
+
+    def _material_path(self) -> Path:
+        return self.output_dir / "material.mtl"
+
+    def _ensure_material_library(self, material_names: set[str]) -> None:
+        if not material_names:
+            return
+
+        material_path = self._material_path()
+        existing_names = _read_material_names(material_path)
+        all_names = sorted(existing_names | material_names)
+        material_path.write_text(
+            "\n".join(
+                [
+                    "# EmbodiChain action-agent normalized mesh materials",
+                    *[
+                        "\n".join(
+                            [
+                                f"newmtl {name}",
+                                "Ka 0.8 0.8 0.8",
+                                "Kd 0.8 0.8 0.8",
+                                "Ks 0.0 0.0 0.0",
+                                "Ns 1.0",
+                                "d 1.0",
+                                "illum 2",
+                            ]
+                        )
+                        for name in all_names
+                    ],
+                    "",
+                ]
+            ),
+            encoding="utf-8",
         )
-        return self.output_dir / filename
 
     def _write_normalized_obj(
         self,
@@ -128,7 +183,8 @@ class MeshFrameNormalizer:
         trimesh = _require_trimesh()
         scene = trimesh.load(str(source_path), force="scene")
         mesh = _scene_to_world_mesh(scene)
-        mesh.apply_transform(self.transform)
+        if self.local_x_correction_degrees:
+            mesh.apply_transform(self.transform)
 
         normalized_path.parent.mkdir(parents=True, exist_ok=True)
         obj_payload = mesh.export(file_type="obj")
@@ -136,6 +192,7 @@ class MeshFrameNormalizer:
             obj_text = obj_payload.decode("utf-8")
         else:
             obj_text = str(obj_payload)
+        obj_text = _ensure_obj_material_reference(obj_text)
 
         header = "\n".join(
             [
@@ -149,19 +206,75 @@ class MeshFrameNormalizer:
             ]
         )
         normalized_path.write_text(header + obj_text, encoding="utf-8")
+        self._ensure_material_library(_obj_material_names(obj_text) or {"material_0"})
 
 
 def _scene_to_world_mesh(scene: Any) -> Any:
-    try:
+    if hasattr(scene, "to_geometry"):
+        mesh = scene.to_geometry()
+    elif hasattr(scene, "dump"):
         mesh = scene.dump(concatenate=True)
-    except AttributeError:
+    else:
         mesh = scene
     if not hasattr(mesh, "vertices") or len(mesh.vertices) == 0:
         raise ValueError("Mesh contains no vertices.")
     return mesh
 
 
+def _obj_material_names(obj_text: str) -> set[str]:
+    names: set[str] = set()
+    for line in obj_text.splitlines():
+        if not line.startswith("usemtl "):
+            continue
+        name = line.split(maxsplit=1)[1].strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _repair_obj_material_reference(obj_path: Path) -> str:
+    obj_text = obj_path.read_text(encoding="utf-8")
+    repaired = _ensure_obj_material_reference(obj_text)
+    if repaired != obj_text:
+        obj_path.write_text(repaired, encoding="utf-8")
+    return repaired
+
+
+def _ensure_obj_material_reference(obj_text: str) -> str:
+    has_mtllib = any(line.startswith("mtllib ") for line in obj_text.splitlines())
+    has_usemtl = any(line.startswith("usemtl ") for line in obj_text.splitlines())
+    prefix = []
+    if not has_mtllib:
+        prefix.append("mtllib material.mtl")
+    if not has_usemtl:
+        prefix.append("usemtl material_0")
+    if not prefix:
+        return obj_text
+    return "\n".join(prefix) + "\n" + obj_text
+
+
+def _read_material_names(material_path: Path) -> set[str]:
+    if not material_path.is_file():
+        return set()
+
+    names: set[str] = set()
+    for line in material_path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("newmtl "):
+            continue
+        name = line.split(maxsplit=1)[1].strip()
+        if name:
+            names.add(name)
+    return names
+
+
 def _rotation_x_matrix4(degrees: float) -> list[list[float]]:
+    if degrees == 0.0:
+        return [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
     radians = math.radians(degrees)
     cos_value = math.cos(radians)
     sin_value = math.sin(radians)

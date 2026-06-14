@@ -1720,16 +1720,16 @@ def _build_ur5_basket_bundle(
                 by_uid[roles.right_target_source_uid],
                 roles.right_target_runtime_uid,
                 object_scale,
-                replacement_by_source_uid.get(roles.right_target_source_uid),
                 mesh_normalizer,
+                replacement_by_source_uid.get(roles.right_target_source_uid),
             ),
             _make_target_object_config(
                 scene_dir,
                 by_uid[roles.left_target_source_uid],
                 roles.left_target_runtime_uid,
                 object_scale,
-                replacement_by_source_uid.get(roles.left_target_source_uid),
                 mesh_normalizer,
+                replacement_by_source_uid.get(roles.left_target_source_uid),
             ),
             *[
                 _make_extra_rigid_object_config(
@@ -1779,6 +1779,15 @@ def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
     )
 
 
+def _attach_mesh_normalization_summary(
+    bundle: dict[str, Any],
+    mesh_normalizer: MeshFrameNormalizer,
+) -> None:
+    reports = mesh_normalizer.reports
+    if reports:
+        bundle.setdefault("summary", {})["normalized_meshes"] = reports
+
+
 def _build_relative_placement_bundle(
     *,
     scene_dir: Path,
@@ -1789,6 +1798,7 @@ def _build_relative_placement_bundle(
     target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
+    mesh_normalizer: MeshFrameNormalizer,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -1797,21 +1807,21 @@ def _build_relative_placement_bundle(
     rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
-    static_reference_source_uids = _static_relative_reference_source_uids(
-        spec,
-        by_uid,
-    )
+    moved_source_uids = {placement.moved_source_uid for placement in spec.placements}
     dynamic_rigid_objects = [
-        obj for obj in rigid_objects if obj.source_uid not in static_reference_source_uids
+        obj for obj in rigid_objects if obj.source_uid in moved_source_uids
     ]
-    static_reference_objects = [
-        obj for obj in rigid_objects if obj.source_uid in static_reference_source_uids
+    static_scene_objects = [
+        obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
     ]
     object_scale = _target_body_scale_vector(target_body_scale)
-    robot_init_z = _estimate_dual_ur5_init_z(
+    table_config = _make_background_config(
         scene_dir,
         by_uid[spec.table_source_uid],
+        mesh_normalizer,
     )
+    table_top_z = _mesh_config_world_zmax(table_config)
+    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1827,18 +1837,22 @@ def _build_relative_placement_bundle(
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
-            _make_background_config(scene_dir, by_uid[spec.table_source_uid]),
+            table_config,
             *[
-                _make_container_background_config(
+                _make_relative_background_object_config(
                     scene_dir,
                     obj,
                     runtime_uids[obj.source_uid],
-                    _relative_object_body_scale(obj, target_scale=object_scale),
+                    max_convex_hull_num=_relative_static_background_max_convex_hull_num(
+                        runtime_uids[obj.source_uid],
+                        spec,
+                    ),
+                    mesh_normalizer=mesh_normalizer,
                 )
-                for obj in static_reference_objects
+                for obj in static_scene_objects
             ],
             *[
-                _make_extra_background_config(scene_dir, obj, object_scale)
+                _make_extra_background_config(scene_dir, obj, mesh_normalizer)
                 for obj in background_objects
                 if obj.source_uid != spec.table_source_uid
             ],
@@ -1848,18 +1862,17 @@ def _build_relative_placement_bundle(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=_relative_object_body_scale(
-                    obj,
-                    target_scale=object_scale,
-                ),
+                body_scale=object_scale,
                 max_convex_hull_num=_relative_rigid_object_max_convex_hull_num(
                     runtime_uids[obj.source_uid],
                     spec,
                 ),
+                mesh_normalizer=mesh_normalizer,
             )
             for obj in dynamic_rigid_objects
         ],
     }
+    _apply_tabletop_z_placement(gym_config, table_top_z)
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
@@ -1881,34 +1894,6 @@ def _target_body_scale_vector(
 
 def _source_body_scale(obj: _SceneObject) -> list[float]:
     return _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0]))
-
-
-def _static_relative_reference_source_uids(
-    spec: _RelativePlacementSpec,
-    by_uid: Mapping[str, _SceneObject],
-) -> set[str]:
-    moved_source_uids = {placement.moved_source_uid for placement in spec.placements}
-    return {
-        placement.reference_source_uid
-        for placement in spec.placements
-        if placement.reference_source_uid not in moved_source_uids
-        and _is_container_like(by_uid[placement.reference_source_uid])
-    }
-
-
-def _relative_object_body_scale(
-    obj: _SceneObject,
-    *,
-    target_scale: list[float],
-) -> list[float]:
-    if _is_container_object(obj):
-        return _source_body_scale(obj)
-    return target_scale
-
-
-def _is_container_object(obj: _SceneObject) -> bool:
-    text = _object_text(obj)
-    return any(keyword in text for keyword in _CONTAINER_KEYWORDS)
 
 
 def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
@@ -1936,15 +1921,110 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
     }
 
 
-def _estimate_dual_ur5_init_z(scene_dir: Path, table_obj: _SceneObject) -> float:
-    """Estimate robot root height from the table mesh top surface."""
-
-    table_top_z = _resolve_table_mesh_world_zmax(scene_dir, table_obj)
+def _dual_ur5_init_z_from_table_top(table_top_z: float | None) -> float:
     if table_top_z is None:
         return _DUAL_UR5_LEGACY_INIT_Z
 
     init_z = table_top_z + _DUAL_UR5_TABLETOP_CLEARANCE - _DUAL_UR5_ARM_COMPONENT_Z
     return round(max(_DUAL_UR5_LEGACY_INIT_Z, init_z), 6)
+
+
+def _apply_tabletop_z_placement(
+    gym_config: dict[str, Any],
+    table_top_z: float | None,
+) -> None:
+    if table_top_z is None:
+        return
+    target_bottom_z = float(table_top_z) + _TABLETOP_OBJECT_CLEARANCE
+    for obj in _iter_generated_scene_object_configs(gym_config):
+        if obj.get("uid") == "table":
+            continue
+        mesh_min_z = _mesh_config_local_zmin_after_rotation(obj)
+        if mesh_min_z is None:
+            continue
+        init_pos = _clean_vector3(obj.get("init_pos", [0.0, 0.0, 0.0]))
+        init_pos[2] = round(target_bottom_z - mesh_min_z, 6)
+        obj["init_pos"] = init_pos
+
+
+def _iter_generated_scene_object_configs(
+    gym_config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    objects: list[dict[str, Any]] = []
+    for section in ("background", "rigid_object"):
+        value = gym_config.get(section, [])
+        if isinstance(value, Mapping):
+            value = [value]
+        if not isinstance(value, list):
+            continue
+        objects.extend(obj for obj in value if isinstance(obj, dict))
+    return objects
+
+
+def _mesh_config_world_zmax(obj_config: Mapping[str, Any]) -> float | None:
+    bounds = _mesh_config_world_z_bounds(obj_config)
+    if bounds is None:
+        return None
+    return bounds[1]
+
+
+def _mesh_config_local_zmin_after_rotation(
+    obj_config: Mapping[str, Any],
+) -> float | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+
+    matrix = _mesh_config_transform_matrix(
+        obj_config,
+        translation=[0.0, 0.0, 0.0],
+    )
+    return min(_transform_point(matrix, vertex)[2] for vertex in vertices)
+
+
+def _mesh_config_world_z_bounds(
+    obj_config: Mapping[str, Any],
+) -> tuple[float, float] | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+
+    matrix = _mesh_config_transform_matrix(obj_config)
+    z_values = [_transform_point(matrix, vertex)[2] for vertex in vertices]
+    return (min(z_values), max(z_values))
+
+
+def _mesh_config_transform_matrix(
+    obj_config: Mapping[str, Any],
+    *,
+    translation: list[float] | None = None,
+) -> list[list[float]]:
+    scale = _vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    init_local_pose = obj_config.get("init_local_pose")
+    if init_local_pose is not None and translation is None:
+        root_matrix = _matrix4(init_local_pose)
+    else:
+        root_matrix = _euler_xyz_degrees_matrix(
+            _vector3(obj_config.get("init_rot", [0.0, 0.0, 0.0])),
+            (
+                _vector3(obj_config.get("init_pos", [0.0, 0.0, 0.0]))
+                if translation is None
+                else translation
+            ),
+        )
+    return _matrix_multiply(root_matrix, _scale_matrix4(scale))
 
 
 def _resolve_table_mesh_world_zmax(
@@ -2015,9 +2095,11 @@ def _load_mesh_vertices_with_trimesh(
 
     try:
         scene_or_mesh = trimesh.load(str(mesh_path), force="scene")
-        try:
+        if hasattr(scene_or_mesh, "to_geometry"):
+            mesh = scene_or_mesh.to_geometry()
+        elif hasattr(scene_or_mesh, "dump"):
             mesh = scene_or_mesh.dump(concatenate=True)
-        except AttributeError:
+        else:
             mesh = scene_or_mesh
     except Exception:
         return None
@@ -2823,8 +2905,12 @@ def _make_light_config() -> dict[str, Any]:
     }
 
 
-def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any]:
-    shape = _make_shape_config(scene_dir, obj.config)
+def _make_background_config(
+    scene_dir: Path,
+    obj: _SceneObject,
+    mesh_normalizer: MeshFrameNormalizer,
+) -> dict[str, Any]:
+    shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
     return {
         "uid": "table",
         "shape": shape,
@@ -2832,7 +2918,7 @@ def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any
         "body_scale": _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0])),
         "body_type": "kinematic",
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _corrected_init_rot_for_shape(obj.config, shape),
+        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
         "max_convex_hull_num": _role_limited_max_convex_hull_num(
             obj,
             _BACKGROUND_MAX_CONVEX_HULL_NUM,
@@ -2843,9 +2929,10 @@ def _make_background_config(scene_dir: Path, obj: _SceneObject) -> dict[str, Any
 def _make_extra_background_config(
     scene_dir: Path,
     obj: _SceneObject,
+    mesh_normalizer: MeshFrameNormalizer,
     body_scale: Any | None = None,
 ) -> dict[str, Any]:
-    shape = _make_shape_config(scene_dir, obj.config)
+    shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
     config = {
         "uid": _normalize_runtime_uid(obj.source_uid),
         "shape": shape,
@@ -2857,7 +2944,7 @@ def _make_extra_background_config(
         ),
         "body_type": str(obj.config.get("body_type", "static")),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _corrected_init_rot_for_shape(obj.config, shape),
+        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
         "max_convex_hull_num": _role_limited_max_convex_hull_num(
             obj,
             _BACKGROUND_MAX_CONVEX_HULL_NUM,
@@ -2871,16 +2958,20 @@ def _make_target_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     target_scale: list[float],
+    mesh_normalizer: MeshFrameNormalizer,
     replacement: _ResolvedTargetReplacement | None = None,
 ) -> dict[str, Any]:
-    return _make_rigid_object_config(
+    config = _make_rigid_object_config(
         scene_dir,
         obj,
         runtime_uid,
         target_scale,
         max_convex_hull_num=_TARGET_MAX_CONVEX_HULL_NUM,
         mesh_fpath=replacement.mesh_path if replacement else None,
+        mesh_normalizer=mesh_normalizer,
     )
+    config["body_type"] = "dynamic"
+    return config
 
 
 def _make_container_object_config(
@@ -2888,6 +2979,7 @@ def _make_container_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
+    mesh_normalizer: MeshFrameNormalizer,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -2898,6 +2990,7 @@ def _make_container_object_config(
             obj,
             _CONTAINER_MAX_CONVEX_HULL_NUM,
         ),
+        mesh_normalizer=mesh_normalizer,
     )
 
 
@@ -2906,15 +2999,36 @@ def _make_container_background_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
+    mesh_normalizer: MeshFrameNormalizer,
 ) -> dict[str, Any]:
     config = _make_container_object_config(
         scene_dir,
         obj,
         runtime_uid,
         body_scale,
+        mesh_normalizer,
     )
     config["body_type"] = "kinematic"
-    config["init_rot"] = _corrected_init_rot_for_shape(obj.config, config["shape"])
+    return config
+
+
+def _make_relative_background_object_config(
+    scene_dir: Path,
+    obj: _SceneObject,
+    runtime_uid: str,
+    *,
+    max_convex_hull_num: int,
+    mesh_normalizer: MeshFrameNormalizer,
+) -> dict[str, Any]:
+    config = _make_rigid_object_config(
+        scene_dir,
+        obj,
+        runtime_uid,
+        _source_body_scale(obj),
+        max_convex_hull_num=max_convex_hull_num,
+        mesh_normalizer=mesh_normalizer,
+    )
+    config["body_type"] = "kinematic"
     return config
 
 
@@ -2922,6 +3036,7 @@ def _make_extra_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
     body_scale: Any,
+    mesh_normalizer: MeshFrameNormalizer,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -2932,6 +3047,7 @@ def _make_extra_rigid_object_config(
             obj,
             _EXTRA_RIGID_MAX_CONVEX_HULL_NUM,
         ),
+        mesh_normalizer=mesh_normalizer,
     )
 
 
@@ -2942,6 +3058,7 @@ def _make_relative_rigid_object_config(
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
+    mesh_normalizer: MeshFrameNormalizer,
 ) -> dict[str, Any]:
     if max_convex_hull_num == _TARGET_MAX_CONVEX_HULL_NUM:
         resolved_max_convex_hull_num = max_convex_hull_num
@@ -2950,13 +3067,16 @@ def _make_relative_rigid_object_config(
             obj,
             max_convex_hull_num,
         )
-    return _make_rigid_object_config(
+    config = _make_rigid_object_config(
         scene_dir,
         obj,
         runtime_uid,
         body_scale,
         max_convex_hull_num=resolved_max_convex_hull_num,
+        mesh_normalizer=mesh_normalizer,
     )
+    config["body_type"] = "dynamic"
+    return config
 
 
 def _make_rigid_object_config(
@@ -2966,14 +3086,20 @@ def _make_rigid_object_config(
     body_scale: Any,
     max_convex_hull_num: int,
     mesh_fpath: str | Path | None = None,
+    mesh_normalizer: MeshFrameNormalizer | None = None,
 ) -> dict[str, Any]:
-    shape = _make_shape_config(scene_dir, obj.config, mesh_fpath=mesh_fpath)
+    shape = _make_shape_config(
+        scene_dir,
+        obj.config,
+        mesh_fpath=mesh_fpath,
+        mesh_normalizer=mesh_normalizer,
+    )
     config = {
         "uid": runtime_uid,
         "shape": shape,
         "attrs": dict(_RIGID_OBJECT_ATTRS),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _corrected_init_rot_for_shape(obj.config, shape),
+        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
         "body_scale": _clean_vector3(body_scale),
         "max_convex_hull_num": int(max_convex_hull_num),
     }
@@ -3012,54 +3138,37 @@ def _relative_rigid_object_max_convex_hull_num(
     return _EXTRA_RIGID_MAX_CONVEX_HULL_NUM
 
 
+def _relative_static_background_max_convex_hull_num(
+    runtime_uid: str,
+    spec: _RelativePlacementSpec,
+) -> int:
+    for placement in spec.placements:
+        if (
+            placement.relation == "inside"
+            and runtime_uid == placement.reference_runtime_uid
+        ):
+            return _CONTAINER_MAX_CONVEX_HULL_NUM
+    return _BACKGROUND_MAX_CONVEX_HULL_NUM
+
+
 def _make_shape_config(
     scene_dir: Path,
     source_config: Mapping[str, Any],
     *,
     mesh_fpath: str | Path | None = None,
+    mesh_normalizer: MeshFrameNormalizer | None = None,
 ) -> dict[str, Any]:
     shape = copy.deepcopy(dict(source_config.get("shape", {})))
     if mesh_fpath is not None:
         shape["shape_type"] = "Mesh"
         shape["fpath"] = str(mesh_fpath)
     if shape.get("shape_type") == "Mesh" and "fpath" in shape:
-        shape["fpath"] = _asset_path_for_config(scene_dir, str(shape["fpath"]))
+        mesh_path = Path(_asset_path_for_config(scene_dir, str(shape["fpath"])))
+        if mesh_normalizer is not None:
+            mesh_path = mesh_normalizer.normalize_path(mesh_path)
+        shape["fpath"] = mesh_path.as_posix()
     shape.setdefault("compute_uv", False)
     return shape
-
-
-def _corrected_init_rot_for_shape(
-    source_config: Mapping[str, Any],
-    shape_config: Mapping[str, Any],
-) -> list[float]:
-    init_rot = _clean_vector3(source_config.get("init_rot", [0.0, 0.0, 0.0]))
-    if not _is_glb_mesh_shape(shape_config):
-        return init_rot
-
-    from scipy.spatial.transform import Rotation
-
-    source_rotation = Rotation.from_euler("XYZ", init_rot, degrees=True)
-    correction = Rotation.from_euler(
-        "X",
-        _DEXSIM_041_GLB_LOCAL_X_CORRECTION_DEGREES,
-        degrees=True,
-    )
-    corrected = source_rotation * correction
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="Gimbal lock detected.*",
-            category=UserWarning,
-        )
-        corrected_euler = corrected.as_euler("XYZ", degrees=True)
-    return [float(value) for value in corrected_euler]
-
-
-def _is_glb_mesh_shape(shape_config: Mapping[str, Any]) -> bool:
-    if shape_config.get("shape_type") != "Mesh":
-        return False
-    fpath = shape_config.get("fpath")
-    return isinstance(fpath, str) and Path(fpath).suffix.lower() == ".glb"
 
 
 def _asset_path_for_config(scene_dir: Path, fpath: str) -> str:
@@ -3202,20 +3311,7 @@ def _write_config_bundle(
         atom_actions=output_dir / "atom_actions.txt",
         summary=dict(bundle.get("summary", {})),
     )
-    output_files = [
-        paths.gym_config,
-        paths.agent_config,
-        paths.task_prompt,
-        paths.basic_background,
-        paths.atom_actions,
-    ]
-    existing = [path for path in output_files if path.exists()]
-    if existing and not overwrite:
-        existing_text = ", ".join(path.as_posix() for path in existing)
-        raise FileExistsError(
-            f"Generated file(s) already exist: {existing_text}. "
-            "Pass overwrite=True or --overwrite to replace them."
-        )
+    _raise_if_generated_files_exist(output_dir, overwrite)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(paths.gym_config, bundle["gym_config"])
@@ -3224,6 +3320,25 @@ def _write_config_bundle(
     _write_text(paths.basic_background, bundle["basic_background"])
     _write_text(paths.atom_actions, bundle["atom_actions"])
     return paths
+
+
+def _raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
+    if overwrite:
+        return
+    output_files = [
+        output_dir / "fast_gym_config.json",
+        output_dir / "agent_config.json",
+        output_dir / "task_prompt.txt",
+        output_dir / "basic_background.txt",
+        output_dir / "atom_actions.txt",
+    ]
+    existing = [path for path in output_files if path.exists()]
+    if existing:
+        existing_text = ", ".join(path.as_posix() for path in existing)
+        raise FileExistsError(
+            f"Generated file(s) already exist: {existing_text}. "
+            "Pass overwrite=True or --overwrite to replace them."
+        )
 
 
 def _write_json(path: Path, data: Mapping[str, Any]) -> None:
