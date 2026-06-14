@@ -14,6 +14,30 @@ Scaffold a new task environment following EmbodiChain's conventions and patterns
 
 ## Steps
 
+### 0. Scaffold with CLI (preferred)
+
+```bash
+# In-repo expert demonstration task
+embodichain-new-task \
+  --target inrepo \
+  --workflow demo \
+  --category tableware \
+  --name pick_place \
+  --gym-id PickPlace-v1
+
+# In-repo RL task
+embodichain-new-task --target inrepo --workflow rl --name reach_cube --gym-id ReachCubeRL
+
+# External extension (see https://github.com/DexForce/embodichain_task_template)
+embodichain-new-task --target extension --workflow demo --name my_task \
+  --package-name my_tasks --output-dir ./my_tasks
+
+# Interactive prompts
+embodichain-new-task --interactive
+```
+
+Then customize generated files (scene JSON, `create_demo_action_list`, RL hooks).
+
 ### 1. Determine Task Category
 
 Ask the user:

@@ -122,7 +122,14 @@ def main():
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
         packages=find_packages(exclude=["docs"]),
         data_files=data_files,
-        entry_points={},
+        entry_points={
+            "console_scripts": [
+                "embodichain-new-task=embodichain.toolkits.scaffold.cli:main",
+            ],
+        },
+        package_data={
+            "embodichain.toolkits.scaffold": ["templates/**/*.j2"],
+        },
         cmdclass=cmdclass,
         include_package_data=True,
     )

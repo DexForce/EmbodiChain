@@ -1,0 +1,40 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import torch
+from typing import Sequence
+
+from embodichain.lab.sim.types import EnvAction
+from embodichain.lab.gym.utils.registration import register_env
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+
+
+@register_env("{{ gym_id }}", max_episode_steps={{ max_episode_steps }})
+class {{ task_class }}(EmbodiedEnv):
+    """{{ description }}"""
+
+    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+        super().__init__(cfg, **kwargs)
+
+    def create_demo_action_list(self, *args, **kwargs) -> Sequence[EnvAction] | None:
+        """Generate a demonstration action sequence for data collection."""
+        demo_actions: list[EnvAction] = []
+        for _ in range(50):
+            action = self.action_space.sample() * 0.05
+            demo_actions.append(torch.as_tensor(action, device=self.device))
+        return demo_actions
