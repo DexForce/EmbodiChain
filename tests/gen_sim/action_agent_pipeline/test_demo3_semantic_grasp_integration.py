@@ -35,8 +35,18 @@ pytestmark = pytest.mark.skipif(
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_DEMO3_CONFIG_DIR = (
+    _REPO_ROOT / "gym_project/action_agent_pipeline/configs/demo3_text"
+)
 _DEMO3_CONFIG_DIR = (
-    _REPO_ROOT / "embodichain/gen_sim/action_agent_pipeline/configs/demo3_text"
+    Path(
+        os.environ.get(
+            "RUN_DEXSIM_GRASP_CONFIG_DIR",
+            str(_DEFAULT_DEMO3_CONFIG_DIR),
+        )
+    )
+    .expanduser()
+    .resolve()
 )
 _MIN_LIFT_M = float(os.environ.get("RUN_DEXSIM_GRASP_MIN_LIFT_M", "0.04"))
 _MAX_EEF_DISTANCE_M = float(
