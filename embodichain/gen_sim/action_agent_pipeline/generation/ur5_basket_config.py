@@ -1686,6 +1686,12 @@ def _build_ur5_basket_bundle(
         "light": _make_light_config(),
         "background": [
             _make_background_config(scene_dir, by_uid[roles.table_source_uid]),
+            _make_container_background_config(
+                scene_dir,
+                by_uid[roles.container_source_uid],
+                roles.container_runtime_uid,
+                container_scale,
+            ),
             *[
                 _make_extra_background_config(scene_dir, obj)
                 for obj in extra_background_objects
@@ -1705,12 +1711,6 @@ def _build_ur5_basket_bundle(
                 roles.left_target_runtime_uid,
                 object_scale,
                 replacement_by_source_uid.get(roles.left_target_source_uid),
-            ),
-            _make_container_object_config(
-                scene_dir,
-                by_uid[roles.container_source_uid],
-                roles.container_runtime_uid,
-                container_scale,
             ),
             *[
                 _make_extra_rigid_object_config(scene_dir, obj, _source_body_scale(obj))
@@ -1772,6 +1772,16 @@ def _build_relative_placement_bundle(
     rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_runtime_uid_mapping(rigid_objects)
+    static_reference_source_uids = _static_relative_reference_source_uids(
+        spec,
+        by_uid,
+    )
+    dynamic_rigid_objects = [
+        obj for obj in rigid_objects if obj.source_uid not in static_reference_source_uids
+    ]
+    static_reference_objects = [
+        obj for obj in rigid_objects if obj.source_uid in static_reference_source_uids
+    ]
     object_scale = _target_body_scale_vector(target_body_scale)
     robot_init_z = _estimate_dual_ur5_init_z(
         scene_dir,
@@ -1794,6 +1804,15 @@ def _build_relative_placement_bundle(
         "background": [
             _make_background_config(scene_dir, by_uid[spec.table_source_uid]),
             *[
+                _make_container_background_config(
+                    scene_dir,
+                    obj,
+                    runtime_uids[obj.source_uid],
+                    _relative_object_body_scale(obj, target_scale=object_scale),
+                )
+                for obj in static_reference_objects
+            ],
+            *[
                 _make_extra_background_config(scene_dir, obj, object_scale)
                 for obj in background_objects
                 if obj.source_uid != spec.table_source_uid
@@ -1813,7 +1832,7 @@ def _build_relative_placement_bundle(
                     spec,
                 ),
             )
-            for obj in rigid_objects
+            for obj in dynamic_rigid_objects
         ],
     }
     return {
@@ -1837,6 +1856,19 @@ def _target_body_scale_vector(
 
 def _source_body_scale(obj: _SceneObject) -> list[float]:
     return _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0]))
+
+
+def _static_relative_reference_source_uids(
+    spec: _RelativePlacementSpec,
+    by_uid: Mapping[str, _SceneObject],
+) -> set[str]:
+    moved_source_uids = {placement.moved_source_uid for placement in spec.placements}
+    return {
+        placement.reference_source_uid
+        for placement in spec.placements
+        if placement.reference_source_uid not in moved_source_uids
+        and _is_container_like(by_uid[placement.reference_source_uid])
+    }
 
 
 def _relative_object_body_scale(
@@ -2844,6 +2876,23 @@ def _make_container_object_config(
     )
 
 
+def _make_container_background_config(
+    scene_dir: Path,
+    obj: _SceneObject,
+    runtime_uid: str,
+    body_scale: Any,
+) -> dict[str, Any]:
+    config = _make_container_object_config(
+        scene_dir,
+        obj,
+        runtime_uid,
+        body_scale,
+    )
+    config["body_type"] = "kinematic"
+    config["init_rot"] = _corrected_init_rot_for_shape(obj.config, config["shape"])
+    return config
+
+
 def _make_extra_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
@@ -3011,21 +3060,26 @@ def _validate_bundle(bundle: Mapping[str, Any], roles: _BasketTaskRoles) -> None
         raise ValueError("Generated UR5 basket config must use DualUR5.")
 
     rigid_uids = {obj["uid"] for obj in gym_config.get("rigid_object", [])}
-    required = {
+    background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
+    scene_uids = rigid_uids | background_uids
+    required_rigid = {
         roles.left_target_runtime_uid,
         roles.right_target_runtime_uid,
-        roles.container_runtime_uid,
     }
-    if not required.issubset(rigid_uids):
+    if not required_rigid.issubset(rigid_uids):
         raise ValueError(
-            f"Generated rigid objects missing: {sorted(required - rigid_uids)}"
+            f"Generated rigid objects missing: {sorted(required_rigid - rigid_uids)}"
+        )
+    if roles.container_runtime_uid not in scene_uids:
+        raise ValueError(
+            f"Generated scene objects missing container: {roles.container_runtime_uid}"
         )
 
     success = gym_config["env"]["extensions"]["agent_success"]
     for term in success.get("terms", []):
         if (
             term.get("object") not in rigid_uids
-            or term.get("container") not in rigid_uids
+            or term.get("container") not in scene_uids
         ):
             raise ValueError(f"Invalid success term uid reference: {term}")
 
@@ -3040,36 +3094,50 @@ def _validate_relative_bundle(
     if gym_config.get("robot", {}).get("uid") != "DualUR5":
         raise ValueError("Generated relative placement config must use DualUR5.")
 
-    rigid_uids = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
-    if len(rigid_uids) != len(set(rigid_uids)):
-        raise ValueError(f"Duplicate rigid object runtime uid(s): {rigid_uids}")
-    required = {
-        uid
-        for placement in spec.placements
-        for uid in (placement.moved_runtime_uid, placement.reference_runtime_uid)
-    }
-    missing = required - set(rigid_uids)
-    if missing:
+    rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
+    if len(rigid_uid_list) != len(set(rigid_uid_list)):
+        raise ValueError(f"Duplicate rigid object runtime uid(s): {rigid_uid_list}")
+    rigid_uids = set(rigid_uid_list)
+    background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
+    scene_uids = rigid_uids | background_uids
+    moved_required = {placement.moved_runtime_uid for placement in spec.placements}
+    missing_moved = moved_required - rigid_uids
+    if missing_moved:
         raise ValueError(
-            f"Generated relative config missing rigid object(s): {missing}"
+            f"Generated relative config missing moved rigid object(s): {missing_moved}"
+        )
+    reference_required = {
+        placement.reference_runtime_uid for placement in spec.placements
+    }
+    missing_reference = reference_required - scene_uids
+    if missing_reference:
+        raise ValueError(
+            f"Generated relative config missing reference object(s): {missing_reference}"
         )
 
     _validate_success_uids(
         gym_config["env"]["extensions"]["agent_success"],
-        set(rigid_uids),
+        rigid_uids=rigid_uids,
+        scene_uids=scene_uids,
     )
     registry = gym_config["env"]["events"]["register_info_to_env"]["params"]["registry"]
     registered = {entry["entity_cfg"]["uid"] for entry in registry}
+    required = moved_required | reference_required
     if not required.issubset(registered):
         raise ValueError(
             f"Relative config registry missing: {sorted(required - registered)}"
         )
 
 
-def _validate_success_uids(success: Mapping[str, Any], rigid_uids: set[str]) -> None:
+def _validate_success_uids(
+    success: Mapping[str, Any],
+    *,
+    rigid_uids: set[str],
+    scene_uids: set[str],
+) -> None:
     if success.get("op") in {"all", "and", "any", "or"}:
         for term in success.get("terms", []):
-            _validate_success_uids(term, rigid_uids)
+            _validate_success_uids(term, rigid_uids=rigid_uids, scene_uids=scene_uids)
         return
 
     success_type = str(success.get("type", success.get("func", ""))).lower()
@@ -3089,7 +3157,8 @@ def _validate_success_uids(success: Mapping[str, Any], rigid_uids: set[str]) -> 
 
     for key in required_keys:
         uid = success.get(key)
-        if uid not in rigid_uids:
+        valid_uids = rigid_uids if key == "object" else scene_uids
+        if uid not in valid_uids:
             raise ValueError(f"Invalid success uid reference {key}={uid!r}.")
 
 

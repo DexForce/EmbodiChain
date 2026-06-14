@@ -51,11 +51,12 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
-    assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
+    assert set(rigid_objects) == {"left_apple", "right_apple"}
     assert rigid_objects["left_apple"]["body_scale"] == [0.6, 0.6, 0.6]
     assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
-    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert rigid_objects["left_apple"]["shape"]["fpath"].endswith(
         "mesh_assets/apple/apple_2/apple_2.glb"
     )
@@ -129,7 +130,7 @@ def test_generator_applies_dexsim_041_glb_rotation_correction(
     assert background_objects["table"]["init_rot"] == pytest.approx(
         _expected_glb_corrected_rot([0.0, 0.0, 180.0])
     )
-    assert rigid_objects["wicker_basket"]["init_rot"] == pytest.approx(
+    assert background_objects["wicker_basket"]["init_rot"] == pytest.approx(
         _expected_glb_corrected_rot([0.0, 0.0, 180.0])
     )
     assert rigid_objects["right_apple"]["init_rot"] == pytest.approx(
@@ -165,7 +166,11 @@ def test_target_replacements_generate_meshes_and_replace_paths(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
 
-    assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+
+    assert set(rigid_objects) == {"left_apple", "right_apple"}
+    assert "wicker_basket" in background_objects
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert rigid_objects["right_apple"]["shape"]["fpath"].endswith(
         "mesh_assets/new1/orange.glb"
     )
@@ -197,7 +202,11 @@ def test_target_replacements_can_sync_runtime_names(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
 
-    assert set(rigid_objects) == {"left_orange", "right_apple", "wicker_basket"}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+
+    assert set(rigid_objects) == {"left_orange", "right_apple"}
+    assert "wicker_basket" in background_objects
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert rigid_objects["left_orange"]["shape"]["fpath"].endswith(
         "mesh_assets/new1/orange.glb"
     )
@@ -257,9 +266,11 @@ def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
     assert set(rigid_objects) == {
         "left_apple",
         "right_apple",
-        "wicker_basket",
         "vase_0",
     }
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert "wicker_basket" in background_objects
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert rigid_objects["left_apple"]["body_scale"] == [0.8, 0.8, 0.8]
     assert rigid_objects["right_apple"]["body_scale"] == [0.8, 0.8, 0.8]
     assert rigid_objects["vase_0"]["body_scale"] == [1.2, 1.1, 0.9]
@@ -313,11 +324,15 @@ def test_task_description_generates_relative_left_of_config(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(rigid_objects) == {"apple_1", "apple_2"}
     assert rigid_objects["apple_2"]["body_scale"] == [0.5, 0.5, 0.5]
     assert rigid_objects["apple_1"]["body_scale"] == [0.5, 0.5, 0.5]
-    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert background_objects["wicker_basket"]["init_rot"] == pytest.approx(
+        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
+    )
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
@@ -492,6 +507,13 @@ def test_task_description_respects_explicit_left_arm(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"apple_1", "apple_2"}
+    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert background_objects["wicker_basket"]["init_rot"] == pytest.approx(
+        _expected_glb_corrected_rot([0.0, 0.0, 180.0])
+    )
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
     assert paths.summary["active_arm"] == "left_arm"
 
