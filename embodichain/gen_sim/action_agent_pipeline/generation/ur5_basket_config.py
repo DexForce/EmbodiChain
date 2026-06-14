@@ -25,8 +25,10 @@ import json
 import math
 import re
 import struct
-import warnings
 
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
+    MeshFrameNormalizer,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_agent_config,
     make_basket_atom_actions_prompt,
@@ -49,7 +51,6 @@ _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 _TARGET_REPLACEMENT_MANIFEST_FILENAME = ".embodichain_replacement_manifest.json"
-_DEXSIM_041_GLB_LOCAL_X_CORRECTION_DEGREES = -90.0
 
 _CONTAINER_KEYWORDS = (
     "basket",
@@ -125,6 +126,7 @@ _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
+_TABLETOP_OBJECT_CLEARANCE = 0.003
 _GLB_JSON_CHUNK_TYPE = 0x4E4F534A
 _GLB_BINARY_CHUNK_TYPE = 0x004E4942
 _GLTF_COMPONENT_FORMATS = {
@@ -299,12 +301,18 @@ def generate_ur5_basket_config_from_project(
         Paths of generated config files.
     """
 
+    output_dir_path = Path(output_dir).expanduser().resolve()
+    _raise_if_generated_files_exist(output_dir_path, overwrite)
+
     input_path = Path(gym_project).expanduser().resolve()
     gym_config_path = _resolve_gym_config_path(input_path)
     scene_dir = gym_config_path.parent
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
+    mesh_normalizer = MeshFrameNormalizer(
+        output_dir=output_dir_path / "mesh_assets" / "normalized"
+    )
 
     scene_objects = _collect_scene_objects(source_config)
     if task_description:
@@ -328,12 +336,14 @@ def generate_ur5_basket_config_from_project(
             target_body_scale=target_body_scale,
             max_episodes=max_episodes,
             max_episode_steps=max_episode_steps,
+            mesh_normalizer=mesh_normalizer,
         )
         _validate_relative_bundle(bundle, spec)
+        _attach_mesh_normalization_summary(bundle, mesh_normalizer)
         if prewarm_coacd_cache:
             _attach_coacd_cache_summary(bundle)
         return _write_config_bundle(
-            output_dir=Path(output_dir).expanduser().resolve(),
+            output_dir=output_dir_path,
             bundle=bundle,
             overwrite=overwrite,
         )
@@ -369,12 +379,14 @@ def generate_ur5_basket_config_from_project(
         target_replacements=resolved_replacements,
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
+        mesh_normalizer=mesh_normalizer,
     )
     _validate_bundle(bundle, roles)
+    _attach_mesh_normalization_summary(bundle, mesh_normalizer)
     if prewarm_coacd_cache:
         _attach_coacd_cache_summary(bundle)
     return _write_config_bundle(
-        output_dir=Path(output_dir).expanduser().resolve(),
+        output_dir=output_dir_path,
         bundle=bundle,
         overwrite=overwrite,
     )
@@ -1643,6 +1655,7 @@ def _build_ur5_basket_bundle(
     target_replacements: Sequence[_ResolvedTargetReplacement],
     max_episodes: int,
     max_episode_steps: int,
+    mesh_normalizer: MeshFrameNormalizer,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -1666,10 +1679,13 @@ def _build_ur5_basket_bundle(
         for obj in scene_objects
         if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
     ]
-    robot_init_z = _estimate_dual_ur5_init_z(
+    table_config = _make_background_config(
         scene_dir,
         by_uid[roles.table_source_uid],
+        mesh_normalizer,
     )
+    table_top_z = _mesh_config_world_zmax(table_config)
+    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1685,15 +1701,16 @@ def _build_ur5_basket_bundle(
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
-            _make_background_config(scene_dir, by_uid[roles.table_source_uid]),
+            table_config,
             _make_container_background_config(
                 scene_dir,
                 by_uid[roles.container_source_uid],
                 roles.container_runtime_uid,
                 container_scale,
+                mesh_normalizer,
             ),
             *[
-                _make_extra_background_config(scene_dir, obj)
+                _make_extra_background_config(scene_dir, obj, mesh_normalizer)
                 for obj in extra_background_objects
             ],
         ],
@@ -1704,6 +1721,7 @@ def _build_ur5_basket_bundle(
                 roles.right_target_runtime_uid,
                 object_scale,
                 replacement_by_source_uid.get(roles.right_target_source_uid),
+                mesh_normalizer,
             ),
             _make_target_object_config(
                 scene_dir,
@@ -1711,13 +1729,20 @@ def _build_ur5_basket_bundle(
                 roles.left_target_runtime_uid,
                 object_scale,
                 replacement_by_source_uid.get(roles.left_target_source_uid),
+                mesh_normalizer,
             ),
             *[
-                _make_extra_rigid_object_config(scene_dir, obj, _source_body_scale(obj))
+                _make_extra_rigid_object_config(
+                    scene_dir,
+                    obj,
+                    _source_body_scale(obj),
+                    mesh_normalizer,
+                )
                 for obj in extra_rigid_objects
             ],
         ],
     }
+    _apply_tabletop_z_placement(gym_config, table_top_z)
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
