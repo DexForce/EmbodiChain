@@ -122,6 +122,10 @@ _DUAL_UR5_HIGH_TABLETOP_INIT_Z = 0.8
 _DUAL_UR5_ARM_COMPONENT_Z = 0.4
 _DUAL_UR5_TABLETOP_CLEARANCE = 0.25
 _DUAL_UR5_SIDE_AXIS_INDEX = 1
+_DUAL_UR5_ROTATED_INIT_X = 2.0
+_DUAL_UR5_ROTATED_INIT_YAW_DEGREES = -90.0
+_ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
+_ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
@@ -574,7 +578,7 @@ def _pick_left_right_targets(
                 key=lambda obj: abs(_side_axis_value(obj)),
                 reverse=True,
             )[:2]
-    left, right = sorted(picked, key=_side_axis_value)
+    left, right = sorted(picked, key=_side_axis_value, reverse=True)
     return left, right
 
 
@@ -595,7 +599,7 @@ def _position_side_axis_value(position: list[float]) -> float:
 
 
 def _arm_side_for_position(position: list[float]) -> str:
-    return "left" if _position_side_axis_value(position) < 0.0 else "right"
+    return "left" if _position_side_axis_value(position) >= 0.0 else "right"
 
 
 def _target_noun(left_target: _SceneObject, right_target: _SceneObject) -> str:
@@ -1051,8 +1055,8 @@ def _call_role_llm(
         "Return only one JSON object with keys: container_object, "
         "left_target_object, right_target_object, target_noun, "
         "container_runtime_uid. Use only source_uid values from the scene. The "
-        "left target starts on the negative-y side, and the right target starts "
-        "on the positive-y side.\n\n"
+        "rotated robot-view left target starts on the positive-y side, and the "
+        "rotated robot-view right target starts on the negative-y side.\n\n"
         f"Project: {project_name}\n"
         f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}\n"
         f"Default roles:\n{json.dumps(default_roles, ensure_ascii=False, indent=2)}"
@@ -1184,9 +1188,10 @@ def _call_relative_task_llm(
         "left arm, or left UR5; use arm='right' for explicit right-arm "
         "instructions such as 右臂, 右机械臂, right arm, or right UR5; use "
         "arm='auto' when the task does not specify an arm.\n"
-        "- For Chinese/English left/right/front/back, use the relation enums. "
-        "front_of means negative world-x; behind means positive world-x; "
-        "left_of means negative world-y; right_of means positive world-y.\n"
+        "- For Chinese/English left/right/front/back, use the relation enums "
+        "from the rotated robot-view perspective. front_of means positive "
+        "world-x; behind means negative world-x; left_of means positive "
+        "world-y; right_of means negative world-y.\n"
         "- If the task says to release an object above a basket/container so it "
         "falls into it, use goal_relation='inside'.\n"
         "- If the task says to stack/place one object on another non-container "
@@ -1330,7 +1335,7 @@ def _relative_forced_arm_sides(
         return inferred_sides
 
     side_values = [_position_side_axis_value(position) for position in positions]
-    if side_values[0] <= side_values[1]:
+    if side_values[0] >= side_values[1]:
         return ["left", "right"]
     return ["right", "left"]
 
@@ -1508,14 +1513,11 @@ def _relative_release_offset(relation: str) -> list[float]:
         return [0.0, 0.0, _SIDE_RELEASE_Z_OFFSET]
     if relation == "on":
         return [0.0, 0.0, _ON_RELEASE_Z_OFFSET]
-    if relation == "left_of":
-        return [0.0, -_SIDE_RELATION_DISTANCE, _SIDE_RELEASE_Z_OFFSET]
-    if relation == "right_of":
-        return [0.0, _SIDE_RELATION_DISTANCE, _SIDE_RELEASE_Z_OFFSET]
-    if relation == "front_of":
-        return [-_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
-    if relation == "behind":
-        return [_SIDE_RELATION_DISTANCE, 0.0, _SIDE_RELEASE_Z_OFFSET]
+    if relation in {"left_of", "right_of", "front_of", "behind"}:
+        axis, offset, _ = _side_relation_axes(relation)
+        release_offset = [0.0, 0.0, _SIDE_RELEASE_Z_OFFSET]
+        release_offset[0 if axis == "x" else 1] = offset
+        return release_offset
     raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
 
 
@@ -2514,13 +2516,13 @@ def _make_relative_placement_success_spec(
 
 def _side_relation_axes(relation: str) -> tuple[str, float, str]:
     if relation == "left_of":
-        return "y", -_SIDE_RELATION_DISTANCE, "x"
+        return "y", _ROBOT_VIEW_LEFT_WORLD_Y_SIGN * _SIDE_RELATION_DISTANCE, "x"
     if relation == "right_of":
-        return "y", _SIDE_RELATION_DISTANCE, "x"
+        return "y", -_ROBOT_VIEW_LEFT_WORLD_Y_SIGN * _SIDE_RELATION_DISTANCE, "x"
     if relation == "front_of":
-        return "x", -_SIDE_RELATION_DISTANCE, "y"
+        return "x", _ROBOT_VIEW_FRONT_WORLD_X_SIGN * _SIDE_RELATION_DISTANCE, "y"
     if relation == "behind":
-        return "x", _SIDE_RELATION_DISTANCE, "y"
+        return "x", -_ROBOT_VIEW_FRONT_WORLD_X_SIGN * _SIDE_RELATION_DISTANCE, "y"
     raise ValueError(f"Unsupported side relation: {relation!r}.")
 
 
@@ -2771,8 +2773,8 @@ def _make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
                 },
             ],
         },
-        "init_pos": [-2.0, 0.0, float(robot_init_z)],
-        "init_rot": [0.0, 0.0, 90.0],
+        "init_pos": [_DUAL_UR5_ROTATED_INIT_X, 0.0, float(robot_init_z)],
+        "init_rot": [0.0, 0.0, _DUAL_UR5_ROTATED_INIT_YAW_DEGREES],
         "init_qpos": [
             0,
             0,

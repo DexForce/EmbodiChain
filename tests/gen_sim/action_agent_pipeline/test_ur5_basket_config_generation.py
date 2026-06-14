@@ -28,6 +28,9 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.generation import (
     ur5_basket_config as ur5_basket_config_generation,
 )
+from embodichain.gen_sim.action_agent_pipeline.cli import (
+    run_agent_pipeline as run_agent_pipeline_cli,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
     MESH_FRAME_NORMALIZATION_POLICY_VERSION,
     MeshFrameNormalizer,
@@ -69,8 +72,8 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["wicker_basket"]["shape"]["fpath"])
-    assert gym_config["robot"]["init_pos"] == [-2.0, 0.0, 0.5]
-    assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
+    assert gym_config["robot"]["init_pos"] == [2.0, 0.0, 0.5]
+    assert gym_config["robot"]["init_rot"] == [0.0, 0.0, -90.0]
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
     assert {term["object"] for term in success_terms} == {"left_apple", "right_apple"}
@@ -87,16 +90,16 @@ def test_ur5_basket_generator_uses_parallel_handoff(
 
     assert "Generate exactly 10 nominal edges" in normalized_task_prompt
     assert "Generate exactly 11 nominal edges" not in normalized_task_prompt
-    assert "negative-y side" in basic_background
     assert "positive-y side" in basic_background
+    assert "negative-y side" in basic_background
     assert "negative-x side" not in basic_background
     assert "positive-x side" not in basic_background
-    assert '"offset":[0.0,-0.04,0.22]' in task_prompt
     assert '"offset":[0.0,0.04,0.22]' in task_prompt
+    assert '"offset":[0.0,-0.04,0.22]' in task_prompt
     assert '"offset":[-0.04,0.0,0.22]' not in task_prompt
     assert '"offset":[0.04,0.0,0.22]' not in task_prompt
-    assert '"offset":[0.0,-0.04,0.22]' in atom_actions
     assert '"offset":[0.0,0.04,0.22]' in atom_actions
+    assert '"offset":[0.0,-0.04,0.22]' in atom_actions
     assert "parallel handoff" in task_prompt
     assert "parallel handoff" in basic_background
     assert "parallel handoff" in atom_actions
@@ -136,8 +139,8 @@ def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
 
     assert background_objects["table"]["init_rot"] == [0.0, 0.0, 180.0]
     assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
-    assert rigid_objects["right_apple"]["init_rot"] == [0.0, 0.0, 140.0]
-    assert rigid_objects["left_apple"]["init_rot"] == [0.0, 0.0, 160.0]
+    assert rigid_objects["left_apple"]["init_rot"] == [0.0, 0.0, 140.0]
+    assert rigid_objects["right_apple"]["init_rot"] == [0.0, 0.0, 160.0]
     for obj_config in [
         background_objects["table"],
         background_objects["wicker_basket"],
@@ -329,24 +332,50 @@ def test_target_replacements_can_sync_runtime_names(
 
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
-    assert set(rigid_objects) == {"left_orange", "right_apple"}
+    assert set(rigid_objects) == {"left_apple", "right_orange"}
     assert "wicker_basket" in background_objects
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    _assert_normalized_obj_path(rigid_objects["left_orange"]["shape"]["fpath"])
-    _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
+    _assert_normalized_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
+    _assert_normalized_obj_path(rigid_objects["right_orange"]["shape"]["fpath"])
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
     assert {term["object"] for term in success_terms} == {
-        "left_orange",
-        "right_apple",
+        "left_apple",
+        "right_orange",
     }
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     basic_background = paths.basic_background.read_text(encoding="utf-8")
-    assert "the left orange and right apple into the wicker_basket" in task_prompt
-    assert "left_arm must only manipulate `left_orange`" in task_prompt
-    assert "- left_orange: the orange mesh initially" in basic_background
-    assert "- right_apple: the apple mesh initially" in basic_background
+    assert "the left apple and right orange into the wicker_basket" in task_prompt
+    assert "left_arm must only manipulate `left_apple`" in task_prompt
+    assert "- left_apple: the apple mesh initially" in basic_background
+    assert "- right_orange: the orange mesh initially" in basic_background
+
+
+def test_pipeline_auto_replacement_uses_rotated_robot_view_order() -> None:
+    gym_config = {
+        "rigid_object": [
+            {"uid": "bread_1", "init_pos": [0.0, 0.2, 0.76]},
+            {"uid": "bread_2", "init_pos": [0.0, -0.1, 0.76]},
+        ],
+    }
+
+    assert (
+        run_agent_pipeline_cli._auto_replacement_source_uid(
+            gym_config,
+            replacement_number=1,
+            option_name="--target_replacement1",
+        )
+        == "bread_1"
+    )
+    assert (
+        run_agent_pipeline_cli._auto_replacement_source_uid(
+            gym_config,
+            replacement_number=2,
+            option_name="--target_replacement2",
+        )
+        == "bread_2"
+    )
 
 
 def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
@@ -459,7 +488,7 @@ def test_task_description_generates_relative_left_of_config(
         for term in success["terms"]
         if term["type"] == "object_axis_offset_near"
     }
-    assert ("y", -0.16) in axis_terms
+    assert ("y", 0.16) in axis_terms
     assert ("x", 0.0) in axis_terms
 
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
@@ -481,7 +510,7 @@ def test_task_description_generates_relative_left_of_config(
         "reference_object": "wicker_basket",
         "relation": "left_of",
         "active_arm": "left_arm",
-        "release_offset": [0.0, -0.16, 0.12],
+        "release_offset": [0.0, 0.16, 0.12],
     }
 
 
@@ -537,13 +566,13 @@ def test_task_description_generates_relative_front_of_config(
         for term in success["terms"]
         if term["type"] == "object_axis_offset_near"
     }
-    assert ("x", -0.16) in axis_terms
+    assert ("x", 0.16) in axis_terms
     assert ("y", 0.0) in axis_terms
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert '"offset":[-0.16,0.0,0.22]' in task_prompt
-    assert '"offset":[-0.16,0.0,0.22]' in atom_actions
+    assert '"offset":[0.16,0.0,0.22]' in task_prompt
+    assert '"offset":[0.16,0.0,0.22]' in atom_actions
 
     assert _stable_summary(paths.summary) == {
         "mode": "relative_placement",
@@ -551,7 +580,7 @@ def test_task_description_generates_relative_front_of_config(
         "reference_object": "apple_2",
         "relation": "front_of",
         "active_arm": "right_arm",
-        "release_offset": [-0.16, 0.0, 0.12],
+        "release_offset": [0.16, 0.0, 0.12],
     }
 
 
@@ -819,8 +848,8 @@ def test_task_description_generates_dual_arm_relative_config(
         for term in placement_success["terms"]
         if term["type"] == "object_axis_offset_near"
     }
-    assert ("apple_2", "y", -0.16) in axis_terms
-    assert ("apple_1", "y", 0.16) in axis_terms
+    assert ("apple_2", "y", 0.16) in axis_terms
+    assert ("apple_1", "y", -0.16) in axis_terms
 
     attr_names = {
         attr["name"]
@@ -836,14 +865,14 @@ def test_task_description_generates_dual_arm_relative_config(
                 "reference_object": "wicker_basket",
                 "relation": "left_of",
                 "active_arm": "left_arm",
-                "release_offset": [0.0, -0.16, 0.12],
+                "release_offset": [0.0, 0.16, 0.12],
             },
             {
                 "moved_object": "apple_1",
                 "reference_object": "wicker_basket",
                 "relation": "right_of",
                 "active_arm": "right_arm",
-                "release_offset": [0.0, 0.16, 0.12],
+                "release_offset": [0.0, -0.16, 0.12],
             },
         ],
     }
@@ -968,7 +997,7 @@ def test_task_description_dual_auto_assigns_complementary_arms(
     )
 
     active_arms = [placement["active_arm"] for placement in paths.summary["placements"]]
-    assert active_arms == ["left_arm", "right_arm"]
+    assert active_arms == ["right_arm", "left_arm"]
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
