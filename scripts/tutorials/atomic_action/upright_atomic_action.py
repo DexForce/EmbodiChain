@@ -64,6 +64,9 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
 
+GRIPPER_MAX_OPEN_WIDTH = 0.088
+GRIPPER_FINGER_LENGTH = 0.078
+
 
 def parse_arguments():
     """
@@ -95,12 +98,6 @@ def parse_arguments():
         type=int,
         default=10000,
         help="Number of surface samples for antipodal grasp generation.",
-    )
-    parser.add_argument(
-        "--n_top_grasps",
-        type=int,
-        default=30,
-        help="Number of top-ranked grasp poses to keep.",
     )
     parser.add_argument(
         "--force_reannotate",
@@ -185,7 +182,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
                 ],
             )
         },
-        init_qpos=[-3.14, -1.57, -1.57, 1.57, -1.57, 0.0, 0.0, 0.0],
+        init_qpos=[0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
         init_pos=position,
     )
     return sim.add_robot(cfg=cfg)
@@ -261,16 +258,50 @@ def build_grasp_generator_cfg(args: argparse.Namespace) -> GraspGeneratorCfg:
         ),
         is_partial_annotate=False,
         is_filter_ground_collision=True,
-        n_top_grasps=args.n_top_grasps,
     )
 
 
 def build_gripper_collision_cfg() -> GripperCollisionCfg:
     return GripperCollisionCfg(
-        max_open_length=0.088,
-        finger_length=0.078,
+        max_open_length=GRIPPER_MAX_OPEN_WIDTH,
+        finger_length=GRIPPER_FINGER_LENGTH,
         point_sample_dense=0.012,
     )
+
+
+def get_hand_open_close_qpos(
+    robot: Robot, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    hand_limits = robot.get_qpos_limits(name="hand")[0].to(
+        device=device, dtype=torch.float32
+    )
+    return hand_limits[:, 0], hand_limits[:, 1]
+
+
+def get_grasp_squeeze_width(object_kind: str) -> float:
+    if object_kind == "bottle":
+        return 0.004
+    return 0.002
+
+
+def get_max_grasp_open_length(object_kind: str) -> float | None:
+    if object_kind == "bottle":
+        return 0.060
+    return None
+
+
+def get_max_grasp_axis_approach_dot(object_kind: str) -> float | None:
+    if object_kind == "bottle":
+        return 0.080
+    return None
+
+
+def get_min_dynamic_hand_close_qpos(
+    object_kind: str, hand_close_qpos: torch.Tensor
+) -> torch.Tensor | None:
+    if object_kind != "bottle":
+        return None
+    return torch.full_like(hand_close_qpos, 0.025)
 
 
 def create_object_semantics(
@@ -307,10 +338,7 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     _, qpos_grasp = robot.compute_ik(
         pose=grasp_xpos, joint_seed=qpos_approach, name="arm"
     )
-    hand_open_qpos = torch.tensor([0.00, 0.00], dtype=torch.float32, device=sim.device)
-    hand_close_qpos = torch.tensor(
-        [0.025, 0.025], dtype=torch.float32, device=sim.device
-    )
+    hand_open_qpos, hand_close_qpos = get_hand_open_close_qpos(robot, sim.device)
 
     arm_trajectory = torch.cat(
         [
@@ -413,8 +441,7 @@ def run_upright_demo(
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
-    hand_open = torch.tensor([0.00, 0.00], dtype=torch.float32, device=sim.device)
-    hand_close = torch.tensor([0.025, 0.025], dtype=torch.float32, device=sim.device)
+    hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
     upright_action = UprightAction(
         motion_generator=motion_gen,
         cfg=UprightActionCfg(
@@ -428,6 +455,26 @@ def run_upright_demo(
             pre_grasp_distance=0.15,
             lift_height=0.15,
             upright_axis_sign=-1.0 if args.object_kind == "bottle" else 1.0,
+            place_press_depth=0.002,
+            place_press_steps=4,
+            upright_hold_steps=3,
+            place_hold_steps=8,
+            release_interp_steps=12,
+            release_retreat_distance=0.08,
+            release_retreat_lift=0.01,
+            final_approach_steps=12,
+            final_approach_preclose_width_margin=0.010,
+            grasp_hold_steps=4,
+            use_grasp_width_qpos=True,
+            gripper_max_open_width=GRIPPER_MAX_OPEN_WIDTH,
+            max_grasp_open_length=get_max_grasp_open_length(args.object_kind),
+            max_grasp_axis_approach_dot=get_max_grasp_axis_approach_dot(
+                args.object_kind
+            ),
+            grasp_squeeze_width=get_grasp_squeeze_width(args.object_kind),
+            min_dynamic_hand_close_qpos=get_min_dynamic_hand_close_qpos(
+                args.object_kind, hand_close
+            ),
         ),
     )
 

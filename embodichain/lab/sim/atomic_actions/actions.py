@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import torch
-from typing import Optional, Union, TYPE_CHECKING, Any
+from typing import Optional, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
@@ -231,11 +231,41 @@ class MoveAction(AtomicAction):
         n_waypoints: int,
     ) -> torch.Tensor:
         """Interpolate hand joint positions between two gripper states."""
-        weights = torch.linspace(0, 1, steps=n_waypoints, device=self.device)
-        hand_qpos_list = [
-            torch.lerp(start_hand_qpos, end_hand_qpos, weight) for weight in weights
-        ]
-        return torch.stack(hand_qpos_list, dim=0)
+        start_hand_qpos = start_hand_qpos.to(self.device)
+        end_hand_qpos = end_hand_qpos.to(self.device)
+
+        if start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 2:
+            start_hand_qpos = start_hand_qpos.unsqueeze(0).repeat(
+                end_hand_qpos.shape[0], 1
+            )
+        if start_hand_qpos.dim() == 2 and end_hand_qpos.dim() == 1:
+            end_hand_qpos = end_hand_qpos.unsqueeze(0).repeat(
+                start_hand_qpos.shape[0], 1
+            )
+
+        weights = torch.linspace(
+            0,
+            1,
+            steps=n_waypoints,
+            device=self.device,
+            dtype=start_hand_qpos.dtype,
+        )
+        if start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 1:
+            return torch.lerp(
+                start_hand_qpos.unsqueeze(0),
+                end_hand_qpos.unsqueeze(0),
+                weights[:, None],
+            )
+        if start_hand_qpos.dim() == 2 and end_hand_qpos.dim() == 2:
+            return torch.lerp(
+                start_hand_qpos.unsqueeze(1),
+                end_hand_qpos.unsqueeze(1),
+                weights[None, :, None],
+            )
+        logger.log_error(
+            "hand qpos must have shape (hand_dof,) or (n_envs, hand_dof)",
+            ValueError,
+        )
 
     def execute(
         self,
@@ -325,6 +355,26 @@ class PickUpAction(MoveAction):
         self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
         self.arm_dof = len(self.arm_joint_ids)
         self.dof = len(self.joint_ids)
+
+    def _expand_hand_qpos(self, hand_qpos: torch.Tensor) -> torch.Tensor:
+        """Resolve hand qpos to batched shape ``(n_envs, hand_dof)``."""
+        hand_dof = len(self.hand_joint_ids)
+        hand_qpos = hand_qpos.to(device=self.device, dtype=torch.float32)
+        if hand_qpos.shape == (hand_dof,):
+            return hand_qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if hand_qpos.shape == (self.n_envs, hand_dof):
+            return hand_qpos
+        logger.log_error(
+            f"hand_qpos must have shape ({hand_dof},) or "
+            f"({self.n_envs}, {hand_dof}), but got {hand_qpos.shape}",
+            ValueError,
+        )
+
+    def _repeat_hand_qpos(
+        self, hand_qpos: torch.Tensor, n_waypoints: int
+    ) -> torch.Tensor:
+        """Repeat hand qpos across trajectory waypoints."""
+        return self._expand_hand_qpos(hand_qpos).unsqueeze(1).repeat(1, n_waypoints, 1)
 
     def execute(
         self,
@@ -532,6 +582,54 @@ class UprightActionCfg(PickUpActionCfg):
     local +Z points toward the physical bottom and local -Z should face upward.
     """
 
+    place_press_depth: float = 0.002
+    """Additional downward displacement (m) after pre-place to make support contact."""
+
+    place_press_steps: int = 4
+    """Number of closed-hand waypoints used for the downward place press."""
+
+    upright_hold_steps: int = 0
+    """Number of closed-hand waypoints to hold after upright placement."""
+
+    place_hold_steps: int = 8
+    """Number of closed-hand waypoints to hold the object after pressing it down."""
+
+    release_interp_steps: int = 12
+    """Number of waypoints for the slow hand release phase."""
+
+    release_retreat_distance: float = 0.08
+    """Horizontal distance (m) to retreat after releasing the upright object."""
+
+    release_retreat_lift: float = 0.01
+    """Small upward offset (m) added during release retreat."""
+
+    use_grasp_width_qpos: bool = False
+    """Whether to map selected grasp open length into a dynamic hand close qpos."""
+
+    gripper_max_open_width: float = 0.088
+    """Maximum total gripper opening width (m) used for width-to-qpos mapping."""
+
+    grasp_squeeze_width: float = 0.003
+    """Width margin (m) subtracted from the selected grasp width before closing."""
+
+    final_approach_steps: int = 12
+    """Number of waypoints for the slow final approach from pre-grasp to grasp."""
+
+    final_approach_preclose_width_margin: float = 0.010
+    """Extra opening width (m) kept around the selected grasp width during final approach."""
+
+    grasp_hold_steps: int = 4
+    """Number of closed-hand waypoints to hold the grasp before lifting."""
+
+    min_dynamic_hand_close_qpos: torch.Tensor | None = None
+    """Optional minimum hand qpos used when mapping grasp width into close qpos."""
+
+    max_grasp_open_length: float | None = None
+    """Optional maximum selected grasp opening length (m) for upright placement."""
+
+    max_grasp_axis_approach_dot: float | None = None
+    """Optional maximum absolute dot between grasp X axis and approach direction."""
+
 
 class UprightAction(PickUpAction):
     def __init__(
@@ -548,6 +646,95 @@ class UprightAction(PickUpAction):
         super().__init__(
             motion_generator, cfg=cfg if cfg is not None else UprightActionCfg()
         )
+
+    def _resolve_grasp_pose(
+        self, semantics: ObjectSemantics
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        is_success, grasp_xpos, open_length = super()._resolve_grasp_pose(semantics)
+        max_open_length = self.cfg.max_grasp_open_length
+        max_axis_dot = self.cfg.max_grasp_axis_approach_dot
+        if max_open_length is None and max_axis_dot is None:
+            return is_success, grasp_xpos, open_length
+
+        approach_direction = self.approach_direction.to(
+            device=self.device, dtype=torch.float32
+        )
+        approach_direction = approach_direction / approach_direction.norm().clamp(
+            min=1e-6
+        )
+        grasp_axis_dot = torch.abs(
+            (grasp_xpos[:, :3, 0] * approach_direction).sum(dim=1)
+        )
+        violates_width = (
+            torch.zeros_like(open_length, dtype=torch.bool)
+            if max_open_length is None
+            else open_length > max_open_length
+        )
+        violates_axis = (
+            torch.zeros_like(grasp_axis_dot, dtype=torch.bool)
+            if max_axis_dot is None
+            else grasp_axis_dot > max_axis_dot
+        )
+        needs_filter = violates_width | violates_axis
+
+        if not bool(torch.any(needs_filter).item()):
+            return is_success, grasp_xpos, open_length
+
+        generator = semantics.affordance.generator
+        hit_point_pairs = (
+            None if generator is None else getattr(generator, "_hit_point_pairs", None)
+        )
+        if hit_point_pairs is None:
+            return is_success, grasp_xpos, open_length
+
+        pair_lengths = torch.norm(
+            hit_point_pairs[:, 1, :] - hit_point_pairs[:, 0, :], dim=-1
+        )
+        valid_mask = torch.ones(
+            hit_point_pairs.shape[0], dtype=torch.bool, device=hit_point_pairs.device
+        )
+        if max_open_length is not None:
+            valid_mask &= pair_lengths <= max_open_length
+        obj_poses = semantics.entity.get_local_pose(to_matrix=True)
+        pair_axes = torch.nn.functional.normalize(
+            hit_point_pairs[:, 1, :] - hit_point_pairs[:, 0, :], dim=-1
+        )
+        pair_axes_world = torch.matmul(
+            pair_axes.unsqueeze(0), obj_poses[:, :3, :3].transpose(1, 2)
+        )
+        pair_axis_dot = torch.abs(
+            (pair_axes_world * approach_direction.view(1, 1, 3)).sum(dim=-1)
+        )
+        if max_axis_dot is not None:
+            valid_mask &= torch.all(pair_axis_dot <= max_axis_dot, dim=0)
+        valid_count = int(valid_mask.sum().item())
+        if valid_count == 0:
+            logger.log_warning(
+                "No grasp candidates remain after upright grasp filtering."
+            )
+            return is_success, grasp_xpos, open_length
+
+        original_hit_point_pairs = generator._hit_point_pairs
+        try:
+            generator._hit_point_pairs = hit_point_pairs[valid_mask]
+            filtered_success, filtered_grasp_xpos, filtered_open_length = (
+                semantics.affordance.get_best_grasp_poses(
+                    obj_poses=obj_poses, approach_direction=self.approach_direction
+                )
+            )
+        finally:
+            generator._hit_point_pairs = original_hit_point_pairs
+
+        use_filtered = needs_filter & filtered_success
+        has_filtered = bool(torch.any(use_filtered).item())
+        if has_filtered:
+            grasp_xpos = torch.where(
+                use_filtered[:, None, None], filtered_grasp_xpos, grasp_xpos
+            )
+            open_length = torch.where(use_filtered, filtered_open_length, open_length)
+            is_success = torch.where(use_filtered, filtered_success, is_success)
+
+        return is_success, grasp_xpos, open_length
 
     @staticmethod
     def _invert_pose(pose: torch.Tensor) -> torch.Tensor:
@@ -602,6 +789,61 @@ class UprightAction(PickUpAction):
             upright_pose[:, 2, 3] = self.cfg.place_clearance - local_bottom_z
         return upright_pose
 
+    def _compute_hand_qpos_for_width(self, target_width: torch.Tensor) -> torch.Tensor:
+        """Map desired total gripper width to batched hand qpos."""
+        target_width = target_width.to(device=self.device, dtype=torch.float32).view(
+            self.n_envs, 1
+        )
+        target_width = target_width.clamp(min=0.0, max=self.cfg.gripper_max_open_width)
+        closing_distance = 0.5 * (self.cfg.gripper_max_open_width - target_width).clamp(
+            min=0.0
+        )
+        hand_qpos_limits = self.robot.get_qpos_limits(
+            name=self.cfg.hand_control_part
+        ).to(self.device)
+        lower_limits = hand_qpos_limits[:, :, 0]
+        upper_limits = hand_qpos_limits[:, :, 1]
+        hand_open_qpos = self._expand_hand_qpos(self.hand_open_qpos)
+        dynamic_qpos = hand_open_qpos + closing_distance.repeat(
+            1, len(self.hand_joint_ids)
+        )
+        return torch.max(torch.min(dynamic_qpos, upper_limits), lower_limits)
+
+    def _compute_dynamic_hand_close_qpos(
+        self, grasp_open_length: torch.Tensor
+    ) -> torch.Tensor:
+        """Map selected grasp width to batched hand close qpos for parallel grippers."""
+        fallback_qpos = self._expand_hand_qpos(self.hand_close_qpos)
+        if not self.cfg.use_grasp_width_qpos:
+            return fallback_qpos
+
+        grasp_open_length = grasp_open_length.to(
+            device=self.device, dtype=torch.float32
+        ).view(self.n_envs, 1)
+        target_width = (grasp_open_length - self.cfg.grasp_squeeze_width).clamp(min=0.0)
+        dynamic_qpos = self._compute_hand_qpos_for_width(target_width)
+        if self.cfg.min_dynamic_hand_close_qpos is not None:
+            min_close_qpos = self._expand_hand_qpos(
+                self.cfg.min_dynamic_hand_close_qpos
+            )
+            dynamic_qpos = torch.max(dynamic_qpos, min_close_qpos)
+        return dynamic_qpos
+
+    def _compute_final_approach_hand_qpos(
+        self, grasp_open_length: torch.Tensor, hand_close_qpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Pre-close the gripper during final approach without reaching squeeze force."""
+        hand_open_qpos = self._expand_hand_qpos(self.hand_open_qpos)
+        if not self.cfg.use_grasp_width_qpos:
+            return hand_open_qpos
+
+        grasp_open_length = grasp_open_length.to(
+            device=self.device, dtype=torch.float32
+        ).view(self.n_envs, 1)
+        target_width = grasp_open_length + self.cfg.final_approach_preclose_width_margin
+        preclose_qpos = self._compute_hand_qpos_for_width(target_width)
+        return torch.max(torch.min(preclose_qpos, hand_close_qpos), hand_open_qpos)
+
     def execute(
         self,
         target: Union[ObjectSemantics, torch.Tensor],
@@ -612,87 +854,161 @@ class UprightAction(PickUpAction):
         if not isinstance(target, ObjectSemantics):
             return super().execute(target=target, start_qpos=start_qpos, **kwargs)
 
+        is_success, grasp_xpos, grasp_open_length = self._resolve_grasp_pose(target)
         obj_poses = target.entity.get_local_pose(to_matrix=True)
-        is_success, grasp_xpos = self._resolve_grasp_pose(target)
-        if not is_success:
+        if not torch.all(is_success).item():
             logger.log_warning(
                 "Failed to resolve grasp pose, using default approach pose"
             )
             return False, torch.empty(0), self.joint_ids
 
+        world_z = torch.tensor([0, 0, 1], device=self.device, dtype=torch.float32)
+        hand_close_qpos = self._compute_dynamic_hand_close_qpos(grasp_open_length)
+        final_approach_hand_qpos = self._compute_final_approach_hand_qpos(
+            grasp_open_length, hand_close_qpos
+        )
         pre_grasp_xpos = self._apply_offset(
             pose=grasp_xpos,
             offset=-grasp_xpos[:, :3, 2] * self.cfg.pre_grasp_distance,
         )
         lift_xpos = self._apply_offset(
             pose=grasp_xpos,
-            offset=torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
+            offset=world_z * self.cfg.lift_height,
         )
 
         obj_to_grasp = torch.bmm(self._invert_pose(obj_poses), grasp_xpos)
         upright_obj_xpos = self._build_upright_object_pose(target, obj_poses)
         upright_lift_obj_xpos = self._apply_offset(
             pose=upright_obj_xpos,
-            offset=torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
+            offset=world_z * self.cfg.lift_height,
         )
         upright_lift_xpos = torch.bmm(upright_lift_obj_xpos, obj_to_grasp)
         upright_place_xpos = torch.bmm(upright_obj_xpos, obj_to_grasp)
-        retreat_xpos = self._apply_offset(
+        press_down_distance = self.cfg.place_clearance + self.cfg.place_press_depth
+        press_xpos = self._apply_offset(
             pose=upright_place_xpos,
-            offset=torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
+            offset=-world_z * press_down_distance,
+        )
+        retreat_direction = -press_xpos[:, :3, 2]
+        retreat_direction[:, 2] = 0.0
+        retreat_direction_norm = retreat_direction.norm(dim=1, keepdim=True)
+        retreat_direction = torch.where(
+            retreat_direction_norm > 1e-6,
+            retreat_direction / retreat_direction_norm.clamp(min=1e-6),
+            -press_xpos[:, :3, 0],
+        )
+        retreat_direction[:, 2] = 0.0
+        retreat_direction = retreat_direction / retreat_direction.norm(
+            dim=1, keepdim=True
+        ).clamp(min=1e-6)
+        retreat_offset = (
+            retreat_direction * self.cfg.release_retreat_distance
+            + world_z * self.cfg.release_retreat_lift
+        )
+        retreat_xpos = self._apply_offset(
+            pose=press_xpos,
+            offset=retreat_offset,
         )
 
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
         n_close_waypoint = self.cfg.hand_interp_steps
-        n_open_waypoint = self.cfg.hand_interp_steps
-        motion_waypoints = self.cfg.sample_interval - n_close_waypoint - n_open_waypoint
+        n_final_approach_waypoint = max(2, self.cfg.final_approach_steps)
+        n_grasp_hold_waypoint = max(0, self.cfg.grasp_hold_steps)
+        n_press_waypoint = max(2, self.cfg.place_press_steps)
+        n_upright_hold_waypoint = max(0, self.cfg.upright_hold_steps)
+        n_hold_waypoint = max(0, self.cfg.place_hold_steps)
+        n_open_waypoint = max(2, self.cfg.release_interp_steps)
+        motion_waypoints = (
+            self.cfg.sample_interval
+            - n_close_waypoint
+            - n_final_approach_waypoint
+            - n_grasp_hold_waypoint
+            - n_upright_hold_waypoint
+            - n_press_waypoint
+            - n_hold_waypoint
+            - n_open_waypoint
+        )
         if motion_waypoints < 6:
             logger.log_error(
                 "Not enough waypoints for upright action. Please increase "
-                "sample_interval or decrease hand_interp_steps.",
+                "sample_interval or decrease hand/press/upright-hold/hold/release "
+                "steps.",
                 ValueError,
             )
-        n_approach_waypoint = max(2, int(np.round(motion_waypoints * 0.35)))
-        n_upright_waypoint = max(2, int(np.round(motion_waypoints * 0.50)))
+        n_pre_approach_waypoint = max(2, int(np.round(motion_waypoints * 0.25)))
+        n_upright_waypoint = max(2, int(np.round(motion_waypoints * 0.60)))
         n_retreat_waypoint = (
             self.cfg.sample_interval
             - n_close_waypoint
+            - n_final_approach_waypoint
+            - n_grasp_hold_waypoint
+            - n_upright_hold_waypoint
+            - n_press_waypoint
+            - n_hold_waypoint
             - n_open_waypoint
-            - n_approach_waypoint
+            - n_pre_approach_waypoint
             - n_upright_waypoint
         )
         if n_retreat_waypoint < 2:
+            retreat_deficit = 2 - n_retreat_waypoint
             n_retreat_waypoint = 2
-            n_upright_waypoint = max(2, n_upright_waypoint - 1)
-
+            n_upright_waypoint = max(2, n_upright_waypoint - retreat_deficit)
         target_states_list = [
             [
                 PlanState(xpos=pre_grasp_xpos[i], move_type=MoveType.EEF_MOVE),
-                PlanState(xpos=grasp_xpos[i], move_type=MoveType.EEF_MOVE),
             ]
             for i in range(self.n_envs)
         ]
         is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
             start_qpos,
-            n_approach_waypoint,
+            n_pre_approach_waypoint,
             self.arm_dof,
         )
         if not is_success:
             logger.log_warning("Failed to plan approach trajectory.")
             return False, torch.empty(0), self.joint_ids
         approach_trajectory = torch.zeros(
-            size=(self.n_envs, n_approach_waypoint, self.dof),
+            size=(self.n_envs, n_pre_approach_waypoint, self.dof),
             dtype=torch.float32,
             device=self.device,
         )
         approach_trajectory[:, :, : self.arm_dof] = plan_traj
-        approach_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
+        approach_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+            self.hand_open_qpos, n_pre_approach_waypoint
+        )
 
-        grasp_qpos = approach_trajectory[:, -1, : self.arm_dof]
-        hand_close_path = self._interpolate_hand_qpos(
+        pre_grasp_qpos = approach_trajectory[:, -1, : self.arm_dof]
+        target_states_list = [
+            [PlanState(xpos=grasp_xpos[i], move_type=MoveType.EEF_MOVE)]
+            for i in range(self.n_envs)
+        ]
+        is_success, plan_traj = self._plan_arm_trajectory(
+            target_states_list,
+            pre_grasp_qpos,
+            n_final_approach_waypoint,
+            self.arm_dof,
+        )
+        if not is_success:
+            logger.log_warning("Failed to plan final approach trajectory.")
+            return False, torch.empty(0), self.joint_ids
+        final_approach_trajectory = torch.zeros(
+            size=(self.n_envs, n_final_approach_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        final_approach_trajectory[:, :, : self.arm_dof] = plan_traj
+        final_approach_hand_path = self._interpolate_hand_qpos(
             self.hand_open_qpos,
-            self.hand_close_qpos,
+            final_approach_hand_qpos,
+            n_final_approach_waypoint,
+        )
+        final_approach_trajectory[:, :, self.arm_dof :] = final_approach_hand_path
+
+        grasp_qpos = final_approach_trajectory[:, -1, : self.arm_dof]
+        hand_close_path = self._interpolate_hand_qpos(
+            final_approach_hand_qpos,
+            hand_close_qpos,
             n_close_waypoint,
         )
         close_trajectory = torch.zeros(
@@ -700,8 +1016,20 @@ class UprightAction(PickUpAction):
             dtype=torch.float32,
             device=self.device,
         )
-        close_trajectory[:, :, : self.arm_dof] = grasp_qpos
+        close_trajectory[:, :, : self.arm_dof] = grasp_qpos.unsqueeze(1)
         close_trajectory[:, :, self.arm_dof :] = hand_close_path
+
+        closed_grasp_qpos = close_trajectory[:, -1, : self.arm_dof]
+        grasp_hold_trajectory = torch.zeros(
+            size=(self.n_envs, n_grasp_hold_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if n_grasp_hold_waypoint > 0:
+            grasp_hold_trajectory[:, :, : self.arm_dof] = closed_grasp_qpos.unsqueeze(1)
+            grasp_hold_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+                hand_close_qpos, n_grasp_hold_waypoint
+            )
 
         target_states_list = [
             [
@@ -713,7 +1041,7 @@ class UprightAction(PickUpAction):
         ]
         is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
-            grasp_qpos,
+            closed_grasp_qpos,
             n_upright_waypoint,
             self.arm_dof,
         )
@@ -726,11 +1054,59 @@ class UprightAction(PickUpAction):
             device=self.device,
         )
         upright_trajectory[:, :, : self.arm_dof] = plan_traj
-        upright_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
+        upright_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+            hand_close_qpos, n_upright_waypoint
+        )
 
         place_qpos = upright_trajectory[:, -1, : self.arm_dof]
+        upright_hold_trajectory = torch.zeros(
+            size=(self.n_envs, n_upright_hold_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if n_upright_hold_waypoint > 0:
+            upright_hold_trajectory[:, :, : self.arm_dof] = place_qpos.unsqueeze(1)
+            upright_hold_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+                hand_close_qpos, n_upright_hold_waypoint
+            )
+
+        target_states_list = [
+            [PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE)]
+            for i in range(self.n_envs)
+        ]
+        is_success, plan_traj = self._plan_arm_trajectory(
+            target_states_list,
+            place_qpos,
+            n_press_waypoint,
+            self.arm_dof,
+        )
+        if not is_success:
+            logger.log_warning("Failed to plan place press trajectory.")
+            return False, torch.empty(0), self.joint_ids
+        press_trajectory = torch.zeros(
+            size=(self.n_envs, n_press_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        press_trajectory[:, :, : self.arm_dof] = plan_traj
+        press_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+            hand_close_qpos, n_press_waypoint
+        )
+
+        press_qpos = press_trajectory[:, -1, : self.arm_dof]
+        hold_trajectory = torch.zeros(
+            size=(self.n_envs, n_hold_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if n_hold_waypoint > 0:
+            hold_trajectory[:, :, : self.arm_dof] = press_qpos.unsqueeze(1)
+            hold_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+                hand_close_qpos, n_hold_waypoint
+            )
+
         hand_open_path = self._interpolate_hand_qpos(
-            self.hand_close_qpos,
+            hand_close_qpos,
             self.hand_open_qpos,
             n_open_waypoint,
         )
@@ -739,7 +1115,7 @@ class UprightAction(PickUpAction):
             dtype=torch.float32,
             device=self.device,
         )
-        open_trajectory[:, :, : self.arm_dof] = place_qpos
+        open_trajectory[:, :, : self.arm_dof] = press_qpos.unsqueeze(1)
         open_trajectory[:, :, self.arm_dof :] = hand_open_path
 
         target_states_list = [
@@ -748,7 +1124,7 @@ class UprightAction(PickUpAction):
         ]
         is_success, plan_traj = self._plan_arm_trajectory(
             target_states_list,
-            place_qpos,
+            press_qpos,
             n_retreat_waypoint,
             self.arm_dof,
         )
@@ -761,13 +1137,20 @@ class UprightAction(PickUpAction):
             device=self.device,
         )
         retreat_trajectory[:, :, : self.arm_dof] = plan_traj
-        retreat_trajectory[:, :, self.arm_dof :] = self.hand_open_qpos
+        retreat_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+            self.hand_open_qpos, n_retreat_waypoint
+        )
 
         trajectory = torch.cat(
             [
                 approach_trajectory,
+                final_approach_trajectory,
                 close_trajectory,
+                grasp_hold_trajectory,
                 upright_trajectory,
+                upright_hold_trajectory,
+                press_trajectory,
+                hold_trajectory,
                 open_trajectory,
                 retreat_trajectory,
             ],
