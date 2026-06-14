@@ -1,0 +1,12 @@
+name: Activate conda py311 environment
+description: Activate py311 and expose its executables on PATH.
+runs:
+  using: composite
+  steps:
+    - name: Activate conda py311 environment
+      shell: bash -l {0}
+      run: |
+        source activate py311
+        echo "$CONDA_PREFIX/bin" >> "$GITHUB_PATH"
+        python --version
+        which python pip
