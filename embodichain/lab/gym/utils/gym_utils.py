@@ -20,7 +20,7 @@ import dexsim
 import argparse
 import gymnasium
 
-from typing import Dict, Any, List, Tuple, Union, Sequence
+from typing import Dict, Any, List, Tuple, Union, Sequence, Optional
 from gymnasium import spaces
 from copy import deepcopy
 from tensordict import TensorDict
@@ -961,12 +961,117 @@ def init_rollout_buffer_from_gym_space(
     return rollout_buffer
 
 
+def _init_language_buffer(
+    language_cfg: dict,
+    batch_size: int,
+    max_episode_steps: int,
+    device: Union[str, torch.device] = "cpu",
+) -> Dict[str, torch.Tensor]:
+    """Initialize language buffer fields for VLA training.
+
+    Creates tensor fields for hierarchical language data storage.
+
+    Args:
+        language_cfg (dict): Language configuration dictionary.
+        batch_size (int): Number of parallel environments.
+        max_episode_steps (int): Maximum episode length.
+        device (Union[str, torch.device]): Device for tensor allocation.
+
+    Returns:
+        Dict[str, torch.Tensor]: Dictionary of language tensors.
+    """
+    # Get configuration parameters with defaults
+    hierarchy_levels = language_cfg.get(
+        "hierarchy_levels", ["task", "subtask", "primitive"]
+    )
+    max_tokens = language_cfg.get("max_tokens", 512)
+    max_instructions = language_cfg.get("max_instructions_per_level", 3)
+    pad_token_id = language_cfg.get("pad_token_id", 0)
+    mode = language_cfg.get("mode", "tokens")
+
+    language_desc = {}
+
+    # Create tensor fields for each hierarchy level
+    for level in hierarchy_levels:
+        level_key = f"{level}_level"
+
+        # Token IDs: [batch_size, max_episode_steps, max_instructions, max_tokens]
+        language_desc[f"{level_key}_tokens"] = torch.zeros(
+            (batch_size, max_episode_steps, max_instructions, max_tokens),
+            dtype=torch.int64,
+            device=device,
+        )
+
+        # Attention mask: [batch_size, max_episode_steps, max_instructions, max_tokens]
+        language_desc[f"{level_key}_attention_mask"] = torch.zeros(
+            (batch_size, max_episode_steps, max_instructions, max_tokens),
+            dtype=torch.int64,
+            device=device,
+        )
+
+        # Instruction count per level: [batch_size, max_episode_steps]
+        language_desc[f"{level_key}_count"] = torch.zeros(
+            (batch_size, max_episode_steps),
+            dtype=torch.int64,
+            device=device,
+        )
+
+    # Instruction count by hierarchy level: [batch_size, max_episode_steps, 3]
+    # 3 corresponds to [task, subtask, primitive] levels
+    language_desc["instruction_counts"] = torch.zeros(
+        (batch_size, max_episode_steps, 3),
+        dtype=torch.int64,
+        device=device,
+    )
+
+    # Change points: [batch_size, max_episode_steps, max_instructions]
+    # Timesteps where language changes within the trajectory
+    language_desc["change_points"] = torch.full(
+        (batch_size, max_episode_steps, max_instructions),
+        -1,
+        dtype=torch.int64,
+        device=device,
+    )
+
+    # Hierarchy depth: [batch_size, max_episode_steps]
+    # Current depth of hierarchy used (1=task only, 2=task+subtask, 3=all)
+    language_desc["hierarchy_depth"] = torch.full(
+        (batch_size, max_episode_steps),
+        len(hierarchy_levels),
+        dtype=torch.int64,
+        device=device,
+    )
+
+    # Instruction type IDs: [batch_size, max_episode_steps, max_instructions]
+    # Encoding of instruction types (e.g., 0=imperative, 1=declarative, 2=conditional)
+    language_desc["instruction_types"] = torch.zeros(
+        (batch_size, max_episode_steps, max_instructions),
+        dtype=torch.int64,
+        device=device,
+    )
+
+    # Optional: Embedding storage for mode='embeddings' or mode='hybrid'
+    if mode in ("embeddings", "hybrid"):
+        embedding_dim = language_cfg.get("embedding_dim", 768)
+        for level in hierarchy_levels:
+            level_key = f"{level}_level"
+            # Embeddings: [batch_size, max_episode_steps, max_instructions, embedding_dim]
+            language_desc[f"{level_key}_embeddings"] = torch.zeros(
+                (batch_size, max_episode_steps, max_instructions, embedding_dim),
+                dtype=torch.float32,
+                device=device,
+            )
+
+    return language_desc
+
+
 def init_rollout_buffer_from_config(
     config: dict,
     max_episode_steps: int,
     batch_size: int,
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
+    language_cfg: Optional[dict] = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -975,15 +1080,19 @@ def init_rollout_buffer_from_config(
         - Sensor observations: ``sensor/<uid>`` for each sensor in config
         - Extra observations: Custom observations from observation functors in ``add`` mode
             that have a ``shape`` specified in their ``extra`` parameter
+        - Language data: Hierarchical language descriptions for VLA training (if language_cfg is provided)
 
     Args:
         config (dict): The environment configuration dictionary.
         max_episode_steps (int): The number of steps in an episode.
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
+        language_cfg (Optional[dict]): Language configuration for VLA training.
+            If provided, language fields will be added to the buffer.
 
     Returns:
-        TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
+        TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards',
+            and optionally 'language' if language_cfg is provided.
     """
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
@@ -1136,5 +1245,19 @@ def init_rollout_buffer_from_config(
     if extra_obs_desc:
         for obs_name, obs_tensor in extra_obs_desc.items():
             assign_data_to_dict(rollout_buffer["obs"], obs_name, obs_tensor)
+
+    # Add language data for VLA training if language config is provided
+    if language_cfg is not None:
+        language_desc = _init_language_buffer(
+            language_cfg, batch_size, max_episode_steps, device
+        )
+        rollout_buffer["language"] = TensorDict(
+            language_desc,
+            batch_size=[batch_size, max_episode_steps],
+            device=device,
+        )
+        log_info(
+            f"[init_rollout_buffer_from_config] Language buffer added with hierarchy levels: {language_cfg.get('hierarchy_levels', ['task', 'subtask', 'primitive'])}"
+        )
 
     return rollout_buffer
