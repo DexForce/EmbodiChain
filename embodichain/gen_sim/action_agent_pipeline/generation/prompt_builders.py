@@ -32,6 +32,15 @@ __all__ = [
     "make_relative_task_prompt",
 ]
 
+_BASKET_LEFT_RELEASE_OFFSET_Y = 0.04
+_BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
+_RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
+- `left_of` means positive world y relative to the reference object.
+- `right_of` means negative world y relative to the reference object.
+- `front_of` means positive world x relative to the reference object.
+- `behind` means negative world x relative to the reference object.
+- `inside` and `on` use the reference object's xy center."""
+
 
 class _BasketRolesLike(Protocol):
     left_target_runtime_uid: str
@@ -149,12 +158,7 @@ Object and arm mapping:
 - Active arm: `{active_arm}`.
 - Keep every `{inactive_slot}` as null.
 
-Coordinate convention for relative placement:
-- `left_of` means negative world y relative to the reference object.
-- `right_of` means positive world y relative to the reference object.
-- `front_of` means negative world x relative to the reference object.
-- `behind` means positive world x relative to the reference object.
-- `inside` and `on` use the reference object's xy center.
+{_RELATIVE_COORDINATE_CONVENTION}
 
 Generate one deterministic nominal graph with exactly 6 nominal edges. Use only
 the atomic action class JSON specs shown below. Do not add recovery, monitor, search,
@@ -292,12 +296,7 @@ Object and arm mapping:
   `{second.moved_runtime_uid}`. Goal relation: `{second.relation}`
   ({_relative_relation_phrase(second.relation)}).
 
-Coordinate convention for relative placement:
-- `left_of` means negative world y relative to the reference object.
-- `right_of` means positive world y relative to the reference object.
-- `front_of` means negative world x relative to the reference object.
-- `behind` means positive world x relative to the reference object.
-- `inside` and `on` use the reference object's xy center.
+{_RELATIVE_COORDINATE_CONVENTION}
 
 Generate one deterministic nominal graph with exactly 10 nominal edges. Use only
 the atomic action class JSON specs shown below. Do not add recovery, monitor, search,
@@ -547,25 +546,25 @@ def make_basket_task_prompt(
     left_high_spec = _format_pose_object_spec(
         "left_arm",
         roles.container_runtime_uid,
-        (0.0, -0.04, 0.22),
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
     left_release_spec = _format_pose_object_spec(
         "left_arm",
         roles.container_runtime_uid,
-        (0.0, -0.04, 0.12),
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
         sample_interval=30,
     )
     right_high_spec = _format_pose_object_spec(
         "right_arm",
         roles.container_runtime_uid,
-        (0.0, 0.04, 0.22),
+        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
     right_release_spec = _format_pose_object_spec(
         "right_arm",
         roles.container_runtime_uid,
-        (0.0, 0.04, 0.12),
+        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
         sample_interval=30,
     )
     left_open_spec = _format_gripper_spec(
@@ -718,9 +717,9 @@ outside the table edge to avoid initial robot-table contact.
 
 The interactive objects are:
 - {roles.left_target_runtime_uid}: the {left_target_text} mesh initially on the
-  negative-y side (source object {roles.left_target_source_uid}).
+  positive-y side (source object {roles.left_target_source_uid}).
 - {roles.right_target_runtime_uid}: the {right_target_text} mesh initially on the
-  positive-y side (source object {roles.right_target_source_uid}).
+  negative-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
 
@@ -760,25 +759,25 @@ def make_basket_atom_actions_prompt(roles: _BasketRolesLike) -> str:
     left_high_spec = _format_pose_object_spec(
         "left_arm",
         roles.container_runtime_uid,
-        (0.0, -0.04, 0.22),
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
     left_release_spec = _format_pose_object_spec(
         "left_arm",
         roles.container_runtime_uid,
-        (0.0, -0.04, 0.12),
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
         sample_interval=30,
     )
     right_high_spec = _format_pose_object_spec(
         "right_arm",
         roles.container_runtime_uid,
-        (0.0, 0.04, 0.22),
+        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
     right_release_spec = _format_pose_object_spec(
         "right_arm",
         roles.container_runtime_uid,
-        (0.0, 0.04, 0.12),
+        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
         sample_interval=30,
     )
     return f"""### Atomic Action Class JSON Specs for UR5BreadBasket Dual-UR5 Placement
