@@ -8,6 +8,15 @@ on:
   pull_request:
     branches: [main]
 
+x-conda-step: &conda_step
+  name: Activate conda py311 environment
+  shell: bash -l {0}
+  run: |
+    source activate py311
+    echo "$CONDA_PREFIX/bin" >> "$GITHUB_PATH"
+    python --version
+    which python pip
+
 jobs:
   lint:
     runs-on: Linux
@@ -28,6 +37,7 @@ jobs:
       options: --memory 100g --gpus device=0 --shm-size 53687091200
     steps:
       - uses: actions/checkout@v4
+      - *conda_step
       - name: Code Style check
         run: |
           echo "Workspace: ${GITHUB_WORKSPACE}"
@@ -50,6 +60,7 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
+      - *conda_step
 
       - name: Cache Python dependencies
         id: cache-pip
@@ -152,6 +163,7 @@ jobs:
     container: *container_template
     steps:
       - uses: actions/checkout@v4
+      - *conda_step
       - name: Run tests
         run: |
           pip install -e ".[gensim]" \
@@ -190,6 +202,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - *conda_step
 
       - name: (Release) Install build tools
         run: |
