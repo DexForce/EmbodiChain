@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import base64
 import hashlib
 import json
 import struct
@@ -187,12 +188,53 @@ def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
     material_text = (normalized_path.parent / "material.mtl").read_text(
         encoding="utf-8"
     )
-    assert "newmtl material_0" in material_text
+    material_name = _single_obj_material_name(obj_text)
+    assert material_name != "material_0"
+    assert f"newmtl {material_name}" in material_text
+    assert "map_Kd " not in material_text
     assert _rounded_vertex_set(_obj_vertices(normalized_path)) == {
         (1.0, 0.0, 0.0),
         (1.0, 1.0, 0.0),
         (1.0, 0.0, 1.0),
     }
+
+
+def test_mesh_frame_normalizer_extracts_embedded_base_color_texture(
+    tmp_path: Path,
+) -> None:
+    mesh_path = tmp_path / "source" / "textured_triangle.glb"
+    texture_png = _tiny_png()
+    _write_minimal_glb(
+        mesh_path,
+        _default_mesh_vertices(),
+        embedded_base_color_png=texture_png,
+    )
+    output_dir = tmp_path / "normalized"
+
+    normalized_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(
+        mesh_path
+    )
+
+    obj_text = normalized_path.read_text(encoding="utf-8")
+    material_name = _single_obj_material_name(obj_text)
+    material_text = (output_dir / "material.mtl").read_text(encoding="utf-8")
+    assert f"newmtl {material_name}" in material_text
+    assert "Kd 1.0 1.0 1.0" in material_text
+    map_kd = _single_map_kd_path(material_text, material_name)
+    assert map_kd.startswith("textures/")
+    assert map_kd.endswith("_basecolor.png")
+    assert (output_dir / map_kd).read_bytes() == texture_png
+
+    material_path = output_dir / "material.mtl"
+    texture_path = output_dir / map_kd
+    material_path.unlink()
+    texture_path.unlink()
+
+    reused_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(mesh_path)
+
+    assert reused_path == normalized_path
+    assert material_path.is_file()
+    assert texture_path.read_bytes() == texture_png
 
 
 def test_mesh_frame_normalizer_recreates_material_library_for_reused_obj(
@@ -211,7 +253,11 @@ def test_mesh_frame_normalizer_recreates_material_library_for_reused_obj(
 
     assert reused_path == normalized_path
     assert material_path.is_file()
-    assert "newmtl material_0" in material_path.read_text(encoding="utf-8")
+    material_text = material_path.read_text(encoding="utf-8")
+    reused_material_name = _single_obj_material_name(
+        reused_path.read_text(encoding="utf-8")
+    )
+    assert f"newmtl {reused_material_name}" in material_text
 
 
 def test_target_replacements_generate_meshes_and_replace_paths(
@@ -697,7 +743,9 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
 
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     assert atom_actions.count('"atomic_action_class":"PickUpAction"') == 1
-    assert '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in atom_actions
+    assert (
+        '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in atom_actions
+    )
     assert '"obj_name":"cup"' in atom_actions
     assert _stable_summary(paths.summary)["relation"] == "on"
 
@@ -1050,7 +1098,9 @@ def test_tabletop_z_placement_uses_normalized_mesh_bounds(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
-    table_config = next(obj for obj in gym_config["background"] if obj["uid"] == "table")
+    table_config = next(
+        obj for obj in gym_config["background"] if obj["uid"] == "table"
+    )
     table_top_z = ur5_basket_config_generation._mesh_config_world_zmax(table_config)
     expected_min_z = (
         table_top_z + ur5_basket_config_generation._TABLETOP_OBJECT_CLEARANCE
@@ -1253,6 +1303,29 @@ def _obj_vertices(path: Path) -> list[tuple[float, float, float]]:
     return vertices
 
 
+def _single_obj_material_name(obj_text: str) -> str:
+    names = {
+        line.split(maxsplit=1)[1].strip()
+        for line in obj_text.splitlines()
+        if line.startswith("usemtl ")
+    }
+    assert len(names) == 1
+    return next(iter(names))
+
+
+def _single_map_kd_path(material_text: str, material_name: str) -> str:
+    current_material = None
+    texture_paths = []
+    for line in material_text.splitlines():
+        if line.startswith("newmtl "):
+            current_material = line.split(maxsplit=1)[1].strip()
+            continue
+        if current_material == material_name and line.startswith("map_Kd "):
+            texture_paths.append(line.split(maxsplit=1)[1].strip())
+    assert len(texture_paths) == 1
+    return texture_paths[0]
+
+
 def _rounded_vertex_set(
     vertices: list[tuple[float, float, float]],
 ) -> set[tuple[float, float, float]]:
@@ -1266,11 +1339,19 @@ def _default_mesh_vertices() -> list[tuple[float, float, float]]:
     return [(-0.05, 0.0, 0.0), (0.05, 0.0, 0.0), (0.0, -0.04, 0.0)]
 
 
+def _tiny_png() -> bytes:
+    return base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8DwHwAF"
+        "gAJ/l7p7YwAAAABJRU5ErkJggg=="
+    )
+
+
 def _write_minimal_glb(
     path: Path,
     vertices: list[tuple[float, float, float]],
     *,
     node_translation: tuple[float, float, float] | None = None,
+    embedded_base_color_png: bytes | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if len(vertices) < 3:
@@ -1281,56 +1362,111 @@ def _write_minimal_glb(
     )
     indices = (0, 1, 2)
     index_binary = b"".join(struct.pack("<H", index) for index in indices)
-    index_binary_padded = index_binary + b"\x00" * (
-        (4 - len(index_binary) % 4) % 4
+    index_binary_padded = index_binary + b"\x00" * ((4 - len(index_binary) % 4) % 4)
+    texcoord_binary = b"".join(
+        struct.pack("<ff", *uv) for uv in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
     )
-    binary = position_binary_padded + index_binary_padded
+    texcoord_binary_padded = texcoord_binary + b"\x00" * (
+        (4 - len(texcoord_binary) % 4) % 4
+    )
+    image_binary = embedded_base_color_png or b""
+    image_binary_padded = image_binary + b"\x00" * ((4 - len(image_binary) % 4) % 4)
+    binary_parts = [position_binary_padded, index_binary_padded]
     index_offset = len(position_binary_padded)
+    texcoord_offset = index_offset + len(index_binary_padded)
+    image_offset = texcoord_offset + len(texcoord_binary_padded)
+    if embedded_base_color_png is not None:
+        binary_parts.extend([texcoord_binary_padded, image_binary_padded])
+    binary = b"".join(binary_parts)
     mins = [min(vertex[axis] for vertex in vertices) for axis in range(3)]
     maxs = [max(vertex[axis] for vertex in vertices) for axis in range(3)]
     node = {"mesh": 0}
     if node_translation is not None:
         node["translation"] = [float(value) for value in node_translation]
+    buffer_views = [
+        {
+            "buffer": 0,
+            "byteOffset": 0,
+            "byteLength": len(position_binary),
+            "target": 34962,
+        },
+        {
+            "buffer": 0,
+            "byteOffset": index_offset,
+            "byteLength": len(index_binary),
+            "target": 34963,
+        },
+    ]
+    accessors = [
+        {
+            "bufferView": 0,
+            "componentType": 5126,
+            "count": len(vertices),
+            "type": "VEC3",
+            "min": mins,
+            "max": maxs,
+        },
+        {
+            "bufferView": 1,
+            "componentType": 5123,
+            "count": len(indices),
+            "type": "SCALAR",
+            "min": [min(indices)],
+            "max": [max(indices)],
+        },
+    ]
+    primitive = {"attributes": {"POSITION": 0}, "indices": 1}
+    if embedded_base_color_png is not None:
+        buffer_views.extend(
+            [
+                {
+                    "buffer": 0,
+                    "byteOffset": texcoord_offset,
+                    "byteLength": len(texcoord_binary),
+                    "target": 34962,
+                },
+                {
+                    "buffer": 0,
+                    "byteOffset": image_offset,
+                    "byteLength": len(image_binary),
+                },
+            ]
+        )
+        accessors.append(
+            {
+                "bufferView": 2,
+                "componentType": 5126,
+                "count": len(indices),
+                "type": "VEC2",
+                "min": [0.0, 0.0],
+                "max": [1.0, 1.0],
+            }
+        )
+        primitive["attributes"]["TEXCOORD_0"] = 2
+        primitive["material"] = 0
+
     doc = {
         "asset": {"version": "2.0"},
         "buffers": [{"byteLength": len(binary)}],
-        "bufferViews": [
-            {
-                "buffer": 0,
-                "byteOffset": 0,
-                "byteLength": len(position_binary),
-                "target": 34962,
-            },
-            {
-                "buffer": 0,
-                "byteOffset": index_offset,
-                "byteLength": len(index_binary),
-                "target": 34963,
-            },
-        ],
-        "accessors": [
-            {
-                "bufferView": 0,
-                "componentType": 5126,
-                "count": len(vertices),
-                "type": "VEC3",
-                "min": mins,
-                "max": maxs,
-            },
-            {
-                "bufferView": 1,
-                "componentType": 5123,
-                "count": len(indices),
-                "type": "SCALAR",
-                "min": [min(indices)],
-                "max": [max(indices)],
-            },
-        ],
-        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+        "bufferViews": buffer_views,
+        "accessors": accessors,
+        "meshes": [{"primitives": [primitive]}],
         "nodes": [node],
         "scenes": [{"nodes": [0]}],
         "scene": 0,
     }
+    if embedded_base_color_png is not None:
+        doc["materials"] = [
+            {
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": {"index": 0},
+                    "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+                    "roughnessFactor": 1.0,
+                }
+            }
+        ]
+        doc["textures"] = [{"source": 0}]
+        doc["images"] = [{"bufferView": 3, "mimeType": "image/png"}]
     json_chunk = json.dumps(doc, separators=(",", ":")).encode("utf-8")
     json_chunk += b" " * ((4 - len(json_chunk) % 4) % 4)
     total_length = 12 + 8 + len(json_chunk) + 8 + len(binary)

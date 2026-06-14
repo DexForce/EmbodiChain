@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import re
+import struct
 
 __all__ = [
     "GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES",
@@ -34,11 +35,30 @@ __all__ = [
 ]
 
 
-MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_obj_v2"
+MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_texture_obj_v3"
 GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 0.0
 GLB_LOCAL_X_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES
 
 _SAFE_STEM_RE = re.compile(r"[^0-9a-zA-Z_.-]+")
+_GLB_JSON_CHUNK_TYPE = 0x4E4F534A
+_GLB_BINARY_CHUNK_TYPE = 0x004E4942
+_TEXTURE_EXTENSION_BY_MIME_TYPE = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+@dataclass(frozen=True)
+class _MaterialSpec:
+    name: str
+    texture_path: str | None = None
+
+
+@dataclass(frozen=True)
+class _TextureAsset:
+    data: bytes
+    extension: str
 
 
 @dataclass(frozen=True)
@@ -94,22 +114,32 @@ class MeshFrameNormalizer:
         cached = self._results_by_source.get(path)
         if cached is not None:
             if cached.normalized_path.is_file():
-                obj_text = _repair_obj_material_reference(cached.normalized_path)
-                self._ensure_material_library(
-                    _obj_material_names(obj_text) or {"material_0"}
+                material_spec = self._material_spec_for(
+                    path,
+                    cached.normalized_path,
+                    cached.source_sha256,
                 )
+                _repair_obj_material_reference(
+                    cached.normalized_path,
+                    material_spec.name,
+                )
+                self._ensure_material_library({material_spec.name: material_spec})
             return cached.normalized_path
 
         source_sha256 = _file_sha256(path)
         normalized_path = self._normalized_path_for(path, source_sha256)
+        material_spec = self._material_spec_for(path, normalized_path, source_sha256)
         status = "reused" if normalized_path.is_file() else "generated"
         if status == "generated":
-            self._write_normalized_obj(path, normalized_path, source_sha256)
-        else:
-            obj_text = _repair_obj_material_reference(normalized_path)
-            self._ensure_material_library(
-                _obj_material_names(obj_text) or {"material_0"}
+            self._write_normalized_obj(
+                path,
+                normalized_path,
+                source_sha256,
+                material_spec,
             )
+        else:
+            _repair_obj_material_reference(normalized_path, material_spec.name)
+            self._ensure_material_library({material_spec.name: material_spec})
 
         result = NormalizedMeshResult(
             source_path=path,
@@ -143,30 +173,66 @@ class MeshFrameNormalizer:
     def _material_path(self) -> Path:
         return self.output_dir / "material.mtl"
 
-    def _ensure_material_library(self, material_names: set[str]) -> None:
-        if not material_names:
+    def _texture_dir(self) -> Path:
+        return self.output_dir / "textures"
+
+    def _material_spec_for(
+        self,
+        source_path: Path,
+        normalized_path: Path,
+        source_sha256: str,
+    ) -> _MaterialSpec:
+        material_hash = _material_hash_for(normalized_path)
+        material_name = f"material_{material_hash}"
+        texture_path = self._write_base_color_texture(
+            source_path,
+            material_hash,
+            source_sha256,
+        )
+        return _MaterialSpec(name=material_name, texture_path=texture_path)
+
+    def _write_base_color_texture(
+        self,
+        source_path: Path,
+        material_hash: str,
+        source_sha256: str,
+    ) -> str | None:
+        try:
+            texture = _extract_glb_base_color_texture(source_path)
+        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if texture is None:
+            return None
+
+        texture_dir = self._texture_dir()
+        texture_dir.mkdir(parents=True, exist_ok=True)
+        texture_name = (
+            f"{material_hash}_{source_sha256[:12]}_basecolor{texture.extension}"
+        )
+        texture_path = texture_dir / texture_name
+        texture_path.write_bytes(texture.data)
+        return f"textures/{texture_name}"
+
+    def _ensure_material_library(
+        self, material_specs: dict[str, _MaterialSpec]
+    ) -> None:
+        if not material_specs:
             return
 
         material_path = self._material_path()
-        existing_names = _read_material_names(material_path)
-        all_names = sorted(existing_names | material_names)
+        all_specs = {
+            **_read_material_specs(material_path),
+            **material_specs,
+        }
         material_path.write_text(
             "\n".join(
                 [
                     "# EmbodiChain action-agent normalized mesh materials",
                     *[
-                        "\n".join(
-                            [
-                                f"newmtl {name}",
-                                "Ka 0.8 0.8 0.8",
-                                "Kd 0.8 0.8 0.8",
-                                "Ks 0.0 0.0 0.0",
-                                "Ns 1.0",
-                                "d 1.0",
-                                "illum 2",
-                            ]
+                        _format_material_spec(spec)
+                        for spec in sorted(
+                            all_specs.values(), key=lambda item: item.name
                         )
-                        for name in all_names
                     ],
                     "",
                 ]
@@ -179,6 +245,7 @@ class MeshFrameNormalizer:
         source_path: Path,
         normalized_path: Path,
         source_sha256: str,
+        material_spec: _MaterialSpec,
     ) -> None:
         trimesh = _require_trimesh()
         scene = trimesh.load(str(source_path), force="scene")
@@ -192,7 +259,7 @@ class MeshFrameNormalizer:
             obj_text = obj_payload.decode("utf-8")
         else:
             obj_text = str(obj_payload)
-        obj_text = _ensure_obj_material_reference(obj_text)
+        obj_text = _ensure_obj_material_reference(obj_text, material_spec.name)
 
         header = "\n".join(
             [
@@ -206,7 +273,7 @@ class MeshFrameNormalizer:
             ]
         )
         normalized_path.write_text(header + obj_text, encoding="utf-8")
-        self._ensure_material_library(_obj_material_names(obj_text) or {"material_0"})
+        self._ensure_material_library({material_spec.name: material_spec})
 
 
 def _scene_to_world_mesh(scene: Any) -> Any:
@@ -221,50 +288,202 @@ def _scene_to_world_mesh(scene: Any) -> Any:
     return mesh
 
 
-def _obj_material_names(obj_text: str) -> set[str]:
-    names: set[str] = set()
-    for line in obj_text.splitlines():
-        if not line.startswith("usemtl "):
-            continue
-        name = line.split(maxsplit=1)[1].strip()
-        if name:
-            names.add(name)
-    return names
+def _material_hash_for(normalized_path: Path) -> str:
+    hash_part = normalized_path.stem.rsplit("_", maxsplit=1)[-1]
+    if re.fullmatch(r"[0-9a-fA-F]{8,}", hash_part):
+        return hash_part.lower()
+    return hashlib.sha256(normalized_path.stem.encode("utf-8")).hexdigest()[:16]
 
 
-def _repair_obj_material_reference(obj_path: Path) -> str:
+def _repair_obj_material_reference(obj_path: Path, material_name: str) -> str:
     obj_text = obj_path.read_text(encoding="utf-8")
-    repaired = _ensure_obj_material_reference(obj_text)
+    repaired = _ensure_obj_material_reference(obj_text, material_name)
     if repaired != obj_text:
         obj_path.write_text(repaired, encoding="utf-8")
     return repaired
 
 
-def _ensure_obj_material_reference(obj_text: str) -> str:
-    has_mtllib = any(line.startswith("mtllib ") for line in obj_text.splitlines())
-    has_usemtl = any(line.startswith("usemtl ") for line in obj_text.splitlines())
-    prefix = []
-    if not has_mtllib:
-        prefix.append("mtllib material.mtl")
-    if not has_usemtl:
-        prefix.append("usemtl material_0")
-    if not prefix:
-        return obj_text
-    return "\n".join(prefix) + "\n" + obj_text
+def _ensure_obj_material_reference(obj_text: str, material_name: str) -> str:
+    lines = obj_text.splitlines()
+    header_lines: list[str] = []
+    body_start = 0
+    for line in lines:
+        if not line.startswith("#"):
+            break
+        header_lines.append(line)
+        body_start += 1
 
-
-def _read_material_names(material_path: Path) -> set[str]:
-    if not material_path.is_file():
-        return set()
-
-    names: set[str] = set()
-    for line in material_path.read_text(encoding="utf-8").splitlines():
-        if not line.startswith("newmtl "):
+    body_lines: list[str] = []
+    has_usemtl = False
+    for line in lines[body_start:]:
+        if line.startswith("mtllib "):
             continue
-        name = line.split(maxsplit=1)[1].strip()
-        if name:
-            names.add(name)
-    return names
+        if line.startswith("usemtl "):
+            body_lines.append(f"usemtl {material_name}")
+            has_usemtl = True
+            continue
+        body_lines.append(line)
+
+    prefix = ["mtllib material.mtl"]
+    if not has_usemtl:
+        prefix.append(f"usemtl {material_name}")
+    return "\n".join(header_lines + prefix + body_lines) + "\n"
+
+
+def _read_material_specs(material_path: Path) -> dict[str, _MaterialSpec]:
+    if not material_path.is_file():
+        return {}
+
+    specs: dict[str, _MaterialSpec] = {}
+    current_name: str | None = None
+    current_texture_path: str | None = None
+    for line in material_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("newmtl "):
+            if current_name is not None:
+                specs[current_name] = _MaterialSpec(
+                    name=current_name,
+                    texture_path=current_texture_path,
+                )
+            current_name = line.split(maxsplit=1)[1].strip()
+            current_texture_path = None
+            continue
+        if current_name is not None and line.startswith("map_Kd "):
+            current_texture_path = line.split(maxsplit=1)[1].strip()
+    if current_name is not None:
+        specs[current_name] = _MaterialSpec(
+            name=current_name,
+            texture_path=current_texture_path,
+        )
+    return specs
+
+
+def _format_material_spec(spec: _MaterialSpec) -> str:
+    ambient = "1.0 1.0 1.0" if spec.texture_path else "0.8 0.8 0.8"
+    diffuse = "1.0 1.0 1.0" if spec.texture_path else "0.8 0.8 0.8"
+    lines = [
+        f"newmtl {spec.name}",
+        f"Ka {ambient}",
+        f"Kd {diffuse}",
+        "Ks 0.0 0.0 0.0",
+        "Ns 1.0",
+        "d 1.0",
+        "illum 2",
+    ]
+    if spec.texture_path:
+        lines.append(f"map_Kd {spec.texture_path}")
+    return "\n".join(lines)
+
+
+def _extract_glb_base_color_texture(source_path: Path) -> _TextureAsset | None:
+    if source_path.suffix.lower() != ".glb":
+        return None
+
+    doc, binary_chunk = _read_glb(source_path)
+    material = _first_textured_material(doc)
+    if material is None:
+        return None
+
+    texture_index = int(material["pbrMetallicRoughness"]["baseColorTexture"]["index"])
+    textures = doc.get("textures", [])
+    if not isinstance(textures, list) or texture_index >= len(textures):
+        return None
+
+    texture = textures[texture_index]
+    if not isinstance(texture, dict):
+        return None
+    image_index = texture.get("source")
+    if image_index is None:
+        return None
+
+    images = doc.get("images", [])
+    if not isinstance(images, list) or int(image_index) >= len(images):
+        return None
+
+    image = images[int(image_index)]
+    if not isinstance(image, dict):
+        return None
+
+    mime_type = str(image.get("mimeType", ""))
+    extension = _TEXTURE_EXTENSION_BY_MIME_TYPE.get(mime_type)
+    if extension is None:
+        return None
+
+    buffer_view_index = image.get("bufferView")
+    if buffer_view_index is None:
+        return None
+
+    image_data = _buffer_view_bytes(doc, binary_chunk, int(buffer_view_index))
+    if not image_data:
+        return None
+    return _TextureAsset(data=image_data, extension=extension)
+
+
+def _first_textured_material(doc: dict[str, Any]) -> dict[str, Any] | None:
+    materials = doc.get("materials", [])
+    if not isinstance(materials, list):
+        return None
+    for material in materials:
+        if not isinstance(material, dict):
+            continue
+        pbr = material.get("pbrMetallicRoughness", {})
+        if not isinstance(pbr, dict):
+            continue
+        base_color_texture = pbr.get("baseColorTexture", {})
+        if not isinstance(base_color_texture, dict):
+            continue
+        if "index" in base_color_texture:
+            return material
+    return None
+
+
+def _read_glb(source_path: Path) -> tuple[dict[str, Any], bytes]:
+    data = source_path.read_bytes()
+    if len(data) < 12:
+        raise ValueError(f"GLB file is too small: {source_path}")
+    magic, version, declared_length = struct.unpack_from("<4sII", data, 0)
+    if magic != b"glTF" or version != 2:
+        raise ValueError(f"Only GLB version 2 files are supported: {source_path}")
+    if declared_length > len(data):
+        raise ValueError(f"GLB length header exceeds file size: {source_path}")
+
+    offset = 12
+    doc: dict[str, Any] | None = None
+    binary_chunk = b""
+    while offset + 8 <= declared_length:
+        chunk_length, chunk_type = struct.unpack_from("<II", data, offset)
+        offset += 8
+        chunk_end = offset + chunk_length
+        if chunk_end > declared_length:
+            raise ValueError(f"GLB chunk exceeds file size: {source_path}")
+        chunk = data[offset:chunk_end]
+        offset = chunk_end
+        if chunk_type == _GLB_JSON_CHUNK_TYPE:
+            doc = json.loads(chunk.decode("utf-8"))
+        elif chunk_type == _GLB_BINARY_CHUNK_TYPE:
+            binary_chunk = chunk
+    if doc is None:
+        raise ValueError(f"GLB file does not contain a JSON chunk: {source_path}")
+    return doc, binary_chunk
+
+
+def _buffer_view_bytes(
+    doc: dict[str, Any],
+    binary_chunk: bytes,
+    buffer_view_index: int,
+) -> bytes:
+    buffer_views = doc.get("bufferViews", [])
+    if not isinstance(buffer_views, list) or buffer_view_index >= len(buffer_views):
+        return b""
+    buffer_view = buffer_views[buffer_view_index]
+    if not isinstance(buffer_view, dict):
+        return b""
+    if int(buffer_view.get("buffer", 0)) != 0:
+        return b""
+    byte_offset = int(buffer_view.get("byteOffset", 0))
+    byte_length = int(buffer_view.get("byteLength", 0))
+    if byte_length <= 0:
+        return b""
+    return binary_chunk[byte_offset : byte_offset + byte_length]
 
 
 def _rotation_x_matrix4(degrees: float) -> list[list[float]]:
