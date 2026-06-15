@@ -31,7 +31,6 @@ from typing import Any, cast
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
-from embodichain.utils.math import pose_nms_indices
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
