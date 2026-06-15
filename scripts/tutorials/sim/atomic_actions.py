@@ -99,7 +99,7 @@ def initialize_simulation(args):
         width=1920,
         height=1080,
         headless=True,
-        sim_device=args.device,
+        sim_device="cuda",
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         render_cfg=RenderCfg(renderer=args.renderer),
@@ -151,6 +151,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
                     [0.0, 0.0, 1.0, 0.12],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
+                num_samples=30,
             )
         },
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
@@ -247,11 +248,9 @@ def main():
         actions_cfg_list=[pickup_cfg, place_cfg, move_cfg],
     )
 
+    sim.init_gpu_physics()
     if not args.headless:
         sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     # ------------------------------------------------------------------ #
     # Step 5: Describe the mug with ObjectSemantics                       #

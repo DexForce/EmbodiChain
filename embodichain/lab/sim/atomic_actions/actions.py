@@ -347,7 +347,7 @@ class PickUpAction(MoveAction):
 
         # Resolve grasp pose
         if isinstance(target, ObjectSemantics):
-            is_success, grasp_xpos, open_length = self._resolve_grasp_pose(target)
+            is_success, grasp_xpos = self._resolve_grasp_pose(target)
         else:
             is_success, grasp_xpos = self._resolve_pose_target(
                 target, action_name=self.__class__.__name__
@@ -371,14 +371,12 @@ class PickUpAction(MoveAction):
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
         # compute waypoint number for each phase
-        (
-            n_approach_waypoint,
-            n_close_waypoint,
-            n_lift_waypoint,
-        ) = self._compute_three_phase_waypoints(
-            self.cfg.hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="lift",
+        n_approach_waypoint, n_close_waypoint, n_lift_waypoint = (
+            self._compute_three_phase_waypoints(
+                self.cfg.hand_interp_steps,
+                first_phase_name="approach",
+                third_phase_name="lift",
+            )
         )
 
         # get pick trajectory
@@ -472,10 +470,47 @@ class PickUpAction(MoveAction):
             )
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
 
-        is_success, grasp_xpos, open_length = semantics.affordance.get_best_grasp_poses(
+        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses, approach_direction=self.approach_direction
         )
-        return is_success, grasp_xpos, open_length
+
+        # Get best grasp pose for each object
+        n_envs = obj_poses.shape[0]
+        init_qpos = self.robot.get_qpos(name=self.cfg.control_part)
+        n_max_pose = 0
+        for result in grasp_poses_result:
+            n_pose = result[0].shape[0]
+            if n_pose > n_max_pose:
+                n_max_pose = n_pose
+
+        grasp_xpos_padding = torch.zeros(
+            (n_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
+        )
+        grasp_cost_padding = torch.full(
+            (n_envs, n_max_pose), float("inf"), dtype=torch.float32, device=self.device
+        )
+        for i in range(n_envs):
+            n_pose = grasp_poses_result[i][0].shape[0]
+            grasp_xpos_padding[i, :n_pose] = grasp_poses_result[i][0]
+            grasp_cost_padding[i, :n_pose] = grasp_poses_result[i][1]
+            # padding with the first grasp pose, which is usually the best one, to ensure that the padded grasp poses are valid for IK computation, although they may not be optimal.
+            grasp_xpos_padding[i, n_pose:] = grasp_poses_result[i][0][0]
+            grasp_cost_padding[i, n_pose:] = grasp_poses_result[i][1][0]
+
+        init_qpos_repeat = init_qpos[:, None, :].repeat(1, n_max_pose, 1)
+        ik_success, qpos = self.robot.compute_batch_ik(
+            pose=grasp_xpos_padding,
+            name=self.cfg.control_part,
+            joint_seed=init_qpos_repeat,
+        )
+        grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
+        best_cost, best_idx = grasp_cost_masked.min(dim=1)
+        is_success = best_cost < 9999.0  # usually cost < 1.0
+        best_grasp_xpos = grasp_xpos_padding[
+            torch.arange(n_envs, device=self.device), best_idx
+        ]
+
+        return is_success, best_grasp_xpos
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
@@ -547,14 +582,12 @@ class PlaceAction(MoveAction):
             return False, torch.empty(0), self.joint_ids
 
         # compute waypoint number for each phase
-        (
-            n_down_waypoint,
-            n_open_waypoint,
-            n_lift_waypoint,
-        ) = self._compute_three_phase_waypoints(
-            self.cfg.hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="lift",
+        n_down_waypoint, n_open_waypoint, n_lift_waypoint = (
+            self._compute_three_phase_waypoints(
+                self.cfg.hand_interp_steps,
+                first_phase_name="approach",
+                third_phase_name="lift",
+            )
         )
 
         down_trajectory = torch.zeros(

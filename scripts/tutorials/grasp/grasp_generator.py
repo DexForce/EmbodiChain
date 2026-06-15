@@ -138,6 +138,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
                     [0.0, 0.0, 1.0, 0.12],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
+                num_samples=30,
             )
         },
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
@@ -225,10 +226,11 @@ if __name__ == "__main__":
     grasp_cfg = GraspGeneratorCfg(
         viser_port=11801,
         antipodal_sampler_cfg=AntipodalSamplerCfg(
-            n_sample=20000, max_length=0.088, min_length=0.003
+            n_sample=10000, max_length=0.088, min_length=0.003
         ),
-        is_partial_annotate=True,
+        is_partial_annotate=False,
         is_filter_ground_collision=True,
+        n_top_grasps=30,
     )
     sim.open_window()
 
@@ -271,7 +273,7 @@ if __name__ == "__main__":
             obj_pose,
             approach_direction,
             visualize_collision=False,
-            visualize_pose=False,
+            visualize_pose=True,
         )
         if is_success:
             grasp_xpos_list.append(grasp_pose.unsqueeze(0))
