@@ -99,12 +99,16 @@ def initialize_simulation(args):
         width=1920,
         height=1080,
         headless=True,
-        sim_device=args.device,
+        sim_device="cuda",
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         render_cfg=RenderCfg(renderer=args.renderer),
     )
     sim = SimulationManager(sim_cfg)
+
+    light = sim.add_light(
+        cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
+    )
 
     return sim
 
@@ -247,11 +251,9 @@ def main():
         actions_cfg_list=[pickup_cfg, place_cfg, move_cfg],
     )
 
+    sim.init_gpu_physics()
     if not args.headless:
         sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     # ------------------------------------------------------------------ #
     # Step 5: Describe the mug with ObjectSemantics                       #
