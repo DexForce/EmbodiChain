@@ -35,7 +35,7 @@ sim_cfg = SimulationManagerCfg(
     width=1920,
     height=1080,
     physics_dt=1.0 / 100.0,
-    sim_device="cpu",
+    device="cpu",
 )
 
 sim = SimulationManager(sim_cfg)

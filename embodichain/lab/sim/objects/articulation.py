@@ -271,7 +271,10 @@ class ArticulationData:
             # Fetch target_qpos from CPU entities
             return torch.as_tensor(
                 np.array(
-                    [entity.get_target_qpos() for entity in self.entities],
+                    [
+                        entity.get_current_qpos(is_target=True)
+                        for entity in self.entities
+                    ],
                 ),
                 dtype=torch.float32,
                 device=self.device,
@@ -316,7 +319,10 @@ class ArticulationData:
             # Fetch target_qvel from CPU entities
             return torch.as_tensor(
                 np.array(
-                    [entity.get_target_qvel() for entity in self.entities],
+                    [
+                        entity.get_current_qvel(is_target=True)
+                        for entity in self.entities
+                    ],
                 ),
                 dtype=torch.float32,
                 device=self.device,
@@ -577,7 +583,9 @@ class Articulation(BatchEntity):
     ) -> None:
         # Initialize world and physics scene
         self._world = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
 
         self.cfg = cfg
         self._entities = entities
@@ -932,6 +940,7 @@ class Articulation(BatchEntity):
                 )
             # TODO: in manual physics mode, the update should be explicitly called after
             # setting the pose to synchronize the state to renderer.
+            self._world.update(0.001)
 
         else:
             if pose.dim() == 2 and pose.shape[1] == 7:
@@ -955,7 +964,6 @@ class Articulation(BatchEntity):
                 data_type=ArticulationGPUAPIWriteType.ROOT_GLOBAL_POSE,
             )
             self._ps.gpu_compute_articulation_kinematic(gpu_indices=indices)
-        self._world.update(0.001)
 
     def get_local_pose(self, to_matrix=False) -> torch.Tensor:
         """Get local pose (root link pose) of the articulation.
@@ -1098,9 +1106,9 @@ class Articulation(BatchEntity):
         if self.device.type == "cpu":
             for i, env_idx in enumerate(local_env_ids):
                 setter = (
-                    self._entities[env_idx].set_target_qpos
+                    self._entities[env_idx].set_current_qpos
                     if target
-                    else self._entities[env_idx].set_current_qpos
+                    else self._entities[env_idx].set_qpos
                 )
                 setter(qpos[i].numpy(), local_joint_ids.numpy())
         else:
@@ -1184,9 +1192,9 @@ class Articulation(BatchEntity):
         if self.device.type == "cpu":
             for i, env_idx in enumerate(local_env_ids):
                 setter = (
-                    self._entities[env_idx].set_target_qvel
+                    self._entities[env_idx].set_current_qvel
                     if target
-                    else self._entities[env_idx].set_current_qvel
+                    else self._entities[env_idx].set_qvel
                 )
                 setter(qvel[i].numpy(), local_joint_ids)
         else:
@@ -1578,10 +1586,32 @@ class Articulation(BatchEntity):
             env_ids (Sequence[int] | None): Environment indices. If None, then all indices are used.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
-        zeros = torch.zeros((len(local_env_ids), self.dof), device=self.device)
-        self.set_qvel(zeros, env_ids=local_env_ids)
-        self.set_qvel(zeros, env_ids=local_env_ids, target=True)
-        self.set_qf(zeros, env_ids=local_env_ids)
+        if self.device.type == "cpu":
+            zero_joint_data = np.zeros((len(local_env_ids), self.dof), dtype=np.float32)
+            for i, env_idx in enumerate(local_env_ids):
+                self._entities[env_idx].set_qvel(zero_joint_data[i])
+                self._entities[env_idx].set_current_qvel(zero_joint_data[i])
+                self._entities[env_idx].set_current_qf(zero_joint_data[i])
+        else:
+            zeros = torch.zeros(
+                (len(local_env_ids), self.dof), dtype=torch.float32, device=self.device
+            )
+            indices = self.body_data.gpu_indices[local_env_ids]
+            self._ps.gpu_apply_joint_data(
+                data=zeros,
+                gpu_indices=indices,
+                data_type=ArticulationGPUAPIWriteType.JOINT_VELOCITY,
+            )
+            self._ps.gpu_apply_joint_data(
+                data=zeros,
+                gpu_indices=indices,
+                data_type=ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY,
+            )
+            self._ps.gpu_apply_joint_data(
+                data=zeros,
+                gpu_indices=indices,
+                data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
+            )
 
     def reallocate_body_data(self) -> None:
         """Reallocate body data tensors to match the current articulation state in the GPU physics scene."""
@@ -1670,7 +1700,8 @@ class Articulation(BatchEntity):
             self._ps.gpu_compute_articulation_kinematic(
                 gpu_indices=self.body_data.gpu_indices[local_env_ids]
             )
-        self._world.update(0.001)
+        else:
+            self._world.update(0.001)
 
     def _set_default_joint_drive(self) -> None:
         """Set default joint drive parameters based on the configuration."""

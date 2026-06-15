@@ -31,10 +31,10 @@ def main(visualize: bool = True):
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Set up simulation with specified device (CPU or CUDA)
-    sim_device = "cpu"
+    device = "cpu"
     num_envs = 9  # Number of parallel arenas/environments
     config = SimulationManagerCfg(
-        headless=False, sim_device=sim_device, arena_space=1.5, num_envs=num_envs
+        headless=False, device=device, arena_space=1.5, num_envs=num_envs
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)

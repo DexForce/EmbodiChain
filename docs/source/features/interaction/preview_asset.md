@@ -73,7 +73,7 @@ asset.set_root_pose(pos=[0, 0, 1.0], rot=[0, 0, 0])
 | `--body_type`        | Body type for rigid objects: `dynamic`, `kinematic`, `static`      | `kinematic`          |
 | `--use_usd_properties` | Use physical properties from the USD file instead of defaults    | `False`              |
 | `--fix_base`         | Fix the base of articulations                                      | `True`               |
-| `--sim_device`       | Simulation device                                                  | `cpu`                |
+| `--device`       | Simulation device                                                  | `cpu`                |
 | `--headless`         | Run without rendering window                                       | `False`              |
 | `--renderer`         | Renderer backend: `hybrid`, `fast-rt` or `rt`            | `hybrid`             |
 | `--preview`          | Enter interactive embed mode after loading                         | `False`              |

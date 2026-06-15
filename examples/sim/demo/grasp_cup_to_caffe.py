@@ -29,6 +29,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
@@ -69,8 +70,9 @@ def initialize_simulation(args) -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         arena_space=2.5,
@@ -419,6 +421,7 @@ def main():
     table = create_table(sim)
     caffe = create_caffe(sim)
     cup = create_cup(sim)
+    sim.update(step=1)
 
     # apply random perturbation
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
@@ -426,9 +429,6 @@ def main():
 
     if not args.headless:
         sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     run_simulation(sim, robot, cup, caffe)
 

@@ -371,14 +371,12 @@ class PickUpAction(MoveAction):
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
         # compute waypoint number for each phase
-        (
-            n_approach_waypoint,
-            n_close_waypoint,
-            n_lift_waypoint,
-        ) = self._compute_three_phase_waypoints(
-            self.cfg.hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="lift",
+        n_approach_waypoint, n_close_waypoint, n_lift_waypoint = (
+            self._compute_three_phase_waypoints(
+                self.cfg.hand_interp_steps,
+                first_phase_name="approach",
+                third_phase_name="lift",
+            )
         )
 
         # get pick trajectory
@@ -547,14 +545,12 @@ class PlaceAction(MoveAction):
             return False, torch.empty(0), self.joint_ids
 
         # compute waypoint number for each phase
-        (
-            n_down_waypoint,
-            n_open_waypoint,
-            n_lift_waypoint,
-        ) = self._compute_three_phase_waypoints(
-            self.cfg.hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="lift",
+        n_down_waypoint, n_open_waypoint, n_lift_waypoint = (
+            self._compute_three_phase_waypoints(
+                self.cfg.hand_interp_steps,
+                first_phase_name="approach",
+                third_phase_name="lift",
+            )
         )
 
         down_trajectory = torch.zeros(

@@ -26,7 +26,6 @@ from dexsim.types import (
     LoadOption,
     RigidBodyShape,
     SDFConfig,
-    PhysicalAttr,
 )
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
@@ -44,6 +43,19 @@ from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
+
+
+def _is_newton_backend_active() -> bool:
+    """Return whether the current default world uses the Newton physics scene."""
+    from embodichain.lab.sim.sim_manager import get_physics_scene
+    from embodichain.lab.sim.objects.backends import is_newton_scene
+
+    return is_newton_scene(get_physics_scene())
+
+
+def _set_body_scale_after_rigidbody(obj: MeshObject, body_scale: tuple | list) -> None:
+    """Set body scale after rigid body creation for Newton compatibility."""
+    obj.set_body_scale(*body_scale)
 
 
 def get_dexsim_arenas() -> List[dexsim.environment.Arena]:
@@ -267,6 +279,7 @@ def load_mesh_objects_from_cfg(
     """
     obj_list = []
     body_type = cfg.to_dexsim_body_type()
+    is_newton_backend = _is_newton_backend_active()
     if isinstance(cfg.shape, MeshCfg):
 
         option = LoadOption()
@@ -318,22 +331,29 @@ def load_mesh_objects_from_cfg(
                     max_convex_hull_num=max_convex_hull_num,
                 )
             elif cfg.sdf_resolution > 0:
+                if not is_newton_backend and cfg.body_scale not in [
+                    (1.0, 1.0, 1.0),
+                    [1.0, 1.0, 1.0],
+                ]:
+                    logger.log_error(
+                        f"Non-unit body scale {cfg.body_scale} is not supported for SDF collision yet. Please set body_scale to (1.0, 1.0, 1.0) for SDF collision."
+                    )
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                sdf_cfg = SDFConfig()
-                sdf_cfg.resolution = cfg.sdf_resolution
+                sdf_cfg = SDFConfig(resolution=cfg.sdf_resolution)
                 obj.add_physical_body(
                     body_type,
                     RigidBodyShape.SDF,
                     config=sdf_cfg,
-                    attr=PhysicalAttr(),
+                    attr=cfg.attrs.attr(),
                 )
             else:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
-                obj.add_rigidbody(body_type, RigidBodyShape.CONVEX)
+                obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+
             obj.set_name(f"{cfg.uid}_{i}")
             obj_list.append(obj)
 
@@ -352,7 +372,11 @@ def load_mesh_objects_from_cfg(
 
         obj_list = create_cube(env_list, cfg.shape.size, uid=cfg.uid)
         for obj in obj_list:
-            obj.add_rigidbody(body_type, RigidBodyShape.BOX)
+            if not is_newton_backend:
+                obj.set_body_scale(*cfg.body_scale)
+            obj.add_rigidbody(body_type, RigidBodyShape.BOX, cfg.attrs.attr())
+            if is_newton_backend:
+                _set_body_scale_after_rigidbody(obj, cfg.body_scale)
 
     elif isinstance(cfg.shape, SphereCfg):
         from embodichain.lab.sim.utility.sim_utils import create_sphere
@@ -361,7 +385,11 @@ def load_mesh_objects_from_cfg(
             env_list, cfg.shape.radius, cfg.shape.resolution, uid=cfg.uid
         )
         for obj in obj_list:
-            obj.add_rigidbody(body_type, RigidBodyShape.SPHERE)
+            if not is_newton_backend:
+                obj.set_body_scale(*cfg.body_scale)
+            obj.add_rigidbody(body_type, RigidBodyShape.SPHERE, cfg.attrs.attr())
+            if is_newton_backend:
+                _set_body_scale_after_rigidbody(obj, cfg.body_scale)
     else:
         logger.log_error(
             f"Unsupported rigid object shape type: {type(cfg.shape)}. Supported types: MeshCfg, CubeCfg, SphereCfg."

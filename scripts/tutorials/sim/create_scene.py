@@ -23,7 +23,11 @@ import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    RigidBodyAttributesCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -38,6 +42,12 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=None,
+        help="Maximum number of simulation steps to run before exiting.",
+    )
     args = parser.parse_args()
 
     # Configure the simulation
@@ -46,7 +56,8 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),
@@ -63,8 +74,9 @@ def main():
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
+            body_scale=[0.5, 0.5, 0.5],
             attrs=RigidBodyAttributesCfg(
-                mass=1.0,
+                mass=0.1,
                 dynamic_friction=0.5,
                 static_friction=0.5,
                 restitution=0.1,
@@ -81,11 +93,11 @@ def main():
             shape=MeshCfg(fpath=path),
             body_type="dynamic",
             attrs=RigidBodyAttributesCfg(
-                mass=3.0,
+                mass=10.0,
             ),
             body_scale=[0.5, 0.5, 0.5],
-            init_pos=[0.0, 0.0, 0.2],
-            init_rot=[90.0, 0.0, 0.0],
+            init_pos=[0.0, 0.0, 0.5],
+            init_rot=[0.0, 0.0, 0.0],
         )
     )
 
@@ -98,10 +110,10 @@ def main():
         sim.open_window()
 
     # Run the simulation
-    run_simulation(sim)
+    run_simulation(sim, max_steps=args.max_steps)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, max_steps: int | None = None):
     """Run the simulation loop.
 
     Args:
@@ -121,6 +133,9 @@ def run_simulation(sim: SimulationManager):
             # Update physics simulation
             sim.update(step=1)
             step_count += 1
+
+            if max_steps is not None and step_count >= max_steps:
+                break
 
             # Print FPS every second
             if step_count % 100 == 0:

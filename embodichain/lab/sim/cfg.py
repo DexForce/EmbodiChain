@@ -15,11 +15,12 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+from collections.abc import Mapping
 import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any, Optional
+from typing import Sequence, Union, Dict, Literal, List, Any, Optional, TYPE_CHECKING
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -40,6 +41,9 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+
+if TYPE_CHECKING:
+    from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
 
 # Global default renderer settings for simulation.
 #
@@ -66,8 +70,11 @@ class RenderCfg:
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
 
-    spp: int = 1
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
+    enable_denoiser: bool = True
+    """Whether to enable denoising. Only valid when renderer is 'hybrid' or 'fast-rt'."""
+
+    spp: int = 64
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
 
     def to_dexsim_flags(self):
         if self.renderer == "hybrid":
@@ -91,7 +98,44 @@ class RenderCfg:
 
 
 @configclass
+class GPUMemoryCfg:
+    """GPU memory configuration for default-backend GPU physics simulation."""
+
+    temp_buffer_capacity: int = 2**24
+    """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
+
+    max_rigid_contact_count: int = 2**19
+    """Increase this if you get 'Contact buffer overflow detected'"""
+
+    max_rigid_patch_count: int = (
+        2**18
+    )  # 81920 is DexSim default but most tasks work with 2**18
+    """Increase this if you get 'Patch buffer overflow detected'"""
+
+    heap_capacity: int = 2**26
+
+    found_lost_pairs_capacity: int = (
+        2**25
+    )  # 262144 is DexSim default but most tasks work with 2**25
+    found_lost_aggregate_pairs_capacity: int = 2**10
+    total_aggregate_pairs_capacity: int = 2**10
+
+
+@configclass
 class PhysicsCfg:
+    """Base configuration for DexSim physics backends."""
+
+    physics_dt: float = 1.0 / 100.0
+    """The time step for the physics simulation."""
+
+    device: str | torch.device = "cpu"
+    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
+
+
+@configclass
+class DefaultPhysicsCfg(PhysicsCfg):
+    """Configuration for the DexSim default (PhysX) physics backend."""
+
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
     """Gravity vector for the simulation environment."""
 
@@ -115,14 +159,17 @@ class PhysicsCfg:
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
-    
-    Note: the larger the tolerance, the faster the simulation will be. 
+
+    Note: the larger the tolerance, the faster the simulation will be.
     """
     speed_tolerance: float = 0.25
     """The speed tolerance for the simulation.
-    
+
     Note: the larger the tolerance, the faster the simulation will be.
     """
+
+    gpu_memory: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
+    """GPU memory configuration for GPU physics simulation."""
 
     def to_dexsim_args(self) -> Dict[str, Any]:
         """Convert to dexsim physics args dictionary."""
@@ -136,6 +183,160 @@ class PhysicsCfg:
             "enable_friction_every_iteration": self.enable_friction_every_iteration,
         }
         return args
+
+
+@configclass
+class NewtonPhysicsCfg(PhysicsCfg):
+    """Configuration for DexSim Newton physics backend."""
+
+    device: str | torch.device = "cuda:0"
+    """The device for Newton physics simulation (e.g. ``cuda:0``)."""
+
+    num_substeps: int = 10
+    """Number of Newton solver substeps per EmbodiChain physics step."""
+
+    requires_grad: bool = False
+    """Whether to finalize the Newton model for differentiable simulation."""
+
+    use_cuda_graph: bool = True
+    """Whether to use CUDA graph capture for Newton stepping when supported."""
+
+    debug_mode: bool = False
+    """Whether to enable Newton debug mode."""
+
+    solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
+    """Optional Newton solver configuration.
+
+    A mapping is converted to the matching DexSim Newton solver config. Include
+    ``solver_type`` or ``class_type`` to select the solver, then add any
+    parameters accepted by that DexSim solver config. If omitted, the Newton
+    backend uses DexSim's MuJoCo Warp solver config by default.
+    """
+
+    broad_phase: Literal["nxn", "sap", "explicit"] | None = None
+    """Newton collision broad-phase implementation. If None, DexSim chooses its default."""
+
+    visualizer_enabled: bool = False
+    """Whether to enable the Newton visualizer."""
+
+    def to_dexsim_cfg(
+        self,
+        gpu_id: int,
+    ):
+        """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        from dexsim.engine.newton_physics import (
+            FeatherstoneSolverCfg,
+            MJWarpSolverCfg,
+            NewtonCfg,
+            NewtonCollisionPipelineCfg,
+            SemiImplicitSolverCfg,
+            VBDSolverCfg,
+            XPBDSolverCfg,
+        )
+
+        torch_device = (
+            torch.device(self.device) if isinstance(self.device, str) else self.device
+        )
+        device = (
+            f"cuda:{gpu_id}"
+            if torch_device.type == "cuda" and torch_device.index is None
+            else str(torch_device)
+        )
+
+        solver_cfg_map = {
+            "mujoco_warp": MJWarpSolverCfg,
+            "xpbd": XPBDSolverCfg,
+            "semi_implicit": SemiImplicitSolverCfg,
+            "featherstone": FeatherstoneSolverCfg,
+            "vbd": VBDSolverCfg,
+        }
+        solver_cfg = _newton_solver_cfg_to_dexsim(
+            solver_cfg=self.solver_cfg,
+            solver_cfg_map=solver_cfg_map,
+        )
+
+        if self.requires_grad and solver_cfg.solver_type != "semi_implicit":
+            logger.log_error(
+                "Newton gradient mode requires solver_type='semi_implicit'."
+            )
+
+        cfg = NewtonCfg(
+            dt=self.physics_dt,
+            num_substeps=self.num_substeps,
+            device=device,
+            debug_mode=self.debug_mode,
+            requires_grad=self.requires_grad,
+            solver_cfg=solver_cfg,
+            collision_pipeline_cfg=NewtonCollisionPipelineCfg(
+                broad_phase=self.broad_phase,
+                requires_grad=self.requires_grad,
+            ),
+        )
+        cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
+        cfg._visualizer_enabled = self.visualizer_enabled
+        return cfg
+
+
+def _normalize_newton_solver_type(solver_type: str) -> str:
+    """Normalize public EmbodiChain and DexSim Newton solver aliases."""
+    key = solver_type.replace("-", "_").lower()
+    aliases = {
+        "mjwarp": "mujoco_warp",
+        "mjwarpsolver": "mujoco_warp",
+        "mjwarpsolvercfg": "mujoco_warp",
+        "mjwarp_solver": "mujoco_warp",
+        "mjwarp_solver_cfg": "mujoco_warp",
+        "mujoco_warp": "mujoco_warp",
+        "mujocowarp": "mujoco_warp",
+        "mujocowarpsolver": "mujoco_warp",
+        "mujocowarpsolvercfg": "mujoco_warp",
+        "xpbdsolver": "xpbd",
+        "xpbdsolvercfg": "xpbd",
+        "xpbd": "xpbd",
+        "semiimplicit": "semi_implicit",
+        "semi_implicit": "semi_implicit",
+        "semiimplicitsolver": "semi_implicit",
+        "semiimplicitsolvercfg": "semi_implicit",
+        "featherstone": "featherstone",
+        "featherstonesolver": "featherstone",
+        "featherstonesolvercfg": "featherstone",
+        "vbd": "vbd",
+        "vbdsolver": "vbd",
+        "vbdsolvercfg": "vbd",
+    }
+    if key not in aliases:
+        logger.log_error(
+            f"Unsupported Newton solver type '{solver_type}'. "
+            "Expected one of 'mjwarp', 'xpbd', 'semi_implicit', "
+            "'featherstone', or 'vbd'."
+        )
+    return aliases[key]
+
+
+def _newton_solver_cfg_to_dexsim(
+    solver_cfg: Mapping[str, Any] | object | None,
+    solver_cfg_map: Mapping[str, type],
+) -> object:
+    """Convert EmbodiChain Newton solver config input to a DexSim config."""
+    if solver_cfg is None:
+        return solver_cfg_map["mujoco_warp"]()
+
+    if not isinstance(solver_cfg, Mapping):
+        if not hasattr(solver_cfg, "solver_type"):
+            logger.log_error(
+                "Newton solver_cfg must be a mapping or a DexSim Newton solver "
+                "config object with a 'solver_type' attribute."
+            )
+        return solver_cfg
+
+    solver_cfg_data = dict(solver_cfg)
+    configured_solver_type = (
+        solver_cfg_data.pop("solver_type", None)
+        or solver_cfg_data.pop("class_type", None)
+        or "mujoco_warp"
+    )
+    normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    return solver_cfg_map[normalized_solver_type](**solver_cfg_data)
 
 
 @configclass
@@ -195,28 +396,32 @@ class WindowRecordCfg:
     """Video file prefix used when no explicit save path is provided."""
 
 
-@configclass
-class GPUMemoryCfg:
-    """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
+def physics_cfg_for_backend(
+    backend: Literal["default", "newton"],
+) -> DefaultPhysicsCfg | NewtonPhysicsCfg:
+    """Return a default physics configuration instance for the given backend."""
+    if backend == "newton":
+        return NewtonPhysicsCfg()
+    return DefaultPhysicsCfg()
 
-    temp_buffer_capacity: int = 2**24
-    """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
 
-    max_rigid_contact_count: int = 2**19
-    """Increase this if you get 'Contact buffer overflow detected'"""
+def physics_backend_from_cfg(
+    physics_cfg: PhysicsCfg,
+) -> Literal["default", "newton"]:
+    """Infer the physics backend name from a physics configuration instance."""
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        return "newton"
+    if isinstance(physics_cfg, DefaultPhysicsCfg):
+        return "default"
+    logger.log_error(
+        f"Unsupported physics_cfg type '{type(physics_cfg).__name__}'. "
+        "Expected DefaultPhysicsCfg or NewtonPhysicsCfg."
+    )
 
-    max_rigid_patch_count: int = (
-        2**18
-    )  # 81920 is DexSim default but most tasks work with 2**18
-    """Increase this if you get 'Patch buffer overflow detected'"""
 
-    heap_capacity: int = 2**26
-
-    found_lost_pairs_capacity: int = (
-        2**25
-    )  # 262144 is DexSim default but most tasks work with 2**25
-    found_lost_aggregate_pairs_capacity: int = 2**10
-    total_aggregate_pairs_capacity: int = 2**10
+def validate_physics_cfg(physics_cfg: PhysicsCfg) -> None:
+    """Validate that ``physics_cfg`` is a supported backend configuration."""
+    physics_backend_from_cfg(physics_cfg)
 
 
 @configclass
