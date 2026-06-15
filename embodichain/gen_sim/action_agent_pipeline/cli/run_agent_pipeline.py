@@ -983,7 +983,7 @@ def _duplicated_numbered_rigid_object_groups(
                 sorted(
                     entries,
                     key=lambda entry: (
-                        -float(entry["y"]),
+                        float(entry["y"]),
                         str(entry["object"]["uid"]),
                     ),
                 ),
