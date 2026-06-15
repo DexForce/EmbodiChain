@@ -173,21 +173,32 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
         logger.log_error(f"Unknow drive type {drive_type}")
 
     for i, art in enumerate(arts):
-        art.set_body_scale(cfg.body_scale)
-        art.set_physical_attr(cfg.attrs.attr())
+        is_newton_art = hasattr(art, "dexsim_meta_links")
+        lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)
+        lifecycle_name = getattr(lifecycle_state, "name", "")
+        if not is_newton_art or lifecycle_name == "BUILDER":
+            art.set_body_scale(cfg.body_scale)
         link_names = art.get_link_names()
+        if is_newton_art:
+            for name in link_names:
+                art.set_physical_attr(cfg.attrs.attr(), name)
+        else:
+            art.set_physical_attr(cfg.attrs.attr())
         _apply_link_physics_overrides(art, cfg, link_names)
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
         art.set_articulation_flag(
             ArticulationFlag.DISABLE_SELF_COLLISION, cfg.disable_self_collision
         )
-        art.set_solver_iteration_counts(
-            min_position_iters=cfg.min_position_iters,
-            min_velocity_iters=cfg.min_velocity_iters,
-        )
+        if hasattr(art, "set_solver_iteration_counts"):
+            art.set_solver_iteration_counts(
+                min_position_iters=cfg.min_position_iters,
+                min_velocity_iters=cfg.min_velocity_iters,
+            )
 
         # TODO: We should change this part after improving spawning of articulation.
         for name in link_names:
+            if not hasattr(art, "get_physical_body"):
+                continue
             physical_body = art.get_physical_body(name)
             inertia = physical_body.get_mass_space_inertia_tensor()
             inertia = np.maximum(inertia, 1e-4)

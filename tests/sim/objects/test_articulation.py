@@ -28,6 +28,7 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    physics_cfg_for_backend,
     RigidBodyAttributesCfg,
     RigidBodyAttributesOverrideCfg,
 )
@@ -37,6 +38,12 @@ from dexsim.types import ActorType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
+
+
+def _teardown_newton_physics() -> None:
+    from dexsim.engine.newton_physics import teardown_newton_physics
+
+    teardown_newton_physics()
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:
@@ -77,9 +84,15 @@ class TestRigidBodyAttributesOverride:
 class BaseArticulationTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, device):
-        config = SimulationManagerCfg(headless=True, device=device, num_envs=NUM_ARENAS)
+    def setup_simulation(self, device, physics: str = "default"):
+        config = SimulationManagerCfg(
+            headless=True,
+            device=device,
+            num_envs=NUM_ARENAS,
+            physics_cfg=physics_cfg_for_backend(physics),
+        )
         self.sim = SimulationManager(config)
+        self.physics = physics
 
         art_path = get_data_path(ART_PATH)
         assert os.path.isfile(art_path)
@@ -91,6 +104,8 @@ class BaseArticulationTest:
 
         if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
             self.sim.init_gpu_physics()
+        if physics == "newton":
+            self.sim.finalize_newton_physics()
 
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
@@ -311,7 +326,7 @@ class BaseArticulationLinkPhysicsTest:
     """Tests for per-link physics configuration (isolated sim per test)."""
 
     def setup_simulation(self, sim_device: str) -> None:
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=2)
+        config = SimulationManagerCfg(headless=True, device=sim_device, num_envs=2)
         self.sim = SimulationManager(config)
         self.art_path = get_data_path(ART_PATH)
         assert os.path.isfile(self.art_path)
@@ -422,6 +437,69 @@ class TestArticulationCPU(BaseArticulationTest):
 class TestArticulationCUDA(BaseArticulationTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+
+class TestArticulationNewton(BaseArticulationTest):
+    """Articulation coverage on the DexSim Newton physics backend."""
+
+    def setup_method(self):
+        self.setup_simulation("cuda", physics="newton")
+
+    def teardown_method(self):
+        self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        _teardown_newton_physics()
+        import gc
+
+        gc.collect()
+
+    def test_control_api(self):
+        """Newton articulation direct state and control buffers round-trip."""
+        qpos_zero = torch.zeros(
+            (NUM_ARENAS, self.art.dof), dtype=torch.float32, device=self.sim.device
+        )
+        qpos = qpos_zero.clone()
+        qpos[:, -1] = 0.1
+
+        self.art.set_qpos(qpos, env_ids=None, target=False)
+        assert torch.allclose(self.art.body_data.qpos, qpos, atol=1e-5)
+
+        self.art.set_qpos(qpos_zero, env_ids=None, target=False)
+        self.art.set_qpos(qpos, env_ids=None, target=True)
+        assert torch.allclose(self.art.body_data.target_qpos, qpos, atol=1e-5)
+
+        qvel = torch.full(
+            (NUM_ARENAS, self.art.dof),
+            0.2,
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        self.art.set_qvel(qvel, env_ids=None, target=False)
+        assert torch.allclose(self.art.body_data.qvel, qvel, atol=1e-5)
+
+        qf = torch.ones(
+            (NUM_ARENAS, self.art.dof), dtype=torch.float32, device=self.sim.device
+        )
+        self.art.set_qf(qf, env_ids=None)
+        assert torch.allclose(self.art.body_data.qf, qf, atol=1e-5)
+
+        self.art.clear_dynamics()
+        assert torch.allclose(self.art.body_data.qvel, qpos_zero, atol=1e-5)
+        assert torch.allclose(self.art.body_data.qf, qpos_zero, atol=1e-5)
+
+    @pytest.mark.skip(
+        reason="DexSim Newton articulation visual-material helpers are render-Skeleton only."
+    )
+    def test_set_visual_material(self):
+        super().test_set_visual_material()
+
+    @pytest.mark.skip(
+        reason="DexSim Newton articulation physical-visible helpers are render-Skeleton only."
+    )
+    def test_set_physical_visible(self):
+        super().test_set_physical_visible()
 
 
 if __name__ == "__main__":

@@ -14,9 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base import RigidBodyViewBase
-from .default import DefaultRigidBodyView
+from .base import ArticulationViewBase, RigidBodyViewBase
+from .default import DefaultArticulationView, DefaultRigidBodyView
 from .newton import (
+    NewtonArticulationView,
     NewtonRigidBodyView,
     apply_collision_filter_for_entities,
     apply_collision_filter_for_envs,
@@ -24,8 +25,11 @@ from .newton import (
 )
 
 __all__ = [
+    "ArticulationViewBase",
     "RigidBodyViewBase",
+    "DefaultArticulationView",
     "DefaultRigidBodyView",
+    "NewtonArticulationView",
     "NewtonRigidBodyView",
     "apply_collision_filter_for_entities",
     "apply_collision_filter_for_envs",

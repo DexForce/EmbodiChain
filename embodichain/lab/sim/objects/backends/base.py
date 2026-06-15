@@ -21,7 +21,7 @@ from functools import cached_property
 
 import torch
 
-__all__ = ["RigidBodyViewBase"]
+__all__ = ["RigidBodyViewBase", "ArticulationViewBase"]
 
 
 class RigidBodyViewBase(ABC):
@@ -202,4 +202,147 @@ class RigidBodyViewBase(ABC):
     @abstractmethod
     def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         """Apply restitution coefficients from ``(N, 1)`` tensor."""
+        ...
+
+
+class ArticulationViewBase(ABC):
+    """Abstract interface for physics-backend articulation data access.
+
+    Public root/link poses use EmbodiChain convention:
+    ``(x, y, z, qx, qy, qz, qw)``.
+    """
+
+    @property
+    @abstractmethod
+    def is_ready(self) -> bool:
+        """Whether backend runtime data can be accessed through batch APIs."""
+        ...
+
+    @property
+    def is_newton_backend(self) -> bool:
+        """Whether this view targets the DexSim Newton backend."""
+        return False
+
+    @property
+    @abstractmethod
+    def articulation_ids_tensor(self) -> torch.Tensor | None:
+        """Backend articulation ids as an int32 tensor, if the backend uses ids."""
+        ...
+
+    @abstractmethod
+    def select_articulation_ids(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
+        """Return backend articulation ids for the given environment ids."""
+        ...
+
+    @abstractmethod
+    def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch root poses into ``data`` and return a view/result tensor."""
+        ...
+
+    @abstractmethod
+    def fetch_root_linear_velocity(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch root linear velocities into ``data`` and return a tensor."""
+        ...
+
+    @abstractmethod
+    def fetch_root_angular_velocity(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch root angular velocities into ``data`` and return a tensor."""
+        ...
+
+    @abstractmethod
+    def fetch_qpos(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch current joint positions into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_target_qpos(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch target joint positions into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_qvel(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch current joint velocities into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_target_qvel(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch target joint velocities into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_qacc(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch current joint accelerations into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_qf(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch current joint forces into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_link_pose(self, data: torch.Tensor) -> torch.Tensor:
+        """Fetch link poses into ``data``."""
+        ...
+
+    @abstractmethod
+    def fetch_link_velocity(
+        self,
+        data: torch.Tensor,
+        linear_data: torch.Tensor,
+        angular_data: torch.Tensor,
+    ) -> torch.Tensor:
+        """Fetch link velocities into ``data`` using provided scratch buffers."""
+        ...
+
+    @abstractmethod
+    def apply_root_pose(
+        self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Apply root poses from ``(N, 7)`` or equivalent backend convention."""
+        ...
+
+    @abstractmethod
+    def apply_qpos(
+        self,
+        qpos: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+        *,
+        target: bool,
+    ) -> None:
+        """Apply joint positions for selected envs and joints."""
+        ...
+
+    @abstractmethod
+    def apply_qvel(
+        self,
+        qvel: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+        *,
+        target: bool,
+    ) -> None:
+        """Apply joint velocities for selected envs and joints."""
+        ...
+
+    @abstractmethod
+    def apply_qf(
+        self,
+        qf: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Apply joint forces for selected envs and joints."""
+        ...
+
+    @abstractmethod
+    def clear_dynamics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        """Clear joint velocities, target velocities, and forces."""
+        ...
+
+    @abstractmethod
+    def compute_kinematics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        """Refresh articulation kinematics if required by the backend."""
         ...

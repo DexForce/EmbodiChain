@@ -617,6 +617,8 @@ class SimulationManager:
 
         for rigid_obj in self._rigid_objects.values():
             rigid_obj.reset()
+        for articulation in self._articulations.values():
+            articulation.reset()
         # Rigid object groups are not supported on the Newton backend yet.
 
     def enable_physics(self, enable: bool) -> None:
@@ -1343,13 +1345,6 @@ class SimulationManager:
         Returns:
             Articulation: The added articulation instance handle.
         """
-        if self.is_newton_backend:
-            logger.log_error(
-                "Articulation support for the Newton backend is not enabled "
-                "in EmbodiChain yet.",
-                error_type=NotImplementedError,
-            )
-
         uid = cfg.uid
         if uid is None:
             uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
@@ -1395,6 +1390,7 @@ class SimulationManager:
         articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
 
         self._articulations[uid] = articulation
+        self._invalidate_newton_physics()
 
         return articulation
 

@@ -18,15 +18,28 @@ from __future__ import annotations
 from typing import Sequence
 from functools import cached_property
 
+import numpy as np
 import torch
 
 from dexsim.models import MeshObject
-from dexsim.engine import PhysicsScene
-from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
-from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
-from embodichain.utils.math import convert_quat, matrix_from_quat
+from dexsim.engine import Articulation, PhysicsScene
+from dexsim.types import (
+    ArticulationGPUAPIReadType,
+    ArticulationGPUAPIWriteType,
+    RigidBodyGPUAPIReadType,
+    RigidBodyGPUAPIWriteType,
+)
+from embodichain.lab.sim.objects.backends.base import (
+    ArticulationViewBase,
+    RigidBodyViewBase,
+)
+from embodichain.utils.math import (
+    convert_quat,
+    matrix_from_quat,
+    quat_from_matrix,
+)
 
-__all__ = ["DefaultRigidBodyView"]
+__all__ = ["DefaultRigidBodyView", "DefaultArticulationView"]
 
 
 class DefaultRigidBodyView(RigidBodyViewBase):
@@ -353,3 +366,360 @@ class DefaultRigidBodyView(RigidBodyViewBase):
         data_cpu = data.cpu().numpy()
         for i, idx in enumerate(indices):
             getattr(self.entities[idx], cpu_method)(data_cpu[i])
+
+
+class DefaultArticulationView(ArticulationViewBase):
+    """Default DexSim backend articulation data adapter."""
+
+    def __init__(
+        self,
+        entities: Sequence[Articulation],
+        ps: PhysicsScene,
+        device: torch.device,
+    ) -> None:
+        self.entities = list(entities)
+        self.ps = ps
+        self.device = device
+        self._is_gpu = device.type == "cuda"
+
+        self.dof = self.entities[0].get_dof()
+        self.num_links = self.entities[0].get_links_num()
+        self.link_names = self.entities[0].get_link_names()
+
+        if self._is_gpu:
+            self._gpu_indices = torch.as_tensor(
+                [entity.get_gpu_index() for entity in self.entities],
+                dtype=torch.int32,
+                device=self.device,
+            )
+            max_dof = self.ps.gpu_get_articulation_max_dof()
+        else:
+            self._gpu_indices = None
+            max_dof = self.dof
+
+        self._qpos_apply = torch.zeros(
+            (len(self.entities), max_dof), dtype=torch.float32, device=self.device
+        )
+        self._target_qpos_apply = torch.zeros_like(self._qpos_apply)
+        self._qvel_apply = torch.zeros_like(self._qpos_apply)
+        self._target_qvel_apply = torch.zeros_like(self._qpos_apply)
+        self._qf_apply = torch.zeros_like(self._qpos_apply)
+
+    @property
+    def is_ready(self) -> bool:
+        return True
+
+    @property
+    def articulation_ids_tensor(self) -> torch.Tensor | None:
+        return self._gpu_indices
+
+    def select_articulation_ids(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
+        if self._gpu_indices is None:
+            return torch.as_tensor(env_ids, dtype=torch.int32, device=self.device)
+        if not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        return self._gpu_indices[env_ids.to(device=self.device, dtype=torch.long)]
+
+    def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
+        if self._is_gpu:
+            self.ps.gpu_fetch_root_data(
+                data=data,
+                gpu_indices=self._gpu_indices,
+                data_type=ArticulationGPUAPIReadType.ROOT_GLOBAL_POSE,
+            )
+            data[:, :4] = convert_quat(data[:, :4], to="wxyz")
+            return data[:, [4, 5, 6, 0, 1, 2, 3]]
+
+        root_pose = torch.as_tensor(
+            np.array([entity.get_local_pose() for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        xyzs = root_pose[:, :3, 3]
+        quats = quat_from_matrix(root_pose[:, :3, :3])
+        return torch.cat((xyzs, quats), dim=-1)
+
+    def fetch_root_linear_velocity(self, data: torch.Tensor) -> torch.Tensor:
+        if self._is_gpu:
+            self.ps.gpu_fetch_root_data(
+                data=data,
+                gpu_indices=self._gpu_indices,
+                data_type=ArticulationGPUAPIReadType.ROOT_LINEAR_VELOCITY,
+            )
+            return data.clone()
+        return torch.as_tensor(
+            np.array([entity.get_root_link_velocity()[:3] for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+    def fetch_root_angular_velocity(self, data: torch.Tensor) -> torch.Tensor:
+        if self._is_gpu:
+            self.ps.gpu_fetch_root_data(
+                data=data,
+                gpu_indices=self._gpu_indices,
+                data_type=ArticulationGPUAPIReadType.ROOT_ANGULAR_VELOCITY,
+            )
+            return data.clone()
+        return torch.as_tensor(
+            np.array([entity.get_root_link_velocity()[3:] for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+    def fetch_qpos(self, data: torch.Tensor) -> torch.Tensor:
+        return self._fetch_joint_data(data, ArticulationGPUAPIReadType.JOINT_POSITION)
+
+    def fetch_target_qpos(self, data: torch.Tensor) -> torch.Tensor:
+        return self._fetch_joint_data(
+            data, ArticulationGPUAPIReadType.JOINT_TARGET_POSITION
+        )
+
+    def fetch_qvel(self, data: torch.Tensor) -> torch.Tensor:
+        return self._fetch_joint_data(data, ArticulationGPUAPIReadType.JOINT_VELOCITY)
+
+    def fetch_target_qvel(self, data: torch.Tensor) -> torch.Tensor:
+        return self._fetch_joint_data(
+            data, ArticulationGPUAPIReadType.JOINT_TARGET_VELOCITY
+        )
+
+    def fetch_qacc(self, data: torch.Tensor) -> torch.Tensor:
+        return self._fetch_joint_data(
+            data, ArticulationGPUAPIReadType.JOINT_ACCELERATION
+        )
+
+    def fetch_qf(self, data: torch.Tensor) -> torch.Tensor:
+        return self._fetch_joint_data(data, ArticulationGPUAPIReadType.JOINT_FORCE)
+
+    def fetch_link_pose(self, data: torch.Tensor) -> torch.Tensor:
+        if self._is_gpu:
+            self.ps.gpu_fetch_link_data(
+                data=data,
+                gpu_indices=self._gpu_indices,
+                data_type=ArticulationGPUAPIReadType.LINK_GLOBAL_POSE,
+            )
+            quat = convert_quat(data[..., :4], to="wxyz")
+            return torch.cat((data[..., 4:], quat), dim=-1)
+
+        from embodichain.lab.sim.utility import get_dexsim_arenas
+
+        arenas = get_dexsim_arenas()
+        for j, entity in enumerate(self.entities):
+            link_pose = np.zeros((self.num_links, 4, 4), dtype=np.float32)
+            for i, link_name in enumerate(self.link_names):
+                pose = entity.get_link_pose(link_name)
+                arena_pose = arenas[j].get_root_node().get_local_pose()
+                pose[:2, 3] -= arena_pose[:2, 3]
+                link_pose[i] = pose
+
+            link_pose_tensor = torch.from_numpy(link_pose)
+            xyz = link_pose_tensor[:, :3, 3]
+            quat = quat_from_matrix(link_pose_tensor[:, :3, :3])
+            data[j][: self.num_links, :] = torch.cat((xyz, quat), dim=-1)
+        return data[:, : self.num_links, :]
+
+    def fetch_link_velocity(
+        self,
+        data: torch.Tensor,
+        linear_data: torch.Tensor,
+        angular_data: torch.Tensor,
+    ) -> torch.Tensor:
+        if self._is_gpu:
+            self.ps.gpu_fetch_link_data(
+                data=linear_data,
+                gpu_indices=self._gpu_indices,
+                data_type=ArticulationGPUAPIReadType.LINK_LINEAR_VELOCITY,
+            )
+            self.ps.gpu_fetch_link_data(
+                data=angular_data,
+                gpu_indices=self._gpu_indices,
+                data_type=ArticulationGPUAPIReadType.LINK_ANGULAR_VELOCITY,
+            )
+            data[..., :3] = linear_data
+            data[..., 3:] = angular_data
+            return data[:, : self.num_links, :]
+
+        for i, entity in enumerate(self.entities):
+            data[i][: self.num_links] = torch.from_numpy(
+                entity.get_link_general_velocities()
+            )
+        return data[:, : self.num_links, :]
+
+    def apply_root_pose(
+        self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        pose = pose.to(dtype=torch.float32)
+        if self._is_gpu:
+            xyz = pose[:, :3]
+            quat = convert_quat(pose[:, 3:7], to="xyzw")
+            data = torch.cat((quat, xyz), dim=-1)
+            indices = self.select_articulation_ids(env_ids)
+            self.ps.gpu_apply_root_data(
+                data=data,
+                gpu_indices=indices,
+                data_type=ArticulationGPUAPIWriteType.ROOT_GLOBAL_POSE,
+            )
+            self.ps.gpu_compute_articulation_kinematic(gpu_indices=indices)
+            return
+
+        pose_cpu = pose.cpu()
+        env_indices = self._env_indices_list(env_ids)
+        pose_matrix = torch.eye(4).unsqueeze(0).repeat(len(env_indices), 1, 1)
+        pose_matrix[:, :3, 3] = pose_cpu[:, :3]
+        pose_matrix[:, :3, :3] = matrix_from_quat(pose_cpu[:, 3:7])
+        for i, env_idx in enumerate(env_indices):
+            self.entities[env_idx].set_local_pose(pose_matrix[i])
+
+    def apply_qpos(
+        self,
+        qpos: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+        *,
+        target: bool,
+    ) -> None:
+        if self._is_gpu:
+            buffer = self._target_qpos_apply if target else self._qpos_apply
+            data_type = (
+                ArticulationGPUAPIWriteType.JOINT_TARGET_POSITION
+                if target
+                else ArticulationGPUAPIWriteType.JOINT_POSITION
+            )
+            self._apply_gpu_joint_rows(buffer, qpos, env_ids, joint_ids, data_type)
+            return
+
+        joint_ids_np = self._joint_ids_numpy(joint_ids)
+        qpos_np = qpos.detach().cpu().numpy()
+        for i, env_idx in enumerate(self._env_indices_list(env_ids)):
+            entity = self.entities[env_idx]
+            setter = entity.set_target_qpos if target else entity.set_current_qpos
+            setter(qpos_np[i], joint_ids_np)
+
+    def apply_qvel(
+        self,
+        qvel: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+        *,
+        target: bool,
+    ) -> None:
+        if self._is_gpu:
+            buffer = self._target_qvel_apply if target else self._qvel_apply
+            data_type = (
+                ArticulationGPUAPIWriteType.JOINT_TARGET_VELOCITY
+                if target
+                else ArticulationGPUAPIWriteType.JOINT_VELOCITY
+            )
+            self._apply_gpu_joint_rows(buffer, qvel, env_ids, joint_ids, data_type)
+            return
+
+        joint_ids_np = self._joint_ids_numpy(joint_ids)
+        qvel_np = qvel.detach().cpu().numpy()
+        for i, env_idx in enumerate(self._env_indices_list(env_ids)):
+            entity = self.entities[env_idx]
+            setter = entity.set_target_qvel if target else entity.set_current_qvel
+            setter(qvel_np[i], joint_ids_np)
+
+    def apply_qf(
+        self,
+        qf: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        if self._is_gpu:
+            self._apply_gpu_joint_rows(
+                self._qf_apply,
+                qf,
+                env_ids,
+                joint_ids,
+                ArticulationGPUAPIWriteType.JOINT_FORCE,
+            )
+            return
+
+        joint_ids_np = self._joint_ids_numpy(joint_ids)
+        qf_np = qf.detach().cpu().numpy()
+        for i, env_idx in enumerate(self._env_indices_list(env_ids)):
+            self.entities[env_idx].set_current_qf(qf_np[i], joint_ids_np)
+
+    def clear_dynamics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        zeros = torch.zeros(
+            (len(env_ids), self.dof), dtype=torch.float32, device=self.device
+        )
+        joint_ids = torch.arange(self.dof, dtype=torch.int32, device=self.device)
+        self.apply_qvel(zeros, env_ids, joint_ids, target=False)
+        self.apply_qvel(zeros, env_ids, joint_ids, target=True)
+        self.apply_qf(zeros, env_ids, joint_ids)
+
+    def compute_kinematics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        if self._is_gpu:
+            self.ps.gpu_compute_articulation_kinematic(
+                gpu_indices=self.select_articulation_ids(env_ids)
+            )
+
+    def _fetch_joint_data(self, data: torch.Tensor, data_type) -> torch.Tensor:
+        if self._is_gpu:
+            self.ps.gpu_fetch_joint_data(
+                data=data,
+                gpu_indices=self._gpu_indices,
+                data_type=data_type,
+            )
+            return data[:, : self.dof].clone()
+
+        method_map = {
+            ArticulationGPUAPIReadType.JOINT_POSITION: lambda entity: entity.get_current_qpos(),
+            ArticulationGPUAPIReadType.JOINT_TARGET_POSITION: lambda entity: entity.get_current_qpos(
+                is_target=True
+            ),
+            ArticulationGPUAPIReadType.JOINT_VELOCITY: lambda entity: entity.get_current_qvel(),
+            ArticulationGPUAPIReadType.JOINT_TARGET_VELOCITY: lambda entity: entity.get_current_qvel(
+                is_target=True
+            ),
+            ArticulationGPUAPIReadType.JOINT_ACCELERATION: lambda entity: entity.get_current_qacc(),
+            ArticulationGPUAPIReadType.JOINT_FORCE: lambda entity: entity.get_current_qf(),
+        }
+        return torch.as_tensor(
+            np.array([method_map[data_type](entity) for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+    def _apply_gpu_joint_rows(
+        self,
+        buffer: torch.Tensor,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        joint_ids: Sequence[int] | torch.Tensor,
+        data_type,
+    ) -> None:
+        env_ids_tensor = self._env_ids_tensor(env_ids)
+        joint_ids_tensor = self._joint_ids_tensor(joint_ids)
+        buffer[env_ids_tensor[:, None], joint_ids_tensor] = values
+        self.ps.gpu_apply_joint_data(
+            data=buffer,
+            gpu_indices=self.select_articulation_ids(env_ids),
+            data_type=data_type,
+        )
+
+    def _env_ids_tensor(self, env_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:
+        if not isinstance(env_ids, torch.Tensor):
+            return torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        return env_ids.to(device=self.device, dtype=torch.long)
+
+    def _joint_ids_tensor(
+        self, joint_ids: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
+        if not isinstance(joint_ids, torch.Tensor):
+            return torch.as_tensor(joint_ids, dtype=torch.long, device=self.device)
+        return joint_ids.to(device=self.device, dtype=torch.long)
+
+    def _env_indices_list(self, env_ids: Sequence[int] | torch.Tensor) -> list[int]:
+        if isinstance(env_ids, torch.Tensor):
+            return env_ids.detach().cpu().to(dtype=torch.long).tolist()
+        return [int(env_idx) for env_idx in env_ids]
+
+    def _joint_ids_numpy(self, joint_ids: Sequence[int] | torch.Tensor) -> np.ndarray:
+        if isinstance(joint_ids, torch.Tensor):
+            return joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
+        return np.asarray(joint_ids, dtype=np.int32)
