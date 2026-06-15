@@ -27,10 +27,7 @@ from typing import Iterable, Optional
 
 from embodichain.gen_sim.simready_pipeline.core.asset import Asset
 from embodichain.gen_sim.simready_pipeline.utils.ingest_utils import (
-<<<<<<< HEAD
-=======
     compute_folder_sha256,
->>>>>>> main
     new_uuid,
     trimesh_parse_ingest,
     blender_parser_ingest,
@@ -51,12 +48,9 @@ GEN_CONFIG = _load_ingest_config()
 INGEST_CONFIG = GEN_CONFIG.get("ingest", {})
 MESH_PROCESSING_CONFIG = GEN_CONFIG.get("mesh_processing", {})
 CANOCAIL_ASSET_NAME = INGEST_CONFIG.get("canonical_asset_name", "asset.obj")
-<<<<<<< HEAD
-=======
 SOURCE_PREPARATION_CONFIG = INGEST_CONFIG.get("source_preparation", {})
 SOURCE_PREPARATION_MODE = SOURCE_PREPARATION_CONFIG.get("mode", "blender")
 SOURCE_PREPARATION_MODES = {"blender", "trimesh"}
->>>>>>> main
 UNPROCESSED_FORMATS = INGEST_CONFIG.get(
     "unprocessed_formats", [".urdf", ".usd"]
 )  # Copy these for now; parsing can be added later.
@@ -70,8 +64,6 @@ BLENDER_REMESH_BAKE_CONFIG = MESH_PROCESSING_CONFIG.get(
 )
 
 
-<<<<<<< HEAD
-=======
 def _resolve_source_preparation_mode(source_preparation_mode: str | None) -> str:
     mode = (source_preparation_mode or SOURCE_PREPARATION_MODE).lower()
     if mode not in SOURCE_PREPARATION_MODES:
@@ -83,26 +75,18 @@ def _resolve_source_preparation_mode(source_preparation_mode: str | None) -> str
     return mode
 
 
->>>>>>> main
 def ingest_one_asset(
     asset_dir: str | Path,
     category: str,
     output_root: Path,
     store: JsonStore,
     manager: ParserManager,
-<<<<<<< HEAD
-    simple_ingest: bool = True,
-) -> Optional[Asset]:
-
-    asset_dir = Path(asset_dir)  # source path
-=======
     source_preparation_mode: str | None = None,
 ) -> Optional[Asset]:
 
     asset_dir = Path(asset_dir)  # source path
     source_preparation_mode = _resolve_source_preparation_mode(source_preparation_mode)
     ingest_sha256 = compute_folder_sha256(asset_dir)
->>>>>>> main
 
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -142,11 +126,7 @@ def ingest_one_asset(
         source_file = find_first_mesh_file(files, PARSEABLE_MESH_FORMATS)
         asset_name = source_file.stem if source_file else None
         ingest_mode = "unified"
-<<<<<<< HEAD
-        if simple_ingest:
-=======
         if source_preparation_mode == "trimesh":
->>>>>>> main
             visual_info = trimesh_parse_ingest(
                 source_file,
                 asset_source,
@@ -154,11 +134,7 @@ def ingest_one_asset(
                 mtl_name=Path(CANOCAIL_ASSET_NAME).with_suffix(".mtl").name,
                 config=TRIMESH_INGEST_CONFIG,
             )
-<<<<<<< HEAD
-        else:
-=======
         elif source_preparation_mode == "blender":
->>>>>>> main
             visual_info = blender_parser_ingest(
                 source_file,
                 asset_source,
@@ -166,27 +142,18 @@ def ingest_one_asset(
                 config=BLENDER_REMESH_BAKE_CONFIG,
                 trimesh_config=TRIMESH_INGEST_CONFIG,
             )
-<<<<<<< HEAD
-
-    asset = Asset(
-        asset_id=asset_id,
-=======
         else:
             raise AssertionError("unreachable source preparation mode")
 
     asset = Asset(
         asset_id=asset_id,
         ingest_sha256=ingest_sha256,
->>>>>>> main
         identity={
             "name": asset_name,
             "source_dir": asset_dir.name,
             "category": category,
             "ingest_mode": ingest_mode,
-<<<<<<< HEAD
-=======
             "source_preparation_mode": source_preparation_mode,
->>>>>>> main
         },
         parsed={"visual": visual_info},
     )
