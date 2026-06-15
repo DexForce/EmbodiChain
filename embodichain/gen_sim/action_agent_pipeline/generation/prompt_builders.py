@@ -32,11 +32,11 @@ __all__ = [
     "make_relative_task_prompt",
 ]
 
-_BASKET_LEFT_RELEASE_OFFSET_Y = 0.04
-_BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
+_BASKET_LEFT_RELEASE_OFFSET_Y = -0.04
+_BASKET_RIGHT_RELEASE_OFFSET_Y = 0.04
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
-- `left_of` means positive world y relative to the reference object.
-- `right_of` means negative world y relative to the reference object.
+- `left_of` means negative world y relative to the reference object.
+- `right_of` means positive world y relative to the reference object.
 - `front_of` means positive world x relative to the reference object.
 - `behind` means negative world x relative to the reference object.
 - `inside` and `on` use the reference object's xy center."""
@@ -371,8 +371,10 @@ This configuration directory is for a Dual-UR5 relative-placement task generated
 from a simple natural-language task description.
 
 The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the UR5 outside the left side of the table's near long edge.
-- right_arm is the UR5 outside the right side of the table's near long edge.
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
 
 The active arm for this task is `{active_arm}`. The inactive arm
 `{inactive_arm}` must stay null in the nominal graph.
@@ -411,8 +413,10 @@ This configuration directory is for a Dual-UR5 dual-arm relative-placement task
 generated from a simple natural-language task description.
 
 The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the UR5 outside the left side of the table's near long edge.
-- right_arm is the UR5 outside the right side of the table's near long edge.
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
 
 Both arms participate in the nominal graph:
 {placement_lines}
@@ -708,8 +712,10 @@ current robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel
 grippers.
 
 The robot is a dual-UR5 composite robot with two parallel grippers:
-- left_arm is the UR5 outside the left side of the table's near long edge.
-- right_arm is the UR5 outside the right side of the table's near long edge.
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
 
 Both UR5 bases are on the same long side of the table and face inward toward
 the central {roles.container_runtime_uid}. The bases are intentionally kept
@@ -717,9 +723,9 @@ outside the table edge to avoid initial robot-table contact.
 
 The interactive objects are:
 - {roles.left_target_runtime_uid}: the {left_target_text} mesh initially on the
-  positive-y side (source object {roles.left_target_source_uid}).
+  negative-y side (source object {roles.left_target_source_uid}).
 - {roles.right_target_runtime_uid}: the {right_target_text} mesh initially on the
-  negative-y side (source object {roles.right_target_source_uid}).
+  positive-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
 
