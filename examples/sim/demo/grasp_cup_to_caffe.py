@@ -428,6 +428,9 @@ def main():
     if not args.headless:
         sim.open_window()
 
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
+
     run_simulation(sim, robot, cup, caffe)
 
     logger.log_info("\n Press Ctrl+C to exit simulation loop.")

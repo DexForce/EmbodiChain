@@ -198,14 +198,15 @@ class ConvexCollisionChecker:
                 positive means the point cloud is outside the object.
         """
         n_batch = batch_points.shape[0]
-        point_signed_distance, is_point_collide = (
-            ConvexCollisionChecker.batch_point_convex_query(
-                self.plane_equations["plane_equations"],
-                self.plane_equations["plane_equation_counts"],
-                batch_points,
-                device=self.device,
-                collision_threshold=collision_threshold,
-            )
+        (
+            point_signed_distance,
+            is_point_collide,
+        ) = ConvexCollisionChecker.batch_point_convex_query(
+            self.plane_equations["plane_equations"],
+            self.plane_equations["plane_equation_counts"],
+            batch_points,
+            device=self.device,
+            collision_threshold=collision_threshold,
         )
         return is_point_collide, point_signed_distance
 

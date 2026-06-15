@@ -870,11 +870,13 @@ class Robot(Articulation):
                         # Add control part joints to indices and values
                         for part_name, part_value in control_part_dict.items():
                             part_joint_names = self.control_parts[part_name]
-                            part_indices, _, part_values = (
-                                resolve_matching_names_values(
-                                    {jn: part_value for jn in part_joint_names},
-                                    self.joint_names,
-                                )
+                            (
+                                part_indices,
+                                _,
+                                part_values,
+                            ) = resolve_matching_names_values(
+                                {jn: part_value for jn in part_joint_names},
+                                self.joint_names,
                             )
                             indices.extend(part_indices)
                             values.extend(part_values)
