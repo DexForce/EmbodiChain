@@ -83,7 +83,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 
 class TestMySimComponent:
     def setup_method(self):
-        config = SimulationManagerCfg(headless=True, device="cpu")
+        config = SimulationManagerCfg(headless=True, sim_device="cpu")
         self.sim = SimulationManager(config)
         # ... setup ...
 

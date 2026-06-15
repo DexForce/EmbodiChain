@@ -34,7 +34,8 @@ EmbodiChain configs form a nested hierarchy:
 EmbodiedEnvCfg
 ├── sim_cfg: SimulationManagerCfg
 │   ├── render_cfg: RenderCfg
-│   └── physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg
+│   ├── physics_config: PhysicsCfg
+│   └── gpu_memory_config: GPUMemoryCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg
 │   ├── drive_pros: JointDrivePropertiesCfg
@@ -145,9 +146,7 @@ When a training config references a gym config (via `trainer.gym_config`), the n
     "env": {
         "num_envs": 4,
         "sim_cfg": {
-            "physics_cfg": {
-                "device": "cuda:0"
-            },
+            "sim_device": "cuda:0",
             "headless": true
         },
         "robot": {

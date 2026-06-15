@@ -259,9 +259,6 @@ def trimesh_parse_ingest(
     return {"visual_ingest": visual_ingest, "visual_source": visual}
 
 
-import bpy
-
-
 def modify_mtl_file(mtl_path: Path, diffuse_name: str, normal_name: str) -> None:
     """Modify an exported OBJ .mtl to reference baked textures."""
     mtl_path = Path(mtl_path)
@@ -299,6 +296,8 @@ def blender_remesh_bake(
     config: Dict[str, Any] | None = None,
 ):
     """Remesh a high-poly mesh into a low-poly one and bake textures via Blender."""
+    import bpy
+
     config = config or {}
     remesh_config = config.get("remesh", {})
     decimate_config = config.get("decimate", {})

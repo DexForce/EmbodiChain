@@ -37,14 +37,12 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
     --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory
-
-# Use trimesh-only ingest for source normalization
-python -m embodichain.gen_sim.simready_pipeline.cli.start \
-    --input_dir /path/to/raw_mesh_folder \
-    --output_root /path/to/output_folder \
-    --category YourCategory \
-    --simple
 ```
+
+Select the source preparation strategy in
+``embodichain/gen_sim/simready_pipeline/configs/gen_config.json`` via
+``ingest.source_preparation.mode``. Supported modes are ``blender`` and
+``trimesh``.
 
 ### Arguments
 
@@ -53,7 +51,6 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 | ``--input_dir`` | *(required)* | Directory containing the raw asset files |
 | ``--output_root`` | *(required)* | Directory where processed assets are written |
 | ``--category`` | *(required)* | Category hint passed into the pipeline |
-| ``--simple`` | ``False`` | Use trimesh-only ingest and skip Blender remesh/bake during ingest |
 
 The generated output contains the canonical source mesh under ``asset_source/``, the final SimReady mesh under ``asset_simready/``, and USD export files under ``asset_usd/`` when export succeeds.
 
@@ -94,7 +91,7 @@ python -m embodichain preview-asset \
 | ``--body_type`` | ``kinematic`` | Body type for rigid objects: ``dynamic``, ``kinematic``, or ``static`` |
 | ``--use_usd_properties`` | ``False`` | Use physical properties from the USD file |
 | ``--fix_base`` | ``True`` | Fix the base of articulations |
-| ``--device`` | ``cpu`` | Simulation device |
+| ``--sim_device`` | ``cpu`` | Simulation device |
 | ``--headless`` | ``False`` | Run without rendering window |
 | ``--renderer`` | ``hybrid`` | Renderer backend: ``legacy``, ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |

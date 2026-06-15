@@ -106,7 +106,7 @@ def _build_env_cfg(
     gym_env_cfg.seed = getattr(gym_env_cfg, "seed", None)
     gym_env_cfg.sim_cfg.headless = headless
     gym_env_cfg.sim_cfg.gpu_id = gpu_id
-    gym_env_cfg.sim_cfg.device = device
+    gym_env_cfg.sim_cfg.sim_device = device
     return gym_config_data, gym_env_cfg
 
 

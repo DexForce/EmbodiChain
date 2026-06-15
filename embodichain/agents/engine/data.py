@@ -112,7 +112,7 @@ def _sim_worker_fn(
     env_cfg.init_rollout_buffer = False
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config.get("headless", True),
-        device=gym_config.get("device", "cpu"),
+        sim_device=gym_config.get("device", "cpu"),
         render_cfg=RenderCfg(renderer=gym_config.get("renderer", "hybrid")),
         gpu_id=gym_config.get("gpu_id", 0),
     )

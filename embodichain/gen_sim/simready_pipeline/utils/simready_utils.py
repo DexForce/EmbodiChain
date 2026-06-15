@@ -66,6 +66,23 @@ client = OpenAI(
 
 STRATEGY = None
 
+
+def get_chat_completion_content(resp: Any) -> str:
+    """Return chat completion message content with a clearer URL hint on bad responses."""
+
+    try:
+        choices = resp.choices
+    except AttributeError as exc:
+        raise AttributeError(
+            "Unexpected OpenAI-compatible chat completion response: missing "
+            "`choices`. Please check OPENAI_BASE_URL. OpenAI-style chat "
+            "completion endpoints usually require the version path, for example "
+            '"https://api.openai.com/v1", and many compatible APIs also require '
+            'a "/v1" suffix.'
+        ) from exc
+    return choices[0].message.content
+
+
 diagonal_views = [
     ("view_from_111", np.array([1.3, 1.3, 1.3], dtype=float)),
     ("view_from_000", np.array([-0.8, -0.8, -0.8], dtype=float)),
@@ -455,7 +472,7 @@ def ask_mllm_detect_and_classify(views_data, extra_text=""):
         temperature=0.2,
         messages=[{"role": "user", "content": content}],
     )
-    raw = resp.choices[0].message.content
+    raw = get_chat_completion_content(resp)
     return extract_json(raw)
 
 
@@ -510,7 +527,7 @@ def ask_mllm_primary_surface(
         temperature=0.2,
         messages=[{"role": "user", "content": content}],
     )
-    raw = resp.choices[0].message.content
+    raw = get_chat_completion_content(resp)
     return extract_json(raw)
 
 
@@ -577,7 +594,7 @@ OUTPUT JSON ONLY:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def ask_llm_full_side_profile(object_name, views_data):
@@ -632,7 +649,7 @@ def ask_llm_full_side_profile(object_name, views_data):
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def ask_llm_upright_rotation(object_name, rotated_imgs_paths):
@@ -700,7 +717,7 @@ OUTPUT JSON ONLY:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def ask_llm_dimension(object_name, img_paths, user_text_hint, current_bbox_dims):
@@ -781,7 +798,7 @@ CRITICAL:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def rotate_image_deg(input_path, deg, output_path):
@@ -967,7 +984,7 @@ CRITICAL RULES:
         ],
         temperature=0.0,
     )
-    return extract_json(resp.choices[0].message.content)
+    return extract_json(get_chat_completion_content(resp))
 
 
 def export_final_mesh(mesh, name, out_dir: Path):
@@ -1035,21 +1052,32 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         if side_profile_result == "B":
             upright_img = render_views(mesh, front_views, out_dir, res)
             upright_img = upright_img[0]["path"]
-            flipped_path = str(
-                Path(upright_img).with_name(
-                    Path(upright_img).stem + f"_180_flipped.png"
+            rotated_imgs = []
+            rotated_imgs.append(upright_img)
+            rotate_deg = [90, 180, 270]
+            for deg in rotate_deg:
+                flipped_path = str(
+                    Path(upright_img).with_name(
+                        Path(upright_img).stem + f"_{deg}_flipped.png"
+                    )
                 )
-            )
-            rotate_image_deg(upright_img, 180, flipped_path)
-            upright_result = ask_llm_upright_2a1(object_name, upright_img, flipped_path)
-            print(upright_result)
-            try:
-                upright_choice = upright_result.get("upright_image", "A")
-            except Exception:
-                upright_choice = "A"
-            if upright_choice == "B":
-                x_flip = rot_x(180)
-                apply_rotations(mesh, x_flip)
+                rotated_imgs.append(rotate_image_deg(upright_img, deg, flipped_path))
+            side_rotation_result = ask_llm_upright_rotation(object_name, rotated_imgs)
+            side_rotation_result = side_rotation_result.get("upright_index", 0)
+            print("side rotation is", side_rotation_result)
+            if side_rotation_result == 0:
+                pass
+            elif side_rotation_result == 1:
+                side_r = rot_x(90)
+                apply_rotations(mesh, side_r)
+            elif side_rotation_result == 2:
+                side_r = rot_x(180)
+                apply_rotations(mesh, side_r)
+            elif side_rotation_result == 3:
+                side_r = rot_x(270)
+                apply_rotations(mesh, side_r)
+            else:
+                raise ValueError("no upright index choosen")
 
         elif side_profile_result == "A":
             upright_img = render_views(
