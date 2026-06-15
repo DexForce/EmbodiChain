@@ -194,19 +194,21 @@ if __name__ == "__main__":
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
-        headless=False,
-        sim_device="cpu",
+        headless=True,
+        sim_device="cuda",
         num_envs=2,
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
 
-    config = {
-        "init_pos": [0.0, 0.0, 1.0],
-    }
+    config = {"init_pos": [0.0, 0.0, 1.0], "init_qpos": [0.1] * 16}
 
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)
+    sim.open_window()
+
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
 
     print("CobotMagic added to the simulation.")
 

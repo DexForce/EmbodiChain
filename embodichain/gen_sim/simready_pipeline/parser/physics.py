@@ -29,6 +29,7 @@ from embodichain.gen_sim.simready_pipeline.utils.simready_utils import (
     delete_rendered_pngs,
     client,
     DEPLOYMENT,
+    get_chat_completion_content,
 )
 
 DEFAULT_RIGID_PHYSICS: Dict[str, Any] = {
@@ -351,7 +352,7 @@ class PhysicsParser(AssetParser):
             ],
         )
 
-        content = resp.choices[0].message.content or ""
+        content = get_chat_completion_content(resp) or ""
         return extract_json(content)
 
     def _fallback_mode(self, asset: Asset) -> str:

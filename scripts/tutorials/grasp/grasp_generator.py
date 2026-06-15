@@ -225,11 +225,10 @@ if __name__ == "__main__":
     grasp_cfg = GraspGeneratorCfg(
         viser_port=11801,
         antipodal_sampler_cfg=AntipodalSamplerCfg(
-            n_sample=10000, max_length=0.088, min_length=0.003
+            n_sample=20000, max_length=0.088, min_length=0.003
         ),
-        is_partial_annotate=False,
+        is_partial_annotate=True,
         is_filter_ground_collision=True,
-        n_top_grasps=30,
     )
     sim.open_window()
 
@@ -272,7 +271,7 @@ if __name__ == "__main__":
             obj_pose,
             approach_direction,
             visualize_collision=False,
-            visualize_pose=True,
+            visualize_pose=False,
         )
         if is_success:
             grasp_xpos_list.append(grasp_pose.unsqueeze(0))

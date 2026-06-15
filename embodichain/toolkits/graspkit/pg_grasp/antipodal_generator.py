@@ -31,11 +31,11 @@ from typing import Any, cast
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
-from embodichain.utils.math import pose_nms_indices
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
 )
+from embodichain.utils import configclass
 from embodichain.toolkits.graspkit.pg_grasp import (
     GripperCollisionChecker,
     GripperCollisionCfg,
@@ -73,17 +73,11 @@ class GraspGeneratorCfg:
     number of sampled surface points, ray perturbation angle, and gripper jaw
     distance limits. See :class:`AntipodalSamplerCfg` for details."""
 
-    max_deviation_angle: float = np.pi / 12
+    max_deviation_angle: float = np.pi / 6
     """Maximum allowed angle (in radians) between the specified approach
     direction and the axis connecting an antipodal point pair. Pairs that
     deviate more than this threshold from perpendicular to the approach are
     discarded during grasp pose computation."""
-
-    n_deviated_approach_directions: int = 4
-    """Number of approach directions with evenly deviated angles when sampling grasp poses."""
-
-    n_top_grasps: int = 50
-    """Number of top-ranked grasp poses to return based on the scoring cost."""
 
     is_partial_annotate: bool = False
     """When ``True``, the annotator allows selecting a partial region of the 
@@ -607,138 +601,6 @@ class GraspGenerator:
         t = transform[:3, 3]
         return points @ r.T + t
 
-    def get_valid_grasp_poses(
-        self,
-        object_pose: torch.Tensor,
-        approach_direction: torch.Tensor,
-        visualize_collision: bool = False,
-    ):
-        if self._hit_point_pairs is None:
-            logger.log_warning(
-                "No antipodal point pairs available. "
-                "Call generate() or annotate() first."
-            )
-            return (
-                False,
-                torch.eye(4, device=self.device),
-                0.0,
-                torch.zeros(1, device=self.device),
-            )
-        origin_points = self._hit_point_pairs[:, 0, :]
-        hit_points = self._hit_point_pairs[:, 1, :]
-        origin_points_ = self._apply_transform(origin_points, object_pose)
-        hit_points_ = self._apply_transform(hit_points, object_pose)
-        centers = (origin_points_ + hit_points_) / 2
-
-        mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
-        mesh_center = mesh_vert_transformed.mean(dim=0)
-
-        # filter perpendicular antipodal point
-        grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
-        cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
-        positive_angle = torch.abs(torch.acos(cos_angle))
-        valid_mask = (
-            positive_angle - torch.pi / 2
-        ).abs() <= self.cfg.max_deviation_angle
-        if valid_mask.sum() == 0:
-            logger.log_warning("No valid antipodal pairs after angle filtering.")
-            return (
-                False,
-                torch.eye(4, device=self.device),
-                0.0,
-                torch.zeros(1, device=self.device),
-            )
-
-        valid_grasp_x = grasp_x[valid_mask]
-        valid_centers = centers[valid_mask]
-        valid_open_lengths = torch.norm(
-            origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
-        )
-
-        # compute grasp poses using antipodal point pairs and approach direction
-        approach_directions = [approach_direction]
-        for i in range(self.cfg.n_deviated_approach_directions - 1):
-            rota_direction = AntipodalSampler._random_rotate_unit_vectors(
-                approach_direction.unsqueeze(0), self.cfg.max_deviation_angle
-            )
-            approach_directions.append(rota_direction[0])
-        valid_grasp_poses_list = []
-        for direct in approach_directions:
-            valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
-                valid_grasp_x, direct, valid_centers
-            )
-            valid_grasp_poses_list.append(valid_grasp_poses)
-        valid_grasp_poses = torch.vstack(valid_grasp_poses_list)
-        valid_grasp_x = valid_grasp_x.repeat(self.cfg.n_deviated_approach_directions, 1)
-        valid_centers = valid_centers.repeat(self.cfg.n_deviated_approach_directions, 1)
-        valid_open_lengths = valid_open_lengths.repeat(
-            self.cfg.n_deviated_approach_directions
-        )
-
-        # TODO: too slow
-        # # remove near grasp poses using non-maximum suppression
-        # nms_indices = pose_nms_indices(
-        #     valid_grasp_poses,
-        #     angle_th=np.pi / 18,
-        #     dist_th=0.01,
-        # )
-        # valid_grasp_poses = valid_grasp_poses[nms_indices]
-        # valid_open_lengths = valid_open_lengths[nms_indices]
-        # valid_centers = valid_centers[nms_indices]
-
-        # select non-collide grasp poses
-        is_colliding, max_penetration = self._collision_checker.query(
-            object_pose,
-            valid_grasp_poses,
-            valid_open_lengths,
-            is_filter_ground_collision=self.cfg.is_filter_ground_collision,
-            is_visual=visualize_collision,
-            collision_threshold=0.0,
-        )
-        if is_colliding.logical_not().sum() == 0:
-            logger.log_warning("No valid antipodal pairs after collision filtering.")
-            return (
-                False,
-                torch.eye(4, device=self.device),
-                0.0,
-                torch.zeros(1, device=self.device),
-            )
-
-        # get best grasp pose
-        valid_grasp_poses = valid_grasp_poses[~is_colliding]
-        valid_open_lengths = valid_open_lengths[~is_colliding]
-        valid_centers = valid_centers[~is_colliding]
-        valid_grasp_x = F.normalize(valid_grasp_poses[:, :3, 0], dim=-1)
-
-        cos_angle = torch.clamp(
-            (valid_grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0
-        )
-        positive_angle = torch.abs(torch.acos(cos_angle))
-        angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
-        center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
-        center_cost = center_distance / center_distance.max()
-        length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
-        total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
-
-        n_valid = valid_grasp_poses.shape[0]
-        if n_valid == 0:
-            # no valid grasp pose
-            return False, valid_grasp_poses, valid_open_lengths, total_cost
-        if n_valid > self.cfg.n_top_grasps:
-            # select only top-k grasps
-            topk_indices = torch.topk(
-                total_cost, self.cfg.n_top_grasps, largest=False
-            ).indices
-            top_grasp_poses = valid_grasp_poses[topk_indices]
-            top_open_lengths = valid_open_lengths[topk_indices]
-            top_total_cost = total_cost[topk_indices]
-        else:
-            top_grasp_poses = valid_grasp_poses
-            top_open_lengths = valid_open_lengths
-            top_total_cost = total_cost
-
-        return True, top_grasp_poses, top_open_lengths, top_total_cost
-
     def get_grasp_poses(
         self,
         object_pose: torch.Tensor,
@@ -773,13 +635,69 @@ class GraspGenerator:
             RuntimeError: If :meth:`generate` or :meth:`annotate` has not
                 been called yet.
         """
-        is_success, valid_grasp_poses, valid_open_lengths, total_cost = (
-            self.get_valid_grasp_poses(
-                object_pose, approach_direction, visualize_collision
+        if self._hit_point_pairs is None:
+            logger.log_warning(
+                "No antipodal point pairs available. "
+                "Call generate() or annotate() first."
             )
-        )
-        if not is_success:
             return False, torch.eye(4, device=self.device), 0.0
+        origin_points = self._hit_point_pairs[:, 0, :]
+        hit_points = self._hit_point_pairs[:, 1, :]
+        origin_points_ = self._apply_transform(origin_points, object_pose)
+        hit_points_ = self._apply_transform(hit_points, object_pose)
+        centers = (origin_points_ + hit_points_) / 2
+
+        mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
+        mesh_center = mesh_vert_transformed.mean(dim=0)
+
+        # filter perpendicular antipodal point
+        grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
+        cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
+        positive_angle = torch.abs(torch.acos(cos_angle))
+        valid_mask = (
+            positive_angle - torch.pi / 2
+        ).abs() <= self.cfg.max_deviation_angle
+        if valid_mask.sum() == 0:
+            logger.log_warning("No valid antipodal pairs after angle filtering.")
+            return False, torch.eye(4, device=self.device), 0.0
+
+        valid_grasp_x = grasp_x[valid_mask]
+        valid_centers = centers[valid_mask]
+
+        # compute grasp poses using antipodal point pairs and approach direction
+        valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
+            valid_grasp_x, approach_direction, valid_centers
+        )
+        valid_open_lengths = torch.norm(
+            origin_points_[valid_mask] - hit_points_[valid_mask], dim=-1
+        )
+        # select non-collide grasp poses
+        is_colliding, max_penetration = self._collision_checker.query(
+            object_pose,
+            valid_grasp_poses,
+            valid_open_lengths,
+            is_filter_ground_collision=self.cfg.is_filter_ground_collision,
+            is_visual=visualize_collision,
+            collision_threshold=0.0,
+        )
+        if is_colliding.logical_not().sum() == 0:
+            logger.log_warning("No valid antipodal pairs after angle filtering.")
+            return False, torch.eye(4, device=self.device), 0.0
+        # get best grasp pose
+        valid_grasp_poses = valid_grasp_poses[~is_colliding]
+        valid_open_lengths = valid_open_lengths[~is_colliding]
+        valid_centers = valid_centers[~is_colliding]
+        valid_grasp_x = F.normalize(valid_grasp_poses[:, :3, 0], dim=-1)
+
+        cos_angle = torch.clamp(
+            (valid_grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0
+        )
+        positive_angle = torch.abs(torch.acos(cos_angle))
+        angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
+        center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
+        center_cost = center_distance / center_distance.max()
+        length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
+        total_cost = 0.3 * angle_cost + 0.3 * length_cost + 0.4 * center_cost
         best_idx = torch.argmin(total_cost)
         best_grasp_pose = valid_grasp_poses[best_idx]
         best_open_length = valid_open_lengths[best_idx]

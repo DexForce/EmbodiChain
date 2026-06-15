@@ -68,7 +68,6 @@ def get_obj_position_info(env):
 
 
 class ValidationAgent(metaclass=ABCMeta):
-
     def __init__(self, llm, **kwargs) -> None:
         super().__init__()
         for key, value in kwargs.items():

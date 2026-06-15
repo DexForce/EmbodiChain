@@ -66,11 +66,8 @@ class RenderCfg:
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
 
-    enable_denoiser: bool = True
-    """Whether to enable denoising. Only valid when renderer is 'hybrid' or 'fast-rt'."""
-
-    spp: int = 64
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
+    spp: int = 1
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
     def to_dexsim_flags(self):
         if self.renderer == "hybrid":

@@ -461,9 +461,9 @@ class SimulationManager:
             sim_config.render_cfg.renderer = resolved_renderer
 
         world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
-        if sim_config.render_cfg.enable_denoiser is False:
-            world_config.raytrace_config.spp = sim_config.render_cfg.spp
-            world_config.raytrace_config.open_denoise = False
+        world_config.raytrace_config.render_iterations_per_frame = (
+            sim_config.render_cfg.spp
+        )
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
