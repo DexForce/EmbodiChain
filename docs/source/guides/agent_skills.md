@@ -6,7 +6,7 @@ workflow for that task.
 
 Tool-specific files are adapters only:
 
-- `.claude/skills/*.md` points Claude-style skill entry points to the canonical skill.
+- `.claude/skills/<skill>/SKILL.md` points Claude Code project skills to the canonical skill.
 - `.github/copilot/*.md` points GitHub Copilot guidance to the canonical skill.
 
 Keep adapters thin. When a workflow changes, update the matching

@@ -1,9 +1,9 @@
 # EmbodiChain Agent Context System
 
 EmbodiChain keeps agent-facing context in `agent_context/`, indexed by
-`agent_context/MAP.yaml`. Agent skills are stored under `.agents/skills/`, and
-tool-specific adapters under `.claude/skills/` and `.github/copilot/` should
-stay thin.
+`agent_context/MAP.yaml`. Agent skills are stored under `.agents/skills/`.
+Claude Code project adapters use `.claude/skills/<skill>/SKILL.md`, and
+GitHub Copilot adapters under `.github/copilot/` should stay thin.
 
 ## Routing Rules
 
@@ -22,6 +22,5 @@ changes, update:
 - `.agents/skills/project-dev-context/SKILL.md`
 - `.agents/skills/project-dev-context/references/context-system.md`
 - `AGENTS.md`
-- `.claude/skills/project-dev-context.md`
+- `.claude/skills/project-dev-context/SKILL.md`
 - `.github/copilot/project-dev-context.md`
-

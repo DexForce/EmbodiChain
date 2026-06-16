@@ -61,7 +61,7 @@ If code behavior changes a routed topic, update all relevant pieces in the same 
 - `agent_context/MAP.yaml` if topic metadata changed
 - `AGENTS.md` if routing guidance changed
 - `.agents/skills/project-dev-context/references/context-system.md` if routing behavior changed
-- `.claude/skills/project-dev-context.md` if Claude adapter wording changed
+- `.claude/skills/project-dev-context/SKILL.md` if Claude adapter wording changed
 - `.github/copilot/project-dev-context.md` if Copilot adapter wording changed
 
 ## Source-of-truth
