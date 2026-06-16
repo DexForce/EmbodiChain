@@ -1224,9 +1224,7 @@ def _call_relative_task_llm(
         '  "action_sketch": [\n'
         '    "grasp moved_object",\n'
         '    "move above the relation target pose",\n'
-        '    "lower to the release pose",\n'
-        '    "open gripper",\n'
-        '    "retreat upward"\n'
+        '    "place at the release pose with PlaceAction"\n'
         "  ]\n"
         "}\n\n"
         "Rules:\n"
@@ -1775,9 +1773,7 @@ def _default_relative_action_sketch(
                 f"move above the {placement.relation} release pose relative to "
                 f"{placement.reference_runtime_uid}"
             ),
-            "lower to the release pose",
-            "open the gripper",
-            "retreat upward",
+            "place at the release pose with PlaceAction",
         ]
     sketch = ["grasp both moved objects with their assigned arms"]
     for placement in placements:
@@ -1788,8 +1784,7 @@ def _default_relative_action_sketch(
                     f"{placement.moved_runtime_uid} above the release pose relative "
                     f"to {placement.reference_runtime_uid}"
                 ),
-                f"lower and release {placement.moved_runtime_uid}",
-                f"retreat {placement.active_side}_arm upward",
+                f"place {placement.moved_runtime_uid} with PlaceAction",
             ]
         )
     return sketch
@@ -2147,8 +2142,7 @@ def _offset_position(
     offset: Sequence[float],
 ) -> list[float]:
     return [
-        round(float(position[index]) + float(offset[index]), 6)
-        for index in range(3)
+        round(float(position[index]) + float(offset[index]), 6) for index in range(3)
     ]
 
 

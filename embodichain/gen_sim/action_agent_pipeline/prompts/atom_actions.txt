@@ -31,15 +31,14 @@ Use only these atomic action classes:
      {"source": "joint_delta", "joint_index": 5, "delta_degrees": -90}
    - Typical cfg:
      {"sample_interval": 30}
-   - For release settling after an open gripper target, use:
-     {"sample_interval": 15, "post_hold_steps": 25}
 
 3. `PlaceAction`
-   - Use this only when a single place action should lower, open, and retreat.
+   - Prefer this for placement because one action lowers, opens the gripper,
+     and retreats upward.
    - Required target_pose. Supported pose targets are the same target_pose objects
      accepted by `MoveAction`.
    - Typical cfg:
-     {"sample_interval": 80, "lift_height": 0.08}
+     {"sample_interval": 80, "lift_height": 0.1}
 
 Rules:
 - Do not output Python code, function calls, or `fn`/`kwargs` action objects.
