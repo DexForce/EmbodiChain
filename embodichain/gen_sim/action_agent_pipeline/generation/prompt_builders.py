@@ -39,6 +39,10 @@ _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placemen
 - `right_of` means positive world y relative to the reference object.
 - `front_of` means positive world x relative to the reference object.
 - `behind` means negative world x relative to the reference object.
+- `front_left_of` combines positive world x and negative world y.
+- `back_left_of` combines negative world x and negative world y.
+- `front_right_of` combines positive world x and positive world y.
+- `back_right_of` combines negative world x and positive world y.
 - `inside` and `on` use the reference object's xy center."""
 
 
@@ -62,6 +66,9 @@ class _RelativePlacementLike(Protocol):
     relation: str
     high_offset: tuple[float, float, float]
     release_offset: tuple[float, float, float]
+    reference_is_initial_pose: bool
+    high_position: Sequence[float] | None
+    release_position: Sequence[float] | None
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -114,16 +121,16 @@ def make_relative_task_prompt(
     active_slot = f"{spec.active_side}_arm_action"
     action_sketch = _format_action_sketch(spec.action_sketch)
     pick_spec = _format_pick_up_spec(active_arm, spec.moved_runtime_uid)
-    high_spec = _format_pose_object_spec(
+    high_spec = _format_relative_pose_spec(
         active_arm,
-        spec.reference_runtime_uid,
-        spec.high_offset,
+        spec,
+        pose_kind="high",
         sample_interval=45,
     )
-    release_spec = _format_pose_object_spec(
+    release_spec = _format_relative_pose_spec(
         active_arm,
-        spec.reference_runtime_uid,
-        spec.release_offset,
+        spec,
+        pose_kind="release",
         sample_interval=30,
     )
     open_spec = _format_gripper_spec(
@@ -138,6 +145,10 @@ def make_relative_task_prompt(
         sample_interval=20,
     )
     initial_spec = _format_initial_qpos_spec(active_arm, sample_interval=30)
+    reference_line = _relative_reference_line(spec)
+    final_planning_rule = _relative_final_planning_rule(project_name, spec)
+    high_step_label = _relative_pose_step_label(spec, "high staging")
+    release_step_label = _relative_pose_step_label(spec, "release")
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
 
@@ -152,8 +163,7 @@ Config-stage LLM interpretation:
 
 Object and arm mapping:
 - Move `{spec.moved_runtime_uid}`. Source object: `{spec.moved_source_uid}`.
-- Use `{spec.reference_runtime_uid}` as the spatial reference. Source object:
-  `{spec.reference_source_uid}`.
+- {reference_line}
 - Goal relation: `{spec.relation}` ({_relative_relation_phrase(spec.relation)}).
 - Active arm: `{active_arm}`.
 - Keep every `{inactive_slot}` as null.
@@ -168,11 +178,11 @@ alignment, or extra lift edges. The inactive arm must remain null in every edge.
    - {active_slot}: {pick_spec}
    - {inactive_slot}: null
 
-2. Move the held object to the high staging pose relative to the reference:
+2. Move the held object to the {high_step_label} pose:
    - {active_slot}: {high_spec}
    - {inactive_slot}: null
 
-3. Lower the held object to the release pose:
+3. Lower the held object to the {release_step_label} pose:
    - {active_slot}: {release_spec}
    - {inactive_slot}: null
 
@@ -189,9 +199,8 @@ alignment, or extra lift edges. The inactive arm must remain null in every edge.
    - {inactive_slot}: null
 
 Final state: `{spec.moved_runtime_uid}` must be
-{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}`. Always
-plan to the current object poses from the exported {project_name} environment
-config. Do not hard-code absolute object coordinates in the generated graph.
+{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}`.
+{final_planning_rule}
 """
 
 
@@ -208,28 +217,28 @@ def _make_dual_relative_task_prompt(
     action_sketch = _format_action_sketch(spec.action_sketch)
     first_pick_spec = _format_pick_up_spec(first_arm, first.moved_runtime_uid)
     second_pick_spec = _format_pick_up_spec(second_arm, second.moved_runtime_uid)
-    first_high_spec = _format_pose_object_spec(
+    first_high_spec = _format_relative_pose_spec(
         first_arm,
-        first.reference_runtime_uid,
-        first.high_offset,
+        first,
+        pose_kind="high",
         sample_interval=45,
     )
-    first_release_spec = _format_pose_object_spec(
+    first_release_spec = _format_relative_pose_spec(
         first_arm,
-        first.reference_runtime_uid,
-        first.release_offset,
+        first,
+        pose_kind="release",
         sample_interval=30,
     )
-    second_high_spec = _format_pose_object_spec(
+    second_high_spec = _format_relative_pose_spec(
         second_arm,
-        second.reference_runtime_uid,
-        second.high_offset,
+        second,
+        pose_kind="high",
         sample_interval=45,
     )
-    second_release_spec = _format_pose_object_spec(
+    second_release_spec = _format_relative_pose_spec(
         second_arm,
-        second.reference_runtime_uid,
-        second.release_offset,
+        second,
+        pose_kind="release",
         sample_interval=30,
     )
     first_open_spec = _format_gripper_spec(
@@ -272,6 +281,9 @@ def _make_dual_relative_task_prompt(
         second_arm,
         sample_interval=30,
     )
+    first_reference_line = _relative_reference_line(first)
+    second_reference_line = _relative_reference_line(second)
+    final_planning_rule = _dual_relative_final_planning_rule(project_name, spec)
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
 
@@ -289,12 +301,10 @@ Object and arm mapping:
   `{first.moved_source_uid}`.
 - {second_slot} must manipulate `{second.moved_runtime_uid}`. Source object:
   `{second.moved_source_uid}`.
-- `{first.reference_runtime_uid}` is the spatial reference for
-  `{first.moved_runtime_uid}`. Goal relation: `{first.relation}`
-  ({_relative_relation_phrase(first.relation)}).
-- `{second.reference_runtime_uid}` is the spatial reference for
-  `{second.moved_runtime_uid}`. Goal relation: `{second.relation}`
-  ({_relative_relation_phrase(second.relation)}).
+- {first_reference_line} Goal relation for `{first.moved_runtime_uid}`:
+  `{first.relation}` ({_relative_relation_phrase(first.relation)}).
+- {second_reference_line} Goal relation for `{second.moved_runtime_uid}`:
+  `{second.relation}` ({_relative_relation_phrase(second.relation)}).
 
 {_RELATIVE_COORDINATE_CONVENTION}
 
@@ -347,9 +357,8 @@ alignment, or extra lift edges.
 Final state: `{first.moved_runtime_uid}` must be
 {_relative_relation_phrase(first.relation)} `{first.reference_runtime_uid}`, and
 `{second.moved_runtime_uid}` must be {_relative_relation_phrase(second.relation)}
-`{second.reference_runtime_uid}`. Always plan to the current object poses from the
-exported {project_name} environment config. Do not hard-code absolute object
-coordinates in the generated graph.
+`{second.reference_runtime_uid}`.
+{final_planning_rule}
 """
 
 
@@ -381,16 +390,14 @@ The active arm for this task is `{active_arm}`. The inactive arm
 
 Interactive task objects:
 - {spec.moved_runtime_uid}: moved object from source `{spec.moved_source_uid}`.
-- {spec.reference_runtime_uid}: reference object from source
-  `{spec.reference_source_uid}`.
+- {_relative_reference_line(spec)}
 
 Config-stage LLM notes:
 {notes}
 
 The execution-stage LLM should generate graph JSON that grasps the moved object,
-moves it to a high staging pose relative to the current reference object pose,
-lowers to the release pose, opens the gripper, retreats upward, and returns the
-active arm to its initial pose.
+moves it to the configured high staging pose, lowers to the release pose, opens
+the gripper, retreats upward, and returns the active arm to its initial pose.
 """
 
 
@@ -437,16 +444,16 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
 
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
-    high_spec = _format_pose_object_spec(
+    high_spec = _format_relative_pose_spec(
         active_arm,
-        spec.reference_runtime_uid,
-        spec.high_offset,
+        spec,
+        pose_kind="high",
         sample_interval=45,
     )
-    release_spec = _format_pose_object_spec(
+    release_spec = _format_relative_pose_spec(
         active_arm,
-        spec.reference_runtime_uid,
-        spec.release_offset,
+        spec,
+        pose_kind="release",
         sample_interval=30,
     )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
@@ -458,9 +465,9 @@ the nominal graph.
 Use exactly these action patterns:
 - Pick up `{spec.moved_runtime_uid}`:
   {_format_pick_up_spec(active_arm, spec.moved_runtime_uid)}
-- High staging relative to `{spec.reference_runtime_uid}`:
+- {_relative_pose_step_label(spec, "High staging")}:
   {high_spec}
-- Release pose relative to `{spec.reference_runtime_uid}`:
+- {_relative_pose_step_label(spec, "Release pose")}:
   {release_spec}
 - Release the held object:
   {_format_gripper_spec(active_arm, "open", sample_interval=15, post_hold_steps=25)}
@@ -475,28 +482,28 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     first, second = spec.placements
     first_arm = f"{first.active_side}_arm"
     second_arm = f"{second.active_side}_arm"
-    first_high_spec = _format_pose_object_spec(
+    first_high_spec = _format_relative_pose_spec(
         first_arm,
-        first.reference_runtime_uid,
-        first.high_offset,
+        first,
+        pose_kind="high",
         sample_interval=45,
     )
-    first_release_spec = _format_pose_object_spec(
+    first_release_spec = _format_relative_pose_spec(
         first_arm,
-        first.reference_runtime_uid,
-        first.release_offset,
+        first,
+        pose_kind="release",
         sample_interval=30,
     )
-    second_high_spec = _format_pose_object_spec(
+    second_high_spec = _format_relative_pose_spec(
         second_arm,
-        second.reference_runtime_uid,
-        second.high_offset,
+        second,
+        pose_kind="high",
         sample_interval=45,
     )
-    second_release_spec = _format_pose_object_spec(
+    second_release_spec = _format_relative_pose_spec(
         second_arm,
-        second.reference_runtime_uid,
-        second.release_offset,
+        second,
+        pose_kind="release",
         sample_interval=30,
     )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
@@ -878,6 +885,59 @@ def _format_pose_object_spec(
     )
 
 
+def _format_relative_pose_spec(
+    robot_name: str,
+    placement: _RelativePlacementLike,
+    *,
+    pose_kind: str,
+    sample_interval: int,
+) -> str:
+    if getattr(placement, "reference_is_initial_pose", False):
+        position = (
+            placement.high_position
+            if pose_kind == "high"
+            else placement.release_position
+        )
+        if position is None:
+            raise ValueError(
+                "Self-relative placement requires absolute high/release positions."
+            )
+        return _format_pose_absolute_spec(
+            robot_name,
+            position,
+            sample_interval=sample_interval,
+        )
+
+    offset = placement.high_offset if pose_kind == "high" else placement.release_offset
+    return _format_pose_object_spec(
+        robot_name,
+        placement.reference_runtime_uid,
+        offset,
+        sample_interval=sample_interval,
+    )
+
+
+def _format_pose_absolute_spec(
+    robot_name: str,
+    position: Sequence[float],
+    *,
+    sample_interval: int,
+) -> str:
+    return _compact_json(
+        {
+            "atomic_action_class": "MoveAction",
+            "robot_name": robot_name,
+            "control": "arm",
+            "target_pose": {
+                "reference": "absolute",
+                "position": [float(value) for value in position],
+                "orientation": "current",
+            },
+            "cfg": {"sample_interval": sample_interval},
+        }
+    )
+
+
 def _format_pose_offset_spec(
     robot_name: str,
     offset: tuple[float, float, float],
@@ -945,6 +1005,64 @@ def _format_action_sketch(action_sketch: list[str]) -> str:
     return "\n".join(f"- {item}" for item in action_sketch)
 
 
+def _relative_reference_line(spec: _RelativePlacementLike) -> str:
+    if getattr(spec, "reference_is_initial_pose", False):
+        return (
+            f"Use the initial position of `{spec.moved_runtime_uid}` as the fixed "
+            f"spatial anchor. Source object: `{spec.moved_source_uid}`."
+        )
+    return (
+        f"Use `{spec.reference_runtime_uid}` as the spatial reference. Source "
+        f"object: `{spec.reference_source_uid}`."
+    )
+
+
+def _relative_pose_step_label(
+    spec: _RelativePlacementLike,
+    label: str,
+) -> str:
+    if getattr(spec, "reference_is_initial_pose", False):
+        return f"{label} at the absolute initial-position offset"
+    return f"{label} relative to `{spec.reference_runtime_uid}`"
+
+
+def _relative_final_planning_rule(
+    project_name: str,
+    spec: _RelativePlacementLike,
+) -> str:
+    if getattr(spec, "reference_is_initial_pose", False):
+        return (
+            "Use the exact absolute target_pose JSON specs shown above. Do not "
+            "rewrite this self-relative task as an object-referenced pose, because "
+            "the moved object would become a moving reference after pickup."
+        )
+    return (
+        f"Always plan to the current object poses from the exported {project_name} "
+        "environment config. Do not hard-code absolute object coordinates in the "
+        "generated graph."
+    )
+
+
+def _dual_relative_final_planning_rule(
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    if any(
+        getattr(placement, "reference_is_initial_pose", False)
+        for placement in spec.placements
+    ):
+        return (
+            "Use the exact absolute target_pose JSON specs shown above for any "
+            "initial-position placement. Do not rewrite those self-relative "
+            "steps as object-referenced poses."
+        )
+    return (
+        f"Always plan to the current object poses from the exported {project_name} "
+        "environment config. Do not hard-code absolute object coordinates in the "
+        "generated graph."
+    )
+
+
 def _relative_relation_phrase(relation: str) -> str:
     if relation == "inside":
         return "inside"
@@ -958,6 +1076,14 @@ def _relative_relation_phrase(relation: str) -> str:
         return "in front of"
     if relation == "behind":
         return "behind"
+    if relation == "front_left_of":
+        return "to the front-left of"
+    if relation == "back_left_of":
+        return "to the back-left of"
+    if relation == "front_right_of":
+        return "to the front-right of"
+    if relation == "back_right_of":
+        return "to the back-right of"
     raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
 
 

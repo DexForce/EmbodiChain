@@ -605,6 +605,164 @@ def test_task_description_generates_relative_front_of_config(
     }
 
 
+def test_task_description_generates_self_relative_front_left_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    for rel_path in (
+        "mesh_assets/table/table_0.glb",
+        "mesh_assets/chip_bag/chip_bag_1.glb",
+    ):
+        _write_minimal_glb(project_dir / rel_path, _default_mesh_vertices())
+
+    gym_config = {
+        "id": "Image2Tabletop-1790000000-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 180.0],
+            ),
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "chip_bag_1",
+                "mesh_assets/chip_bag/chip_bag_1.glb",
+                [0.18, 0.22, 0.76],
+                [0.0, 0.0, 25.0],
+            )
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "chip_bag_1",
+            "reference_object": "chip_bag_1",
+            "goal_relation": "front_left_of",
+            "arm": "left",
+            "task_prompt_summary": "Move the chip bag front-left from its start.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_self_relative_agent",
+        task_description="用左臂把薯片袋子往左前移动",
+        target_body_scale=0.5,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    assert set(rigid_objects) == {"chip_bag"}
+    initial_position = rigid_objects["chip_bag"]["init_pos"]
+    expected_x = round(initial_position[0] + 0.16, 6)
+    expected_y = round(initial_position[1] - 0.16, 6)
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["op"] == "all"
+    axis_terms = {
+        (term.get("axis"), term.get("target"))
+        for term in success["terms"]
+        if term["type"] == "object_axis_near"
+    }
+    assert ("x", expected_x) in axis_terms
+    assert ("y", expected_y) in axis_terms
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert '"reference":"absolute"' in task_prompt
+    assert '"reference":"absolute"' in atom_actions
+    assert f'"position":[{expected_x},{expected_y},' in task_prompt
+
+    assert _stable_summary(paths.summary) == {
+        "mode": "relative_placement",
+        "moved_object": "chip_bag",
+        "reference_object": "chip_bag",
+        "relation": "front_left_of",
+        "active_arm": "left_arm",
+        "release_offset": [0.16, -0.16, 0.12],
+    }
+
+
+def test_task_description_generates_relative_front_right_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_1",
+            "reference_object": "basket_3",
+            "goal_relation": "front_right_of",
+            "arm": "right",
+            "task_prompt_summary": "Move apple_1 to the front-right of basket_3.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_front_right_relative_agent",
+        task_description="用右臂把 apple_1 放到 basket_3 右前",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    success = gym_config["env"]["extensions"]["agent_success"]
+    axis_terms = {
+        (term.get("axis"), term.get("offset"))
+        for term in success["terms"]
+        if term["type"] == "object_axis_offset_near"
+    }
+    assert ("x", 0.16) in axis_terms
+    assert ("y", 0.16) in axis_terms
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert '"offset":[0.16,0.16,0.12]' in task_prompt
+    assert _stable_summary(paths.summary)["release_offset"] == [0.16, 0.16, 0.12]
+
+
+@pytest.mark.parametrize(
+    ("raw_relation", "normalized"),
+    [
+        ("左前", "front_left_of"),
+        ("左后", "back_left_of"),
+        ("右前", "front_right_of"),
+        ("右后", "back_right_of"),
+    ],
+)
+def test_relative_relation_aliases_include_diagonal_chinese_directions(
+    raw_relation: str,
+    normalized: str,
+) -> None:
+    assert ur5_basket_config_generation._normalize_relative_relation(raw_relation) == (
+        normalized
+    )
+
+
 def test_task_description_on_container_is_compiled_as_inside(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -798,6 +956,96 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
     )
     assert '"obj_name":"cup"' in atom_actions
     assert _stable_summary(paths.summary)["relation"] == "on"
+
+
+def test_task_description_allows_single_rigid_with_background_reference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    for rel_path in (
+        "mesh_assets/table/table_0.glb",
+        "mesh_assets/pad/pad_1.glb",
+        "mesh_assets/chip_bag/chip_bag_1.glb",
+    ):
+        _write_minimal_glb(project_dir / rel_path, _default_mesh_vertices())
+
+    gym_config = {
+        "id": "Image2Tabletop-1790000000-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 180.0],
+            ),
+            _mesh_object(
+                "pad_1",
+                "mesh_assets/pad/pad_1.glb",
+                [-0.1, -0.15, 0.74],
+                [0.0, 0.0, 0.0],
+            ),
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "chip_bag_1",
+                "mesh_assets/chip_bag/chip_bag_1.glb",
+                [0.18, 0.22, 0.76],
+                [0.0, 0.0, 25.0],
+            )
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        scene_roles = {
+            item["source_uid"]: item["role"] for item in kwargs["scene_summary"]
+        }
+        assert scene_roles["chip_bag_1"] == "rigid_object"
+        assert scene_roles["pad_1"] == "background"
+        return {
+            "moved_object": "chip_bag_1",
+            "reference_object": "pad_1",
+            "goal_relation": "on",
+            "arm": "left",
+            "task_prompt_summary": "Place the chip bag on the pad.",
+        }
+
+    monkeypatch.setattr(
+        ur5_basket_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_ur5_basket_config_from_project(
+        project_dir,
+        tmp_path / "generated_single_rigid_agent",
+        task_description="用左臂抓薯片袋子放到垫子上",
+        target_body_scale=0.5,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
+    assert set(rigid_objects) == {"chip_bag"}
+    assert rigid_objects["chip_bag"]["body_type"] == "dynamic"
+    assert rigid_objects["chip_bag"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert background_objects["pad"]["body_type"] == "static"
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["type"] == "object_on_object"
+    assert success["object"] == "chip_bag"
+    assert success["support"] == "pad"
+
+    registry = gym_config["env"]["events"]["register_info_to_env"]["params"][
+        "registry"
+    ]
+    registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
+    assert {"chip_bag", "pad"}.issubset(registered_uids)
 
 
 def test_task_description_generates_dual_arm_relative_config(
