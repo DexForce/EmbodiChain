@@ -146,6 +146,7 @@ import numpy as np
 import trimesh
 from pathlib import Path
 
+
 def init_pose_simple(mesh_input):
     fallback_mesh = None
     mesh: trimesh.Trimesh = None
@@ -1026,7 +1027,7 @@ def export_final_mesh(mesh, name, out_dir: Path):
     print(f"Exporting final mesh to: {out_path} (bottom-face center moved to origin)")
     mesh.export(out_path)
 
-    out_path = out_dir / f"{name}_simready.obj"
+    out_path = out_dir / f"asset_simready.obj"
     out_path = out_path.resolve()
     mesh.export(out_path)
     return str(out_path)
@@ -1053,7 +1054,7 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         name = file.stem
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(exist_ok=True, parents=True)
-    #mesh = init_pose(file)
+    # mesh = init_pose(file)
     mesh = init_pose_simple(file)
     images_first = render_views(
         mesh, diagonal_views + cardinal_views + up_down_views, out_dir, res

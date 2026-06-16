@@ -250,13 +250,13 @@ class PhysicsParser(AssetParser):
         asset.simulation.setdefault("blockers", [])
 
     def _simready_process(self, asset: Asset, asset_root: Path) -> None:
-        
+
         # mesh_path = asset_root / asset.asset_data.get("path")
         archive_dir = asset_root / "asset_archive"
         src_name = str(asset.identity.get("source_file"))
         mesh_path = next(archive_dir.rglob(src_name), None)
 
-        out_path = asset_root / "asset_simready" 
+        out_path = asset_root / "asset_simready"
 
         result = process_mesh(
             mesh_path,
