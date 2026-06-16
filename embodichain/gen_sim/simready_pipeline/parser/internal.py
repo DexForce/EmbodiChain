@@ -27,25 +27,13 @@ class InternalParser(AssetParser):
     name = "internal"
 
     @staticmethod
-    def _render_thumbnail(mesh: trimesh.Trimesh, output_path: Path) -> None:
+    def _look_at_pose(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
+        """Build a pose matrix whose -Z axis points from ``eye`` toward ``target``.
+
+        This is the convention pyrender uses for both cameras (look direction is
+        -Z) and directional lights (light travels along -Z), so the same matrix
+        can orient a camera or aim a light at the model.
         """
-        Internal static function to handle the rendering logic.
-        Camera is on X-axis positive, looking at the mesh's bounding box center.
-        Z-axis is up.
-        """
-        bounds = mesh.bounds
-        model_center = (bounds[0] + bounds[1]) / 2.0
-        size = bounds[1] - bounds[0]
-
-        target_frustum_size = max(size[1], size[2]) * 1.5
-        yfov = np.pi / 4.0
-        img_width, img_height = 512, 512
-        camera_distance = (target_frustum_size / 2.0) / np.tan(yfov / 2.0)
-
-        eye = model_center + np.array([camera_distance, 0.0, 0.0])
-        target = model_center  # Look at the mesh center, not origin
-        up = np.array([0.0, 0.0, 1.0])  # Z-up
-
         forward = eye - target
         forward = forward / np.linalg.norm(forward)
 
@@ -54,14 +42,44 @@ class InternalParser(AssetParser):
 
         corrected_up = np.cross(forward, right)
 
-        camera_pose = np.eye(4)
-        camera_pose[:3, 0] = right
-        camera_pose[:3, 1] = corrected_up
-        camera_pose[:3, 2] = forward
-        camera_pose[:3, 3] = eye
+        pose = np.eye(4)
+        pose[:3, 0] = right
+        pose[:3, 1] = corrected_up
+        pose[:3, 2] = forward
+        pose[:3, 3] = eye
+        return pose
 
-        scene = pyrender.Scene(bg_color=[1.0, 1.0, 1.0, 1.0])
-        pyrender_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=False)
+    @staticmethod
+    def _render_thumbnail(mesh: trimesh.Trimesh, output_path: Path) -> None:
+        """
+        Internal static function to handle the rendering logic.
+        Camera looks at the mesh's bounding box center from a 3/4 front angle.
+        Z-axis is up.
+        """
+        bounds = mesh.bounds
+        model_center = (bounds[0] + bounds[1]) / 2.0
+        size = bounds[1] - bounds[0]
+
+        # Frame against the bounding sphere so the 3/4 view always fits nicely.
+        radius = float(np.linalg.norm(size) / 2.0)
+        yfov = np.pi / 4.0
+        img_width, img_height = 512, 512
+        camera_distance = (radius * 1.3) / np.tan(yfov / 2.0)
+
+        up = np.array([0.0, 0.0, 1.0])  # Z-up
+
+        # Classic 3/4 product shot: front (+X), slightly to the side (+Y),
+        # slightly from above (+Z). A flat dead-on side view looks lifeless.
+        view_dir = np.array([1.0, 0.55, 0.45])
+        view_dir = view_dir / np.linalg.norm(view_dir)
+        eye = model_center + view_dir * camera_distance
+        camera_pose = InternalParser._look_at_pose(eye, model_center, up)
+
+        scene = pyrender.Scene(
+            bg_color=[1.0, 1.0, 1.0, 1.0],
+            ambient_light=[0.45, 0.45, 0.45],  # soft base fill, avoids black shadows
+        )
+        pyrender_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=True)
         scene.add(pyrender_mesh)
 
         camera = pyrender.PerspectiveCamera(
@@ -69,15 +87,26 @@ class InternalParser(AssetParser):
         )
         scene.add(camera, pose=camera_pose)
 
-        key_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=3.0)
-        key_pose = np.eye(4)
-        key_pose[:3, 3] = eye + np.array([0, camera_distance, camera_distance])
-        scene.add(key_light, pose=key_pose)
+        # Three-point lighting, all aimed at the model center so the
+        # camera-facing side is properly lit (directional lights shine along
+        # their pose -Z, so they must be oriented, not just positioned).
+        key_pos = model_center + np.array([1.0, 0.8, 1.2]) * camera_distance
+        key_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=4.0)
+        scene.add(
+            key_light, pose=InternalParser._look_at_pose(key_pos, model_center, up)
+        )
 
-        fill_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=1.0)
-        fill_pose = np.eye(4)
-        fill_pose[:3, 3] = eye + np.array([0, -camera_distance, 0.5 * camera_distance])
-        scene.add(fill_light, pose=fill_pose)
+        fill_pos = model_center + np.array([0.6, -1.0, 0.3]) * camera_distance
+        fill_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=2.0)
+        scene.add(
+            fill_light, pose=InternalParser._look_at_pose(fill_pos, model_center, up)
+        )
+
+        rim_pos = model_center + np.array([-1.0, -0.5, 0.8]) * camera_distance
+        rim_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=2.5)
+        scene.add(
+            rim_light, pose=InternalParser._look_at_pose(rim_pos, model_center, up)
+        )
 
         renderer = pyrender.OffscreenRenderer(
             viewport_width=img_width, viewport_height=img_height
@@ -93,7 +122,7 @@ class InternalParser(AssetParser):
         asset.internal.setdefault("error", None)
 
         mesh_path_ori = asset_root / asset.asset_data.get("path")
-        mesh_path_sr = asset_root / "asset_simready" / "asset_simready.obj"
+        mesh_path_sr = asset_root / "asset_simready" / "asset_simready.glb"
         mesh_path = None
         if mesh_path_sr.exists():
             mesh_path = mesh_path_sr
