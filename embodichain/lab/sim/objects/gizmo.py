@@ -328,8 +328,15 @@ class Gizmo:
                 return False
 
             # Solve IK
+            base_pose = self.target.get_link_pose(
+                link_name=solver.root_link_name, to_matrix=True
+            )
+            target_transform_root = torch.bmm(
+                torch.inverse(base_pose), target_transform
+            )
+
             ik_success, new_qpos = solver.get_ik(
-                target_xpos=target_transform, joint_seed=joint_seed
+                target_xpos=target_transform_root, joint_seed=joint_seed
             )
 
             if ik_success:
