@@ -771,6 +771,8 @@ def _build_object_semantics(
     if target_obj is None:
         raise ValueError(f"No rigid object found for {obj_name}.")
 
+    _stabilize_affordance_object(env, target_obj, runtime_kwargs)
+
     mesh_vertices = target_obj.get_vertices(env_ids=[0], scale=True)[0]
     mesh_triangles = target_obj.get_triangles(env_ids=[0])[0]
     mesh_vertices = torch.as_tensor(mesh_vertices, dtype=torch.float32)
@@ -854,6 +856,20 @@ def _build_object_semantics(
         affordance=affordance,
         entity=target_obj,
     )
+
+
+def _stabilize_affordance_object(
+    env,
+    target_obj,
+    runtime_kwargs: Mapping[str, Any],
+) -> None:
+    if not bool(runtime_kwargs.get("stabilize_affordance_object", True)):
+        return
+
+    update_steps = int(runtime_kwargs.get("affordance_stabilization_steps", 5))
+    if update_steps > 0:
+        env.sim.update(step=update_steps)
+    target_obj.clear_dynamics()
 
 
 def _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids):
