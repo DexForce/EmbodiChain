@@ -49,7 +49,6 @@ from .engine import (
 __all__ = [
     # Core classes
     "Affordance",
-    "GraspPose",
     "InteractionPoints",
     "ObjectSemantics",
     "ActionCfg",

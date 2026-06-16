@@ -292,9 +292,7 @@ class MoveAction(AtomicAction):
 
         # TODO: warning and fallback if no valid grasp pose found
         if not is_success:
-            logger.log_warning(
-                "Failed to resolve grasp pose, using default approach pose"
-            )
+            logger.log_warning("Failed to resolve move target pose.")
             return False, torch.empty(0), self.arm_joint_ids
 
         target_states_list = [
@@ -403,11 +401,10 @@ class PickUpAction(MoveAction):
                 target, action_name=self.__class__.__name__
             )
 
-        # TODO: warning and fallback if no valid grasp pose found
+        if isinstance(is_success, torch.Tensor):
+            is_success = torch.all(is_success).item()
         if not is_success:
-            logger.log_warning(
-                "Failed to resolve grasp pose, using default approach pose"
-            )
+            logger.log_warning("Failed to resolve grasp pose for all environments.")
             return False, torch.empty(0), self.joint_ids
 
         # Compute pre-grasp pose
@@ -630,6 +627,17 @@ class UprightActionCfg(PickUpActionCfg):
     max_grasp_axis_approach_dot: float | None = None
     """Optional maximum absolute dot between grasp X axis and approach direction."""
 
+    max_grasp_axis_upright_axis_dot: float | None = None
+    """Optional maximum absolute dot between grasp X axis and object upright axis."""
+
+    upright_yaw_offsets: tuple[float, ...] = (
+        0.0,
+        0.5 * np.pi,
+        -0.5 * np.pi,
+        np.pi,
+    )
+    """Yaw offsets (rad) to try after aligning the object upright axis."""
+
 
 class UprightAction(PickUpAction):
     def __init__(
@@ -650,90 +658,193 @@ class UprightAction(PickUpAction):
     def _resolve_grasp_pose(
         self, semantics: ObjectSemantics
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        is_success, grasp_xpos, open_length = super()._resolve_grasp_pose(semantics)
-        max_open_length = self.cfg.max_grasp_open_length
-        max_axis_dot = self.cfg.max_grasp_axis_approach_dot
-        if max_open_length is None and max_axis_dot is None:
-            return is_success, grasp_xpos, open_length
+        if not isinstance(semantics.affordance, AntipodalAffordance):
+            logger.log_error(
+                "Grasp pose affordance must be of type AntipodalAffordance"
+            )
+        if semantics.entity is None:
+            logger.log_error(
+                "ObjectSemantics must be associated with an entity to get object pose"
+            )
+        obj_poses = semantics.entity.get_local_pose(to_matrix=True)
+        if semantics.affordance.generator is None:
+            semantics.affordance._init_generator()
+        generator = semantics.affordance.generator
+        if generator is None:
+            logger.log_error("Failed to initialize antipodal grasp generator")
 
+        n_envs = obj_poses.shape[0]
         approach_direction = self.approach_direction.to(
             device=self.device, dtype=torch.float32
         )
         approach_direction = approach_direction / approach_direction.norm().clamp(
             min=1e-6
         )
-        grasp_axis_dot = torch.abs(
-            (grasp_xpos[:, :3, 0] * approach_direction).sum(dim=1)
-        )
-        violates_width = (
-            torch.zeros_like(open_length, dtype=torch.bool)
-            if max_open_length is None
-            else open_length > max_open_length
-        )
-        violates_axis = (
-            torch.zeros_like(grasp_axis_dot, dtype=torch.bool)
-            if max_axis_dot is None
-            else grasp_axis_dot > max_axis_dot
-        )
-        needs_filter = violates_width | violates_axis
+        max_open_length = self.cfg.max_grasp_open_length
+        max_approach_axis_dot = self.cfg.max_grasp_axis_approach_dot
+        max_upright_axis_dot = self.cfg.max_grasp_axis_upright_axis_dot
 
-        if not bool(torch.any(needs_filter).item()):
-            return is_success, grasp_xpos, open_length
+        is_success = torch.zeros(n_envs, dtype=torch.bool, device=self.device)
+        grasp_xpos = torch.eye(4, dtype=torch.float32, device=self.device).repeat(
+            n_envs, 1, 1
+        )
+        open_length = torch.zeros(n_envs, dtype=torch.float32, device=self.device)
+        init_qpos = self.robot.get_qpos(name=self.cfg.control_part)
+        world_z = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        upright_obj_pose_candidates = self._build_upright_object_pose_candidates(
+            semantics, obj_poses
+        )
+        selected_upright_obj_poses = upright_obj_pose_candidates[:, 0].clone()
 
-        generator = semantics.affordance.generator
-        hit_point_pairs = (
-            None if generator is None else getattr(generator, "_hit_point_pairs", None)
-        )
-        if hit_point_pairs is None:
-            return is_success, grasp_xpos, open_length
-
-        pair_lengths = torch.norm(
-            hit_point_pairs[:, 1, :] - hit_point_pairs[:, 0, :], dim=-1
-        )
-        valid_mask = torch.ones(
-            hit_point_pairs.shape[0], dtype=torch.bool, device=hit_point_pairs.device
-        )
-        if max_open_length is not None:
-            valid_mask &= pair_lengths <= max_open_length
-        obj_poses = semantics.entity.get_local_pose(to_matrix=True)
-        pair_axes = torch.nn.functional.normalize(
-            hit_point_pairs[:, 1, :] - hit_point_pairs[:, 0, :], dim=-1
-        )
-        pair_axes_world = torch.matmul(
-            pair_axes.unsqueeze(0), obj_poses[:, :3, :3].transpose(1, 2)
-        )
-        pair_axis_dot = torch.abs(
-            (pair_axes_world * approach_direction.view(1, 1, 3)).sum(dim=-1)
-        )
-        if max_axis_dot is not None:
-            valid_mask &= torch.all(pair_axis_dot <= max_axis_dot, dim=0)
-        valid_count = int(valid_mask.sum().item())
-        if valid_count == 0:
-            logger.log_warning(
-                "No grasp candidates remain after upright grasp filtering."
-            )
-            return is_success, grasp_xpos, open_length
-
-        original_hit_point_pairs = generator._hit_point_pairs
-        try:
-            generator._hit_point_pairs = hit_point_pairs[valid_mask]
-            filtered_success, filtered_grasp_xpos, filtered_open_length = (
-                semantics.affordance.get_best_grasp_poses(
-                    obj_poses=obj_poses, approach_direction=self.approach_direction
+        for env_idx in range(n_envs):
+            (
+                has_candidates,
+                candidate_grasp_xpos,
+                candidate_open_length,
+                candidate_cost,
+            ) = generator.get_valid_grasp_poses(obj_poses[env_idx], approach_direction)
+            if not has_candidates:
+                logger.log_warning(
+                    f"No valid grasp candidates found for {env_idx}-th object."
                 )
-            )
-        finally:
-            generator._hit_point_pairs = original_hit_point_pairs
+                continue
 
-        use_filtered = needs_filter & filtered_success
-        has_filtered = bool(torch.any(use_filtered).item())
-        if has_filtered:
-            grasp_xpos = torch.where(
-                use_filtered[:, None, None], filtered_grasp_xpos, grasp_xpos
+            candidate_grasp_xpos = candidate_grasp_xpos.to(
+                device=self.device, dtype=torch.float32
             )
-            open_length = torch.where(use_filtered, filtered_open_length, open_length)
-            is_success = torch.where(use_filtered, filtered_success, is_success)
+            candidate_open_length = candidate_open_length.to(
+                device=self.device, dtype=torch.float32
+            )
+            candidate_cost = candidate_cost.to(device=self.device, dtype=torch.float32)
+            candidate_mask = torch.ones(
+                candidate_grasp_xpos.shape[0], dtype=torch.bool, device=self.device
+            )
+            if max_open_length is not None:
+                candidate_mask &= candidate_open_length <= max_open_length
 
+            grasp_axis_dot = torch.abs(
+                (candidate_grasp_xpos[:, :3, 0] * approach_direction).sum(dim=1)
+            )
+            if max_approach_axis_dot is not None:
+                candidate_mask &= grasp_axis_dot <= max_approach_axis_dot
+
+            upright_axis = torch.nn.functional.normalize(
+                obj_poses[env_idx, :3, 2], dim=0
+            )
+            grasp_upright_axis_dot = torch.abs(
+                (candidate_grasp_xpos[:, :3, 0] * upright_axis).sum(dim=1)
+            )
+            if max_upright_axis_dot is not None:
+                candidate_mask &= grasp_upright_axis_dot <= max_upright_axis_dot
+
+            if not bool(torch.any(candidate_mask).item()):
+                logger.log_warning(
+                    "No grasp candidates remain after upright grasp filtering "
+                    f"for {env_idx}-th object."
+                )
+                continue
+
+            candidate_grasp_xpos = candidate_grasp_xpos[candidate_mask]
+            candidate_open_length = candidate_open_length[candidate_mask]
+            candidate_cost = candidate_cost[candidate_mask]
+            n_candidate = candidate_grasp_xpos.shape[0]
+
+            pre_grasp_xpos = self._apply_offset(
+                pose=candidate_grasp_xpos,
+                offset=-candidate_grasp_xpos[:, :3, 2] * self.cfg.pre_grasp_distance,
+            )
+            lift_xpos = self._apply_offset(
+                pose=candidate_grasp_xpos,
+                offset=world_z * self.cfg.lift_height,
+            )
+            obj_pose_repeat = obj_poses[env_idx].unsqueeze(0).repeat(n_candidate, 1, 1)
+            obj_to_grasp = torch.bmm(
+                self._invert_pose(obj_pose_repeat), candidate_grasp_xpos
+            )
+
+            base_ik_success = torch.ones(
+                n_candidate, dtype=torch.bool, device=self.device
+            )
+            qpos_seed = init_qpos[env_idx : env_idx + 1, None, :].repeat(
+                1, n_candidate, 1
+            )
+            for target_xpos in (
+                pre_grasp_xpos,
+                candidate_grasp_xpos,
+                lift_xpos,
+            ):
+                target_success, target_qpos = self.robot.compute_batch_ik(
+                    pose=target_xpos.unsqueeze(0),
+                    name=self.cfg.control_part,
+                    joint_seed=qpos_seed,
+                    env_ids=[env_idx],
+                )
+                base_ik_success &= target_success[0]
+                qpos_seed = target_qpos
+
+            n_upright_pose = upright_obj_pose_candidates.shape[1]
+            upright_obj_pose_repeat = (
+                upright_obj_pose_candidates[env_idx]
+                .unsqueeze(1)
+                .repeat(1, n_candidate, 1, 1)
+                .reshape(-1, 4, 4)
+            )
+            obj_to_grasp_repeat = (
+                obj_to_grasp.unsqueeze(0)
+                .repeat(n_upright_pose, 1, 1, 1)
+                .reshape(-1, 4, 4)
+            )
+            upright_lift_obj_xpos = self._apply_offset(
+                pose=upright_obj_pose_repeat,
+                offset=world_z * self.cfg.lift_height,
+            )
+            upright_lift_xpos = torch.bmm(upright_lift_obj_xpos, obj_to_grasp_repeat)
+            upright_place_xpos = torch.bmm(upright_obj_pose_repeat, obj_to_grasp_repeat)
+            press_xpos = self._apply_offset(
+                pose=upright_place_xpos,
+                offset=-world_z
+                * (self.cfg.place_clearance + self.cfg.place_press_depth),
+            )
+
+            ik_success = base_ik_success.repeat(n_upright_pose)
+            upright_qpos_seed = qpos_seed.repeat(1, n_upright_pose, 1)
+            for target_xpos in (upright_lift_xpos, upright_place_xpos, press_xpos):
+                target_success, target_qpos = self.robot.compute_batch_ik(
+                    pose=target_xpos.unsqueeze(0),
+                    name=self.cfg.control_part,
+                    joint_seed=upright_qpos_seed,
+                    env_ids=[env_idx],
+                )
+                ik_success &= target_success[0]
+                upright_qpos_seed = target_qpos
+
+            flat_candidate_cost = candidate_cost.repeat(n_upright_pose)
+            masked_cost = torch.where(
+                ik_success,
+                flat_candidate_cost,
+                torch.full_like(flat_candidate_cost, float("inf")),
+            )
+            best_cost, best_flat_idx = masked_cost.min(dim=0)
+            best_upright_idx = torch.div(
+                best_flat_idx, n_candidate, rounding_mode="floor"
+            )
+            best_idx = best_flat_idx % n_candidate
+
+            if not torch.isfinite(best_cost):
+                logger.log_warning(
+                    "No upright grasp candidates remain after IK feasibility "
+                    f"filtering for {env_idx}-th object."
+                )
+                continue
+
+            is_success[env_idx] = True
+            grasp_xpos[env_idx] = candidate_grasp_xpos[best_idx]
+            open_length[env_idx] = candidate_open_length[best_idx]
+            selected_upright_obj_poses[env_idx] = upright_obj_pose_candidates[
+                env_idx, best_upright_idx
+            ]
+
+        self._selected_upright_obj_xpos = selected_upright_obj_poses
         return is_success, grasp_xpos, open_length
 
     @staticmethod
@@ -788,6 +899,24 @@ class UprightAction(PickUpAction):
             local_bottom_z = vertical_offsets.min(dim=0).values
             upright_pose[:, 2, 3] = self.cfg.place_clearance - local_bottom_z
         return upright_pose
+
+    def _build_upright_object_pose_candidates(
+        self, semantics: ObjectSemantics, obj_poses: torch.Tensor
+    ) -> torch.Tensor:
+        """Build upright target poses with alternative yaw rotations."""
+        base_pose = self._build_upright_object_pose(semantics, obj_poses)
+        yaw_offsets = torch.as_tensor(
+            self.cfg.upright_yaw_offsets, device=self.device, dtype=torch.float32
+        )
+        cos_yaw = torch.cos(yaw_offsets).view(1, -1, 1)
+        sin_yaw = torch.sin(yaw_offsets).view(1, -1, 1)
+
+        base_x = base_pose[:, None, :3, 0]
+        base_y = base_pose[:, None, :3, 1]
+        candidates = base_pose[:, None, :, :].repeat(1, yaw_offsets.numel(), 1, 1)
+        candidates[:, :, :3, 0] = cos_yaw * base_x + sin_yaw * base_y
+        candidates[:, :, :3, 1] = -sin_yaw * base_x + cos_yaw * base_y
+        return candidates
 
     def _compute_hand_qpos_for_width(self, target_width: torch.Tensor) -> torch.Tensor:
         """Map desired total gripper width to batched hand qpos."""
@@ -858,7 +987,7 @@ class UprightAction(PickUpAction):
         obj_poses = target.entity.get_local_pose(to_matrix=True)
         if not torch.all(is_success).item():
             logger.log_warning(
-                "Failed to resolve grasp pose, using default approach pose"
+                "Failed to resolve upright grasp pose for all environments."
             )
             return False, torch.empty(0), self.joint_ids
 
@@ -877,7 +1006,9 @@ class UprightAction(PickUpAction):
         )
 
         obj_to_grasp = torch.bmm(self._invert_pose(obj_poses), grasp_xpos)
-        upright_obj_xpos = self._build_upright_object_pose(target, obj_poses)
+        upright_obj_xpos = getattr(self, "_selected_upright_obj_xpos", None)
+        if upright_obj_xpos is None or upright_obj_xpos.shape != obj_poses.shape:
+            upright_obj_xpos = self._build_upright_object_pose(target, obj_poses)
         upright_lift_obj_xpos = self._apply_offset(
             pose=upright_obj_xpos,
             offset=world_z * self.cfg.lift_height,
@@ -1218,9 +1349,7 @@ class PlaceAction(MoveAction):
 
         # TODO: warning and fallback if no valid grasp pose found
         if not is_success:
-            logger.log_warning(
-                "Failed to resolve grasp pose, using default approach pose"
-            )
+            logger.log_warning("Failed to resolve place target pose.")
             return False, torch.empty(0), self.joint_ids
 
         # compute waypoint number for each phase
