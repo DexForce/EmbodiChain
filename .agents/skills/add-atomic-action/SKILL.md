@@ -1,6 +1,6 @@
 ---
 name: add-atomic-action
-description: Use when adding a new observation, event, reward, action, dataset, or randomization functor to an EmbodiChain environment
+description: Use when adding a new simulation atomic action or motion primitive to EmbodiChain's AtomicActionEngine.
 ---
 
 # Add Atomic Action

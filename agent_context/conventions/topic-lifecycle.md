@@ -43,7 +43,9 @@ Explicit refresh requests such as `refresh <topic> context` or
    - `status`
 5. If the routing rule or recommended usage changed, update:
    - `AGENTS.md`
-   - `skills/project-dev-context/`
+   - `.agents/skills/project-dev-context/`
+   - `.claude/skills/project-dev-context.md`
+   - `.github/copilot/project-dev-context.md`
 
 ## Rule
 

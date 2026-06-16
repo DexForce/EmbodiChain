@@ -21,6 +21,8 @@ Use this skill when:
 ## Start here
 
 - Read `agent_context/MAP.yaml` first
+- Read `references/context-system.md` for routing rules
+- Read `agents/openai.yaml` for the canonical agent metadata
 - Read `agent_context/conventions/*.md` when creating or updating context files
 
 ## Workflow
@@ -58,6 +60,9 @@ If code behavior changes a routed topic, update all relevant pieces in the same 
 - the matching file under `agent_context/topics/...`
 - `agent_context/MAP.yaml` if topic metadata changed
 - `AGENTS.md` if routing guidance changed
+- `.agents/skills/project-dev-context/references/context-system.md` if routing behavior changed
+- `.claude/skills/project-dev-context.md` if Claude adapter wording changed
+- `.github/copilot/project-dev-context.md` if Copilot adapter wording changed
 
 ## Source-of-truth
 

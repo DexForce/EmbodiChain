@@ -9,6 +9,6 @@ Practical guides for common tasks in EmbodiChain.
 
    custom_functors
    configuration
+   agent_skills
    add_robot
    cli
-

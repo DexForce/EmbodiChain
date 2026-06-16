@@ -80,9 +80,7 @@ Commit with a clear message following conventional commits format:
 ```bash
 git commit -m "type(scope): brief description
 
-Detailed description of the change.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+Detailed description of the change."
 ```
 
 ### 7. Push to Remote
@@ -168,8 +166,6 @@ Fixes #<issue-number>
 - [ ] I have made corresponding changes to the documentation
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] Dependencies have been updated, if applicable.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
 
 ## PR Title Guidelines
@@ -199,4 +195,3 @@ Fixes #<issue-number>
 - Keep PRs small and focused. Large PRs are harder to review and merge.
 - It's recommended to open an issue and discuss the design before opening a large PR.
 - The checklist in the PR template should be completed honestly.
-- Remember to include the Claude Code attribution at the bottom of the PR body.
