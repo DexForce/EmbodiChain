@@ -1357,36 +1357,13 @@ class SimulationManager:
 
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            env = self._env
-            results = env.import_from_usd_file(
-                cfg.fpath, return_object=True, cache_dir=self._convex_decomp_dir
+            from embodichain.lab.sim.utility.sim_utils import (
+                spawn_usd_articulation_entities,
             )
-            # print("USD import results:", results)
 
-            articulations_found = []
-            for key, value in results.items():
-                if isinstance(value, dexsim.engine.Articulation):
-                    articulations_found.append(value)
-
-            if len(articulations_found) == 0:
-                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-            elif len(articulations_found) > 1:
-                logger.log_error(
-                    f"Multiple articulations found in USD file {cfg.fpath}. "
-                )
-            elif len(articulations_found) == 1:
-                prototype = articulations_found[0]
-                prototype.set_name(f"{uid}_0")
-                if not cfg.use_usd_properties:
-                    from embodichain.lab.sim.utility.sim_utils import (
-                        set_dexsim_articulation_cfg,
-                    )
-
-                    set_dexsim_articulation_cfg(prototype, cfg)
-                obj_list.append(prototype)
+            obj_list = spawn_usd_articulation_entities(
+                cfg, env_list, cache_dir=self._convex_decomp_dir
+            )
         else:
             # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False
@@ -1470,34 +1447,11 @@ class SimulationManager:
 
         is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
         if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            env = self._env
-            results = env.import_from_usd_file(cfg.fpath, return_object=True)
-            # print("USD import results:", results)
+            from embodichain.lab.sim.utility.sim_utils import (
+                spawn_usd_articulation_entities,
+            )
 
-            articulations_found = []
-            for key, value in results.items():
-                if isinstance(value, dexsim.engine.Articulation):
-                    articulations_found.append(value)
-
-            if len(articulations_found) == 0:
-                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-            elif len(articulations_found) > 1:
-                logger.log_error(
-                    f"Multiple articulations found in USD file {cfg.fpath}. "
-                )
-            elif len(articulations_found) == 1:
-                prototype = articulations_found[0]
-                prototype.set_name(f"{uid}_0")
-                if not cfg.use_usd_properties:
-                    from embodichain.lab.sim.utility.sim_utils import (
-                        set_dexsim_articulation_cfg,
-                    )
-
-                    set_dexsim_articulation_cfg(prototype, cfg)
-                obj_list.append(prototype)
+            obj_list = spawn_usd_articulation_entities(cfg, env_list)
         else:
             # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False

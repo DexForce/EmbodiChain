@@ -121,6 +121,14 @@ class BaseRigidObjectTest:
             not self.chair.is_static
         ), "Chair should be kinematic but is marked static"
 
+    def test_spawn_clones_distinct_entities(self):
+        """Multi-env rigid objects are spawned via prototype + clone_actor_to."""
+        assert len(self.duck._entities) == NUM_ARENAS
+        handles = {entity.get_native_handle() for entity in self.duck._entities}
+        assert len(handles) == NUM_ARENAS, "Each arena clone must be a distinct actor"
+        assert self.duck._entities[0].get_name() == "duck_0"
+        assert self.duck._entities[1].get_name() == "duck_1"
+
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
         - duck pose is correctly set

@@ -156,6 +156,26 @@ def default_articulation_clone_options() -> ObjectCloneOptions:
     return options
 
 
+def default_rigid_object_clone_options() -> ObjectCloneOptions:
+    """Return clone options used when duplicating rigid actors across arenas."""
+    options = ObjectCloneOptions()
+    options.render.material = CloneStrategy.DEEP_COPY
+    return options
+
+
+def _clone_actor_between_arenas(
+    source_arena: Arena | Env,
+    source_name: str,
+    target_arena: Arena | Env,
+    target_name: str,
+    clone_options: ObjectCloneOptions,
+) -> MeshObject:
+    """Clone a mesh actor from one arena/env to another."""
+    return source_arena.clone_actor_to(
+        source_name, target_arena, target_name, clone_options
+    )
+
+
 def _clone_articulation_between_arenas(
     source_arena: Arena | Env,
     source_name: str,
@@ -192,6 +212,63 @@ def spawn_articulation_entities(
     source_env = env_list[0]
     prototype_name = f"{cfg.uid}_0"
     prototype = source_env.load_urdf(cfg.fpath)
+    prototype.set_name(prototype_name)
+
+    if not cfg.use_usd_properties:
+        set_dexsim_articulation_cfg(prototype, cfg)
+
+    entities = [prototype]
+    for env_idx in range(1, len(env_list)):
+        target_name = f"{cfg.uid}_{env_idx}"
+        clone = _clone_articulation_between_arenas(
+            source_env,
+            prototype_name,
+            env_list[env_idx],
+            target_name,
+            clone_options,
+        )
+        if clone is None:
+            logger.log_error(
+                f"Failed to clone articulation '{prototype_name}' into env {env_idx}."
+            )
+        entities.append(clone)
+    return entities
+
+
+def _find_single_articulation_in_usd_import(results: dict, fpath: str) -> Articulation:
+    """Return the sole articulation imported from a USD file."""
+    articulations_found = [
+        value for value in results.values() if isinstance(value, Articulation)
+    ]
+    if len(articulations_found) == 0:
+        logger.log_error(f"No articulation found in USD file {fpath}.")
+    if len(articulations_found) > 1:
+        logger.log_error(f"Multiple articulations found in USD file {fpath}.")
+    return articulations_found[0]
+
+
+def spawn_usd_articulation_entities(
+    cfg: ArticulationCfg,
+    env_list: list[Arena | Env],
+    *,
+    cache_dir: str | None = None,
+    clone_options: ObjectCloneOptions | None = None,
+) -> list[Articulation]:
+    """Import one USD articulation prototype and clone it into additional arenas."""
+    if cfg.uid is None:
+        logger.log_error("Articulation uid must be set before spawning entities.")
+    if len(env_list) == 0:
+        return []
+
+    if clone_options is None:
+        clone_options = default_articulation_clone_options()
+
+    source_env = env_list[0]
+    prototype_name = f"{cfg.uid}_0"
+    results = source_env.import_from_usd_file(
+        cfg.fpath, return_object=True, cache_dir=cache_dir
+    )
+    prototype = _find_single_articulation_in_usd_import(results, cfg.fpath)
     prototype.set_name(prototype_name)
 
     if not cfg.use_usd_properties:
@@ -342,6 +419,221 @@ def create_sphere(
     return spheres
 
 
+def _mesh_load_option_from_cfg(cfg: RigidObjectCfg) -> LoadOption:
+    """Build DexSim mesh load options from a rigid-object configuration."""
+    option = LoadOption()
+    option.rebuild_normals = cfg.shape.load_option.rebuild_normals
+    option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
+    option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
+    option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
+    option.smooth = cfg.shape.load_option.smooth
+    return option
+
+
+def _apply_mesh_uv_mapping(obj: MeshObject, cfg: RigidObjectCfg) -> None:
+    """Compute and apply UV mapping for a mesh rigid-object prototype."""
+    if not cfg.shape.compute_uv:
+        return
+
+    vertices = obj.get_vertices()
+    triangles = obj.get_triangles()
+    o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
+    _, uvs = get_mesh_auto_uv(o3d_mesh, np.array(cfg.shape.project_direction))
+    obj.set_uv_mapping(uvs)
+
+
+def _configure_primitive_rigidbody(
+    obj: MeshObject,
+    cfg: RigidObjectCfg,
+    body_type,
+    *,
+    is_newton_backend: bool,
+    shape_type: RigidBodyShape,
+) -> None:
+    """Attach primitive rigid-body physics to a cube or sphere prototype."""
+    if not is_newton_backend:
+        obj.set_body_scale(*cfg.body_scale)
+    obj.add_rigidbody(body_type, shape_type, cfg.attrs.attr())
+    if is_newton_backend:
+        _set_body_scale_after_rigidbody(obj, cfg.body_scale)
+
+
+def _import_usd_rigid_prototype(
+    env: Arena | Env,
+    fpath: str,
+    prototype_name: str,
+) -> MeshObject:
+    """Import a single rigid mesh actor from USD as the spawn prototype."""
+    results = env.import_from_usd_file(fpath, return_object=True)
+    rigidbodys_found = [
+        value for value in results.values() if isinstance(value, MeshObject)
+    ]
+    if len(rigidbodys_found) == 0:
+        logger.log_error(f"No rigid body found in USD file: {fpath}")
+    if len(rigidbodys_found) > 1:
+        logger.log_error(f"Multiple rigid bodies found in USD file: {fpath}.")
+    prototype = rigidbodys_found[0]
+    prototype.set_name(prototype_name)
+    return prototype
+
+
+def _load_rigid_mesh_prototype(
+    env: Arena | Env,
+    cfg: RigidObjectCfg,
+    *,
+    cache_dir: str | None,
+    body_type,
+    is_newton_backend: bool,
+) -> MeshObject:
+    """Load and configure one mesh rigid-object prototype in the source arena."""
+    option = _mesh_load_option_from_cfg(cfg)
+    fpath = cfg.shape.fpath
+    max_convex_hull_num = cfg.max_convex_hull_num
+
+    if max_convex_hull_num > 1:
+        obj = env.load_actor_with_coacd(
+            fpath,
+            duplicate=True,
+            attach_scene=True,
+            option=option,
+            cache_path=cache_dir,
+            actor_type=body_type,
+            max_convex_hull_num=max_convex_hull_num,
+        )
+    elif cfg.sdf_resolution > 0:
+        if not is_newton_backend and cfg.body_scale not in [
+            (1.0, 1.0, 1.0),
+            [1.0, 1.0, 1.0],
+        ]:
+            logger.log_error(
+                f"Non-unit body scale {cfg.body_scale} is not supported for SDF "
+                "collision yet. Please set body_scale to (1.0, 1.0, 1.0) for SDF "
+                "collision."
+            )
+        obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
+        sdf_cfg = SDFConfig(resolution=cfg.sdf_resolution)
+        obj.add_physical_body(
+            body_type,
+            RigidBodyShape.SDF,
+            config=sdf_cfg,
+            attr=cfg.attrs.attr(),
+        )
+    else:
+        obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
+        obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+
+    _apply_mesh_uv_mapping(obj, cfg)
+    return obj
+
+
+def _spawn_clones_from_prototype(
+    source_env: Arena | Env,
+    prototype_name: str,
+    env_list: list[Arena | Env],
+    uid: str,
+    clone_options: ObjectCloneOptions,
+) -> list[MeshObject]:
+    """Return the prototype plus clones for all remaining arenas."""
+    prototype = source_env.get_actor(prototype_name)
+    if prototype is None:
+        logger.log_error(
+            f"Rigid object prototype '{prototype_name}' was not found in the source arena."
+        )
+
+    entities = [prototype]
+    for env_idx in range(1, len(env_list)):
+        target_name = f"{uid}_{env_idx}"
+        clone = _clone_actor_between_arenas(
+            source_env,
+            prototype_name,
+            env_list[env_idx],
+            target_name,
+            clone_options,
+        )
+        if clone is None:
+            logger.log_error(
+                f"Failed to clone rigid object '{prototype_name}' into env {env_idx}."
+            )
+        entities.append(clone)
+    return entities
+
+
+def spawn_rigid_object_entities(
+    cfg: RigidObjectCfg,
+    env_list: list[Arena | Env],
+    *,
+    cache_dir: str | None = None,
+    clone_options: ObjectCloneOptions | None = None,
+) -> list[MeshObject]:
+    """Load one rigid-object prototype and clone it into additional arenas.
+
+    Mesh loading, convex decomposition, and physics setup run once on the
+    prototype in ``env_list[0]`` before cloning.
+    """
+    if cfg.uid is None:
+        logger.log_error("Rigid object uid must be set before spawning entities.")
+    if len(env_list) == 0:
+        return []
+
+    if clone_options is None:
+        clone_options = default_rigid_object_clone_options()
+
+    body_type = cfg.to_dexsim_body_type()
+    is_newton_backend = _is_newton_backend_active()
+    source_env = env_list[0]
+    prototype_name = f"{cfg.uid}_0"
+
+    if isinstance(cfg.shape, MeshCfg):
+        fpath = cfg.shape.fpath
+        is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
+        if is_usd:
+            prototype = _import_usd_rigid_prototype(source_env, fpath, prototype_name)
+        else:
+            cfg.use_usd_properties = False
+            prototype = _load_rigid_mesh_prototype(
+                source_env,
+                cfg,
+                cache_dir=cache_dir,
+                body_type=body_type,
+                is_newton_backend=is_newton_backend,
+            )
+            prototype.set_name(prototype_name)
+    elif isinstance(cfg.shape, CubeCfg):
+        prototype = source_env.create_cube(
+            cfg.shape.size[0], cfg.shape.size[1], cfg.shape.size[2]
+        )
+        prototype.set_name(prototype_name)
+        _configure_primitive_rigidbody(
+            prototype,
+            cfg,
+            body_type,
+            is_newton_backend=is_newton_backend,
+            shape_type=RigidBodyShape.BOX,
+        )
+    elif isinstance(cfg.shape, SphereCfg):
+        prototype = source_env.create_sphere(cfg.shape.radius, cfg.shape.resolution)
+        prototype.set_name(prototype_name)
+        _configure_primitive_rigidbody(
+            prototype,
+            cfg,
+            body_type,
+            is_newton_backend=is_newton_backend,
+            shape_type=RigidBodyShape.SPHERE,
+        )
+    else:
+        logger.log_error(
+            f"Unsupported rigid object shape type: {type(cfg.shape)}. "
+            "Supported types: MeshCfg, CubeCfg, SphereCfg."
+        )
+        return []
+
+    if len(env_list) == 1:
+        return [prototype]
+    return _spawn_clones_from_prototype(
+        source_env, prototype_name, env_list, cfg.uid, clone_options
+    )
+
+
 def load_mesh_objects_from_cfg(
     cfg: RigidObjectCfg, env_list: List[Arena], cache_dir: str | None = None
 ) -> List[MeshObject]:
@@ -355,124 +647,7 @@ def load_mesh_objects_from_cfg(
     Returns:
         List[MeshObject]: List of loaded mesh objects.
     """
-    obj_list = []
-    body_type = cfg.to_dexsim_body_type()
-    is_newton_backend = _is_newton_backend_active()
-    if isinstance(cfg.shape, MeshCfg):
-
-        option = LoadOption()
-        option.rebuild_normals = cfg.shape.load_option.rebuild_normals
-        option.rebuild_tangent = cfg.shape.load_option.rebuild_tangent
-        option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
-        option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
-        option.smooth = cfg.shape.load_option.smooth
-
-        cfg: RigidObjectCfg
-        max_convex_hull_num = cfg.max_convex_hull_num
-        fpath = cfg.shape.fpath
-
-        compute_uv = cfg.shape.compute_uv
-
-        is_usd = fpath.endswith((".usd", ".usda", ".usdc"))
-        if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            _env: dexsim.environment.Env = dexsim.default_world().get_env()
-            results = _env.import_from_usd_file(fpath, return_object=True)
-            # print(f"import usd result: {results}")
-
-            rigidbodys_found = []
-            for key, value in results.items():
-                if isinstance(value, MeshObject):
-                    rigidbodys_found.append(value)
-            if len(rigidbodys_found) == 0:
-                logger.log_error(f"No rigid body found in USD file: {fpath}")
-            elif len(rigidbodys_found) > 1:
-                logger.log_error(f"Multiple rigid bodies found in USD file: {fpath}.")
-            elif len(rigidbodys_found) == 1:
-                obj_list.append(rigidbodys_found[0])
-                return obj_list
-        else:
-            # non-usd file does not support this option, will be forced set False to avoid potential issues.
-            cfg.use_usd_properties = False
-
-        for i, env in enumerate(env_list):
-            if max_convex_hull_num > 1:
-                obj = env.load_actor_with_coacd(
-                    fpath,
-                    duplicate=True,
-                    attach_scene=True,
-                    option=option,
-                    cache_path=cache_dir,
-                    actor_type=body_type,
-                    max_convex_hull_num=max_convex_hull_num,
-                )
-            elif cfg.sdf_resolution > 0:
-                if not is_newton_backend and cfg.body_scale not in [
-                    (1.0, 1.0, 1.0),
-                    [1.0, 1.0, 1.0],
-                ]:
-                    logger.log_error(
-                        f"Non-unit body scale {cfg.body_scale} is not supported for SDF collision yet. Please set body_scale to (1.0, 1.0, 1.0) for SDF collision."
-                    )
-                obj = env.load_actor(
-                    fpath, duplicate=True, attach_scene=True, option=option
-                )
-                sdf_cfg = SDFConfig(resolution=cfg.sdf_resolution)
-                obj.add_physical_body(
-                    body_type,
-                    RigidBodyShape.SDF,
-                    config=sdf_cfg,
-                    attr=cfg.attrs.attr(),
-                )
-            else:
-                obj = env.load_actor(
-                    fpath, duplicate=True, attach_scene=True, option=option
-                )
-                obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
-
-            obj.set_name(f"{cfg.uid}_{i}")
-            obj_list.append(obj)
-
-            if compute_uv:
-                vertices = obj.get_vertices()
-                triangles = obj.get_triangles()
-
-                o3d_mesh = o3d.t.geometry.TriangleMesh(vertices, triangles)
-                _, uvs = get_mesh_auto_uv(
-                    o3d_mesh, np.array(cfg.shape.project_direction)
-                )
-                obj.set_uv_mapping(uvs)
-
-    elif isinstance(cfg.shape, CubeCfg):
-        from embodichain.lab.sim.utility.sim_utils import create_cube
-
-        obj_list = create_cube(env_list, cfg.shape.size, uid=cfg.uid)
-        for obj in obj_list:
-            if not is_newton_backend:
-                obj.set_body_scale(*cfg.body_scale)
-            obj.add_rigidbody(body_type, RigidBodyShape.BOX, cfg.attrs.attr())
-            if is_newton_backend:
-                _set_body_scale_after_rigidbody(obj, cfg.body_scale)
-
-    elif isinstance(cfg.shape, SphereCfg):
-        from embodichain.lab.sim.utility.sim_utils import create_sphere
-
-        obj_list = create_sphere(
-            env_list, cfg.shape.radius, cfg.shape.resolution, uid=cfg.uid
-        )
-        for obj in obj_list:
-            if not is_newton_backend:
-                obj.set_body_scale(*cfg.body_scale)
-            obj.add_rigidbody(body_type, RigidBodyShape.SPHERE, cfg.attrs.attr())
-            if is_newton_backend:
-                _set_body_scale_after_rigidbody(obj, cfg.body_scale)
-    else:
-        logger.log_error(
-            f"Unsupported rigid object shape type: {type(cfg.shape)}. Supported types: MeshCfg, CubeCfg, SphereCfg."
-        )
-    return obj_list
+    return spawn_rigid_object_entities(cfg, env_list, cache_dir=cache_dir)
 
 
 def load_soft_object_from_cfg(
