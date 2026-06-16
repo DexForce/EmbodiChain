@@ -1020,12 +1020,15 @@ def export_final_mesh(mesh, name, out_dir: Path):
     T_trans = np.eye(4)
     T_trans[:3, 3] = -bottom_center
     mesh.apply_transform(T_trans)
-    out_path = out_dir / f"{name}_simready.obj"
+    out_path = out_dir / f"{name}_simready.glb"
     out_path = out_path.resolve()
 
     print(f"Exporting final mesh to: {out_path} (bottom-face center moved to origin)")
     mesh.export(out_path)
 
+    out_path = out_dir / f"{name}_simready.obj"
+    out_path = out_path.resolve()
+    mesh.export(out_path)
     return str(out_path)
 
 
