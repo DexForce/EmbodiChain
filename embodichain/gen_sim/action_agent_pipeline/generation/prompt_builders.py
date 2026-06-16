@@ -34,6 +34,7 @@ __all__ = [
 
 _BASKET_LEFT_RELEASE_OFFSET_Y = -0.04
 _BASKET_RIGHT_RELEASE_OFFSET_Y = 0.04
+_PLACE_LIFT_HEIGHT = 0.10
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
 - `left_of` means negative world y relative to the reference object.
 - `right_of` means positive world y relative to the reference object.
@@ -127,22 +128,11 @@ def make_relative_task_prompt(
         pose_kind="high",
         sample_interval=45,
     )
-    release_spec = _format_relative_pose_spec(
+    place_spec = _format_relative_place_spec(
         active_arm,
         spec,
-        pose_kind="release",
-        sample_interval=30,
-    )
-    open_spec = _format_gripper_spec(
-        active_arm,
-        "open",
-        sample_interval=15,
-        post_hold_steps=25,
-    )
-    retreat_spec = _format_pose_offset_spec(
-        active_arm,
-        (0.0, 0.0, 0.14),
-        sample_interval=20,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
     )
     initial_spec = _format_initial_qpos_spec(active_arm, sample_interval=30)
     reference_line = _relative_reference_line(spec)
@@ -170,9 +160,11 @@ Object and arm mapping:
 
 {_RELATIVE_COORDINATE_CONVENTION}
 
-Generate one deterministic nominal graph with exactly 6 nominal edges. Use only
+Generate one deterministic nominal graph with exactly 4 nominal edges. Use only
 the atomic action class JSON specs shown below. Do not add recovery, monitor, search,
-alignment, or extra lift edges. The inactive arm must remain null in every edge.
+alignment, or extra lift edges. Use `PlaceAction` for the release-place step so
+lowering, gripper opening, and upward retreat remain one atomic action. The
+inactive arm must remain null in every edge.
 
 1. Pick up the moved object:
    - {active_slot}: {pick_spec}
@@ -182,19 +174,11 @@ alignment, or extra lift edges. The inactive arm must remain null in every edge.
    - {active_slot}: {high_spec}
    - {inactive_slot}: null
 
-3. Lower the held object to the {release_step_label} pose:
-   - {active_slot}: {release_spec}
+3. Place the held object at the {release_step_label} pose:
+   - {active_slot}: {place_spec}
    - {inactive_slot}: null
 
-4. Release the moved object:
-   - {active_slot}: {open_spec}
-   - {inactive_slot}: null
-
-5. Move the empty gripper upward to clear the object:
-   - {active_slot}: {retreat_spec}
-   - {inactive_slot}: null
-
-6. Return the active arm to its initial pose:
+4. Return the active arm to its initial pose:
    - {active_slot}: {initial_spec}
    - {inactive_slot}: null
 
@@ -223,35 +207,23 @@ def _make_dual_relative_task_prompt(
         pose_kind="high",
         sample_interval=45,
     )
-    first_release_spec = _format_relative_pose_spec(
-        first_arm,
-        first,
-        pose_kind="release",
-        sample_interval=30,
-    )
     second_high_spec = _format_relative_pose_spec(
         second_arm,
         second,
         pose_kind="high",
         sample_interval=45,
     )
-    second_release_spec = _format_relative_pose_spec(
+    first_place_spec = _format_relative_place_spec(
+        first_arm,
+        first,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
+    )
+    second_place_spec = _format_relative_place_spec(
         second_arm,
         second,
-        pose_kind="release",
-        sample_interval=30,
-    )
-    first_open_spec = _format_gripper_spec(
-        first_arm,
-        "open",
-        sample_interval=15,
-        post_hold_steps=25,
-    )
-    second_open_spec = _format_gripper_spec(
-        second_arm,
-        "open",
-        sample_interval=15,
-        post_hold_steps=25,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
     )
     first_close_spec = _format_gripper_spec(
         first_arm,
@@ -262,16 +234,6 @@ def _make_dual_relative_task_prompt(
         second_arm,
         "close",
         sample_interval=10,
-    )
-    first_retreat_spec = _format_pose_offset_spec(
-        first_arm,
-        (0.0, 0.0, 0.14),
-        sample_interval=20,
-    )
-    second_retreat_spec = _format_pose_offset_spec(
-        second_arm,
-        (0.0, 0.0, 0.14),
-        sample_interval=20,
     )
     first_initial_spec = _format_initial_qpos_spec(
         first_arm,
@@ -308,9 +270,10 @@ Object and arm mapping:
 
 {_RELATIVE_COORDINATE_CONVENTION}
 
-Generate one deterministic nominal graph with exactly 10 nominal edges. Use only
+Generate one deterministic nominal graph with exactly 6 nominal edges. Use only
 the atomic action class JSON specs shown below. Do not add recovery, monitor, search,
-alignment, or extra lift edges.
+alignment, or extra lift edges. Use `PlaceAction` for each release-place step so
+lowering, gripper opening, and upward retreat remain one atomic action.
 
 1. Pick up both moved objects simultaneously:
    - {first_slot}: {first_pick_spec}
@@ -321,36 +284,20 @@ alignment, or extra lift edges.
    - {first_slot}: {first_high_spec}
    - {second_slot}: {second_close_spec}
 
-3. Lower `{first.moved_runtime_uid}` to the release pose:
-   - {first_slot}: {first_release_spec}
+3. Place `{first.moved_runtime_uid}` at the release pose:
+   - {first_slot}: {first_place_spec}
    - {second_slot}: {second_close_spec}
 
-4. Release `{first.moved_runtime_uid}`:
-   - {first_slot}: {first_open_spec}
-   - {second_slot}: {second_close_spec}
-
-5. Move the empty `{first_arm}` gripper upward to clear the workspace:
-   - {first_slot}: {first_retreat_spec}
-   - {second_slot}: {second_close_spec}
-
-6. Return `{first_arm}` to its initial pose while moving `{second.moved_runtime_uid}`
+4. Return `{first_arm}` to its initial pose while moving `{second.moved_runtime_uid}`
    to the high staging pose:
    - {first_slot}: {first_initial_spec}
    - {second_slot}: {second_high_spec}
 
-7. Lower `{second.moved_runtime_uid}` to the release pose:
+5. Place `{second.moved_runtime_uid}` at the release pose:
    - {first_slot}: null
-   - {second_slot}: {second_release_spec}
+   - {second_slot}: {second_place_spec}
 
-8. Release `{second.moved_runtime_uid}`:
-   - {first_slot}: null
-   - {second_slot}: {second_open_spec}
-
-9. Move the empty `{second_arm}` gripper upward to clear the workspace:
-   - {first_slot}: null
-   - {second_slot}: {second_retreat_spec}
-
-10. Return `{second_arm}` to its initial pose:
+6. Return `{second_arm}` to its initial pose:
    - {first_slot}: null
    - {second_slot}: {second_initial_spec}
 
@@ -396,8 +343,8 @@ Config-stage LLM notes:
 {notes}
 
 The execution-stage LLM should generate graph JSON that grasps the moved object,
-moves it to the configured high staging pose, lowers to the release pose, opens
-the gripper, retreats upward, and returns the active arm to its initial pose.
+moves it to the configured high staging pose, places it at the release pose with
+one `PlaceAction`, and returns the active arm to its initial pose.
 """
 
 
@@ -432,9 +379,10 @@ Config-stage LLM notes:
 {notes}
 
 The execution-stage LLM should generate graph JSON that grasps both moved
-objects, places the first moved object, retreats the first arm, then places the
-second moved object while the first arm returns to its initial pose. Each arm
-must release its moved object before returning to its initial pose.
+objects, stages and places the first moved object with one `PlaceAction`, then
+stages and places the second moved object while the first arm returns to its
+initial pose. Each arm must release its moved object before returning to its
+initial pose.
 """
 
 
@@ -450,11 +398,11 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
         pose_kind="high",
         sample_interval=45,
     )
-    release_spec = _format_relative_pose_spec(
+    place_spec = _format_relative_place_spec(
         active_arm,
         spec,
-        pose_kind="release",
-        sample_interval=30,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
     )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
 
@@ -467,12 +415,8 @@ Use exactly these action patterns:
   {_format_pick_up_spec(active_arm, spec.moved_runtime_uid)}
 - {_relative_pose_step_label(spec, "High staging")}:
   {high_spec}
-- {_relative_pose_step_label(spec, "Release pose")}:
-  {release_spec}
-- Release the held object:
-  {_format_gripper_spec(active_arm, "open", sample_interval=15, post_hold_steps=25)}
-- Retreat upward:
-  {_format_pose_offset_spec(active_arm, (0.0, 0.0, 0.14), sample_interval=20)}
+- Place at the release pose:
+  {place_spec}
 - Return to initial qpos:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}
 """
@@ -488,23 +432,23 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
         pose_kind="high",
         sample_interval=45,
     )
-    first_release_spec = _format_relative_pose_spec(
-        first_arm,
-        first,
-        pose_kind="release",
-        sample_interval=30,
-    )
     second_high_spec = _format_relative_pose_spec(
         second_arm,
         second,
         pose_kind="high",
         sample_interval=45,
     )
-    second_release_spec = _format_relative_pose_spec(
+    first_place_spec = _format_relative_place_spec(
+        first_arm,
+        first,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
+    )
+    second_place_spec = _format_relative_place_spec(
         second_arm,
         second,
-        pose_kind="release",
-        sample_interval=30,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
     )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
 
@@ -520,18 +464,14 @@ Use these action patterns:
   {_format_pick_up_spec(second_arm, second.moved_runtime_uid)}
 - First high staging:
   {first_high_spec}
-- First release pose:
-  {first_release_spec}
+- First place action:
+  {first_place_spec}
 - Second high staging:
   {second_high_spec}
-- Second release pose:
-  {second_release_spec}
-- Release an object:
-  {_format_gripper_spec("<assigned_arm>", "open", sample_interval=15, post_hold_steps=25)}
+- Second place action:
+  {second_place_spec}
 - Keep a holding arm closed:
   {_format_gripper_spec("<holding_arm>", "close", sample_interval=10)}
-- Retreat upward:
-  {_format_pose_offset_spec("<assigned_arm>", (0.0, 0.0, 0.14), sample_interval=20)}
 - Return to initial qpos:
   {_format_initial_qpos_spec("<released_arm>", sample_interval=30)}
 """
@@ -560,50 +500,30 @@ def make_basket_task_prompt(
         (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
-    left_release_spec = _format_pose_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=30,
-    )
     right_high_spec = _format_pose_object_spec(
         "right_arm",
         roles.container_runtime_uid,
         (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
-    right_release_spec = _format_pose_object_spec(
+    left_place_spec = _format_place_object_spec(
+        "left_arm",
+        roles.container_runtime_uid,
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
+    )
+    right_place_spec = _format_place_object_spec(
         "right_arm",
         roles.container_runtime_uid,
         (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=30,
-    )
-    left_open_spec = _format_gripper_spec(
-        "left_arm",
-        "open",
-        sample_interval=15,
-        post_hold_steps=25,
-    )
-    right_open_spec = _format_gripper_spec(
-        "right_arm",
-        "open",
-        sample_interval=15,
-        post_hold_steps=25,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
     )
     right_close_spec = _format_gripper_spec(
         "right_arm",
         "close",
         sample_interval=10,
-    )
-    left_retreat_spec = _format_pose_offset_spec(
-        "left_arm",
-        (0.0, 0.0, 0.14),
-        sample_interval=20,
-    )
-    right_retreat_spec = _format_pose_offset_spec(
-        "right_arm",
-        (0.0, 0.0, 0.14),
-        sample_interval=20,
     )
     left_initial_spec = _format_initial_qpos_spec(
         "left_arm",
@@ -633,23 +553,23 @@ Object and arm mapping:
 - Both target objects must be released into `{roles.container_runtime_uid}`.
 
 Generate one deterministic nominal graph with the following semantic sequence.
-Do not add extra alignment, search, recovery, or monitor steps. Do include the
-specified post-release retreat and return-to-initial steps. The left arm must
-finish its upward retreat before the right arm enters the shared container
-workspace, but the left return-to-initial action and the right high-staging
-action must execute simultaneously in one graph edge. Generate exactly 10
+Do not add extra alignment, search, recovery, or monitor steps. Use `PlaceAction`
+for each release-place step so lowering, gripper opening, and upward retreat
+remain one atomic action. The left arm must finish its `PlaceAction` retreat
+before the right arm enters the shared container workspace, but the left
+return-to-initial action and the right high-staging action must execute
+simultaneously in one graph edge. Generate exactly 6
 nominal edges, one edge for each numbered step below. Do not split the
 simultaneous grasp or the simultaneous left-return/right-staging action into
-separate edges. Do not merge, reorder, or omit the lower-to-release,
-open-gripper, upward-retreat, or final right return-to-initial edges.
+separate edges. Do not split a `PlaceAction` into separate lower-to-release,
+open-gripper, or upward-retreat edges.
 
 A target object is not considered placed when it is only above the
 {roles.container_runtime_uid}. For each arm, the placement order must be: move
-to a high staging pose above the container, lower to the release pose inside the
-container, use `target_qpos` with source `gripper_state` and state `open`,
-move the empty gripper upward, then return the arm to its initial pose. Never
-use `target_qpos` source `initial` for an arm that has not already released its
-held target object.
+to a high staging pose above the container, then execute one `PlaceAction` at
+the release pose inside the container, then return the arm to its initial pose.
+Never use `target_qpos` source `initial` for an arm that has not already
+released its held target object.
 
 1. Pick up both target objects simultaneously:
    - left_arm_action: {left_pick_spec}
@@ -660,40 +580,24 @@ held target object.
    - left_arm_action: {left_high_spec}
    - right_arm_action: {right_close_spec}
 
-3. Lower the held left target object to the left release pose inside the
+3. Place the held left target object at the left release pose inside the
    {roles.container_runtime_uid}:
-   - left_arm_action: {left_release_spec}
+   - left_arm_action: {left_place_spec}
    - right_arm_action: {right_close_spec}
 
-4. Release the left target object into the {roles.container_runtime_uid}:
-   - left_arm_action: {left_open_spec}
-   - right_arm_action: {right_close_spec}
-
-5. Move the empty left gripper upward to clear the container:
-   - left_arm_action: {left_retreat_spec}
-   - right_arm_action: {right_close_spec}
-
-6. After the left gripper has retreated upward, return the left UR5 to its
+4. After the left gripper has retreated upward, return the left UR5 to its
    initial pose while simultaneously moving the held right target object
    directly above the right half of the {roles.container_runtime_uid}. This
    parallel handoff must remain one graph edge:
    - left_arm_action: {left_initial_spec}
    - right_arm_action: {right_high_spec}
 
-7. Lower the held right target object to the right release pose inside the
+5. Place the held right target object at the right release pose inside the
    {roles.container_runtime_uid}:
    - left_arm_action: null
-   - right_arm_action: {right_release_spec}
+   - right_arm_action: {right_place_spec}
 
-8. Release the right target object into the {roles.container_runtime_uid}:
-   - left_arm_action: null
-   - right_arm_action: {right_open_spec}
-
-9. Move the empty right gripper upward to clear the container:
-   - left_arm_action: null
-   - right_arm_action: {right_retreat_spec}
-
-10. Return the right UR5 to its initial pose after releasing the target object:
+6. Return the right UR5 to its initial pose after releasing the target object:
    - left_arm_action: null
    - right_arm_action: {right_initial_spec}
 
@@ -740,27 +644,26 @@ The nominal task starts with simultaneous dual-arm grasping. The left UR5 must
 grasp {roles.left_target_runtime_uid} while the right UR5 grasps
 {roles.right_target_runtime_uid} in the same graph edge. After both
 {target_plural} are held, the left UR5 places
-{roles.left_target_runtime_uid} into {roles.container_runtime_uid}, releases
-it, and retreats upward. The next graph edge is a parallel handoff: the left
-UR5 returns to its initial pose while the right UR5 simultaneously moves its
+{roles.left_target_runtime_uid} into {roles.container_runtime_uid} with one
+`PlaceAction`. The next graph edge is a parallel handoff: the left UR5 returns
+to its initial pose while the right UR5 simultaneously moves its
 already-grasped {roles.right_target_runtime_uid} to the high staging pose above
-{roles.container_runtime_uid}. The right UR5 then lowers and releases
-{roles.right_target_runtime_uid}, retreats upward, and returns to its initial
-pose. To change the insertion order later, edit the task prompt sequence and
-keep the same atomic action API.
+{roles.container_runtime_uid}. The right UR5 then places
+{roles.right_target_runtime_uid} with one `PlaceAction` and returns to its
+initial pose. To change the insertion order later, edit the task prompt sequence
+and keep the same atomic action API.
 
-The {roles.container_runtime_uid} area is a shared workspace. After a UR5
-releases a target object, it should retreat upward before the other UR5 moves
-to the container, otherwise the two arms may collide near the container. The
-right UR5 should keep holding {roles.right_target_runtime_uid} while the left
-UR5 performs its placement and upward retreat. Once that retreat is complete,
-the right UR5 may move toward the container while the left UR5 simultaneously
-returns to its initial pose; it must not wait for the left return-to-initial
-motion to finish.
+The {roles.container_runtime_uid} area is a shared workspace. A UR5 should
+complete its `PlaceAction` retreat before the other UR5 moves to the container,
+otherwise the two arms may collide near the container. The right UR5 should keep
+holding {roles.right_target_runtime_uid} while the left UR5 performs its
+placement. Once that `PlaceAction` is complete, the right UR5 may move toward
+the container while the left UR5 simultaneously returns to its initial pose; it
+must not wait for the left return-to-initial motion to finish.
 
 A target object at a high pose above `{roles.container_runtime_uid}` is only
-staged, not placed. Each arm must lower the held object into the container
-release pose and open the gripper before any return-to-initial motion.
+staged, not placed. Each arm must execute a `PlaceAction` at the container
+release pose before any return-to-initial motion.
 
 Always plan to the current `{roles.container_runtime_uid}` object pose from the
 environment config. Do not hard-code container coordinates in generated graph
@@ -775,23 +678,25 @@ def make_basket_atom_actions_prompt(roles: _BasketRolesLike) -> str:
         (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
-    left_release_spec = _format_pose_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=30,
-    )
     right_high_spec = _format_pose_object_spec(
         "right_arm",
         roles.container_runtime_uid,
         (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
         sample_interval=45,
     )
-    right_release_spec = _format_pose_object_spec(
+    left_place_spec = _format_place_object_spec(
+        "left_arm",
+        roles.container_runtime_uid,
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
+    )
+    right_place_spec = _format_place_object_spec(
         "right_arm",
         roles.container_runtime_uid,
         (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=30,
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
     )
     return f"""### Atomic Action Class JSON Specs for UR5BreadBasket Dual-UR5 Placement
 
@@ -806,7 +711,7 @@ left-first placement with an overlapped handoff to the right arm:
 - While the left arm places its target, keep the right hand closed with a
   `target_qpos` whose source is `gripper_state` and state is `close`.
 - After the left arm releases `{roles.left_target_runtime_uid}`, first move it
-  upward to clear the container.
+  upward to clear the container as part of the same `PlaceAction`.
 - The next nominal edge must pair the left arm's initial `target_qpos` move with
   the right arm's object-referenced `target_pose` high-staging move. Do not split this
   parallel handoff into separate edges.
@@ -821,18 +726,14 @@ Use these action patterns:
   {_format_pick_up_spec("right_arm", roles.right_target_runtime_uid)}
 - Left high staging:
   {left_high_spec}
-- Left release pose:
-  {left_release_spec}
+- Left place action:
+  {left_place_spec}
 - Right high staging:
   {right_high_spec}
-- Right release pose:
-  {right_release_spec}
-- Release an object:
-  {_format_gripper_spec("<assigned_arm>", "open", sample_interval=15, post_hold_steps=25)}
+- Right place action:
+  {right_place_spec}
 - Keep a holding arm closed:
   {_format_gripper_spec("<holding_arm>", "close", sample_interval=10)}
-- Retreat upward:
-  {_format_pose_offset_spec("<assigned_arm>", (0.0, 0.0, 0.14), sample_interval=20)}
 - Return to initial qpos:
   {_format_initial_qpos_spec("<released_arm>", sample_interval=30)}
 """
@@ -884,6 +785,27 @@ def _format_pose_object_spec(
     )
 
 
+def _format_place_object_spec(
+    robot_name: str,
+    obj_name: str,
+    offset: tuple[float, float, float] | list[float],
+    *,
+    sample_interval: int,
+    lift_height: float,
+) -> str:
+    x, y, z = offset
+    return _format_place_spec(
+        robot_name,
+        {
+            "reference": "object",
+            "obj_name": obj_name,
+            "offset": [float(x), float(y), float(z)],
+        },
+        sample_interval=sample_interval,
+        lift_height=lift_height,
+    )
+
+
 def _format_relative_pose_spec(
     robot_name: str,
     placement: _RelativePlacementLike,
@@ -916,6 +838,32 @@ def _format_relative_pose_spec(
     )
 
 
+def _format_relative_place_spec(
+    robot_name: str,
+    placement: _RelativePlacementLike,
+    *,
+    sample_interval: int,
+    lift_height: float,
+) -> str:
+    if getattr(placement, "reference_is_initial_pose", False):
+        if placement.release_position is None:
+            raise ValueError("Self-relative placement requires release position.")
+        return _format_place_absolute_spec(
+            robot_name,
+            placement.release_position,
+            sample_interval=sample_interval,
+            lift_height=lift_height,
+        )
+
+    return _format_place_object_spec(
+        robot_name,
+        placement.reference_runtime_uid,
+        placement.release_offset,
+        sample_interval=sample_interval,
+        lift_height=lift_height,
+    )
+
+
 def _format_pose_absolute_spec(
     robot_name: str,
     position: Sequence[float],
@@ -932,6 +880,45 @@ def _format_pose_absolute_spec(
                 "position": [float(value) for value in position],
             },
             "cfg": {"sample_interval": sample_interval},
+        }
+    )
+
+
+def _format_place_absolute_spec(
+    robot_name: str,
+    position: Sequence[float],
+    *,
+    sample_interval: int,
+    lift_height: float,
+) -> str:
+    return _format_place_spec(
+        robot_name,
+        {
+            "reference": "absolute",
+            "position": [float(value) for value in position],
+        },
+        sample_interval=sample_interval,
+        lift_height=lift_height,
+    )
+
+
+def _format_place_spec(
+    robot_name: str,
+    target_pose: Mapping[str, Any],
+    *,
+    sample_interval: int,
+    lift_height: float,
+) -> str:
+    return _compact_json(
+        {
+            "atomic_action_class": "PlaceAction",
+            "robot_name": robot_name,
+            "control": "arm",
+            "target_pose": dict(target_pose),
+            "cfg": {
+                "sample_interval": sample_interval,
+                "lift_height": float(lift_height),
+            },
         }
     )
 

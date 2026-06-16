@@ -93,9 +93,7 @@ def test_ur5_basket_generator_uses_parallel_handoff(
         "arm": "left_arm",
         "eef": "left_eef",
     }
-    assert extensions["arm_aim_yaw_offset"]["left"] == pytest.approx(
-        3.141592653589793
-    )
+    assert extensions["arm_aim_yaw_offset"]["left"] == pytest.approx(3.141592653589793)
     assert extensions["arm_aim_yaw_offset"]["right"] == pytest.approx(0.0)
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
@@ -111,8 +109,8 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     normalized_task_prompt = " ".join(task_prompt.split())
 
-    assert "Generate exactly 10 nominal edges" in normalized_task_prompt
-    assert "Generate exactly 11 nominal edges" not in normalized_task_prompt
+    assert "Generate exactly 6 nominal edges" in normalized_task_prompt
+    assert "Generate exactly 10 nominal edges" not in normalized_task_prompt
     assert "positive-y side" in basic_background
     assert "negative-y side" in basic_background
     assert "negative-x side" not in basic_background
@@ -127,6 +125,16 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     )
     assert left_high_offset_spec in task_prompt
     assert right_high_offset_spec in task_prompt
+    assert (
+        '"atomic_action_class":"PlaceAction","robot_name":"left_arm","control":"arm",'
+        '"target_pose":{"reference":"object","obj_name":"wicker_basket",'
+        '"offset":[0.0,-0.04,0.12]}' in task_prompt
+    )
+    assert (
+        '"atomic_action_class":"PlaceAction","robot_name":"right_arm","control":"arm",'
+        '"target_pose":{"reference":"object","obj_name":"wicker_basket",'
+        '"offset":[0.0,0.04,0.12]}' in task_prompt
+    )
     assert '"offset":[-0.04,0.0,0.22]' not in task_prompt
     assert '"offset":[0.04,0.0,0.22]' not in task_prompt
     assert left_high_offset_spec in atom_actions
@@ -136,8 +144,8 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     assert "parallel handoff" in atom_actions
     assert len(paths.summary["normalized_meshes"]) == 4
 
-    handoff_edge = task_prompt.split("6. After the left gripper", maxsplit=1)[1].split(
-        "\n7. Lower the held right target object",
+    handoff_edge = task_prompt.split("4. After the left gripper", maxsplit=1)[1].split(
+        "\n5. Place the held right target object",
         maxsplit=1,
     )[0]
     assert (
@@ -527,10 +535,11 @@ def test_task_description_generates_relative_left_of_config(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     assert "Move apple_2 to the left of basket_3." in task_prompt
     assert (
-        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        "Generate one deterministic nominal graph with exactly 4 nominal edges"
         in task_prompt
     )
     assert '"atomic_action_class":"PickUpAction","robot_name":"left_arm"' in task_prompt
+    assert '"atomic_action_class":"PlaceAction","robot_name":"left_arm"' in task_prompt
     assert '"obj_name":"apple_2"' in task_prompt
     assert "right_arm_action: null" in task_prompt
     assert "Generate exactly 10 nominal edges" not in task_prompt
@@ -1070,9 +1079,7 @@ def test_task_description_allows_single_rigid_with_background_reference(
     assert success["object"] == "chip_bag"
     assert success["support"] == "pad"
 
-    registry = gym_config["env"]["events"]["register_info_to_env"]["params"][
-        "registry"
-    ]
+    registry = gym_config["env"]["events"]["register_info_to_env"]["params"]["registry"]
     registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
     assert {"chip_bag", "pad"}.issubset(registered_uids)
 
@@ -1178,7 +1185,7 @@ def test_task_description_generates_dual_arm_relative_config(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     basic_background = paths.basic_background.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 10 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 6 nominal edges" in (
         task_prompt
     )
     assert (
@@ -1193,6 +1200,8 @@ def test_task_description_generates_dual_arm_relative_config(
         '"robot_name":"right_arm","control":"hand","target_qpos":{"source":"gripper_state","state":"close"}'
         in task_prompt
     )
+    assert '"atomic_action_class":"PlaceAction","robot_name":"left_arm"' in task_prompt
+    assert '"atomic_action_class":"PlaceAction","robot_name":"right_arm"' in task_prompt
     assert "The inactive arm must remain null" not in task_prompt
     assert "Both arms participate" in basic_background
     assert "left_arm moves `apple_2`" in basic_background
