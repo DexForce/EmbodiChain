@@ -1,0 +1,4 @@
+name: benchmark
+canonical_skill: .agents/skills/benchmark/SKILL.md
+project: EmbodiChain
+
