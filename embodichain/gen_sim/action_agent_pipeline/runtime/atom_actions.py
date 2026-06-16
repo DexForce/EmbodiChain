@@ -63,6 +63,13 @@ __all__ = [
 SUPPORTED_ATOMIC_ACTION_CLASSES = {"PickUpAction", "MoveAction", "PlaceAction"}
 SUPPORTED_CONTROLS = {"arm", "hand"}
 TARGET_SPEC_FIELDS = ("target_object", "target_pose", "target_qpos")
+ACTION_SPEC_FIELDS = {
+    "atomic_action_class",
+    "robot_name",
+    "control",
+    "cfg",
+    *TARGET_SPEC_FIELDS,
+}
 SUPPORTED_POSE_REFERENCES = {"object", "absolute", "relative"}
 SUPPORTED_QPOS_SOURCES = {"initial", "gripper_state", "joint_delta"}
 SUPPORTED_CFG_KEYS = {
@@ -142,6 +149,12 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "Legacy target.kind schema is not supported. Use exactly one of "
             "target_object, target_pose, or target_qpos."
+        )
+    unknown_fields = set(spec) - ACTION_SPEC_FIELDS
+    if unknown_fields:
+        raise ValueError(
+            f"Unsupported atomic action spec fields: "
+            f"{', '.join(sorted(unknown_fields))}."
         )
 
     atomic_action_class = spec.get("atomic_action_class")
@@ -230,6 +243,11 @@ def _normalize_action_target(
 
 
 def _validate_target_object(target_object: Mapping[str, Any]) -> None:
+    unknown_fields = set(target_object) - {"obj_name", "affordance"}
+    if unknown_fields:
+        raise ValueError(
+            f"Unsupported target_object fields: {', '.join(sorted(unknown_fields))}."
+        )
     obj_name = target_object.get("obj_name")
     if not isinstance(obj_name, str) or not obj_name:
         raise ValueError("target_object requires non-empty obj_name.")
@@ -246,6 +264,12 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
         )
 
     if reference == "object":
+        _validate_target_fields(
+            target_pose,
+            {"reference", "obj_name", "offset", "orientation"},
+            "target_pose",
+        )
+        _validate_current_orientation(target_pose)
         obj_name = target_pose.get("obj_name")
         if not isinstance(obj_name, str) or not obj_name:
             raise ValueError("object target_pose requires non-empty obj_name.")
@@ -253,6 +277,12 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
         return
 
     if reference == "absolute":
+        _validate_target_fields(
+            target_pose,
+            {"reference", "position", "orientation"},
+            "target_pose",
+        )
+        _validate_current_orientation(target_pose)
         position = target_pose.get("position")
         if not isinstance(position, list) or len(position) != 3:
             raise ValueError(
@@ -260,6 +290,11 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
             )
         return
 
+    _validate_target_fields(
+        target_pose,
+        {"reference", "offset", "frame"},
+        "target_pose",
+    )
     _xyz(target_pose.get("offset", [0.0, 0.0, 0.0]), "offset")
     frame = target_pose.get("frame", "world")
     if frame not in {"world", "eef"}:
@@ -278,11 +313,13 @@ def _validate_target_qpos(
         )
 
     if source == "initial":
+        _validate_target_fields(target_qpos, {"source"}, "target_qpos")
         if control != "arm":
             raise ValueError("initial target_qpos requires control='arm'.")
         return
 
     if source == "gripper_state":
+        _validate_target_fields(target_qpos, {"source", "state"}, "target_qpos")
         if control != "hand":
             raise ValueError("gripper_state target_qpos requires control='hand'.")
         state = target_qpos.get("state")
@@ -292,12 +329,35 @@ def _validate_target_qpos(
             )
         return
 
+    _validate_target_fields(
+        target_qpos,
+        {"source", "joint_index", "delta_degrees"},
+        "target_qpos",
+    )
     if control != "arm":
         raise ValueError("joint_delta target_qpos requires control='arm'.")
     if "joint_index" not in target_qpos:
         raise ValueError("joint_delta target_qpos requires joint_index.")
     int(target_qpos["joint_index"])
     float(target_qpos.get("delta_degrees", 0.0))
+
+
+def _validate_target_fields(
+    target_spec: Mapping[str, Any],
+    allowed_fields: set[str],
+    target_name: str,
+) -> None:
+    unknown_fields = set(target_spec) - allowed_fields
+    if unknown_fields:
+        raise ValueError(
+            f"Unsupported {target_name} fields: {', '.join(sorted(unknown_fields))}."
+        )
+
+
+def _validate_current_orientation(target_pose: Mapping[str, Any]) -> None:
+    orientation = target_pose.get("orientation")
+    if orientation is not None and orientation != "current":
+        raise ValueError("target_pose orientation only supports 'current'.")
 
 
 def execute_atomic_action(
@@ -530,9 +590,10 @@ def _interpolate_qpos_trajectory(
         dtype=start_qpos.dtype,
         device=start_qpos.device,
     ).reshape(1, sample_interval, 1)
-    return start_qpos.unsqueeze(1) + (
-        target_qpos.unsqueeze(1) - start_qpos.unsqueeze(1)
-    ) * weights
+    return (
+        start_qpos.unsqueeze(1)
+        + (target_qpos.unsqueeze(1) - start_qpos.unsqueeze(1)) * weights
+    )
 
 
 def _select_arm_parts(env, robot_name: str):
@@ -563,6 +624,24 @@ def _build_action_cfg_and_start(env, spec: AtomicActionSpec):
     is_left, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
         env, spec.robot_name
     )
+    cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
+    start_qpos = _resolve_action_start_qpos(
+        env,
+        spec,
+        is_left=is_left,
+        arm_joints=arm_joints,
+        eef_joints=eef_joints,
+    )
+    return cfg, start_qpos
+
+
+def _build_action_cfg(
+    env,
+    spec: AtomicActionSpec,
+    arm_part: str,
+    hand_part: str,
+    hand_dof: int,
+):
     cfg_values = dict(spec.cfg)
     cfg_values.pop("post_hold_steps", None)
     device = env.robot.device
@@ -570,46 +649,48 @@ def _build_action_cfg_and_start(env, spec: AtomicActionSpec):
     if spec.atomic_action_class == "PickUpAction":
         if spec.control != "arm":
             raise ValueError("PickUpAction atomic action requires control='arm'.")
-        hand_dof = len(eef_joints)
-        cfg = PickUpActionCfg(
+        return PickUpActionCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
             hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device),
             hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device),
             **_cfg_supported_kwargs(PickUpActionCfg, cfg_values),
         )
-        return cfg, _current_arm_qpos(env, is_left, arm_joints)
 
     if spec.atomic_action_class == "PlaceAction":
         if spec.control != "arm":
             raise ValueError("PlaceAction atomic action requires control='arm'.")
-        cfg = PlaceActionCfg(
+        return PlaceActionCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
-            hand_open_qpos=_state_to_hand_qpos(env.open_state, len(eef_joints), device),
-            hand_close_qpos=_state_to_hand_qpos(
-                env.close_state, len(eef_joints), device
-            ),
+            hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device),
+            hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device),
             **_cfg_supported_kwargs(PlaceActionCfg, cfg_values),
         )
-        return cfg, _current_arm_qpos(env, is_left, arm_joints)
 
     control_part = arm_part if spec.control == "arm" else hand_part
-    cfg = MoveActionCfg(
+    return MoveActionCfg(
         control_part=control_part,
         **_cfg_supported_kwargs(MoveActionCfg, cfg_values),
     )
+
+
+def _resolve_action_start_qpos(
+    env,
+    spec: AtomicActionSpec,
+    *,
+    is_left: bool,
+    arm_joints: list[int],
+    eef_joints: list[int],
+):
     if spec.control == "hand":
         _, _, _, _, current_gripper_state = get_arm_states(env, spec.robot_name)
-        return (
-            cfg,
-            _state_to_hand_qpos(
-                current_gripper_state,
-                len(eef_joints),
-                device,
-            ).reshape(1, len(eef_joints)),
-        )
-    return cfg, _current_arm_qpos(env, is_left, arm_joints)
+        return _state_to_hand_qpos(
+            current_gripper_state,
+            len(eef_joints),
+            env.robot.device,
+        ).reshape(1, len(eef_joints))
+    return _current_arm_qpos(env, is_left, arm_joints)
 
 
 def _resolve_target(env, spec: AtomicActionSpec, runtime_kwargs: dict[str, Any]):
@@ -867,9 +948,10 @@ def _stabilize_affordance_object(
         return
 
     update_steps = int(runtime_kwargs.get("affordance_stabilization_steps", 5))
-    if update_steps > 0:
+    if update_steps > 0 and hasattr(env.sim, "update"):
         env.sim.update(step=update_steps)
-    target_obj.clear_dynamics()
+    if hasattr(target_obj, "clear_dynamics"):
+        target_obj.clear_dynamics()
 
 
 def _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids):

@@ -878,7 +878,6 @@ def _format_pose_object_spec(
                 "reference": "object",
                 "obj_name": obj_name,
                 "offset": [float(x), float(y), float(z)],
-                "orientation": "current",
             },
             "cfg": {"sample_interval": sample_interval},
         }
@@ -931,7 +930,6 @@ def _format_pose_absolute_spec(
             "target_pose": {
                 "reference": "absolute",
                 "position": [float(value) for value in position],
-                "orientation": "current",
             },
             "cfg": {"sample_interval": sample_interval},
         }
