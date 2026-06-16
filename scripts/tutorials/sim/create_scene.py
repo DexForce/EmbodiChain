@@ -98,6 +98,7 @@ def main():
             body_scale=[0.5, 0.5, 0.5],
             init_pos=[0.0, 0.0, 0.5],
             init_rot=[0.0, 0.0, 0.0],
+            max_convex_hull_num=32,
         )
     )
 

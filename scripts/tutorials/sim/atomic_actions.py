@@ -157,6 +157,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
                     [0.0, 0.0, 1.0, 0.12],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
+                num_samples=30,
             )
         },
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
