@@ -22,8 +22,8 @@ Use only these atomic action classes:
    - Use `control: "arm"` with target_pose or arm target_qpos.
    - Use `control: "hand"` with gripper target_qpos.
    - Supported target_pose objects:
-     {"reference": "object", "obj_name": "<object>", "offset": [x, y, z], "orientation": "current"}
-     {"reference": "absolute", "position": [x, y, z], "orientation": "current"}
+     {"reference": "object", "obj_name": "<object>", "offset": [x, y, z]}
+     {"reference": "absolute", "position": [x, y, z]}
      {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef"}
    - Supported target_qpos objects:
      {"source": "initial"}
@@ -48,7 +48,6 @@ Rules:
 - Keep all values JSON primitives.
 - Each non-null action must contain exactly one of `target_object`, `target_pose`,
   or `target_qpos`.
-- Preserve current orientation by setting `"orientation": "current"` for pose targets.
 - To keep a holding arm closed while the other arm moves, use:
   {
     "atomic_action_class": "MoveAction",

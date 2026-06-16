@@ -178,6 +178,20 @@ def test_normalize_atomic_action_spec_rejects_legacy_target_kind_schema() -> Non
         )
 
 
+def test_normalize_atomic_action_spec_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError, match="Unsupported atomic action spec fields"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveAction",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_qpos": {"source": "initial"},
+                "cfg": {},
+                "description": "return home",
+            }
+        )
+
+
 def test_normalize_atomic_action_spec_rejects_multiple_target_fields() -> None:
     with pytest.raises(ValueError, match="exactly one of target_object"):
         normalize_atomic_action_spec(

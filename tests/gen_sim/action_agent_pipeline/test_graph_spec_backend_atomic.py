@@ -110,3 +110,15 @@ def test_compile_agent_graph_rejects_legacy_action_schema() -> None:
             graph_cls=_FakeGraph,
             monitor_module={},
         )
+
+
+def test_compile_agent_graph_rejects_extra_edge_fields() -> None:
+    task_graph = _task_graph(_pick_up_spec("left_arm", "apple"))
+    task_graph["edges"][0]["monitor"] = {"condition": "object visible"}
+
+    with pytest.raises(ValueError, match="unsupported fields: monitor"):
+        compile_agent_graph_spec(
+            task_graph,
+            graph_cls=_FakeGraph,
+            monitor_module={},
+        )

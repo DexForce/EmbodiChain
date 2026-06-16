@@ -16,9 +16,6 @@
 
 from __future__ import annotations
 
-import ast
-from typing import List
-
 from embodichain.utils.logger import log_error
 
 
@@ -103,68 +100,3 @@ def get_arm_states(env, robot_name):
         select_arm_current_pose,
         select_arm_current_gripper_state,
     )
-
-
-def extract_drive_calls(code_str: str) -> List[str]:
-    """Extract all drive() function calls from a code string.
-
-    Args:
-        code_str: Python code string to parse.
-
-    Returns:
-        List of code blocks containing drive() calls.
-    """
-    tree = ast.parse(code_str)
-    lines = code_str.splitlines()
-
-    drive_blocks = []
-
-    for node in tree.body:
-        # Match: drive(...)
-        if (
-            isinstance(node, ast.Expr)
-            and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Name)
-            and node.value.func.id == "drive"
-        ):
-            # AST line numbers are 1-based
-            start = node.lineno - 1
-            end = node.end_lineno
-            block = "\n".join(lines[start:end])
-            drive_blocks.append(block)
-
-    return drive_blocks
-
-
-def apply_offset_to_pose(pose, offset: list):
-    pose[0, 3] += offset[0]
-    pose[1, 3] += offset[1]
-    pose[2, 3] += offset[2]
-    return pose
-
-
-def resolve_action(action, env, kwargs):
-    if callable(action):
-        return action(env=env, **kwargs)
-    return action
-
-
-def sync_agent_state_from_robot(env) -> None:
-    """Synchronize cached agent arm states from the physical robot state."""
-    action = env.robot.get_qpos().squeeze(0)
-    for side in ("left", "right"):
-        is_left = side == "left"
-        arm_joints = getattr(env, f"{side}_arm_joints", [])
-        eef_joints = getattr(env, f"{side}_eef_joints", [])
-        if arm_joints:
-            arm_qpos = action[arm_joints]
-            env.set_current_qpos_agent(arm_qpos, is_left=is_left)
-            env.set_current_xpos_agent(
-                env.get_arm_fk(qpos=arm_qpos, is_left=is_left),
-                is_left=is_left,
-            )
-        if eef_joints:
-            env.set_current_gripper_state_agent(
-                action[eef_joints][0].unsqueeze(0),
-                is_left=is_left,
-            )

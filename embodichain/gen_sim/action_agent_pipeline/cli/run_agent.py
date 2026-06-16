@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import tqdm
 
-from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.atomic_actions import (  # noqa: F401
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (  # noqa: F401
     AtomicActionsAgentEnv,
 )
 from embodichain.lab.gym.utils.gym_utils import (

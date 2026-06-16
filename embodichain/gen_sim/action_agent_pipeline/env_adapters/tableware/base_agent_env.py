@@ -333,7 +333,6 @@ class BaseAgentEnv:
             regenerate=regenerate, recovery=recovery
         )
         atomic_action_kwargs = {
-            "use_place_action": True,
             "allow_grasp_annotation": True,
             "force_grasp_reannotate": False,
         }

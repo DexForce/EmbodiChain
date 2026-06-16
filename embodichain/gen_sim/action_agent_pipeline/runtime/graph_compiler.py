@@ -38,6 +38,7 @@ _RECOVERY_KEYS = {
     "recovery_branches",
     "recoveries",
 }
+_EDGE_KEYS = {"id", "source", "target", "left_arm_action", "right_arm_action"}
 
 
 def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
@@ -149,6 +150,12 @@ def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
     edge_specs = list(task_spec.get("edges", []))
     edge_ids = set()
     for edge in edge_specs:
+        unknown_edge_keys = set(edge) - _EDGE_KEYS
+        if unknown_edge_keys:
+            raise ValueError(
+                f"Nominal edge '{edge.get('id', '<unknown>')}' contains unsupported "
+                f"fields: {', '.join(sorted(unknown_edge_keys))}."
+            )
         edge_id = edge["id"]
         if edge_id in edge_ids:
             raise ValueError(f"Duplicate graph edge id '{edge_id}'.")
