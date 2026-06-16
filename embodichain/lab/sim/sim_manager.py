@@ -2054,16 +2054,29 @@ class SimulationManager:
                 f"Scene destruction wait timeout, {scene_count} C++ scene(s) still alive!"
             )
 
-    def destroy(self) -> None:
+    def destroy(self, exit_process: bool | None = None) -> None:
         """
         No longer destructs C++ objects in place due to lingering deep local variables;
         instead, packages itself into a destruction task, submits to the cleanup queue,
         and waits for top-level delayed consumption.
-        """
-        self._is_pending_kill = True
 
+        Args:
+            exit_process (bool | None): Whether to call os._exit(0) after queuing
+                the destruction task. If None, reads EMBODICHAIN_SIM_EXIT_PROCESS.
+        """
+
+        if exit_process is None:
+            exit_process = (
+                os.getenv("EMBODICHAIN_SIM_EXIT_PROCESS", "1").strip().lower()
+            )
+            exit_process = exit_process not in ("0", "false", "no", "off")
+
+        self._is_pending_kill = True
         # Transfer the actual destruction logic to the cleanup queue
         SimulationManager._cleanup_queue.put(self._deferred_destroy)
+
+        if exit_process:
+            os._exit(0)
 
     def _deferred_destroy(self) -> None:
         """Destroy all simulated assets and release resources."""

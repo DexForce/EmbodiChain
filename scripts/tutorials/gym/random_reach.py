@@ -176,3 +176,5 @@ if __name__ == "__main__":
             print(f"FPS: {fps:.2f}")
         else:
             print("Elapsed time is too short to calculate FPS.")
+
+    env.close()
