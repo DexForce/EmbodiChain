@@ -72,7 +72,17 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["wicker_basket"]["shape"]["fpath"])
-    assert gym_config["robot"]["init_pos"] == [2.0, 0.0, 0.5]
+    table_top_z = ur5_basket_config_generation._mesh_config_world_zmax(
+        background_objects["table"]
+    )
+    expected_robot_init_z = (
+        table_top_z
+        + ur5_basket_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
+        - ur5_basket_config_generation._DUAL_UR5_ARM_COMPONENT_Z
+    )
+    assert gym_config["robot"]["init_pos"] == pytest.approx(
+        [2.0, 0.0, expected_robot_init_z]
+    )
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, -90.0]
     extensions = gym_config["env"]["extensions"]
     assert extensions["agent_arm_slots"]["left"] == {
@@ -587,13 +597,13 @@ def test_task_description_generates_relative_front_of_config(
         for term in success["terms"]
         if term["type"] == "object_axis_offset_near"
     }
-    assert ("x", 0.16) in axis_terms
+    assert ("x", -0.16) in axis_terms
     assert ("y", 0.0) in axis_terms
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert '"offset":[0.16,0.0,0.22]' in task_prompt
-    assert '"offset":[0.16,0.0,0.22]' in atom_actions
+    assert '"offset":[-0.16,0.0,0.22]' in task_prompt
+    assert '"offset":[-0.16,0.0,0.22]' in atom_actions
 
     assert _stable_summary(paths.summary) == {
         "mode": "relative_placement",
@@ -601,7 +611,7 @@ def test_task_description_generates_relative_front_of_config(
         "reference_object": "apple_2",
         "relation": "front_of",
         "active_arm": "right_arm",
-        "release_offset": [0.16, 0.0, 0.12],
+        "release_offset": [-0.16, 0.0, 0.12],
     }
 
 
@@ -667,7 +677,7 @@ def test_task_description_generates_self_relative_front_left_config(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     assert set(rigid_objects) == {"chip_bag"}
     initial_position = rigid_objects["chip_bag"]["init_pos"]
-    expected_x = round(initial_position[0] + 0.16, 6)
+    expected_x = round(initial_position[0] - 0.16, 6)
     expected_y = round(initial_position[1] - 0.16, 6)
 
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -692,7 +702,7 @@ def test_task_description_generates_self_relative_front_left_config(
         "reference_object": "chip_bag",
         "relation": "front_left_of",
         "active_arm": "left_arm",
-        "release_offset": [0.16, -0.16, 0.12],
+        "release_offset": [-0.16, -0.16, 0.12],
     }
 
 
@@ -737,12 +747,31 @@ def test_task_description_generates_relative_front_right_config(
         for term in success["terms"]
         if term["type"] == "object_axis_offset_near"
     }
-    assert ("x", 0.16) in axis_terms
+    assert ("x", -0.16) in axis_terms
     assert ("y", 0.16) in axis_terms
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert '"offset":[0.16,0.16,0.12]' in task_prompt
-    assert _stable_summary(paths.summary)["release_offset"] == [0.16, 0.16, 0.12]
+    assert '"offset":[-0.16,0.16,0.12]' in task_prompt
+    assert _stable_summary(paths.summary)["release_offset"] == [-0.16, 0.16, 0.12]
+
+
+def test_side_relation_offsets_use_robot_view_front_back_convention() -> None:
+    assert ur5_basket_config_generation._side_relation_xy_offsets("front_of") == (
+        -0.16,
+        0.0,
+    )
+    assert ur5_basket_config_generation._side_relation_xy_offsets("behind") == (
+        0.16,
+        0.0,
+    )
+    assert ur5_basket_config_generation._side_relation_xy_offsets("front_left_of") == (
+        -0.16,
+        -0.16,
+    )
+    assert ur5_basket_config_generation._side_relation_xy_offsets("back_right_of") == (
+        0.16,
+        0.16,
+    )
 
 
 @pytest.mark.parametrize(

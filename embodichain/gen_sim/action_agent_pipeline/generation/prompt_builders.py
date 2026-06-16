@@ -37,12 +37,12 @@ _BASKET_RIGHT_RELEASE_OFFSET_Y = 0.04
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
 - `left_of` means negative world y relative to the reference object.
 - `right_of` means positive world y relative to the reference object.
-- `front_of` means positive world x relative to the reference object.
-- `behind` means negative world x relative to the reference object.
-- `front_left_of` combines positive world x and negative world y.
-- `back_left_of` combines negative world x and negative world y.
-- `front_right_of` combines positive world x and positive world y.
-- `back_right_of` combines negative world x and positive world y.
+- `front_of` means negative world x relative to the reference object.
+- `behind` means positive world x relative to the reference object.
+- `front_left_of` combines negative world x and negative world y.
+- `back_left_of` combines positive world x and negative world y.
+- `front_right_of` combines negative world x and positive world y.
+- `back_right_of` combines positive world x and positive world y.
 - `inside` and `on` use the reference object's xy center."""
 
 

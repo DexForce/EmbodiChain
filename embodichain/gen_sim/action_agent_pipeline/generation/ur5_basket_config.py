@@ -180,7 +180,7 @@ _DUAL_UR5_SIDE_AXIS_INDEX = 1
 _DUAL_UR5_ROTATED_INIT_X = 2.0
 _DUAL_UR5_ROTATED_INIT_YAW_DEGREES = -90.0
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = -1.0
-_ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
+_ROBOT_VIEW_FRONT_WORLD_X_SIGN = -1.0
 _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
@@ -1258,8 +1258,8 @@ def _call_relative_task_llm(
         "instructions such as 右臂, 右机械臂, right arm, or right UR5; use "
         "arm='auto' when the task does not specify an arm.\n"
         "- For Chinese/English left/right/front/back, use the relation enums "
-        "from the rotated robot-view perspective. front_of means positive "
-        "world-x; behind means negative world-x; left_of means negative "
+        "from the rotated robot-view perspective. front_of means negative "
+        "world-x; behind means positive world-x; left_of means negative "
         "world-y; right_of means positive world-y. Diagonal relations combine "
         "both axes: front_left_of, back_left_of, front_right_of, back_right_of.\n"
         "- If the task says to release an object above a basket/container so it "
