@@ -1,0 +1,4 @@
+name: add-test
+canonical_skill: .agents/skills/add-test/SKILL.md
+project: EmbodiChain
+

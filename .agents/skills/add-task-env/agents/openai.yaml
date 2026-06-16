@@ -1,0 +1,4 @@
+name: add-task-env
+canonical_skill: .agents/skills/add-task-env/SKILL.md
+project: EmbodiChain
+

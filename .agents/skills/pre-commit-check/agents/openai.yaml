@@ -1,0 +1,4 @@
+name: pre-commit-check
+canonical_skill: .agents/skills/pre-commit-check/SKILL.md
+project: EmbodiChain
+

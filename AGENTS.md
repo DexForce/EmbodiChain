@@ -6,7 +6,8 @@ EmbodiChain keeps agent-facing context in a structured topic registry:
 
 - `agent_context/` — agent-readable Markdown context, indexed by `agent_context/MAP.yaml`
 - `docs/source/` — human-facing Sphinx documentation
-- `skills/project-dev-context/` — the skill that routes "reference project context" requests
+- `.agents/skills/project-dev-context/` — the skill that routes "reference project context" requests
+- `.claude/skills/` and `.github/copilot/` — thin tool-specific adapters that point back to `.agents/skills/`
 
 When a request says things like:
 
@@ -34,6 +35,10 @@ Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-syste
 
 ```
 EmbodiChain/
+├── .agents/                      # Canonical in-repo agent skills
+│   └── skills/
+├── .claude/                      # Claude adapters for canonical skills
+│   └── skills/
 ├── embodichain/                  # Main Python package
 │   ├── agents/                   # AI agents
 │   │   ├── datasets/             # Datasets and data loaders for model training
@@ -71,7 +76,7 @@ EmbodiChain/
 ├── docs/                         # Sphinx documentation source + build
 │   └── source/                   # .md doc pages (overview, quick_start, features, resources)
 ├── tests/                        # Test suite
-├── .github/                      # CI workflows and issue/PR templates
+├── .github/                      # CI workflows, issue/PR templates, Copilot adapters
 ├── setup.py                      # Package setup
 └── VERSION                       # Package version file
 ```
@@ -252,8 +257,12 @@ Use the `/add-test` skill to scaffold tests with the correct file placement, sty
 
 ## Skills Quick Reference
 
+Canonical skill instructions live under `.agents/skills/<skill>/SKILL.md`.
+Tool-specific adapter files should stay thin and point back to the canonical skill.
+
 | Skill | Command | Purpose |
 |-------|---------|---------|
+| Add Atomic Action | `/add-atomic-action` | Scaffold a new simulation atomic action |
 | Add Task Env | `/add-task-env` | Scaffold a new `EmbodiedEnv` task |
 | Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
 | Add Test | `/add-test` | Scaffold tests following project conventions |
