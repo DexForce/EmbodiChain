@@ -172,18 +172,18 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
     else:
         logger.log_error(f"Unknow drive type {drive_type}")
 
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    sim = SimulationManager.get_instance()
+
     for i, art in enumerate(arts):
         is_newton_art = hasattr(art, "dexsim_meta_links")
         lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)
         lifecycle_name = getattr(lifecycle_state, "name", "")
         if not is_newton_art or lifecycle_name == "BUILDER":
             art.set_body_scale(cfg.body_scale)
+
         link_names = art.get_link_names()
-        if is_newton_art:
-            for name in link_names:
-                art.set_physical_attr(cfg.attrs.attr(), name)
-        else:
-            art.set_physical_attr(cfg.attrs.attr())
         _apply_link_physics_overrides(art, cfg, link_names)
         art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
         art.set_articulation_flag(
