@@ -48,10 +48,7 @@ from embodichain.utils.math import (
     quat_from_matrix,
     matrix_from_euler,
 )
-from embodichain.lab.sim.utility.sim_utils import (
-    get_dexsim_drive_type,
-    set_dexsim_articulation_cfg,
-)
+from embodichain.lab.sim.utility.sim_utils import get_dexsim_drive_type
 from embodichain.lab.sim.utility.solver_utils import (
     create_pk_chain,
     create_pk_serial_chain,
@@ -424,7 +421,7 @@ class Articulation(BatchEntity):
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)
 
-        if device.type == "cuda":
+        if device.type == "cuda" and not is_newton_scene(self._ps):
             self._world.update(0.001)
 
         self._data = ArticulationData(entities=entities, ps=self._ps, device=device)
@@ -438,9 +435,6 @@ class Articulation(BatchEntity):
 
         # Determine if we should use USD properties or cfg properties.
         if not self.cfg.use_usd_properties:
-            # Set articulation configuration in DexSim
-            set_dexsim_articulation_cfg(entities, self.cfg)
-
             num_entities = len(entities)
             dof = self._data.dof
             default_cfg = JointDrivePropertiesCfg()
@@ -529,7 +523,7 @@ class Articulation(BatchEntity):
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
         # TODO: very weird that we must call update here to make sure the GPU indices are valid.
-        if device.type == "cuda":
+        if device.type == "cuda" and not is_newton_scene(self._ps):
             self._world.update(0.001)
 
         super().__init__(cfg, entities, device)

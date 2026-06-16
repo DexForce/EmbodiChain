@@ -85,11 +85,18 @@ class BaseArticulationTest:
     """Shared test logic for CPU and CUDA."""
 
     def setup_simulation(self, device, physics: str = "default"):
+        physics_cfg = physics_cfg_for_backend(physics)
+        if physics == "newton":
+            physics_cfg.solver_cfg = {
+                "solver_type": "mujoco_warp",
+                "njmax": 8192,
+                "nconmax": 8192,
+            }
         config = SimulationManagerCfg(
             headless=True,
             device=device,
             num_envs=NUM_ARENAS,
-            physics_cfg=physics_cfg_for_backend(physics),
+            physics_cfg=physics_cfg,
         )
         self.sim = SimulationManager(config)
         self.physics = physics

@@ -1378,14 +1378,24 @@ class SimulationManager:
                     f"Multiple articulations found in USD file {cfg.fpath}. "
                 )
             elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])
+                prototype = articulations_found[0]
+                prototype.set_name(f"{uid}_0")
+                if not cfg.use_usd_properties:
+                    from embodichain.lab.sim.utility.sim_utils import (
+                        set_dexsim_articulation_cfg,
+                    )
+
+                    set_dexsim_articulation_cfg(prototype, cfg)
+                obj_list.append(prototype)
         else:
             # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False
 
-            for env in env_list:
-                art = env.load_urdf(cfg.fpath)
-                obj_list.append(art)
+            from embodichain.lab.sim.utility.sim_utils import (
+                spawn_articulation_entities,
+            )
+
+            obj_list = spawn_articulation_entities(cfg, env_list)
 
         articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
 
@@ -1479,14 +1489,24 @@ class SimulationManager:
                     f"Multiple articulations found in USD file {cfg.fpath}. "
                 )
             elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])
+                prototype = articulations_found[0]
+                prototype.set_name(f"{uid}_0")
+                if not cfg.use_usd_properties:
+                    from embodichain.lab.sim.utility.sim_utils import (
+                        set_dexsim_articulation_cfg,
+                    )
+
+                    set_dexsim_articulation_cfg(prototype, cfg)
+                obj_list.append(prototype)
         else:
             # non-usd file does not support this option, will be forced set False to avoid potential issues.
             cfg.use_usd_properties = False
 
-            for env in env_list:
-                art = env.load_urdf(cfg.fpath)
-                obj_list.append(art)
+            from embodichain.lab.sim.utility.sim_utils import (
+                spawn_articulation_entities,
+            )
+
+            obj_list = spawn_articulation_entities(cfg, env_list)
 
         robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
 

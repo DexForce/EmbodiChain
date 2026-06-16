@@ -21,9 +21,11 @@ import open3d as o3d
 from typing import List, Union
 
 from dexsim.types import (
+    CloneStrategy,
     DriveType,
     ArticulationFlag,
     LoadOption,
+    ObjectCloneOptions,
     RigidBodyShape,
     SDFConfig,
 )
@@ -147,12 +149,78 @@ def _apply_link_physics_overrides(
         art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
 
 
-def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) -> None:
-    """Set articulation configuration for a list of dexsim articulations.
+def default_articulation_clone_options() -> ObjectCloneOptions:
+    """Return clone options used when duplicating articulations across arenas."""
+    options = ObjectCloneOptions()
+    options.render.material = CloneStrategy.DEEP_COPY
+    return options
+
+
+def _clone_articulation_between_arenas(
+    source_arena: Arena | Env,
+    source_name: str,
+    target_arena: Arena | Env,
+    target_name: str,
+    clone_options: ObjectCloneOptions,
+) -> Articulation:
+    """Clone an articulation from one arena/env to another."""
+    if _is_newton_backend_active():
+        return source_arena.clone_skeleton_to(
+            source_name, target_arena, target_name, clone_options
+        )
+    return source_arena.clone_articulation_to(
+        source_name, target_arena, target_name, clone_options
+    )
+
+
+def spawn_articulation_entities(
+    cfg: ArticulationCfg,
+    env_list: list[Arena | Env],
+    *,
+    clone_options: ObjectCloneOptions | None = None,
+) -> list[Articulation]:
+    """Load one articulation prototype and clone it into additional arenas.
+
+    DexSim configuration is applied once on the prototype before cloning.
+    """
+    if cfg.uid is None:
+        logger.log_error("Articulation uid must be set before spawning entities.")
+
+    if clone_options is None:
+        clone_options = default_articulation_clone_options()
+
+    source_env = env_list[0]
+    prototype_name = f"{cfg.uid}_0"
+    prototype = source_env.load_urdf(cfg.fpath)
+    prototype.set_name(prototype_name)
+
+    if not cfg.use_usd_properties:
+        set_dexsim_articulation_cfg(prototype, cfg)
+
+    entities = [prototype]
+    for env_idx in range(1, len(env_list)):
+        target_name = f"{cfg.uid}_{env_idx}"
+        clone = _clone_articulation_between_arenas(
+            source_env,
+            prototype_name,
+            env_list[env_idx],
+            target_name,
+            clone_options,
+        )
+        if clone is None:
+            logger.log_error(
+                f"Failed to clone articulation '{prototype_name}' into env {env_idx}."
+            )
+        entities.append(clone)
+    return entities
+
+
+def set_dexsim_articulation_cfg(art: Articulation, cfg: ArticulationCfg) -> None:
+    """Apply EmbodiChain articulation cfg to a single DexSim articulation entity.
 
     Args:
-        arts (List[Articulation]): List of dexsim articulations to configure.
-        cfg (ArticulationCfg): Configuration object containing articulation settings.
+        art: DexSim articulation (or Newton skeleton carrier) to configure.
+        cfg: EmbodiChain articulation configuration.
     """
 
     def get_drive_type(drive_pros):
@@ -172,46 +240,45 @@ def set_dexsim_articulation_cfg(arts: List[Articulation], cfg: ArticulationCfg) 
     else:
         logger.log_error(f"Unknow drive type {drive_type}")
 
-    from embodichain.lab.sim.sim_manager import SimulationManager
+    is_newton_art = hasattr(art, "dexsim_meta_links")
+    lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)
+    lifecycle_name = getattr(lifecycle_state, "name", "")
+    if not is_newton_art or lifecycle_name == "BUILDER":
+        art.set_body_scale(cfg.body_scale)
 
-    sim = SimulationManager.get_instance()
-
-    for i, art in enumerate(arts):
-        is_newton_art = hasattr(art, "dexsim_meta_links")
-        lifecycle_state = getattr(getattr(art, "_mgr", None), "_lifecycle_state", None)
-        lifecycle_name = getattr(lifecycle_state, "name", "")
-        if not is_newton_art or lifecycle_name == "BUILDER":
-            art.set_body_scale(cfg.body_scale)
-
-        link_names = art.get_link_names()
-        _apply_link_physics_overrides(art, cfg, link_names)
-        art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
-        art.set_articulation_flag(
-            ArticulationFlag.DISABLE_SELF_COLLISION, cfg.disable_self_collision
-        )
-        if hasattr(art, "set_solver_iteration_counts"):
-            art.set_solver_iteration_counts(
-                min_position_iters=cfg.min_position_iters,
-                min_velocity_iters=cfg.min_velocity_iters,
-            )
-
-        # TODO: We should change this part after improving spawning of articulation.
+    link_names = art.get_link_names()
+    if is_newton_art:
         for name in link_names:
-            if not hasattr(art, "get_physical_body"):
-                continue
-            physical_body = art.get_physical_body(name)
-            inertia = physical_body.get_mass_space_inertia_tensor()
-            inertia = np.maximum(inertia, 1e-4)
-            physical_body.set_mass_space_inertia_tensor(inertia)
+            art.set_physical_attr(cfg.attrs.attr(), name)
+    else:
+        art.set_physical_attr(cfg.attrs.attr())
+    _apply_link_physics_overrides(art, cfg, link_names)
+    art.set_articulation_flag(ArticulationFlag.FIX_BASE, cfg.fix_base)
+    art.set_articulation_flag(
+        ArticulationFlag.DISABLE_SELF_COLLISION, cfg.disable_self_collision
+    )
+    if hasattr(art, "set_solver_iteration_counts"):
+        art.set_solver_iteration_counts(
+            min_position_iters=cfg.min_position_iters,
+            min_velocity_iters=cfg.min_velocity_iters,
+        )
 
-            if i == 0 and cfg.compute_uv:
-                render_body = art.get_render_body(name)
-                if render_body:
-                    render_body.set_projective_uv()
+    for name in link_names:
+        if not hasattr(art, "get_physical_body"):
+            continue
+        physical_body = art.get_physical_body(name)
+        inertia = physical_body.get_mass_space_inertia_tensor()
+        inertia = np.maximum(inertia, 1e-4)
+        physical_body.set_mass_space_inertia_tensor(inertia)
 
-                # TODO: will crash when exit if not explicitly delete.
-                # This may due to the destruction of render body order when exiting.
-                del render_body
+        if cfg.compute_uv:
+            render_body = art.get_render_body(name)
+            if render_body:
+                render_body.set_projective_uv()
+
+            # TODO: will crash when exit if not explicitly delete.
+            # This may due to the destruction of render body order when exiting.
+            del render_body
 
 
 def is_rt_enabled() -> bool:
