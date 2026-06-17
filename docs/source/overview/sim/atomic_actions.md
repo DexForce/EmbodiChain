@@ -63,11 +63,11 @@ AtomicActionEngine ◄─────────────── PlanResult �
 
 The following actions are available out of the box:
 
-| Atomic action | Single arm / dual arm | GIF | Description |
-|---|---|---|---|
-| `PickUpAction` | Single arm | <img src="../../_static/atomic_actions/pick.gif" alt="PickUpAction recording" width="240" /> | Approaches the object from a pre-grasp pose, closes the gripper at the selected grasp pose, and lifts the object. |
-| `MoveAction` | Single arm | <img src="../../_static/atomic_actions/move.gif" alt="MoveAction recording" width="240" /> | Moves the controlled end-effector through free space to a target pose without changing the gripper state or requiring an object target. |
-| `PlaceAction` | Single arm | <img src="../../_static/atomic_actions/place.gif" alt="PlaceAction recording" width="240" /> | Starts from a held-object state, moves to the release pose, opens the gripper, and retracts upward after placement. |
+| Atomic action | Single arm / dual arm | Target type| Motion phases | GIF |
+|---|---|---|---|---|
+| `MoveAction` | Single arm | `Tensor (4,4)` — EEF pose | Approach → close gripper → lift |  <img src="../../_static/atomic_actions/move.gif" alt="PickUpAction recording" width="240" /> |
+| `PickUpAction` | Single arm | `ObjectSemantics` or `Tensor (4,4)` | Move arm to pose |  <img src="../../_static/atomic_actions/pick.gif" alt="PickUpAction recording" width="240" /> |
+| `PlaceAction` | Single arm | `Tensor (4,4)` — EEF release pose | Lower → open gripper → retract |  <img src="../../_static/atomic_actions/place.gif" alt="PickUpAction recording" width="240" /> |
 
 ### `MoveAction`
 
