@@ -234,14 +234,10 @@ class MoveAction(AtomicAction):
         start_hand_qpos = start_hand_qpos.to(self.device)
         end_hand_qpos = end_hand_qpos.to(self.device)
 
-        if start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 2:
-            start_hand_qpos = start_hand_qpos.unsqueeze(0).repeat(
-                end_hand_qpos.shape[0], 1
-            )
-        if start_hand_qpos.dim() == 2 and end_hand_qpos.dim() == 1:
-            end_hand_qpos = end_hand_qpos.unsqueeze(0).repeat(
-                start_hand_qpos.shape[0], 1
-            )
+        if start_hand_qpos.dim() == 1:
+            start_hand_qpos = start_hand_qpos.unsqueeze(0)
+        if end_hand_qpos.dim() == 1:
+            end_hand_qpos = end_hand_qpos.unsqueeze(0)
 
         weights = torch.linspace(
             0,
@@ -250,21 +246,10 @@ class MoveAction(AtomicAction):
             device=self.device,
             dtype=start_hand_qpos.dtype,
         )
-        if start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 1:
-            return torch.lerp(
-                start_hand_qpos.unsqueeze(0),
-                end_hand_qpos.unsqueeze(0),
-                weights[:, None],
-            )
-        if start_hand_qpos.dim() == 2 and end_hand_qpos.dim() == 2:
-            return torch.lerp(
-                start_hand_qpos.unsqueeze(1),
-                end_hand_qpos.unsqueeze(1),
-                weights[None, :, None],
-            )
-        logger.log_error(
-            "hand qpos must have shape (hand_dof,) or (n_envs, hand_dof)",
-            ValueError,
+        return torch.lerp(
+            start_hand_qpos.unsqueeze(1),
+            end_hand_qpos.unsqueeze(1),
+            weights[None, :, None],
         )
 
     def execute(
