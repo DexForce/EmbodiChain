@@ -33,6 +33,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
+from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 
 
 def main():
@@ -58,45 +59,71 @@ def main():
     sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
 
-    # Get DexForce W1 URDF path
-    urdf_path = get_data_path(
-        "DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M/DexforceW1V021.urdf"
+    cfg = DexforceW1Cfg.from_dict(
+        {
+            "uid": "w1_gizmo_test",
+        }
+    )
+    cfg.solver_cfg["left_arm"].tcp = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.012],
+            [0.0, 1.0, 0.0, 0.04],
+            [0.0, 0.0, 1.0, 0.11],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    cfg.solver_cfg["right_arm"].tcp = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.012],
+            [0.0, 1.0, 0.0, -0.04],
+            [0.0, 0.0, 1.0, 0.11],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
     )
 
-    # Create DexForce W1 robot
-    robot_cfg = RobotCfg(
-        uid="w1_gizmo_test",
-        urdf_cfg=URDFCfg(
-            components=[{"component_type": "humanoid", "urdf_path": urdf_path}]
-        ),
-        control_parts={"left_arm": ["LEFT_J[1-7]"], "right_arm": ["RIGHT_J[1-7]"]},
-        solver_cfg={
-            "left_arm": PinkSolverCfg(
-                urdf_path=urdf_path,
-                end_link_name="left_ee",
-                root_link_name="left_arm_base",
-                pos_eps=1e-2,
-                rot_eps=5e-2,
-                max_iterations=300,
-                dt=0.1,
-            ),
-            "right_arm": PinkSolverCfg(
-                urdf_path=urdf_path,
-                end_link_name="right_ee",
-                root_link_name="right_arm_base",
-                pos_eps=1e-2,
-                rot_eps=5e-2,
-                max_iterations=300,
-                dt=0.1,
-            ),
-        },
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"(LEFT|RIGHT)_J[1-7]": 1e4, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e7},
-            damping={"(LEFT|RIGHT)_J[1-7]": 1e3, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e4},
-            max_effort={"(LEFT|RIGHT)_J[1-7]": 1e5, "(ANKLE|KNEE|BUTTOCK|WAIST)": 1e10},
-        ),
-    )
-    robot = sim.add_robot(cfg=robot_cfg)
+    cfg.init_qpos = [
+        1.0000e00,
+        -2.0000e00,
+        1.0000e00,
+        0.0000e00,
+        -2.6921e-05,
+        -2.6514e-03,
+        -1.5708e00,
+        1.4575e00,
+        -7.8540e-01,
+        1.2834e-01,
+        1.5708e00,
+        -2.2310e00,
+        -7.8540e-01,
+        1.4461e00,
+        -1.5708e00,
+        1.6716e00,
+        7.8540e-01,
+        7.6745e-01,
+        0.0000e00,
+        3.8108e-01,
+        0.0000e00,
+        0.0000e00,
+        0.0000e00,
+        0.0000e00,
+        1.5000e00,
+        0.0000e00,
+        0.0000e00,
+        0.0000e00,
+        0.0000e00,
+        1.5000e00,
+        6.9974e-02,
+        7.3950e-02,
+        6.6574e-02,
+        6.0923e-02,
+        0.0000e00,
+        6.7342e-02,
+        7.0862e-02,
+        6.3684e-02,
+        5.7822e-02,
+        0.0000e00,
+    ]
+    robot = sim.add_robot(cfg=cfg)
 
     # Set initial joint positions for both arms
     # Left arm: 8 joints (WAIST + 7 LEFT_J), Right arm: 8 joints (WAIST + 7 RIGHT_J)
