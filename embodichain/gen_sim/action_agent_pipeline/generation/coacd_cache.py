@@ -25,6 +25,7 @@ from embodichain.utils.logger import log_info
 
 __all__ = [
     "coacd_cache_path_for_mesh",
+    "dexsim_coacd_cache_key_for_mesh",
     "prewarm_coacd_cache_for_gym_config",
 ]
 
@@ -37,17 +38,30 @@ def coacd_cache_path_for_mesh(
     mesh_path: str | Path,
     max_convex_hull_num: int,
     cache_dir: str | Path | None = None,
+    *,
+    mesh_count: int = 1,
 ) -> Path:
     """Return the DexSim environment-side CoACD cache path for a mesh."""
 
     if cache_dir is None:
         cache_dir = _DEFAULT_CONVEX_DECOMP_DIR
 
-    mesh_path = Path(mesh_path).expanduser().resolve()
-    mesh_md5_key = hashlib.md5(mesh_path.read_bytes()).hexdigest()
+    mesh_md5_key = dexsim_coacd_cache_key_for_mesh(mesh_path, mesh_count=mesh_count)
     return Path(cache_dir).expanduser().resolve() / (
         f"{mesh_md5_key}_{int(max_convex_hull_num)}.obj"
     )
+
+
+def dexsim_coacd_cache_key_for_mesh(
+    mesh_path: str | Path,
+    *,
+    mesh_count: int = 1,
+) -> str:
+    """Return the cache key used by DexSim ``load_actor_with_coacd``."""
+
+    resolved_mesh_path = Path(mesh_path).expanduser().resolve(strict=False)
+    mesh_key_data = f"{resolved_mesh_path}|mesh_count={int(mesh_count)}"
+    return hashlib.md5(mesh_key_data.encode("utf-8")).hexdigest()
 
 
 def prewarm_coacd_cache_for_gym_config(
@@ -88,6 +102,7 @@ def prewarm_coacd_cache_for_gym_config(
         report = {
             "uid": uid,
             "mesh_path": mesh_path.as_posix(),
+            "mesh_count": 1,
             "max_convex_hull_num": max_convex_hull_num,
             "cache_path": cache_path.as_posix(),
         }
