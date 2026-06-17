@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from embodichain.gen_sim.action_agent_pipeline.utils.mllm import create_chat_openai
 
-__all__ = ["create_llm", "task_llm", "compile_llm"]
+__all__ = ["create_llm", "task_llm"]
 
 
 # ------------------------------------------------------------------------------
@@ -54,10 +54,6 @@ def _create_llm_safe(*, temperature=0.0, model=None, usage_stage=None):
 task_llm = _create_llm_safe(
     temperature=0.0,
     usage_stage="action_agent.task_graph",
-)
-compile_llm = _create_llm_safe(
-    temperature=0.0,
-    usage_stage="action_agent.compile_canonicalize",
 )
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ _RECOVERY_KEYS = {
     "recovery_branches",
     "recoveries",
 }
+_COMPILED_BUNDLE_KEYS = {"task_graph", "metadata"}
 _EDGE_KEYS = {"id", "source", "target", "left_arm_action", "right_arm_action"}
 
 
@@ -49,20 +50,21 @@ def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
 def compile_agent_graph_from_file(
     path: str | Path,
     *,
-    env: Any = None,
     graph_cls: type | None = None,
     action_module: Any = None,
-    monitor_module: Any = None,
 ) -> Any:
     """Compile a graph JSON bundle from disk into an executable graph."""
-    del env, monitor_module
-
     bundle = load_agent_graph_bundle(path)
-    recovery_graph = bundle.get("recovery_graph")
-    if _has_recovery_content(recovery_graph):
-        raise ValueError("Recovery graph artifacts are no longer supported.")
-
-    task_graph = bundle.get("task_graph", bundle)
+    if "task_graph" in bundle:
+        unknown_bundle_keys = set(bundle) - _COMPILED_BUNDLE_KEYS
+        if unknown_bundle_keys:
+            raise ValueError(
+                "Compiled graph artifact contains unsupported top-level fields: "
+                f"{', '.join(sorted(unknown_bundle_keys))}."
+            )
+        task_graph = bundle["task_graph"]
+    else:
+        task_graph = bundle
     return compile_agent_graph_spec(
         task_graph,
         graph_cls=graph_cls,
@@ -72,19 +74,11 @@ def compile_agent_graph_from_file(
 
 def compile_agent_graph_spec(
     task_graph: str | Mapping[str, Any],
-    recovery_graph: str | Mapping[str, Any] | None = None,
     *,
-    env: Any = None,
     graph_cls: type | None = None,
     action_module: Any = None,
-    monitor_module: Any = None,
 ) -> Any:
     """Compile a nominal JSON graph into ``AgentTaskGraph``."""
-    del env, monitor_module
-
-    if _has_recovery_content(recovery_graph):
-        raise ValueError("Recovery graph compilation has been removed.")
-
     task_spec = extract_json_object(task_graph)
     _reject_recovery_keys(task_spec)
     _validate_task_spec(task_spec)
@@ -243,15 +237,6 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
         )
 
     return action_module.normalize_atomic_action_spec(spec)
-
-
-def _has_recovery_content(value: Any) -> bool:
-    if value is None:
-        return False
-    recovery_spec = extract_json_object(value)
-    if not isinstance(recovery_spec, Mapping):
-        return bool(recovery_spec)
-    return any(bool(recovery_spec.get(key)) for key in _RECOVERY_KEYS)
 
 
 def _reject_recovery_keys(task_spec: Mapping[str, Any]) -> None:

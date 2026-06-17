@@ -40,16 +40,12 @@ class CompileAgent(AgentBase):
     query_suffix = "."
     prompt_kwargs: dict[str, dict[str, Any]]
 
-    def __init__(self, llm, **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         for key, value in kwargs.items():
             setattr(self, key, value)
         self.prompt_kwargs = kwargs.get("prompt_kwargs", {})
-        self.llm = llm
 
     def generate(self, **kwargs):
-        if kwargs.get("recovery_enabled") or kwargs.get("recovery_spec"):
-            raise NotImplementedError("Recovery graph generation has been removed.")
-
         log_dir = kwargs.get(
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
@@ -116,9 +112,6 @@ def _runtime_kwargs(
     prompt_only_keys.update(
         {
             "task_graph",
-            "recovery_spec",
-            "recovery_graph",
-            "recovery_enabled",
             "observations",
             "regenerate",
         }

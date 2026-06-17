@@ -111,7 +111,6 @@ def _generate_action_agent_trajectory(
         save_video=getattr(args, "save_video", False),
         debug_mode=getattr(args, "debug_mode", False),
         regenerate=getattr(args, "regenerate", False),
-        recovery=getattr(args, "recovery", False),
     )
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")

@@ -135,7 +135,7 @@ def _make_env(tmp_path: Path):
 
     # Import registers AtomicActionsAgent-v3.
     from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware import (  # noqa: F401
-        atomic_actions,
+        agent_env,
     )
 
     args = argparse.Namespace(
