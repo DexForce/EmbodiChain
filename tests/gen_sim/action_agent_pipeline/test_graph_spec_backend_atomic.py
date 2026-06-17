@@ -95,7 +95,6 @@ def test_compile_agent_graph_accepts_atomic_action_class_spec() -> None:
     graph = compile_agent_graph_spec(
         _task_graph(action),
         graph_cls=_FakeGraph,
-        monitor_module={},
     )
 
     assert graph.edges["e01"]["left_arm_action"] == action
@@ -108,7 +107,6 @@ def test_compile_agent_graph_rejects_legacy_action_schema() -> None:
         compile_agent_graph_spec(
             task_graph,
             graph_cls=_FakeGraph,
-            monitor_module={},
         )
 
 
@@ -120,5 +118,4 @@ def test_compile_agent_graph_rejects_extra_edge_fields() -> None:
         compile_agent_graph_spec(
             task_graph,
             graph_cls=_FakeGraph,
-            monitor_module={},
         )

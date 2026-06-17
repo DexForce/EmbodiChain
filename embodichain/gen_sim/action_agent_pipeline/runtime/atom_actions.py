@@ -266,10 +266,9 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
     if reference == "object":
         _validate_target_fields(
             target_pose,
-            {"reference", "obj_name", "offset", "orientation"},
+            {"reference", "obj_name", "offset"},
             "target_pose",
         )
-        _validate_current_orientation(target_pose)
         obj_name = target_pose.get("obj_name")
         if not isinstance(obj_name, str) or not obj_name:
             raise ValueError("object target_pose requires non-empty obj_name.")
@@ -279,10 +278,9 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
     if reference == "absolute":
         _validate_target_fields(
             target_pose,
-            {"reference", "position", "orientation"},
+            {"reference", "position"},
             "target_pose",
         )
-        _validate_current_orientation(target_pose)
         position = target_pose.get("position")
         if not isinstance(position, list) or len(position) != 3:
             raise ValueError(
@@ -354,12 +352,6 @@ def _validate_target_fields(
         )
 
 
-def _validate_current_orientation(target_pose: Mapping[str, Any]) -> None:
-    orientation = target_pose.get("orientation")
-    if orientation is not None and orientation != "current":
-        raise ValueError("target_pose orientation only supports 'current'.")
-
-
 def execute_atomic_action(
     action_spec: Mapping[str, Any] | AtomicActionSpec,
     *,
@@ -394,7 +386,17 @@ def execute_atomic_action(
         return action_np
 
     target = _resolve_target(env, spec, runtime_kwargs)
-    cfg, start_qpos = _build_action_cfg_and_start(env, spec)
+    is_left, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
+        env, spec.robot_name
+    )
+    cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
+    start_qpos = _resolve_action_start_qpos(
+        env,
+        spec,
+        is_left=is_left,
+        arm_joints=arm_joints,
+        eef_joints=eef_joints,
+    )
     action_cls = _get_atomic_action_class(spec.atomic_action_class)
     action = action_cls(motion_generator=_make_motion_generator(env), cfg=cfg)
     is_success, trajectory, joint_ids = action.execute(
@@ -434,13 +436,9 @@ def execute_parallel_atomic_actions(
     right_arm_action=None,
     env=None,
     return_result: bool = False,
-    monitor_sequences=None,
     **runtime_kwargs,
 ):
     """Execute left/right atomic action specs as one synchronized stream."""
-    if monitor_sequences is not None:
-        raise NotImplementedError("Monitor sequences have been removed.")
-
     left_arm_action = _resolve_action_spec(left_arm_action, env, runtime_kwargs)
     right_arm_action = _resolve_action_spec(right_arm_action, env, runtime_kwargs)
 
@@ -494,9 +492,6 @@ def execute_parallel_atomic_actions(
     if return_result:
         return {
             "actions": actions,
-            "monitor_index": None,
-            "monitor_name": None,
-            "step_index": None,
         }
     return actions
 
@@ -618,21 +613,6 @@ def _make_motion_generator(env):
 def _get_atomic_action_class(atomic_action_class: str):
     action_class, _ = ATOMIC_ACTION_REGISTRY[atomic_action_class]
     return action_class
-
-
-def _build_action_cfg_and_start(env, spec: AtomicActionSpec):
-    is_left, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
-        env, spec.robot_name
-    )
-    cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
-    start_qpos = _resolve_action_start_qpos(
-        env,
-        spec,
-        is_left=is_left,
-        arm_joints=arm_joints,
-        eef_joints=eef_joints,
-    )
-    return cfg, start_qpos
 
 
 def _build_action_cfg(

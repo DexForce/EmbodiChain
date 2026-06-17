@@ -35,7 +35,6 @@ class BaseAgentEnv:
         )
         from embodichain.gen_sim.action_agent_pipeline.agents.llm import (
             task_llm,
-            compile_llm,
         )
 
         task_agent_config = self._agent_config_with_prompt_keys(
@@ -54,7 +53,6 @@ class BaseAgentEnv:
             config_dir=agent_config_path,
         )
         self.compile_agent = CompileAgent(
-            compile_llm,
             **compile_agent_config,
             **agent_config["CompileAgent"],
             task_name=task_name,
@@ -291,12 +289,7 @@ class BaseAgentEnv:
         return control_part
 
     # -------------------- get compiled graph for action list --------------------
-    def generate_graph_for_actions(self, regenerate=False, recovery=False, **kwargs):
-        if recovery:
-            raise NotImplementedError(
-                "RecoveryAgent has been removed from this pipeline."
-            )
-
+    def generate_graph_for_actions(self, regenerate=False, **kwargs):
         logger.log_info(
             "Generate graph for creating action list for "
             f"{self.compile_agent.task_name}.",
@@ -326,11 +319,9 @@ class BaseAgentEnv:
         return graph_file_path, kwargs, graph_content
 
     # -------------------- get action list --------------------
-    def create_demo_action_list(
-        self, regenerate=False, recovery=False, *args, **kwargs
-    ):
+    def create_demo_action_list(self, regenerate=False, *args, **kwargs):
         graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
-            regenerate=regenerate, recovery=recovery
+            regenerate=regenerate
         )
         atomic_action_kwargs = {
             "allow_grasp_annotation": True,

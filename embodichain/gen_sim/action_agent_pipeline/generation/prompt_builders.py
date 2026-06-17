@@ -85,9 +85,7 @@ def make_agent_config() -> dict[str, Any]:
         "TaskAgent": {
             "prompt_name": "generate_task_graph",
         },
-        "CompileAgent": {
-            "prompt_name": "compile_agent_graph",
-        },
+        "CompileAgent": {},
         "Agent": {
             "prompt_kwargs": {
                 "task_prompt": {
@@ -919,28 +917,6 @@ def _format_place_spec(
                 "sample_interval": sample_interval,
                 "lift_height": float(lift_height),
             },
-        }
-    )
-
-
-def _format_pose_offset_spec(
-    robot_name: str,
-    offset: tuple[float, float, float],
-    *,
-    sample_interval: int = 20,
-) -> str:
-    dx, dy, dz = offset
-    return _compact_json(
-        {
-            "atomic_action_class": "MoveAction",
-            "robot_name": robot_name,
-            "control": "arm",
-            "target_pose": {
-                "reference": "relative",
-                "offset": [float(dx), float(dy), float(dz)],
-                "frame": "world",
-            },
-            "cfg": {"sample_interval": sample_interval},
         }
     )
 

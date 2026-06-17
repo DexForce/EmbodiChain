@@ -209,6 +209,24 @@ def test_normalize_atomic_action_spec_rejects_multiple_target_fields() -> None:
         )
 
 
+def test_normalize_atomic_action_spec_rejects_orientation_field() -> None:
+    with pytest.raises(ValueError, match="Unsupported target_pose fields"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveAction",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_pose": {
+                    "reference": "object",
+                    "obj_name": "apple",
+                    "offset": [0.0, 0.0, 0.1],
+                    "orientation": "current",
+                },
+                "cfg": {},
+            }
+        )
+
+
 def test_normalize_atomic_action_spec_rejects_pickup_pose_target() -> None:
     with pytest.raises(ValueError, match="PickUpAction requires control='arm'"):
         normalize_atomic_action_spec(
@@ -256,7 +274,6 @@ def test_object_referenced_pose_builds_move_cfg_and_pose_target(monkeypatch) -> 
                 "reference": "object",
                 "obj_name": "apple",
                 "offset": [0.1, 0.2, 0.3],
-                "orientation": "current",
             },
             "cfg": {"sample_interval": 12},
         },
