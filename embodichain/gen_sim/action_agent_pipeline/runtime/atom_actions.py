@@ -881,6 +881,19 @@ def _build_object_semantics(
             },
         )
     )
+    max_decomposition_hulls = _max_decomposition_hulls(target_obj, runtime_kwargs)
+    source_mesh_path = _rigid_object_mesh_path(target_obj)
+    body_scale = _rigid_object_body_scale(target_obj)
+    _prepare_grasp_collision_cache_from_env_coacd(
+        obj_name=obj_name,
+        mesh_vertices=mesh_vertices,
+        mesh_triangles=mesh_triangles,
+        source_mesh_path=source_mesh_path,
+        max_decomposition_hulls=max_decomposition_hulls,
+        body_scale=body_scale,
+        runtime_kwargs=runtime_kwargs,
+    )
+
     gripper_collision_cfg = GripperCollisionCfg(
         **_cfg_supported_kwargs(
             GripperCollisionCfg,
@@ -891,12 +904,9 @@ def _build_object_semantics(
                     "grasp_point_sample_dense",
                     0.012,
                 ),
-                "max_decomposition_hulls": _max_decomposition_hulls(
-                    target_obj,
-                    runtime_kwargs,
-                ),
-                "env_coacd_source_mesh_path": _rigid_object_mesh_path(target_obj),
-                "env_coacd_body_scale": _rigid_object_body_scale(target_obj),
+                "max_decomposition_hulls": max_decomposition_hulls,
+                "env_coacd_source_mesh_path": source_mesh_path,
+                "env_coacd_body_scale": body_scale,
             },
         )
     )
@@ -917,6 +927,42 @@ def _build_object_semantics(
         affordance=affordance,
         entity=target_obj,
     )
+
+
+def _prepare_grasp_collision_cache_from_env_coacd(
+    *,
+    obj_name: str,
+    mesh_vertices: torch.Tensor,
+    mesh_triangles: torch.Tensor,
+    source_mesh_path: str | None,
+    max_decomposition_hulls: int,
+    body_scale: list[float] | None,
+    runtime_kwargs: Mapping[str, Any],
+) -> None:
+    if not bool(runtime_kwargs.get("reuse_env_coacd_for_grasp", True)):
+        return
+
+    try:
+        from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
+            ensure_grasp_collision_cache_from_env_coacd,
+        )
+
+        result = ensure_grasp_collision_cache_from_env_coacd(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            source_mesh_path=source_mesh_path,
+            max_decomposition_hulls=max_decomposition_hulls,
+            body_scale=body_scale,
+        )
+    except Exception:
+        return
+
+    if result.get("status") == "generated":
+        log_info(
+            "Prepared grasp collision cache from environment CoACD cache: "
+            f"target={obj_name}, cache={result.get('grasp_cache_path')}.",
+            color="green",
+        )
 
 
 def _stabilize_affordance_object(
