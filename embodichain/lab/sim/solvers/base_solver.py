@@ -397,19 +397,19 @@ class BaseSolver(metaclass=ABCMeta):
     def get_ik(
         self,
         target_pose: torch.Tensor,
-        joint_seed: torch.Tensor | None = None,
+        qpos_seed: torch.Tensor | None = None,
         num_samples: int | None = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         r"""Computes the inverse kinematics for a given target pose.
 
         This method generates random joint configurations within the specified limits,
-        including the provided joint_seed, and attempts to find valid inverse kinematics solutions.
-        It then identifies the joint position that is closest to the joint_seed.
+        including the provided qpos_seed, and attempts to find valid inverse kinematics solutions.
+        It then identifies the joint position that is closest to the qpos_seed.
 
         Args:
             target_pose (torch.Tensor): The target pose represented as a 4x4 transformation matrix.
-            joint_seed (torch.Tensor | None): The initial joint positions used as a seed.
+            qpos_seed (torch.Tensor | None): The initial joint positions used as a seed.
             num_samples (int | None): The number of random joint seeds to generate.
             **kwargs: Additional keyword arguments for customization.
 
