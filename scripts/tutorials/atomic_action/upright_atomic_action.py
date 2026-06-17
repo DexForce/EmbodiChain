@@ -224,24 +224,10 @@ def create_fallen_bottle(sim: SimulationManager) -> RigidObject:
         ),
         max_convex_hull_num=16,
         init_pos=[-0.4294, -0.0825, -0.0997],
-        init_rot=[90.0, 90.0, 0.0],
+        init_rot=[90.0, 135.0, 0.0],
         body_scale=(bottle_scale, bottle_scale, bottle_scale),
     )
     return sim.add_rigid_object(cfg=bottle_cfg)
-
-
-def create_support_plane(sim: SimulationManager) -> RigidObject:
-    support_cfg = RigidObjectCfg(
-        uid="support_plane",
-        shape=CubeCfg(size=[1.4, 1.4, 0.02]),
-        attrs=RigidBodyAttributesCfg(
-            dynamic_friction=0.97,
-            static_friction=0.99,
-        ),
-        body_type="static",
-        init_pos=[-0.2, 0.0, -0.015],
-    )
-    return sim.add_rigid_object(cfg=support_cfg)
 
 
 def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
@@ -251,11 +237,6 @@ def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> No
 
     obj.reset()
     sim.update(step=step)
-    obj.clear_dynamics()
-
-
-def freeze_object_before_grasp(obj: RigidObject) -> None:
-    """Clear residual motion before planning without changing the body type."""
     obj.clear_dynamics()
 
 
@@ -624,10 +605,11 @@ def create_object_semantics(
 def run_upright_demo(
     args: argparse.Namespace, sim: SimulationManager, robot: Robot
 ) -> None:
-    create_support_plane(sim)
+
+    sim.open_window()
+
     obj = create_fallen_bottle(sim)
     settle_object(sim, obj, step=5)
-    freeze_object_before_grasp(obj)
     semantics = create_object_semantics(obj, args)
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
@@ -677,7 +659,6 @@ def run_upright_demo(
         diagnose_upright_plan(robot, upright_action, semantics)
         return
 
-    sim.open_window()
     if not args.auto_play:
         input("Inspect the fallen bottle, then press Enter to plan upright...")
 
