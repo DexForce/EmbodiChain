@@ -186,12 +186,13 @@ class AtomicActionEngine:
         self, actions_cfg_list: Optional[List[ActionCfg]] = None
     ) -> Dict[str, "AtomicAction"]:
         actions: Dict[str, AtomicAction] = {}
-        from .actions import MoveAction, PickUpAction, PlaceAction
+        from .actions import MoveAction, PickUpAction, PlaceAction, HandoffAction
 
         builtin_action_map: Dict[str, Type[AtomicAction]] = {
             "move": MoveAction,
             "pick_up": PickUpAction,
             "place": PlaceAction,
+            "handoff": HandoffAction,
         }
         if actions_cfg_list is not None:
             for cfg in actions_cfg_list:

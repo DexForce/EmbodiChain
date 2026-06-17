@@ -65,6 +65,514 @@ class GraspActionCfg(MoveActionCfg):
     """Number of waypoints for the gripper open/close interpolation phase."""
 
 
+@configclass
+class HandoffActionCfg(ActionCfg):
+    name: str = "handoff"
+    """Name of the action, used for identification and logging."""
+
+    control_part: str = "dual_arm"
+    """Combined control part containing giver and receiver arm joints."""
+
+    giver_arm_control_part: str = "right_arm"
+    """Arm that initially holds the object."""
+
+    receiver_arm_control_part: str = "left_arm"
+    """Arm that receives the object."""
+
+    giver_hand_control_part: str = "right_hand"
+    """Hand control part attached to the giver arm."""
+
+    receiver_hand_control_part: str = "left_hand"
+    """Hand control part attached to the receiver arm."""
+
+    giver_hand_open_qpos: torch.Tensor | None = None
+    """Giver hand qpos for the open state."""
+
+    giver_hand_close_qpos: torch.Tensor | None = None
+    """Giver hand qpos for the closed state."""
+
+    receiver_hand_open_qpos: torch.Tensor | None = None
+    """Receiver hand qpos for the open state."""
+
+    receiver_hand_close_qpos: torch.Tensor | None = None
+    """Receiver hand qpos for the closed state."""
+
+    sample_interval: int = 100
+    """Number of waypoints for the full handoff trajectory."""
+
+    hand_interp_steps: int = 8
+    """Number of waypoints for each hand open/close interpolation phase."""
+
+    handoff_hold_steps: int = 2
+    """Number of waypoints to hold both hands closed before releasing."""
+
+    retreat_steps: int = 12
+    """Number of waypoints used for the retreat phase."""
+
+    pre_handoff_distance: float = 0.1
+    """Distance to offset backward from each handoff pose for approach."""
+
+    giver_retreat_distance: float = 0.08
+    """Distance for the giver arm to retreat after releasing the object."""
+
+    receiver_retreat_distance: float = 0.0
+    """Distance for the receiver arm to retreat while holding the object."""
+
+
+class HandoffAction(AtomicAction):
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: HandoffActionCfg | None = None,
+    ):
+        """Initialize a dual-arm handoff action."""
+        super().__init__(
+            motion_generator, cfg=cfg if cfg is not None else HandoffActionCfg()
+        )
+
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.dual_arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.giver_arm_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.giver_arm_control_part
+        )
+        self.receiver_arm_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.receiver_arm_control_part
+        )
+        self.giver_hand_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.giver_hand_control_part
+        )
+        self.receiver_hand_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.receiver_hand_control_part
+        )
+        self.joint_ids = (
+            self.dual_arm_joint_ids
+            + self.giver_hand_joint_ids
+            + self.receiver_hand_joint_ids
+        )
+        self.giver_arm_dof = len(self.giver_arm_joint_ids)
+        self.receiver_arm_dof = len(self.receiver_arm_joint_ids)
+        self.dual_arm_dof = len(self.dual_arm_joint_ids)
+        self.giver_hand_dof = len(self.giver_hand_joint_ids)
+        self.receiver_hand_dof = len(self.receiver_hand_joint_ids)
+        self.dof = len(self.joint_ids)
+
+        self._validate_hand_qpos_cfg()
+        self.giver_hand_open_qpos = self._expand_qpos(
+            self.cfg.giver_hand_open_qpos,
+            self.giver_hand_dof,
+            "giver_hand_open_qpos",
+        )
+        self.giver_hand_close_qpos = self._expand_qpos(
+            self.cfg.giver_hand_close_qpos,
+            self.giver_hand_dof,
+            "giver_hand_close_qpos",
+        )
+        self.receiver_hand_open_qpos = self._expand_qpos(
+            self.cfg.receiver_hand_open_qpos,
+            self.receiver_hand_dof,
+            "receiver_hand_open_qpos",
+        )
+        self.receiver_hand_close_qpos = self._expand_qpos(
+            self.cfg.receiver_hand_close_qpos,
+            self.receiver_hand_dof,
+            "receiver_hand_close_qpos",
+        )
+
+    def _validate_hand_qpos_cfg(self) -> None:
+        """Ensure all hand state tensors are provided."""
+        required_names = (
+            "giver_hand_open_qpos",
+            "giver_hand_close_qpos",
+            "receiver_hand_open_qpos",
+            "receiver_hand_close_qpos",
+        )
+        for name in required_names:
+            if getattr(self.cfg, name) is None:
+                logger.log_error(f"{name} must be specified in HandoffActionCfg")
+
+    def _expand_qpos(
+        self,
+        qpos: torch.Tensor,
+        dof: int,
+        name: str,
+    ) -> torch.Tensor:
+        """Resolve qpos to batched shape ``(n_envs, dof)``."""
+        qpos = qpos.to(device=self.device, dtype=torch.float32)
+        if qpos.shape == (dof,):
+            return qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if qpos.shape == (self.n_envs, dof):
+            return qpos
+        logger.log_error(
+            f"{name} must have shape ({dof},) or "
+            f"({self.n_envs}, {dof}), but got {qpos.shape}",
+            ValueError,
+        )
+
+    def _resolve_target(self, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Resolve handoff target into giver and receiver pose batches."""
+        if not isinstance(target, torch.Tensor):
+            logger.log_error(
+                "HandoffAction target must be a torch.Tensor with shape "
+                "(2, 4, 4) or (n_envs, 2, 4, 4)",
+                TypeError,
+            )
+        target = target.to(device=self.device, dtype=torch.float32)
+        if target.shape == (2, 4, 4):
+            target = target.unsqueeze(0).repeat(self.n_envs, 1, 1, 1)
+        if target.shape != (self.n_envs, 2, 4, 4):
+            logger.log_error(
+                "HandoffAction target must have shape (2, 4, 4) or "
+                f"({self.n_envs}, 2, 4, 4), but got {target.shape}",
+                ValueError,
+            )
+        return target[:, 0], target[:, 1]
+
+    def _resolve_start_qpos(
+        self,
+        start_qpos: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Resolve start qpos into giver and receiver arm qpos."""
+        if start_qpos is None:
+            return (
+                self.robot.get_qpos(name=self.cfg.giver_arm_control_part),
+                self.robot.get_qpos(name=self.cfg.receiver_arm_control_part),
+            )
+
+        start_qpos = start_qpos.to(device=self.device, dtype=torch.float32)
+        if start_qpos.shape == (self.dual_arm_dof,):
+            start_qpos = start_qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if start_qpos.shape != (self.n_envs, self.dual_arm_dof):
+            logger.log_error(
+                f"start_qpos must have shape ({self.dual_arm_dof},) or "
+                f"({self.n_envs}, {self.dual_arm_dof}), but got {start_qpos.shape}",
+                ValueError,
+            )
+
+        dual_id_to_col = {
+            joint_id: col for col, joint_id in enumerate(self.dual_arm_joint_ids)
+        }
+        giver_cols = self._lookup_joint_columns(
+            self.giver_arm_joint_ids, dual_id_to_col, self.cfg.giver_arm_control_part
+        )
+        receiver_cols = self._lookup_joint_columns(
+            self.receiver_arm_joint_ids,
+            dual_id_to_col,
+            self.cfg.receiver_arm_control_part,
+        )
+        return start_qpos[:, giver_cols], start_qpos[:, receiver_cols]
+
+    @staticmethod
+    def _lookup_joint_columns(
+        joint_ids: list[int],
+        joint_id_to_col: dict[int, int],
+        control_part: str,
+    ) -> list[int]:
+        """Map global joint ids into local trajectory columns."""
+        missing_joint_ids = [
+            joint_id for joint_id in joint_ids if joint_id not in joint_id_to_col
+        ]
+        if missing_joint_ids:
+            logger.log_error(
+                f"Joints {missing_joint_ids} from '{control_part}' are not included "
+                "in the configured dual-arm control part.",
+                ValueError,
+            )
+        return [joint_id_to_col[joint_id] for joint_id in joint_ids]
+
+    def _compute_segment_lengths(self) -> dict[str, int]:
+        """Compute waypoint counts for the fixed handoff phase sequence."""
+        n_receiver_close = max(2, self.cfg.hand_interp_steps)
+        n_giver_open = max(2, self.cfg.hand_interp_steps)
+        n_hold = max(0, self.cfg.handoff_hold_steps)
+        n_retreat = max(2, self.cfg.retreat_steps)
+        n_approach = (
+            self.cfg.sample_interval
+            - n_receiver_close
+            - n_hold
+            - n_giver_open
+            - n_retreat
+        )
+        if n_approach < 2:
+            logger.log_error(
+                "Not enough waypoints for handoff approach trajectory. "
+                "Please increase sample_interval or decrease hand/hold/retreat steps.",
+                ValueError,
+            )
+        return {
+            "approach": n_approach,
+            "receiver_close": n_receiver_close,
+            "hold": n_hold,
+            "giver_open": n_giver_open,
+            "retreat": n_retreat,
+        }
+
+    def get_segment_lengths(self) -> dict[str, int]:
+        """Return waypoint counts for the fixed handoff phase sequence."""
+        return self._compute_segment_lengths()
+
+    def _apply_local_z_offset(
+        self,
+        pose: torch.Tensor,
+        distance: float,
+    ) -> torch.Tensor:
+        """Offset pose translation along the pose local Z axis."""
+        result = pose.clone()
+        result[:, :3, 3] += pose[:, :3, 2] * distance
+        return result
+
+    def _plan_arm_trajectory(
+        self,
+        control_part: str,
+        start_qpos: torch.Tensor,
+        target_poses: torch.Tensor,
+        n_waypoints: int,
+    ) -> tuple[bool, torch.Tensor]:
+        """Plan a batched arm trajectory through Cartesian target poses."""
+        n_state = target_poses.shape[1]
+        arm_dof = start_qpos.shape[-1]
+        trajectory = torch.zeros(
+            size=(self.n_envs, n_state, arm_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        qpos_seed = start_qpos
+        for i in range(n_state):
+            is_success, qpos = self.robot.compute_ik(
+                pose=target_poses[:, i],
+                name=control_part,
+                joint_seed=qpos_seed,
+            )
+            if not torch.all(is_success).item():
+                logger.log_warning(
+                    f"Failed to compute IK for {control_part} target state {i}."
+                )
+                return False, trajectory
+            trajectory[:, i] = qpos
+            qpos_seed = qpos
+
+        trajectory = torch.cat([start_qpos.unsqueeze(1), trajectory], dim=1)
+        return True, interpolate_with_distance(
+            trajectory=trajectory,
+            interp_num=n_waypoints,
+            device=self.device,
+        )
+
+    def _interpolate_qpos(
+        self,
+        start_qpos: torch.Tensor,
+        end_qpos: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate batched qpos between two states."""
+        weights = torch.linspace(
+            0.0,
+            1.0,
+            steps=n_waypoints,
+            device=self.device,
+            dtype=start_qpos.dtype,
+        )
+        return torch.lerp(
+            start_qpos.unsqueeze(1),
+            end_qpos.unsqueeze(1),
+            weights[None, :, None],
+        )
+
+    @staticmethod
+    def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
+        """Repeat batched qpos across waypoints."""
+        return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+
+    def _compose_dual_arm_trajectory(
+        self,
+        giver_arm_traj: torch.Tensor,
+        receiver_arm_traj: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compose giver and receiver arm trajectories in dual-arm joint order."""
+        n_waypoints = giver_arm_traj.shape[1]
+        dual_arm_traj = torch.zeros(
+            size=(self.n_envs, n_waypoints, self.dual_arm_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        dual_id_to_col = {
+            joint_id: col for col, joint_id in enumerate(self.dual_arm_joint_ids)
+        }
+        giver_cols = self._lookup_joint_columns(
+            self.giver_arm_joint_ids, dual_id_to_col, self.cfg.giver_arm_control_part
+        )
+        receiver_cols = self._lookup_joint_columns(
+            self.receiver_arm_joint_ids,
+            dual_id_to_col,
+            self.cfg.receiver_arm_control_part,
+        )
+        dual_arm_traj[:, :, giver_cols] = giver_arm_traj
+        dual_arm_traj[:, :, receiver_cols] = receiver_arm_traj
+        return dual_arm_traj
+
+    def _assemble_phase(
+        self,
+        giver_arm_traj: torch.Tensor,
+        receiver_arm_traj: torch.Tensor,
+        giver_hand_traj: torch.Tensor,
+        receiver_hand_traj: torch.Tensor,
+    ) -> torch.Tensor:
+        """Assemble arm and hand trajectories into the action joint order."""
+        return torch.cat(
+            [
+                self._compose_dual_arm_trajectory(giver_arm_traj, receiver_arm_traj),
+                giver_hand_traj,
+                receiver_hand_traj,
+            ],
+            dim=-1,
+        )
+
+    def execute(
+        self,
+        target: torch.Tensor,
+        start_qpos: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        """Execute a dual-arm handoff action.
+
+        Args:
+            target: Handoff poses with shape ``(2, 4, 4)`` or
+                ``(n_envs, 2, 4, 4)``. The first pose is for the giver arm and
+                the second pose is for the receiver arm.
+            start_qpos: Optional dual-arm start qpos in ``cfg.control_part`` order.
+
+        Returns:
+            Success flag, planned trajectory, and joint ids corresponding to the
+            trajectory columns.
+        """
+        giver_handoff_xpos, receiver_handoff_xpos = self._resolve_target(target)
+        giver_start_qpos, receiver_start_qpos = self._resolve_start_qpos(start_qpos)
+        segments = self._compute_segment_lengths()
+
+        giver_pre_xpos = self._apply_local_z_offset(
+            giver_handoff_xpos, -self.cfg.pre_handoff_distance
+        )
+        receiver_pre_xpos = self._apply_local_z_offset(
+            receiver_handoff_xpos, -self.cfg.pre_handoff_distance
+        )
+
+        giver_approach_targets = torch.stack(
+            [giver_pre_xpos, giver_handoff_xpos], dim=1
+        )
+        receiver_approach_targets = torch.stack(
+            [receiver_pre_xpos, receiver_handoff_xpos], dim=1
+        )
+        is_success, giver_approach_traj = self._plan_arm_trajectory(
+            self.cfg.giver_arm_control_part,
+            giver_start_qpos,
+            giver_approach_targets,
+            segments["approach"],
+        )
+        if not is_success:
+            return False, torch.empty(0, device=self.device), self.joint_ids
+        is_success, receiver_approach_traj = self._plan_arm_trajectory(
+            self.cfg.receiver_arm_control_part,
+            receiver_start_qpos,
+            receiver_approach_targets,
+            segments["approach"],
+        )
+        if not is_success:
+            return False, torch.empty(0, device=self.device), self.joint_ids
+
+        giver_handoff_qpos = giver_approach_traj[:, -1]
+        receiver_handoff_qpos = receiver_approach_traj[:, -1]
+        approach_trajectory = self._assemble_phase(
+            giver_approach_traj,
+            receiver_approach_traj,
+            self._repeat_qpos(self.giver_hand_close_qpos, segments["approach"]),
+            self._repeat_qpos(self.receiver_hand_open_qpos, segments["approach"]),
+        )
+
+        receiver_close_trajectory = self._assemble_phase(
+            self._repeat_qpos(giver_handoff_qpos, segments["receiver_close"]),
+            self._repeat_qpos(receiver_handoff_qpos, segments["receiver_close"]),
+            self._repeat_qpos(
+                self.giver_hand_close_qpos, segments["receiver_close"]
+            ),
+            self._interpolate_qpos(
+                self.receiver_hand_open_qpos,
+                self.receiver_hand_close_qpos,
+                segments["receiver_close"],
+            ),
+        )
+
+        hold_trajectory = torch.empty(
+            size=(self.n_envs, 0, self.dof), dtype=torch.float32, device=self.device
+        )
+        if segments["hold"] > 0:
+            hold_trajectory = self._assemble_phase(
+                self._repeat_qpos(giver_handoff_qpos, segments["hold"]),
+                self._repeat_qpos(receiver_handoff_qpos, segments["hold"]),
+                self._repeat_qpos(self.giver_hand_close_qpos, segments["hold"]),
+                self._repeat_qpos(self.receiver_hand_close_qpos, segments["hold"]),
+            )
+
+        giver_open_trajectory = self._assemble_phase(
+            self._repeat_qpos(giver_handoff_qpos, segments["giver_open"]),
+            self._repeat_qpos(receiver_handoff_qpos, segments["giver_open"]),
+            self._interpolate_qpos(
+                self.giver_hand_close_qpos,
+                self.giver_hand_open_qpos,
+                segments["giver_open"],
+            ),
+            self._repeat_qpos(self.receiver_hand_close_qpos, segments["giver_open"]),
+        )
+
+        giver_retreat_xpos = self._apply_local_z_offset(
+            giver_handoff_xpos, -self.cfg.giver_retreat_distance
+        )
+        receiver_retreat_xpos = self._apply_local_z_offset(
+            receiver_handoff_xpos, -self.cfg.receiver_retreat_distance
+        )
+        is_success, giver_retreat_traj = self._plan_arm_trajectory(
+            self.cfg.giver_arm_control_part,
+            giver_handoff_qpos,
+            giver_retreat_xpos.unsqueeze(1),
+            segments["retreat"],
+        )
+        if not is_success:
+            return False, torch.empty(0, device=self.device), self.joint_ids
+        if self.cfg.receiver_retreat_distance > 0.0:
+            is_success, receiver_retreat_traj = self._plan_arm_trajectory(
+                self.cfg.receiver_arm_control_part,
+                receiver_handoff_qpos,
+                receiver_retreat_xpos.unsqueeze(1),
+                segments["retreat"],
+            )
+            if not is_success:
+                return False, torch.empty(0, device=self.device), self.joint_ids
+        else:
+            receiver_retreat_traj = self._repeat_qpos(
+                receiver_handoff_qpos, segments["retreat"]
+            )
+
+        retreat_trajectory = self._assemble_phase(
+            giver_retreat_traj,
+            receiver_retreat_traj,
+            self._repeat_qpos(self.giver_hand_open_qpos, segments["retreat"]),
+            self._repeat_qpos(self.receiver_hand_close_qpos, segments["retreat"]),
+        )
+
+        trajectory = torch.cat(
+            [
+                approach_trajectory,
+                receiver_close_trajectory,
+                hold_trajectory,
+                giver_open_trajectory,
+                retreat_trajectory,
+            ],
+            dim=1,
+        )
+        return True, trajectory, self.joint_ids
+
+    def validate(self, target, start_qpos=None, **kwargs):
+        return True
+
+
 class MoveAction(AtomicAction):
     def __init__(
         self,
