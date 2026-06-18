@@ -216,7 +216,6 @@ class AtomicActionEngine:
                 ObjectSemantics,
                 MoveObjectTarget,
                 Dict[str, Any],
-                None,
             ]
         ],
     ) -> tuple[bool, torch.Tensor]:
@@ -278,7 +277,7 @@ class AtomicActionEngine:
         self,
         action_name: str,
         target: Union[
-            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any], None
+            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any]
         ],
         **kwargs,
     ) -> bool:
@@ -294,16 +293,13 @@ class AtomicActionEngine:
     def _resolve_target(
         self,
         target: Union[
-            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any], None
+            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any]
         ],
-    ) -> Union[torch.Tensor, ObjectSemantics, MoveObjectTarget, None]:
+    ) -> Union[torch.Tensor, ObjectSemantics, MoveObjectTarget]:
         """Resolve user target input into tensor pose or ObjectSemantics.
 
         Supports the convenience dict format in ``execute`` and ``validate``.
         """
-        if target is None:
-            return None
-
         if isinstance(target, torch.Tensor):
             return target
 
@@ -367,7 +363,7 @@ class AtomicActionEngine:
 
         raise TypeError(
             "target must be torch.Tensor, str, ObjectSemantics, MoveObjectTarget, "
-            "Dict[str, Any], or None"
+            "or Dict[str, Any]"
         )
 
     def get_semantic_analyzer(self) -> SemanticAnalyzer:

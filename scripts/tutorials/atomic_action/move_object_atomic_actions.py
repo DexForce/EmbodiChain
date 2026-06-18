@@ -40,7 +40,6 @@ from embodichain.lab.sim.atomic_actions import (
     MoveObjectTarget,
     ObjectSemantics,
     PickUpActionCfg,
-    PlaceActionCfg,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -79,7 +78,6 @@ BOTTLE_MIN_HAND_CLOSE_QPOS = 0.024
 MOVE_SAMPLE_INTERVAL = 60
 PICK_SAMPLE_INTERVAL = 120
 MOVE_OBJECT_SAMPLE_INTERVAL = 120
-PLACE_SAMPLE_INTERVAL = 36
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 TABLE_SIZE = [1.0, 1.4, 0.05]
@@ -88,15 +86,9 @@ TABLE_TOP_Z = -0.045
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveObjectAction with optional release."
+        description="Demonstrate MoveObjectAction holding a bottle in the gripper."
     )
     add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--mode",
-        choices=("hold", "release"),
-        default="hold",
-        help="hold keeps the bottle in the gripper; release opens the gripper.",
-    )
     parser.add_argument(
         "--n_sample",
         type=int,
@@ -331,11 +323,10 @@ def log_object_state(obj: RigidObject, label: str) -> None:
 
 
 def build_action_sequence(
-    args: argparse.Namespace,
     hand_open: torch.Tensor,
     hand_close: torch.Tensor,
     device: torch.device,
-) -> tuple[list, list]:
+) -> list:
     move_cfg = MoveActionCfg(
         control_part="arm",
         sample_interval=MOVE_SAMPLE_INTERVAL,
@@ -359,23 +350,7 @@ def build_action_sequence(
         hand_close_qpos=hand_close,
         sample_interval=MOVE_OBJECT_SAMPLE_INTERVAL,
     )
-    action_cfgs = [move_cfg, pickup_cfg, move_object_cfg]
-    target_suffix = []
-
-    if args.mode == "release":
-        place_cfg = PlaceActionCfg(
-            control_part="arm",
-            hand_control_part="hand",
-            hand_open_qpos=hand_open,
-            hand_close_qpos=hand_close,
-            lift_height=0.08,
-            sample_interval=PLACE_SAMPLE_INTERVAL,
-            hand_interp_steps=HAND_INTERP_STEPS,
-        )
-        action_cfgs.append(place_cfg)
-        target_suffix.append(None)
-
-    return action_cfgs, target_suffix
+    return [move_cfg, pickup_cfg, move_object_cfg]
 
 
 def run_move_object_demo(args: argparse.Namespace) -> None:
@@ -390,9 +365,7 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
-    action_cfgs, target_suffix = build_action_sequence(
-        args, hand_open, hand_close, sim.device
-    )
+    action_cfgs = build_action_sequence(hand_open, hand_close, sim.device)
     atomic_engine = AtomicActionEngine(
         motion_generator=motion_gen,
         actions_cfg_list=action_cfgs,
@@ -410,13 +383,10 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
         object_target_pose=make_upright_object_pose(sim.device)
     )
 
-    action_chain = "move -> pick_up -> move_object"
-    if args.mode == "release":
-        action_chain += " -> place"
-    logger.log_info(f"Planning {action_chain} (mode={args.mode})")
+    logger.log_info("Planning move -> pick_up -> move_object")
     start_time = time.time()
     is_success, traj = atomic_engine.execute_static(
-        target_list=[move_target, semantics, move_object_target, *target_suffix]
+        target_list=[move_target, semantics, move_object_target]
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
@@ -441,10 +411,7 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
             log_object_state(obj, f"replay step {i}/{traj.shape[1] - 1}")
         time.sleep(1e-2)
 
-    if args.mode == "release":
-        logger.log_info("Release mode: gripper opened after move_object.")
-    else:
-        logger.log_info("Hold mode: keeping the bottle suspended in the gripper.")
+    logger.log_info("MoveObjectAction keeps the bottle suspended in the gripper.")
 
     final_qpos = traj[:, -1, :]
     for i in range(POST_TRAJECTORY_STEPS):

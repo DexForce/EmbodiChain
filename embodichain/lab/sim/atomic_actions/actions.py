@@ -1501,7 +1501,7 @@ class PlaceAction(MoveAction):
 
     def execute(
         self,
-        target: Union[ObjectSemantics, torch.Tensor, None],
+        target: Union[ObjectSemantics, torch.Tensor],
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[bool, torch.Tensor, list[float]]:
@@ -1519,23 +1519,6 @@ class PlaceAction(MoveAction):
         """
         self._held_object_state = None
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
-
-        if target is None:
-            n_open_waypoint = max(2, self.cfg.hand_interp_steps)
-            hand_open_trajectory = torch.zeros(
-                size=(self.n_envs, n_open_waypoint, self.dof),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            hand_open_trajectory[:, :, : self.arm_dof] = start_qpos.unsqueeze(1).repeat(
-                1, n_open_waypoint, 1
-            )
-            hand_open_trajectory[:, :, self.arm_dof :] = self._interpolate_hand_qpos(
-                self.hand_close_qpos,
-                self.hand_open_qpos,
-                n_open_waypoint,
-            )
-            return True, hand_open_trajectory, self.joint_ids
 
         is_success, place_xpos = self._resolve_pose_target(
             target, action_name=self.__class__.__name__
