@@ -73,8 +73,8 @@ class GraspActionCfg(MoveActionCfg):
 
 
 @configclass
-class HandoffActionCfg(ActionCfg):
-    name: str = "handoff"
+class HandoverActionCfg(ActionCfg):
+    name: str = "handover"
     """Name of the action, used for identification and logging."""
 
     control_part: str = "dual_arm"
@@ -105,19 +105,19 @@ class HandoffActionCfg(ActionCfg):
     """Receiver hand qpos for the closed state."""
 
     sample_interval: int = 100
-    """Number of waypoints for the full handoff trajectory."""
+    """Number of waypoints for the full handover trajectory."""
 
     hand_interp_steps: int = 8
     """Number of waypoints for each hand open/close interpolation phase."""
 
-    handoff_hold_steps: int = 2
+    handover_hold_steps: int = 2
     """Number of waypoints to hold both hands closed before releasing."""
 
     retreat_steps: int = 12
     """Number of waypoints used for the retreat phase."""
 
-    pre_handoff_distance: float = 0.1
-    """Distance to offset backward from each handoff pose for approach."""
+    pre_handover_distance: float = 0.1
+    """Distance to offset backward from each handover pose for approach."""
 
     giver_retreat_distance: float = 0.08
     """Distance for the giver arm to retreat after releasing the object."""
@@ -126,15 +126,15 @@ class HandoffActionCfg(ActionCfg):
     """Distance for the receiver arm to retreat while holding the object."""
 
 
-class HandoffAction(AtomicAction):
+class HandoverAction(AtomicAction):
     def __init__(
         self,
         motion_generator: MotionGenerator,
-        cfg: HandoffActionCfg | None = None,
+        cfg: HandoverActionCfg | None = None,
     ):
-        """Initialize a dual-arm handoff action."""
+        """Initialize a dual-arm handover action."""
         super().__init__(
-            motion_generator, cfg=cfg if cfg is not None else HandoffActionCfg()
+            motion_generator, cfg=cfg if cfg is not None else HandoverActionCfg()
         )
 
         self.n_envs = self.robot.get_qpos().shape[0]
@@ -195,7 +195,7 @@ class HandoffAction(AtomicAction):
         )
         for name in required_names:
             if getattr(self.cfg, name) is None:
-                logger.log_error(f"{name} must be specified in HandoffActionCfg")
+                logger.log_error(f"{name} must be specified in HandoverActionCfg")
 
     def _expand_qpos(
         self,
@@ -216,10 +216,10 @@ class HandoffAction(AtomicAction):
         )
 
     def _resolve_target(self, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Resolve handoff target into giver and receiver pose batches."""
+        """Resolve handover target into giver and receiver pose batches."""
         if not isinstance(target, torch.Tensor):
             logger.log_error(
-                "HandoffAction target must be a torch.Tensor with shape "
+                "HandoverAction target must be a torch.Tensor with shape "
                 "(2, 4, 4) or (n_envs, 2, 4, 4)",
                 TypeError,
             )
@@ -228,7 +228,7 @@ class HandoffAction(AtomicAction):
             target = target.unsqueeze(0).repeat(self.n_envs, 1, 1, 1)
         if target.shape != (self.n_envs, 2, 4, 4):
             logger.log_error(
-                "HandoffAction target must have shape (2, 4, 4) or "
+                "HandoverAction target must have shape (2, 4, 4) or "
                 f"({self.n_envs}, 2, 4, 4), but got {target.shape}",
                 ValueError,
             )
@@ -287,10 +287,10 @@ class HandoffAction(AtomicAction):
         return [joint_id_to_col[joint_id] for joint_id in joint_ids]
 
     def _compute_segment_lengths(self) -> dict[str, int]:
-        """Compute waypoint counts for the fixed handoff phase sequence."""
+        """Compute waypoint counts for the fixed handover phase sequence."""
         n_receiver_close = max(2, self.cfg.hand_interp_steps)
         n_giver_open = max(2, self.cfg.hand_interp_steps)
-        n_hold = max(0, self.cfg.handoff_hold_steps)
+        n_hold = max(0, self.cfg.handover_hold_steps)
         n_retreat = max(2, self.cfg.retreat_steps)
         n_approach = (
             self.cfg.sample_interval
@@ -301,7 +301,7 @@ class HandoffAction(AtomicAction):
         )
         if n_approach < 2:
             logger.log_error(
-                "Not enough waypoints for handoff approach trajectory. "
+                "Not enough waypoints for handover approach trajectory. "
                 "Please increase sample_interval or decrease hand/hold/retreat steps.",
                 ValueError,
             )
@@ -314,7 +314,7 @@ class HandoffAction(AtomicAction):
         }
 
     def get_segment_lengths(self) -> dict[str, int]:
-        """Return waypoint counts for the fixed handoff phase sequence."""
+        """Return waypoint counts for the fixed handover phase sequence."""
         return self._compute_segment_lengths()
 
     def _apply_local_z_offset(
@@ -439,10 +439,10 @@ class HandoffAction(AtomicAction):
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[bool, torch.Tensor, list[float]]:
-        """Execute a dual-arm handoff action.
+        """Execute a dual-arm handover action.
 
         Args:
-            target: Handoff poses with shape ``(2, 4, 4)`` or
+            target: Handover poses with shape ``(2, 4, 4)`` or
                 ``(n_envs, 2, 4, 4)``. The first pose is for the giver arm and
                 the second pose is for the receiver arm.
             start_qpos: Optional dual-arm start qpos in ``cfg.control_part`` order.
@@ -451,22 +451,22 @@ class HandoffAction(AtomicAction):
             Success flag, planned trajectory, and joint ids corresponding to the
             trajectory columns.
         """
-        giver_handoff_xpos, receiver_handoff_xpos = self._resolve_target(target)
+        giver_handover_xpos, receiver_handover_xpos = self._resolve_target(target)
         giver_start_qpos, receiver_start_qpos = self._resolve_start_qpos(start_qpos)
         segments = self._compute_segment_lengths()
 
         giver_pre_xpos = self._apply_local_z_offset(
-            giver_handoff_xpos, -self.cfg.pre_handoff_distance
+            giver_handover_xpos, -self.cfg.pre_handover_distance
         )
         receiver_pre_xpos = self._apply_local_z_offset(
-            receiver_handoff_xpos, -self.cfg.pre_handoff_distance
+            receiver_handover_xpos, -self.cfg.pre_handover_distance
         )
 
         giver_approach_targets = torch.stack(
-            [giver_pre_xpos, giver_handoff_xpos], dim=1
+            [giver_pre_xpos, giver_handover_xpos], dim=1
         )
         receiver_approach_targets = torch.stack(
-            [receiver_pre_xpos, receiver_handoff_xpos], dim=1
+            [receiver_pre_xpos, receiver_handover_xpos], dim=1
         )
         is_success, giver_approach_traj = self._plan_arm_trajectory(
             self.cfg.giver_arm_control_part,
@@ -485,8 +485,8 @@ class HandoffAction(AtomicAction):
         if not is_success:
             return False, torch.empty(0, device=self.device), self.joint_ids
 
-        giver_handoff_qpos = giver_approach_traj[:, -1]
-        receiver_handoff_qpos = receiver_approach_traj[:, -1]
+        giver_handover_qpos = giver_approach_traj[:, -1]
+        receiver_handover_qpos = receiver_approach_traj[:, -1]
         approach_trajectory = self._assemble_phase(
             giver_approach_traj,
             receiver_approach_traj,
@@ -495,8 +495,8 @@ class HandoffAction(AtomicAction):
         )
 
         receiver_close_trajectory = self._assemble_phase(
-            self._repeat_qpos(giver_handoff_qpos, segments["receiver_close"]),
-            self._repeat_qpos(receiver_handoff_qpos, segments["receiver_close"]),
+            self._repeat_qpos(giver_handover_qpos, segments["receiver_close"]),
+            self._repeat_qpos(receiver_handover_qpos, segments["receiver_close"]),
             self._repeat_qpos(
                 self.giver_hand_close_qpos, segments["receiver_close"]
             ),
@@ -512,15 +512,15 @@ class HandoffAction(AtomicAction):
         )
         if segments["hold"] > 0:
             hold_trajectory = self._assemble_phase(
-                self._repeat_qpos(giver_handoff_qpos, segments["hold"]),
-                self._repeat_qpos(receiver_handoff_qpos, segments["hold"]),
+                self._repeat_qpos(giver_handover_qpos, segments["hold"]),
+                self._repeat_qpos(receiver_handover_qpos, segments["hold"]),
                 self._repeat_qpos(self.giver_hand_close_qpos, segments["hold"]),
                 self._repeat_qpos(self.receiver_hand_close_qpos, segments["hold"]),
             )
 
         giver_open_trajectory = self._assemble_phase(
-            self._repeat_qpos(giver_handoff_qpos, segments["giver_open"]),
-            self._repeat_qpos(receiver_handoff_qpos, segments["giver_open"]),
+            self._repeat_qpos(giver_handover_qpos, segments["giver_open"]),
+            self._repeat_qpos(receiver_handover_qpos, segments["giver_open"]),
             self._interpolate_qpos(
                 self.giver_hand_close_qpos,
                 self.giver_hand_open_qpos,
@@ -530,14 +530,14 @@ class HandoffAction(AtomicAction):
         )
 
         giver_retreat_xpos = self._apply_local_z_offset(
-            giver_handoff_xpos, -self.cfg.giver_retreat_distance
+            giver_handover_xpos, -self.cfg.giver_retreat_distance
         )
         receiver_retreat_xpos = self._apply_local_z_offset(
-            receiver_handoff_xpos, -self.cfg.receiver_retreat_distance
+            receiver_handover_xpos, -self.cfg.receiver_retreat_distance
         )
         is_success, giver_retreat_traj = self._plan_arm_trajectory(
             self.cfg.giver_arm_control_part,
-            giver_handoff_qpos,
+            giver_handover_qpos,
             giver_retreat_xpos.unsqueeze(1),
             segments["retreat"],
         )
@@ -546,7 +546,7 @@ class HandoffAction(AtomicAction):
         if self.cfg.receiver_retreat_distance > 0.0:
             is_success, receiver_retreat_traj = self._plan_arm_trajectory(
                 self.cfg.receiver_arm_control_part,
-                receiver_handoff_qpos,
+                receiver_handover_qpos,
                 receiver_retreat_xpos.unsqueeze(1),
                 segments["retreat"],
             )
@@ -554,7 +554,7 @@ class HandoffAction(AtomicAction):
                 return False, torch.empty(0, device=self.device), self.joint_ids
         else:
             receiver_retreat_traj = self._repeat_qpos(
-                receiver_handoff_qpos, segments["retreat"]
+                receiver_handover_qpos, segments["retreat"]
             )
 
         retreat_trajectory = self._assemble_phase(

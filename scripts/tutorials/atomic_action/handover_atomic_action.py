@@ -15,10 +15,10 @@
 # ----------------------------------------------------------------------------
 
 """
-This script demonstrates a dual-arm atomic handoff skill.
+This script demonstrates a dual-arm atomic handover skill.
 
 The right UR10 first picks up a bottle, then hands it to the left UR10 in the air
-using HandoffAction.
+using HandoverAction.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
-    HandoffAction,
-    HandoffActionCfg,
+    HandoverAction,
+    HandoverActionCfg,
     ObjectSemantics,
     PickUpAction,
     PickUpActionCfg,
@@ -81,7 +81,7 @@ GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_TCP_Z = 0.121
 BOTTLE_GRASP_COLLISION_THRESHOLD = -0.004
 PICK_SAMPLE_INTERVAL = 100
-HANDOFF_SAMPLE_INTERVAL = 100
+HANDOVER_SAMPLE_INTERVAL = 100
 ROBOT_INIT_POS = (2.4, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 TABLE_TOP_Z = 0.65
@@ -102,13 +102,13 @@ BOTTLE_LOCAL_CENTER = (
 )
 BOTTLE_LOCAL_AXIS_MIN = 0.005116572952270508
 BOTTLE_LOCAL_AXIS_MAX = 0.14948709716796876
-HANDOFF_BOTTLE_CENTER = (-0.35, -0.05, 1.0)
-HANDOFF_RECEIVER_AXIS_MARGIN = 0.035
+HANDOVER_BOTTLE_CENTER = (-0.35, -0.05, 1.0)
+HANDOVER_RECEIVER_AXIS_MARGIN = 0.035
 
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
-    parser = argparse.ArgumentParser(description="Dual-arm bottle handoff demo")
+    parser = argparse.ArgumentParser(description="Dual-arm bottle handover demo")
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
         "--n_sample",
@@ -220,7 +220,7 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
     left_arm_home = [0.0, 0.0, -1.57, -1.57, 1.57, 1.57]
     right_arm_home = [-1.57, -1.57, -1.57, -1.57, 0.0, 0.0]
     cfg = RobotCfg(
-        uid="DualUR10Handoff",
+        uid="DualUR10Handover",
         urdf_cfg=URDFCfg(
             components=[
                 {
@@ -236,7 +236,7 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
                 {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
                 {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
             ],
-            fname="dual_ur10_handoff",
+            fname="dual_ur10_handover",
         ),
         drive_pros=JointDrivePropertiesCfg(
             stiffness={
@@ -417,37 +417,37 @@ def format_tensor(tensor: torch.Tensor) -> str:
 
 
 def build_horizontal_bottle_pose(device: torch.device) -> torch.Tensor:
-    """Build a hand-tuned horizontal bottle pose for the mid-air handoff."""
+    """Build a hand-tuned horizontal bottle pose for the mid-air handover."""
     pose = torch.eye(4, dtype=torch.float32, device=device)
     pose[:3, 0] = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device)
     pose[:3, 1] = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
     pose[:3, 2] = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32, device=device)
 
     bottle_center = torch.tensor(
-        HANDOFF_BOTTLE_CENTER, dtype=torch.float32, device=device
+        HANDOVER_BOTTLE_CENTER, dtype=torch.float32, device=device
     )
     local_center = torch.tensor(BOTTLE_LOCAL_CENTER, dtype=torch.float32, device=device)
     pose[:3, 3] = bottle_center - pose[:3, :3] @ local_center
     return pose
 
 
-def build_object_aware_handoff_target(
+def build_object_aware_handover_target(
     robot: Robot, obj: RigidObject, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build dual-arm handoff poses from the current held-object geometry."""
+    """Build dual-arm handover poses from the current held-object geometry."""
     obj_pose = obj.get_local_pose(to_matrix=True).to(device=device, dtype=torch.float32)
     giver_tcp = robot.compute_fk(
         qpos=robot.get_qpos(name="right_arm"), name="right_arm", to_matrix=True
     )
     obj_to_giver = torch.bmm(torch.linalg.inv(obj_pose), giver_tcp)
 
-    handoff_obj_pose = build_horizontal_bottle_pose(device).unsqueeze(0).repeat(
+    handover_obj_pose = build_horizontal_bottle_pose(device).unsqueeze(0).repeat(
         obj_pose.shape[0], 1, 1
     )
-    giver_handoff_pose = torch.bmm(handoff_obj_pose, obj_to_giver)
+    giver_handover_pose = torch.bmm(handover_obj_pose, obj_to_giver)
 
-    axis_min = BOTTLE_LOCAL_AXIS_MIN + HANDOFF_RECEIVER_AXIS_MARGIN
-    axis_max = BOTTLE_LOCAL_AXIS_MAX - HANDOFF_RECEIVER_AXIS_MARGIN
+    axis_min = BOTTLE_LOCAL_AXIS_MIN + HANDOVER_RECEIVER_AXIS_MARGIN
+    axis_max = BOTTLE_LOCAL_AXIS_MAX - HANDOVER_RECEIVER_AXIS_MARGIN
     axis_center = 0.5 * (BOTTLE_LOCAL_AXIS_MIN + BOTTLE_LOCAL_AXIS_MAX)
     receiver_obj_pose = obj_to_giver.clone()
     giver_axis = obj_to_giver[:, 2, 3]
@@ -457,23 +457,23 @@ def build_object_aware_handoff_target(
         torch.full_like(giver_axis, axis_min),
     )
     receiver_obj_pose[:, 2, 3] = receiver_axis
-    receiver_handoff_pose = torch.bmm(handoff_obj_pose, receiver_obj_pose)
+    receiver_handover_pose = torch.bmm(handover_obj_pose, receiver_obj_pose)
 
-    handoff_target = torch.stack(
-        [giver_handoff_pose[0], receiver_handoff_pose[0]], dim=0
+    handover_target = torch.stack(
+        [giver_handover_pose[0], receiver_handover_pose[0]], dim=0
     )
-    return handoff_target, handoff_obj_pose[0]
+    return handover_target, handover_obj_pose[0]
 
 
-def log_handoff_geometry(target: torch.Tensor, bottle_pose: torch.Tensor) -> None:
-    """Log the object-aware handoff geometry."""
+def log_handover_geometry(target: torch.Tensor, bottle_pose: torch.Tensor) -> None:
+    """Log the object-aware handover geometry."""
     tcp_delta = target[0, :3, 3] - target[1, :3, 3]
     tcp_distance = torch.linalg.norm(tcp_delta)
     bottle_center = torch.tensor(
-        HANDOFF_BOTTLE_CENTER, dtype=torch.float32, device=target.device
+        HANDOVER_BOTTLE_CENTER, dtype=torch.float32, device=target.device
     )
     logger.log_info(
-        "handoff target geometry: "
+        "handover target geometry: "
         f"giver_tcp={format_tensor(target[0, :3, 3])}, "
         f"receiver_tcp={format_tensor(target[1, :3, 3])}, "
         f"tcp_distance={format_tensor(tcp_distance)}, "
@@ -487,7 +487,7 @@ def log_tcp_alignment(
     traj: torch.Tensor,
     joint_ids: list[int],
     target: torch.Tensor,
-    action: HandoffAction,
+    action: HandoverAction,
 ) -> None:
     """Log TCP alignment at the end of the approach phase."""
     segments = action.get_segment_lengths()
@@ -516,7 +516,7 @@ def log_tcp_alignment(
         trace = rot_delta[:, 0, 0] + rot_delta[:, 1, 1] + rot_delta[:, 2, 2]
         rot_error = torch.acos(((trace - 1.0) * 0.5).clamp(-1.0, 1.0))
         logger.log_info(
-            f"{label} handoff tcp pos={format_tensor(tcp[0, :3, 3])}, "
+            f"{label} handover tcp pos={format_tensor(tcp[0, :3, 3])}, "
             f"target={format_tensor(target_pose[0, :3, 3])}, "
             f"pos_error={format_tensor(pos_error)}, "
             f"rot_error_rad={format_tensor(rot_error)}"
@@ -576,10 +576,10 @@ def execute_trajectory(
         time.sleep(1e-2)
 
 
-def run_handoff_demo(
+def run_handover_demo(
     args: argparse.Namespace, sim: SimulationManager, robot: Robot
 ) -> None:
-    """Plan and optionally execute pick-up plus handoff."""
+    """Plan and optionally execute pick-up plus handover."""
     create_support_plane(sim)
     bottle = create_bottle(sim)
     settle_object(sim, bottle, step=0)
@@ -608,9 +608,9 @@ def run_handoff_demo(
             hand_interp_steps=10,
         ),
     )
-    handoff_action = HandoffAction(
+    handover_action = HandoverAction(
         motion_generator=motion_gen,
-        cfg=HandoffActionCfg(
+        cfg=HandoverActionCfg(
             control_part="dual_arm",
             giver_arm_control_part="right_arm",
             receiver_arm_control_part="left_arm",
@@ -620,11 +620,11 @@ def run_handoff_demo(
             giver_hand_close_qpos=right_close,
             receiver_hand_open_qpos=left_open,
             receiver_hand_close_qpos=left_close,
-            sample_interval=HANDOFF_SAMPLE_INTERVAL,
+            sample_interval=HANDOVER_SAMPLE_INTERVAL,
             hand_interp_steps=10,
-            handoff_hold_steps=6,
+            handover_hold_steps=6,
             retreat_steps=16,
-            pre_handoff_distance=0.10,
+            pre_handover_distance=0.10,
             giver_retreat_distance=0.08,
             receiver_retreat_distance=0.00,
         ),
@@ -653,41 +653,41 @@ def run_handoff_demo(
         )
     bottle.clear_dynamics()
 
-    handoff_target, handoff_bottle_pose = build_object_aware_handoff_target(
+    handover_target, handover_bottle_pose = build_object_aware_handover_target(
         robot, bottle, sim.device
     )
-    log_handoff_geometry(handoff_target, handoff_bottle_pose)
+    log_handover_geometry(handover_target, handover_bottle_pose)
     start_time = time.time()
-    handoff_success, handoff_traj, handoff_joint_ids = handoff_action.execute(
-        handoff_target
+    handover_success, handover_traj, handover_joint_ids = handover_action.execute(
+        handover_target
     )
     logger.log_info(
-        f"Plan handoff cost time: {time.time() - start_time:.2f} seconds"
+        f"Plan handover cost time: {time.time() - start_time:.2f} seconds"
     )
-    if not handoff_success:
-        logger.log_warning("Failed to plan handoff trajectory.")
+    if not handover_success:
+        logger.log_warning("Failed to plan handover trajectory.")
         return
     log_action_plan(
         robot,
-        "handoff",
-        handoff_traj,
-        handoff_joint_ids,
-        handoff_action.get_segment_lengths(),
+        "handover",
+        handover_traj,
+        handover_joint_ids,
+        handover_action.get_segment_lengths(),
     )
     log_tcp_alignment(
-        robot, handoff_traj, handoff_joint_ids, handoff_target, handoff_action
+        robot, handover_traj, handover_joint_ids, handover_target, handover_action
     )
 
     if args.diagnose_plan:
         return
 
     if not args.auto_play:
-        input("Press Enter to execute handoff...")
+        input("Press Enter to execute handover...")
     execute_trajectory(
         sim,
         robot,
-        handoff_traj,
-        handoff_joint_ids,
+        handover_traj,
+        handover_joint_ids,
         bottle,
         args.debug_hand_state,
     )
@@ -696,11 +696,11 @@ def run_handoff_demo(
 
 
 def main() -> None:
-    """Run the dual-arm handoff demo."""
+    """Run the dual-arm handover demo."""
     args = parse_arguments()
     sim = initialize_simulation(args)
     robot = create_dual_ur10_robot(sim)
-    run_handoff_demo(args, sim, robot)
+    run_handover_demo(args, sim, robot)
 
 
 if __name__ == "__main__":
