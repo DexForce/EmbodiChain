@@ -104,6 +104,14 @@ BOTTLE_LOCAL_AXIS_MIN = 0.005116572952270508
 BOTTLE_LOCAL_AXIS_MAX = 0.14948709716796876
 HANDOVER_BOTTLE_CENTER = (-0.35, -0.05, 1.0)
 HANDOVER_RECEIVER_AXIS_MARGIN = 0.035
+HANDOVER_PICK_APPROACH_DIRECTIONS = (
+    (0.0, -1.0, 0.0),
+    (0.0, 1.0, 0.0),
+    (-1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0),
+)
+HANDOVER_PICK_AXIS_MARGIN = 0.030
+HANDOVER_GRASP_CANDIDATE_LIMIT = 160
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -416,6 +424,42 @@ def format_tensor(tensor: torch.Tensor) -> str:
     return str(rounded.tolist())
 
 
+def invert_pose(pose: torch.Tensor) -> torch.Tensor:
+    """Invert batched homogeneous transforms."""
+    inv_pose = pose.clone()
+    rot_t = pose[:, :3, :3].transpose(1, 2)
+    inv_pose[:, :3, :3] = rot_t
+    inv_pose[:, :3, 3] = -torch.bmm(rot_t, pose[:, :3, 3:4]).squeeze(-1)
+    return inv_pose
+
+
+def apply_local_z_offset(pose: torch.Tensor, distance: float) -> torch.Tensor:
+    """Offset batched poses along their local Z axis."""
+    result = pose.clone()
+    result[:, :3, 3] += pose[:, :3, 2] * distance
+    return result
+
+
+def compute_pose_ik_sequence(
+    robot: Robot,
+    control_part: str,
+    target_poses: list[torch.Tensor],
+    seed_qpos: torch.Tensor,
+) -> tuple[bool, torch.Tensor]:
+    """Check sequential IK reachability and return the final qpos."""
+    qpos_seed = seed_qpos
+    for target_pose in target_poses:
+        is_success, qpos = robot.compute_ik(
+            pose=target_pose,
+            name=control_part,
+            joint_seed=qpos_seed,
+        )
+        if not torch.all(is_success).item():
+            return False, qpos_seed
+        qpos_seed = qpos
+    return True, qpos_seed
+
+
 def build_horizontal_bottle_pose(device: torch.device) -> torch.Tensor:
     """Build a hand-tuned horizontal bottle pose for the mid-air handover."""
     pose = torch.eye(4, dtype=torch.float32, device=device)
@@ -431,26 +475,20 @@ def build_horizontal_bottle_pose(device: torch.device) -> torch.Tensor:
     return pose
 
 
-def build_object_aware_handover_target(
-    robot: Robot, obj: RigidObject, device: torch.device
+def build_handover_target_from_object_to_giver(
+    object_to_giver: torch.Tensor, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build dual-arm handover poses from the current held-object geometry."""
-    obj_pose = obj.get_local_pose(to_matrix=True).to(device=device, dtype=torch.float32)
-    giver_tcp = robot.compute_fk(
-        qpos=robot.get_qpos(name="right_arm"), name="right_arm", to_matrix=True
-    )
-    obj_to_giver = torch.bmm(torch.linalg.inv(obj_pose), giver_tcp)
-
+    """Build handover target poses from a fixed object-to-giver relation."""
     handover_obj_pose = build_horizontal_bottle_pose(device).unsqueeze(0).repeat(
-        obj_pose.shape[0], 1, 1
+        object_to_giver.shape[0], 1, 1
     )
-    giver_handover_pose = torch.bmm(handover_obj_pose, obj_to_giver)
+    giver_handover_pose = torch.bmm(handover_obj_pose, object_to_giver)
 
     axis_min = BOTTLE_LOCAL_AXIS_MIN + HANDOVER_RECEIVER_AXIS_MARGIN
     axis_max = BOTTLE_LOCAL_AXIS_MAX - HANDOVER_RECEIVER_AXIS_MARGIN
     axis_center = 0.5 * (BOTTLE_LOCAL_AXIS_MIN + BOTTLE_LOCAL_AXIS_MAX)
-    receiver_obj_pose = obj_to_giver.clone()
-    giver_axis = obj_to_giver[:, 2, 3]
+    receiver_obj_pose = object_to_giver.clone()
+    giver_axis = object_to_giver[:, 2, 3]
     receiver_axis = torch.where(
         giver_axis < axis_center,
         torch.full_like(giver_axis, axis_max),
@@ -463,6 +501,18 @@ def build_object_aware_handover_target(
         [giver_handover_pose[0], receiver_handover_pose[0]], dim=0
     )
     return handover_target, handover_obj_pose[0]
+
+
+def build_object_aware_handover_target(
+    robot: Robot, obj: RigidObject, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build dual-arm handover poses from the current held-object geometry."""
+    obj_pose = obj.get_local_pose(to_matrix=True).to(device=device, dtype=torch.float32)
+    giver_tcp = robot.compute_fk(
+        qpos=robot.get_qpos(name="right_arm"), name="right_arm", to_matrix=True
+    )
+    obj_to_giver = torch.bmm(invert_pose(obj_pose), giver_tcp)
+    return build_handover_target_from_object_to_giver(obj_to_giver, device)
 
 
 def log_handover_geometry(target: torch.Tensor, bottle_pose: torch.Tensor) -> None:
@@ -480,6 +530,173 @@ def log_handover_geometry(target: torch.Tensor, bottle_pose: torch.Tensor) -> No
         f"bottle_center={format_tensor(bottle_center)}, "
         f"bottle_axis={format_tensor(bottle_pose[:3, 2])}"
     )
+
+
+def is_handover_ready_grasp_reachable(
+    robot: Robot,
+    grasp_pose: torch.Tensor,
+    object_to_giver: torch.Tensor,
+    pick_action: PickUpAction,
+    handover_action: HandoverAction,
+    device: torch.device,
+) -> bool:
+    """Check whether a candidate grasp can pick and move into handover."""
+    giver_seed = robot.get_qpos(name=pick_action.cfg.control_part)
+    pre_grasp_pose = apply_local_z_offset(
+        grasp_pose, -pick_action.cfg.pre_grasp_distance
+    )
+    lift_pose = grasp_pose.clone()
+    lift_pose[:, :3, 3] += torch.tensor(
+        [0.0, 0.0, pick_action.cfg.lift_height],
+        dtype=torch.float32,
+        device=device,
+    )
+    pick_reachable, lift_qpos = compute_pose_ik_sequence(
+        robot,
+        pick_action.cfg.control_part,
+        [pre_grasp_pose, grasp_pose, lift_pose],
+        giver_seed,
+    )
+    if not pick_reachable:
+        return False
+
+    handover_target, _ = build_handover_target_from_object_to_giver(
+        object_to_giver, device
+    )
+    giver_handover_pose = handover_target[None, 0]
+    receiver_handover_pose = handover_target[None, 1]
+    giver_pre_pose = apply_local_z_offset(
+        giver_handover_pose, -handover_action.cfg.pre_handover_distance
+    )
+    receiver_pre_pose = apply_local_z_offset(
+        receiver_handover_pose, -handover_action.cfg.pre_handover_distance
+    )
+
+    giver_reachable, _ = compute_pose_ik_sequence(
+        robot,
+        handover_action.cfg.giver_arm_control_part,
+        [giver_pre_pose, giver_handover_pose],
+        lift_qpos,
+    )
+    if not giver_reachable:
+        return False
+
+    receiver_seed = robot.get_qpos(name=handover_action.cfg.receiver_arm_control_part)
+    receiver_reachable, _ = compute_pose_ik_sequence(
+        robot,
+        handover_action.cfg.receiver_arm_control_part,
+        [receiver_pre_pose, receiver_handover_pose],
+        receiver_seed,
+    )
+    return receiver_reachable
+
+
+def select_handover_ready_grasp_pose(
+    robot: Robot,
+    semantics: ObjectSemantics,
+    pick_action: PickUpAction,
+    handover_action: HandoverAction,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """Select a side grasp that can also reach the handover pose."""
+    if not isinstance(semantics.affordance, AntipodalAffordance):
+        logger.log_warning("Handover grasp selection requires AntipodalAffordance.")
+        return None
+
+    obj_pose = semantics.entity.get_local_pose(to_matrix=True).to(
+        device=device, dtype=torch.float32
+    )
+    inv_obj_pose = invert_pose(obj_pose)
+    axis_min = BOTTLE_LOCAL_AXIS_MIN + HANDOVER_PICK_AXIS_MARGIN
+    axis_max = BOTTLE_LOCAL_AXIS_MAX - HANDOVER_PICK_AXIS_MARGIN
+    axis_center = 0.5 * (BOTTLE_LOCAL_AXIS_MIN + BOTTLE_LOCAL_AXIS_MAX)
+    axis_half_span = 0.5 * (BOTTLE_LOCAL_AXIS_MAX - BOTTLE_LOCAL_AXIS_MIN)
+
+    best_candidate: tuple[float, torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+    for approach_direction_tuple in HANDOVER_PICK_APPROACH_DIRECTIONS:
+        approach_direction = torch.tensor(
+            approach_direction_tuple, dtype=torch.float32, device=device
+        )
+        grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
+            obj_poses=obj_pose, approach_direction=approach_direction
+        )
+        grasp_poses, grasp_costs = grasp_poses_result[0]
+        grasp_poses = grasp_poses.to(device=device, dtype=torch.float32)
+        grasp_costs = torch.as_tensor(
+            grasp_costs, dtype=torch.float32, device=device
+        ).flatten()
+        if grasp_poses.dim() != 3 or grasp_costs.shape[0] != grasp_poses.shape[0]:
+            logger.log_info(
+                "handover side-grasp candidates: "
+                f"approach={approach_direction_tuple}, total=0"
+            )
+            continue
+
+        n_pose = grasp_poses.shape[0]
+        object_to_grasps = torch.bmm(inv_obj_pose.repeat(n_pose, 1, 1), grasp_poses)
+        local_axis = object_to_grasps[:, 2, 3]
+        axis_mask = (local_axis >= axis_min) & (local_axis <= axis_max)
+        if not torch.any(axis_mask):
+            logger.log_info(
+                "handover side-grasp candidates: "
+                f"approach={approach_direction_tuple}, total={n_pose}, filtered=0"
+            )
+            continue
+
+        endpoint_preference = torch.abs(local_axis - axis_center) / axis_half_span
+        handover_cost = grasp_costs + 0.4 * (1.0 - endpoint_preference)
+        candidate_indices = torch.nonzero(axis_mask, as_tuple=False).flatten()
+        candidate_indices = candidate_indices[
+            torch.argsort(handover_cost[candidate_indices])
+        ][:HANDOVER_GRASP_CANDIDATE_LIMIT]
+        logger.log_info(
+            "handover side-grasp candidates: "
+            f"approach={approach_direction_tuple}, total={n_pose}, "
+            f"filtered={int(axis_mask.sum().item())}, "
+            f"tested={candidate_indices.shape[0]}"
+        )
+
+        for candidate_idx in candidate_indices:
+            grasp_pose = grasp_poses[candidate_idx].unsqueeze(0)
+            object_to_giver = object_to_grasps[candidate_idx].unsqueeze(0)
+            if not is_handover_ready_grasp_reachable(
+                robot,
+                grasp_pose,
+                object_to_giver,
+                pick_action,
+                handover_action,
+                device,
+            ):
+                continue
+
+            score = float(handover_cost[candidate_idx].detach().cpu())
+            if best_candidate is None or score < best_candidate[0]:
+                best_candidate = (
+                    score,
+                    grasp_pose,
+                    object_to_giver,
+                    approach_direction,
+                )
+                break
+        if best_candidate is not None:
+            break
+
+    if best_candidate is None:
+        logger.log_warning("No handover-ready side grasp found.")
+        return None
+
+    score, grasp_pose, object_to_giver, approach_direction = best_candidate
+    handover_target, handover_bottle_pose = build_handover_target_from_object_to_giver(
+        object_to_giver, device
+    )
+    logger.log_info(
+        "Selected handover-ready side grasp: "
+        f"approach={format_tensor(approach_direction)}, "
+        f"object_axis={format_tensor(object_to_giver[0, 2, 3])}, "
+        f"score={score:.4f}"
+    )
+    log_handover_geometry(handover_target, handover_bottle_pose)
+    return grasp_pose[0], object_to_giver
 
 
 def log_tcp_alignment(
@@ -636,7 +853,20 @@ def run_handover_demo(
             input("Inspect the scene, then press Enter to plan pick-up...")
 
     start_time = time.time()
-    pick_success, pick_traj, pick_joint_ids = pick_action.execute(semantics)
+    handover_ready_grasp_result = select_handover_ready_grasp_pose(
+        robot, semantics, pick_action, handover_action, sim.device
+    )
+    logger.log_info(
+        "Select handover-ready grasp cost time: "
+        f"{time.time() - start_time:.2f} seconds"
+    )
+    if handover_ready_grasp_result is None:
+        logger.log_warning("Failed to select a handover-ready grasp pose.")
+        return
+    handover_ready_grasp, planned_object_to_giver = handover_ready_grasp_result
+
+    start_time = time.time()
+    pick_success, pick_traj, pick_joint_ids = pick_action.execute(handover_ready_grasp)
     logger.log_info(f"Plan pick-up cost time: {time.time() - start_time:.2f} seconds")
     if not pick_success:
         logger.log_warning("Failed to plan pick-up trajectory.")
@@ -653,9 +883,14 @@ def run_handover_demo(
         )
     bottle.clear_dynamics()
 
-    handover_target, handover_bottle_pose = build_object_aware_handover_target(
-        robot, bottle, sim.device
-    )
+    if args.diagnose_plan:
+        handover_target, handover_bottle_pose = build_handover_target_from_object_to_giver(
+            planned_object_to_giver, sim.device
+        )
+    else:
+        handover_target, handover_bottle_pose = build_object_aware_handover_target(
+            robot, bottle, sim.device
+        )
     log_handover_geometry(handover_target, handover_bottle_pose)
     start_time = time.time()
     handover_success, handover_traj, handover_joint_ids = handover_action.execute(
