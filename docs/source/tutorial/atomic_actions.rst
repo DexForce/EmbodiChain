@@ -30,13 +30,13 @@ For the full design overview, architecture diagram, and extension guide see
 The Code
 --------
 
-The tutorial corresponds to the ``atomic_actions.py`` script in the ``scripts/tutorials/sim``
+The tutorial corresponds to the ``atomic_actions.py`` script in the ``scripts/tutorials/atomic_action``
 directory.
 
 .. dropdown:: Code for atomic_actions.py
     :icon: code
 
-    .. literalinclude:: ../../../scripts/tutorials/sim/atomic_actions.py
+    .. literalinclude:: ../../../scripts/tutorials/atomic_action/atomic_actions.py
         :language: python
         :linenos:
 

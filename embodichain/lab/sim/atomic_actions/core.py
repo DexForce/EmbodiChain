@@ -320,6 +320,42 @@ class ObjectSemantics:
         self.affordance.geometry = self.geometry
 
 
+@dataclass
+class HeldObjectState:
+    """State shared by actions while an object is held by the robot."""
+
+    semantics: ObjectSemantics
+    """Semantic object currently held by the gripper."""
+
+    object_to_eef: torch.Tensor
+    """Batched transform from object frame to end-effector frame, shape [B, 4, 4]."""
+
+    grasp_xpos: torch.Tensor
+    """Batched end-effector grasp pose selected during pickup, shape [B, 4, 4]."""
+
+
+@dataclass
+class PlaceTarget:
+    """Object-centric target for place-like actions.
+
+    ``object_target_pose`` describes the desired object pose before applying the
+    configured airborne height offset. ``PlaceAction`` converts this object pose
+    into an end-effector pose using the current ``HeldObjectState``.
+    """
+
+    object_target_pose: torch.Tensor
+    """Target object pose, shape [4, 4] or [B, 4, 4]."""
+
+    release: bool | None = None
+    """Whether to open the gripper at the target. ``None`` uses action config."""
+
+    height_offset: float | None = None
+    """World-Z offset above the target pose. ``None`` uses action config."""
+
+    held_object: HeldObjectState | None = None
+    """Optional held-object state overriding the engine action context."""
+
+
 # =============================================================================
 # ActionCfg and AtomicAction
 # =============================================================================

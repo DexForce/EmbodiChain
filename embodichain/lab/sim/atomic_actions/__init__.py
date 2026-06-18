@@ -26,6 +26,8 @@ from .core import (
     AntipodalAffordance,
     InteractionPoints,
     ObjectSemantics,
+    HeldObjectState,
+    PlaceTarget,
     ActionCfg,
     AtomicAction,
 )
@@ -53,6 +55,8 @@ __all__ = [
     "Affordance",
     "InteractionPoints",
     "ObjectSemantics",
+    "HeldObjectState",
+    "PlaceTarget",
     "ActionCfg",
     "AtomicAction",
     # Action implementations

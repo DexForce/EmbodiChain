@@ -22,7 +22,14 @@ from typing import Optional, Union, TYPE_CHECKING
 from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
-from .core import AtomicAction, ObjectSemantics, AntipodalAffordance, ActionCfg
+from .core import (
+    AtomicAction,
+    ObjectSemantics,
+    AntipodalAffordance,
+    ActionCfg,
+    HeldObjectState,
+    PlaceTarget,
+)
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
@@ -742,14 +749,10 @@ class MoveAction(AtomicAction):
         start_hand_qpos = start_hand_qpos.to(self.device)
         end_hand_qpos = end_hand_qpos.to(self.device)
 
-        if start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 2:
-            start_hand_qpos = start_hand_qpos.unsqueeze(0).repeat(
-                end_hand_qpos.shape[0], 1
-            )
-        if start_hand_qpos.dim() == 2 and end_hand_qpos.dim() == 1:
-            end_hand_qpos = end_hand_qpos.unsqueeze(0).repeat(
-                start_hand_qpos.shape[0], 1
-            )
+        if start_hand_qpos.dim() == 1:
+            start_hand_qpos = start_hand_qpos.unsqueeze(0)
+        if end_hand_qpos.dim() == 1:
+            end_hand_qpos = end_hand_qpos.unsqueeze(0)
 
         weights = torch.linspace(
             0,
@@ -758,22 +761,20 @@ class MoveAction(AtomicAction):
             device=self.device,
             dtype=start_hand_qpos.dtype,
         )
-        if start_hand_qpos.dim() == 1 and end_hand_qpos.dim() == 1:
-            return torch.lerp(
-                start_hand_qpos.unsqueeze(0),
-                end_hand_qpos.unsqueeze(0),
-                weights[:, None],
-            )
-        if start_hand_qpos.dim() == 2 and end_hand_qpos.dim() == 2:
-            return torch.lerp(
-                start_hand_qpos.unsqueeze(1),
-                end_hand_qpos.unsqueeze(1),
-                weights[None, :, None],
-            )
-        logger.log_error(
-            "hand qpos must have shape (hand_dof,) or (n_envs, hand_dof)",
-            ValueError,
+        return torch.lerp(
+            start_hand_qpos.unsqueeze(1),
+            end_hand_qpos.unsqueeze(1),
+            weights[None, :, None],
         )
+
+    @staticmethod
+    def _invert_pose(pose: torch.Tensor) -> torch.Tensor:
+        """Invert a batched homogeneous transform."""
+        inv_pose = pose.clone()
+        rot_t = pose[:, :3, :3].transpose(1, 2)
+        inv_pose[:, :3, :3] = rot_t
+        inv_pose[:, :3, 3] = -torch.bmm(rot_t, pose[:, :3, 3:4]).squeeze(-1)
+        return inv_pose
 
     def execute(
         self,
@@ -848,7 +849,8 @@ class PickUpAction(MoveAction):
         super().__init__(
             motion_generator, cfg=cfg if cfg is not None else PickUpActionCfg()
         )
-        self.cfg = cfg
+        self.cfg = cfg if cfg is not None else self.cfg
+        self._held_object_state: HeldObjectState | None = None
         self.approach_direction = self.cfg.approach_direction.to(self.device)
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PickUpActionCfg")
@@ -902,7 +904,9 @@ class PickUpAction(MoveAction):
         """
 
         # Resolve grasp pose
-        if isinstance(target, ObjectSemantics):
+        self._held_object_state = None
+        target_semantics = target if isinstance(target, ObjectSemantics) else None
+        if target_semantics is not None:
             is_success, grasp_xpos = self._resolve_grasp_pose(target)
         else:
             is_success, grasp_xpos = self._resolve_pose_target(
@@ -914,6 +918,15 @@ class PickUpAction(MoveAction):
         if not is_success:
             logger.log_warning("Failed to resolve grasp pose for all environments.")
             return False, torch.empty(0), self.joint_ids
+
+        if target_semantics is not None:
+            obj_poses = target_semantics.entity.get_local_pose(to_matrix=True)
+            object_to_eef = torch.bmm(self._invert_pose(obj_poses), grasp_xpos)
+            self._held_object_state = HeldObjectState(
+                semantics=target_semantics,
+                object_to_eef=object_to_eef,
+                grasp_xpos=grasp_xpos,
+            )
 
         # Compute pre-grasp pose
         # TODO: only for parallel gripper, approach in negative grasp z direction
@@ -1011,6 +1024,10 @@ class PickUpAction(MoveAction):
             [pick_trajectory, hand_close_trajectory, lift_trajectory], dim=1
         )
         return True, trajectory, self.joint_ids
+
+    def get_held_object_state(self) -> HeldObjectState | None:
+        """Return the held-object state produced by the latest successful pickup."""
+        return self._held_object_state
 
     def _resolve_grasp_pose(
         self, semantics: ObjectSemantics
@@ -1803,6 +1820,12 @@ class PlaceActionCfg(GraspActionCfg):
     name: str = "place"
     """Name of the action, used for identification and logging."""
 
+    release: bool = True
+    """Whether to open the gripper after reaching the airborne place target."""
+
+    place_height_offset: float = 0.2
+    """World-Z height offset (m) above the object target pose for object-centric place."""
+
 
 class PlaceAction(MoveAction):
     def __init__(
@@ -1819,7 +1842,8 @@ class PlaceAction(MoveAction):
         super().__init__(
             motion_generator, cfg=cfg if cfg is not None else PlaceActionCfg()
         )
-        self.cfg = cfg
+        self.cfg = cfg if cfg is not None else self.cfg
+        self._held_object_state: HeldObjectState | None = None
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PlaceActionCfg")
         if self.cfg.hand_close_qpos is None:
@@ -1832,16 +1856,88 @@ class PlaceAction(MoveAction):
         self.arm_dof = len(self.arm_joint_ids)
         self.dof = len(self.joint_ids)
 
+    def _resolve_place_target(
+        self,
+        target: Union[ObjectSemantics, torch.Tensor, PlaceTarget],
+        action_context: dict | None = None,
+        held_object_state: HeldObjectState | None = None,
+    ) -> tuple[bool, torch.Tensor, bool]:
+        """Resolve place target into an end-effector target pose and release flag."""
+        if not isinstance(target, PlaceTarget):
+            is_success, place_xpos = self._resolve_pose_target(
+                target, action_name=self.__class__.__name__
+            )
+            release = self.cfg.release
+            held_state = held_object_state
+            if held_state is None and action_context is not None:
+                held_state = action_context.get("held_object_state")
+            self._held_object_state = None if release else held_state
+            return is_success, place_xpos, release
+
+        held_state = target.held_object or held_object_state
+        if held_state is None and action_context is not None:
+            held_state = action_context.get("held_object_state")
+        if held_state is None:
+            logger.log_error(
+                "PlaceTarget requires a HeldObjectState from a prior PickUpAction "
+                "or target.held_object.",
+                ValueError,
+            )
+
+        object_target_pose = target.object_target_pose.to(
+            device=self.device, dtype=torch.float32
+        )
+        if object_target_pose.shape == (4, 4):
+            object_target_pose = object_target_pose.unsqueeze(0).repeat(
+                self.n_envs, 1, 1
+            )
+        if object_target_pose.shape != (self.n_envs, 4, 4):
+            logger.log_error(
+                f"object_target_pose must have shape (4, 4) or "
+                f"({self.n_envs}, 4, 4), but got {object_target_pose.shape}",
+                ValueError,
+            )
+
+        height_offset = (
+            self.cfg.place_height_offset
+            if target.height_offset is None
+            else target.height_offset
+        )
+        object_place_xpos = self._apply_offset(
+            pose=object_target_pose,
+            offset=torch.tensor(
+                [0.0, 0.0, height_offset], dtype=torch.float32, device=self.device
+            ),
+        )
+
+        object_to_eef = held_state.object_to_eef.to(
+            device=self.device, dtype=torch.float32
+        )
+        if object_to_eef.shape == (4, 4):
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
+        if object_to_eef.shape != (self.n_envs, 4, 4):
+            logger.log_error(
+                f"object_to_eef must have shape (4, 4) or "
+                f"({self.n_envs}, 4, 4), but got {object_to_eef.shape}",
+                ValueError,
+            )
+
+        place_xpos = torch.bmm(object_place_xpos, object_to_eef)
+        release = self.cfg.release if target.release is None else target.release
+        self._held_object_state = None if release else held_state
+        return True, place_xpos, release
+
     def execute(
         self,
-        target: Union[ObjectSemantics, torch.Tensor],
+        target: Union[ObjectSemantics, torch.Tensor, PlaceTarget],
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[bool, torch.Tensor, list[float]]:
-        """execute pick up action
+        """Execute object-centric or end-effector-centric place action.
 
         Args:
-            target (ObjectSemantics): object semantics containing grasp affordance and entity information
+            target: PlaceTarget for object-centric place, or tensor EEF pose for
+                the legacy place path.
             start_qpos (Optional[torch.Tensor], optional): Planning start qpos. Defaults to None.
 
         Returns:
@@ -1850,15 +1946,41 @@ class PlaceAction(MoveAction):
             trajectory of shape (n_envs, n_waypoints, dof),
             joint_ids corresponding to trajectory
         """
-        is_success, place_xpos = self._resolve_pose_target(
-            target, action_name=self.__class__.__name__
+        is_success, place_xpos, release = self._resolve_place_target(
+            target,
+            action_context=kwargs.get("action_context"),
+            held_object_state=kwargs.get("held_object_state"),
         )
         start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
-        # TODO: warning and fallback if no valid grasp pose found
         if not is_success:
             logger.log_warning("Failed to resolve place target pose.")
             return False, torch.empty(0), self.joint_ids
+
+        if not release:
+            target_states_list = [
+                [
+                    PlanState(xpos=place_xpos[i], move_type=MoveType.EEF_MOVE),
+                ]
+                for i in range(self.n_envs)
+            ]
+            hold_trajectory = torch.zeros(
+                size=(self.n_envs, self.cfg.sample_interval, self.dof),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            is_success, plan_traj = self._plan_arm_trajectory(
+                target_states_list,
+                start_qpos,
+                self.cfg.sample_interval,
+                self.arm_dof,
+            )
+            if not is_success:
+                logger.log_warning("Failed to plan place hold trajectory.")
+                return False, hold_trajectory, self.joint_ids
+            hold_trajectory[:, :, : self.arm_dof] = plan_traj
+            hold_trajectory[:, :, self.arm_dof :] = self.hand_close_qpos
+            return True, hold_trajectory, self.joint_ids
 
         # compute waypoint number for each phase
         n_down_waypoint, n_open_waypoint, n_lift_waypoint = (
@@ -1944,6 +2066,10 @@ class PlaceAction(MoveAction):
             [down_trajectory, hand_open_trajectory, back_trajectory], dim=1
         )
         return True, trajectory, self.joint_ids
+
+    def get_held_object_state(self) -> HeldObjectState | None:
+        """Return the held-object state after place, if the gripper stayed closed."""
+        return self._held_object_state
 
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
