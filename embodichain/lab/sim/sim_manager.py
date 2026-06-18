@@ -22,7 +22,6 @@ import sys
 import queue
 import time
 import threading
-import importlib
 import dexsim
 import torch
 import numpy as np
@@ -77,7 +76,6 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     DefaultPhysicsCfg,
     NewtonPhysicsCfg,
-    physics_backend_from_cfg,
     validate_physics_cfg,
     MarkerCfg,
     WindowRecordCfg,
@@ -89,6 +87,7 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     RobotCfg,
 )
+from embodichain.lab.sim.physics import make_physics_backend
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.utils import configclass, logger
 
@@ -294,9 +293,11 @@ class SimulationManager:
         self.sim_config = sim_config
         self.device = torch.device("cpu")
 
-        # Initialize physics backend.
-        self._physics_backend = physics_backend_from_cfg(sim_config.physics_cfg)
-        self._newton_manager: NewtonManager = None
+        # Initialize physics backend (selected by the type of physics_cfg).
+        # The backend is held as an instance member; SimulationManager delegates
+        # all backend-specific lifecycle/scene/capability logic to it instead of
+        # branching on a backend name throughout the manager.
+        self.physics = make_physics_backend(sim_config.physics_cfg, self)
 
         world_config = self._convert_sim_config(sim_config)
 
@@ -324,20 +325,8 @@ class SimulationManager:
         self._world.set_delta_time(sim_config.physics_cfg.physics_dt)
         self._world.show_coordinate_axis(False)
 
-        if self.is_default_backend:
-            default_physics_cfg = sim_config.physics_cfg
-            assert isinstance(default_physics_cfg, DefaultPhysicsCfg)
-            dexsim.set_physics_config(**default_physics_cfg.to_dexsim_args())
-            dexsim.set_physics_gpu_memory_config(
-                **default_physics_cfg.gpu_memory.to_dict()
-            )
-        else:
-            from dexsim.engine.newton_physics import get_newton_manager
-
-            self._newton_manager = get_newton_manager(self._world)
-
-        self._is_initialized_gpu_physics = False
-        self._is_finalized_newton_physics = False
+        # Activate the physics backend now that the dexsim World exists.
+        self.physics.activate(sim_config)
 
         # activate physics
         self.enable_physics(True)
@@ -487,17 +476,17 @@ class SimulationManager:
     @property
     def physics_backend(self) -> str:
         """Return the active physics backend name."""
-        return self._physics_backend
+        return self.physics.name
 
     @property
     def is_default_backend(self) -> bool:
         """Whether the existing DexSim default physics backend is active."""
-        return self._physics_backend == "default"
+        return self.physics.name == "default"
 
     @property
     def is_newton_backend(self) -> bool:
         """Whether the DexSim Newton physics backend is active."""
-        return self._physics_backend == "newton"
+        return self.physics.name == "newton"
 
     @property
     def newton_manager(self) -> NewtonManager:
@@ -505,11 +494,7 @@ class SimulationManager:
         if not self.is_newton_backend:
             logger.log_warning("Newton backend is not active.")
             return None
-        if self._newton_manager is None:
-            from dexsim.engine.newton_physics import get_newton_manager
-
-            self._newton_manager = get_newton_manager(self._world)
-        return self._newton_manager
+        return self.physics.newton_manager
 
     @property
     def is_physics_manually_update(self) -> bool:
@@ -549,9 +534,6 @@ class SimulationManager:
         world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
-        if isinstance(sim_config.physics_cfg, DefaultPhysicsCfg):
-            world_config.length_tolerance = sim_config.physics_cfg.length_tolerance
-            world_config.speed_tolerance = sim_config.physics_cfg.speed_tolerance
 
         if sim_config.render_cfg.renderer == "auto":
             from embodichain.lab.sim.utility.render_utils import (
@@ -583,19 +565,11 @@ class SimulationManager:
 
                 self.device = torch.device(f"cuda:{sim_config.gpu_id}")
 
-        if self.is_default_backend and self.device.type == "cuda":
-            world_config.enable_gpu_sim = True
-            world_config.direct_gpu_api = True
-
-        if self.is_newton_backend:
-            importlib.import_module("dexsim.engine.newton_physics")
-
-            newton_physics_cfg = sim_config.physics_cfg
-            world_config.newton_cfg = newton_physics_cfg.to_dexsim_cfg(
-                gpu_id=sim_config.gpu_id,
-            )
-
         world_config.gpu_id = sim_config.gpu_id
+
+        # Apply backend-specific WorldConfig fields (default tolerances/GPU flags
+        # or the Newton cfg) via the active backend.
+        self.physics.configure_world(world_config, sim_config)
 
         return world_config
 
@@ -606,20 +580,13 @@ class SimulationManager:
         self._default_resources = SimResources()
 
     def _invalidate_newton_physics(self) -> None:
-        """Mark the Newton scene as needing finalization after scene mutation."""
-        if self.is_newton_backend:
-            self._is_finalized_newton_physics = False
+        """Mark the active backend scene as needing re-initialization.
 
-    def _reset_newton_entities_after_finalize(self) -> None:
-        """Apply deferred initial resets once Newton runtime data is ready."""
-        if not self.is_newton_backend:
-            return
-
-        for rigid_obj in self._rigid_objects.values():
-            rigid_obj.reset()
-        for articulation in self._articulations.values():
-            articulation.reset()
-        # Rigid object groups are not supported on the Newton backend yet.
+        Delegates to the active :class:`PhysicsBackend`; a no-op for backends
+        without a dirty/finalize lifecycle. Called after every scene mutation
+        (adding assets, creating the default plane).
+        """
+        self.physics.invalidate()
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -638,95 +605,32 @@ class SimulationManager:
         Args:
             enable (bool): whether to enable manual update.
         """
-        if self.is_newton_backend and enable is False:
+        if not self.physics.can_disable_manual_update and enable is False:
             logger.log_warning(
-                "Newton physics backend does not support switching between manual and automatic update. Ignoring set_manual_update call."
+                "The active physics backend does not support switching between "
+                "manual and automatic update. Ignoring set_manual_update call."
             )
             return
         self._world.set_manual_update(enable)
 
     def init_gpu_physics(self) -> None:
-        """Initialize the GPU physics simulation."""
-        if self.is_newton_backend:
-            logger.log_debug(
-                "GPU physics initialization is handled by the Newton backend. Forcing finalization of Newton physics."
-            )
-            self.finalize_newton_physics()
-            return
+        """Initialize the GPU physics simulation.
 
-        if not self.is_use_gpu_physics:
-            logger.log_warning(
-                "The simulation device is not cuda, cannot initialize GPU physics."
-            )
-            return
-
-        if self._is_initialized_gpu_physics:
-            return
-
-        for art in self._articulations.values():
-            art.reallocate_body_data()
-        for robot in self._robots.values():
-            robot.reallocate_body_data()
-
-        # Re-establish rigid object positions after articulation resets, ensuring
-        # no articulation kinematics step has inadvertently corrupted the broadphase
-        # state for rigid bodies.
-        for rigid_obj in self._rigid_objects.values():
-            rigid_obj.reset()
-
-        self._is_initialized_gpu_physics = True
-
-    def _newton_lifecycle_state(self) -> str:
-        """Return the Newton manager lifecycle state name, or empty string."""
-        mgr = self.newton_manager
-        return getattr(getattr(mgr, "lifecycle_state", None), "name", "")
+        Delegates to the active backend's unified :meth:`PhysicsBackend.prepare`
+        (for the default backend this performs the real GPU initialization; for
+        the Newton backend it finalizes the scene).
+        """
+        self.physics.prepare()
 
     def finalize_newton_physics(self) -> None:
-        """Finalize the Newton scene if it has not been finalized yet."""
-        if not self.is_newton_backend:
-            logger.log_warning(
-                "Newton backend is not active, cannot finalize Newton physics."
-            )
-            return
+        """Finalize the Newton scene if it has not been finalized yet.
 
-        if (
-            self._is_finalized_newton_physics
-            and self._newton_lifecycle_state() == "READY"
-        ):
-            return
-
-        mgr: NewtonManager = self.newton_manager
-        state = self._newton_lifecycle_state()
-
-        if state != "READY":
-            from dexsim.engine.newton_physics.rebuild import (
-                ensure_simulation_prepared_lazy,
-                rebuild_newton_from_scene,
-            )
-
-            safe_to_continue, _ = ensure_simulation_prepared_lazy(
-                mgr,
-                self._world,
-                rebuild_from_scene=rebuild_newton_from_scene,
-                warn=True,
-            )
-            if not safe_to_continue:
-                logger.log_error(
-                    "Failed to finalize Newton physics: model is not ready to build "
-                    f"(lifecycle state {state!r})."
-                )
-                return
-
-        state = self._newton_lifecycle_state()
-        if state != "READY":
-            logger.log_error(
-                "Failed to finalize Newton physics: lifecycle state is "
-                f"{state!r} after simulation preparation."
-            )
-
-        self._is_finalized_newton_physics = True
-        self._is_initialized_gpu_physics = self.device.type == "cuda"
-        self._reset_newton_entities_after_finalize()
+        Delegates to the active backend's unified :meth:`PhysicsBackend.prepare`
+        (for the Newton backend this (re-)finalizes the scene and applies
+        deferred entity resets; for the default backend it initializes GPU
+        physics).
+        """
+        self.physics.prepare()
 
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
@@ -746,13 +650,9 @@ class SimulationManager:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 1.
         """
-        if self.is_newton_backend:
-            self.finalize_newton_physics()
-        elif self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                f"Using GPU physics, but not initialized yet. Forcing initialization."
-            )
-            self.init_gpu_physics()
+        # Ensure the active backend runtime is ready (lazy GPU init for the
+        # default backend, scene finalize for the Newton backend).
+        self.physics.ensure_initialized()
 
         if self.is_physics_manually_update:
             if physics_dt is None:
@@ -791,12 +691,7 @@ class SimulationManager:
 
     def get_physics_scene(self) -> PhysicsScene | NewtonPhysicsScene:
         """Get the physics scene of the simulation."""
-        if self.is_newton_backend:
-            physics_scene = self.newton_manager.scene
-        else:
-            physics_scene = self._world.get_physics_scene()
-
-        return physics_scene
+        return self.physics.get_scene()
 
     def open_window(self) -> None:
         """Open the simulation window."""
@@ -1095,10 +990,10 @@ class SimulationManager:
         Returns:
             SoftObject: The added soft object instance handle.
         """
-        if self.is_newton_backend:
+        if not self.physics.supports_soft_bodies:
             logger.log_error(
-                "Soft object support for the Newton backend is not enabled "
-                "in EmbodiChain yet.",
+                f"Soft object support is not enabled for the "
+                f"{self.physics.name} backend yet.",
                 error_type=NotImplementedError,
             )
 
@@ -1132,10 +1027,10 @@ class SimulationManager:
         Returns:
             ClothObject: The added cloth object instance handle.
         """
-        if self.is_newton_backend:
+        if not self.physics.supports_cloth:
             logger.log_error(
-                "Cloth object support for the Newton backend is not enabled "
-                "in EmbodiChain yet.",
+                f"Cloth object support is not enabled for the "
+                f"{self.physics.name} backend yet.",
                 error_type=NotImplementedError,
             )
 
@@ -1232,10 +1127,10 @@ class SimulationManager:
         Args:
             cfg (RigidObjectGroupCfg): Configuration for the rigid object group.
         """
-        if self.is_newton_backend:
+        if not self.physics.supports_rigid_object_group:
             logger.log_error(
-                "Rigid object group support for the Newton backend is not enabled "
-                "in EmbodiChain yet.",
+                f"Rigid object group support is not enabled for the "
+                f"{self.physics.name} backend yet.",
                 error_type=NotImplementedError,
             )
 
@@ -1412,10 +1307,10 @@ class SimulationManager:
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
         """
-        if self.is_newton_backend:
+        if not self.physics.supports_robot:
             logger.log_error(
-                "Robot support for the Newton backend is not enabled "
-                "in EmbodiChain yet.",
+                f"Robot support is not enabled for the "
+                f"{self.physics.name} backend yet.",
                 error_type=NotImplementedError,
             )
 
