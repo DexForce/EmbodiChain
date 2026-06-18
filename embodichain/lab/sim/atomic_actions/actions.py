@@ -22,7 +22,14 @@ from typing import Optional, Union, TYPE_CHECKING
 from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
-from .core import AtomicAction, ObjectSemantics, AntipodalAffordance, ActionCfg
+from .core import (
+    AtomicAction,
+    ObjectSemantics,
+    AntipodalAffordance,
+    ActionCfg,
+    HeldObjectState,
+    MoveObjectTarget,
+)
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
@@ -252,6 +259,15 @@ class MoveAction(AtomicAction):
             weights[None, :, None],
         )
 
+    @staticmethod
+    def _invert_pose(pose: torch.Tensor) -> torch.Tensor:
+        """Invert a batched homogeneous transform."""
+        inv_pose = pose.clone()
+        rot_t = pose[:, :3, :3].transpose(1, 2)
+        inv_pose[:, :3, :3] = rot_t
+        inv_pose[:, :3, 3] = -torch.bmm(rot_t, pose[:, :3, 3:4]).squeeze(-1)
+        return inv_pose
+
     def execute(
         self,
         target: Union[ObjectSemantics, torch.Tensor],
@@ -325,7 +341,8 @@ class PickUpAction(MoveAction):
         super().__init__(
             motion_generator, cfg=cfg if cfg is not None else PickUpActionCfg()
         )
-        self.cfg = cfg
+        self.cfg = cfg if cfg is not None else self.cfg
+        self._held_object_state: HeldObjectState | None = None
         self.approach_direction = self.cfg.approach_direction.to(self.device)
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PickUpActionCfg")
@@ -379,8 +396,10 @@ class PickUpAction(MoveAction):
         """
 
         # Resolve grasp pose
-        if isinstance(target, ObjectSemantics):
-            is_success, grasp_xpos = self._resolve_grasp_pose(target)
+        self._held_object_state = None
+        target_semantics = target if isinstance(target, ObjectSemantics) else None
+        if target_semantics is not None:
+            is_success, grasp_xpos = self._resolve_grasp_pose(target_semantics)
         else:
             is_success, grasp_xpos = self._resolve_pose_target(
                 target, action_name=self.__class__.__name__
@@ -391,6 +410,15 @@ class PickUpAction(MoveAction):
         if not is_success:
             logger.log_warning("Failed to resolve grasp pose for all environments.")
             return False, torch.empty(0), self.joint_ids
+
+        if target_semantics is not None:
+            obj_poses = target_semantics.entity.get_local_pose(to_matrix=True)
+            object_to_eef = torch.bmm(self._invert_pose(obj_poses), grasp_xpos)
+            self._held_object_state = HeldObjectState(
+                semantics=target_semantics,
+                object_to_eef=object_to_eef,
+                grasp_xpos=grasp_xpos,
+            )
 
         # Compute pre-grasp pose
         # TODO: only for parallel gripper, approach in negative grasp z direction
@@ -547,6 +575,10 @@ class PickUpAction(MoveAction):
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
         return True
+
+    def get_held_object_state(self) -> HeldObjectState | None:
+        """Return the held-object state produced by the latest successful pickup."""
+        return self._held_object_state
 
 
 @configclass
@@ -1276,6 +1308,163 @@ class UprightAction(PickUpAction):
 
 
 @configclass
+class MoveObjectActionCfg(MoveActionCfg):
+    name: str = "move_object"
+    """Name of the action, used for identification and logging."""
+
+    hand_close_qpos: torch.Tensor | None = None
+    """[hand_dof,] or [n_envs, hand_dof] joint positions for keeping the hand closed."""
+
+    hand_control_part: str = "hand"
+    """Name of the robot part that controls the hand joints."""
+
+
+class MoveObjectAction(MoveAction):
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: MoveObjectActionCfg | None = None,
+    ):
+        """
+        Initialize the atomic action.
+        Args:
+            motion_generator: The motion generator instance to use for planning.
+            cfg: Configuration for the action.
+        """
+        super().__init__(
+            motion_generator, cfg=cfg if cfg is not None else MoveObjectActionCfg()
+        )
+        self.cfg = cfg if cfg is not None else self.cfg
+        self._held_object_state: HeldObjectState | None = None
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error("hand_close_qpos must be specified in MoveObjectActionCfg")
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
+        self.arm_dof = len(self.arm_joint_ids)
+        self.hand_dof = len(self.hand_joint_ids)
+        self.dof = len(self.joint_ids)
+
+    def _resolve_move_object_target(
+        self,
+        target: MoveObjectTarget,
+        action_context: dict | None = None,
+        held_object_state: HeldObjectState | None = None,
+    ) -> tuple[bool, torch.Tensor, HeldObjectState]:
+        """Resolve an object target pose into an end-effector target pose."""
+        if not isinstance(target, MoveObjectTarget):
+            logger.log_error(
+                "MoveObjectAction target must be a MoveObjectTarget.",
+                TypeError,
+            )
+
+        held_state = held_object_state
+        if held_state is None and action_context is not None:
+            held_state = action_context.get("held_object_state")
+        if held_state is None:
+            logger.log_error(
+                "MoveObjectTarget requires a HeldObjectState from a prior PickUpAction.",
+                ValueError,
+            )
+
+        object_target_pose = target.object_target_pose.to(
+            device=self.device, dtype=torch.float32
+        )
+        if object_target_pose.shape == (4, 4):
+            object_target_pose = object_target_pose.unsqueeze(0).repeat(
+                self.n_envs, 1, 1
+            )
+        if object_target_pose.shape != (self.n_envs, 4, 4):
+            logger.log_error(
+                f"object_target_pose must have shape (4, 4) or "
+                f"({self.n_envs}, 4, 4), but got {object_target_pose.shape}",
+                ValueError,
+            )
+
+        object_to_eef = held_state.object_to_eef.to(
+            device=self.device, dtype=torch.float32
+        )
+        if object_to_eef.shape == (4, 4):
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
+        if object_to_eef.shape != (self.n_envs, 4, 4):
+            logger.log_error(
+                f"object_to_eef must have shape (4, 4) or "
+                f"({self.n_envs}, 4, 4), but got {object_to_eef.shape}",
+                ValueError,
+            )
+
+        move_object_xpos = torch.bmm(object_target_pose, object_to_eef)
+        return True, move_object_xpos, held_state
+
+    def _repeat_hand_close_qpos(self, n_waypoints: int) -> torch.Tensor:
+        """Repeat the closed-hand target across trajectory waypoints."""
+        hand_qpos = self.hand_close_qpos.to(device=self.device, dtype=torch.float32)
+        if hand_qpos.shape == (self.hand_dof,):
+            hand_qpos = hand_qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if hand_qpos.shape != (self.n_envs, self.hand_dof):
+            logger.log_error(
+                f"hand_close_qpos must have shape ({self.hand_dof},) or "
+                f"({self.n_envs}, {self.hand_dof}), but got {hand_qpos.shape}",
+                ValueError,
+            )
+        return hand_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+
+    def execute(
+        self,
+        target: MoveObjectTarget,
+        start_qpos: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        """Move the held object to a target object pose and keep grasping it."""
+        is_success, move_object_xpos, held_state = self._resolve_move_object_target(
+            target,
+            action_context=kwargs.get("action_context"),
+            held_object_state=kwargs.get("held_object_state"),
+        )
+        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
+        self._held_object_state = held_state
+
+        if not is_success:
+            logger.log_warning("Failed to resolve move_object target pose.")
+            return False, torch.empty(0), self.joint_ids
+
+        target_states_list = [
+            [
+                PlanState(xpos=move_object_xpos[i], move_type=MoveType.EEF_MOVE),
+            ]
+            for i in range(self.n_envs)
+        ]
+        trajectory = torch.zeros(
+            size=(self.n_envs, self.cfg.sample_interval, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        is_success, plan_traj = self._plan_arm_trajectory(
+            target_states_list,
+            start_qpos,
+            self.cfg.sample_interval,
+            self.arm_dof,
+        )
+        if not is_success:
+            logger.log_warning("Failed to plan move_object trajectory.")
+            return False, trajectory, self.joint_ids
+        trajectory[:, :, : self.arm_dof] = plan_traj
+        trajectory[:, :, self.arm_dof :] = self._repeat_hand_close_qpos(
+            self.cfg.sample_interval
+        )
+        return True, trajectory, self.joint_ids
+
+    def get_held_object_state(self) -> HeldObjectState | None:
+        """Return the held-object state after moving the object."""
+        return self._held_object_state
+
+    def validate(self, target, start_qpos=None, **kwargs):
+        # TODO: implement proper validation logic for move object action
+        return True
+
+
+@configclass
 class PlaceActionCfg(GraspActionCfg):
     name: str = "place"
     """Name of the action, used for identification and logging."""
@@ -1296,7 +1485,8 @@ class PlaceAction(MoveAction):
         super().__init__(
             motion_generator, cfg=cfg if cfg is not None else PlaceActionCfg()
         )
-        self.cfg = cfg
+        self.cfg = cfg if cfg is not None else self.cfg
+        self._held_object_state: HeldObjectState | None = None
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PlaceActionCfg")
         if self.cfg.hand_close_qpos is None:
@@ -1311,7 +1501,7 @@ class PlaceAction(MoveAction):
 
     def execute(
         self,
-        target: Union[ObjectSemantics, torch.Tensor],
+        target: Union[ObjectSemantics, torch.Tensor, None],
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[bool, torch.Tensor, list[float]]:
@@ -1327,10 +1517,29 @@ class PlaceAction(MoveAction):
             trajectory of shape (n_envs, n_waypoints, dof),
             joint_ids corresponding to trajectory
         """
+        self._held_object_state = None
+        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
+
+        if target is None:
+            n_open_waypoint = max(2, self.cfg.hand_interp_steps)
+            hand_open_trajectory = torch.zeros(
+                size=(self.n_envs, n_open_waypoint, self.dof),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            hand_open_trajectory[:, :, : self.arm_dof] = start_qpos.unsqueeze(1).repeat(
+                1, n_open_waypoint, 1
+            )
+            hand_open_trajectory[:, :, self.arm_dof :] = self._interpolate_hand_qpos(
+                self.hand_close_qpos,
+                self.hand_open_qpos,
+                n_open_waypoint,
+            )
+            return True, hand_open_trajectory, self.joint_ids
+
         is_success, place_xpos = self._resolve_pose_target(
             target, action_name=self.__class__.__name__
         )
-        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
         # TODO: warning and fallback if no valid grasp pose found
         if not is_success:
@@ -1425,3 +1634,7 @@ class PlaceAction(MoveAction):
     def validate(self, target, start_qpos=None, **kwargs):
         # TODO: implement proper validation logic for pick up action
         return True
+
+    def get_held_object_state(self) -> HeldObjectState | None:
+        """Return None after place releases the held object."""
+        return self._held_object_state

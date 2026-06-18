@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Type, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.planners import PlanResult
 from embodichain.utils import logger
-from .core import AtomicAction, ObjectSemantics, ActionCfg
+from .core import AtomicAction, ObjectSemantics, ActionCfg, MoveObjectTarget
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
@@ -178,6 +178,7 @@ class AtomicActionEngine:
 
         # Semantic analyzer for object understanding
         self._semantic_analyzer = SemanticAnalyzer()
+        self._action_context: Dict[str, Any] = {}
 
         # Initialize default actions
         self._actions: Dict[str, AtomicAction] = self._init_actions(actions_cfg_list)
@@ -186,11 +187,12 @@ class AtomicActionEngine:
         self, actions_cfg_list: Optional[List[ActionCfg]] = None
     ) -> Dict[str, "AtomicAction"]:
         actions: Dict[str, AtomicAction] = {}
-        from .actions import MoveAction, PickUpAction, PlaceAction
+        from .actions import MoveAction, MoveObjectAction, PickUpAction, PlaceAction
 
         builtin_action_map: Dict[str, Type[AtomicAction]] = {
             "move": MoveAction,
             "pick_up": PickUpAction,
+            "move_object": MoveObjectAction,
             "place": PlaceAction,
         }
         if actions_cfg_list is not None:
@@ -207,7 +209,16 @@ class AtomicActionEngine:
 
     def execute_static(
         self,
-        target_list: List[Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]]],
+        target_list: List[
+            Union[
+                torch.Tensor,
+                str,
+                ObjectSemantics,
+                MoveObjectTarget,
+                Dict[str, Any],
+                None,
+            ]
+        ],
     ) -> tuple[bool, torch.Tensor]:
         """Execute a sequence of actions to target poses.
 
@@ -233,10 +244,22 @@ class AtomicActionEngine:
             arm_joint_ids = self.motion_generator.robot.get_joint_ids(name=control_part)
             start_qpos_part = start_qpos[:, arm_joint_ids]
             is_success, traj, joint_ids = atom_action.execute(
-                target=target, start_qpos=start_qpos_part
+                target=target,
+                start_qpos=start_qpos_part,
+                action_context=self._action_context,
+                held_object_state=self._action_context.get("held_object_state"),
             )
             if not is_success:
                 return False, all_trajectory
+
+            held_state_getter = getattr(atom_action, "get_held_object_state", None)
+            if callable(held_state_getter):
+                held_state = held_state_getter()
+                if held_state is None:
+                    self._action_context.pop("held_object_state", None)
+                else:
+                    self._action_context["held_object_state"] = held_state
+
             n_waypoints = traj.shape[1]
 
             traj_full = torch.zeros(
@@ -254,7 +277,9 @@ class AtomicActionEngine:
     def validate(
         self,
         action_name: str,
-        target: Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]],
+        target: Union[
+            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any], None
+        ],
         **kwargs,
     ) -> bool:
         """Validate if a named action is feasible without executing."""
@@ -268,22 +293,35 @@ class AtomicActionEngine:
 
     def _resolve_target(
         self,
-        target: Union[torch.Tensor, str, ObjectSemantics, Dict[str, Any]],
-    ) -> Union[torch.Tensor, ObjectSemantics]:
+        target: Union[
+            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any], None
+        ],
+    ) -> Union[torch.Tensor, ObjectSemantics, MoveObjectTarget, None]:
         """Resolve user target input into tensor pose or ObjectSemantics.
 
         Supports the convenience dict format in ``execute`` and ``validate``.
         """
+        if target is None:
+            return None
+
         if isinstance(target, torch.Tensor):
             return target
 
-        if isinstance(target, ObjectSemantics):
+        if isinstance(target, (ObjectSemantics, MoveObjectTarget)):
             return target
 
         if isinstance(target, str):
             return self._semantic_analyzer.analyze(target)
 
         if isinstance(target, dict):
+            if "object_target_pose" in target:
+                object_target_pose = target["object_target_pose"]
+                if not isinstance(object_target_pose, torch.Tensor):
+                    raise TypeError(
+                        "target['object_target_pose'] must be a torch.Tensor"
+                    )
+                return MoveObjectTarget(object_target_pose=object_target_pose)
+
             if "pose" in target:
                 pose = target["pose"]
                 if not isinstance(pose, torch.Tensor):
@@ -328,7 +366,8 @@ class AtomicActionEngine:
             return semantics
 
         raise TypeError(
-            "target must be torch.Tensor, str, ObjectSemantics, or Dict[str, Any]"
+            "target must be torch.Tensor, str, ObjectSemantics, MoveObjectTarget, "
+            "Dict[str, Any], or None"
         )
 
     def get_semantic_analyzer(self) -> SemanticAnalyzer:
