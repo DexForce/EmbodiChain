@@ -313,6 +313,19 @@ class DefaultRigidBodyView(RigidBodyViewBase):
         for i, idx in enumerate(indices):
             self.entities[int(idx)].get_physical_body().set_restitution(data_cpu[i, 0])
 
+    def fetch_contact_offset(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        raise NotImplementedError(
+            "Per-body contact_offset fetch is not exposed by the default backend."
+        )
+
+    def apply_contact_offset(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        raise NotImplementedError(
+            "Per-body contact_offset apply is not exposed by the default backend; "
+            "set it via RigidBodyAttributesCfg (consumed at build) instead."
+        )
+
     # -- Internal helpers ----------------------------------------------------
 
     def _select_entities(self, body_ids: torch.Tensor | None) -> list[MeshObject]:

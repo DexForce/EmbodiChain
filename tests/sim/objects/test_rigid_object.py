@@ -466,8 +466,24 @@ class BaseRigidObjectTest:
             assert torch.allclose(self.duck.get_friction(), expected_friction)
             assert torch.allclose(self.duck.get_damping(), expected_damping)
 
-            # set_attrs and set_body_type remain unsupported on Newton
-            self.duck.set_attrs(RigidBodyAttributesCfg(mass=2.5))
+            # set_attrs applies the Newton-supported subset (mass, friction,
+            # restitution, contact_offset) at runtime and mirrors the rest.
+            self.duck.set_attrs(
+                RigidBodyAttributesCfg(mass=2.5, dynamic_friction=0.7, restitution=0.4)
+            )
+            assert torch.allclose(
+                self.duck.get_mass(),
+                torch.full((NUM_ARENAS,), 2.5, device=self.sim.device),
+                atol=1e-5,
+            ), "Newton set_attrs(mass) did not apply via batch API"
+            assert torch.allclose(
+                self.duck.get_friction(),
+                torch.full((NUM_ARENAS,), 0.7, device=self.sim.device),
+                atol=1e-5,
+            ), "Newton set_attrs(dynamic_friction) did not apply via batch API"
+
+            # set_body_type is a runtime no-op on Newton (body type is fixed at
+            # registration); the call must not change body_type.
             self.duck.set_body_type("kinematic")
             assert self.duck.body_type == "dynamic"
 
@@ -492,10 +508,13 @@ class BaseRigidObjectTest:
                 self.duck.get_inertia(), new_inertia, atol=1e-5
             ), f"Newton set_inertia round-trip failed: {self.duck.get_inertia()}"
 
-            # Damping: still unsupported on Newton
-            self.duck.set_damping(
-                torch.full((NUM_ARENAS, 2), 0.2, device=self.sim.device)
-            )
+            # Damping is a runtime no-op on Newton (not modelled per body) but
+            # mirrors onto metadata so get_damping stays consistent.
+            new_damping = torch.full((NUM_ARENAS, 2), 0.2, device=self.sim.device)
+            self.duck.set_damping(new_damping)
+            assert torch.allclose(
+                self.duck.get_damping(), new_damping, atol=1e-5
+            ), "Newton set_damping should mirror onto metadata for get_damping"
 
             self.table.get_mass()
             self.table.get_friction()

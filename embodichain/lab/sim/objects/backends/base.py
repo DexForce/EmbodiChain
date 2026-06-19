@@ -204,6 +204,18 @@ class RigidBodyViewBase(ABC):
         """Apply restitution coefficients from ``(N, 1)`` tensor."""
         ...
 
+    @abstractmethod
+    def fetch_contact_offset(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        """Fetch contact offsets into ``data`` as ``(N, 1)``."""
+        ...
+
+    @abstractmethod
+    def apply_contact_offset(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        """Apply contact offsets from ``(N, 1)`` tensor."""
+        ...
+
 
 class ArticulationViewBase(ABC):
     """Abstract interface for physics-backend articulation data access.

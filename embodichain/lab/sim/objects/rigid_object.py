@@ -324,6 +324,37 @@ class RigidObject(BatchEntity):
             )
         return attr
 
+    def _set_newton_attr_meta(self, env_idx: int, physical_attr) -> None:
+        """Mirror a :class:`dexsim.types.PhysicalAttr` onto the stored Newton meta.
+
+        Newton only models a subset of physical attributes at runtime (mass,
+        friction, restitution, contact_offset, COM, inertia); the remaining
+        fields (damping, ccd, sleep thresholds, solver iters, ...) are carried
+        as metadata for rebuild and for getter consistency. This helper keeps
+        that mirror in sync so :meth:`get_damping` / :meth:`get_mass` and the
+        next scene rebuild see the user's intent.
+        """
+        attr = self._get_newton_attr(env_idx)
+        for name in (
+            "mass",
+            "density",
+            "dynamic_friction",
+            "static_friction",
+            "restitution",
+            "contact_offset",
+            "rest_offset",
+            "linear_damping",
+            "angular_damping",
+            "sleep_threshold",
+            "enable_ccd",
+            "max_depenetration_velocity",
+            "min_position_iters",
+            "min_velocity_iters",
+            "max_linear_velocity",
+            "max_angular_velocity",
+        ):
+            setattr(attr, name, getattr(physical_attr, name))
+
     def _warn_newton_unsupported(self, api_name: str) -> None:
         logger.log_warning(
             f"Newton backend does not support RigidObject.{api_name} runtime updates. "
@@ -680,17 +711,61 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match attrs length {len(attrs)}."
             )
 
+        # Resolve per-env physical attrs into a flat list aligned with local_env_ids.
+        if isinstance(attrs, RigidBodyAttributesCfg):
+            physical_attrs = [attrs.attr() for _ in local_env_ids]
+        else:
+            physical_attrs = [a.attr() for a in attrs]
+
         if is_newton_scene(self._ps):
-            self._warn_newton_unsupported("set_attrs")
+            self._set_newton_attrs(physical_attrs, local_env_ids)
             return
 
         # TODO: maybe need to improve the physical attributes setter efficiency.
-        if isinstance(attrs, RigidBodyAttributesCfg):
-            for i, env_idx in enumerate(local_env_ids):
-                self._entities[env_idx].set_physical_attr(attrs.attr())
-        else:
-            for i, env_idx in enumerate(local_env_ids):
-                self._entities[env_idx].set_physical_attr(attrs[i].attr())
+        for i, env_idx in enumerate(local_env_ids):
+            self._entities[env_idx].set_physical_attr(physical_attrs[i])
+
+    def _set_newton_attrs(
+        self,
+        physical_attrs: list,
+        local_env_ids,
+    ) -> None:
+        """Apply physical attributes on the Newton backend.
+
+        Newton models only a subset of physical attributes at runtime
+        (mass, friction, restitution, contact_offset); the rest (damping, ccd,
+        sleep thresholds, solver iters, rest_offset, static_friction) are
+        metadata carried for rebuild and getter consistency. When the Newton
+        model is finalized (READY/STALE) the supported subset is pushed live
+        via the batch scene API; beforehand (BUILDER) the attributes are only
+        mirrored onto the meta so the next finalize consumes them.
+        """
+        for i, env_idx in enumerate(local_env_ids):
+            self._set_newton_attr_meta(env_idx, physical_attrs[i])
+
+        if self._data is None or not self._data.body_view.is_ready:
+            logger.log_debug(
+                "Newton model is not finalized; physical attributes are mirrored "
+                "to metadata and applied at the next finalize_newton_physics()."
+            )
+            return
+
+        body_ids = self._data.body_ids_for(local_env_ids)
+        view = self._data.body_view
+        device = self.device
+
+        def _stack(field: str) -> torch.Tensor:
+            return torch.as_tensor(
+                [getattr(a, field) for a in physical_attrs],
+                dtype=torch.float32,
+                device=device,
+            ).unsqueeze(-1)
+
+        # Newton-supported runtime subset.
+        view.apply_mass(_stack("mass"), body_ids)
+        view.apply_friction(_stack("dynamic_friction"), body_ids)
+        view.apply_restitution(_stack("restitution"), body_ids)
+        view.apply_contact_offset(_stack("contact_offset"), body_ids)
 
     def set_mass(
         self, mass: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -817,6 +892,12 @@ class RigidObject(BatchEntity):
         Args:
             damping (torch.Tensor): The damping to set with shape (N, 2), where the first column is linear damping and the second column is angular damping.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
+
+        .. attention::
+            The Newton backend does not simulate per-body linear/angular damping
+            (its damping is a global solver knob). On Newton this call mirrors
+            the values onto the attribute metadata so :meth:`get_damping` and
+            scene rebuilds stay consistent, but has no runtime effect.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -825,17 +906,22 @@ class RigidObject(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match damping length {len(damping)}."
             )
 
+        damping = damping.to(dtype=torch.float32, device=self.device)
+
         if is_newton_scene(self._ps):
-            self._warn_newton_unsupported("set_damping")
+            for i, env_idx in enumerate(local_env_ids):
+                attr = self._get_newton_attr(env_idx)
+                attr.linear_damping = float(damping[i, 0].item())
+                attr.angular_damping = float(damping[i, 1].item())
             return
 
-        damping = damping.cpu().numpy()
+        damping_np = damping.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
             self._entities[env_idx].get_physical_body().set_linear_damping(
-                damping[i, 0]
+                damping_np[i, 0]
             )
             self._entities[env_idx].get_physical_body().set_angular_damping(
-                damping[i, 1]
+                damping_np[i, 1]
             )
 
     def get_damping(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
@@ -1070,11 +1156,20 @@ class RigidObject(BatchEntity):
 
         Args:
             body_type (str): The body type to set. Must be one of 'dynamic', or 'kinematic'.
+
+        .. attention::
+            On the Newton backend, body type (dynamic/kinematic/static) is fixed
+            at body registration and cannot be changed at runtime; switching it
+            would require re-registering the body and rebuilding the model. This
+            call is therefore a no-op on Newton.
         """
         from dexsim.types import ActorType
 
         if is_newton_scene(self._ps):
-            self._warn_newton_unsupported("set_body_type")
+            logger.log_warning(
+                "Newton backend does not support changing RigidObject body type at "
+                "runtime (it is fixed at registration). Skipping set_body_type call."
+            )
             return
 
         if body_type not in ("dynamic", "kinematic"):

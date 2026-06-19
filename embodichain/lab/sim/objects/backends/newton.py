@@ -364,6 +364,14 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     def apply_restitution(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
         self._apply_data(body_ids, self._get_data_type().RESTITUTION, data)
 
+    def fetch_contact_offset(
+        self, data: torch.Tensor, body_ids: torch.Tensor | None = None
+    ) -> None:
+        self._fetch_scalar(self._get_data_type().CONTACT_OFFSET, data, body_ids)
+
+    def apply_contact_offset(self, data: torch.Tensor, body_ids: torch.Tensor) -> None:
+        self._apply_data(body_ids, self._get_data_type().CONTACT_OFFSET, data)
+
     # -- Collision filter ----------------------------------------------------
 
     def fetch_collision_filter(
