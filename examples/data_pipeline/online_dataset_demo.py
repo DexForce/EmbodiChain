@@ -28,7 +28,7 @@ streaming live simulation data.  Two DataLoader patterns are shown:
 
 Usage::
 
-    python examples/agents/datasets/online_dataset_demo.py
+    python examples/data_pipeline/online_dataset_demo.py
 """
 
 from __future__ import annotations
@@ -40,9 +40,12 @@ from pathlib import Path
 
 from torch.utils.data import DataLoader
 
-from embodichain.agents.datasets.sampler import UniformChunkSampler, GMMChunkSampler
-from embodichain.agents.datasets import OnlineDataset
-from embodichain.agents.engine.data import OnlineDataEngine, OnlineDataEngineCfg
+from embodichain.data_pipeline.datasets.sampler import (
+    UniformChunkSampler,
+    GMMChunkSampler,
+)
+from embodichain.data_pipeline.datasets import OnlineDataset
+from embodichain.data_pipeline.engine.data import OnlineDataEngine, OnlineDataEngineCfg
 from embodichain.utils.logger import log_info
 
 

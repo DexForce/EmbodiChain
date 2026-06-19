@@ -1,7 +1,7 @@
-embodichain.agents.rl.collector
-================================
+embodichain.training.rl.collector
+=================================
 
-.. automodule:: embodichain.agents.rl.collector
+.. automodule:: embodichain.training.rl.collector
 
 Overview
 --------
@@ -16,7 +16,7 @@ assembling rollout data into a preallocated ``TensorDict`` layout.
    BaseCollector
    SyncCollector
 
-.. currentmodule:: embodichain.agents.rl.collector
+.. currentmodule:: embodichain.training.rl.collector
 
 BaseCollector
 -------------

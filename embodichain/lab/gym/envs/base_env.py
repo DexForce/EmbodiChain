@@ -193,7 +193,7 @@ class BaseEnv(gym.Env):
         Returns a Box space by computing total dimensions from nested dict observations.
         This is needed because RL algorithms (PPO, SAC, etc.) require flat vector inputs.
         """
-        from embodichain.agents.rl.utils.helper import flatten_dict_observation
+        from embodichain.training.rl.utils.helper import flatten_dict_observation
 
         flattened_obs = flatten_dict_observation(self._init_raw_obs)
         total_dim = flattened_obs.shape[-1]

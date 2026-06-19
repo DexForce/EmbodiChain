@@ -1,7 +1,7 @@
-﻿embodichain.agents.rl.train
-===========================
+embodichain.training.rl.train
+=============================
 
-.. automodule:: embodichain.agents.rl.train
+.. automodule:: embodichain.training.rl.train
 
 Overview
 --------
@@ -17,7 +17,7 @@ Training entry points and command-line helpers for launching RL experiments.
       parse_args
       train_from_config
 
-.. automodule:: embodichain.agents.rl.train
+.. automodule:: embodichain.training.rl.train
    :members:
    :undoc-members:
    :show-inheritance:

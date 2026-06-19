@@ -1,12 +1,12 @@
-embodichain.agents.rl
+embodichain.training.rl
 =======================
 
-.. automodule:: embodichain.agents.rl
+.. automodule:: embodichain.training.rl
 
 Overview
 --------
 
-The ``embodichain.agents.rl`` package contains algorithm registries, rollout
+The ``embodichain.training.rl`` package contains algorithm registries, rollout
 collection logic, policy/model builders, and training entry points.
 
    .. rubric:: Submodules
@@ -24,7 +24,7 @@ collection logic, policy/model builders, and training entry points.
 Algorithms
 ----------
 
-.. automodule:: embodichain.agents.rl.algo
+.. automodule:: embodichain.training.rl.algo
    :members:
    :undoc-members:
    :show-inheritance:
@@ -32,7 +32,7 @@ Algorithms
 Rollout Buffer
 --------------
 
-.. automodule:: embodichain.agents.rl.buffer
+.. automodule:: embodichain.training.rl.buffer
    :members:
    :undoc-members:
    :show-inheritance:
@@ -40,7 +40,7 @@ Rollout Buffer
 Collectors
 ----------
 
-.. automodule:: embodichain.agents.rl.collector
+.. automodule:: embodichain.training.rl.collector
    :members:
    :undoc-members:
    :show-inheritance:
@@ -48,7 +48,7 @@ Collectors
 Policy Models
 -------------
 
-.. automodule:: embodichain.agents.rl.models
+.. automodule:: embodichain.training.rl.models
    :members:
    :undoc-members:
    :show-inheritance:
@@ -56,7 +56,7 @@ Policy Models
 Training
 --------
 
-.. automodule:: embodichain.agents.rl.train
+.. automodule:: embodichain.training.rl.train
    :members:
    :undoc-members:
    :show-inheritance:
@@ -64,7 +64,7 @@ Training
 Utilities
 ---------
 
-.. automodule:: embodichain.agents.rl.utils
+.. automodule:: embodichain.training.rl.utils
    :members:
    :undoc-members:
    :show-inheritance:

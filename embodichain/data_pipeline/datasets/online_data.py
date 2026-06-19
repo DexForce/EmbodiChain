@@ -21,8 +21,8 @@ from typing import Callable, Iterator, List, Optional
 from tensordict import TensorDict
 from torch.utils.data import IterableDataset
 
-from embodichain.agents.engine.data import OnlineDataEngine
-from embodichain.agents.datasets.sampler import ChunkSizeSampler
+from embodichain.data_pipeline.engine.data import OnlineDataEngine
+from embodichain.data_pipeline.datasets.sampler import ChunkSizeSampler
 
 __all__ = [
     "OnlineDataset",

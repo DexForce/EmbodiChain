@@ -21,7 +21,7 @@ This module defines configuration classes for RL algorithms, centralizing the ma
 
 ## Usage Example
 ```python
-from embodichain.agents.rl.utils import AlgorithmCfg
+from embodichain.training.rl.utils import AlgorithmCfg
 cfg = AlgorithmCfg(learning_rate=1e-4, batch_size=8192, gamma=0.99)
 ```
 Or via config file:

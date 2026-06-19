@@ -37,13 +37,13 @@ import torch
 from tensordict import TensorDict
 from torch.utils.data import DataLoader
 
-from embodichain.agents.datasets import (
+from embodichain.data_pipeline.datasets import (
     ChunkSizeSampler,
     GMMChunkSampler,
     OnlineDataset,
     UniformChunkSampler,
 )
-from embodichain.agents.engine.data import OnlineDataEngine, OnlineDataEngineCfg
+from embodichain.data_pipeline.engine.data import OnlineDataEngine, OnlineDataEngineCfg
 
 # ---------------------------------------------------------------------------
 # Constants

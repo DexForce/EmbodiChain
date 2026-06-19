@@ -25,11 +25,11 @@ import wandb
 from torch.utils.tensorboard import SummaryWriter
 from copy import deepcopy
 
-from embodichain.agents.rl.models import build_policy, get_registered_policy_names
-from embodichain.agents.rl.models import build_mlp_from_cfg
-from embodichain.agents.rl.algo import build_algo, get_registered_algo_names
-from embodichain.agents.rl.utils import dict_to_tensordict, flatten_dict_observation
-from embodichain.agents.rl.utils.trainer import Trainer
+from embodichain.training.rl.models import build_policy, get_registered_policy_names
+from embodichain.training.rl.models import build_mlp_from_cfg
+from embodichain.training.rl.algo import build_algo, get_registered_algo_names
+from embodichain.training.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.training.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.tasks.rl import build_env
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES

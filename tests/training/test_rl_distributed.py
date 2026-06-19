@@ -75,7 +75,7 @@ def test_distributed_training_via_torchrun():
                 f"--nproc_per_node={nproc}",
                 "--standalone",
                 "-m",
-                "embodichain.agents.rl.train",
+                "embodichain.training.rl.train",
                 "--config",
                 config_path,
                 "--distributed",

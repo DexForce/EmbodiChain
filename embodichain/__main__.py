@@ -81,7 +81,7 @@ def main() -> None:
         "train-rl",
         help="Train an RL agent from a config file (.json, .yaml, or .yml).",
     )
-    from embodichain.agents.rl.train import cli as train_rl_cli
+    from embodichain.training.rl.train import cli as train_rl_cli
 
     train_rl_parser.set_defaults(func=train_rl_cli)
 
