@@ -355,22 +355,6 @@ class _HandCloseAction(MoveAction):
         return self._expand_hand_qpos(hand_qpos).unsqueeze(1).repeat(1, n_waypoints, 1)
 
 
-class _GraspAction(_HandCloseAction):
-    """Internal base for actions that open and close the gripper."""
-
-    def __init__(
-        self,
-        motion_generator: MotionGenerator,
-        cfg: GraspActionCfg,
-        *,
-        cfg_name: str,
-    ):
-        super().__init__(motion_generator, cfg=cfg, cfg_name=cfg_name)
-        if self.cfg.hand_open_qpos is None:
-            logger.log_error(f"hand_open_qpos must be specified in {cfg_name}")
-        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
-
-
 @configclass
 class PickUpActionCfg(GraspActionCfg):
     name: str = "pick_up"
@@ -385,7 +369,7 @@ class PickUpActionCfg(GraspActionCfg):
     in the object local frame. Default [0, 0, -1] means approaching from above."""
 
 
-class PickUpAction(_GraspAction):
+class PickUpAction(MoveAction):
     updates_held_object_state = True
 
     def __init__(
@@ -400,11 +384,22 @@ class PickUpAction(_GraspAction):
             cfg: Configuration for the action.
         """
         super().__init__(
-            motion_generator,
-            cfg=cfg if cfg is not None else PickUpActionCfg(),
-            cfg_name="PickUpActionCfg",
+            motion_generator, cfg=cfg if cfg is not None else PickUpActionCfg()
         )
+        self.cfg = cfg if cfg is not None else self.cfg
         self.approach_direction = self.cfg.approach_direction.to(self.device)
+        if self.cfg.hand_open_qpos is None:
+            logger.log_error("hand_open_qpos must be specified in PickUpActionCfg")
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error("hand_close_qpos must be specified in PickUpActionCfg")
+        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
+        self.arm_dof = len(self.arm_joint_ids)
+        self.dof = len(self.joint_ids)
+        self._held_object_state: HeldObjectState | None = None
 
     def execute(
         self,
@@ -435,12 +430,11 @@ class PickUpAction(_GraspAction):
                 target, action_name=self.__class__.__name__
             )
 
-        if isinstance(is_success, torch.Tensor):
-            # Current engine contract is all-or-nothing; per-env masking is outside
-            # this action's return protocol.
-            is_success = torch.all(is_success).item()
+        # TODO: warning and fallback if no valid grasp pose found
         if not is_success:
-            logger.log_warning("Failed to resolve grasp pose for all environments.")
+            logger.log_warning(
+                "Failed to resolve grasp pose, using default approach pose"
+            )
             return False, torch.empty(0), self.joint_ids
 
         if target_semantics is not None:
@@ -751,7 +745,7 @@ class PlaceActionCfg(GraspActionCfg):
     """Name of the action, used for identification and logging."""
 
 
-class PlaceAction(_GraspAction):
+class PlaceAction(MoveAction):
     updates_held_object_state = True
 
     def __init__(
@@ -766,10 +760,20 @@ class PlaceAction(_GraspAction):
             cfg: Configuration for the action.
         """
         super().__init__(
-            motion_generator,
-            cfg=cfg if cfg is not None else PlaceActionCfg(),
-            cfg_name="PlaceActionCfg",
+            motion_generator, cfg=cfg if cfg is not None else PlaceActionCfg()
         )
+        self.cfg = cfg if cfg is not None else self.cfg
+        if self.cfg.hand_open_qpos is None:
+            logger.log_error("hand_open_qpos must be specified in PlaceActionCfg")
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error("hand_close_qpos must be specified in PlaceActionCfg")
+        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
+        self.arm_dof = len(self.arm_joint_ids)
+        self.dof = len(self.joint_ids)
 
     def execute(
         self,
@@ -789,16 +793,16 @@ class PlaceAction(_GraspAction):
             trajectory of shape (n_envs, n_waypoints, dof),
             joint_ids corresponding to trajectory
         """
-        self._held_object_state = None
-        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
-
         is_success, place_xpos = self._resolve_pose_target(
             target, action_name=self.__class__.__name__
         )
+        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
 
         # TODO: warning and fallback if no valid grasp pose found
         if not is_success:
-            logger.log_warning("Failed to resolve place target pose.")
+            logger.log_warning(
+                "Failed to resolve grasp pose, using default approach pose"
+            )
             return False, torch.empty(0), self.joint_ids
 
         # compute waypoint number for each phase
@@ -892,4 +896,4 @@ class PlaceAction(_GraspAction):
 
     def get_held_object_state(self) -> HeldObjectState | None:
         """Return None after place releases the held object."""
-        return self._held_object_state
+        return None
