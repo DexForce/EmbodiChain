@@ -1158,6 +1158,14 @@ class Articulation(BatchEntity):
             env_ids: Environment indices. If None, all environments are updated.
             base_attrs: Base config used when ``attrs`` is a partial override.
             replace_inertial: Recompute inertia when mass changes.
+
+        .. attention::
+            On the Newton backend, ``set_physical_attr`` only mirrors attributes
+            onto link metadata (consumed at the next scene rebuild). Mass is
+            additionally pushed live via ``set_link_mass`` so runtime per-link
+            mass overrides take effect immediately (mirroring the dedicated
+            :meth:`set_mass`). Friction/restitution/contact_offset have no live
+            per-link API on Newton articulations and are rebuild-time only.
         """
         if link_names is None:
             matched_link_names = self.link_names
@@ -1181,14 +1189,22 @@ class Articulation(BatchEntity):
         else:
             physical_attr = attrs
 
+        is_newton = self._data is not None and self._data.is_newton_backend
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for env_idx in local_env_ids:
             for name in matched_link_names:
+                local_name = self._entity_link_name(env_idx, name)
                 self._entities[env_idx].set_physical_attr(
                     physical_attr,
-                    self._entity_link_name(env_idx, name),
+                    local_name,
                     is_replace_inertial=replace_inertial,
                 )
+                # On Newton, set_physical_attr is metadata-only; push mass live
+                # so runtime per-link mass overrides take effect immediately.
+                if is_newton:
+                    self._entities[env_idx].set_link_mass(
+                        local_name, physical_attr.mass
+                    )
 
     def set_joint_drive(
         self,

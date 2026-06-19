@@ -508,6 +508,25 @@ class TestArticulationNewton(BaseArticulationTest):
     def test_set_physical_visible(self):
         super().test_set_physical_visible()
 
+    def test_set_link_physical_attr_mass_live_on_newton(self):
+        """Per-link mass set via set_link_physical_attr takes effect live on Newton.
+
+        On Newton, ``set_physical_attr`` is metadata-only; the fix pushes mass
+        live via ``set_link_mass`` (mirroring the dedicated set_mass). Verify a
+        runtime per-link mass override round-trips through get_mass.
+        """
+        link_name = self.art.link_names[0]
+        original = self.art.get_mass(link_names=[link_name])[0, 0].item()
+        new_mass = original + 1.5
+        self.art.set_link_physical_attr(
+            RigidBodyAttributesOverrideCfg(mass=new_mass),
+            link_names=[link_name],
+        )
+        live_mass = self.art.get_mass(link_names=[link_name])[0, 0].item()
+        assert (
+            abs(live_mass - new_mass) < 1e-3
+        ), f"per-link mass {new_mass} not applied live on Newton (got {live_mass})"
+
 
 if __name__ == "__main__":
     test = TestArticulationCPU()
