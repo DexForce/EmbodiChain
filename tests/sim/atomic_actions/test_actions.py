@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 import torch
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
@@ -199,6 +199,48 @@ class TestMoveActionHelpers:
         assert torch.allclose(result[:, 0], start)
         assert torch.allclose(result[:, -1], end)
 
+    def test_plan_arm_trajectory_accepts_all_env_success_tensor(self):
+        n_waypoints = 5
+        target_state = Mock()
+        target_state.xpos = torch.eye(4)
+        target_states_list = [[target_state] for _ in range(NUM_ENVS)]
+        start_qpos = torch.zeros(NUM_ENVS, ARM_DOF)
+        interp_traj = torch.zeros(NUM_ENVS, n_waypoints, ARM_DOF)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.actions.interpolate_with_distance",
+            return_value=interp_traj,
+        ):
+            is_success, trajectory = self.action._plan_arm_trajectory(
+                target_states_list,
+                start_qpos,
+                n_waypoints,
+            )
+
+        assert is_success is True
+        assert trajectory is interp_traj
+
+    def test_plan_arm_trajectory_fails_on_partial_env_success_tensor(self):
+        target_state = Mock()
+        target_state.xpos = torch.eye(4)
+        target_states_list = [[target_state] for _ in range(NUM_ENVS)]
+        start_qpos = torch.zeros(NUM_ENVS, ARM_DOF)
+        self.robot.compute_ik = Mock(
+            return_value=(
+                torch.tensor([True, False], dtype=torch.bool),
+                torch.zeros(NUM_ENVS, ARM_DOF),
+            )
+        )
+
+        is_success, trajectory = self.action._plan_arm_trajectory(
+            target_states_list,
+            start_qpos,
+            n_waypoints=5,
+        )
+
+        assert is_success is False
+        assert trajectory.shape == (NUM_ENVS, 1, ARM_DOF)
+
 
 # ---------------------------------------------------------------------------
 # PickUpAction
@@ -233,6 +275,89 @@ class TestPickUpActionInit:
             range(ARM_DOF, ARM_DOF + HAND_DOF)
         )
         assert action.dof == TOTAL_DOF
+
+
+class TestPickUpActionExecute:
+    """Tests for PickUpAction execution with batched success flags."""
+
+    def setup_method(self):
+        self.robot = _make_mock_robot()
+        self.mg = _make_mock_motion_generator(self.robot)
+
+    def _make_cfg(self, **overrides):
+        defaults = dict(
+            hand_open_qpos=torch.tensor([0.0, 0.0]),
+            hand_close_qpos=torch.tensor([0.025, 0.025]),
+            control_part="arm",
+            hand_control_part="hand",
+            pre_grasp_distance=0.15,
+            lift_height=0.15,
+            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+            sample_interval=8,
+            hand_interp_steps=2,
+        )
+        defaults.update(overrides)
+        return PickUpActionCfg(**defaults)
+
+    def _make_semantics(self) -> ObjectSemantics:
+        entity = Mock()
+        entity.get_local_pose.return_value = torch.eye(4).unsqueeze(0).repeat(
+            NUM_ENVS, 1, 1
+        )
+        return ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            label="box",
+            entity=entity,
+        )
+
+    def test_execute_accepts_all_env_grasp_success_tensor(self):
+        cfg = self._make_cfg()
+        action = PickUpAction(self.mg, cfg=cfg)
+        semantics = self._make_semantics()
+        grasp_xpos = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        action._resolve_grasp_pose = Mock(
+            return_value=(torch.tensor([True, True], dtype=torch.bool), grasp_xpos)
+        )
+
+        def plan_success(target_states_list, start_qpos, n_waypoints, arm_dof):
+            return True, torch.zeros(NUM_ENVS, n_waypoints, arm_dof)
+
+        action._plan_arm_trajectory = Mock(side_effect=plan_success)
+
+        is_success, trajectory, joint_ids = action.execute(
+            target=semantics,
+            start_qpos=torch.zeros(NUM_ENVS, ARM_DOF),
+        )
+
+        assert is_success is True
+        assert joint_ids == list(range(TOTAL_DOF))
+        assert trajectory.shape == (NUM_ENVS, cfg.sample_interval, TOTAL_DOF)
+        assert action._plan_arm_trajectory.call_count == 2
+        held_state = action.get_held_object_state()
+        assert held_state is not None
+        assert held_state.semantics is semantics
+
+    def test_execute_fails_on_partial_env_grasp_success_tensor(self):
+        action = PickUpAction(self.mg, cfg=self._make_cfg())
+        semantics = self._make_semantics()
+        grasp_xpos = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        action._resolve_grasp_pose = Mock(
+            return_value=(torch.tensor([True, False], dtype=torch.bool), grasp_xpos)
+        )
+        action._plan_arm_trajectory = Mock()
+
+        is_success, trajectory, joint_ids = action.execute(
+            target=semantics,
+            start_qpos=torch.zeros(NUM_ENVS, ARM_DOF),
+        )
+
+        assert is_success is False
+        assert trajectory.numel() == 0
+        assert joint_ids == list(range(TOTAL_DOF))
+        action._plan_arm_trajectory.assert_not_called()
+        semantics.entity.get_local_pose.assert_not_called()
+        assert action.get_held_object_state() is None
 
 
 # ---------------------------------------------------------------------------

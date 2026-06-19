@@ -98,6 +98,12 @@ class MoveAction(AtomicAction):
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.dof = len(self.arm_joint_ids)
 
+    def _all_envs_success(self, is_success: bool | torch.Tensor) -> bool:
+        """Return true only when all environments report success."""
+        if isinstance(is_success, torch.Tensor):
+            return bool(torch.all(is_success).item())
+        return bool(is_success)
+
     def _resolve_pose_target(
         self,
         target: Union[ObjectSemantics, torch.Tensor],
@@ -222,7 +228,7 @@ class MoveAction(AtomicAction):
             is_success, qpos = self.robot.compute_ik(
                 pose=xpos_traj[:, j], name=self.cfg.control_part, joint_seed=qpos_seed
             )
-            if not is_success:
+            if not self._all_envs_success(is_success):
                 logger.log_warning(
                     f"Failed to compute IK for target state {j} in some environments. "
                     "The resulting trajectory may be invalid."
@@ -431,7 +437,7 @@ class PickUpAction(MoveAction):
             )
 
         # TODO: warning and fallback if no valid grasp pose found
-        if not is_success:
+        if not self._all_envs_success(is_success):
             logger.log_warning(
                 "Failed to resolve grasp pose, using default approach pose"
             )
