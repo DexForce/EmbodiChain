@@ -1360,6 +1360,7 @@ class SimulationManager:
         robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
 
         self._robots[uid] = robot
+        self._invalidate_newton_physics()
 
         return robot
 

@@ -90,6 +90,8 @@ class NewtonPhysicsBackend(PhysicsBackend):
             rigid_obj.reset()
         for articulation in self._manager._articulations.values():
             articulation.reset()
+        for robot in self._manager._robots.values():
+            robot.reset()
         # Rigid object groups are not supported on the Newton backend yet.
 
     def prepare(self) -> None:
@@ -145,6 +147,21 @@ class NewtonPhysicsBackend(PhysicsBackend):
         return self.newton_manager.scene
 
     # -- capabilities --------------------------------------------------- #
+    @property
+    def supports_robot(self) -> bool:
+        # Blocked on a dexsim Newton-backend bug: ``NewtonArticulation.get_dof``
+        # (dexsim/engine/newton_physics/articulation/articulation.py) returns the
+        # TOTAL dof over all joints including mimic slaves, while the BUILDER-state
+        # joint setters (set_current_qpos / _set_joint_values) only accept values
+        # for ACTIVE joints (mimic slaves are modelled as constraints). For a
+        # mimic-jointed robot (e.g. dexforce_w1: 40 total / 20 active) this makes
+        # RigidObject/Articulation.reset() pass 40 qpos to a 20-joint setter and
+        # raise "Expected 20 qpos values for selected joints, got 40" during
+        # ``add_robot``. The dexsim method carries an explicit TODO to return
+        # active-DOF; once fixed upstream, flip this to True. The spawn wiring is
+        # already Newton-ready (see add_robot invalidate + _reset_entities_after_finalize).
+        return False
+
     @property
     def can_disable_manual_update(self) -> bool:
         # Newton cannot switch between manual and automatic update.
