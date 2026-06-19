@@ -272,4 +272,4 @@ is_success, traj = engine.execute_static(target_list=[target_pose])
 - {doc}`planners/motion_generator` — the trajectory planner used by every action
 - {doc}`sim_robot` — how control parts and IK solvers are configured
 - Tutorial: `scripts/tutorials/sim/atomic_actions.py`
-- Move object demo: `scripts/tutorials/sim/move_object_atomic_actions.py`
+- Move object demo: `scripts/tutorials/atomic_action/move_object_atomic_actions.py`

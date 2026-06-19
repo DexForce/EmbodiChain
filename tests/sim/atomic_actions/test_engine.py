@@ -234,7 +234,7 @@ class TestHeldObjectStateContract:
         action.get_held_object_state.return_value = held_state
         return action
 
-    def test_execute_static_ignores_getter_when_action_does_not_update_state(self):
+    def test_execute_static_clears_stale_context_before_running_actions(self):
         held_state = object()
         action = self._make_action(
             updates_held_object_state=False,
@@ -247,7 +247,7 @@ class TestHeldObjectStateContract:
 
         assert is_success is True
         action.get_held_object_state.assert_not_called()
-        assert self.engine._action_context["held_object_state"] is held_state
+        assert "held_object_state" not in self.engine._action_context
 
     def test_execute_static_updates_state_when_action_declares_contract(self):
         held_state = object()
@@ -276,6 +276,24 @@ class TestHeldObjectStateContract:
 
         assert is_success is True
         action.get_held_object_state.assert_called_once_with()
+        assert "held_object_state" not in self.engine._action_context
+
+    def test_execute_static_keeps_state_within_single_action_sequence(self):
+        held_state = object()
+        producer = self._make_action(
+            updates_held_object_state=True,
+            held_state=held_state,
+        )
+        release = self._make_action(
+            updates_held_object_state=True,
+            held_state=None,
+        )
+        self.engine._actions = {"producer": producer, "release": release}
+
+        is_success, _ = self.engine.execute_static([torch.eye(4), torch.eye(4)])
+
+        assert is_success is True
+        assert release.execute.call_args.kwargs["held_object_state"] is held_state
         assert "held_object_state" not in self.engine._action_context
 
 

@@ -229,6 +229,7 @@ class AtomicActionEngine:
             logger.log_error(
                 f"Length of target_list ({len(target_list)}) must match number of actions ({len(action_names)})."
             )
+        self._action_context.clear()
         start_qpos = self.motion_generator.robot.get_qpos()
         n_envs = start_qpos.shape[0]
         all_dof = self.motion_generator.robot.dof

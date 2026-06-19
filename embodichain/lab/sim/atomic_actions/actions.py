@@ -98,24 +98,6 @@ class MoveAction(AtomicAction):
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.dof = len(self.arm_joint_ids)
 
-    def _init_hand_close_state(self, cfg_name: str) -> None:
-        """Initialize shared closed-hand state for gripper actions."""
-        if self.cfg.hand_close_qpos is None:
-            logger.log_error(f"hand_close_qpos must be specified in {cfg_name}")
-        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
-
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
-        self.arm_dof = len(self.arm_joint_ids)
-        self.dof = len(self.joint_ids)
-
-    def _init_grasp_hand_state(self, cfg_name: str) -> None:
-        """Initialize shared open/closed gripper state for grasp actions."""
-        if self.cfg.hand_open_qpos is None:
-            logger.log_error(f"hand_open_qpos must be specified in {cfg_name}")
-        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
-        self._init_hand_close_state(cfg_name)
-
     def _resolve_pose_target(
         self,
         target: Union[ObjectSemantics, torch.Tensor],
@@ -287,26 +269,6 @@ class MoveAction(AtomicAction):
             return result.squeeze(0)
         return result
 
-    def _expand_hand_qpos(self, hand_qpos: torch.Tensor) -> torch.Tensor:
-        """Resolve hand qpos to batched shape ``(n_envs, hand_dof)``."""
-        hand_dof = len(self.hand_joint_ids)
-        hand_qpos = hand_qpos.to(device=self.device, dtype=torch.float32)
-        if hand_qpos.shape == (hand_dof,):
-            return hand_qpos.unsqueeze(0).repeat(self.n_envs, 1)
-        if hand_qpos.shape == (self.n_envs, hand_dof):
-            return hand_qpos
-        logger.log_error(
-            f"hand_qpos must have shape ({hand_dof},) or "
-            f"({self.n_envs}, {hand_dof}), but got {hand_qpos.shape}",
-            ValueError,
-        )
-
-    def _repeat_hand_qpos(
-        self, hand_qpos: torch.Tensor, n_waypoints: int
-    ) -> torch.Tensor:
-        """Repeat hand qpos across trajectory waypoints."""
-        return self._expand_hand_qpos(hand_qpos).unsqueeze(1).repeat(1, n_waypoints, 1)
-
     def execute(
         self,
         target: Union[ObjectSemantics, torch.Tensor],
@@ -351,6 +313,64 @@ class MoveAction(AtomicAction):
         return True
 
 
+class _HandCloseAction(MoveAction):
+    """Internal base for actions that keep the gripper closed."""
+
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: HandCloseActionCfg,
+        *,
+        cfg_name: str,
+    ):
+        super().__init__(motion_generator, cfg=cfg)
+        self._held_object_state: HeldObjectState | None = None
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error(f"hand_close_qpos must be specified in {cfg_name}")
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.joint_ids = self.arm_joint_ids + self.hand_joint_ids
+        self.arm_dof = len(self.arm_joint_ids)
+        self.dof = len(self.joint_ids)
+
+    def _expand_hand_qpos(self, hand_qpos: torch.Tensor) -> torch.Tensor:
+        """Resolve hand qpos to batched shape ``(n_envs, hand_dof)``."""
+        hand_dof = len(self.hand_joint_ids)
+        hand_qpos = hand_qpos.to(device=self.device, dtype=torch.float32)
+        if hand_qpos.shape == (hand_dof,):
+            return hand_qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if hand_qpos.shape == (self.n_envs, hand_dof):
+            return hand_qpos
+        logger.log_error(
+            f"hand_qpos must have shape ({hand_dof},) or "
+            f"({self.n_envs}, {hand_dof}), but got {hand_qpos.shape}",
+            ValueError,
+        )
+
+    def _repeat_hand_qpos(
+        self, hand_qpos: torch.Tensor, n_waypoints: int
+    ) -> torch.Tensor:
+        """Repeat hand qpos across trajectory waypoints."""
+        return self._expand_hand_qpos(hand_qpos).unsqueeze(1).repeat(1, n_waypoints, 1)
+
+
+class _GraspAction(_HandCloseAction):
+    """Internal base for actions that open and close the gripper."""
+
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: GraspActionCfg,
+        *,
+        cfg_name: str,
+    ):
+        super().__init__(motion_generator, cfg=cfg, cfg_name=cfg_name)
+        if self.cfg.hand_open_qpos is None:
+            logger.log_error(f"hand_open_qpos must be specified in {cfg_name}")
+        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
+
+
 @configclass
 class PickUpActionCfg(GraspActionCfg):
     name: str = "pick_up"
@@ -365,7 +385,7 @@ class PickUpActionCfg(GraspActionCfg):
     in the object local frame. Default [0, 0, -1] means approaching from above."""
 
 
-class PickUpAction(MoveAction):
+class PickUpAction(_GraspAction):
     updates_held_object_state = True
 
     def __init__(
@@ -380,12 +400,11 @@ class PickUpAction(MoveAction):
             cfg: Configuration for the action.
         """
         super().__init__(
-            motion_generator, cfg=cfg if cfg is not None else PickUpActionCfg()
+            motion_generator,
+            cfg=cfg if cfg is not None else PickUpActionCfg(),
+            cfg_name="PickUpActionCfg",
         )
-        self.cfg = cfg if cfg is not None else self.cfg
-        self._held_object_state: HeldObjectState | None = None
         self.approach_direction = self.cfg.approach_direction.to(self.device)
-        self._init_grasp_hand_state("PickUpActionCfg")
 
     def execute(
         self,
@@ -600,7 +619,7 @@ class MoveObjectActionCfg(HandCloseActionCfg):
     """Name of the action, used for identification and logging."""
 
 
-class MoveObjectAction(MoveAction):
+class MoveObjectAction(_HandCloseAction):
     updates_held_object_state = True
 
     def __init__(
@@ -615,11 +634,10 @@ class MoveObjectAction(MoveAction):
             cfg: Configuration for the action.
         """
         super().__init__(
-            motion_generator, cfg=cfg if cfg is not None else MoveObjectActionCfg()
+            motion_generator,
+            cfg=cfg if cfg is not None else MoveObjectActionCfg(),
+            cfg_name="MoveObjectActionCfg",
         )
-        self.cfg = cfg if cfg is not None else self.cfg
-        self._held_object_state: HeldObjectState | None = None
-        self._init_hand_close_state("MoveObjectActionCfg")
 
     def _resolve_move_object_target(
         self,
@@ -733,7 +751,7 @@ class PlaceActionCfg(GraspActionCfg):
     """Name of the action, used for identification and logging."""
 
 
-class PlaceAction(MoveAction):
+class PlaceAction(_GraspAction):
     updates_held_object_state = True
 
     def __init__(
@@ -748,11 +766,10 @@ class PlaceAction(MoveAction):
             cfg: Configuration for the action.
         """
         super().__init__(
-            motion_generator, cfg=cfg if cfg is not None else PlaceActionCfg()
+            motion_generator,
+            cfg=cfg if cfg is not None else PlaceActionCfg(),
+            cfg_name="PlaceActionCfg",
         )
-        self.cfg = cfg if cfg is not None else self.cfg
-        self._held_object_state: HeldObjectState | None = None
-        self._init_grasp_hand_state("PlaceActionCfg")
 
     def execute(
         self,
