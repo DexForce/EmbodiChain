@@ -425,6 +425,139 @@ def validate_physics_cfg(physics_cfg: PhysicsCfg) -> None:
 
 
 @configclass
+class NewtonCollisionAttributesCfg:
+    """Newton-specific per-shape collision/contact attributes.
+
+    Mirrors :class:`dexsim.spawn.descs.NewtonCollisionDesc` (which in turn
+    mirrors ``newton.ModelBuilder.ShapeConfig``), so the resolver can overlay
+    these fields by name. All fields default to ``None`` meaning "keep the
+    Newton backend default".
+
+    The backend-neutral quantities (sliding friction, restitution,
+    enable-collision) live on :class:`RigidBodyAttributesCfg` and are projected
+    onto the Newton ``mu`` / ``restitution`` / ``has_shape_collision`` shape
+    knobs by the resolver; they are NOT repeated here.
+    """
+
+    # -- Contact-material fields (per-solver subset, see NEWTON_CONTACT_SOLVER_FIELDS) --
+    ke: float | None = None
+    """Contact stiffness for compliant contacts."""
+    kd: float | None = None
+    """Contact damping for compliant contacts."""
+    kf: float | None = None
+    """Friction stiffness for compliant contacts."""
+    ka: float | None = None
+    """Adhesion stiffness for compliant contacts."""
+    kh: float | None = None
+    """Hydroelastic stiffness scale."""
+    mu_torsional: float | None = None
+    """Torsional friction coefficient."""
+    mu_rolling: float | None = None
+    """Rolling friction coefficient."""
+
+    # -- Solver-agnostic shape-config fields --
+    margin: float | None = None
+    """Contact margin (shapes within this distance are considered in contact)."""
+    gap: float | None = None
+    """Contact gap (rest distance between shapes)."""
+    is_solid: bool | None = None
+    """Whether the shape is solid (vs. hollow) for mass computation."""
+    collision_group: int | None = None
+    """Collision group id used by the broad-phase filter."""
+    collision_filter_parent: bool | None = None
+    """Whether to filter collisions with the parent body."""
+    has_particle_collision: bool | None = None
+    """Whether the shape collides with particles."""
+    is_visible: bool | None = None
+    """Whether the shape is visible to the Newton visualizer."""
+    is_site: bool | None = None
+    """Whether the shape is registered as a Newton site."""
+    is_hydroelastic: bool | None = None
+    """Whether to use hydroelastic contact for this shape."""
+
+    # -- SDF (signed distance field) collision params --
+    sdf_narrow_band_range: tuple[float, float] | None = None
+    """Narrow-band range [inner, outer] for SDF collision."""
+    sdf_target_voxel_size: float | None = None
+    """Target voxel size for SDF generation."""
+    sdf_max_resolution: int | None = None
+    """Maximum grid resolution for SDF generation."""
+    sdf_texture_format: str | None = None
+    """Texture format for SDF collision."""
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> NewtonCollisionAttributesCfg:
+        """Initialize the configuration from a dictionary."""
+        cfg = cls()
+        for key, value in init_dict.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+            else:
+                logger.log_warning(
+                    f"Key '{key}' not found in {cfg.__class__.__name__}."
+                )
+        return cfg
+
+    def to_newton_collision_desc(self):
+        """Build a :class:`dexsim.spawn.descs.NewtonCollisionDesc` from this cfg."""
+        from dexsim.spawn.descs import NewtonCollisionDesc
+
+        return NewtonCollisionDesc(
+            **{
+                f: getattr(self, f)
+                for f in (
+                    "ke",
+                    "kd",
+                    "kf",
+                    "ka",
+                    "kh",
+                    "mu_torsional",
+                    "mu_rolling",
+                    "margin",
+                    "gap",
+                    "is_solid",
+                    "collision_group",
+                    "collision_filter_parent",
+                    "has_particle_collision",
+                    "is_visible",
+                    "is_site",
+                    "is_hydroelastic",
+                    "sdf_narrow_band_range",
+                    "sdf_target_voxel_size",
+                    "sdf_max_resolution",
+                    "sdf_texture_format",
+                )
+            }
+        )
+
+
+def _merge_newton_subcfg(
+    override: NewtonCollisionAttributesCfg | None,
+    base: NewtonCollisionAttributesCfg | None,
+) -> NewtonCollisionAttributesCfg | None:
+    """Merge a Newton sub-config override onto a base.
+
+    For each Newton field, the override's non-None value wins, else the base's.
+    Returns ``None`` if neither side sets any field.
+    """
+    if override is None:
+        return base
+    if base is None:
+        return override
+    merged = NewtonCollisionAttributesCfg()
+    any_set = False
+    for field_name in merged.__dataclass_fields__:
+        if field_name == "newton":
+            continue
+        ov = getattr(override, field_name)
+        val = ov if ov is not None else getattr(base, field_name)
+        setattr(merged, field_name, val)
+        if val is not None:
+            any_set = True
+    return merged if any_set else None
+
+
+@configclass
 class RigidBodyAttributesCfg:
     """Physical attributes for rigid bodies.
 
@@ -432,6 +565,11 @@ class RigidBodyAttributesCfg:
     1. The dynamic properties, such as mass, damping, etc.
     2. The collision properties.
     3. The physics material properties.
+
+    The ``newton`` sub-config carries Newton-specific per-shape contact/shape
+    knobs (``ke``/``kd``/``margin``/...) that have no PhysX equivalent; it is
+    ignored on the default backend and applied via the Newton desc-native
+    registration path when set.
     """
 
     mass: float = 1.0
@@ -490,8 +628,17 @@ class RigidBodyAttributesCfg:
     static_friction: float = 0.5
     """Static friction coefficient."""
 
+    newton: NewtonCollisionAttributesCfg | None = None
+    """Newton-specific per-shape contact/shape attributes (ignored on default backend)."""
+
     def attr(self) -> PhysicalAttr:
-        """Convert to dexsim PhysicalAttr"""
+        """Convert to dexsim PhysicalAttr.
+
+        This is the legacy PhysX-oriented projection used by the default
+        backend. Newton-native fields (``self.newton``) are not representable
+        here; the Newton path uses
+        :func:`embodichain.lab.sim.physics_attrs.resolve_newton_shape` instead.
+        """
         attr = PhysicalAttr()
         attr.mass = self.mass
         attr.contact_offset = self.contact_offset
@@ -515,7 +662,9 @@ class RigidBodyAttributesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
+            if key == "newton" and isinstance(value, dict):
+                setattr(cfg, key, NewtonCollisionAttributesCfg.from_dict(value))
+            elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
                 logger.log_warning(
@@ -550,16 +699,38 @@ class RigidBodyAttributesOverrideCfg:
     dynamic_friction: float | None = None
     static_friction: float | None = None
 
+    newton: NewtonCollisionAttributesCfg | None = None
+    """Newton-specific per-shape overrides (None means inherit the base newton sub-config)."""
+
     def merge_with(self, base: RigidBodyAttributesCfg) -> PhysicalAttr:
-        """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides."""
+        """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides.
+
+        .. note::
+            This returns the legacy PhysX projection and therefore drops the
+            Newton sub-config. For a Newton-aware merge that preserves
+            ``newton``, use :meth:`merged_cfg` and pass it to the Newton
+            resolver.
+        """
+        return self.merged_cfg(base).attr()
+
+    def merged_cfg(self, base: RigidBodyAttributesCfg) -> RigidBodyAttributesCfg:
+        """Merge overrides onto ``base`` into a full :class:`RigidBodyAttributesCfg`.
+
+        Unlike :meth:`merge_with`, this preserves the ``newton`` sub-config
+        (override's non-None sub-fields win, else base's) so the result can be
+        fed to the Newton resolver.
+        """
         merged = RigidBodyAttributesCfg()
         for field_name in merged.__dataclass_fields__:
+            if field_name == "newton":
+                continue
             override_val = getattr(self, field_name)
             if override_val is not None:
                 setattr(merged, field_name, override_val)
             else:
                 setattr(merged, field_name, getattr(base, field_name))
-        return merged.attr()
+        merged.newton = _merge_newton_subcfg(self.newton, base.newton)
+        return merged
 
     @classmethod
     def from_dict(
@@ -568,7 +739,9 @@ class RigidBodyAttributesOverrideCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
+            if key == "newton" and isinstance(value, dict):
+                setattr(cfg, key, NewtonCollisionAttributesCfg.from_dict(value))
+            elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
                 logger.log_warning(

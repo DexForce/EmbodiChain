@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import dexsim
 import open3d as o3d
@@ -28,6 +30,7 @@ from dexsim.types import (
     ObjectCloneOptions,
     RigidBodyShape,
     SDFConfig,
+    ActorType,
 )
 from dexsim.engine import Articulation
 from dexsim.environment import Env, Arena
@@ -58,6 +61,133 @@ def _is_newton_backend_active() -> bool:
 def _set_body_scale_after_rigidbody(obj: MeshObject, body_scale: tuple | list) -> None:
     """Set body scale after rigid body creation for Newton compatibility."""
     obj.set_body_scale(*body_scale)
+
+
+def _newton_solver_type() -> str | None:
+    """Return the active Newton solver type, or None if unavailable."""
+    try:
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        mgr = getattr(get_physics_scene(), "manager", None)
+        if mgr is None:
+            return None
+        return getattr(getattr(mgr, "cfg", None), "solver_cfg", None).solver_type
+    except Exception:
+        return None
+
+
+def _attach_newton_rigidbody_desc(
+    obj: MeshObject,
+    cfg: RigidObjectCfg,
+    body_type: ActorType,
+    shape_type: RigidBodyShape,
+) -> None:
+    """Attach rigid-body physics via dexsim's Newton desc-native path.
+
+    Used when ``cfg.attrs.newton`` is set on the Newton backend: builds the
+    resolved Newton shape descriptor (common fields projected + Newton-native
+    sub-config) and a ``RigidBodyPhysicsDesc`` body descriptor, populates the
+    ``mgr.dexsim_meta`` scaffolding that dexsim's registration/rebuild reads
+    (mirroring ``NewtonSpawnAdapter._attach_newton``), and registers via
+    ``register_mesh_object_to_newton_patch`` — fully bypassing the legacy
+    ``PhysicalAttr`` path so Newton-native contact/shape params reach the model.
+    Emits per-solver / backend-mismatch warnings.
+    """
+    from embodichain.lab.sim.sim_manager import get_physics_scene
+    from dexsim.engine.newton_physics.rigid_body.registration import (
+        register_mesh_object_to_newton_patch,
+    )
+    from dexsim.engine.newton_physics.registry import _get_entity_native_handle
+    from embodichain.lab.sim.physics_attrs import (
+        resolve_newton_body,
+        resolve_newton_shape,
+        warn_ignored_contact_fields,
+        warn_backend_mismatched_fields,
+    )
+
+    mgr = getattr(get_physics_scene(), "manager", None)
+    if mgr is None:
+        logger.log_error(
+            "Newton manager is unavailable; cannot attach rigid body via the "
+            "desc-native path."
+        )
+    shape = resolve_newton_shape(cfg.attrs)
+    solver_type = _newton_solver_type()
+    if solver_type is not None:
+        warn_ignored_contact_fields(shape, solver_type)
+    warn_backend_mismatched_fields(cfg.attrs, "newton")
+    body = resolve_newton_body(cfg.attrs, body_type)
+
+    # Populate the dexsim_meta scaffolding registration/rebuild read. This
+    # mirrors dexsim's NewtonSpawnAdapter._attach_newton meta dict so the body
+    # rebuilds correctly on the next finalize.
+    entity_handle = _get_entity_native_handle(obj)
+    arena = obj.get_arena() if hasattr(obj, "get_arena") else None
+    arena_handle = arena.get_native_handle() if arena is not None else -1
+    mgr.dexsim_meta[entity_handle] = {
+        "actor_type": body_type,
+        "shape_type": shape_type,
+        "node_scale": np.asarray(obj.get_scale(), dtype=np.float32).reshape(-1)[:3],
+        "body_scale": np.asarray(obj.get_body_scale(), dtype=np.float32).reshape(-1)[
+            :3
+        ],
+        "arena_native_handle": arena_handle,
+        "newton_world_index": -1,
+        "newton_shape": shape,
+        "newton_body": body,
+    }
+
+    register_mesh_object_to_newton_patch(
+        mgr,
+        obj,
+        body_type,
+        shape_type,
+        attr=None,
+        mesh_source_obj=obj,
+        newton_shape=shape,
+        newton_body=body,
+    )
+    # Newton requires body scale after rigid-body creation.
+    _set_body_scale_after_rigidbody(obj, cfg.body_scale)
+
+
+def _use_newton_desc_path(cfg: RigidObjectCfg) -> bool:
+    """Whether to route rigid-body spawn through the Newton desc-native path."""
+    return _is_newton_backend_active() and cfg.attrs.newton is not None
+
+
+def _newton_subcfg_has_fields(newton_cfg) -> bool:
+    """Return True if a Newton sub-config sets any field."""
+    if newton_cfg is None:
+        return False
+    return any(
+        getattr(newton_cfg, f.name, None) is not None
+        for f in newton_cfg.__dataclass_fields__
+        if f.name != "newton"
+    )
+
+
+def _warn_newton_articulation_native_attrs(cfg: "ArticulationCfg") -> None:
+    """Warn that Newton-native per-link contact params are not applied to articulations.
+
+    dexsim's ``NewtonArticulation`` exposes no per-link contact-material setter
+    (ke/kd/margin/...), so the ``attrs.newton`` sub-config on an articulation is
+    accepted for config symmetry but cannot be applied per-link on Newton today.
+    Common fields (mass/friction/restitution/contact_offset) are still applied
+    via the legacy ``set_physical_attr`` path.
+    """
+    sources = []
+    if _newton_subcfg_has_fields(getattr(cfg.attrs, "newton", None)):
+        sources.append("attrs.newton")
+    for group_name, group_cfg in (cfg.link_attrs or {}).items():
+        if _newton_subcfg_has_fields(getattr(group_cfg.attrs, "newton", None)):
+            sources.append(f"link_attrs['{group_name}'].attrs.newton")
+    if sources:
+        logger.log_warning(
+            "Newton-native per-link contact/shape params (" + ", ".join(sources) + ") "
+            "are not yet applied to articulation links on the Newton backend "
+            "(no dexsim per-link contact-material API). Common fields are applied."
+        )
 
 
 def get_dexsim_arenas() -> List[dexsim.environment.Arena]:
@@ -327,6 +457,7 @@ def set_dexsim_articulation_cfg(art: Articulation, cfg: ArticulationCfg) -> None
     if is_newton_art:
         for name in link_names:
             art.set_physical_attr(cfg.attrs.attr(), name)
+        _warn_newton_articulation_native_attrs(cfg)
     else:
         art.set_physical_attr(cfg.attrs.attr())
     _apply_link_physics_overrides(art, cfg, link_names)
@@ -451,6 +582,9 @@ def _configure_primitive_rigidbody(
     shape_type: RigidBodyShape,
 ) -> None:
     """Attach primitive rigid-body physics to a cube or sphere prototype."""
+    if is_newton_backend and cfg.attrs.newton is not None:
+        _attach_newton_rigidbody_desc(obj, cfg, body_type, shape_type)
+        return
     if not is_newton_backend:
         obj.set_body_scale(*cfg.body_scale)
     obj.add_rigidbody(body_type, shape_type, cfg.attrs.attr())
@@ -520,7 +654,10 @@ def _load_rigid_mesh_prototype(
         )
     else:
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
-        obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+        if is_newton_backend and cfg.attrs.newton is not None:
+            _attach_newton_rigidbody_desc(obj, cfg, body_type, RigidBodyShape.CONVEX)
+        else:
+            obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
 
     _apply_mesh_uv_mapping(obj, cfg)
     return obj

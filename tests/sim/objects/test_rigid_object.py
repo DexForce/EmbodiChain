@@ -28,6 +28,7 @@ from embodichain.lab.sim import (
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import RigidObjectCfg, physics_cfg_for_backend
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import NewtonCollisionAttributesCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
 
@@ -982,6 +983,42 @@ class TestRigidObjectNewton(BaseRigidObjectTest):
     def test_physical_attributes(self):
         """Newton getters and setters for mass, friction, inertia work via batch API."""
         super().test_physical_attributes()
+
+    def test_newton_native_attrs_desc_native_spawn(self):
+        """RigidObject with attrs.newton spawns via the desc-native path on Newton.
+
+        Setting ``attrs.newton`` routes spawn through
+        ``register_mesh_object_to_newton_patch`` (bypassing legacy PhysicalAttr),
+        so Newton-native contact/shape params reach the model. Verifies the
+        body is registered with the Newton manager after finalize.
+        """
+        duck_path = get_data_path(DUCK_PATH)
+        cfg = RigidObjectCfg(
+            uid="duck_newton_native",
+            shape=MeshCfg(fpath=duck_path),
+            body_type="dynamic",
+            attrs=RigidBodyAttributesCfg(
+                mass=1.0,
+                dynamic_friction=0.5,
+                restitution=0.1,
+                newton=NewtonCollisionAttributesCfg(ke=1e3, kd=50.0, margin=0.01),
+            ),
+        )
+        obj: RigidObject = self.sim.add_rigid_object(cfg=cfg)
+        self.sim.finalize_newton_physics()
+
+        assert obj.num_instances == NUM_ARENAS
+        assert obj.body_type == "dynamic"
+        # The body must be registered with the Newton manager post-finalize.
+        mgr = self.sim.newton_manager
+        assert mgr is not None
+        assert mgr.registered_body_count() > 0
+        # Common fields round-trip via the batch view (mass applied live).
+        assert torch.allclose(
+            obj.get_mass(),
+            torch.full((NUM_ARENAS,), 1.0, device=self.sim.device),
+            atol=1e-5,
+        )
 
     @pytest.mark.skip(
         reason="TODO: DexSim Newton SDF rigidbody path is not validated in EmbodiChain yet."
