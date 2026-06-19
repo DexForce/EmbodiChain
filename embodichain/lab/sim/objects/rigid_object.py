@@ -324,6 +324,24 @@ class RigidObject(BatchEntity):
             )
         return attr
 
+    def _get_newton_attr_or_none(self, env_idx: int):
+        """Return the Newton meta PhysicalAttr, or None when not present.
+
+        Unlike :meth:`_get_newton_attr` this does not raise: objects spawned via
+        the desc-native path (``attrs.newton`` set) carry ``newton_shape``/
+        ``newton_body`` descriptors instead of a legacy ``attr``, so they have
+        no meta ``PhysicalAttr`` to mirror onto. Used by the not-ready setter
+        paths to tolerate both spawn paths.
+        """
+        entity = self._entities[env_idx]
+        entity_handle = int(entity.get_native_handle())
+        if entity_handle < 0:
+            entity_handle &= _UINT64_MAX
+        manager = getattr(self._ps, "manager", None)
+        if manager is None:
+            return None
+        return getattr(manager, "dexsim_meta", {}).get(entity_handle, {}).get("attr")
+
     def _set_newton_attr_meta(self, env_idx: int, physical_attr) -> None:
         """Mirror a :class:`dexsim.types.PhysicalAttr` onto the stored Newton meta.
 
@@ -793,7 +811,14 @@ class RigidObject(BatchEntity):
 
         mass_np = mass.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_mass(mass_np[i])
+            if is_newton_scene(self._ps):
+                # Not finalized: mirror to meta (consumed at next finalize). The
+                # PhysX-bound set_mass is not patched for Newton entities.
+                attr = self._get_newton_attr_or_none(env_idx)
+                if attr is not None:
+                    attr.mass = float(mass_np[i])
+            else:
+                self._entities[env_idx].get_physical_body().set_mass(mass_np[i])
 
     def get_mass(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get mass for the rigid object.
@@ -848,12 +873,20 @@ class RigidObject(BatchEntity):
 
         friction_np = friction.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_dynamic_friction(
-                friction_np[i]
-            )
-            self._entities[env_idx].get_physical_body().set_static_friction(
-                friction_np[i]
-            )
+            if is_newton_scene(self._ps):
+                # Not finalized: mirror to meta (Newton has a single mu; consumed
+                # at next finalize). The PhysX-bound friction setters are not
+                # patched for Newton entities.
+                attr = self._get_newton_attr_or_none(env_idx)
+                if attr is not None:
+                    attr.dynamic_friction = float(friction_np[i])
+            else:
+                self._entities[env_idx].get_physical_body().set_dynamic_friction(
+                    friction_np[i]
+                )
+                self._entities[env_idx].get_physical_body().set_static_friction(
+                    friction_np[i]
+                )
 
     def get_friction(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get friction for the rigid object.
@@ -978,9 +1011,16 @@ class RigidObject(BatchEntity):
 
         inertia_np = inertia.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_mass_space_inertia_tensor(
-                inertia_np[i]
-            )
+            if is_newton_scene(self._ps):
+                # Not finalized: mirror to meta (consumed at next finalize). The
+                # PhysX-bound inertia setter is not patched for Newton entities.
+                attr = self._get_newton_attr_or_none(env_idx)
+                if attr is not None:
+                    attr.inertia = np.asarray(inertia_np[i], dtype=np.float32)
+            else:
+                self._entities[
+                    env_idx
+                ].get_physical_body().set_mass_space_inertia_tensor(inertia_np[i])
 
     def get_inertia(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get inertia tensor for the rigid object.
