@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, Mock
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
     Affordance,
+    MoveObjectTarget,
     ObjectSemantics,
 )
 from embodichain.lab.sim.atomic_actions.engine import (
@@ -144,6 +145,11 @@ class TestResolveTarget:
         result = self.engine._resolve_target(sem)
         assert result is sem
 
+    def test_move_object_target_passthrough(self):
+        target = MoveObjectTarget(object_target_pose=torch.eye(4))
+        result = self.engine._resolve_target(target)
+        assert result is target
+
     def test_string_resolved_via_semantic_analyzer(self):
         result = self.engine._resolve_target("mug")
         assert isinstance(result, ObjectSemantics)
@@ -157,6 +163,16 @@ class TestResolveTarget:
     def test_dict_with_pose_raises_on_non_tensor(self):
         with pytest.raises(TypeError, match="must be a torch.Tensor"):
             self.engine._resolve_target({"pose": "not_a_tensor"})
+
+    def test_dict_with_object_target_pose(self):
+        pose = torch.eye(4)
+        result = self.engine._resolve_target({"object_target_pose": pose})
+        assert isinstance(result, MoveObjectTarget)
+        assert result.object_target_pose is pose
+
+    def test_dict_with_object_target_pose_raises_on_non_tensor(self):
+        with pytest.raises(TypeError, match="must be a torch.Tensor"):
+            self.engine._resolve_target({"object_target_pose": "not_a_tensor"})
 
     def test_dict_with_semantics_key(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="bottle")
@@ -183,6 +199,84 @@ class TestResolveTarget:
     def test_unsupported_type_raises(self):
         with pytest.raises(TypeError, match="target must be"):
             self.engine._resolve_target(42)
+
+
+# ---------------------------------------------------------------------------
+# AtomicActionEngine held-object state contract
+# ---------------------------------------------------------------------------
+
+
+class TestHeldObjectStateContract:
+    """Tests for explicit held-object state updates in execute_static."""
+
+    def setup_method(self):
+        self.robot = Mock()
+        self.robot.device = torch.device("cpu")
+        self.robot.dof = 6
+        self.robot.get_qpos.return_value = torch.zeros(1, 6)
+        self.robot.get_joint_ids.return_value = list(range(6))
+
+        self.mg = Mock()
+        self.mg.robot = self.robot
+        self.mg.device = torch.device("cpu")
+
+        self.engine = AtomicActionEngine(self.mg, actions_cfg_list=[])
+
+    def _make_action(self, *, updates_held_object_state: bool, held_state):
+        action = Mock()
+        action.control_part = "arm"
+        action.updates_held_object_state = updates_held_object_state
+        action.execute.return_value = (
+            True,
+            torch.zeros(1, 2, 6),
+            list(range(6)),
+        )
+        action.get_held_object_state.return_value = held_state
+        return action
+
+    def test_execute_static_ignores_getter_when_action_does_not_update_state(self):
+        held_state = object()
+        action = self._make_action(
+            updates_held_object_state=False,
+            held_state=None,
+        )
+        self.engine._actions = {"noop": action}
+        self.engine._action_context["held_object_state"] = held_state
+
+        is_success, _ = self.engine.execute_static([torch.eye(4)])
+
+        assert is_success is True
+        action.get_held_object_state.assert_not_called()
+        assert self.engine._action_context["held_object_state"] is held_state
+
+    def test_execute_static_updates_state_when_action_declares_contract(self):
+        held_state = object()
+        action = self._make_action(
+            updates_held_object_state=True,
+            held_state=held_state,
+        )
+        self.engine._actions = {"producer": action}
+
+        is_success, _ = self.engine.execute_static([torch.eye(4)])
+
+        assert is_success is True
+        action.get_held_object_state.assert_called_once_with()
+        assert self.engine._action_context["held_object_state"] is held_state
+
+    def test_execute_static_clears_state_when_action_returns_none(self):
+        held_state = object()
+        action = self._make_action(
+            updates_held_object_state=True,
+            held_state=None,
+        )
+        self.engine._actions = {"release": action}
+        self.engine._action_context["held_object_state"] = held_state
+
+        is_success, _ = self.engine.execute_static([torch.eye(4)])
+
+        assert is_success is True
+        action.get_held_object_state.assert_called_once_with()
+        assert "held_object_state" not in self.engine._action_context
 
 
 if __name__ == "__main__":

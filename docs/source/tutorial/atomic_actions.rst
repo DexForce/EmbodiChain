@@ -15,7 +15,8 @@ Key Features
 - **Semantic-aware execution** — actions accept either a raw pose tensor or an
   ``ObjectSemantics`` descriptor that bundles affordance data (grasp poses, interaction
   points) with the simulation entity.
-- **Three built-in primitives** — ``MoveAction``, ``PickUpAction``, and ``PlaceAction``
+- **Built-in primitives** — ``MoveAction``, ``PickUpAction``, ``MoveObjectAction``,
+  and ``PlaceAction``
   cover the most common tabletop manipulation workflows out of the box.
   See the :ref:`supported_atomic_actions` table for configs and target types.
 - **Extensible registry** — custom actions can be registered globally with
@@ -30,13 +31,13 @@ For the full design overview, architecture diagram, and extension guide see
 The Code
 --------
 
-The tutorial corresponds to the ``atomic_actions.py`` script in the ``scripts/tutorials/atomic_action``
+The tutorial corresponds to the ``atomic_actions.py`` script in the ``scripts/tutorials/sim``
 directory.
 
 .. dropdown:: Code for atomic_actions.py
     :icon: code
 
-    .. literalinclude:: ../../../scripts/tutorials/atomic_action/atomic_actions.py
+    .. literalinclude:: ../../../scripts/tutorials/sim/atomic_actions.py
         :language: python
         :linenos:
 
@@ -53,6 +54,7 @@ Setting up the engine
    from embodichain.lab.sim.atomic_actions import (
        AtomicActionEngine,
        PickUpActionCfg,
+       MoveObjectActionCfg,
        PlaceActionCfg,
        MoveActionCfg,
    )
@@ -77,6 +79,11 @@ Setting up the engine
        control_part="arm",
        hand_control_part="hand",
        lift_height=0.15,
+   )
+   move_object_cfg = MoveObjectActionCfg(
+       hand_close_qpos=hand_close,
+       control_part="arm",
+       hand_control_part="hand",
    )
    move_cfg = MoveActionCfg(control_part="arm")
 
@@ -138,6 +145,30 @@ Executing a pick-place-move sequence
    for i in range(trajectory.shape[1]):
        robot.set_qpos(trajectory[:, i])
        sim.update(step=4)
+
+Moving a held object
+~~~~~~~~~~~~~~~~~~~~
+
+``MoveObjectAction`` consumes the runtime ``HeldObjectState`` produced by a previous
+semantic ``PickUpAction``. The target is object-centric, so the caller specifies where the
+object should move, and the action converts that pose into an end-effector target while
+keeping the gripper closed.
+
+.. code-block:: python
+
+   from embodichain.lab.sim.atomic_actions import MoveObjectTarget
+
+   engine = AtomicActionEngine(
+       motion_generator=motion_gen,
+       actions_cfg_list=[pickup_cfg, move_object_cfg],
+   )
+
+   object_target_pose = torch.eye(4, dtype=torch.float32, device=device)
+   object_target_pose[:3, 3] = torch.tensor([0.3, -0.2, 0.25], device=device)
+
+   is_success, trajectory = engine.execute_static(
+       target_list=[semantics, MoveObjectTarget(object_target_pose=object_target_pose)]
+   )
 
 Registering custom actions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

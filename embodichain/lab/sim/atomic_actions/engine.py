@@ -251,9 +251,8 @@ class AtomicActionEngine:
             if not is_success:
                 return False, all_trajectory
 
-            held_state_getter = getattr(atom_action, "get_held_object_state", None)
-            if callable(held_state_getter):
-                held_state = held_state_getter()
+            if atom_action.updates_held_object_state:
+                held_state = atom_action.get_held_object_state()
                 if held_state is None:
                     self._action_context.pop("held_object_state", None)
                 else:

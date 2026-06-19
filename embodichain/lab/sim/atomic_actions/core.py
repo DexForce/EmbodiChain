@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Any, ClassVar, Dict, List, Optional, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.planners import PlanResult, PlanState, MoveType
 from embodichain.utils import configclass
@@ -375,6 +375,9 @@ class AtomicAction(ABC):
     the existing motion planning infrastructure.
     """
 
+    updates_held_object_state: ClassVar[bool] = False
+    """Whether the engine should read held-object state after this action."""
+
     def __init__(
         self,
         motion_generator: MotionGenerator,
@@ -391,6 +394,10 @@ class AtomicAction(ABC):
         self.robot = motion_generator.robot
         self.control_part = cfg.control_part
         self.device = self.robot.device
+
+    def get_held_object_state(self) -> HeldObjectState | None:
+        """Return held-object state after execution if this action updates it."""
+        return None
 
     @abstractmethod
     def execute(

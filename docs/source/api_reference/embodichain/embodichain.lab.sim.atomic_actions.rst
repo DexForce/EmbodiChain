@@ -10,12 +10,16 @@ embodichain.lab.sim.atomic_actions
       Affordance
       InteractionPoints
       ObjectSemantics
+      HeldObjectState
+      MoveObjectTarget
       ActionCfg
       AtomicAction
       MoveActionCfg
       MoveAction
       PickUpActionCfg
       PickUpAction
+      MoveObjectActionCfg
+      MoveObjectAction
       PlaceActionCfg
       PlaceAction
       AtomicActionEngine
@@ -34,6 +38,14 @@ Core
     :show-inheritance:
 
 .. autoclass:: ObjectSemantics
+    :members:
+    :show-inheritance:
+
+.. autoclass:: HeldObjectState
+    :members:
+    :show-inheritance:
+
+.. autoclass:: MoveObjectTarget
     :members:
     :show-inheritance:
 
@@ -63,6 +75,15 @@ Actions
     :show-inheritance:
 
 .. autoclass:: PickUpAction
+    :members:
+    :show-inheritance:
+
+.. autoclass:: MoveObjectActionCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+    :show-inheritance:
+
+.. autoclass:: MoveObjectAction
     :members:
     :show-inheritance:
 

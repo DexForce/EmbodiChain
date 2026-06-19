@@ -36,12 +36,10 @@ from .actions import (
     MoveObjectAction,
     PickUpAction,
     PlaceAction,
-    UprightAction,
     MoveActionCfg,
     MoveObjectActionCfg,
     PickUpActionCfg,
     PlaceActionCfg,
-    UprightActionCfg,
 )
 from .engine import (
     AtomicActionEngine,
@@ -64,12 +62,10 @@ __all__ = [
     "MoveObjectAction",
     "PickUpAction",
     "PlaceAction",
-    "UprightAction",
     "MoveActionCfg",
     "MoveObjectActionCfg",
     "PickUpActionCfg",
     "PlaceActionCfg",
-    "UprightActionCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",
