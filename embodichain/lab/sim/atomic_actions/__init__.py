@@ -31,6 +31,7 @@ from .core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
+    CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -42,6 +43,8 @@ from .core import (
     WorldState,
 )
 from .actions import (
+    CoordinatedPlacement,
+    CoordinatedPlacementCfg,
     MoveEndEffector,
     MoveJoints,
     MoveHeldObject,
@@ -72,6 +75,7 @@ __all__ = [
     "JointPositionTarget",
     "NamedJointPositionTarget",
     "EndEffectorPoseTarget",
+    "CoordinatedPlacementTarget",
     "GraspTarget",
     "Target",
     "WorldState",
@@ -84,11 +88,13 @@ __all__ = [
     "MoveHeldObject",
     "PickUp",
     "Place",
+    "CoordinatedPlacement",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",
     "PickUpCfg",
     "PlaceCfg",
+    "CoordinatedPlacementCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",
