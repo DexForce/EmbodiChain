@@ -362,6 +362,208 @@ class _HandCloseAction(MoveAction):
 
 
 @configclass
+class PressActionCfg(HandCloseActionCfg):
+    name: str = "press"
+    """Name of the action, used for identification and logging."""
+
+    hand_interp_steps: int = 8
+    """Number of waypoints for closing the gripper before pressing."""
+
+
+class PressAction(_HandCloseAction):
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        cfg: PressActionCfg | None = None,
+    ):
+        """
+        Initialize the atomic action.
+        Args:
+            motion_generator: The motion generator instance to use for planning.
+            cfg: Configuration for the action.
+        """
+        super().__init__(
+            motion_generator,
+            cfg=cfg if cfg is not None else PressActionCfg(),
+            cfg_name="PressActionCfg",
+        )
+
+    def _compute_press_waypoints(self) -> tuple[int, int, int]:
+        """Split waypoints into hand-close, down, and return phases."""
+        hand_waypoints = self.cfg.hand_interp_steps
+        if hand_waypoints < 1:
+            logger.log_error(
+                "hand_interp_steps must be at least 1 for PressActionCfg.",
+                ValueError,
+            )
+
+        motion_waypoints = self.cfg.sample_interval - hand_waypoints
+        down_waypoints = motion_waypoints // 2
+        back_waypoints = motion_waypoints - down_waypoints
+        if down_waypoints < 2 or back_waypoints < 2:
+            logger.log_error(
+                "Not enough waypoints for press trajectory. Please increase "
+                "sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
+        return hand_waypoints, down_waypoints, back_waypoints
+
+    def _resolve_current_hand_qpos(
+        self, current_qpos: torch.Tensor | None
+    ) -> torch.Tensor:
+        """Resolve the hand qpos at the start of the press action."""
+        if current_qpos is None:
+            return self.robot.get_qpos(name=self.cfg.hand_control_part).to(
+                device=self.device, dtype=torch.float32
+            )
+
+        current_qpos = current_qpos.to(device=self.device, dtype=torch.float32)
+        if current_qpos.dim() == 1:
+            current_qpos = current_qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if current_qpos.shape[0] != self.n_envs:
+            logger.log_error(
+                f"current_qpos must have batch size {self.n_envs}, "
+                f"but got {current_qpos.shape[0]}",
+                ValueError,
+            )
+
+        hand_dof = len(self.hand_joint_ids)
+        if current_qpos.shape[1] == hand_dof:
+            return current_qpos
+        if current_qpos.shape[1] <= max(self.hand_joint_ids):
+            logger.log_error(
+                "current_qpos must be either hand qpos or full robot qpos.",
+                ValueError,
+            )
+        return current_qpos[:, self.hand_joint_ids]
+
+    def execute(
+        self,
+        target: Union[ObjectSemantics, torch.Tensor],
+        start_qpos: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> tuple[bool, torch.Tensor, list[float]]:
+        """Close the gripper, press down to a target pose, then return."""
+        is_success, press_xpos = self._resolve_pose_target(
+            target, action_name=self.__class__.__name__
+        )
+        if not is_success:
+            logger.log_warning("Failed to resolve press target pose.")
+            return False, torch.empty(0), self.joint_ids
+
+        press_xpos = press_xpos.to(device=self.device, dtype=torch.float32)
+        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
+        start_hand_qpos = self._resolve_current_hand_qpos(kwargs.get("current_qpos"))
+
+        n_close_waypoint, n_down_waypoint, n_back_waypoint = (
+            self._compute_press_waypoints()
+        )
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=self.cfg.control_part,
+            to_matrix=True,
+        )
+
+        hand_close_path = self._interpolate_hand_qpos(
+            start_hand_qpos,
+            self.hand_close_qpos,
+            n_close_waypoint,
+        )
+        hand_close_trajectory = torch.zeros(
+            size=(self.n_envs, n_close_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        hand_close_trajectory[:, :, : self.arm_dof] = start_qpos.unsqueeze(1)
+        hand_close_trajectory[:, :, self.arm_dof :] = hand_close_path
+
+        target_states_list = [
+            [
+                PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE),
+            ]
+            for i in range(self.n_envs)
+        ]
+        is_success, down_plan_traj = self._plan_arm_trajectory(
+            target_states_list,
+            start_qpos,
+            n_down_waypoint,
+            self.arm_dof,
+        )
+        if not is_success:
+            logger.log_warning("Failed to plan press down trajectory.")
+            return False, torch.empty(0), self.joint_ids
+
+        down_trajectory = torch.zeros(
+            size=(self.n_envs, n_down_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        down_trajectory[:, :, : self.arm_dof] = down_plan_traj
+        down_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+            self.hand_close_qpos,
+            n_down_waypoint,
+        )
+
+        press_qpos = down_plan_traj[:, -1, : self.arm_dof]
+        back_keyframes = torch.cat(
+            [press_qpos.unsqueeze(1), start_qpos.unsqueeze(1)],
+            dim=1,
+        )
+        back_plan_traj = interpolate_with_distance(
+            trajectory=back_keyframes,
+            interp_num=n_back_waypoint,
+            device=self.device,
+        )
+        back_trajectory = torch.zeros(
+            size=(self.n_envs, n_back_waypoint, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        back_trajectory[:, :, : self.arm_dof] = back_plan_traj
+        back_trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
+            self.hand_close_qpos,
+            n_back_waypoint,
+        )
+
+        if not torch.allclose(
+            self.robot.compute_fk(
+                qpos=back_plan_traj[:, -1, :],
+                name=self.cfg.control_part,
+                to_matrix=True,
+            )[:, :3, 3],
+            start_xpos[:, :3, 3],
+            rtol=1e-4,
+            atol=1e-4,
+        ):
+            logger.log_warning(
+                "Press return trajectory may not end at the original end-effector position."
+            )
+
+        trajectory = torch.cat(
+            [hand_close_trajectory, down_trajectory, back_trajectory],
+            dim=1,
+        )
+        return True, trajectory, self.joint_ids
+
+    def validate(self, target, start_qpos=None, **kwargs):
+        is_success, press_xpos = self._resolve_pose_target(
+            target, action_name=self.__class__.__name__
+        )
+        if not is_success:
+            return False
+
+        press_xpos = press_xpos.to(device=self.device, dtype=torch.float32)
+        start_qpos = self._resolve_start_qpos(start_qpos, self.arm_dof)
+        ik_success, _ = self.robot.compute_ik(
+            pose=press_xpos,
+            name=self.cfg.control_part,
+            joint_seed=start_qpos,
+        )
+        return self._all_envs_success(ik_success)
+
+
+@configclass
 class PickUpActionCfg(GraspActionCfg):
     name: str = "pick_up"
     """Name of the action, used for identification and logging."""

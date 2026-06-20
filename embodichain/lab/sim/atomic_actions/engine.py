@@ -187,13 +187,20 @@ class AtomicActionEngine:
         self, actions_cfg_list: Optional[List[ActionCfg]] = None
     ) -> Dict[str, "AtomicAction"]:
         actions: Dict[str, AtomicAction] = {}
-        from .actions import MoveAction, MoveObjectAction, PickUpAction, PlaceAction
+        from .actions import (
+            MoveAction,
+            MoveObjectAction,
+            PickUpAction,
+            PlaceAction,
+            PressAction,
+        )
 
         builtin_action_map: Dict[str, Type[AtomicAction]] = {
             "move": MoveAction,
             "pick_up": PickUpAction,
             "move_object": MoveObjectAction,
             "place": PlaceAction,
+            "press": PressAction,
         }
         if actions_cfg_list is not None:
             for cfg in actions_cfg_list:
@@ -246,6 +253,7 @@ class AtomicActionEngine:
             is_success, traj, joint_ids = atom_action.execute(
                 target=target,
                 start_qpos=start_qpos_part,
+                current_qpos=start_qpos,
                 action_context=self._action_context,
                 held_object_state=self._action_context.get("held_object_state"),
             )
