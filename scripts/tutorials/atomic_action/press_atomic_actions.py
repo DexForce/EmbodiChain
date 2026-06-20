@@ -92,6 +92,14 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULT_PRESS_TOLERANCE,
         help="XY tolerance in meters for checking whether press reaches block center.",
     )
+    parser.add_argument(
+        "--block_pos",
+        type=float,
+        nargs=2,
+        default=BLOCK_CENTER[:2],
+        metavar=("X", "Y"),
+        help="Initial XY position of the wooden block center.",
+    )
     return parser.parse_args()
 
 
@@ -169,7 +177,10 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(cfg=cfg)
 
 
-def create_wooden_block(sim: SimulationManager) -> RigidObject:
+def create_wooden_block(
+    sim: SimulationManager,
+    block_center: list[float],
+) -> RigidObject:
     cfg = RigidObjectCfg(
         uid="wooden_block",
         shape=CubeCfg(
@@ -185,7 +196,7 @@ def create_wooden_block(sim: SimulationManager) -> RigidObject:
             dynamic_friction=0.8,
             static_friction=0.9,
         ),
-        init_pos=BLOCK_CENTER,
+        init_pos=block_center,
     )
     return sim.add_rigid_object(cfg=cfg)
 
@@ -299,7 +310,12 @@ def run_press_demo(args: argparse.Namespace) -> None:
     sim = initialize_simulation(args)
     robot = create_robot(sim)
     create_table(sim)
-    block = create_wooden_block(sim)
+    block_center = [
+        args.block_pos[0],
+        args.block_pos[1],
+        TABLE_TOP_Z + 0.5 * BLOCK_SIZE[2],
+    ]
+    block = create_wooden_block(sim, block_center)
 
     settle_object(sim, block, step=5)
     motion_gen = MotionGenerator(
