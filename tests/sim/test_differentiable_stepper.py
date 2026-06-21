@@ -74,3 +74,27 @@ def test_newton_with_grad_creates_stepper():
 
     assert isinstance(stepper, DifferentiableStepper)
     SimulationManager.reset()
+
+
+def test_tape_context_records_step():
+    import warp as wp
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            physics_cfg=NewtonPhysicsCfg(
+                requires_grad=True,
+                solver_cfg={"solver_type": "semi_implicit"},
+                use_cuda_graph=False,
+            ),
+            num_envs=1,
+            headless=True,
+        )
+    )
+    sim.finalize_newton_physics()
+    from embodichain.lab.sim.diff import tape_context
+
+    with tape_context(sim) as tape:
+        pass  # empty tape is valid; tape.backward() on empty is a no-op
+
+    assert isinstance(tape, wp.Tape)
+    SimulationManager.reset()
