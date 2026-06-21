@@ -22,9 +22,9 @@ import pytest
 import torch
 from unittest.mock import MagicMock, Mock
 
+from embodichain.lab.sim.atomic_actions.affordance import Affordance
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
-    Affordance,
     MoveObjectTarget,
     ObjectSemantics,
 )

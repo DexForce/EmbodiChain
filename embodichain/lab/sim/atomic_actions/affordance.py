@@ -1,0 +1,209 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import torch
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
+
+from embodichain.toolkits.graspkit.pg_grasp import (
+    GraspGenerator,
+    GraspGeneratorCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
+    GripperCollisionCfg,
+)
+from embodichain.utils import logger
+
+
+@dataclass
+class Affordance:
+    """Base class for affordance data.
+
+    Affordance represents interaction possibilities for an object.
+    Unlike the previous design, Affordance no longer stores a shared geometry
+    dict aliased from ObjectSemantics. Subclasses take only the specific
+    fields they need.
+    """
+
+    object_label: str = ""
+    """Label of the object this affordance belongs to."""
+
+    custom_config: Dict[str, Any] = field(default_factory=dict)
+    """User-defined configuration payload."""
+
+    def set_custom_config(self, key: str, value: Any) -> None:
+        """Set a custom affordance configuration value."""
+        self.custom_config[key] = value
+
+    def get_custom_config(self, key: str, default: Any = None) -> Any:
+        """Get a custom affordance configuration value."""
+        return self.custom_config.get(key, default)
+
+    def get_batch_size(self) -> int:
+        """Return the batch size of this affordance data."""
+        return 1
+
+
+@dataclass
+class AntipodalAffordance(Affordance):
+    """Antipodal grasp affordance for parallel-jaw grippers."""
+
+    mesh_vertices: torch.Tensor | None = None
+    """Object mesh vertices, shape [N, 3]."""
+
+    mesh_triangles: torch.Tensor | None = None
+    """Object mesh triangle indices, shape [M, 3]."""
+
+    generator_cfg: GraspGeneratorCfg | None = None
+    """Optional grasp-generator configuration."""
+
+    gripper_collision_cfg: GripperCollisionCfg | None = None
+    """Optional gripper-collision configuration."""
+
+    force_reannotate: bool = False
+    """If True, recompute the grasp annotation on each access."""
+
+    is_draw_grasp_xpos: bool = False
+    """If True, draw grasp poses in the simulator on each call."""
+
+    _generator: GraspGenerator | None = field(default=None, init=False, repr=False)
+
+    def _init_generator(self) -> None:
+        if self.mesh_vertices is None or self.mesh_triangles is None:
+            logger.log_error(
+                "mesh_vertices and mesh_triangles must be provided to initialize "
+                "AntipodalAffordance.",
+                ValueError,
+            )
+        self._generator = GraspGenerator(
+            vertices=self.mesh_vertices,
+            triangles=self.mesh_triangles,
+            cfg=self.generator_cfg,
+            gripper_collision_cfg=self.gripper_collision_cfg,
+        )
+        if self.force_reannotate or self._generator._hit_point_pairs is None:
+            self._generator.annotate()
+
+    def get_valid_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        if self._generator is None:
+            self._init_generator()
+        results = []
+        for i, obj_pose in enumerate(obj_poses):
+            is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
+                obj_pose, approach_direction
+            )
+            if not is_success:
+                logger.log_warning(
+                    f"Failed to find valid grasp poses for {i}-th object."
+                )
+            results.append((grasp_poses, costs))
+        return results
+
+    def get_best_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self._generator is None:
+            self._init_generator()
+        grasp_xpos_list: list[torch.Tensor] = []
+        is_success_list: list[bool] = []
+        open_length_list: list[float] = []
+        for i, obj_pose in enumerate(obj_poses):
+            is_success, grasp_xpos, open_length = self._generator.get_grasp_poses(
+                obj_pose, approach_direction
+            )
+            if is_success:
+                grasp_xpos_list.append(grasp_xpos.unsqueeze(0))
+            else:
+                logger.log_warning(f"No valid grasp pose found for {i}-th object.")
+                grasp_xpos_list.append(
+                    torch.eye(
+                        4, dtype=torch.float32, device=self._generator.device
+                    ).unsqueeze(0)
+                )
+            is_success_list.append(is_success)
+            open_length_list.append(open_length)
+        is_success_t = torch.tensor(
+            is_success_list, dtype=torch.bool, device=self._generator.device
+        )
+        grasp_xpos = torch.concatenate(grasp_xpos_list, dim=0)
+        open_length_t = torch.tensor(
+            open_length_list, dtype=torch.float32, device=self._generator.device
+        )
+        if self.is_draw_grasp_xpos:
+            self._draw_grasp_xpos(grasp_xpos, open_length_t)
+        return is_success_t, grasp_xpos, open_length_t
+
+    def _draw_grasp_xpos(
+        self, grasp_xpos: torch.Tensor, open_length: torch.Tensor
+    ) -> None:
+        from embodichain.lab.sim.sim_manager import SimulationManager
+        from embodichain.lab.sim.objects.gizmo import MarkerCfg
+
+        sim = SimulationManager.get_instance()
+        axis_xpos = [
+            grasp_xpos[i].to("cpu").numpy() for i in range(grasp_xpos.shape[0])
+        ]
+        sim.draw_marker(
+            cfg=MarkerCfg(name="grasp_xpos", axis_xpos=axis_xpos, axis_len=0.05)
+        )
+
+
+@dataclass
+class InteractionPoints(Affordance):
+    """Batch of 3D interaction points on an object surface."""
+
+    points: torch.Tensor = field(default_factory=lambda: torch.zeros(1, 3))
+    """Batch of 3D interaction points with shape [B, 3]."""
+
+    normals: torch.Tensor | None = None
+    """Optional surface normals at each interaction point with shape [B, 3]."""
+
+    point_types: List[str] = field(default_factory=list)
+    """Optional labels for each point's interaction type."""
+
+    def get_points_by_type(self, point_type: str) -> torch.Tensor | None:
+        """Get points by their interaction type."""
+        if point_type in self.point_types:
+            indices = [i for i, t in enumerate(self.point_types) if t == point_type]
+            return self.points[indices]
+        return None
+
+    def get_batch_size(self) -> int:
+        """Return the number of interaction points in this affordance."""
+        return self.points.shape[0]
+
+    def get_approach_direction(self, point_idx: int) -> torch.Tensor:
+        """Get recommended approach direction for a given point."""
+        if self.normals is not None:
+            return -self.normals[point_idx]
+        return torch.tensor(
+            [0, 0, 1], dtype=self.points.dtype, device=self.points.device
+        )
+
+
+__all__ = ["Affordance", "AntipodalAffordance", "InteractionPoints"]

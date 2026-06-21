@@ -22,9 +22,9 @@ import pytest
 import torch
 from unittest.mock import Mock, patch
 
+from embodichain.lab.sim.atomic_actions.affordance import Affordance
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
-    Affordance,
     HeldObjectState,
     MoveObjectTarget,
     ObjectSemantics,
@@ -301,8 +301,8 @@ class TestPickUpActionExecute:
 
     def _make_semantics(self) -> ObjectSemantics:
         entity = Mock()
-        entity.get_local_pose.return_value = torch.eye(4).unsqueeze(0).repeat(
-            NUM_ENVS, 1, 1
+        entity.get_local_pose.return_value = (
+            torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
         )
         return ObjectSemantics(
             affordance=Affordance(),

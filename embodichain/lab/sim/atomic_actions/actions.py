@@ -25,11 +25,11 @@ from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
 from .core import (
     AtomicAction,
     ObjectSemantics,
-    AntipodalAffordance,
     ActionCfg,
     HeldObjectState,
     MoveObjectTarget,
 )
+from .affordance import AntipodalAffordance
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.utils.math import pose_inv
@@ -731,8 +731,7 @@ class MoveObjectAction(_HandCloseAction):
             return False, trajectory, self.joint_ids
         trajectory[:, :, : self.arm_dof] = plan_traj
         trajectory[:, :, self.arm_dof :] = self._repeat_hand_qpos(
-            self.hand_close_qpos,
-            self.cfg.sample_interval
+            self.hand_close_qpos, self.cfg.sample_interval
         )
         return True, trajectory, self.joint_ids
 

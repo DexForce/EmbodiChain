@@ -21,10 +21,12 @@ move, etc., with support for semantic object understanding and extensible
 custom action registration.
 """
 
-from .core import (
+from .affordance import (
     Affordance,
     AntipodalAffordance,
     InteractionPoints,
+)
+from .core import (
     ObjectSemantics,
     HeldObjectState,
     MoveObjectTarget,

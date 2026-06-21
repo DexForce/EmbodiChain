@@ -127,7 +127,7 @@ class SemanticAnalyzer:
             return self._object_cache[label]
 
         # Create default semantics (placeholder implementation)
-        from .core import AntipodalAffordance
+        from .affordance import AntipodalAffordance
 
         # Generate default grasp poses based on object type
         default_poses = torch.eye(4).unsqueeze(0)
