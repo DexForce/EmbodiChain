@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -56,7 +56,7 @@ class TrajectoryBuilder:
             return bool(torch.all(is_success).item())
         return bool(is_success)
 
-    def resolve_pose_target(self, target: torch.Tensor, n_envs: int) -> torch.Tensor:
+    def resolve_pose_target(self, target: torch.Tensor, *, n_envs: int) -> torch.Tensor:
         """Broadcast a (4, 4) pose to (n_envs, 4, 4) or validate batched shape."""
         if not isinstance(target, torch.Tensor):
             logger.log_error(
@@ -75,7 +75,7 @@ class TrajectoryBuilder:
 
     def resolve_start_qpos(
         self,
-        start_qpos: Optional[torch.Tensor],
+        start_qpos: torch.Tensor | None,
         *,
         n_envs: int,
         arm_dof: int,
@@ -121,7 +121,7 @@ class TrajectoryBuilder:
         target_pose: torch.Tensor,
         *,
         control_part: str,
-        qpos_seed: Optional[torch.Tensor] = None,
+        qpos_seed: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Solve IK for a single (unbatched) target pose."""
         if qpos_seed is None:
@@ -132,15 +132,16 @@ class TrajectoryBuilder:
             name=control_part,
         )
         if not success.all():
-            raise RuntimeError(f"IK failed for target pose: {target_pose}")
+            logger.log_error(f"IK failed for target pose: {target_pose}", RuntimeError)
         return qpos.squeeze(0)
 
     def fk_compute(self, qpos: torch.Tensor, *, control_part: str) -> torch.Tensor:
         """Compute forward kinematics for a joint configuration."""
-        if qpos.dim() == 1:
+        is_unbatched = qpos.dim() == 1
+        if is_unbatched:
             qpos = qpos.unsqueeze(0)
         xpos = self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
-        return xpos.squeeze(0) if xpos.shape[0] == 1 else xpos
+        return xpos.squeeze(0) if is_unbatched else xpos
 
     # ------------------------------------------------------------------
     # Waypoint splitting
@@ -184,7 +185,7 @@ class TrajectoryBuilder:
         sample_interval: int,
         control_part: str,
     ) -> MotionGenOptions:
-        """Build default motion generation options for an atomic action."""
+        """Build planner options. Reads ``start_qpos[0]`` because the planner shares options across envs; pass the full batched tensor for type uniformity with other helpers."""
         return MotionGenOptions(
             start_qpos=start_qpos[0],
             control_part=control_part,
@@ -256,8 +257,9 @@ class TrajectoryBuilder:
             f"but got {hand_qpos.shape}",
             ValueError,
         )
+        raise AssertionError("unreachable")  # logger.log_error already raised
 
-    def repeat_hand_qpos(
+    def broadcast_hand_qpos_to_waypoints(
         self,
         hand_qpos: torch.Tensor,
         *,
@@ -265,7 +267,7 @@ class TrajectoryBuilder:
         hand_dof: int,
         n_waypoints: int,
     ) -> torch.Tensor:
-        """Repeat hand qpos across trajectory waypoints."""
+        """Expand hand qpos to (n_envs, n_waypoints, hand_dof) by broadcasting the per-env value across all waypoints."""
         return (
             self.expand_hand_qpos(hand_qpos, n_envs=n_envs, hand_dof=hand_dof)
             .unsqueeze(1)
@@ -276,6 +278,7 @@ class TrajectoryBuilder:
         self,
         start_hand_qpos: torch.Tensor,
         end_hand_qpos: torch.Tensor,
+        *,
         n_waypoints: int,
     ) -> torch.Tensor:
         """Interpolate hand joint positions between two gripper states."""
