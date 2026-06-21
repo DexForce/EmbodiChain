@@ -632,6 +632,55 @@ class SimulationManager:
         """
         self.physics.prepare()
 
+    def create_differentiable_stepper(self):
+        """Create a single-step differentiable physics primitive (Newton-only).
+
+        Requires the Newton backend with ``requires_grad=True`` and
+        ``solver_type="semi_implicit"``. Delegates to
+        :meth:`dexsim.engine.newton_physics.NewtonManager.create_differentiable_stepper`.
+
+        Raises:
+            RuntimeError: If the active backend is not Newton or if the
+                Newton manager is not ready / not in grad mode.
+        """
+        if not self.is_newton_backend:
+            logger.log_error(
+                "create_differentiable_stepper requires the Newton backend."
+            )
+        return self.physics.newton_manager.create_differentiable_stepper()
+
+    def create_gradient_rollout(
+        self,
+        record_steps: int,
+        substeps_per_record: int | None = None,
+        record_dt: float | None = None,
+    ):
+        """Create a gradient rollout buffer (Newton-only).
+
+        Delegates to
+        :meth:`dexsim.engine.newton_physics.NewtonManager.create_gradient_rollout`.
+
+        Args:
+            record_steps: Number of record points to capture in the rollout
+                buffer.
+            substeps_per_record: Newton substeps between successive record
+                points. Defaults to the Newton manager's configured
+                ``num_substeps``.
+            record_dt: Time interval between successive record points.
+                Defaults to the Newton manager's configured ``dt``.
+
+        Raises:
+            RuntimeError: If the active backend is not Newton or if the
+                Newton manager is not ready / not in grad mode.
+        """
+        if not self.is_newton_backend:
+            logger.log_error("create_gradient_rollout requires the Newton backend.")
+        return self.physics.newton_manager.create_gradient_rollout(
+            record_steps=record_steps,
+            substeps_per_record=substeps_per_record,
+            record_dt=record_dt,
+        )
+
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Render all camera group in the simulation.
 
