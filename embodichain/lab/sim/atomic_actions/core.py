@@ -51,7 +51,7 @@ class ObjectSemantics:
     """Affordance data (GraspPose, InteractionPoints, etc.)."""
 
     geometry: Dict[str, Any]
-    """Geometric information including bounding box, mesh data."""
+    """Non-affordance geometric metadata (e.g., bounding_box). Mesh tensors now live on AntipodalAffordance, not here."""
 
     properties: Dict[str, Any] = field(default_factory=dict)
     """Physical properties: mass, friction, etc."""

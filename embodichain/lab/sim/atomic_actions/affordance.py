@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import torch
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 from embodichain.toolkits.graspkit.pg_grasp import (
     GraspGenerator,
@@ -34,16 +34,15 @@ from embodichain.utils import logger
 class Affordance:
     """Base class for affordance data.
 
-    Affordance represents interaction possibilities for an object.
-    Unlike the previous design, Affordance no longer stores a shared geometry
-    dict aliased from ObjectSemantics. Subclasses take only the specific
-    fields they need.
+    Represents an object's interaction possibilities. Subclasses carry whatever
+    typed fields they need (mesh tensors, interaction points, etc.); the base
+    class only carries an object label and a free-form custom_config dict.
     """
 
     object_label: str = ""
     """Label of the object this affordance belongs to."""
 
-    custom_config: Dict[str, Any] = field(default_factory=dict)
+    custom_config: dict[str, Any] = field(default_factory=dict)
     """User-defined configuration payload."""
 
     def set_custom_config(self, key: str, value: Any) -> None:
@@ -77,9 +76,6 @@ class AntipodalAffordance(Affordance):
 
     force_reannotate: bool = False
     """If True, recompute the grasp annotation on each access."""
-
-    is_draw_grasp_xpos: bool = False
-    """If True, draw grasp poses in the simulator on each call."""
 
     _generator: GraspGenerator | None = field(default=None, init=False, repr=False)
 
@@ -154,23 +150,7 @@ class AntipodalAffordance(Affordance):
         open_length_t = torch.tensor(
             open_length_list, dtype=torch.float32, device=self._generator.device
         )
-        if self.is_draw_grasp_xpos:
-            self._draw_grasp_xpos(grasp_xpos, open_length_t)
         return is_success_t, grasp_xpos, open_length_t
-
-    def _draw_grasp_xpos(
-        self, grasp_xpos: torch.Tensor, open_length: torch.Tensor
-    ) -> None:
-        from embodichain.lab.sim.sim_manager import SimulationManager
-        from embodichain.lab.sim.objects.gizmo import MarkerCfg
-
-        sim = SimulationManager.get_instance()
-        axis_xpos = [
-            grasp_xpos[i].to("cpu").numpy() for i in range(grasp_xpos.shape[0])
-        ]
-        sim.draw_marker(
-            cfg=MarkerCfg(name="grasp_xpos", axis_xpos=axis_xpos, axis_len=0.05)
-        )
 
 
 @dataclass
@@ -183,7 +163,7 @@ class InteractionPoints(Affordance):
     normals: torch.Tensor | None = None
     """Optional surface normals at each interaction point with shape [B, 3]."""
 
-    point_types: List[str] = field(default_factory=list)
+    point_types: list[str] = field(default_factory=list)
     """Optional labels for each point's interaction type."""
 
     def get_points_by_type(self, point_type: str) -> torch.Tensor | None:

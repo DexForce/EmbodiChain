@@ -54,7 +54,7 @@ class TestAntipodalAffordance:
     def test_no_geometry_alias_field(self):
         # The redesign removes the shared-geometry-dict footgun.
         aff = AntipodalAffordance()
-        assert not hasattr(aff, "geometry") or getattr(aff, "geometry", None) is None
+        assert not hasattr(aff, "geometry")
 
 
 class TestInteractionPoints:

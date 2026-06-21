@@ -53,6 +53,7 @@ from .engine import (
 __all__ = [
     # Core classes
     "Affordance",
+    "AntipodalAffordance",
     "InteractionPoints",
     "ObjectSemantics",
     "HeldObjectState",
