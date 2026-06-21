@@ -54,6 +54,7 @@ from .engine import (
     unregister_action,
     get_registered_actions,
 )
+from .trajectory import TrajectoryBuilder
 
 __all__ = [
     # Core classes
@@ -84,4 +85,6 @@ __all__ = [
     "register_action",
     "unregister_action",
     "get_registered_actions",
+    # Trajectory helpers
+    "TrajectoryBuilder",
 ]
