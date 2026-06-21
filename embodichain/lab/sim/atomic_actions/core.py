@@ -170,7 +170,7 @@ class AtomicAction(ABC):
 
     def __init__(
         self,
-        motion_generator: "MotionGenerator",
+        motion_generator: MotionGenerator,
         cfg: ActionCfg | None = None,
     ) -> None:
         self.motion_generator = motion_generator
@@ -180,7 +180,7 @@ class AtomicAction(ABC):
         self.control_part = self.cfg.control_part
 
     @abstractmethod
-    def execute(self, target: "Target", state: WorldState) -> ActionResult:
+    def execute(self, target: Target, state: WorldState) -> ActionResult:
         """Plan and return a full-DoF trajectory for this action.
 
         Args:

@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 import torch
 
@@ -41,16 +43,29 @@ class TestTypedTargets:
 
     def test_pose_target_is_frozen(self):
         t = PoseTarget(xpos=torch.eye(4))
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             t.xpos = torch.zeros(4, 4)  # type: ignore[misc]
 
     def test_grasp_target_holds_semantics(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
         assert GraspTarget(semantics=sem).semantics is sem
 
+    def test_grasp_target_is_frozen(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
+        t = GraspTarget(semantics=sem)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.semantics = ObjectSemantics(  # type: ignore[misc]
+                affordance=Affordance(), geometry={}, label="other"
+            )
+
     def test_held_object_target_holds_pose(self):
         x = torch.eye(4)
         assert HeldObjectTarget(object_target_pose=x).object_target_pose is x
+
+    def test_held_object_target_is_frozen(self):
+        t = HeldObjectTarget(object_target_pose=torch.eye(4))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.object_target_pose = torch.zeros(4, 4)  # type: ignore[misc]
 
 
 class TestObjectSemantics:
