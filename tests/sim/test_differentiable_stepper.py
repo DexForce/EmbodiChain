@@ -39,7 +39,11 @@ def test_default_backend_rejects_differentiable_stepper():
 def test_newton_without_grad_rejects_differentiable_stepper():
     sim = SimulationManager(
         SimulationManagerCfg(
-            physics_cfg=NewtonPhysicsCfg(requires_grad=False, use_cuda_graph=False),
+            physics_cfg=NewtonPhysicsCfg(
+                requires_grad=False,
+                solver_cfg={"solver_type": "semi_implicit"},
+                use_cuda_graph=False,
+            ),
             num_envs=1,
             headless=True,
         )
