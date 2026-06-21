@@ -24,7 +24,7 @@ a pick-and-place task with a robot arm.
 Key concepts covered:
   1. Setting up a MotionGenerator and AtomicActionEngine
   2. Describing what to pick using ObjectSemantics and AntipodalAffordance
-  3. Running a pick → place → move sequence with execute_static()
+  3. Running a pick → place → move sequence with engine.run([(name, target), ...])
 
 Run with:
     python atomic_actions.py [--num_envs N] [--renderer hybrid|fast-rt|rt]
@@ -62,12 +62,17 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
 
 # Import everything from the public atomic_actions API
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
-    ObjectSemantics,
     AntipodalAffordance,
-    PickUpActionCfg,
-    PlaceActionCfg,
+    AtomicActionEngine,
+    GraspTarget,
+    MoveAction,
     MoveActionCfg,
+    ObjectSemantics,
+    PickUpAction,
+    PickUpActionCfg,
+    PlaceAction,
+    PlaceActionCfg,
+    PoseTarget,
 )
 
 
@@ -240,13 +245,14 @@ def main():
     # ------------------------------------------------------------------ #
     # Step 4: Build the AtomicActionEngine                                #
     #                                                                     #
-    # actions_cfg_list defines the ORDER of actions that execute_static() #
-    # will run. Each entry is matched positionally to target_list.        #
+    # Actions are registered individually by name. run() then takes an    #
+    # explicit list of (name, typed_target) steps, so the sequence is     #
+    # declared at call time rather than baked into the engine.            #
     # ------------------------------------------------------------------ #
-    atomic_engine = AtomicActionEngine(
-        motion_generator=motion_gen,
-        actions_cfg_list=[pickup_cfg, place_cfg, move_cfg],
-    )
+    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+    atomic_engine.register(PickUpAction(motion_gen, cfg=pickup_cfg))
+    atomic_engine.register(PlaceAction(motion_gen, cfg=place_cfg))
+    atomic_engine.register(MoveAction(motion_gen, cfg=move_cfg))
 
     sim.init_gpu_physics()
     if not args.headless:
@@ -261,28 +267,27 @@ def main():
     #   - entity reference (so the action can read the live object pose)  #
     # ------------------------------------------------------------------ #
     mug_grasp_affordance = AntipodalAffordance(
-        object_label="mug",
+        mesh_vertices=mug.get_vertices(env_ids=[0], scale=True)[0],
+        mesh_triangles=mug.get_triangles(env_ids=[0])[0],
+        gripper_collision_cfg=GripperCollisionCfg(
+            max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
+        ),
+        generator_cfg=GraspGeneratorCfg(
+            viser_port=11801,
+            antipodal_sampler_cfg=AntipodalSamplerCfg(
+                n_sample=20000, max_length=0.088, min_length=0.003
+            ),
+        ),
         force_reannotate=False,
-        custom_config={
-            "gripper_collision_cfg": GripperCollisionCfg(
-                max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
-            ),
-            "generator_cfg": GraspGeneratorCfg(
-                viser_port=11801,
-                antipodal_sampler_cfg=AntipodalSamplerCfg(
-                    n_sample=20000, max_length=0.088, min_length=0.003
-                ),
-            ),
-        },
     )
     mug_semantics = ObjectSemantics(
-        label="mug",
+        affordance=mug_grasp_affordance,
         geometry={
             "mesh_vertices": mug.get_vertices(env_ids=[0], scale=True)[0],
             "mesh_triangles": mug.get_triangles(env_ids=[0])[0],
         },
-        affordance=mug_grasp_affordance,
-        entity=mug,  # needed so PickUpAction can read the mug's live pose
+        label="mug",
+        entity=mug,
     )
 
     # ------------------------------------------------------------------ #
@@ -319,13 +324,18 @@ def main():
     # ------------------------------------------------------------------ #
     # Step 7: Plan and execute the full sequence                          #
     #                                                                     #
-    # execute_static() plans all three actions in order and returns a     #
-    # single concatenated joint trajectory (n_envs, n_waypoints, dof).   #
-    # We then replay it frame-by-frame in the simulator.                 #
+    # run() plans the declared (name, typed_target) steps in order and    #
+    # returns (is_success, traj, final_state). traj is a single           #
+    # concatenated joint trajectory (n_envs, n_waypoints, dof). We then   #
+    # replay it frame-by-frame in the simulator.                          #
     # ------------------------------------------------------------------ #
     print("Planning pick → place → move trajectory...")
-    is_success, traj = atomic_engine.execute_static(
-        target_list=[mug_semantics, place_xpos, rest_xpos]
+    is_success, traj, _ = atomic_engine.run(
+        steps=[
+            ("pick_up", GraspTarget(semantics=mug_semantics)),
+            ("place", PoseTarget(xpos=place_xpos)),
+            ("move", PoseTarget(xpos=rest_xpos)),
+        ],
     )
 
     if not is_success:
