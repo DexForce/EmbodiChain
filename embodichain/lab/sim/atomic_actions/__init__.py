@@ -27,11 +27,16 @@ from .affordance import (
     InteractionPoints,
 )
 from .core import (
-    ObjectSemantics,
-    HeldObjectState,
-    MoveObjectTarget,
     ActionCfg,
+    ActionResult,
     AtomicAction,
+    GraspTarget,
+    HeldObjectState,
+    HeldObjectTarget,
+    ObjectSemantics,
+    PoseTarget,
+    Target,
+    WorldState,
 )
 from .actions import (
     MoveAction,
@@ -57,7 +62,12 @@ __all__ = [
     "InteractionPoints",
     "ObjectSemantics",
     "HeldObjectState",
-    "MoveObjectTarget",
+    "HeldObjectTarget",
+    "PoseTarget",
+    "GraspTarget",
+    "Target",
+    "WorldState",
+    "ActionResult",
     "ActionCfg",
     "AtomicAction",
     # Action implementations

@@ -27,7 +27,7 @@ from .core import (
     ObjectSemantics,
     ActionCfg,
     HeldObjectState,
-    MoveObjectTarget,
+    HeldObjectTarget,
 )
 from .affordance import AntipodalAffordance
 from embodichain.utils import logger
@@ -641,14 +641,14 @@ class MoveObjectAction(_HandCloseAction):
 
     def _resolve_move_object_target(
         self,
-        target: MoveObjectTarget,
+        target: HeldObjectTarget,
         action_context: dict | None = None,
         held_object_state: HeldObjectState | None = None,
     ) -> tuple[bool, torch.Tensor, HeldObjectState]:
         """Resolve an object target pose into an end-effector target pose."""
-        if not isinstance(target, MoveObjectTarget):
+        if not isinstance(target, HeldObjectTarget):
             logger.log_error(
-                "MoveObjectAction target must be a MoveObjectTarget.",
+                "MoveObjectAction target must be a HeldObjectTarget.",
                 TypeError,
             )
 
@@ -657,7 +657,7 @@ class MoveObjectAction(_HandCloseAction):
             held_state = action_context.get("held_object_state")
         if held_state is None:
             logger.log_error(
-                "MoveObjectTarget requires a HeldObjectState from a prior PickUpAction.",
+                "HeldObjectTarget requires a HeldObjectState from a prior PickUpAction.",
                 ValueError,
             )
 
@@ -692,7 +692,7 @@ class MoveObjectAction(_HandCloseAction):
 
     def execute(
         self,
-        target: MoveObjectTarget,
+        target: HeldObjectTarget,
         start_qpos: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[bool, torch.Tensor, list[float]]:

@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Type, Union, TYPE_CHECKING
 
 from embodichain.lab.sim.planners import PlanResult
 from embodichain.utils import logger
-from .core import AtomicAction, ObjectSemantics, ActionCfg, MoveObjectTarget
+from .core import AtomicAction, ObjectSemantics, ActionCfg, HeldObjectTarget
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
@@ -214,7 +214,7 @@ class AtomicActionEngine:
                 torch.Tensor,
                 str,
                 ObjectSemantics,
-                MoveObjectTarget,
+                HeldObjectTarget,
                 Dict[str, Any],
             ]
         ],
@@ -277,7 +277,7 @@ class AtomicActionEngine:
         self,
         action_name: str,
         target: Union[
-            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any]
+            torch.Tensor, str, ObjectSemantics, HeldObjectTarget, Dict[str, Any]
         ],
         **kwargs,
     ) -> bool:
@@ -293,9 +293,9 @@ class AtomicActionEngine:
     def _resolve_target(
         self,
         target: Union[
-            torch.Tensor, str, ObjectSemantics, MoveObjectTarget, Dict[str, Any]
+            torch.Tensor, str, ObjectSemantics, HeldObjectTarget, Dict[str, Any]
         ],
-    ) -> Union[torch.Tensor, ObjectSemantics, MoveObjectTarget]:
+    ) -> Union[torch.Tensor, ObjectSemantics, HeldObjectTarget]:
         """Resolve user target input into tensor pose or ObjectSemantics.
 
         Supports the convenience dict format in ``execute`` and ``validate``.
@@ -303,7 +303,7 @@ class AtomicActionEngine:
         if isinstance(target, torch.Tensor):
             return target
 
-        if isinstance(target, (ObjectSemantics, MoveObjectTarget)):
+        if isinstance(target, (ObjectSemantics, HeldObjectTarget)):
             return target
 
         if isinstance(target, str):
@@ -316,7 +316,7 @@ class AtomicActionEngine:
                     raise TypeError(
                         "target['object_target_pose'] must be a torch.Tensor"
                     )
-                return MoveObjectTarget(object_target_pose=object_target_pose)
+                return HeldObjectTarget(object_target_pose=object_target_pose)
 
             if "pose" in target:
                 pose = target["pose"]
@@ -362,7 +362,7 @@ class AtomicActionEngine:
             return semantics
 
         raise TypeError(
-            "target must be torch.Tensor, str, ObjectSemantics, MoveObjectTarget, "
+            "target must be torch.Tensor, str, ObjectSemantics, HeldObjectTarget, "
             "or Dict[str, Any]"
         )
 
