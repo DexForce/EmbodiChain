@@ -10,10 +10,16 @@ embodichain.lab.sim.atomic_actions
       Affordance
       InteractionPoints
       ObjectSemantics
+      PoseTarget
+      GraspTarget
+      HeldObjectTarget
+      Target
       HeldObjectState
-      MoveObjectTarget
+      WorldState
+      ActionResult
       ActionCfg
       AtomicAction
+      TrajectoryBuilder
       MoveActionCfg
       MoveAction
       PickUpActionCfg
@@ -41,19 +47,44 @@ Core
     :members:
     :show-inheritance:
 
+.. autoclass:: PoseTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: GraspTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: HeldObjectTarget
+    :members:
+    :show-inheritance:
+
+.. autodata:: Target
+
 .. autoclass:: HeldObjectState
     :members:
     :show-inheritance:
 
-.. autoclass:: MoveObjectTarget
+.. autoclass:: WorldState
+    :members:
+    :show-inheritance:
+
+.. autoclass:: ActionResult
     :members:
     :show-inheritance:
 
 .. autoclass:: ActionCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
 
 .. autoclass:: AtomicAction
+    :members:
+    :show-inheritance:
+
+Trajectory helpers
+------------------
+
+.. autoclass:: TrajectoryBuilder
     :members:
     :show-inheritance:
 
@@ -62,7 +93,7 @@ Actions
 
 .. autoclass:: MoveActionCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
     :show-inheritance:
 
 .. autoclass:: MoveAction
@@ -71,7 +102,7 @@ Actions
 
 .. autoclass:: PickUpActionCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
     :show-inheritance:
 
 .. autoclass:: PickUpAction
@@ -80,7 +111,7 @@ Actions
 
 .. autoclass:: MoveObjectActionCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
     :show-inheritance:
 
 .. autoclass:: MoveObjectAction
@@ -89,7 +120,7 @@ Actions
 
 .. autoclass:: PlaceActionCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
     :show-inheritance:
 
 .. autoclass:: PlaceAction
