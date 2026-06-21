@@ -154,9 +154,7 @@ def _arm_qpos_from_state(
     state: WorldState, arm_joint_ids, robot_dof: int
 ) -> torch.Tensor:
     """Extract the arm slice of the full-DoF last_qpos carried in WorldState."""
-    if state.last_qpos.shape[1] == robot_dof:
-        return state.last_qpos[:, arm_joint_ids]
-    return state.last_qpos
+    return state.last_qpos[:, arm_joint_ids]
 
 
 # =============================================================================
@@ -257,13 +255,16 @@ class PickUpAction(AtomicAction):
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.arm_dof = len(self.arm_joint_ids)
-        self.hand_dof = len(self.hand_joint_ids)
         self.robot_dof = self.robot.dof
 
         if self.cfg.hand_open_qpos is None:
-            logger.log_error("hand_open_qpos must be specified in PickUpActionCfg")
+            logger.log_error(
+                "hand_open_qpos must be specified in PickUpActionCfg", ValueError
+            )
         if self.cfg.hand_close_qpos is None:
-            logger.log_error("hand_close_qpos must be specified in PickUpActionCfg")
+            logger.log_error(
+                "hand_close_qpos must be specified in PickUpActionCfg", ValueError
+            )
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
         self.approach_direction = self.cfg.approach_direction.to(self.device)
@@ -272,10 +273,13 @@ class PickUpAction(AtomicAction):
         sem = target.semantics
         if not isinstance(sem.affordance, AntipodalAffordance):
             logger.log_error(
-                "PickUpAction requires an AntipodalAffordance on the target semantics."
+                "PickUpAction requires an AntipodalAffordance on the target semantics.",
+                ValueError,
             )
         if sem.entity is None:
-            logger.log_error("PickUpAction requires an entity on the target semantics.")
+            logger.log_error(
+                "PickUpAction requires an entity on the target semantics.", ValueError
+            )
 
         is_success, grasp_xpos = self._resolve_grasp_pose(sem)
         if not self.builder.all_envs_success(is_success):
@@ -447,11 +451,12 @@ class MoveObjectAction(AtomicAction):
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.arm_dof = len(self.arm_joint_ids)
-        self.hand_dof = len(self.hand_joint_ids)
         self.robot_dof = self.robot.dof
 
         if self.cfg.hand_close_qpos is None:
-            logger.log_error("hand_close_qpos must be specified in MoveObjectActionCfg")
+            logger.log_error(
+                "hand_close_qpos must be specified in MoveObjectActionCfg", ValueError
+            )
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
     def execute(self, target: HeldObjectTarget, state: WorldState) -> ActionResult:
@@ -493,7 +498,7 @@ class MoveObjectAction(AtomicAction):
             return self._fail(state)
 
         full = torch.empty(
-            (self.n_envs, self.cfg.sample_interval, self.robot_dof),
+            (self.n_envs, arm_traj.shape[1], self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
@@ -543,13 +548,16 @@ class PlaceAction(AtomicAction):
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.arm_dof = len(self.arm_joint_ids)
-        self.hand_dof = len(self.hand_joint_ids)
         self.robot_dof = self.robot.dof
 
         if self.cfg.hand_open_qpos is None:
-            logger.log_error("hand_open_qpos must be specified in PlaceActionCfg")
+            logger.log_error(
+                "hand_open_qpos must be specified in PlaceActionCfg", ValueError
+            )
         if self.cfg.hand_close_qpos is None:
-            logger.log_error("hand_close_qpos must be specified in PlaceActionCfg")
+            logger.log_error(
+                "hand_close_qpos must be specified in PlaceActionCfg", ValueError
+            )
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
