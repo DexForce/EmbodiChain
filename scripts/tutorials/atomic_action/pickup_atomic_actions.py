@@ -35,9 +35,13 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
+    GraspTarget,
+    MoveAction,
     MoveActionCfg,
     ObjectSemantics,
+    PickUpAction,
     PickUpActionCfg,
+    PoseTarget,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -313,12 +317,11 @@ def create_object_semantics(
             "mesh_triangles": obj.get_triangles(env_ids=[0])[0],
         },
         affordance=AntipodalAffordance(
-            object_label=label,
+            mesh_vertices=obj.get_vertices(env_ids=[0], scale=True)[0],
+            mesh_triangles=obj.get_triangles(env_ids=[0])[0],
+            gripper_collision_cfg=build_gripper_collision_cfg(),
+            generator_cfg=build_grasp_generator_cfg(args),
             force_reannotate=args.force_reannotate,
-            custom_config={
-                "gripper_collision_cfg": build_gripper_collision_cfg(),
-                "generator_cfg": build_grasp_generator_cfg(args),
-            },
         ),
         entity=obj,
     )
@@ -429,10 +432,13 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
     approach_direction = resolve_approach_direction(args, sim.device)
     action_cfgs = build_action_sequence(hand_open, hand_close, approach_direction)
-    atomic_engine = AtomicActionEngine(
-        motion_generator=motion_gen,
-        actions_cfg_list=action_cfgs,
-    )
+    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+    _action_classes = {
+        "move": MoveAction,
+        "pick_up": PickUpAction,
+    }
+    for cfg in action_cfgs:
+        atomic_engine.register(_action_classes[cfg.name](motion_gen, cfg=cfg))
 
     sim.open_window()
     if not args.auto_play:
@@ -448,8 +454,11 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
         f"approach_direction={format_tensor(approach_direction)}"
     )
     start_time = time.time()
-    is_success, traj = atomic_engine.execute_static(
-        target_list=[move_target, semantics]
+    is_success, traj, _ = atomic_engine.run(
+        steps=[
+            ("move", PoseTarget(xpos=move_target)),
+            ("pick_up", GraspTarget(semantics=semantics)),
+        ]
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
