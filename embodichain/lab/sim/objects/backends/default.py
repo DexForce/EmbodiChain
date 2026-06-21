@@ -64,7 +64,7 @@ class DefaultRigidBodyView(RigidBodyViewBase):
 
         if self._is_gpu:
             self._gpu_indices = torch.as_tensor(
-                [entity.get_gpu_index() for entity in self.entities],
+                [entity.get_sim_index() for entity in self.entities],
                 dtype=torch.int32,
                 device=self.device,
             )
@@ -401,7 +401,7 @@ class DefaultArticulationView(ArticulationViewBase):
 
         if self._is_gpu:
             self._gpu_indices = torch.as_tensor(
-                [entity.get_gpu_index() for entity in self.entities],
+                [entity.get_sim_index() for entity in self.entities],
                 dtype=torch.int32,
                 device=self.device,
             )

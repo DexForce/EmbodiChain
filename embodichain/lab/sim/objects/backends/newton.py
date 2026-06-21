@@ -171,10 +171,6 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         self.entities = list(entities)
         self.scene = scene
         self.device = device
-        self.entity_handles = [
-            _normalize_native_handle(entity.get_native_handle(), "MeshObject")
-            for entity in self.entities
-        ]
         # Body IDs are resolved lazily because Newton's model is not built
         # until finalization.  Pre-finalization, ``body_id_for_entity()``
         # returns tentative IDs that may differ from the final interleaved
@@ -402,7 +398,7 @@ class NewtonRigidBodyView(RigidBodyViewBase):
 
     def _resolve_body_id(self, entity: MeshObject) -> int:
         manager = getattr(self.scene, "manager", None)
-        if manager is not None and hasattr(entity, "get_native_handle"):
+        if manager is not None:
             entity_handle = _normalize_native_handle(
                 entity.get_native_handle(), "MeshObject"
             )
@@ -410,10 +406,9 @@ class NewtonRigidBodyView(RigidBodyViewBase):
             if body_id is not None:
                 return int(body_id)
 
-        if hasattr(entity, "get_gpu_index"):
-            body_id = int(entity.get_gpu_index())
-            if 0 <= body_id <= _INT32_MAX:
-                return body_id
+        body_id = int(entity.get_sim_index())
+        if 0 <= body_id <= _INT32_MAX:
+            return body_id
         return -1
 
     def _resolve_body_ids(self, body_ids: torch.Tensor | None) -> torch.Tensor:
@@ -479,7 +474,7 @@ class NewtonArticulationView(ArticulationViewBase):
         self.num_links = self.entities[0].get_links_num()
         self.link_names = self.entities[0].get_link_names()
         self._articulation_ids = torch.as_tensor(
-            [entity.get_gpu_index() for entity in self.entities],
+            [entity.get_sim_index() for entity in self.entities],
             dtype=torch.int32,
             device=self.device,
         )
