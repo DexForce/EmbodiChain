@@ -326,13 +326,42 @@ Done:
 9. Articulation and robot support on Newton — implemented (incl. upstream
    dexsim joint-active-indexing fix); `TestArticulationNewton` and
    `TestRobotNewton` green.
+13. Multi-env parallel simulation on Newton — already complete via the
+    spawn-time prototype+clone path (`spawn_rigid_object_entities` /
+    `spawn_articulation_entities` → dexsim's `clone_actor_to`,
+    Newton-patched). Newton object views accept multi-entity lists and
+    resolve one body ID per env. Covered by `TestRigidObjectNewton`
+    (`NUM_ARENAS=2`, `test_spawn_clones_distinct_entities`),
+    `TestArticulationNewton` (`num_envs=2`), `TestRobotNewton`
+    (`num_envs=10`). Implementation plan:
+    `docs/superpowers/plans/2026-06-22-newton-backend-pr.md`.
+14. Differentiable env for APG — implemented.
+    `embodichain.lab.sim.diff` provides `NewtonStepFunc`
+    (`torch.autograd.Function`) bridging a `wp.Tape` around
+    `DifferentiableStepper` into PyTorch autograd, plus `tape_context`
+    and `differentiable_step` helpers. `SimulationManager` gains
+    `create_differentiable_stepper` / `create_gradient_rollout`
+    delegators. `DifferentiableEmbodiedEnv` validates
+    `NewtonPhysicsCfg(requires_grad=True, solver_type="semi_implicit")`
+    and overrides `step()` to call `NewtonStepFunc.apply`. The Franka
+    FR3 reach APG example (`franka_reach_apg.py`) exercises the bridge
+    end-to-end with a Warp action kernel and a Warp reward kernel
+    computed inside the tape; `test_franka_apg_smoke_backward` and
+    `test_franka_apg_one_iter_loss_reduces` are green. Agent context:
+    `agent_context/topics/differentiable-env/`.
+
+    .. note::
+        The Franka task uses an FK-bypass step function
+        (``newton.eval_fk``) because the ``semi_implicit`` solver does
+        not propagate gradient through ``joint_target_pos`` to
+        ``body_q``. The default ``_make_step_fn`` still uses the
+        differentiable stepper for envs that want the dynamics-grad
+        path; see the differentiable-env topic for details.
 
 Remaining:
 
 5. Implement and test Newton `RigidObjectGroup` (after a design decision).
 7. Add rigid-only Newton gym smoke tests.
-8. Add gradient rollout wrapper and a minimal differentiable Newton smoke test
-   (`requires_grad=True` + `solver_type="semi_implicit"`).
 10. Add soft/cloth support after a dedicated Newton object design and tests.
 11. Newton-native per-link contact params for articulations (after dexsim
     exposes a per-link shape-material setter).
