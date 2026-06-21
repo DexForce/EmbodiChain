@@ -2,20 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Finish the two outstanding Newton-backend PR targets — multi-env
-parallel simulation via `clone_arena_to` and a `DifferentiableEmbodiedEnv`
-that bridges Warp tape autodiff into PyTorch autograd for analytic policy
-gradient (APG).
+**Goal:** Finish the Newton-backend PR. **Target 4 (multi-env) was found
+already complete during execution** — EmbodiChain's spawn path already does
+prototype+clone across arenas at spawn time, and Newton views already handle
+multi-env entity lists. This plan therefore covers only **Target 5
+(differentiable env for APG)** plus branch cleanup and docs.
 
-**Architecture:** The Newton backend implicitly clones arena_0 into
-arenas 1..N-1 inside `NewtonPhysicsBackend.prepare()` before
-`rebuild_newton_from_scene`, and Newton object views resolve per-env body
-IDs by reconstructing dexsim's clone naming pattern
-(`f"{actor_name}_{arena_name}"`). A new `embodichain.lab.sim.diff`
-package provides a `torch.autograd.Function` bridge over
+**Architecture:** A new `embodichain.lab.sim.diff` package provides a
+`torch.autograd.Function` bridge over
 `dexsim.engine.newton_physics.DifferentiableStepper`; a new
 `DifferentiableEmbodiedEnv` gym subclass wires it into the standard
-EmbodiChain env step pipeline.
+EmbodiChain env step pipeline. `SimulationManager` gains thin delegators to
+dexsim's `create_differentiable_stepper` / `create_gradient_rollout`.
+
+**Revision history:** Original plan had Tasks 1–4 covering multi-env clone
+scaffolding, spawn guards, clone-at-finalize, and body-id resolution. Those
+were deleted after code inspection showed the spawn path
+(`spawn_rigid_object_entities` → `_spawn_clones_from_prototype`) already
+clones prototypes into all arenas at spawn time, Newton views already accept
+multi-entity lists, and existing tests (`TestRigidObjectNewton` with
+`NUM_ARENAS=2`, `test_spawn_clones_distinct_entities`,
+`test_newton_native_attrs_desc_native_spawn` asserting
+`obj.num_instances == NUM_ARENAS`) already pass. Task numbers below are
+rebased: old Task 5 → Task 1, old Task 6 → Task 2, etc.
 
 **Tech Stack:** Python 3.10+, PyTorch (autograd), NVIDIA Warp (`wp.Tape`,
 `wp.to_torch`/`wp.from_torch`), DexSim Newton physics
@@ -32,549 +41,24 @@ EmbodiChain env step pipeline.
 - `embodichain/lab/sim/diff/bridge.py` — `NewtonStepFunc(torch.autograd.Function)`, `tape_context`, `differentiable_step`
 - `embodichain/lab/gym/envs/differentiable_env.py` — `DifferentiableEmbodiedEnv` subclass
 - `embodichain/lab/gym/envs/tasks/special/franka_reach_apg.py` — Franka APG example task
-- `tests/sim/test_newton_multi_env.py`
 - `tests/sim/test_differentiable_stepper.py`
 - `tests/gym/envs/test_differentiable_env.py`
 - `agent_context/topics/differentiable-env.md`
 
 **Modified:**
-- `embodichain/lab/sim/physics/newton.py` — add clone-at-finalize, `_arenas_cloned` flag
 - `embodichain/lab/sim/sim_manager.py` — add `create_differentiable_stepper` / `create_gradient_rollout` delegators
-- `embodichain/lab/sim/objects/backends/newton.py` — multi-env body-id resolution in `NewtonRigidBodyView` / `NewtonArticulationView`
-- `embodichain/lab/sim/utility/sim_utils.py` — `arena_index>0` spawn guard on Newton
 - `agent_context/MAP.yaml` — register new `differentiable-env` topic
-- `design/newton-backend-design.md` — mark Targets 4/5 done, link to plan
+- `design/newton-backend-design.md` — mark Target 5 done, link to plan
+
+**Already complete (Target 4, verified during execution):**
+- Multi-env clone-at-spawn: `embodichain/lab/sim/utility/sim_utils.py:spawn_rigid_object_entities` / `spawn_articulation_entities` already prototype-then-clone across all arenas via dexsim's `clone_actor_to` (Newton-patched).
+- Newton multi-env views: `embodichain/lab/sim/objects/backends/newton.py:NewtonRigidBodyView` / `NewtonArticulationView` already accept `Sequence[MeshObject]` and resolve one body ID per entity.
+- Newton multi-env tests: `tests/sim/objects/test_rigid_object.py::TestRigidObjectNewton` (NUM_ARENAS=2, `test_spawn_clones_distinct_entities`, `test_newton_native_attrs_desc_native_spawn` asserting `obj.num_instances == NUM_ARENAS`), `tests/sim/objects/test_articulation.py::TestArticulationNewton` (num_envs=2), `tests/sim/objects/test_robot.py` (num_envs=10).
 
 ---
 
-## Task 1: Add `_arenas_cloned` flag to `NewtonPhysicsBackend`
 
-**Files:**
-- Modify: `embodichain/lab/sim/physics/newton.py`
-
-Establish the flag and reset semantics first; clone logic comes in Task 3.
-
-- [ ] **Step 1: Read the current backend file**
-
-Run: `Read embodichain/lab/sim/physics/newton.py`
-
-- [ ] **Step 2: Add the flag to `__init__`**
-
-Edit `embodichain/lab/sim/physics/newton.py` — inside `NewtonPhysicsBackend.__init__`:
-
-```python
-    def __init__(self, manager) -> None:
-        super().__init__(manager)
-        self._newton_manager: "NewtonManager | None" = None
-        self._is_finalized = False
-        self._arenas_cloned = False
-```
-
-- [ ] **Step 3: Reset the flag in `invalidate`**
-
-Edit `invalidate` to also reset the clone state — topology mutations that
-trigger `invalidate()` must allow re-cloning into any newly added arenas
-or after a `clean_arena`:
-
-```python
-    def invalidate(self) -> None:
-        """Mark the Newton scene as needing re-finalization after a mutation."""
-        self._is_finalized = False
-        self._arenas_cloned = False
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add embodichain/lab/sim/physics/newton.py
-git commit -m "feat(sim/newton): add _arenas_cloned lifecycle flag
-
-Prep for clone-at-finalize multi-env. Tracks whether source arena has
-been replicated into peer arenas for the current Newton finalize cycle;
-cleared by invalidate() so topology mutations trigger re-clone."
-```
-
----
-
-## Task 2: Spawn guard for `arena_index>0` on Newton
-
-**Files:**
-- Modify: `embodichain/lab/sim/utility/sim_utils.py`
-
-On Newton, every `add_*` call must target the source arena (arena_0). Reject
-`arena_index>0` with a clear message. `-1` (global) and `0` both route to
-arena_0. This makes the implicit-clone contract explicit at the spawn API.
-
-- [ ] **Step 1: Inspect the existing entry points**
-
-Run: `grep -n "def spawn_rigid_object\|def spawn_articulation\|def spawn_robot\|arena_index" embodichain/lab/sim/utility/sim_utils.py | head -30`
-
-Note the function names. The actual entry points are the ones called by
-`SimulationManager.add_rigid_object` / `add_articulation` / `add_robot`.
-
-- [ ] **Step 2: Write the failing test first**
-
-Create `tests/sim/test_newton_multi_env.py`:
-
-```python
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# ----------------------------------------------------------------------------
-"""Multi-env Newton backend tests."""
-
-from __future__ import annotations
-
-import pytest
-
-from embodichain.lab.sim.cfg import (
-    NewtonPhysicsCfg,
-    RigidObjectCfg,
-)
-from embodichain.lab.sim.shapes import BoxCfg
-from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
-
-
-def _newton_sim_cfg(num_envs: int = 4, headless: bool = True) -> SimulationManagerCfg:
-    return SimulationManagerCfg(
-        physics_cfg=NewtonPhysicsCfg(
-            physics_dt=1.0 / 60.0,
-            num_substeps=4,
-            requires_grad=False,
-            use_cuda_graph=False,
-            debug_mode=False,
-        ),
-        num_envs=num_envs,
-        headless=headless,
-    )
-
-
-def test_spawn_with_arena_index_above_zero_rejected_on_newton():
-    sim = SimulationManager(_newton_sim_cfg(num_envs=2))
-    cube_cfg = RigidObjectCfg(
-        uid="cube",
-        shape=BoxCfg(extents=(0.1, 0.1, 0.1)),
-        init_pos=(0.0, 0.0, 1.0),
-    )
-    cube_cfg.arena_index = 1
-    with pytest.raises(Exception, match=r"arena_index"):
-        sim.add_rigid_object(cube_cfg)
-    SimulationManager.reset()
-```
-
-> Note: `RigidObjectCfg` does not own `arena_index` directly — the field
-> lives on the `MarkerCfg`-style and a few cfgs. If `add_rigid_object`
-> accepts `arena_index` via a kwarg, adjust the test accordingly. Verify by
-> grepping `def add_rigid_object` in `sim_manager.py` before running.
-
-- [ ] **Step 3: Run the test and confirm it fails**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py::test_spawn_with_arena_index_above_zero_rejected_on_newton`
-Expected: FAIL (no guard yet — either spawns silently or fails with the wrong error).
-
-- [ ] **Step 4: Add the guard helper to `sim_utils.py`**
-
-Edit `embodichain/lab/sim/utility/sim_utils.py` — add near
-`_is_newton_backend_active`:
-
-```python
-def _check_newton_spawn_arena(arena_index: int) -> None:
-    """Reject Newton spawns into a non-source arena.
-
-    Newton's multi-env path clones arena_0 into peer arenas at finalize.
-    Spawning into arenas 1..N-1 directly would conflict with the clone
-    and produce duplicate or misindexed bodies.
-    """
-    if _is_newton_backend_active() and arena_index is not None and arena_index > 0:
-        logger.log_error(
-            f"Invalid arena_index={arena_index} for Newton spawn. "
-            "Newton multi-env clones the source arena (arena_index in {-1, 0}) "
-            "into peer arenas at finalize."
-        )
-```
-
-- [ ] **Step 5: Call the guard from every Newton-relevant spawn path**
-
-Edit `embodichain/lab/sim/utility/sim_utils.py` — call
-`_check_newton_spawn_arena(cfg.arena_index)` (or the equivalent passed-in
-kwarg) at the top of `spawn_rigid_object`, `spawn_articulation`, and
-`spawn_robot` (the helpers invoked from
-`SimulationManager.add_rigid_object` / `add_articulation` / `add_robot`).
-Confirm names by grep before editing.
-
-- [ ] **Step 6: Re-run the test and confirm it passes**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py::test_spawn_with_arena_index_above_zero_rejected_on_newton`
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add embodichain/lab/sim/utility/sim_utils.py tests/sim/test_newton_multi_env.py
-git commit -m "feat(sim/newton): reject arena_index>0 spawns on Newton
-
-Newton multi-env clones the source arena at finalize, so spawning
-directly into peer arenas would produce duplicate bodies. Adds a
-spawn-time guard plus a regression test."
-```
-
----
-
-## Task 3: Implement clone-at-finalize in `NewtonPhysicsBackend.prepare()`
-
-**Files:**
-- Modify: `embodichain/lab/sim/physics/newton.py`
-- Test: `tests/sim/test_newton_multi_env.py`
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `tests/sim/test_newton_multi_env.py`:
-
-```python
-def test_finalize_clones_source_arena_into_peers():
-    sim = SimulationManager(_newton_sim_cfg(num_envs=3))
-    cube_cfg = RigidObjectCfg(
-        uid="cube",
-        shape=BoxCfg(extents=(0.1, 0.1, 0.1)),
-        init_pos=(0.0, 0.0, 1.0),
-    )
-    sim.add_rigid_object(cube_cfg)
-    sim.finalize_newton_physics()
-
-    backend = sim.physics
-    assert backend._arenas_cloned is True
-    assert backend._is_finalized is True
-
-    # arena_1 and arena_2 should now contain a "cube_arena_1" / "cube_arena_2"
-    # actor mirroring arena_0's cube.
-    actor_names_arena_0 = {a.get_name() for a in sim._arenas[0].get_all_actors()}
-    actor_names_arena_1 = {a.get_name() for a in sim._arenas[1].get_all_actors()}
-    actor_names_arena_2 = {a.get_name() for a in sim._arenas[2].get_all_actors()}
-
-    assert any("cube" in n for n in actor_names_arena_0)
-    assert any(n.endswith("_arena_1") for n in actor_names_arena_1)
-    assert any(n.endswith("_arena_2") for n in actor_names_arena_2)
-
-    SimulationManager.reset()
-```
-
-- [ ] **Step 2: Run the test and confirm it fails**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py::test_finalize_clones_source_arena_into_peers`
-Expected: FAIL — `backend._arenas_cloned` stays False; peer arenas are
-empty.
-
-- [ ] **Step 3: Implement the clone helper**
-
-Edit `embodichain/lab/sim/physics/newton.py` — add private helpers and call
-from `prepare()`:
-
-```python
-    def _arena_is_empty(self, arena) -> bool:
-        try:
-            return len(list(arena.get_all_actors())) == 0
-        except Exception:
-            return True
-
-    def _clone_source_arena_if_needed(self) -> None:
-        arenas = self._manager._arenas
-        if len(arenas) <= 1 or self._arenas_cloned:
-            return
-        source = arenas[0]
-        for arena in arenas[1:]:
-            if self._arena_is_empty(arena):
-                source.clone_arena_to(arena)
-        self._arenas_cloned = True
-```
-
-Then change `prepare()` to call the helper before the rebuild — insert
-between the early-return and the `if state != "READY":` block:
-
-```python
-    def prepare(self) -> None:
-        if self._is_finalized and self._lifecycle_state() == "READY":
-            return
-
-        # Clone arena_0 into peer arenas before rebuilding the Newton model.
-        # See docs/superpowers/specs/2026-06-21-newton-backend-pr-design.md §2.
-        self._clone_source_arena_if_needed()
-
-        mgr = self.newton_manager
-        state = self._lifecycle_state()
-        ...
-```
-
-- [ ] **Step 4: Run the test and confirm it passes**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py::test_finalize_clones_source_arena_into_peers`
-Expected: PASS.
-
-- [ ] **Step 5: Add a re-clone-after-mutation test**
-
-Append to `tests/sim/test_newton_multi_env.py`:
-
-```python
-def test_attribute_mutation_does_not_trigger_reclone():
-    sim = SimulationManager(_newton_sim_cfg(num_envs=2))
-    cube_cfg = RigidObjectCfg(
-        uid="cube",
-        shape=BoxCfg(extents=(0.1, 0.1, 0.1)),
-        init_pos=(0.0, 0.0, 1.0),
-    )
-    cube = sim.add_rigid_object(cube_cfg)
-    sim.finalize_newton_physics()
-    assert sim.physics._arenas_cloned is True
-
-    cube.set_mass(2.0)  # attribute write, NOT topology change
-    assert sim.physics._arenas_cloned is True
-
-    SimulationManager.reset()
-
-
-def test_adding_a_new_asset_invalidates_clone_state():
-    sim = SimulationManager(_newton_sim_cfg(num_envs=2))
-    cube_cfg = RigidObjectCfg(
-        uid="cube",
-        shape=BoxCfg(extents=(0.1, 0.1, 0.1)),
-        init_pos=(0.0, 0.0, 1.0),
-    )
-    sim.add_rigid_object(cube_cfg)
-    sim.finalize_newton_physics()
-    assert sim.physics._arenas_cloned is True
-
-    sphere_cfg = RigidObjectCfg(
-        uid="sphere",
-        shape=BoxCfg(extents=(0.05, 0.05, 0.05)),
-        init_pos=(0.0, 0.2, 1.0),
-    )
-    sim.add_rigid_object(sphere_cfg)
-    assert sim.physics._arenas_cloned is False  # invalidate() cleared it
-
-    sim.finalize_newton_physics()
-    assert sim.physics._arenas_cloned is True
-    SimulationManager.reset()
-```
-
-- [ ] **Step 6: Run the new tests**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py -k "mutation or invalidates"`
-Expected: PASS (re-clone-on-add works because `add_rigid_object` already
-calls `_invalidate_newton_physics`, which clears `_arenas_cloned` from
-Task 1).
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add embodichain/lab/sim/physics/newton.py tests/sim/test_newton_multi_env.py
-git commit -m "feat(sim/newton): clone source arena into peers at finalize
-
-NewtonPhysicsBackend.prepare() now calls clone_arena_to(arena_i) for
-every empty peer arena before triggering rebuild_newton_from_scene.
-The _arenas_cloned flag prevents redundant cloning across attribute
-mutations; topology changes (add_*/remove_*) clear it via invalidate().
-Closes Target 4 (multi-env spawn-side)."
-```
-
----
-
-## Task 4: Multi-env body-ID resolution in Newton object views
-
-**Files:**
-- Modify: `embodichain/lab/sim/objects/backends/newton.py`
-- Test: `tests/sim/test_newton_multi_env.py`
-
-dexsim's `_clone_arena_to_Arena_newton` (see
-`/root/sources/dexsim/python/dexsim/engine/newton_physics/rigid_body/scene.py:198`)
-names cloned actors `f"{src_actor_name}_{dst_arena.get_name()}"`. After
-finalize, the Newton view must resolve N body IDs per logical entity using
-this exact pattern.
-
-- [ ] **Step 1: Inspect current view resolver**
-
-Run: `Read embodichain/lab/sim/objects/backends/newton.py`
-
-Identify `NewtonRigidBodyView._resolve_body_ids` (or equivalent) and
-note its current scalar return shape.
-
-- [ ] **Step 2: Write the failing batched-state test**
-
-Append to `tests/sim/test_newton_multi_env.py`:
-
-```python
-import torch
-
-
-def test_rigid_object_returns_batched_body_state_after_clone():
-    sim = SimulationManager(_newton_sim_cfg(num_envs=3))
-    cube_cfg = RigidObjectCfg(
-        uid="cube",
-        shape=BoxCfg(extents=(0.1, 0.1, 0.1)),
-        init_pos=(0.0, 0.0, 1.0),
-    )
-    cube = sim.add_rigid_object(cube_cfg)
-    sim.finalize_newton_physics()
-
-    state = cube.data.body_state  # public batched accessor
-    # Expected: shape [num_envs, 7] for (xyz + qxqyqzqw) or [num_envs, 13]
-    # depending on accessor; just assert the leading dim is num_envs.
-    assert state.shape[0] == 3
-    SimulationManager.reset()
-```
-
-> If the existing accessor name differs from `data.body_state`, grep
-> `RigidObjectData` for the canonical accessor that returns pose+twist
-> per env, and adjust.
-
-- [ ] **Step 3: Run the test and confirm it fails**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py::test_rigid_object_returns_batched_body_state_after_clone`
-Expected: FAIL — view returns arena_0's scalar.
-
-- [ ] **Step 4: Add `_num_envs` plumbing to the view**
-
-Edit `embodichain/lab/sim/objects/backends/newton.py` —
-`NewtonRigidBodyView.__init__` (and similarly for
-`NewtonArticulationView`):
-
-```python
-class NewtonRigidBodyView(RigidBodyViewBase):
-    def __init__(self, entities, physics_scene, *, num_envs: int = 1):
-        super().__init__(entities, physics_scene)
-        self._num_envs = num_envs
-        self._body_ids: torch.Tensor | None = None  # resolved lazily
-        self._arena_names: tuple[str, ...] | None = None  # filled at first resolve
-```
-
-- [ ] **Step 5: Implement the batched body-id resolver**
-
-In the same class:
-
-```python
-    def _resolve_body_ids(self) -> torch.Tensor:
-        """Return a [num_envs] tensor of Newton body IDs for this entity.
-
-        Reconstructs dexsim's clone naming
-        (``f"{src_name}_{dst_arena_name}"``) and looks each name up in the
-        finalized Newton model. Falls back to the arena_0 scalar before
-        finalize.
-        """
-        if self._body_ids is not None:
-            return self._body_ids
-
-        scene = self._physics_scene
-        mgr = scene.newton_manager if hasattr(scene, "newton_manager") else scene
-        # Pre-finalize: return scalar arena_0 ID for BUILDER-state code paths.
-        lifecycle = getattr(getattr(mgr, "lifecycle_state", None), "name", "")
-        if lifecycle != "READY":
-            return self._resolve_arena0_scalar()
-
-        src_name = self._entities[0].get_name()
-        if self._num_envs == 1:
-            self._body_ids = torch.tensor(
-                [self._lookup_body_id(mgr, src_name)],
-                dtype=torch.long,
-            )
-            return self._body_ids
-
-        arena_names = self._arena_names_from_manager()
-        ids: list[int] = []
-        for i, arena_name in enumerate(arena_names):
-            name = src_name if i == 0 else f"{src_name}_{arena_name}"
-            ids.append(self._lookup_body_id(mgr, name))
-        self._body_ids = torch.tensor(ids, dtype=torch.long)
-        return self._body_ids
-
-    def _arena_names_from_manager(self) -> tuple[str, ...]:
-        if self._arena_names is not None:
-            return self._arena_names
-        # The owning SimulationManager exposes _arenas; the view is
-        # constructed from inside SimulationManager.add_rigid_object, so
-        # we pass arena names down at construction OR look them up via a
-        # back-reference. Prefer construction-time injection — see Task 5.
-        raise RuntimeError(
-            "Arena names not injected — caller must pass arena_names "
-            "at view construction.")
-
-    def _lookup_body_id(self, mgr, name: str) -> int:
-        # The dexsim Newton manager exposes a name -> body_id map. Probe
-        # the canonical accessor; fall back to scanning model.body_label.
-        if hasattr(mgr, "body_index"):
-            return int(mgr.body_index(name))
-        labels = list(getattr(mgr._model, "body_label", []))
-        for i, label in enumerate(labels):
-            if str(label) == name:
-                return i
-        raise KeyError(f"Newton body {name!r} not found after finalize.")
-```
-
-> Note: the actual lookup API may differ — verify by reading
-> `/root/sources/dexsim/python/dexsim/engine/newton_physics/newton_manager.py`
-> for `body_index` / `get_body_id` / `name_to_body_id` before finalizing
-> the resolver. Use whichever name dexsim exposes; if none, the
-> `body_label` scan is the safe fallback.
-
-- [ ] **Step 6: Same treatment for `NewtonArticulationView`**
-
-Add `_num_envs`, `_arena_names`, and a parallel resolver for the
-articulation's body-list and joint-id list. Use the same
-`f"{name}_{arena_name}"` pattern. For an articulation with N links,
-the result is `[num_envs, num_links]`.
-
-- [ ] **Step 7: Inject `num_envs` and `arena_names` at view construction**
-
-Each `RigidObject` / `Articulation` constructs its view via a factory in
-`embodichain/lab/sim/objects/backends/__init__.py` (or similar). Locate
-that factory by grep and thread `num_envs` and `arena_names` through:
-
-```python
-def make_rigid_body_view(entities, physics_scene, *, num_envs, arena_names):
-    if is_newton_scene(physics_scene):
-        return NewtonRigidBodyView(
-            entities, physics_scene,
-            num_envs=num_envs, arena_names=arena_names,
-        )
-    return DefaultRigidBodyView(entities, physics_scene)
-```
-
-Caller (`RigidObject.__init__`, `Articulation.__init__`) passes
-`self._sim_manager.num_envs` and a tuple of arena names
-(`tuple(a.get_name() for a in self._sim_manager._arenas)`).
-
-- [ ] **Step 8: Run the batched-state test**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py::test_rigid_object_returns_batched_body_state_after_clone`
-Expected: PASS.
-
-- [ ] **Step 9: Run the full multi-env test file**
-
-Run: `pytest -q tests/sim/test_newton_multi_env.py`
-Expected: All four tests PASS.
-
-- [ ] **Step 10: Run the existing Newton single-env suite for regressions**
-
-Run: `pytest -q tests/sim/objects/test_rigid_object.py::TestRigidObjectNewton tests/sim/objects/test_articulation.py::TestArticulationNewton tests/sim/objects/test_robot.py::TestRobotNewton`
-Expected: All PASS.
-
-- [ ] **Step 11: Commit**
-
-```bash
-git add embodichain/lab/sim/objects/backends/newton.py \
-        embodichain/lab/sim/objects/backends/__init__.py \
-        embodichain/lab/sim/objects/rigid_object.py \
-        embodichain/lab/sim/objects/articulation.py \
-        tests/sim/test_newton_multi_env.py
-git commit -m "feat(sim/newton): multi-env body-id resolution in object views
-
-NewtonRigidBodyView and NewtonArticulationView now resolve a [num_envs]
-body-id tensor by reconstructing dexsim's clone naming
-(f\"{src_name}_{arena_name}\"). View construction takes num_envs and
-arena_names; the existing batched accessors return [num_envs, ...]
-tensors automatically. Closes Target 4 (multi-env read side)."
-```
-
----
-
-## Task 5: Add `create_differentiable_stepper` / `create_gradient_rollout` delegators
+## Task 1: Add `create_differentiable_stepper` / `create_gradient_rollout` delegators
 
 **Files:**
 - Modify: `embodichain/lab/sim/sim_manager.py`
@@ -704,7 +188,7 @@ Backs the new embodichain.lab.sim.diff package (next commit)."
 
 ---
 
-## Task 6: Create the `embodichain.lab.sim.diff` package — bridge
+## Task 2: Create the `embodichain.lab.sim.diff` package — bridge
 
 **Files:**
 - Create: `embodichain/lab/sim/diff/__init__.py`
@@ -908,7 +392,7 @@ class NewtonStepFunc(torch.autograd.Function):
 ```
 
 > Note: the contract between `obs_reward_fn` and `NewtonStepFunc.backward`
-> is intentionally explicit — the caller (the env in Task 7) constructs the
+> is intentionally explicit — the caller (the env in Task 3) constructs the
 > dict in a way that records which outputs need grad-tracking. The
 > `_order` / `_grad_track` plumbing keeps the autograd function fully
 > general; the env class hides it from end users.
@@ -965,7 +449,7 @@ the convenience wrapper. Foundation for DifferentiableEmbodiedEnv."
 
 ---
 
-## Task 7: `DifferentiableEmbodiedEnv` gym subclass
+## Task 3: `DifferentiableEmbodiedEnv` gym subclass
 
 **Files:**
 - Create: `embodichain/lab/gym/envs/differentiable_env.py`
@@ -1185,7 +669,7 @@ and the autograd bridge."
 
 ---
 
-## Task 8: Franka reach APG example task
+## Task 4: Franka reach APG example task
 
 **Files:**
 - Create: `embodichain/lab/gym/envs/tasks/special/franka_reach_apg.py`
@@ -1561,7 +1045,7 @@ newton.utils.download_asset with explicit override."
 
 ---
 
-## Task 9: Documentation — agent_context topic and design doc update
+## Task 5: Documentation — agent_context topic and design doc update
 
 **Files:**
 - Create: `agent_context/topics/differentiable-env.md`
@@ -1661,7 +1145,7 @@ done with a link to the implementation plan."
 
 ---
 
-## Task 10: Branch cleanup and full test run
+## Task 6: Branch cleanup and full test run
 
 **Files:** none (git operations + verification only).
 
@@ -1714,46 +1198,37 @@ Reference the design doc and this plan.
 
 ## Self-Review
 
-**Spec coverage check:**
+**Spec coverage check (against the revised 6-task plan):**
 
-- §2 multi-env clone-at-finalize — Tasks 1, 3.
-- §2 spawn guard `arena_index>0` — Task 2.
-- §2 batched body-id resolution — Task 4.
-- §3 module layout (`diff/bridge.py`, `differentiable_env.py`, example) — Tasks 6, 7, 8.
-- §3 `NewtonStepFunc` + `tape_context` — Task 6.
-- §3 `DifferentiableEmbodiedEnv` validation + step pipeline — Task 7.
-- §3 Franka APG example + smoke tests — Task 8.
-- §4 manager delegators — Task 5.
-- §4 view changes for num_envs — Task 4.
-- §5 risks: clone re-evaluation under mutation — Tasks 1, 3; documented
-  in topic file (Task 9).
+- §2 multi-env — **already complete** (verified during execution; existing
+  `spawn_rigid_object_entities` / `spawn_articulation_entities` prototype-then-clone
+  at spawn, Newton views accept multi-entity lists, `TestRigidObjectNewton`
+  with `NUM_ARENAS=2` passes). No task needed.
+- §3 module layout (`diff/bridge.py`, `differentiable_env.py`, example) — Tasks 2, 3, 4.
+- §3 `NewtonStepFunc` + `tape_context` — Task 2.
+- §3 `DifferentiableEmbodiedEnv` validation + step pipeline — Task 3.
+- §3 Franka APG example + smoke tests — Task 4.
+- §4 manager delegators — Task 1.
+- §5 risks: clone re-evaluation under mutation — **N/A** (no clone-at-finalize;
+  cloning happens once at spawn, before finalize).
 - §6 deferred items — out of scope (no tasks, per spec).
-- §7 PR shape and commit plan — Task 10.
-- §8 test files — Tasks 2, 3, 4, 5, 6, 7, 8.
-- §9 acceptance criteria — Task 10.
+- §7 PR shape and commit plan — Task 6.
+- §8 test files — Tasks 1, 2, 3, 4.
+- §9 acceptance criteria — Task 6.
 
 No gaps.
 
 **Placeholder scan:**
 
-- "verify by reading dexsim newton_manager for `body_index`" in Task 4 —
-  the resolver has a fallback (scan `body_label`) so the verification
-  step is a *preferred* path, not a placeholder.
-- "actual lookup API may differ" in Task 4 — the fallback path is
-  guaranteed; the note is an optimization hint, not unfinished work.
 - No "TBD" / "TODO" / "implement later" in step content.
 
 **Type/signature consistency:**
 
-- `NewtonStepFunc.apply(action, sim_state)` — Task 6 defines signature;
-  Task 7 calls with the same args.
-- `_apply_action_kernel(action_wp, tape)` — Task 7 abstract method;
-  Task 8 implements with the same signature.
-- `_read_outputs(final_state) -> dict` — Task 7 abstract method; Task 8
+- `NewtonStepFunc.apply(action, sim_state)` — Task 2 defines signature;
+  Task 3 calls with the same args.
+- `_apply_action_kernel(action_wp, tape)` — Task 3 abstract method;
+  Task 4 implements with the same signature.
+- `_read_outputs(final_state) -> dict` — Task 3 abstract method; Task 4
   returns the documented `_order` / `_grad_track` shape.
-- `_arenas_cloned: bool` — Task 1 introduces; Tasks 3 reads/writes;
-  consistent.
-- `num_envs` / `arena_names` view-construction kwargs — Task 4
-  introduces; consistent across both views and the factory.
 
 No drift.
