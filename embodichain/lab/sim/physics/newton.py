@@ -47,7 +47,6 @@ class NewtonPhysicsBackend(PhysicsBackend):
         super().__init__(manager)
         self._newton_manager: "NewtonManager | None" = None
         self._is_finalized = False
-        self._arenas_cloned = False
 
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
@@ -67,7 +66,6 @@ class NewtonPhysicsBackend(PhysicsBackend):
     def invalidate(self) -> None:
         """Mark the Newton scene as needing re-finalization after a mutation."""
         self._is_finalized = False
-        self._arenas_cloned = False
 
     @property
     def is_initialized(self) -> bool:
