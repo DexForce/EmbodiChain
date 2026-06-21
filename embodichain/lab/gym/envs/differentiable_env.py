@@ -31,7 +31,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import torch
 
@@ -102,6 +102,39 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
             "_read_outputs(final_state)."
         )
 
+    def _make_step_fn(self) -> Callable[[], Any]:
+        """Return a callable that advances the sim inside the open tape.
+
+        The returned callable takes no arguments and returns the final
+        Newton :class:`State` after stepping. It is invoked by
+        :class:`NewtonStepFunc` inside the ``with tape:`` block, so any
+        Warp kernel launches (or differentiable Newton calls like
+        ``eval_fk``) are recorded on the tape.
+
+        The default implementation runs the differentiable
+        :class:`DifferentiableStepper` for ``sim_steps_per_control``
+        substeps. Subclasses can override this to swap in an FK-only
+        differentiable path (bypassing the dynamics solver when it does
+        not propagate grad through control inputs) or any other
+        tape-tracked stepping strategy.
+        """
+        manager = self.sim
+        substeps = self.cfg.sim_steps_per_control
+        nm = manager.physics.newton_manager
+        stepper = manager.create_differentiable_stepper()
+        state_in = nm._state_0
+        state_out = nm._model.state()
+        contacts = stepper.create_contacts()
+        dt_val = nm.solver_dt
+
+        def _step():
+            for _ in range(substeps):
+                stepper.step(state_in, state_out, contacts=contacts, dt=dt_val)
+                state_in, state_out = state_out, state_in
+            return state_in
+
+        return _step
+
     # -- gym surface ------------------------------------------------------ #
 
     def step(self, action: torch.Tensor):
@@ -130,6 +163,7 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
             "action_to_control_kernel": self._wrap_action_kernel(),
             "kernel_args": (),
             "obs_reward_fn": self._read_outputs,
+            "step_fn": self._make_step_fn(),
             "last_info": {},
         }
 
