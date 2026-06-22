@@ -18,8 +18,8 @@
 
 from __future__ import annotations
 
-import pytest
 import torch
+from unittest.mock import Mock
 
 from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
@@ -55,6 +55,24 @@ class TestAntipodalAffordance:
         # The redesign removes the shared-geometry-dict footgun.
         aff = AntipodalAffordance()
         assert not hasattr(aff, "geometry")
+
+    def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
+        aff = AntipodalAffordance()
+        generator = Mock()
+        generator.get_valid_grasp_poses.return_value = (
+            False,
+            torch.eye(4),
+            0.0,
+            torch.zeros(1),
+        )
+        aff._generator = generator
+
+        results = aff.get_valid_grasp_poses(torch.eye(4).unsqueeze(0))
+
+        grasp_poses, costs = results[0]
+        assert grasp_poses.shape == (1, 4, 4)
+        assert costs.shape == (1,)
+        assert torch.isinf(costs).all()
 
 
 class TestInteractionPoints:

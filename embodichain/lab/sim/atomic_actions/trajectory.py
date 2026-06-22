@@ -94,6 +94,32 @@ class TrajectoryBuilder:
             )
         return start_qpos
 
+    def resolve_joint_target(
+        self,
+        target_qpos: torch.Tensor,
+        *,
+        n_envs: int,
+        joint_dof: int,
+        control_part: str,
+    ) -> torch.Tensor:
+        """Resolve a joint-space target into batched control-part joint positions."""
+        if not isinstance(target_qpos, torch.Tensor):
+            logger.log_error(
+                f"target qpos for '{control_part}' must be a torch.Tensor with shape "
+                f"({joint_dof},) or ({n_envs}, {joint_dof})",
+                TypeError,
+            )
+        target_qpos = target_qpos.to(device=self.device, dtype=torch.float32)
+        if target_qpos.shape == (joint_dof,):
+            target_qpos = target_qpos.unsqueeze(0).repeat(n_envs, 1)
+        if target_qpos.shape != (n_envs, joint_dof):
+            logger.log_error(
+                f"target qpos for '{control_part}' must have shape ({joint_dof},) "
+                f"or ({n_envs}, {joint_dof}), but got {target_qpos.shape}",
+                ValueError,
+            )
+        return target_qpos
+
     # ------------------------------------------------------------------
     # Pose math
     # ------------------------------------------------------------------
@@ -101,7 +127,11 @@ class TrajectoryBuilder:
     def apply_local_offset(
         self, pose: torch.Tensor, offset: torch.Tensor
     ) -> torch.Tensor:
-        """Apply a translational offset to a batched pose."""
+        """Apply a world-frame translational offset to a batched pose.
+
+        Despite the historical method name, ``offset`` is added directly to the
+        translation column and is not rotated by each pose's orientation.
+        """
         if not (pose.dim() == 3 and pose.shape[1:] == (4, 4)):
             logger.log_error("pose must have shape [N, 4, 4]", ValueError)
         if offset.dim() == 1:
@@ -125,11 +155,19 @@ class TrajectoryBuilder:
     ) -> torch.Tensor:
         """Solve IK for a single (unbatched) target pose."""
         if qpos_seed is None:
-            qpos_seed = self.robot.get_qpos()
+            qpos_seed = self.robot.get_qpos(name=control_part)[0]
+        elif qpos_seed.dim() == 2:
+            qpos_seed = qpos_seed[0]
+        elif qpos_seed.dim() != 1:
+            logger.log_error(
+                f"qpos_seed must be 1D or 2D, but got shape {qpos_seed.shape}",
+                ValueError,
+            )
         success, qpos = self.robot.compute_ik(
             pose=target_pose.unsqueeze(0),
-            qpos_seed=qpos_seed.unsqueeze(0),
+            joint_seed=qpos_seed.unsqueeze(0),
             name=control_part,
+            env_ids=[0],
         )
         if not success.all():
             logger.log_error(f"IK failed for target pose: {target_pose}", RuntimeError)
@@ -238,6 +276,18 @@ class TrajectoryBuilder:
             trajectory=trajectory, interp_num=n_waypoints, device=self.device
         )
         return True, interp
+
+    def plan_joint_traj(
+        self,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate a joint-space trajectory from ``start_qpos`` to ``target_qpos``."""
+        trajectory = torch.stack([start_qpos, target_qpos], dim=1)
+        return interpolate_with_distance(
+            trajectory=trajectory, interp_num=n_waypoints, device=self.device
+        )
 
     # ------------------------------------------------------------------
     # Hand qpos helpers

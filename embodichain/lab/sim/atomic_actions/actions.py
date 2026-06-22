@@ -16,8 +16,8 @@
 
 """Concrete atomic actions built on :class:`AtomicAction` and :class:`TrajectoryBuilder`.
 
-Four sibling actions live here: :class:`MoveAction`, :class:`PickUpAction`,
-:class:`MoveObjectAction`, and :class:`PlaceAction`. Each inherits
+Five sibling actions live here: :class:`MoveEndEffector`, :class:`MoveJoints`,
+:class:`PickUp`, :class:`MoveHeldObject`, and :class:`Place`. Each inherits
 :class:`AtomicAction` directly and composes a :class:`TrajectoryBuilder` for
 shared trajectory math. ``execute`` takes a typed target plus a
 :class:`WorldState` and returns an :class:`ActionResult` whose trajectory is
@@ -40,21 +40,23 @@ from .core import (
     AtomicAction,
     GraspTarget,
     HeldObjectState,
-    HeldObjectTarget,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
-    PoseTarget,
+    EndEffectorPoseTarget,
     WorldState,
 )
 from .trajectory import TrajectoryBuilder
 
 # =============================================================================
-# Cfg classes (flat — no inheritance among GraspActionCfg/HandCloseActionCfg)
+# Cfg classes (flat — no inheritance among action configs)
 # =============================================================================
 
 
 @configclass
-class MoveActionCfg(ActionCfg):
-    name: str = "move"
+class MoveEndEffectorCfg(ActionCfg):
+    name: str = "move_end_effector"
     """Name of the action, used for identification and logging."""
 
     sample_interval: int = 50
@@ -62,7 +64,19 @@ class MoveActionCfg(ActionCfg):
 
 
 @configclass
-class PickUpActionCfg(ActionCfg):
+class MoveJointsCfg(ActionCfg):
+    name: str = "move_joints"
+    """Name of the action, used for identification and logging."""
+
+    sample_interval: int = 50
+    """Number of waypoints in the interpolated joint-space trajectory."""
+
+    named_joint_positions: dict[str, torch.Tensor] | None = None
+    """Optional named joint targets resolved by ``NamedJointPositionTarget``."""
+
+
+@configclass
+class PickUpCfg(ActionCfg):
     name: str = "pick_up"
     """Name of the action, used for identification and logging."""
 
@@ -92,8 +106,8 @@ class PickUpActionCfg(ActionCfg):
 
 
 @configclass
-class MoveObjectActionCfg(ActionCfg):
-    name: str = "move_object"
+class MoveHeldObjectCfg(ActionCfg):
+    name: str = "move_held_object"
     """Name of the action, used for identification and logging."""
 
     sample_interval: int = 50
@@ -107,7 +121,7 @@ class MoveObjectActionCfg(ActionCfg):
 
 
 @configclass
-class PlaceActionCfg(ActionCfg):
+class PlaceCfg(ActionCfg):
     name: str = "place"
     """Name of the action, used for identification and logging."""
 
@@ -158,28 +172,28 @@ def _arm_qpos_from_state(
 
 
 # =============================================================================
-# MoveAction
+# MoveEndEffector
 # =============================================================================
 
 
-class MoveAction(AtomicAction):
+class MoveEndEffector(AtomicAction):
     """Plan a free-space end-effector move to a target pose."""
 
-    TargetType: ClassVar[type] = PoseTarget
+    TargetType: ClassVar[type] = EndEffectorPoseTarget
 
     def __init__(
         self,
         motion_generator,
-        cfg: MoveActionCfg | None = None,
+        cfg: MoveEndEffectorCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveActionCfg())
+        super().__init__(motion_generator, cfg or MoveEndEffectorCfg())
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.arm_dof = len(self.arm_joint_ids)
         self.robot_dof = self.robot.dof
 
-    def execute(self, target: PoseTarget, state: WorldState) -> ActionResult:
+    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
         move_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
         start_qpos = self.builder.resolve_start_qpos(
             _arm_qpos_from_state(state, self.arm_joint_ids, self.robot_dof),
@@ -235,11 +249,93 @@ class MoveAction(AtomicAction):
 
 
 # =============================================================================
-# PickUpAction
+# MoveJoints
 # =============================================================================
 
 
-class PickUpAction(AtomicAction):
+class MoveJoints(AtomicAction):
+    """Plan a joint-space move for the configured control part."""
+
+    TargetType: ClassVar[tuple[type, ...]] = (
+        JointPositionTarget,
+        NamedJointPositionTarget,
+    )
+
+    def __init__(
+        self,
+        motion_generator,
+        cfg: MoveJointsCfg | None = None,
+    ) -> None:
+        super().__init__(motion_generator, cfg or MoveJointsCfg())
+        self.builder = TrajectoryBuilder(motion_generator)
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.joint_dof = len(self.joint_ids)
+        self.robot_dof = self.robot.dof
+        self.named_joint_positions = self.cfg.named_joint_positions or {}
+
+    def execute(
+        self,
+        target: JointPositionTarget | NamedJointPositionTarget,
+        state: WorldState,
+    ) -> ActionResult:
+        target_qpos = self.builder.resolve_joint_target(
+            self._resolve_target_qpos(target),
+            n_envs=self.n_envs,
+            joint_dof=self.joint_dof,
+            control_part=self.cfg.control_part,
+        )
+        start_qpos = self.builder.resolve_start_qpos(
+            state.last_qpos[:, self.joint_ids],
+            n_envs=self.n_envs,
+            arm_dof=self.joint_dof,
+            control_part=self.cfg.control_part,
+        )
+        joint_traj = self.builder.plan_joint_traj(
+            start_qpos, target_qpos, self.cfg.sample_interval
+        )
+        full = self._embed(joint_traj, state.last_qpos)
+        return ActionResult(
+            success=True,
+            trajectory=full,
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(), held_object=state.held_object
+            ),
+        )
+
+    def _resolve_target_qpos(
+        self, target: JointPositionTarget | NamedJointPositionTarget
+    ) -> torch.Tensor:
+        if isinstance(target, JointPositionTarget):
+            return target.qpos
+        if target.name not in self.named_joint_positions:
+            logger.log_error(
+                f"Unknown named joint-position target '{target.name}' for "
+                f"MoveJoints. Available targets: {sorted(self.named_joint_positions)}",
+                KeyError,
+            )
+        return self.named_joint_positions[target.name]
+
+    def _embed(
+        self, joint_traj: torch.Tensor, last_full_qpos: torch.Tensor
+    ) -> torch.Tensor:
+        n_wp = joint_traj.shape[1]
+        full = torch.empty(
+            (self.n_envs, n_wp, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full[:, :, :] = last_full_qpos.unsqueeze(1)
+        full[:, :, self.joint_ids] = joint_traj
+        return full
+
+
+# =============================================================================
+# PickUp
+# =============================================================================
+
+
+class PickUp(AtomicAction):
     """Approach a grasp pose, close the gripper, lift."""
 
     TargetType: ClassVar[type] = GraspTarget
@@ -247,9 +343,9 @@ class PickUpAction(AtomicAction):
     def __init__(
         self,
         motion_generator,
-        cfg: PickUpActionCfg | None = None,
+        cfg: PickUpCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or PickUpActionCfg())
+        super().__init__(motion_generator, cfg or PickUpCfg())
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
@@ -259,11 +355,11 @@ class PickUpAction(AtomicAction):
 
         if self.cfg.hand_open_qpos is None:
             logger.log_error(
-                "hand_open_qpos must be specified in PickUpActionCfg", ValueError
+                "hand_open_qpos must be specified in PickUpCfg", ValueError
             )
         if self.cfg.hand_close_qpos is None:
             logger.log_error(
-                "hand_close_qpos must be specified in PickUpActionCfg", ValueError
+                "hand_close_qpos must be specified in PickUpCfg", ValueError
             )
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
@@ -273,17 +369,17 @@ class PickUpAction(AtomicAction):
         sem = target.semantics
         if not isinstance(sem.affordance, AntipodalAffordance):
             logger.log_error(
-                "PickUpAction requires an AntipodalAffordance on the target semantics.",
+                "PickUp requires an AntipodalAffordance on the target semantics.",
                 ValueError,
             )
         if sem.entity is None:
             logger.log_error(
-                "PickUpAction requires an entity on the target semantics.", ValueError
+                "PickUp requires an entity on the target semantics.", ValueError
             )
 
         is_success, grasp_xpos = self._resolve_grasp_pose(sem)
         if not self.builder.all_envs_success(is_success):
-            logger.log_warning("PickUpAction failed to resolve a grasp pose.")
+            logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
 
         # Pre-grasp by offsetting backwards along grasp z.
@@ -322,7 +418,7 @@ class PickUpAction(AtomicAction):
             arm_dof=self.arm_dof,
         )
         if not ok:
-            logger.log_warning("PickUpAction failed to plan the approach trajectory.")
+            logger.log_warning("PickUp failed to plan the approach trajectory.")
             return self._fail(state)
 
         # Phase 3: lift (planned from grasp qpos)
@@ -343,7 +439,7 @@ class PickUpAction(AtomicAction):
             arm_dof=self.arm_dof,
         )
         if not ok:
-            logger.log_warning("PickUpAction failed to plan the lift trajectory.")
+            logger.log_warning("PickUp failed to plan the lift trajectory.")
             return self._fail(state)
 
         # Phase 2: hand close (arm held at grasp qpos)
@@ -431,21 +527,21 @@ class PickUpAction(AtomicAction):
 
 
 # =============================================================================
-# MoveObjectAction
+# MoveHeldObject
 # =============================================================================
 
 
-class MoveObjectAction(AtomicAction):
+class MoveHeldObject(AtomicAction):
     """Move the held object to a target object pose; keep the gripper closed."""
 
-    TargetType: ClassVar[type] = HeldObjectTarget
+    TargetType: ClassVar[type] = HeldObjectPoseTarget
 
     def __init__(
         self,
         motion_generator,
-        cfg: MoveObjectActionCfg | None = None,
+        cfg: MoveHeldObjectCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveObjectActionCfg())
+        super().__init__(motion_generator, cfg or MoveHeldObjectCfg())
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
@@ -455,14 +551,14 @@ class MoveObjectAction(AtomicAction):
 
         if self.cfg.hand_close_qpos is None:
             logger.log_error(
-                "hand_close_qpos must be specified in MoveObjectActionCfg", ValueError
+                "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
             )
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
-    def execute(self, target: HeldObjectTarget, state: WorldState) -> ActionResult:
+    def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
         if state.held_object is None:
             logger.log_error(
-                "MoveObjectAction requires WorldState.held_object — run PickUpAction first.",
+                "MoveHeldObject requires WorldState.held_object — run PickUp first.",
                 ValueError,
             )
         object_target_pose = _resolve_object_target(
@@ -494,7 +590,7 @@ class MoveObjectAction(AtomicAction):
             arm_dof=self.arm_dof,
         )
         if not ok:
-            logger.log_warning("MoveObjectAction failed to plan trajectory.")
+            logger.log_warning("MoveHeldObject failed to plan trajectory.")
             return self._fail(state)
 
         full = torch.empty(
@@ -528,21 +624,21 @@ class MoveObjectAction(AtomicAction):
 
 
 # =============================================================================
-# PlaceAction
+# Place
 # =============================================================================
 
 
-class PlaceAction(AtomicAction):
+class Place(AtomicAction):
     """Lower the held object to a place pose, open the gripper, retract."""
 
-    TargetType: ClassVar[type] = PoseTarget
+    TargetType: ClassVar[type] = EndEffectorPoseTarget
 
     def __init__(
         self,
         motion_generator,
-        cfg: PlaceActionCfg | None = None,
+        cfg: PlaceCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or PlaceActionCfg())
+        super().__init__(motion_generator, cfg or PlaceCfg())
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
@@ -551,17 +647,15 @@ class PlaceAction(AtomicAction):
         self.robot_dof = self.robot.dof
 
         if self.cfg.hand_open_qpos is None:
-            logger.log_error(
-                "hand_open_qpos must be specified in PlaceActionCfg", ValueError
-            )
+            logger.log_error("hand_open_qpos must be specified in PlaceCfg", ValueError)
         if self.cfg.hand_close_qpos is None:
             logger.log_error(
-                "hand_close_qpos must be specified in PlaceActionCfg", ValueError
+                "hand_close_qpos must be specified in PlaceCfg", ValueError
             )
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
-    def execute(self, target: PoseTarget, state: WorldState) -> ActionResult:
+    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
         start_arm_qpos = self.builder.resolve_start_qpos(
             _arm_qpos_from_state(state, self.arm_joint_ids, self.robot_dof),
@@ -654,12 +748,14 @@ class PlaceAction(AtomicAction):
 
 
 __all__ = [
-    "MoveAction",
-    "MoveActionCfg",
-    "MoveObjectAction",
-    "MoveObjectActionCfg",
-    "PickUpAction",
-    "PickUpActionCfg",
-    "PlaceAction",
-    "PlaceActionCfg",
+    "MoveEndEffector",
+    "MoveEndEffectorCfg",
+    "MoveJoints",
+    "MoveJointsCfg",
+    "MoveHeldObject",
+    "MoveHeldObjectCfg",
+    "PickUp",
+    "PickUpCfg",
+    "Place",
+    "PlaceCfg",
 ]

@@ -40,6 +40,13 @@ if TYPE_CHECKING:
 _global_action_registry: dict[str, type[AtomicAction]] = {}
 
 
+def _target_type_name(target_type: type | tuple[type, ...]) -> str:
+    """Return a readable name for one accepted target type or a tuple of them."""
+    if isinstance(target_type, tuple):
+        return " | ".join(t.__name__ for t in target_type)
+    return target_type.__name__
+
+
 def register_action(name: str, action_class: type[AtomicAction]) -> None:
     """Register a custom AtomicAction subclass globally under ``name``."""
     _global_action_registry[name] = action_class
@@ -102,7 +109,7 @@ class AtomicActionEngine:
             empty trajectory and the seed state.
         """
         if state is None:
-            state = WorldState(last_qpos=self.robot.get_qpos())
+            state = WorldState(last_qpos=self.robot.get_qpos().clone())
 
         full_traj = torch.empty(
             (state.last_qpos.shape[0], 0, self.robot.dof),
@@ -117,7 +124,7 @@ class AtomicActionEngine:
             if not isinstance(target, action.TargetType):
                 logger.log_error(
                     f"Action '{name}' expects target of type "
-                    f"{action.TargetType.__name__}, got {type(target).__name__}",
+                    f"{_target_type_name(action.TargetType)}, got {type(target).__name__}",
                     TypeError,
                 )
             result: ActionResult = action.execute(target, state)

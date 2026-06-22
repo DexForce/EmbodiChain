@@ -36,15 +36,15 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
     GraspTarget,
-    HeldObjectTarget,
-    MoveAction,
-    MoveActionCfg,
-    MoveObjectAction,
-    MoveObjectActionCfg,
+    HeldObjectPoseTarget,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
     ObjectSemantics,
-    PickUpAction,
-    PickUpActionCfg,
-    PoseTarget,
+    PickUp,
+    PickUpCfg,
+    EndEffectorPoseTarget,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -82,7 +82,7 @@ BOTTLE_MIN_HAND_CLOSE_QPOS = 0.024
 
 MOVE_SAMPLE_INTERVAL = 60
 PICK_SAMPLE_INTERVAL = 120
-MOVE_OBJECT_SAMPLE_INTERVAL = 120
+MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 TABLE_SIZE = [1.0, 1.4, 0.05]
@@ -91,7 +91,7 @@ TABLE_TOP_Z = -0.045
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveObjectAction holding a bottle in the gripper."
+        description="Demonstrate MoveHeldObject holding a bottle in the gripper."
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
@@ -331,11 +331,11 @@ def build_action_sequence(
     hand_close: torch.Tensor,
     device: torch.device,
 ) -> list:
-    move_cfg = MoveActionCfg(
+    move_cfg = MoveEndEffectorCfg(
         control_part="arm",
         sample_interval=MOVE_SAMPLE_INTERVAL,
     )
-    pickup_cfg = PickUpActionCfg(
+    pickup_cfg = PickUpCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_open_qpos=hand_open,
@@ -348,13 +348,13 @@ def build_action_sequence(
         sample_interval=PICK_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
     )
-    move_object_cfg = MoveObjectActionCfg(
+    move_held_object_cfg = MoveHeldObjectCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_close_qpos=hand_close,
-        sample_interval=MOVE_OBJECT_SAMPLE_INTERVAL,
+        sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
     )
-    return [move_cfg, pickup_cfg, move_object_cfg]
+    return [move_cfg, pickup_cfg, move_held_object_cfg]
 
 
 def run_move_object_demo(args: argparse.Namespace) -> None:
@@ -372,9 +372,9 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
     action_cfgs = build_action_sequence(hand_open, hand_close, sim.device)
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
     _action_classes = {
-        "move": MoveAction,
-        "pick_up": PickUpAction,
-        "move_object": MoveObjectAction,
+        "move_end_effector": MoveEndEffector,
+        "pick_up": PickUp,
+        "move_held_object": MoveHeldObject,
     }
     for cfg in action_cfgs:
         atomic_engine.register(_action_classes[cfg.name](motion_gen, cfg=cfg))
@@ -387,27 +387,27 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
     move_position = obj_pose[0, :3, 3].clone()
     move_position[2] = 0.36
     move_target = make_top_down_eef_pose(move_position)
-    move_object_target = HeldObjectTarget(
+    move_held_object_target = HeldObjectPoseTarget(
         object_target_pose=make_upright_object_pose(sim.device)
     )
 
-    logger.log_info("Planning move -> pick_up -> move_object")
+    logger.log_info("Planning move_end_effector -> pick_up -> move_held_object")
     start_time = time.time()
     is_success, traj, _ = atomic_engine.run(
         steps=[
-            ("move", PoseTarget(xpos=move_target)),
+            ("move_end_effector", EndEffectorPoseTarget(xpos=move_target)),
             ("pick_up", GraspTarget(semantics=semantics)),
-            ("move_object", move_object_target),
+            ("move_held_object", move_held_object_target),
         ]
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
     if not is_success:
-        logger.log_warning("Failed to plan move_object demo trajectory.")
+        logger.log_warning("Failed to plan move_held_object demo trajectory.")
         return
 
     if not args.auto_play:
-        input("Press Enter to replay the move_object demo...")
+        input("Press Enter to replay the move_held_object demo...")
 
     post_grasp_clear_step = compute_pick_close_end_step()
     should_clear_object_dynamics = True
@@ -423,7 +423,7 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
             log_object_state(obj, f"replay step {i}/{traj.shape[1] - 1}")
         time.sleep(1e-2)
 
-    logger.log_info("MoveObjectAction keeps the bottle suspended in the gripper.")
+    logger.log_info("MoveHeldObject keeps the bottle suspended in the gripper.")
 
     final_qpos = traj[:, -1, :]
     for i in range(POST_TRAJECTORY_STEPS):

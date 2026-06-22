@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate PickUpAction on an upright object with configurable approach."""
+"""Demonstrate PickUp on an upright object with configurable approach."""
 
 from __future__ import annotations
 
@@ -36,12 +36,12 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
     GraspTarget,
-    MoveAction,
-    MoveActionCfg,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
     ObjectSemantics,
-    PickUpAction,
-    PickUpActionCfg,
-    PoseTarget,
+    PickUp,
+    PickUpCfg,
+    EndEffectorPoseTarget,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -118,7 +118,7 @@ APPROACH_DIRECTIONS = {
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate PickUpAction on an upright object."
+        description="Demonstrate PickUp on an upright object."
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
@@ -400,11 +400,11 @@ def build_action_sequence(
     hand_close: torch.Tensor,
     approach_direction: torch.Tensor,
 ) -> list:
-    move_cfg = MoveActionCfg(
+    move_cfg = MoveEndEffectorCfg(
         control_part="arm",
         sample_interval=MOVE_SAMPLE_INTERVAL,
     )
-    pickup_cfg = PickUpActionCfg(
+    pickup_cfg = PickUpCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_open_qpos=hand_open,
@@ -434,8 +434,8 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
     action_cfgs = build_action_sequence(hand_open, hand_close, approach_direction)
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
     _action_classes = {
-        "move": MoveAction,
-        "pick_up": PickUpAction,
+        "move_end_effector": MoveEndEffector,
+        "pick_up": PickUp,
     }
     for cfg in action_cfgs:
         atomic_engine.register(_action_classes[cfg.name](motion_gen, cfg=cfg))
@@ -450,13 +450,13 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
     move_target = make_top_down_eef_pose(move_position)
 
     logger.log_info(
-        f"Planning move -> pick_up for {args.object} with "
+        f"Planning move_end_effector -> pick_up for {args.object} with "
         f"approach_direction={format_tensor(approach_direction)}"
     )
     start_time = time.time()
     is_success, traj, _ = atomic_engine.run(
         steps=[
-            ("move", PoseTarget(xpos=move_target)),
+            ("move_end_effector", EndEffectorPoseTarget(xpos=move_target)),
             ("pick_up", GraspTarget(semantics=semantics)),
         ]
     )
@@ -483,9 +483,7 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
             log_object_state(obj, f"replay step {i}/{traj.shape[1] - 1}")
         time.sleep(1e-2)
 
-    logger.log_info(
-        f"PickUpAction keeps the upright {args.object} suspended in the gripper."
-    )
+    logger.log_info(f"PickUp keeps the upright {args.object} suspended in the gripper.")
 
     final_qpos = traj[:, -1, :]
     for i in range(POST_TRAJECTORY_STEPS):

@@ -29,9 +29,11 @@ from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
     GraspTarget,
     HeldObjectState,
-    HeldObjectTarget,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
-    PoseTarget,
+    EndEffectorPoseTarget,
     WorldState,
 )
 
@@ -39,12 +41,29 @@ from embodichain.lab.sim.atomic_actions.core import (
 class TestTypedTargets:
     def test_pose_target_holds_tensor(self):
         x = torch.eye(4)
-        assert PoseTarget(xpos=x).xpos is x
+        assert EndEffectorPoseTarget(xpos=x).xpos is x
 
     def test_pose_target_is_frozen(self):
-        t = PoseTarget(xpos=torch.eye(4))
+        t = EndEffectorPoseTarget(xpos=torch.eye(4))
         with pytest.raises(dataclasses.FrozenInstanceError):
             t.xpos = torch.zeros(4, 4)  # type: ignore[misc]
+
+    def test_joint_position_target_holds_qpos(self):
+        qpos = torch.zeros(6)
+        assert JointPositionTarget(qpos=qpos).qpos is qpos
+
+    def test_joint_position_target_is_frozen(self):
+        t = JointPositionTarget(qpos=torch.zeros(6))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.qpos = torch.ones(6)  # type: ignore[misc]
+
+    def test_named_joint_position_target_holds_name(self):
+        assert NamedJointPositionTarget(name="home").name == "home"
+
+    def test_named_joint_position_target_is_frozen(self):
+        t = NamedJointPositionTarget(name="home")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.name = "ready"  # type: ignore[misc]
 
     def test_grasp_target_holds_semantics(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
@@ -60,10 +79,10 @@ class TestTypedTargets:
 
     def test_held_object_target_holds_pose(self):
         x = torch.eye(4)
-        assert HeldObjectTarget(object_target_pose=x).object_target_pose is x
+        assert HeldObjectPoseTarget(object_target_pose=x).object_target_pose is x
 
     def test_held_object_target_is_frozen(self):
-        t = HeldObjectTarget(object_target_pose=torch.eye(4))
+        t = HeldObjectPoseTarget(object_target_pose=torch.eye(4))
         with pytest.raises(dataclasses.FrozenInstanceError):
             t.object_target_pose = torch.zeros(4, 4)  # type: ignore[misc]
 

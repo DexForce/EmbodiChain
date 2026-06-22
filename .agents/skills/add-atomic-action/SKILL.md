@@ -30,9 +30,10 @@ full-DoF trajectory.
 ## The Contract (read first)
 
 Every atomic action is a **sibling** inheriting `AtomicAction` directly — do **not**
-inherit from `MoveAction` or any other action. Each action:
+inherit from `MoveEndEffector` or any other action. Each action:
 
-1. Declares `TargetType: ClassVar[type]` — the concrete target dataclass it accepts.
+1. Declares `TargetType: ClassVar[type | tuple[type, ...]]` — the concrete target dataclass,
+   or tuple of dataclasses, it accepts.
 2. Holds `self.builder = TrajectoryBuilder(motion_generator)` for shared trajectory math.
 3. Implements exactly one method: `execute(self, target, state: WorldState) -> ActionResult`.
    - `target` is an instance of `self.TargetType`.
@@ -66,7 +67,7 @@ from embodichain.lab.sim.atomic_actions.core import ActionCfg
 
 
 @configclass
-class PushActionCfg(ActionCfg):
+class PushCfg(ActionCfg):
     name: str = "push"            # must match the engine registration key
     push_distance: float = 0.05   # metres to push forward
     sample_interval: int = 30     # waypoints for the push phase
@@ -76,14 +77,16 @@ class PushActionCfg(ActionCfg):
 **Rules:**
 - `name` must be unique and match the key used to register the action with the engine.
 - Inherit from `ActionCfg` directly. If the action needs hand open/close fields,
-  declare them on this cfg (see `PickUpActionCfg` for the pattern) — do not invent a
+  declare them on this cfg (see `PickUpCfg` for the pattern) — do not invent a
   shared `GraspActionCfg` parent.
 - All fields must have defaults.
 
 ### 2. Define a typed target (if needed)
 
-Reuse an existing target when it fits (`PoseTarget(xpos)` for an EEF-pose target,
-`GraspTarget(semantics)` for a pickup, `HeldObjectTarget(object_target_pose)` for
+Reuse an existing target when it fits (`EndEffectorPoseTarget(xpos)` for an EEF-pose target,
+`JointPositionTarget(qpos)` for an explicit control-part qpos target,
+`NamedJointPositionTarget(name)` for a named qpos target resolved by action config,
+`GraspTarget(semantics)` for a pickup, `HeldObjectPoseTarget(object_target_pose)` for
 moving a grasped object). Only define a new frozen dataclass target when the action
 needs inputs the existing targets don't carry. Put new targets in `core.py`.
 
@@ -117,13 +120,13 @@ from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
 from embodichain.utils import logger
 
 
-class PushAction(AtomicAction):
+class Push(AtomicAction):
     """Push an object forward by a fixed distance from a contact pose."""
 
-    TargetType: ClassVar[type] = PushTarget  # set to PoseTarget if you reused it
+    TargetType: ClassVar[type] = PushTarget  # set to EndEffectorPoseTarget if you reused it
 
-    def __init__(self, motion_generator, cfg: PushActionCfg | None = None):
-        super().__init__(motion_generator, cfg or PushActionCfg())
+    def __init__(self, motion_generator, cfg: PushCfg | None = None):
+        super().__init__(motion_generator, cfg or PushCfg())
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
@@ -193,8 +196,9 @@ class PushAction(AtomicAction):
 - `execute()` returns an `ActionResult` — never a bare tuple.
 - `trajectory` shape is always `(n_envs, n_waypoints, robot.dof)` (full robot DoF).
 - Use `self.builder.<helper>` for all trajectory math (`resolve_pose_target`,
-  `resolve_start_qpos`, `apply_local_offset`, `plan_arm_traj`, `split_three_phase`,
-  `interpolate_hand_qpos`). Do not reimplement that math inline.
+  `resolve_joint_target`, `resolve_start_qpos`, `apply_local_offset`, `plan_arm_traj`,
+  `plan_joint_traj`, `split_three_phase`, `interpolate_hand_qpos`). Do not reimplement
+  that math inline.
 - Thread `WorldState` explicitly: advance `last_qpos` to the final trajectory row;
   set/clear/preserve `held_object` per what the action does to the grasp.
 - Use `logger.log_error(msg, ValueError)` for contract violations (wrong target type,
@@ -208,10 +212,10 @@ class PushAction(AtomicAction):
 Register an **instance** with the engine so `run()` can dispatch it by name.
 
 ```python
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine, PushAction
+from embodichain.lab.sim.atomic_actions import AtomicActionEngine, Push
 
 engine = AtomicActionEngine(motion_generator=motion_gen)
-engine.register(PushAction(motion_gen, cfg=PushActionCfg()))  # keyed by cfg.name "push"
+engine.register(Push(motion_gen, cfg=PushCfg()))  # keyed by cfg.name "push"
 ```
 
 For third-party / plugin actions that should be discoverable without the caller
@@ -219,7 +223,7 @@ constructing them, register the **class** in the global registry:
 
 ```python
 from embodichain.lab.sim.atomic_actions import register_action
-register_action("push", PushAction)
+register_action("push", Push)
 ```
 
 ### 5. Export from the public API
@@ -228,13 +232,13 @@ Add the config, action class, and any new target to
 `embodichain/lab/sim/atomic_actions/__init__.py`:
 
 ```python
-from .actions import PushAction, PushActionCfg
+from .actions import Push, PushCfg
 # (and from .core import PushTarget if you defined one)
 
 __all__ = [
     ...,
-    "PushAction",
-    "PushActionCfg",
+    "Push",
+    "PushCfg",
 ]
 ```
 
@@ -243,7 +247,7 @@ __all__ = [
 Add a row to the table in `docs/source/overview/sim/atomic_actions.md`:
 
 ```markdown
-| `PushAction` | `PushActionCfg` | `PushTarget` — contact pose | Approach → push forward |
+| `Push` | `PushCfg` | `PushTarget` — contact pose | Approach → push forward |
 ```
 
 ### 7. Write a test
@@ -255,13 +259,13 @@ and the `WorldState` contract.
 
 ```python
 def test_push_action_cfg_defaults():
-    cfg = PushActionCfg()
+    cfg = PushCfg()
     assert cfg.name == "push"
     assert cfg.push_distance == 0.05
 
 def test_push_action_returns_full_dof_trajectory():
     mg = _make_mock_motion_generator()
-    action = PushAction(mg, PushActionCfg(sample_interval=10))
+    action = Push(mg, PushCfg(sample_interval=10))
     state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
     with patch(
         "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
@@ -279,11 +283,11 @@ def test_push_action_returns_full_dof_trajectory():
 
 | Mistake | Fix |
 |---------|-----|
-| Inheriting from `MoveAction` | Inherit `AtomicAction` directly and compose a `TrajectoryBuilder`. Actions are siblings, not a tree. |
+| Inheriting from `MoveEndEffector` | Inherit `AtomicAction` directly and compose a `TrajectoryBuilder`. Actions are siblings, not a tree. |
 | Returning `(bool, Tensor, joint_ids)` | Return an `ActionResult` with a full-DoF `(n_envs, n_wp, robot.dof)` trajectory. |
 | Declaring `validate` / `updates_held_object_state` / `get_held_object_state` | These were removed. State flows only through `WorldState` and `ActionResult.next_state`. |
 | `execute(target, start_qpos=None, **kwargs)` | Signature is `execute(self, target, state: WorldState) -> ActionResult`. No `**kwargs`, no `start_qpos`. |
-| Reimplementing IK / interpolation inline | Use `self.builder.plan_arm_traj(...)` and friends. |
+| Reimplementing IK / interpolation inline | Use `self.builder.plan_arm_traj(...)`, `self.builder.plan_joint_traj(...)`, and friends. |
 | Returning arm-only or arm+hand trajectory | Always embed into full `robot.dof` before returning. |
 | `name` not matching the engine registration key | Keep `cfg.name` identical to the key passed to `engine.register(...)` / `register_action(...)`. |
 | Forgetting to export from `__init__.py` | Users import from the public API — missing exports cause `ImportError`. |
@@ -294,9 +298,9 @@ def test_push_action_returns_full_dof_trajectory():
 | Step | Action |
 |------|--------|
 | 1 | Define a flat `@configclass` extending `ActionCfg` with a unique `name` |
-| 2 | Define a typed target (or reuse `PoseTarget` / `GraspTarget` / `HeldObjectTarget`) |
+| 2 | Define a typed target (or reuse `EndEffectorPoseTarget` / `JointPositionTarget` / `NamedJointPositionTarget` / `GraspTarget` / `HeldObjectPoseTarget`) |
 | 3 | Subclass `AtomicAction` directly, set `TargetType`, compose `TrajectoryBuilder`, implement `execute(target, state) -> ActionResult` |
-| 4 | Register: `engine.register(PushAction(mg, cfg=...))` (instance) or `register_action("push", PushAction)` (class) |
+| 4 | Register: `engine.register(Push(mg, cfg=...))` (instance) or `register_action("push", Push)` (class) |
 | 5 | Export config + action (+ target) from `__init__.py` |
 | 6 | Add a row to the supported-actions table in the overview docs |
 | 7 | Write behavioural tests (target type, full-DoF shape, `WorldState` contract) |

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for the four concrete atomic action classes."""
+"""Tests for the concrete atomic action classes."""
 
 from __future__ import annotations
 
@@ -29,20 +29,24 @@ from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
     GraspTarget,
     HeldObjectState,
-    HeldObjectTarget,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
-    PoseTarget,
+    EndEffectorPoseTarget,
     WorldState,
 )
 from embodichain.lab.sim.atomic_actions.actions import (
-    MoveAction,
-    MoveActionCfg,
-    MoveObjectAction,
-    MoveObjectActionCfg,
-    PickUpAction,
-    PickUpActionCfg,
-    PlaceAction,
-    PlaceActionCfg,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
+    MoveJoints,
+    MoveJointsCfg,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
 )
 
 NUM_ENVS = 2
@@ -116,34 +120,118 @@ def _hand_close():
 
 
 # ---------------------------------------------------------------------------
-# MoveAction
+# MoveEndEffector
 # ---------------------------------------------------------------------------
 
 
-class TestMoveAction:
+class TestMoveEndEffectorAction:
     def setup_method(self):
         self.mg = _make_mock_motion_generator()
 
     def test_target_type_is_pose_target(self):
-        assert MoveAction.TargetType is PoseTarget
+        assert MoveEndEffector.TargetType is EndEffectorPoseTarget
+
+    def test_default_name_is_explicit(self):
+        assert MoveEndEffectorCfg().name == "move_end_effector"
 
     def test_execute_returns_full_dof_trajectory(self):
-        action = MoveAction(self.mg, MoveActionCfg(sample_interval=10))
+        action = MoveEndEffector(self.mg, MoveEndEffectorCfg(sample_interval=10))
         with patch(
             "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
             return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
         ):
             state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
-            result = action.execute(PoseTarget(xpos=torch.eye(4)), state)
+            result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
         assert isinstance(result, ActionResult)
         assert result.success is True
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
-        # Move doesn't touch held_object
+        # MoveEndEffector preserves held_object.
         assert result.next_state.held_object is None
 
 
 # ---------------------------------------------------------------------------
-# PickUpAction
+# MoveJoints
+# ---------------------------------------------------------------------------
+
+
+class TestMoveJointsAction:
+    def setup_method(self):
+        self.mg = _make_mock_motion_generator()
+
+    def test_target_type_accepts_explicit_and_named_joint_targets(self):
+        assert MoveJoints.TargetType == (JointPositionTarget, NamedJointPositionTarget)
+
+    def test_default_name_is_explicit(self):
+        assert MoveJointsCfg().name == "move_joints"
+
+    def test_execute_with_explicit_qpos_returns_full_dof_trajectory(self):
+        action = MoveJoints(self.mg, MoveJointsCfg(sample_interval=10))
+        target_qpos = torch.full((ARM_DOF,), 0.5)
+        hand_qpos = torch.full((NUM_ENVS, HAND_DOF), 0.25)
+        last_qpos = torch.cat([torch.zeros(NUM_ENVS, ARM_DOF), hand_qpos], dim=1)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="mug"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+
+        def interpolate(trajectory, interp_num, device):
+            assert trajectory.shape == (NUM_ENVS, 2, ARM_DOF)
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(
+                JointPositionTarget(qpos=target_qpos),
+                WorldState(last_qpos=last_qpos, held_object=held),
+            )
+
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
+        assert torch.allclose(result.trajectory[:, -1, :ARM_DOF], target_qpos)
+        assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], hand_qpos)
+        assert result.next_state.held_object is held
+
+    def test_execute_with_named_qpos_resolves_cfg_target(self):
+        action = MoveJoints(
+            self.mg,
+            MoveJointsCfg(
+                sample_interval=8,
+                named_joint_positions={"home": torch.full((ARM_DOF,), 0.2)},
+            ),
+        )
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: trajectory[
+                :, -1:, :
+            ].repeat(1, interp_num, 1),
+        ):
+            result = action.execute(
+                NamedJointPositionTarget(name="home"),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+        assert result.success is True
+        assert torch.allclose(
+            result.next_state.last_qpos[:, :ARM_DOF],
+            torch.full((NUM_ENVS, ARM_DOF), 0.2),
+        )
+
+    def test_unknown_named_qpos_raises(self):
+        action = MoveJoints(self.mg, MoveJointsCfg())
+        with pytest.raises(KeyError, match="missing"):
+            action.execute(
+                NamedJointPositionTarget(name="missing"),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+
+
+# ---------------------------------------------------------------------------
+# PickUp
 # ---------------------------------------------------------------------------
 
 
@@ -152,16 +240,16 @@ class TestPickUpAction:
         self.mg = _make_mock_motion_generator()
 
     def test_target_type_is_grasp_target(self):
-        assert PickUpAction.TargetType is GraspTarget
+        assert PickUp.TargetType is GraspTarget
 
     def test_execute_populates_held_object_state(self):
-        cfg = PickUpActionCfg(
+        cfg = PickUpCfg(
             hand_open_qpos=_hand_open(),
             hand_close_qpos=_hand_close(),
             sample_interval=20,
             hand_interp_steps=4,
         )
-        action = PickUpAction(self.mg, cfg)
+        action = PickUp(self.mg, cfg)
 
         # Fake affordance that returns a single identity grasp pose.
         affordance = AntipodalAffordance()
@@ -200,33 +288,38 @@ class TestPickUpAction:
 
 
 # ---------------------------------------------------------------------------
-# MoveObjectAction
+# MoveHeldObject
 # ---------------------------------------------------------------------------
 
 
-class TestMoveObjectAction:
+class TestMoveHeldObjectAction:
     def setup_method(self):
         self.mg = _make_mock_motion_generator()
 
     def test_target_type_is_held_object_target(self):
-        assert MoveObjectAction.TargetType is HeldObjectTarget
+        assert MoveHeldObject.TargetType is HeldObjectPoseTarget
+
+    def test_default_name_is_explicit(self):
+        assert (
+            MoveHeldObjectCfg(hand_close_qpos=_hand_close()).name == "move_held_object"
+        )
 
     def test_requires_held_object_in_state(self):
-        cfg = MoveObjectActionCfg(
+        cfg = MoveHeldObjectCfg(
             hand_close_qpos=_hand_close(),
             sample_interval=10,
         )
-        action = MoveObjectAction(self.mg, cfg)
+        action = MoveHeldObject(self.mg, cfg)
         state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
         with pytest.raises(Exception):
-            action.execute(HeldObjectTarget(object_target_pose=torch.eye(4)), state)
+            action.execute(HeldObjectPoseTarget(object_target_pose=torch.eye(4)), state)
 
     def test_preserves_held_object(self):
-        cfg = MoveObjectActionCfg(
+        cfg = MoveHeldObjectCfg(
             hand_close_qpos=_hand_close(),
             sample_interval=10,
         )
-        action = MoveObjectAction(self.mg, cfg)
+        action = MoveHeldObject(self.mg, cfg)
         sem = ObjectSemantics(
             affordance=AntipodalAffordance(), geometry={}, label="mug"
         )
@@ -241,7 +334,7 @@ class TestMoveObjectAction:
             return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
         ):
             result = action.execute(
-                HeldObjectTarget(object_target_pose=torch.eye(4)), state
+                HeldObjectPoseTarget(object_target_pose=torch.eye(4)), state
             )
         assert result.success is True
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
@@ -249,7 +342,7 @@ class TestMoveObjectAction:
 
 
 # ---------------------------------------------------------------------------
-# PlaceAction
+# Place
 # ---------------------------------------------------------------------------
 
 
@@ -258,16 +351,16 @@ class TestPlaceAction:
         self.mg = _make_mock_motion_generator()
 
     def test_target_type_is_pose_target(self):
-        assert PlaceAction.TargetType is PoseTarget
+        assert Place.TargetType is EndEffectorPoseTarget
 
     def test_execute_clears_held_object(self):
-        cfg = PlaceActionCfg(
+        cfg = PlaceCfg(
             hand_open_qpos=_hand_open(),
             hand_close_qpos=_hand_close(),
             sample_interval=20,
             hand_interp_steps=4,
         )
-        action = PlaceAction(self.mg, cfg)
+        action = Place(self.mg, cfg)
         sem = ObjectSemantics(
             affordance=AntipodalAffordance(), geometry={}, label="mug"
         )
@@ -283,7 +376,7 @@ class TestPlaceAction:
                 NUM_ENVS, interp_num, ARM_DOF
             ),
         ):
-            result = action.execute(PoseTarget(xpos=torch.eye(4)), state)
+            result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
         assert result.success is True
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None

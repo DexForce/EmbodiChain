@@ -109,9 +109,19 @@ class AntipodalAffordance(Affordance):
             is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
                 obj_pose, approach_direction
             )
+            if grasp_poses.shape == (4, 4):
+                grasp_poses = grasp_poses.unsqueeze(0)
+            if costs.dim() == 0:
+                costs = costs.unsqueeze(0)
             if not is_success:
                 logger.log_warning(
                     f"Failed to find valid grasp poses for {i}-th object."
+                )
+                costs = torch.full(
+                    (grasp_poses.shape[0],),
+                    torch.inf,
+                    dtype=torch.float32,
+                    device=grasp_poses.device,
                 )
             results.append((grasp_poses, costs))
         return results

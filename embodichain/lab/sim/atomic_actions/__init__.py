@@ -17,9 +17,9 @@
 """Atomic action abstraction layer for embodied AI motion generation.
 
 This module provides a unified interface for the atomic motion primitives
-(``move``, ``pick_up``, ``move_object``, ``place``), with typed targets, a
-``WorldState`` threaded across sequenced actions, and extensible custom action
-registration.
+(``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
+``place``), with typed targets, a ``WorldState`` threaded across sequenced
+actions, and extensible custom action registration.
 """
 
 from .affordance import (
@@ -33,21 +33,25 @@ from .core import (
     AtomicAction,
     GraspTarget,
     HeldObjectState,
-    HeldObjectTarget,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
-    PoseTarget,
+    EndEffectorPoseTarget,
     Target,
     WorldState,
 )
 from .actions import (
-    MoveAction,
-    MoveObjectAction,
-    PickUpAction,
-    PlaceAction,
-    MoveActionCfg,
-    MoveObjectActionCfg,
-    PickUpActionCfg,
-    PlaceActionCfg,
+    MoveEndEffector,
+    MoveJoints,
+    MoveHeldObject,
+    PickUp,
+    Place,
+    MoveEndEffectorCfg,
+    MoveJointsCfg,
+    MoveHeldObjectCfg,
+    PickUpCfg,
+    PlaceCfg,
 )
 from .engine import (
     AtomicActionEngine,
@@ -64,8 +68,10 @@ __all__ = [
     "InteractionPoints",
     "ObjectSemantics",
     "HeldObjectState",
-    "HeldObjectTarget",
-    "PoseTarget",
+    "HeldObjectPoseTarget",
+    "JointPositionTarget",
+    "NamedJointPositionTarget",
+    "EndEffectorPoseTarget",
     "GraspTarget",
     "Target",
     "WorldState",
@@ -73,14 +79,16 @@ __all__ = [
     "ActionCfg",
     "AtomicAction",
     # Action implementations
-    "MoveAction",
-    "MoveObjectAction",
-    "PickUpAction",
-    "PlaceAction",
-    "MoveActionCfg",
-    "MoveObjectActionCfg",
-    "PickUpActionCfg",
-    "PlaceActionCfg",
+    "MoveEndEffector",
+    "MoveJoints",
+    "MoveHeldObject",
+    "PickUp",
+    "Place",
+    "MoveEndEffectorCfg",
+    "MoveJointsCfg",
+    "MoveHeldObjectCfg",
+    "PickUpCfg",
+    "PlaceCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",

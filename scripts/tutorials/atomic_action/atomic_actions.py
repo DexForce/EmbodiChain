@@ -24,7 +24,7 @@ a pick-and-place task with a robot arm.
 Key concepts covered:
   1. Setting up a MotionGenerator and AtomicActionEngine
   2. Describing what to pick using ObjectSemantics and AntipodalAffordance
-  3. Running a pick → place → move sequence with engine.run([(name, target), ...])
+  3. Running a pick → place → move_end_effector sequence with engine.run([(name, target), ...])
 
 Run with:
     python atomic_actions.py [--num_envs N] [--renderer hybrid|fast-rt|rt]
@@ -65,14 +65,14 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
     GraspTarget,
-    MoveAction,
-    MoveActionCfg,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
     ObjectSemantics,
-    PickUpAction,
-    PickUpActionCfg,
-    PlaceAction,
-    PlaceActionCfg,
-    PoseTarget,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
+    EndEffectorPoseTarget,
 )
 
 
@@ -207,9 +207,9 @@ def main():
     # ------------------------------------------------------------------ #
     # Step 3: Configure the three atomic actions                          #
     #                                                                     #
-    #  PickUpAction  — approach → close gripper → lift                   #
-    #  PlaceAction   — lower → open gripper → retract                    #
-    #  MoveAction    — free-space move to a target EEF pose               #
+    #  PickUp  — approach → close gripper → lift                   #
+    #  Place   — lower → open gripper → retract                    #
+    #  MoveEndEffector — free-space move to a target EEF pose           #
     # ------------------------------------------------------------------ #
     # Gripper joint values for this robot (DH_PGC_140):
     #   open  = [0.00, 0.00]   (fully open)
@@ -217,7 +217,7 @@ def main():
     hand_open = torch.tensor([0.00, 0.00], dtype=torch.float32, device=sim.device)
     hand_close = torch.tensor([0.025, 0.025], dtype=torch.float32, device=sim.device)
 
-    pickup_cfg = PickUpActionCfg(
+    pickup_cfg = PickUpCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_open_qpos=hand_open,
@@ -230,7 +230,7 @@ def main():
         lift_height=0.15,  # lift 15 cm after grasping
     )
 
-    place_cfg = PlaceActionCfg(
+    place_cfg = PlaceCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_open_qpos=hand_open,
@@ -238,7 +238,7 @@ def main():
         lift_height=0.15,
     )
 
-    move_cfg = MoveActionCfg(
+    move_cfg = MoveEndEffectorCfg(
         control_part="arm",
     )
 
@@ -250,9 +250,9 @@ def main():
     # declared at call time rather than baked into the engine.            #
     # ------------------------------------------------------------------ #
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(PickUpAction(motion_gen, cfg=pickup_cfg))
-    atomic_engine.register(PlaceAction(motion_gen, cfg=place_cfg))
-    atomic_engine.register(MoveAction(motion_gen, cfg=move_cfg))
+    atomic_engine.register(PickUp(motion_gen, cfg=pickup_cfg))
+    atomic_engine.register(Place(motion_gen, cfg=place_cfg))
+    atomic_engine.register(MoveEndEffector(motion_gen, cfg=move_cfg))
 
     sim.init_gpu_physics()
     if not args.headless:
@@ -294,7 +294,7 @@ def main():
     # Step 6: Define target poses for place and final rest                #
     #                                                                     #
     # Poses are 4×4 homogeneous transforms (rotation | translation).     #
-    # For PickUpAction the target is mug_semantics — the action computes  #
+    # For PickUp the target is mug_semantics — the action computes  #
     # the grasp pose automatically from the affordance.                   #
     # ------------------------------------------------------------------ #
     # Place the mug 20 cm to the left and 40 cm forward from its pickup pose
@@ -309,7 +309,7 @@ def main():
         device=sim.device,
     )
 
-    # Move the arm to a safe resting pose after placing
+    # Move the end-effector to a safe resting pose after placing.
     rest_xpos = torch.tensor(
         [
             [-0.0539, -0.9985, -0.0022, 0.5000],
@@ -329,12 +329,12 @@ def main():
     # concatenated joint trajectory (n_envs, n_waypoints, dof). We then   #
     # replay it frame-by-frame in the simulator.                          #
     # ------------------------------------------------------------------ #
-    print("Planning pick → place → move trajectory...")
+    print("Planning pick → place → move_end_effector trajectory...")
     is_success, traj, _ = atomic_engine.run(
         steps=[
             ("pick_up", GraspTarget(semantics=mug_semantics)),
-            ("place", PoseTarget(xpos=place_xpos)),
-            ("move", PoseTarget(xpos=rest_xpos)),
+            ("place", EndEffectorPoseTarget(xpos=place_xpos)),
+            ("move_end_effector", EndEffectorPoseTarget(xpos=rest_xpos)),
         ],
     )
 

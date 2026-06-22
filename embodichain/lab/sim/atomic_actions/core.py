@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, TYPE_CHECKING, Union
+from typing import Any, ClassVar, TYPE_CHECKING
 
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import configclass
@@ -67,11 +67,27 @@ class ObjectSemantics:
 
 
 @dataclass(frozen=True)
-class PoseTarget:
-    """End-effector pose target. Used by MoveAction and PlaceAction."""
+class EndEffectorPoseTarget:
+    """End-effector pose target. Used by MoveEndEffector and Place."""
 
     xpos: torch.Tensor
     """(4, 4) or (n_envs, 4, 4) homogeneous transform."""
+
+
+@dataclass(frozen=True)
+class JointPositionTarget:
+    """Joint-space target for a configured robot control part."""
+
+    qpos: torch.Tensor
+    """(control_dof,) or (n_envs, control_dof) target joint positions."""
+
+
+@dataclass(frozen=True)
+class NamedJointPositionTarget:
+    """Named joint-space target resolved from ``MoveJointsCfg``."""
+
+    name: str
+    """Name of a joint-position target in ``MoveJointsCfg.named_joint_positions``."""
 
 
 @dataclass(frozen=True)
@@ -82,14 +98,20 @@ class GraspTarget:
 
 
 @dataclass(frozen=True)
-class HeldObjectTarget:
+class HeldObjectPoseTarget:
     """Move the currently-held object to a desired object pose."""
 
     object_target_pose: torch.Tensor
     """(4, 4) or (n_envs, 4, 4) target pose for the held object."""
 
 
-Target = Union[PoseTarget, GraspTarget, HeldObjectTarget]
+Target = (
+    EndEffectorPoseTarget
+    | JointPositionTarget
+    | NamedJointPositionTarget
+    | GraspTarget
+    | HeldObjectPoseTarget
+)
 
 
 # =============================================================================
@@ -165,8 +187,8 @@ class AtomicAction(ABC):
     dropped from the contract in this redesign.
     """
 
-    TargetType: ClassVar[type]
-    """Concrete target dataclass accepted by ``execute``."""
+    TargetType: ClassVar[type | tuple[type, ...]]
+    """Concrete target dataclass or dataclasses accepted by ``execute``."""
 
     def __init__(
         self,
@@ -198,9 +220,11 @@ __all__ = [
     "AtomicAction",
     "GraspTarget",
     "HeldObjectState",
-    "HeldObjectTarget",
+    "HeldObjectPoseTarget",
+    "JointPositionTarget",
+    "NamedJointPositionTarget",
     "ObjectSemantics",
-    "PoseTarget",
+    "EndEffectorPoseTarget",
     "Target",
     "WorldState",
 ]

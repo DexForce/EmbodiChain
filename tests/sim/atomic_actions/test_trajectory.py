@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 import torch
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
 
@@ -91,6 +91,33 @@ class TestResolvePoseTarget:
             self.builder.resolve_pose_target(torch.eye(3), n_envs=2)
 
 
+class TestResolveJointTarget:
+    def setup_method(self):
+        self.builder = TrajectoryBuilder(_make_mock_motion_generator())
+
+    def test_unbatched_qpos_broadcasts(self):
+        qpos = torch.arange(6, dtype=torch.float32)
+        out = self.builder.resolve_joint_target(
+            qpos, n_envs=2, joint_dof=6, control_part="arm"
+        )
+        assert out.shape == (2, 6)
+        assert torch.allclose(out[0], qpos)
+        assert torch.allclose(out[1], qpos)
+
+    def test_batched_qpos_passes_through(self):
+        qpos = torch.arange(12, dtype=torch.float32).reshape(2, 6)
+        out = self.builder.resolve_joint_target(
+            qpos, n_envs=2, joint_dof=6, control_part="arm"
+        )
+        assert torch.equal(out, qpos)
+
+    def test_wrong_shape_raises(self):
+        with pytest.raises(Exception):
+            self.builder.resolve_joint_target(
+                torch.zeros(5), n_envs=2, joint_dof=6, control_part="arm"
+            )
+
+
 class TestSplitThreePhase:
     def setup_method(self):
         self.builder = TrajectoryBuilder(_make_mock_motion_generator())
@@ -151,3 +178,42 @@ class TestInterpolateHandQpos:
         out = self.builder.interpolate_hand_qpos(a, b, n_waypoints=5)
         assert torch.allclose(out[:, 0], a)
         assert torch.allclose(out[:, -1], b)
+
+
+class TestPlanJointTraj:
+    def setup_method(self):
+        self.builder = TrajectoryBuilder(_make_mock_motion_generator())
+
+    def test_interpolates_start_to_target(self):
+        start = torch.zeros(2, 6)
+        target = torch.ones(2, 6)
+        expected = torch.ones(2, 5, 6)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=expected,
+        ) as interpolate:
+            out = self.builder.plan_joint_traj(start, target, n_waypoints=5)
+
+        assert out is expected
+        _, kwargs = interpolate.call_args
+        assert kwargs["interp_num"] == 5
+        assert torch.equal(kwargs["trajectory"][:, 0, :], start)
+        assert torch.equal(kwargs["trajectory"][:, 1, :], target)
+
+
+class TestIkSolve:
+    def test_uses_first_env_seed_for_single_pose(self):
+        mg = _make_mock_motion_generator(num_envs=3, arm_dof=6)
+        builder = TrajectoryBuilder(mg)
+
+        def compute_ik(pose=None, name=None, joint_seed=None, env_ids=None):
+            return torch.ones(1, dtype=torch.bool), joint_seed + 1.0
+
+        mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        out = builder.ik_solve(torch.eye(4), control_part="arm")
+
+        _, kwargs = mg.robot.compute_ik.call_args
+        assert kwargs["joint_seed"].shape == (1, 6)
+        assert kwargs["env_ids"] == [0]
+        assert out.shape == (6,)
