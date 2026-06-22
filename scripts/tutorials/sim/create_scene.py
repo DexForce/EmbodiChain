@@ -191,9 +191,7 @@ def run_simulation(
             sim.wait_window_record_saves()
 
         # Clean up resources
-        sim.destroy(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
-        print("[INFO]: Simulation terminated successfully")
+        sim.destroy()
 
 
 if __name__ == "__main__":
