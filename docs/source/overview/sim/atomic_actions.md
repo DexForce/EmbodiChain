@@ -89,12 +89,11 @@ the next.
 
 The following actions are available out of the box:
 
-| Action | Config class | Target type | Motion phases |
-|---|---|---|---|
-| `MoveAction` | `MoveActionCfg` | `PoseTarget` | Move arm to EEF pose |
-| `PickUpAction` | `PickUpActionCfg` | `GraspTarget` | Approach → close gripper → lift |
-| `MoveObjectAction` | `MoveObjectActionCfg` | `HeldObjectTarget` | Move held object and keep gripper closed |
-| `PlaceAction` | `PlaceActionCfg` | `PoseTarget` | Lower → open gripper → retract |
+| Atomic action | Single arm / dual arm | Target type| Motion phases | GIF |
+|---|---|---|---|---|
+| `MoveAction` | Single arm | `Tensor (4,4)` — EEF pose | Approach → close gripper → lift |  <img src="../../_static/atomic_actions/move.gif" alt="PickUpAction recording" width="240" /> |
+| `PickUpAction` | Single arm | `ObjectSemantics` or `Tensor (4,4)` | Move arm to pose |  <img src="../../_static/atomic_actions/pick.gif" alt="PickUpAction recording" width="240" /> |
+| `PlaceAction` | Single arm | `Tensor (4,4)` — EEF release pose | Lower → open gripper → retract |  <img src="../../_static/atomic_actions/place.gif" alt="PickUpAction recording" width="240" /> |
 
 ### `MoveAction`
 

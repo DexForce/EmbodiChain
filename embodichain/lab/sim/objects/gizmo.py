@@ -301,12 +301,6 @@ class Gizmo:
     def _update_robot_ik(self, target_transform: torch.Tensor):
         """Update robot joints using IK to reach target transform"""
         try:
-            # Get robot solver for the arm
-            solver = self.target.get_solver(self._robot_arm_name)
-            if solver is None:
-                logger.log_warning(f"No solver found for arm: {self._robot_arm_name}")
-                return False
-
             # Get current joint positions as seed using proprioception
             proprioception = self.target.get_proprioception()
             current_qpos_full = proprioception["qpos"]  # Full joint positions
@@ -328,8 +322,8 @@ class Gizmo:
                 return False
 
             # Solve IK
-            ik_success, new_qpos = solver.get_ik(
-                target_xpos=target_transform, joint_seed=joint_seed
+            ik_success, new_qpos = self.target.compute_ik(
+                pose=target_transform, name=self._robot_arm_name, joint_seed=joint_seed
             )
 
             if ik_success:
