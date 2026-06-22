@@ -32,7 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import List, Union, Dict, Union, Sequence
+from typing import Callable, List, Union, Dict, Union, Sequence
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -89,6 +89,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import look_at_to_pose
 
 __all__ = [
     "SimulationManager",
@@ -155,7 +156,7 @@ class SimulationManagerCfg:
 
 @dataclass
 class _WindowRecordState:
-    """Internal state for viewer-window recording."""
+    """Internal state for simulation recording."""
 
     time_step: float
     max_memory_bytes: int
@@ -163,9 +164,13 @@ class _WindowRecordState:
     video_name: str
     save_kwargs: dict[str, object]
     record_camera: object | None = None
+    pose_provider: Callable[[], np.ndarray] | None = None
+    fixed_pose: np.ndarray | None = None
     frames: list[np.ndarray] = field(default_factory=list)
     current_memory_bytes: int = 0
     last_capture_time: float = field(default_factory=time.time)
+    accumulated_sim_time: float = 0.0
+    capture_from_sim_update: bool = False
     task_status: int = TASK_RETURN.TASK_LOOP
     loop_handle: object | None = None
 
@@ -564,6 +569,13 @@ class SimulationManager:
                 physics_dt = self.sim_config.physics_dt
             for i in range(step):
                 self._world.update(physics_dt)
+                if (
+                    self._window_record_state is not None
+                    and self._window_record_state.capture_from_sim_update
+                ):
+                    self._step_window_record_from_sim_update(
+                        self._window_record_state, physics_dt
+                    )
 
         else:
             logger.log_warning("Physics simulation is not manually updated.")
@@ -1729,6 +1741,34 @@ class SimulationManager:
         """Check whether the viewer window is currently recording."""
         return self._window_record_state is not None
 
+    def _build_window_record_pose_from_look_at(
+        self,
+        eye: Sequence[float],
+        target: Sequence[float],
+        up: Sequence[float] = (0.0, 0.0, 1.0),
+    ) -> np.ndarray:
+        """Build a camera pose matrix for the recorder from look-at inputs."""
+        pose = look_at_to_pose(eye, target, up)[0].cpu().numpy()
+        pose[:3, 1] = -pose[:3, 1]
+        pose[:3, 2] = -pose[:3, 2]
+        return np.asarray(pose, dtype=np.float32)
+
+    def _resolve_window_record_pose(
+        self, state: _WindowRecordState
+    ) -> np.ndarray | None:
+        """Resolve the camera pose used by the recorder for the current frame."""
+        if state.pose_provider is not None:
+            pose = state.pose_provider()
+            return np.asarray(pose, dtype=np.float32)
+
+        if state.fixed_pose is not None:
+            return np.asarray(state.fixed_pose, dtype=np.float32)
+
+        if self._window is not None:
+            return np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+
+        return None
+
     def _step_window_record(self, state: _WindowRecordState) -> int:
         """Capture frames in the render thread without blocking the UI loop."""
         if state.task_status != TASK_RETURN.TASK_LOOP:
@@ -1739,14 +1779,19 @@ class SimulationManager:
             return state.task_status
 
         state.last_capture_time = now
+        return self._capture_window_record_frame(state)
+
+    def _capture_window_record_frame(self, state: _WindowRecordState) -> int:
+        """Render one frame for the active recording session."""
         frame: np.ndarray | None = None
-        if self._window is not None and state.record_camera is not None:
-            pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        pose = self._resolve_window_record_pose(state)
+        if pose is not None and state.record_camera is not None:
             state.record_camera.set_world_pose(pose)
             state.record_camera.render()
             rgb = np.asarray(state.record_camera.get_rgb_map())
             if rgb.size != 0:
                 frame = np.ascontiguousarray(rgb[..., :3])
+
         if frame is None:
             return state.task_status
 
@@ -1760,6 +1805,22 @@ class SimulationManager:
             state.task_status = TASK_RETURN.TASK_EXIT
 
         return state.task_status
+
+    def _step_window_record_from_sim_update(
+        self, state: _WindowRecordState, physics_dt: float
+    ) -> int:
+        """Capture recording frames based on simulation time progression."""
+        if state.task_status != TASK_RETURN.TASK_LOOP:
+            return state.task_status
+
+        state.accumulated_sim_time += physics_dt
+        if state.accumulated_sim_time + 1e-9 < state.time_step:
+            return state.task_status
+
+        state.accumulated_sim_time = max(
+            0.0, state.accumulated_sim_time - state.time_step
+        )
+        return self._capture_window_record_frame(state)
 
     def _save_window_record_worker(
         self,
@@ -1791,13 +1852,49 @@ class SimulationManager:
         fps: int = 20,
         max_memory: int = 1024,
         video_prefix: str = "viewer_record",
+        pose_provider: Callable[[], np.ndarray] | None = None,
+        fixed_pose: np.ndarray | None = None,
+        look_at: (
+            tuple[
+                Sequence[float],
+                Sequence[float],
+                Sequence[float],
+            ]
+            | None
+        ) = None,
+        use_sim_time: bool | None = None,
     ) -> bool:
-        """Start asynchronously recording the viewer by buffering frames from a hidden camera
-        that follows the live window camera pose.
+        """Start asynchronously recording the simulation to a video buffer.
+
+        The recorder can either follow the live viewer camera or run without a
+        window by using a fixed pose or a pose callback supplied by the caller.
         """
-        if self._window is None:
-            logger.log_warning("No simulation window available for viewer recording.")
+        if pose_provider is not None and fixed_pose is not None:
+            logger.log_error(
+                "Recorder accepts only one explicit pose source: `pose_provider` or `fixed_pose`."
+            )
+        if pose_provider is not None and look_at is not None:
+            logger.log_error(
+                "Recorder accepts only one explicit pose source: `pose_provider` or `look_at`."
+            )
+        if fixed_pose is not None and look_at is not None:
+            logger.log_error(
+                "Recorder accepts only one explicit pose source: `fixed_pose` or `look_at`."
+            )
+
+        if look_at is not None:
+            fixed_pose = self._build_window_record_pose_from_look_at(*look_at)
+
+        if pose_provider is None and fixed_pose is None and self._window is None:
+            logger.log_warning(
+                "No simulation window available for viewer recording. "
+                "Provide `pose_provider`, `fixed_pose`, or `look_at` to record in headless mode."
+            )
             return False
+
+        if use_sim_time is None:
+            use_sim_time = self._window is None
+
         width = self.sim_config.width
         height = self.sim_config.height
         if self._window_record_camera is None:
@@ -1820,21 +1917,43 @@ class SimulationManager:
             video_name=video_name,
             save_kwargs={"fps": fps},
             record_camera=record_camera,
+            pose_provider=pose_provider,
+            fixed_pose=(
+                None if fixed_pose is None else np.asarray(fixed_pose, dtype=np.float32)
+            ),
+            capture_from_sim_update=use_sim_time,
             last_capture_time=time.time() - time_step,
         )
 
-        def _window_record_loop(_: float) -> int:
-            return self._step_window_record(state)
+        if not state.capture_from_sim_update:
 
-        state.loop_handle = self._world.thread_rt().add_loop(
-            _window_record_loop, time_step
-        )
+            def _window_record_loop(_: float) -> int:
+                return self._step_window_record(state)
+
+            state.loop_handle = self._world.thread_rt().add_loop(
+                _window_record_loop, time_step
+            )
         self._window_record_state = state
 
-        logger.log_info(
-            f"Viewer recording started. Press 'r' again to stop and save to "
-            f"{os.path.join(output_dir, video_name + '.mp4')}"
+        follow_source = (
+            "live viewer pose"
+            if pose_provider is None and fixed_pose is None and self._window is not None
+            else "custom pose source"
         )
+        timing_source = (
+            "simulation time" if state.capture_from_sim_update else "wall time"
+        )
+        save_target = os.path.join(output_dir, video_name + ".mp4")
+        if self._window is not None:
+            logger.log_info(
+                f"Viewer recording started ({follow_source}, {timing_source}). Press 'r' again to stop and save to "
+                f"{save_target}"
+            )
+        else:
+            logger.log_info(
+                f"Viewer recording started ({follow_source}, {timing_source}). Call `stop_window_record()` to save to "
+                f"{save_target}"
+            )
         return True
 
     def stop_window_record(self, save_path: str | None = None) -> bool:
@@ -1879,6 +1998,16 @@ class SimulationManager:
             f"{os.path.join(output_dir, video_name + '.mp4')} in background."
         )
         return True
+
+    def wait_window_record_saves(self) -> None:
+        """Wait for all background video export threads to finish."""
+        alive_threads = []
+        for thread in self._window_record_save_threads:
+            if thread.is_alive():
+                thread.join()
+            if thread.is_alive():
+                alive_threads.append(thread)
+        self._window_record_save_threads = alive_threads
 
     def toggle_window_record(
         self,
@@ -2083,6 +2212,10 @@ class SimulationManager:
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)
+
+        if self.is_window_recording():
+            self.stop_window_record()
+        self.wait_window_record_saves()
 
         import sys, gc
 
