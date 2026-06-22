@@ -32,7 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import Callable, List, Union, Dict, Union, Sequence
+from typing import Callable, Dict, List, Sequence, Union
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -1868,7 +1868,31 @@ class SimulationManager:
 
         The recorder can either follow the live viewer camera or run without a
         window by using a fixed pose or a pose callback supplied by the caller.
+
+        Args:
+            save_path: Optional output path for the recorded video.
+            fps: Target output frames per second. Must be positive.
+            max_memory: Maximum buffered frame memory in MB. Must be positive.
+            video_prefix: File name prefix used when ``save_path`` is not provided.
+            pose_provider: Optional callback that returns the current camera pose.
+            fixed_pose: Optional fixed 4x4 camera pose matrix.
+            look_at: Optional ``(eye, target, up)`` tuple used to derive a fixed pose.
+            use_sim_time: Whether to capture frames from simulation time instead of
+                wall time. Defaults to headless mode when no viewer window exists.
+
+        Returns:
+            bool: True if recording starts successfully, otherwise False.
         """
+        if self.is_window_recording():
+            logger.log_error(
+                "A viewer recording session is already active. Stop it before starting a new recording."
+            )
+        if fps <= 0:
+            logger.log_error(f"Viewer recording FPS must be positive, got {fps}.")
+        if max_memory <= 0:
+            logger.log_error(
+                f"Viewer recording max_memory must be positive, got {max_memory}."
+            )
         if pose_provider is not None and fixed_pose is not None:
             logger.log_error(
                 "Recorder accepts only one explicit pose source: `pose_provider` or `fixed_pose`."
@@ -2001,13 +2025,9 @@ class SimulationManager:
 
     def wait_window_record_saves(self) -> None:
         """Wait for all background video export threads to finish."""
-        alive_threads = []
         for thread in self._window_record_save_threads:
-            if thread.is_alive():
-                thread.join()
-            if thread.is_alive():
-                alive_threads.append(thread)
-        self._window_record_save_threads = alive_threads
+            thread.join()
+        self._window_record_save_threads = []
 
     def toggle_window_record(
         self,
