@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 """
 This script demonstrates how to create a simulation scene using SimulationManager.
 It shows the basic setup of simulation context, adding objects, and sensors.
@@ -38,13 +40,31 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--record-steps",
+        type=int,
+        default=1000,
+        help="Number of simulation steps to record before exiting in headless mode.",
+    )
+    parser.add_argument(
+        "--record-fps",
+        type=int,
+        default=20,
+        help="Output video FPS for headless recording.",
+    )
+    parser.add_argument(
+        "--record-save-path",
+        type=str,
+        default=None,
+        help="Optional mp4 output path for headless recording.",
+    )
     args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=True,
+        headless=args.headless,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
         render_cfg=RenderCfg(
@@ -97,15 +117,37 @@ def main():
     if not args.headless:
         sim.open_window()
 
+    if args.headless:
+        if not sim.start_window_record(
+            save_path=args.record_save_path,
+            fps=args.record_fps,
+            max_memory=2048,
+            video_prefix="create_scene_headless",
+            look_at=((2.6, -2.2, 1.6), (0.0, 0.0, 0.45), (0.0, 0.0, 1.0)),
+        ):
+            raise RuntimeError("Failed to start headless recording")
+        print("[INFO]: Headless recording enabled.")
+        print(
+            "[INFO]: The output path is reported by `SimulationManager.start_window_record()`."
+        )
+        print(f"[INFO]: Running {args.record_steps} steps before exporting the video")
+
     # Run the simulation
-    run_simulation(sim)
+    run_simulation(
+        sim,
+        max_steps=args.record_steps if args.headless else None,
+    )
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(
+    sim: SimulationManager,
+    max_steps: int | None = None,
+):
     """Run the simulation loop.
 
     Args:
-        sim: The SimulationManager instance to run
+        sim: The SimulationManager instance to run.
+        max_steps: Optional maximum number of simulation steps to execute.
     """
 
     # Initialize GPU physics if using CUDA
@@ -135,12 +177,21 @@ def run_simulation(sim: SimulationManager):
                 last_time = current_time
                 last_step = step_count
 
+            if max_steps is not None and step_count >= max_steps:
+                print(
+                    f"[INFO]: Reached {max_steps} steps. Exporting headless recording..."
+                )
+                break
+
     except KeyboardInterrupt:
         print("\n[INFO]: Stopping simulation...")
     finally:
+        if sim.is_window_recording():
+            sim.stop_window_record()
+            sim.wait_window_record_saves()
+
         # Clean up resources
         sim.destroy()
-        print("[INFO]: Simulation terminated successfully")
 
 
 if __name__ == "__main__":
