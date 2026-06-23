@@ -29,7 +29,7 @@ __all__ = ["download_neural_planner_checkpoint"]
 
 def download_neural_planner_checkpoint(
     repo_id: str = "dexforce/neural_motion_generator",
-    filename: str = "franka.pt",
+    filename: str = "franka/franka.pt",
     token: str | None = None,
     endpoint: str = _HF_ENDPOINT,
 ) -> str:
@@ -43,7 +43,7 @@ def download_neural_planner_checkpoint(
 
     Args:
         repo_id: HuggingFace repository ID.
-        filename: Checkpoint filename to download.
+        filename: Checkpoint path in the repo, e.g. ``franka/franka.pt``.
         token: HuggingFace API token. Falls back to the ``HF_TOKEN``
             environment variable or the cached token from
             ``huggingface-cli login``.
