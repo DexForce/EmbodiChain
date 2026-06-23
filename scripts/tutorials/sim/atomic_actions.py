@@ -44,6 +44,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
@@ -99,12 +100,17 @@ def initialize_simulation(args):
         width=1920,
         height=1080,
         headless=True,
-        sim_device="cuda",
+        device="cuda",
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
     )
     sim = SimulationManager(sim_cfg)
+
+    light = sim.add_light(
+        cfg=LightCfg(uid="main_light", intensity=50.0, init_pos=(0, 0, 2.0))
+    )
 
     return sim
 

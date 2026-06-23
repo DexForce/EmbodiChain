@@ -31,8 +31,8 @@ def main():
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Initialize simulation
-    sim_device = "cpu"
-    config = SimulationManagerCfg(headless=False, sim_device=sim_device)
+    device = "cpu"
+    config = SimulationManagerCfg(headless=False, device=device)
     sim = SimulationManager(config)
     sim.set_manual_update(False)
 

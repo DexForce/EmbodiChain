@@ -1,0 +1,176 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+"""Differentiable Newton-backed EmbodiedEnv for analytic policy gradient.
+
+Wraps the standard :class:`EmbodiedEnv` step pipeline in a Warp tape and
+bridges autograd into PyTorch via
+:class:`embodichain.lab.sim.diff.NewtonStepFunc`. Subclasses define how
+actions become Newton control writes and how observations/rewards are
+read from the post-step state; the bridge handles the tape lifecycle
+and the backward pass.
+
+Usage:
+
+    class MyTask(DifferentiableEmbodiedEnv):
+        def _apply_action_kernel(self, action_wp, tape): ...
+        def _read_outputs(self, final_state) -> dict: ...
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
+import torch
+
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+from embodichain.lab.sim.diff import NewtonStepFunc
+from embodichain.utils import logger
+
+__all__ = ["DifferentiableEmbodiedEnv"]
+
+
+class DifferentiableEmbodiedEnv(EmbodiedEnv):
+    """EmbodiedEnv variant that exposes APG-ready :py:meth:`step`.
+
+    Subclasses must implement :meth:`_apply_action_kernel` and
+    :meth:`_read_outputs`; the rest of the EmbodiedEnv contract (reset,
+    observation managers, reward functors) carries over.
+    """
+
+    def __init__(self, cfg: EmbodiedEnvCfg, *args, **kwargs) -> None:
+        self._validate_diff_cfg(cfg)
+        super().__init__(cfg, *args, **kwargs)
+        self._truncate_backward_at: int | None = getattr(
+            cfg, "truncate_backward_at", None
+        )
+
+    @staticmethod
+    def _validate_diff_cfg(cfg: EmbodiedEnvCfg) -> None:
+        physics_cfg = cfg.sim_cfg.physics_cfg
+        if not isinstance(physics_cfg, NewtonPhysicsCfg):
+            logger.log_error(
+                "DifferentiableEmbodiedEnv requires NewtonPhysicsCfg, "
+                f"got {type(physics_cfg).__name__}."
+            )
+        if not physics_cfg.requires_grad:
+            logger.log_error(
+                "DifferentiableEmbodiedEnv requires requires_grad=True on "
+                "the NewtonPhysicsCfg."
+            )
+
+    # -- subclass contract ------------------------------------------------ #
+
+    def _apply_action_kernel(self, action_wp: Any, tape: Any) -> None:
+        """Inside the open Warp tape, write the action into Newton control.
+
+        Implementations launch a Warp kernel that reads ``action_wp``
+        (a ``wp.array(dtype=wp.float32, requires_grad=True)`` of shape
+        ``[num_envs * action_dim]``) and writes into
+        ``self.sim.physics.newton_manager._control`` so the next stepper
+        call uses the new control.
+        """
+        raise NotImplementedError(
+            "Subclasses of DifferentiableEmbodiedEnv must implement "
+            "_apply_action_kernel(action_wp, tape)."
+        )
+
+    def _read_outputs(self, final_state: Any) -> dict:
+        """Read the post-step observation and reward as torch tensors.
+
+        Must return a dict with keys ``"obs"``, ``"reward"``,
+        ``"terminated"``, ``"truncated"``, plus the ``_order`` and
+        ``_grad_track`` metadata expected by
+        :class:`NewtonStepFunc`. ``obs`` and ``reward`` should be torch
+        tensors backed by ``wp.to_torch`` of grad-tracked Warp arrays.
+        """
+        raise NotImplementedError(
+            "Subclasses of DifferentiableEmbodiedEnv must implement "
+            "_read_outputs(final_state)."
+        )
+
+    def _make_step_fn(self) -> Callable[[], Any]:
+        """Return a callable that advances the sim inside the open tape.
+
+        The returned callable takes no arguments and returns the final
+        Newton :class:`State` after stepping. It is invoked by
+        :class:`NewtonStepFunc` inside the ``with tape:`` block, so any
+        Warp kernel launches (or differentiable Newton calls like
+        ``eval_fk``) are recorded on the tape.
+
+        The default implementation runs the differentiable
+        :class:`DifferentiableStepper` for ``sim_steps_per_control``
+        substeps. Subclasses can override this to swap in an FK-only
+        differentiable path (bypassing the dynamics solver when it does
+        not propagate grad through control inputs) or any other
+        tape-tracked stepping strategy.
+        """
+        manager = self.sim
+        substeps = self.cfg.sim_steps_per_control
+        nm = manager.physics.newton_manager
+        stepper = manager.create_differentiable_stepper()
+        state_in = nm._state_0
+        state_out = nm._model.state()
+        contacts = stepper.create_contacts()
+        dt_val = nm.solver_dt
+
+        def _step():
+            for _ in range(substeps):
+                stepper.step(state_in, state_out, contacts=contacts, dt=dt_val)
+                state_in, state_out = state_out, state_in
+            return state_in
+
+        return _step
+
+    # -- gym surface ------------------------------------------------------ #
+
+    def step(self, action: torch.Tensor):
+        if not isinstance(action, torch.Tensor):
+            action = torch.as_tensor(action, dtype=torch.float32)
+        sim_state = self._build_sim_state_dict(action)
+        outputs = NewtonStepFunc.apply(action, sim_state)
+        obs, reward, terminated, truncated = outputs[:4]
+        info = sim_state["last_info"]
+
+        done_mask = terminated | truncated
+        if done_mask.any():
+            reset_ids = done_mask.nonzero(as_tuple=False).squeeze(-1)
+            fresh_obs, _ = self.reset(options={"reset_ids": reset_ids})
+            obs = torch.where(
+                done_mask.unsqueeze(-1).expand_as(obs),
+                fresh_obs.detach(),
+                obs,
+            )
+        return obs, reward, terminated, truncated, info
+
+    def _build_sim_state_dict(self, action: torch.Tensor) -> dict:
+        return {
+            "manager": self.sim,
+            "substeps": self.cfg.sim_steps_per_control,
+            "action_to_control_kernel": self._wrap_action_kernel(),
+            "kernel_args": (),
+            "obs_reward_fn": self._read_outputs,
+            "step_fn": self._make_step_fn(),
+            "last_info": {},
+        }
+
+    def _wrap_action_kernel(self):
+        env = self
+
+        def _inner(action_wp, *_):
+            env._apply_action_kernel(action_wp, tape=None)
+
+        return _inner

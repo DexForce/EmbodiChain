@@ -54,7 +54,7 @@ class RandomReachEnv(BaseEnv):
 
         env_cfg = EnvCfg(
             sim_cfg=SimulationManagerCfg(
-                headless=headless, arena_space=2.0, sim_device=device
+                headless=headless, arena_space=2.0, device=device
             ),
             num_envs=NUM_ENVS,
         )
@@ -117,14 +117,14 @@ class BaseEnvTest:
     """Shared test logic for CPU and CUDA."""
 
     @classmethod
-    def setup_simulation_hook(cls, sim_device):
+    def setup_simulation_hook(cls, device):
         if hasattr(cls, "env"):
             return
         cls.env = gym.make(
             "RandomReach-v1",
             num_envs=NUM_ENVS,
             headless=True,
-            device=sim_device,
+            device=device,
         )
         cls.device = cls.env.get_wrapper_attr("device")
         cls.num_envs = cls.env.get_wrapper_attr("num_envs")
@@ -217,12 +217,12 @@ if __name__ == "__main__":
 import sys
 
 
-def new_setup_simulation(cls, sim_device):
+def new_setup_simulation(cls, device):
     print(">>> ENTERING setup_simulation", file=sys.stderr)
     if hasattr(cls, "env"):
         return
     cls.env = gym.make(
-        "RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=sim_device
+        "RandomReach-v1", num_envs=NUM_ENVS, headless=True, device=device
     )
     cls.device = cls.env.get_wrapper_attr("device")
     cls.num_envs = cls.env.get_wrapper_attr("num_envs")

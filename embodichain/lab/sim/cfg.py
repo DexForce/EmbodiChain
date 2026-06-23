@@ -15,11 +15,12 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+from collections.abc import Mapping
 import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any, Optional
+from typing import Sequence, Union, Dict, Literal, List, Any, Optional, TYPE_CHECKING
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -40,6 +41,9 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+
+if TYPE_CHECKING:
+    from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
 
 # Global default renderer settings for simulation.
 #
@@ -66,8 +70,11 @@ class RenderCfg:
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
 
-    spp: int = 1
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
+    enable_denoiser: bool = True
+    """Whether to enable denoising. Only valid when renderer is 'hybrid' or 'fast-rt'."""
+
+    spp: int = 64
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
 
     def to_dexsim_flags(self):
         if self.renderer == "hybrid":
@@ -91,7 +98,44 @@ class RenderCfg:
 
 
 @configclass
+class GPUMemoryCfg:
+    """GPU memory configuration for default-backend GPU physics simulation."""
+
+    temp_buffer_capacity: int = 2**24
+    """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
+
+    max_rigid_contact_count: int = 2**19
+    """Increase this if you get 'Contact buffer overflow detected'"""
+
+    max_rigid_patch_count: int = (
+        2**18
+    )  # 81920 is DexSim default but most tasks work with 2**18
+    """Increase this if you get 'Patch buffer overflow detected'"""
+
+    heap_capacity: int = 2**26
+
+    found_lost_pairs_capacity: int = (
+        2**25
+    )  # 262144 is DexSim default but most tasks work with 2**25
+    found_lost_aggregate_pairs_capacity: int = 2**10
+    total_aggregate_pairs_capacity: int = 2**10
+
+
+@configclass
 class PhysicsCfg:
+    """Base configuration for DexSim physics backends."""
+
+    physics_dt: float = 1.0 / 100.0
+    """The time step for the physics simulation."""
+
+    device: str | torch.device = "cpu"
+    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
+
+
+@configclass
+class DefaultPhysicsCfg(PhysicsCfg):
+    """Configuration for the DexSim default (PhysX) physics backend."""
+
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
     """Gravity vector for the simulation environment."""
 
@@ -115,14 +159,17 @@ class PhysicsCfg:
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
-    
-    Note: the larger the tolerance, the faster the simulation will be. 
+
+    Note: the larger the tolerance, the faster the simulation will be.
     """
     speed_tolerance: float = 0.25
     """The speed tolerance for the simulation.
-    
+
     Note: the larger the tolerance, the faster the simulation will be.
     """
+
+    gpu_memory: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
+    """GPU memory configuration for GPU physics simulation."""
 
     def to_dexsim_args(self) -> Dict[str, Any]:
         """Convert to dexsim physics args dictionary."""
@@ -136,6 +183,161 @@ class PhysicsCfg:
             "enable_friction_every_iteration": self.enable_friction_every_iteration,
         }
         return args
+
+
+@configclass
+class NewtonPhysicsCfg(PhysicsCfg):
+    """Configuration for DexSim Newton physics backend."""
+
+    device: str | torch.device = "cuda:0"
+    """The device for Newton physics simulation (e.g. ``cuda:0``)."""
+
+    num_substeps: int = 10
+    """Number of Newton solver substeps per EmbodiChain physics step."""
+
+    requires_grad: bool = False
+    """Whether to finalize the Newton model for differentiable simulation."""
+
+    use_cuda_graph: bool = True
+    """Whether to use CUDA graph capture for Newton stepping when supported."""
+
+    debug_mode: bool = False
+    """Whether to enable Newton debug mode."""
+
+    solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
+    """Optional Newton solver configuration.
+
+    A mapping is converted to the matching DexSim Newton solver config. Include
+    ``solver_type`` or ``class_type`` to select the solver, then add any
+    parameters accepted by that DexSim solver config. If omitted, the Newton
+    backend uses DexSim's MuJoCo Warp solver config by default.
+    """
+
+    broad_phase: Literal["nxn", "sap", "explicit"] | None = None
+    """Newton collision broad-phase implementation. If None, DexSim chooses its default."""
+
+    visualizer_enabled: bool = False
+    """Whether to enable the Newton visualizer."""
+
+    def to_dexsim_cfg(
+        self,
+        gpu_id: int,
+    ):
+        """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        from dexsim.engine.newton_physics import (
+            FeatherstoneSolverCfg,
+            MJWarpSolverCfg,
+            NewtonCfg,
+            NewtonCollisionPipelineCfg,
+            SemiImplicitSolverCfg,
+            VBDSolverCfg,
+            XPBDSolverCfg,
+        )
+
+        torch_device = (
+            torch.device(self.device) if isinstance(self.device, str) else self.device
+        )
+        device = (
+            f"cuda:{gpu_id}"
+            if torch_device.type == "cuda" and torch_device.index is None
+            else str(torch_device)
+        )
+
+        solver_cfg_map = {
+            "mujoco_warp": MJWarpSolverCfg,
+            "xpbd": XPBDSolverCfg,
+            "semi_implicit": SemiImplicitSolverCfg,
+            "featherstone": FeatherstoneSolverCfg,
+            "vbd": VBDSolverCfg,
+        }
+        solver_cfg = _newton_solver_cfg_to_dexsim(
+            solver_cfg=self.solver_cfg,
+            solver_cfg_map=solver_cfg_map,
+        )
+
+        if self.requires_grad and solver_cfg.solver_type != "semi_implicit":
+            logger.log_error(
+                "Newton gradient mode requires solver_type='semi_implicit'."
+            )
+
+        cfg = NewtonCfg(
+            dt=self.physics_dt,
+            num_substeps=self.num_substeps,
+            device=device,
+            debug_mode=self.debug_mode,
+            requires_grad=self.requires_grad,
+            solver_cfg=solver_cfg,
+            collision_pipeline_cfg=NewtonCollisionPipelineCfg(
+                broad_phase=self.broad_phase,
+                requires_grad=self.requires_grad,
+            ),
+            sync_to_dexsim=True
+        )
+        cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
+        cfg._visualizer_enabled = self.visualizer_enabled
+        return cfg
+
+
+def _normalize_newton_solver_type(solver_type: str) -> str:
+    """Normalize public EmbodiChain and DexSim Newton solver aliases."""
+    key = solver_type.replace("-", "_").lower()
+    aliases = {
+        "mjwarp": "mujoco_warp",
+        "mjwarpsolver": "mujoco_warp",
+        "mjwarpsolvercfg": "mujoco_warp",
+        "mjwarp_solver": "mujoco_warp",
+        "mjwarp_solver_cfg": "mujoco_warp",
+        "mujoco_warp": "mujoco_warp",
+        "mujocowarp": "mujoco_warp",
+        "mujocowarpsolver": "mujoco_warp",
+        "mujocowarpsolvercfg": "mujoco_warp",
+        "xpbdsolver": "xpbd",
+        "xpbdsolvercfg": "xpbd",
+        "xpbd": "xpbd",
+        "semiimplicit": "semi_implicit",
+        "semi_implicit": "semi_implicit",
+        "semiimplicitsolver": "semi_implicit",
+        "semiimplicitsolvercfg": "semi_implicit",
+        "featherstone": "featherstone",
+        "featherstonesolver": "featherstone",
+        "featherstonesolvercfg": "featherstone",
+        "vbd": "vbd",
+        "vbdsolver": "vbd",
+        "vbdsolvercfg": "vbd",
+    }
+    if key not in aliases:
+        logger.log_error(
+            f"Unsupported Newton solver type '{solver_type}'. "
+            "Expected one of 'mjwarp', 'xpbd', 'semi_implicit', "
+            "'featherstone', or 'vbd'."
+        )
+    return aliases[key]
+
+
+def _newton_solver_cfg_to_dexsim(
+    solver_cfg: Mapping[str, Any] | object | None,
+    solver_cfg_map: Mapping[str, type],
+) -> object:
+    """Convert EmbodiChain Newton solver config input to a DexSim config."""
+    if solver_cfg is None:
+        return solver_cfg_map["mujoco_warp"]()
+
+    if not isinstance(solver_cfg, Mapping):
+        if not hasattr(solver_cfg, "solver_type"):
+            logger.log_error(
+                "Newton solver_cfg must be a mapping or a DexSim Newton solver "
+                "config object with a 'solver_type' attribute."
+            )
+        return solver_cfg
+
+    solver_cfg_data = dict(solver_cfg)
+    configured_solver_type = (
+        solver_cfg_data.pop("solver_type", None)
+        or solver_cfg_data.pop("class_type", None)
+        or "mujoco_warp"
+    )
+    normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    return solver_cfg_map[normalized_solver_type](**solver_cfg_data)
 
 
 @configclass
@@ -195,28 +397,165 @@ class WindowRecordCfg:
     """Video file prefix used when no explicit save path is provided."""
 
 
+def physics_cfg_for_backend(
+    backend: Literal["default", "newton"],
+) -> DefaultPhysicsCfg | NewtonPhysicsCfg:
+    """Return a default physics configuration instance for the given backend."""
+    if backend == "newton":
+        return NewtonPhysicsCfg()
+    return DefaultPhysicsCfg()
+
+
+def physics_backend_from_cfg(
+    physics_cfg: PhysicsCfg,
+) -> Literal["default", "newton"]:
+    """Infer the physics backend name from a physics configuration instance."""
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        return "newton"
+    if isinstance(physics_cfg, DefaultPhysicsCfg):
+        return "default"
+    logger.log_error(
+        f"Unsupported physics_cfg type '{type(physics_cfg).__name__}'. "
+        "Expected DefaultPhysicsCfg or NewtonPhysicsCfg."
+    )
+
+
+def validate_physics_cfg(physics_cfg: PhysicsCfg) -> None:
+    """Validate that ``physics_cfg`` is a supported backend configuration."""
+    physics_backend_from_cfg(physics_cfg)
+
+
 @configclass
-class GPUMemoryCfg:
-    """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
+class NewtonCollisionAttributesCfg:
+    """Newton-specific per-shape collision/contact attributes.
 
-    temp_buffer_capacity: int = 2**24
-    """Increase this if you get 'PxgPinnedHostLinearMemoryAllocator: overflowing initial allocation size, increase capacity to at least %.' """
+    Mirrors :class:`dexsim.spawn.descs.NewtonCollisionDesc` (which in turn
+    mirrors ``newton.ModelBuilder.ShapeConfig``), so the resolver can overlay
+    these fields by name. All fields default to ``None`` meaning "keep the
+    Newton backend default".
 
-    max_rigid_contact_count: int = 2**19
-    """Increase this if you get 'Contact buffer overflow detected'"""
+    The backend-neutral quantities (sliding friction, restitution,
+    enable-collision) live on :class:`RigidBodyAttributesCfg` and are projected
+    onto the Newton ``mu`` / ``restitution`` / ``has_shape_collision`` shape
+    knobs by the resolver; they are NOT repeated here.
+    """
 
-    max_rigid_patch_count: int = (
-        2**18
-    )  # 81920 is DexSim default but most tasks work with 2**18
-    """Increase this if you get 'Patch buffer overflow detected'"""
+    # -- Contact-material fields (per-solver subset, see NEWTON_CONTACT_SOLVER_FIELDS) --
+    ke: float | None = None
+    """Contact stiffness for compliant contacts."""
+    kd: float | None = None
+    """Contact damping for compliant contacts."""
+    kf: float | None = None
+    """Friction stiffness for compliant contacts."""
+    ka: float | None = None
+    """Adhesion stiffness for compliant contacts."""
+    kh: float | None = None
+    """Hydroelastic stiffness scale."""
+    mu_torsional: float | None = None
+    """Torsional friction coefficient."""
+    mu_rolling: float | None = None
+    """Rolling friction coefficient."""
 
-    heap_capacity: int = 2**26
+    # -- Solver-agnostic shape-config fields --
+    margin: float | None = None
+    """Contact margin (shapes within this distance are considered in contact)."""
+    gap: float | None = None
+    """Contact gap (rest distance between shapes)."""
+    is_solid: bool | None = None
+    """Whether the shape is solid (vs. hollow) for mass computation."""
+    collision_group: int | None = None
+    """Collision group id used by the broad-phase filter."""
+    collision_filter_parent: bool | None = None
+    """Whether to filter collisions with the parent body."""
+    has_particle_collision: bool | None = None
+    """Whether the shape collides with particles."""
+    is_visible: bool | None = None
+    """Whether the shape is visible to the Newton visualizer."""
+    is_site: bool | None = None
+    """Whether the shape is registered as a Newton site."""
+    is_hydroelastic: bool | None = None
+    """Whether to use hydroelastic contact for this shape."""
 
-    found_lost_pairs_capacity: int = (
-        2**25
-    )  # 262144 is DexSim default but most tasks work with 2**25
-    found_lost_aggregate_pairs_capacity: int = 2**10
-    total_aggregate_pairs_capacity: int = 2**10
+    # -- SDF (signed distance field) collision params --
+    sdf_narrow_band_range: tuple[float, float] | None = None
+    """Narrow-band range [inner, outer] for SDF collision."""
+    sdf_target_voxel_size: float | None = None
+    """Target voxel size for SDF generation."""
+    sdf_max_resolution: int | None = None
+    """Maximum grid resolution for SDF generation."""
+    sdf_texture_format: str | None = None
+    """Texture format for SDF collision."""
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> NewtonCollisionAttributesCfg:
+        """Initialize the configuration from a dictionary."""
+        cfg = cls()
+        for key, value in init_dict.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+            else:
+                logger.log_warning(
+                    f"Key '{key}' not found in {cfg.__class__.__name__}."
+                )
+        return cfg
+
+    def to_newton_collision_desc(self):
+        """Build a :class:`dexsim.spawn.descs.NewtonCollisionDesc` from this cfg."""
+        from dexsim.spawn.descs import NewtonCollisionDesc
+
+        return NewtonCollisionDesc(
+            **{
+                f: getattr(self, f)
+                for f in (
+                    "ke",
+                    "kd",
+                    "kf",
+                    "ka",
+                    "kh",
+                    "mu_torsional",
+                    "mu_rolling",
+                    "margin",
+                    "gap",
+                    "is_solid",
+                    "collision_group",
+                    "collision_filter_parent",
+                    "has_particle_collision",
+                    "is_visible",
+                    "is_site",
+                    "is_hydroelastic",
+                    "sdf_narrow_band_range",
+                    "sdf_target_voxel_size",
+                    "sdf_max_resolution",
+                    "sdf_texture_format",
+                )
+            }
+        )
+
+
+def _merge_newton_subcfg(
+    override: NewtonCollisionAttributesCfg | None,
+    base: NewtonCollisionAttributesCfg | None,
+) -> NewtonCollisionAttributesCfg | None:
+    """Merge a Newton sub-config override onto a base.
+
+    For each Newton field, the override's non-None value wins, else the base's.
+    Returns ``None`` if neither side sets any field.
+    """
+    if override is None:
+        return base
+    if base is None:
+        return override
+    merged = NewtonCollisionAttributesCfg()
+    any_set = False
+    for field_name in merged.__dataclass_fields__:
+        if field_name == "newton":
+            continue
+        ov = getattr(override, field_name)
+        val = ov if ov is not None else getattr(base, field_name)
+        setattr(merged, field_name, val)
+        if val is not None:
+            any_set = True
+    return merged if any_set else None
 
 
 @configclass
@@ -227,6 +566,11 @@ class RigidBodyAttributesCfg:
     1. The dynamic properties, such as mass, damping, etc.
     2. The collision properties.
     3. The physics material properties.
+
+    The ``newton`` sub-config carries Newton-specific per-shape contact/shape
+    knobs (``ke``/``kd``/``margin``/...) that have no PhysX equivalent; it is
+    ignored on the default backend and applied via the Newton desc-native
+    registration path when set.
     """
 
     mass: float = 1.0
@@ -285,8 +629,17 @@ class RigidBodyAttributesCfg:
     static_friction: float = 0.5
     """Static friction coefficient."""
 
+    newton: NewtonCollisionAttributesCfg | None = None
+    """Newton-specific per-shape contact/shape attributes (ignored on default backend)."""
+
     def attr(self) -> PhysicalAttr:
-        """Convert to dexsim PhysicalAttr"""
+        """Convert to dexsim PhysicalAttr.
+
+        This is the legacy PhysX-oriented projection used by the default
+        backend. Newton-native fields (``self.newton``) are not representable
+        here; the Newton path uses
+        :func:`embodichain.lab.sim.physics_attrs.resolve_newton_shape` instead.
+        """
         attr = PhysicalAttr()
         attr.mass = self.mass
         attr.contact_offset = self.contact_offset
@@ -310,7 +663,9 @@ class RigidBodyAttributesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
+            if key == "newton" and isinstance(value, dict):
+                setattr(cfg, key, NewtonCollisionAttributesCfg.from_dict(value))
+            elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
                 logger.log_warning(
@@ -345,16 +700,38 @@ class RigidBodyAttributesOverrideCfg:
     dynamic_friction: float | None = None
     static_friction: float | None = None
 
+    newton: NewtonCollisionAttributesCfg | None = None
+    """Newton-specific per-shape overrides (None means inherit the base newton sub-config)."""
+
     def merge_with(self, base: RigidBodyAttributesCfg) -> PhysicalAttr:
-        """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides."""
+        """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides.
+
+        .. note::
+            This returns the legacy PhysX projection and therefore drops the
+            Newton sub-config. For a Newton-aware merge that preserves
+            ``newton``, use :meth:`merged_cfg` and pass it to the Newton
+            resolver.
+        """
+        return self.merged_cfg(base).attr()
+
+    def merged_cfg(self, base: RigidBodyAttributesCfg) -> RigidBodyAttributesCfg:
+        """Merge overrides onto ``base`` into a full :class:`RigidBodyAttributesCfg`.
+
+        Unlike :meth:`merge_with`, this preserves the ``newton`` sub-config
+        (override's non-None sub-fields win, else base's) so the result can be
+        fed to the Newton resolver.
+        """
         merged = RigidBodyAttributesCfg()
         for field_name in merged.__dataclass_fields__:
+            if field_name == "newton":
+                continue
             override_val = getattr(self, field_name)
             if override_val is not None:
                 setattr(merged, field_name, override_val)
             else:
                 setattr(merged, field_name, getattr(base, field_name))
-        return merged.attr()
+        merged.newton = _merge_newton_subcfg(self.newton, base.newton)
+        return merged
 
     @classmethod
     def from_dict(
@@ -363,7 +740,9 @@ class RigidBodyAttributesOverrideCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
+            if key == "newton" and isinstance(value, dict):
+                setattr(cfg, key, NewtonCollisionAttributesCfg.from_dict(value))
+            elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
                 logger.log_warning(

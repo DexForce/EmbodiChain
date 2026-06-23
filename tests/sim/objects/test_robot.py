@@ -22,6 +22,7 @@ import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
+from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.data import get_data_path
 
 # Define control parts
@@ -50,11 +51,11 @@ CONTROL_PARTS = {
 # Base test class for CPU and CUDA
 class BaseRobotTest:
     @classmethod
-    def setup_simulation(cls, sim_device):
+    def setup_simulation(cls, device):
         if hasattr(cls, "sim"):
             return
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=10)
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=10)
         cls.sim = SimulationManager(config)
 
         cfg = DexforceW1Cfg.from_dict(
@@ -68,7 +69,7 @@ class BaseRobotTest:
         cls.robot: Robot = cls.sim.add_robot(cfg=cfg)
 
         # Initialize GPU physics if needed
-        if sim_device == "cuda" and getattr(cls.sim, "is_use_gpu_physics", False):
+        if device == "cuda" and getattr(cls.sim, "is_use_gpu_physics", False):
             cls.sim.init_gpu_physics()
 
     def test_get_joint_ids(self):
@@ -329,6 +330,68 @@ class TestRobotCPU(BaseRobotTest):
 class TestRobotCUDA(BaseRobotTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+
+def _teardown_newton_physics() -> None:
+    from dexsim.engine.newton_physics import teardown_newton_physics
+
+    teardown_newton_physics()
+
+
+class TestRobotNewton:
+    """Focused Robot-on-Newton coverage (spawn, finalize, control surface).
+
+    A robot is a URDF articulation; the Newton ``load_urdf`` patch builds a
+    NewtonArticulation. This exercises the add_robot -> finalize_newton_physics
+    -> control-part / qpos path end-to-end on Newton. It does NOT inherit the
+    full BaseRobotTest suite because rebuilding the (complex, mimic-jointed)
+    dexforce_w1 Newton model per test method is prohibitively slow; the
+    default/CUDA classes already cover the shared control-part/FK/IK logic.
+    """
+
+    def setup_method(self):
+        physics_cfg = physics_cfg_for_backend("newton")
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "njmax": 8192,
+            "nconmax": 8192,
+        }
+        config = SimulationManagerCfg(
+            headless=True, device="cuda", num_envs=1, physics_cfg=physics_cfg
+        )
+        self.sim = SimulationManager(config)
+        cfg = DexforceW1Cfg.from_dict(
+            {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
+        )
+        self.robot: Robot = self.sim.add_robot(cfg=cfg)
+        self.sim.finalize_newton_physics()
+
+    def teardown_method(self):
+        self.sim.destroy()
+        import embodichain.lab.sim as om
+
+        om.SimulationManager.flush_cleanup_queue()
+        _teardown_newton_physics()
+        import gc
+
+        gc.collect()
+
+    def test_newton_robot_spawn_and_control(self):
+        """Robot spawns on Newton, finalizes, and exposes a working control surface."""
+        assert self.sim.is_newton_backend
+        assert self.sim.physics._lifecycle_state() == "READY"
+        assert self.robot.dof > 0
+
+        left_ids = self.robot.get_joint_ids("left_arm")
+        right_ids = self.robot.get_joint_ids("right_arm")
+        assert len(left_ids) > 0 and len(right_ids) > 0
+
+        # State round-trip via the Newton articulation view.
+        qpos = torch.zeros(
+            (1, self.robot.dof), dtype=torch.float32, device=self.sim.device
+        )
+        self.robot.set_qpos(qpos, env_ids=None, target=False)
+        assert torch.allclose(self.robot.body_data.qpos, qpos, atol=1e-5)
 
 
 if __name__ == "__main__":

@@ -322,3 +322,33 @@ topics:
       - manager-functor
       - env-framework
     status: active
+  - id: differentiable-env
+    title: Differentiable Environment (APG)
+    aliases:
+      - differentiable env
+      - apg
+      - analytic policy gradient
+      - differentiable rl
+      - Warp tape autograd
+      - NewtonStepFunc
+      - 可微环境
+    keywords:
+      - differentiable
+      - gradient
+      - apg
+      - autograd
+      - warp tape
+      - requires_grad
+      - semi_implicit
+      - DifferentiableEmbodiedEnv
+      - NewtonStepFunc
+    paths:
+      - topics/differentiable-env/differentiable-env.md
+    source_of_truth:
+      - embodichain/lab/gym/envs/differentiable_env.py
+      - embodichain/lab/sim/diff/
+      - embodichain/lab/gym/envs/tasks/special/franka_reach_apg.py
+    related_topics:
+      - env-framework
+      - rl-training
+    status: active

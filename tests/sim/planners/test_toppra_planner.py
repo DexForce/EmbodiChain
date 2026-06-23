@@ -25,7 +25,7 @@ class TestToppraPlanner:
         cls = type(self)
         if hasattr(cls, "sim"):
             return
-        cls.sim_config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.sim_config = SimulationManagerCfg(headless=True, device="cpu")
         cls.sim = SimulationManager(cls.sim_config)
 
         cfg_dict = {
