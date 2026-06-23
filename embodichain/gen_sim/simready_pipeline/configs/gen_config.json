@@ -64,9 +64,9 @@
   },
   "llm": {
     "openai_compatible": {
-      "api_key": "sk-7hjyRgBLrhUYUSCpLgPSARk8sz1Sc2vZ2bnt3fy1bkHsI7ak",
+      "api_key": "",
       "model": "gpt-5",
-      "base_url": "https://airouter.cloud/v1",
+      "base_url": "",
       "default_query": {}
     }
   }
