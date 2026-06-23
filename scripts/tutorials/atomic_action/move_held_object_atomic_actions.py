@@ -126,11 +126,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Run the viewer demo without waiting for keyboard input.",
     )
     parser.add_argument(
-        "--debug_state",
-        action="store_true",
-        help="Log bottle pose during replay.",
-    )
-    parser.add_argument(
         "--no_vis_eef_axis",
         action="store_true",
         help="Do not draw the current end-effector/TCP coordinate frame before planning.",
@@ -382,19 +377,6 @@ def compute_pick_close_end_step() -> int:
     return MOVE_SAMPLE_INTERVAL + n_approach + HAND_INTERP_STEPS
 
 
-def format_tensor(tensor: torch.Tensor) -> str:
-    rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
-    return str(rounded.tolist())
-
-
-def log_object_state(obj: RigidObject, label: str) -> None:
-    obj_pose = obj.get_local_pose(to_matrix=True)
-    logger.log_info(
-        f"{label}: pos={format_tensor(obj_pose[0, :3, 3])}, "
-        f"z_axis={format_tensor(obj_pose[0, :3, 2])}"
-    )
-
-
 def draw_current_eef_axis(sim: SimulationManager, robot: Robot) -> None:
     eef_pose = robot.compute_fk(
         qpos=robot.get_qpos(name="arm"),
@@ -504,7 +486,6 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
     try:
         post_grasp_clear_step = compute_pick_close_end_step()
         should_clear_object_dynamics = True
-        log_stride = max(1, traj.shape[1] // 10)
         for i in range(traj.shape[1]):
             robot.set_qpos(traj[:, i, :])
             sim.update(step=4)
@@ -512,8 +493,6 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
                 obj.clear_dynamics()
                 should_clear_object_dynamics = False
                 logger.log_info(f"Object dynamics cleared after grasp at step={i}")
-            if args.debug_state and (i % log_stride == 0 or i == traj.shape[1] - 1):
-                log_object_state(obj, f"replay step {i}/{traj.shape[1] - 1}")
             time.sleep(1e-2)
 
         logger.log_info("MoveHeldObject keeps the bottle suspended in the gripper.")
@@ -522,8 +501,6 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
         for i in range(POST_TRAJECTORY_STEPS):
             robot.set_qpos(final_qpos)
             sim.update(step=2)
-            if args.debug_state and i % max(1, POST_TRAJECTORY_STEPS // 5) == 0:
-                log_object_state(obj, f"post step {i}/{POST_TRAJECTORY_STEPS - 1}")
             time.sleep(1e-2)
     finally:
         stop_auto_play_recording(sim, recording_started)
