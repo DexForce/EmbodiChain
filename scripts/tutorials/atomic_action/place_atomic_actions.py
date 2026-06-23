@@ -76,11 +76,15 @@ GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_TCP_Z = 0.15
 
-OBJECT_LABEL = "paper_cup"
-OBJECT_MESH_PATH = "PaperCup/paper_cup.ply"
+OBJECT_LABEL = "sugar_box"
+OBJECT_MESH_PATH = "SugarBox/sugar_box_usd/sugar_box.usda"
 OBJECT_XY = (-0.42, -0.08)
 OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
 OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
+OBJECT_INIT_ROT = (0.0, 0.0, 0.0)
+OBJECT_BODY_SCALE = (0.8, 0.8, 0.8)
+OBJECT_MASS = 0.05
+OBJECT_USE_USD_PROPERTIES = False
 
 PICK_SAMPLE_INTERVAL = 120
 PLACE_SAMPLE_INTERVAL = 120
@@ -265,14 +269,15 @@ def create_pick_object(sim: SimulationManager) -> RigidObject:
         uid=OBJECT_LABEL,
         shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
         attrs=RigidBodyAttributesCfg(
-            mass=0.01,
+            mass=OBJECT_MASS,
             dynamic_friction=0.97,
             static_friction=0.99,
         ),
         max_convex_hull_num=16,
         init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.0],
-        init_rot=(0.0, 0.0, 0.0),
-        body_scale=(0.8, 0.8, 0.8),
+        init_rot=OBJECT_INIT_ROT,
+        body_scale=OBJECT_BODY_SCALE,
+        use_usd_properties=OBJECT_USE_USD_PROPERTIES,
     )
     obj = sim.add_rigid_object(cfg=cfg)
     obj.cfg.init_pos = compute_tabletop_init_pos(obj, cfg.init_rot)

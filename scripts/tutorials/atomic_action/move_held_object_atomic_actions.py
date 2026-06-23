@@ -69,6 +69,7 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
 from embodichain.utils import logger
+from embodichain.utils.math import matrix_from_euler
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "GRIPPER_FINGER1_JOINT_1"
@@ -78,9 +79,16 @@ GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_TCP_Z = 0.15
 
-BOTTLE_LABEL = "bottle"
-BOTTLE_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
-BOTTLE_MIN_HAND_CLOSE_QPOS = 0.024
+OBJECT_LABEL = "sugar_box"
+OBJECT_MESH_PATH = "SugarBox/sugar_box_usd/sugar_box.usda"
+OBJECT_XY = (-0.42, -0.08)
+OBJECT_CLEARANCE = 0.0
+OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
+OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
+OBJECT_INIT_ROT = (0.0, 0.0, 0.0)
+OBJECT_BODY_SCALE = (0.8, 0.8, 0.8)
+OBJECT_MASS = 0.05
+OBJECT_USE_USD_PROPERTIES = False
 
 MOVE_SAMPLE_INTERVAL = 60
 PICK_SAMPLE_INTERVAL = 120
@@ -106,7 +114,7 @@ TABLE_TOP_Z = -0.045
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveHeldObject holding a bottle in the gripper."
+        description="Demonstrate MoveHeldObject holding a sugar box in the gripper."
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
@@ -261,22 +269,38 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(cfg=cfg)
 
 
-def create_fallen_bottle(sim: SimulationManager) -> RigidObject:
-    bottle_scale = 0.0008
+def create_pick_object(sim: SimulationManager) -> RigidObject:
     cfg = RigidObjectCfg(
-        uid="bottle",
-        shape=MeshCfg(fpath=get_data_path("ScannedBottle/yibao.ply")),
+        uid=OBJECT_LABEL,
+        shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
         attrs=RigidBodyAttributesCfg(
-            mass=0.02,
+            mass=OBJECT_MASS,
             dynamic_friction=0.97,
             static_friction=0.99,
         ),
         max_convex_hull_num=16,
-        init_pos=[-0.4294, -0.0825, -0.0997],
-        init_rot=[90.0, 45.0, 0.0],
-        body_scale=(bottle_scale, bottle_scale, bottle_scale),
+        init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.0],
+        init_rot=OBJECT_INIT_ROT,
+        body_scale=OBJECT_BODY_SCALE,
+        use_usd_properties=OBJECT_USE_USD_PROPERTIES,
     )
-    return sim.add_rigid_object(cfg=cfg)
+    obj = sim.add_rigid_object(cfg=cfg)
+    obj.cfg.init_pos = compute_tabletop_init_pos(obj, cfg.init_rot)
+    obj.reset()
+    return obj
+
+
+def compute_tabletop_init_pos(
+    obj: RigidObject, init_rot: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
+    rot = torch.as_tensor(init_rot, dtype=torch.float32, device=vertices.device)
+    rot = rot.unsqueeze(0) * torch.pi / 180.0
+    upright_rot = matrix_from_euler(rot, "XYZ")[0]
+    rotated_vertices = vertices @ upright_rot.T
+    bottom_z = rotated_vertices[:, 2].min().item()
+    z = TABLE_TOP_Z + OBJECT_CLEARANCE - bottom_z
+    return (OBJECT_XY[0], OBJECT_XY[1], z)
 
 
 def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
@@ -315,7 +339,7 @@ def create_object_semantics(
     obj: RigidObject, args: argparse.Namespace
 ) -> ObjectSemantics:
     return ObjectSemantics(
-        label=BOTTLE_LABEL,
+        label=OBJECT_LABEL,
         geometry={
             "mesh_vertices": obj.get_vertices(env_ids=[0], scale=True)[0],
             "mesh_triangles": obj.get_triangles(env_ids=[0])[0],
@@ -341,7 +365,7 @@ def get_hand_open_close_qpos(
     hand_close_limit = hand_limits[:, 1]
     hand_close = torch.minimum(
         hand_close_limit,
-        torch.full_like(hand_close_limit, BOTTLE_MIN_HAND_CLOSE_QPOS),
+        torch.full_like(hand_close_limit, OBJECT_MIN_HAND_CLOSE_QPOS),
     )
     return hand_open, hand_close
 
@@ -356,18 +380,18 @@ def make_pre_pick_eef_pose(robot: Robot, position: torch.Tensor) -> torch.Tensor
     return pose
 
 
-def make_upright_object_pose(device: torch.device) -> torch.Tensor:
+def make_object_target_pose(device: torch.device) -> torch.Tensor:
     pose = torch.eye(4, dtype=torch.float32, device=device)
     pose[:3, :3] = torch.tensor(
         [
-            [1.0, 0.0, 0.0],
-            [0.0, -1.0, 0.0],
             [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
         ],
         dtype=torch.float32,
         device=device,
     )
-    pose[:3, 3] = torch.tensor([0.28, -0.2, 0.22], dtype=torch.float32, device=device)
+    pose[:3, 3] = torch.tensor([-0.3, -0.3, 0.5], dtype=torch.float32, device=device)
     return pose
 
 
@@ -409,7 +433,7 @@ def build_action_sequence(
         hand_open_qpos=hand_open,
         hand_close_qpos=hand_close,
         approach_direction=torch.tensor(
-            BOTTLE_APPROACH_DIRECTION, dtype=torch.float32, device=device
+            OBJECT_APPROACH_DIRECTION, dtype=torch.float32, device=device
         ),
         pre_grasp_distance=0.15,
         lift_height=0.16,
@@ -429,7 +453,7 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
     sim = initialize_simulation(args)
     robot = create_robot(sim)
     create_table(sim)
-    obj = create_fallen_bottle(sim)
+    obj = create_pick_object(sim)
 
     settle_object(sim, obj, step=5)
     semantics = create_object_semantics(obj, args)
@@ -452,14 +476,14 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
     if not args.no_vis_eef_axis:
         draw_current_eef_axis(sim, robot)
     if not args.auto_play:
-        input("Inspect the fallen bottle, then press Enter to plan...")
+        input("Inspect the sugar box, then press Enter to plan...")
 
     obj_pose = obj.get_local_pose(to_matrix=True)
     move_position = obj_pose[0, :3, 3].clone()
     move_position[2] = 0.36
     move_target = make_pre_pick_eef_pose(robot, move_position)
     move_held_object_target = HeldObjectPoseTarget(
-        object_target_pose=make_upright_object_pose(sim.device)
+        object_target_pose=make_object_target_pose(sim.device)
     )
 
     logger.log_info("Planning move_end_effector -> pick_up -> move_held_object")
@@ -495,7 +519,7 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
                 logger.log_info(f"Object dynamics cleared after grasp at step={i}")
             time.sleep(1e-2)
 
-        logger.log_info("MoveHeldObject keeps the bottle suspended in the gripper.")
+        logger.log_info("MoveHeldObject keeps the sugar box suspended in the gripper.")
 
         final_qpos = traj[:, -1, :]
         for i in range(POST_TRAJECTORY_STEPS):

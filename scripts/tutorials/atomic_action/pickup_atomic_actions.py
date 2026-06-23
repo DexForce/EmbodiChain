@@ -78,26 +78,13 @@ OBJECT_XY = (-0.42, -0.08)
 OBJECT_CLEARANCE = 0.0
 
 OBJECT_PRESETS = {
-    "paper_cup": {
-        "label": "paper_cup",
-        "mesh_path": "PaperCup/paper_cup.ply",
+    "sugar_box": {
+        "label": "sugar_box",
+        "mesh_path": "SugarBox/sugar_box_usd/sugar_box.usda",
         "init_rot": (0.0, 0.0, 0.0),
         "body_scale": (0.8, 0.8, 0.8),
-        "mass": 0.01,
-    },
-    "coffee_cup": {
-        "label": "coffee_cup",
-        "mesh_path": "CoffeeCup/cup.ply",
-        "init_rot": (0.0, 0.0, -90.0),
-        "body_scale": (1.0, 1.0, 1.0),
-        "mass": 0.01,
-    },
-    "bottle": {
-        "label": "bottle",
-        "mesh_path": "ScannedBottle/yibao.ply",
-        "init_rot": (180.0, 0.0, 0.0),
-        "body_scale": (0.0008, 0.0008, 0.0008),
-        "mass": 0.02,
+        "mass": 0.05,
+        "use_usd_properties": False,
     },
 }
 
@@ -135,7 +122,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--object",
         choices=sorted(OBJECT_PRESETS.keys()),
-        default="paper_cup",
+        default="sugar_box",
         help="Object preset to pick.",
     )
     parser.add_argument(
@@ -318,6 +305,7 @@ def create_pick_object(sim: SimulationManager, object_name: str) -> RigidObject:
         init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.0],
         init_rot=preset["init_rot"],
         body_scale=preset["body_scale"],
+        use_usd_properties=preset["use_usd_properties"],
     )
     obj = sim.add_rigid_object(cfg=cfg)
     obj.cfg.init_pos = _compute_tabletop_init_pos(obj, cfg.init_rot)
