@@ -104,7 +104,7 @@ def initialize_simulation(args):
         width=1920,
         height=1080,
         headless=True,
-        sim_device="cuda",
+        sim_device=args.device,
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         render_cfg=RenderCfg(renderer=args.renderer),
@@ -159,7 +159,16 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
                 num_samples=30,
             )
         },
-        init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
+        init_qpos=[
+            0.0,
+            -np.pi / 2,
+            -np.pi / 2,
+            -np.pi / 2,
+            np.pi / 2,
+            -np.pi / 2,
+            0,
+            0.0,
+        ],
         init_pos=position,
     )
     return sim.add_robot(cfg=cfg)
@@ -308,6 +317,8 @@ def main():
         dtype=torch.float32,
         device=sim.device,
     )
+    if sim.device.type == "cuda":
+        place_xpos[1, 3] *= -1
 
     # Move the end-effector to a safe resting pose after placing.
     rest_xpos = torch.tensor(
