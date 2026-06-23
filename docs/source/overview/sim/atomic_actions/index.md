@@ -86,116 +86,33 @@ the next.
 
 ---
 
-## Built-in Actions
+## Typed Targets & State Threading
 
-(supported_atomic_actions)=
+The engine takes a sequence of `(name, typed_target)` steps. Each target is a small
+frozen dataclass, and the engine checks that each step's target matches the registered
+action's `TargetType` before calling `execute`:
 
-The following actions are available out of the box:
-
-| Atomic action | Single arm / dual arm | Target type | Motion phases | GIF |
-|---|---|---|---|---|
-| `MoveEndEffector` | Single arm | `EndEffectorPoseTarget` — EEF pose | Move end-effector to pose | <img src="../../_static/atomic_actions/move.gif" alt="MoveEndEffector recording" width="240" /> |
-| `MoveJoints` | Single arm | `JointPositionTarget` or `NamedJointPositionTarget` — qpos | Interpolate control-part joints | |
-| `PickUp` | Single arm | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../_static/atomic_actions/pick.gif" alt="PickUp recording" width="240" /> |
-| `MoveHeldObject` | Single arm | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | |
-| `Place` | Single arm | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../_static/atomic_actions/place.gif" alt="Place recording" width="240" /> |
-
-### `MoveEndEffector`
-
-Moves the end-effector to a target pose in free space.
-
-| Config field | Default | Description |
+| Target | Holds | Accepted by |
 |---|---|---|
-| `control_part` | `"arm"` | Robot control part to move |
-| `sample_interval` | `50` | Number of waypoints in the trajectory |
+| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)` or `(n_envs,4,4)` | `MoveEndEffector`, `Place` |
+| `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)` or `(n_envs, control_dof)` | `MoveJoints` |
+| `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
+| `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
+| `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
 
-**Target:** `EndEffectorPoseTarget(xpos=...)` where `xpos` is a `torch.Tensor` of shape `(4, 4)` or
-`(n_envs, 4, 4)` — a homogeneous EEF pose.
+`WorldState` is threaded between actions and carries the robot's `last_qpos` plus an optional
+`held_object: HeldObjectState`. The built-in actions update it as follows:
 
----
+| Action | Effect on `held_object` |
+|---|---|
+| `PickUp` | Populates it (computed object-to-EEF transform) |
+| `MoveHeldObject` | Requires it; preserves it unchanged |
+| `Place` | Clears it to `None` |
+| `MoveEndEffector` | Leaves it unchanged |
+| `MoveJoints` | Leaves it unchanged |
 
-### `MoveJoints`
-
-Moves a configured control part directly in joint space. Use this for known safe poses,
-home poses, recovery motions, or any motion where a qpos target is clearer than an EEF pose.
-
-| Config field | Default | Description |
-|---|---|---|
-| `control_part` | `"arm"` | Robot control part to move |
-| `sample_interval` | `50` | Number of waypoints in the interpolated trajectory |
-| `named_joint_positions` | `None` | Optional `dict[str, torch.Tensor]` for named qpos targets |
-
-**Targets:**
-- `JointPositionTarget(qpos=...)` where `qpos` is a `torch.Tensor` of shape `(control_dof,)` or
-  `(n_envs, control_dof)`.
-- `NamedJointPositionTarget(name=...)` where `name` is resolved from
-  `MoveJointsCfg.named_joint_positions`.
-
----
-
-### `PickUp`
-
-Three-phase grasp motion: *approach → close gripper → lift*.
-
-| Config field | Default | Description |
-|---|---|---|
-| `approach_direction` | `[0, 0, -1]` | Gripper approach direction in object frame |
-| `pre_grasp_distance` | `0.15` | Hover distance before descending (m) |
-| `lift_height` | `0.10` | Lift height after grasping (m) |
-| `hand_open_qpos` | `None` | **Required.** Gripper open joint positions |
-| `hand_close_qpos` | `None` | **Required.** Gripper closed joint positions |
-| `hand_control_part` | `"hand"` | Robot control part for the gripper |
-| `hand_interp_steps` | `5` | Waypoints for the gripper close phase |
-| `sample_interval` | `80` | Total waypoints across all three phases |
-
-**Target:** `GraspTarget(semantics=...)` — an `ObjectSemantics` whose `affordance` is an
-`AntipodalAffordance`. The grasp pose is solved from the affordance and the entity's live
-pose at execute time. On success, the returned `WorldState` carries a populated
-`held_object` (`HeldObjectState`).
-
----
-
-### `MoveHeldObject`
-
-Moves a held object to an object-centric target pose while preserving the grasp. It requires
-the `HeldObjectState` populated by a prior `PickUp` (read from `WorldState.held_object`)
-and preserves it in its successor state.
-
-`HeldObjectState` and `HeldObjectPoseTarget` are intentionally kept separate from
-`ObjectSemantics`: `ObjectSemantics` describes the object and affordances, while these
-types describe runtime held-object state and an action-specific target pose.
-
-| Config field | Default | Description |
-|---|---|---|
-| `hand_close_qpos` | `None` | **Required.** Gripper closed joint positions |
-| `hand_control_part` | `"hand"` | Robot control part for the gripper |
-| `sample_interval` | `50` | Number of waypoints in the trajectory |
-
-**Target:** `HeldObjectPoseTarget(object_target_pose=...)` where `object_target_pose` is a
-`torch.Tensor` of shape `(4, 4)` or `(n_envs, 4, 4)` — the desired pose of the held object.
-The action converts this to an EEF target via the stored object-to-EEF transform.
-
----
-
-### `Place`
-
-Three-phase release motion: *lower → open gripper → retract*. Mirrors `PickUp`.
-
-`PlaceCfg` carries its own gripper fields directly (it inherits `ActionCfg`, not a
-shared grasp-cfg base). The `approach_direction` field is not used — the arm moves straight
-down to the target pose. On success, the returned `WorldState` clears `held_object` to `None`.
-
-| Config field | Default | Description |
-|---|---|---|
-| `lift_height` | `0.10` | Retract height after opening the gripper (m) |
-| `hand_open_qpos` | `None` | **Required.** Gripper open joint positions |
-| `hand_close_qpos` | `None` | **Required.** Gripper closed joint positions |
-| `hand_control_part` | `"hand"` | Robot control part for the gripper |
-| `hand_interp_steps` | `5` | Waypoints for the gripper open phase |
-| `sample_interval` | `80` | Total waypoints across all three phases |
-
-**Target:** `EndEffectorPoseTarget(xpos=...)` — the EEF pose at release, a `torch.Tensor` of shape
-`(4, 4)` or `(n_envs, 4, 4)`.
+If a step fails, `run()` returns `success=False` with the partial trajectory concatenated up
+to (but not including) the failed step, and the `WorldState` going into that step.
 
 ---
 
@@ -364,39 +281,15 @@ all_actions = get_registered_actions()       # dict[str, type[AtomicAction]]
 
 ---
 
-## Typed Targets & State Threading
+```{toctree}
+:maxdepth: 1
 
-The engine takes a sequence of `(name, typed_target)` steps. Each target is a small
-frozen dataclass, and the engine checks that each step's target matches the registered
-action's `TargetType` before calling `execute`:
-
-| Target | Holds | Accepted by |
-|---|---|---|
-| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)` or `(n_envs,4,4)` | `MoveEndEffector`, `Place` |
-| `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)` or `(n_envs, control_dof)` | `MoveJoints` |
-| `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
-| `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
-| `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
-
-`WorldState` is threaded between actions and carries the robot's `last_qpos` plus an optional
-`held_object: HeldObjectState`. The built-in actions update it as follows:
-
-| Action | Effect on `held_object` |
-|---|---|
-| `PickUp` | Populates it (computed object-to-EEF transform) |
-| `MoveHeldObject` | Requires it; preserves it unchanged |
-| `Place` | Clears it to `None` |
-| `MoveEndEffector` | Leaves it unchanged |
-| `MoveJoints` | Leaves it unchanged |
-
-If a step fails, `run()` returns `success=False` with the partial trajectory concatenated up
-to (but not including) the failed step, and the `WorldState` going into that step.
-
----
+builtin_actions
+```
 
 ## Further Reading
 
-- {doc}`planners/motion_generator` — the trajectory planner used by every action
-- {doc}`sim_robot` — how control parts and IK solvers are configured
+- {doc}`../planners/motion_generator` — the trajectory planner used by every action
+- {doc}`../sim_robot` — how control parts and IK solvers are configured
 - Tutorial: `scripts/tutorials/atomic_action/atomic_actions.py`
 - Move held object demo: `scripts/tutorials/atomic_action/move_object_atomic_actions.py`
