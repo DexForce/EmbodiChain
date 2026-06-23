@@ -47,6 +47,8 @@ from embodichain.lab.sim.atomic_actions.actions import (
     PickUpCfg,
     Place,
     PlaceCfg,
+    Press,
+    PressCfg,
 )
 
 NUM_ENVS = 2
@@ -535,3 +537,57 @@ class TestPlaceAction:
         )
         # start prepended to the 3 down-phase IK solutions -> 4 keyframes.
         assert captured["down_keyframes"].shape == (NUM_ENVS, 4, ARM_DOF)
+
+
+# ---------------------------------------------------------------------------
+# Press
+# ---------------------------------------------------------------------------
+
+
+class TestPressAction:
+    def setup_method(self):
+        self.mg = _make_mock_motion_generator()
+
+    def test_target_type_is_pose_target(self):
+        assert Press.TargetType is EndEffectorPoseTarget
+
+    def test_default_name_is_explicit(self):
+        assert PressCfg(hand_close_qpos=_hand_close()).name == "press"
+
+    def test_execute_closes_hand_and_preserves_held_object(self):
+        cfg = PressCfg(
+            hand_close_qpos=_hand_close(),
+            sample_interval=12,
+            hand_interp_steps=4,
+        )
+        action = Press(self.mg, cfg)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="mug"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        start_hand_qpos = torch.full((NUM_ENVS, HAND_DOF), 0.01)
+        last_qpos = torch.cat([torch.zeros(NUM_ENVS, ARM_DOF), start_hand_qpos], dim=1)
+        state = WorldState(last_qpos=last_qpos, held_object=held)
+
+        def interpolate(trajectory, interp_num, device):
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
+
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 12, TOTAL_DOF)
+        expected_hand_qpos = _hand_close().unsqueeze(0).repeat(NUM_ENVS, 1)
+        assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], expected_hand_qpos)
+        assert torch.allclose(
+            result.next_state.last_qpos[:, :ARM_DOF],
+            last_qpos[:, :ARM_DOF],
+        )
+        assert result.next_state.held_object is held
