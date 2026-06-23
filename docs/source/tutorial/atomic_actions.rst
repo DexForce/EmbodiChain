@@ -37,6 +37,14 @@ The Code
 The tutorial corresponds to the ``atomic_actions.py`` script in the
 ``scripts/tutorials/atomic_action`` directory.
 
+Focused demo scripts are also available for the five built-in primitives:
+
+- ``move_end_effector_atomic_actions.py``
+- ``move_joints_atomic_actions.py``
+- ``pickup_atomic_actions.py``
+- ``move_held_object_atomic_actions.py``
+- ``place_atomic_actions.py``
+
 .. dropdown:: Code for atomic_actions.py
     :icon: code
 

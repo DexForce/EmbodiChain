@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -49,6 +50,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     LightCfg,
+    MarkerCfg,
     RenderCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
@@ -85,6 +87,19 @@ PICK_SAMPLE_INTERVAL = 120
 MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+DEFAULT_AUTO_PLAY_LOOK_AT = (
+    (-1.6, -1.5, 1.2),
+    (0.0, 0.0, 0.25),
+    (0.0, 0.0, 1.0),
+)
+RECORD_WIDTH = 640
+RECORD_HEIGHT = 480
+VIEWER_WIDTH = 1600
+VIEWER_HEIGHT = 900
+AUTO_PLAY_RECORD_FPS = 20
+AUTO_PLAY_RECORD_MAX_MEMORY = 2048
+EEF_AXIS_LEN = 0.06
+EEF_AXIS_SIZE = 0.003
 TABLE_SIZE = [1.0, 1.4, 0.05]
 TABLE_TOP_Z = -0.045
 
@@ -115,11 +130,70 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Log bottle pose during replay.",
     )
+    parser.add_argument(
+        "--no_vis_eef_axis",
+        action="store_true",
+        help="Do not draw the current end-effector/TCP coordinate frame before planning.",
+    )
     return parser.parse_args()
 
 
+def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
+    """Return the viewer window size used by this tutorial."""
+    return VIEWER_WIDTH, VIEWER_HEIGHT
+
+
+def start_auto_play_recording(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+    video_prefix: str,
+    look_at: tuple[
+        Sequence[float],
+        Sequence[float],
+        Sequence[float],
+    ] = DEFAULT_AUTO_PLAY_LOOK_AT,
+) -> bool:
+    """Start recording for ``--auto_play`` tutorial runs."""
+    if not getattr(args, "auto_play", False):
+        return False
+
+    original_width = sim.sim_config.width
+    original_height = sim.sim_config.height
+    try:
+        sim.sim_config.width = RECORD_WIDTH
+        sim.sim_config.height = RECORD_HEIGHT
+        if not sim.start_window_record(
+            fps=AUTO_PLAY_RECORD_FPS,
+            max_memory=AUTO_PLAY_RECORD_MAX_MEMORY,
+            video_prefix=video_prefix,
+            look_at=look_at,
+            use_sim_time=True,
+        ):
+            raise RuntimeError("Failed to start auto_play recording.")
+    finally:
+        sim.sim_config.width = original_width
+        sim.sim_config.height = original_height
+    return True
+
+
+def stop_auto_play_recording(
+    sim: SimulationManager,
+    recording_started: bool,
+) -> None:
+    """Stop recording and wait until the mp4 has been written."""
+    if not recording_started:
+        return
+
+    if sim.is_window_recording():
+        sim.stop_window_record()
+    sim.wait_window_record_saves()
+
+
 def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
+    width, height = get_tutorial_window_size(args)
     cfg = SimulationManagerCfg(
+        width=width,
+        height=height,
         headless=True,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
@@ -277,17 +351,12 @@ def get_hand_open_close_qpos(
     return hand_open, hand_close
 
 
-def make_top_down_eef_pose(position: torch.Tensor) -> torch.Tensor:
-    pose = torch.eye(4, dtype=torch.float32, device=position.device)
-    pose[:3, :3] = torch.tensor(
-        [
-            [-0.0539, -0.9985, -0.0022],
-            [-0.9977, 0.0540, -0.0401],
-            [0.0401, 0.0000, -0.9992],
-        ],
-        dtype=torch.float32,
-        device=position.device,
-    )
+def make_pre_pick_eef_pose(robot: Robot, position: torch.Tensor) -> torch.Tensor:
+    pose = robot.compute_fk(
+        qpos=robot.get_qpos(name="arm"),
+        name="arm",
+        to_matrix=True,
+    )[0].clone()
     pose[:3, 3] = position
     return pose
 
@@ -326,6 +395,23 @@ def log_object_state(obj: RigidObject, label: str) -> None:
     )
 
 
+def draw_current_eef_axis(sim: SimulationManager, robot: Robot) -> None:
+    eef_pose = robot.compute_fk(
+        qpos=robot.get_qpos(name="arm"),
+        name="arm",
+        to_matrix=True,
+    )
+    sim.draw_marker(
+        cfg=MarkerCfg(
+            name="current_eef_axis",
+            marker_type="axis",
+            axis_xpos=eef_pose,
+            axis_size=EEF_AXIS_SIZE,
+            axis_len=EEF_AXIS_LEN,
+        )
+    )
+
+
 def build_action_sequence(
     hand_open: torch.Tensor,
     hand_close: torch.Tensor,
@@ -357,7 +443,7 @@ def build_action_sequence(
     return [move_cfg, pickup_cfg, move_held_object_cfg]
 
 
-def run_move_object_demo(args: argparse.Namespace) -> None:
+def run_move_held_object_demo(args: argparse.Namespace) -> None:
     sim = initialize_simulation(args)
     robot = create_robot(sim)
     create_table(sim)
@@ -379,14 +465,17 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
     for cfg in action_cfgs:
         atomic_engine.register(_action_classes[cfg.name](motion_gen, cfg=cfg))
 
-    sim.open_window()
+    if not args.headless:
+        sim.open_window()
+    if not args.no_vis_eef_axis:
+        draw_current_eef_axis(sim, robot)
     if not args.auto_play:
         input("Inspect the fallen bottle, then press Enter to plan...")
 
     obj_pose = obj.get_local_pose(to_matrix=True)
     move_position = obj_pose[0, :3, 3].clone()
     move_position[2] = 0.36
-    move_target = make_top_down_eef_pose(move_position)
+    move_target = make_pre_pick_eef_pose(robot, move_position)
     move_held_object_target = HeldObjectPoseTarget(
         object_target_pose=make_upright_object_pose(sim.device)
     )
@@ -409,29 +498,35 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input("Press Enter to replay the move_held_object demo...")
 
-    post_grasp_clear_step = compute_pick_close_end_step()
-    should_clear_object_dynamics = True
-    log_stride = max(1, traj.shape[1] // 10)
-    for i in range(traj.shape[1]):
-        robot.set_qpos(traj[:, i, :])
-        sim.update(step=4)
-        if should_clear_object_dynamics and i + 1 >= post_grasp_clear_step:
-            obj.clear_dynamics()
-            should_clear_object_dynamics = False
-            logger.log_info(f"Object dynamics cleared after grasp at step={i}")
-        if args.debug_state and (i % log_stride == 0 or i == traj.shape[1] - 1):
-            log_object_state(obj, f"replay step {i}/{traj.shape[1] - 1}")
-        time.sleep(1e-2)
+    recording_started = start_auto_play_recording(
+        sim, args, video_prefix="move_held_object_auto_play"
+    )
+    try:
+        post_grasp_clear_step = compute_pick_close_end_step()
+        should_clear_object_dynamics = True
+        log_stride = max(1, traj.shape[1] // 10)
+        for i in range(traj.shape[1]):
+            robot.set_qpos(traj[:, i, :])
+            sim.update(step=4)
+            if should_clear_object_dynamics and i + 1 >= post_grasp_clear_step:
+                obj.clear_dynamics()
+                should_clear_object_dynamics = False
+                logger.log_info(f"Object dynamics cleared after grasp at step={i}")
+            if args.debug_state and (i % log_stride == 0 or i == traj.shape[1] - 1):
+                log_object_state(obj, f"replay step {i}/{traj.shape[1] - 1}")
+            time.sleep(1e-2)
 
-    logger.log_info("MoveHeldObject keeps the bottle suspended in the gripper.")
+        logger.log_info("MoveHeldObject keeps the bottle suspended in the gripper.")
 
-    final_qpos = traj[:, -1, :]
-    for i in range(POST_TRAJECTORY_STEPS):
-        robot.set_qpos(final_qpos)
-        sim.update(step=2)
-        if args.debug_state and i % max(1, POST_TRAJECTORY_STEPS // 5) == 0:
-            log_object_state(obj, f"post step {i}/{POST_TRAJECTORY_STEPS - 1}")
-        time.sleep(1e-2)
+        final_qpos = traj[:, -1, :]
+        for i in range(POST_TRAJECTORY_STEPS):
+            robot.set_qpos(final_qpos)
+            sim.update(step=2)
+            if args.debug_state and i % max(1, POST_TRAJECTORY_STEPS // 5) == 0:
+                log_object_state(obj, f"post step {i}/{POST_TRAJECTORY_STEPS - 1}")
+            time.sleep(1e-2)
+    finally:
+        stop_auto_play_recording(sim, recording_started)
 
     if not args.auto_play:
         input("Press Enter to exit the simulation...")
@@ -439,7 +534,7 @@ def run_move_object_demo(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_arguments()
-    run_move_object_demo(args)
+    run_move_held_object_demo(args)
 
 
 if __name__ == "__main__":

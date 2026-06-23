@@ -292,4 +292,9 @@ builtin_actions
 - {doc}`../planners/motion_generator` — the trajectory planner used by every action
 - {doc}`../sim_robot` — how control parts and IK solvers are configured
 - Tutorial: `scripts/tutorials/atomic_action/atomic_actions.py`
-- Move held object demo: `scripts/tutorials/atomic_action/move_object_atomic_actions.py`
+- Focused primitive demos:
+  - `scripts/tutorials/atomic_action/move_end_effector_atomic_actions.py`
+  - `scripts/tutorials/atomic_action/move_joints_atomic_actions.py`
+  - `scripts/tutorials/atomic_action/pickup_atomic_actions.py`
+  - `scripts/tutorials/atomic_action/move_held_object_atomic_actions.py`
+  - `scripts/tutorials/atomic_action/place_atomic_actions.py`
