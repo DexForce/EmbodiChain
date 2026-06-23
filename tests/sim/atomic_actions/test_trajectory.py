@@ -86,6 +86,12 @@ class TestResolvePoseTarget:
         out = self.builder.resolve_pose_target(pose, n_envs=2)
         assert torch.equal(out, pose)
 
+    def test_pose_converts_to_builder_dtype_and_device(self):
+        pose = torch.eye(4, dtype=torch.float64)
+        out = self.builder.resolve_pose_target(pose, n_envs=2)
+        assert out.dtype == torch.float32
+        assert out.device == self.builder.device
+
     def test_wrong_shape_raises(self):
         with pytest.raises(Exception):
             self.builder.resolve_pose_target(torch.eye(3), n_envs=2)
@@ -150,6 +156,12 @@ class TestApplyLocalOffset:
         out = self.builder.apply_local_offset(pose, offset)
         assert torch.allclose(out[0, :3, 3], torch.tensor([0.1, 0.0, 0.0]))
         assert torch.allclose(out[1, :3, 3], torch.tensor([0.0, 0.2, 0.0]))
+
+    def test_incompatible_offset_batch_raises(self):
+        pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
+        offset = torch.zeros(3, 3)
+        with pytest.raises(ValueError, match="offset batch size"):
+            self.builder.apply_local_offset(pose, offset)
 
 
 class TestExpandHandQpos:

@@ -95,6 +95,15 @@ class AntipodalAffordance(Affordance):
         if self.force_reannotate or self._generator._hit_point_pairs is None:
             self._generator.annotate()
 
+    def _resolve_approach_direction(
+        self, approach_direction: torch.Tensor
+    ) -> torch.Tensor:
+        """Move the approach direction to the grasp generator device."""
+        return approach_direction.to(
+            device=self._generator.device,
+            dtype=torch.float32,
+        )
+
     def get_valid_grasp_poses(
         self,
         obj_poses: torch.Tensor,
@@ -104,6 +113,7 @@ class AntipodalAffordance(Affordance):
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         if self._generator is None:
             self._init_generator()
+        approach_direction = self._resolve_approach_direction(approach_direction)
         results = []
         for i, obj_pose in enumerate(obj_poses):
             is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
@@ -135,6 +145,7 @@ class AntipodalAffordance(Affordance):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if self._generator is None:
             self._init_generator()
+        approach_direction = self._resolve_approach_direction(approach_direction)
         grasp_xpos_list: list[torch.Tensor] = []
         is_success_list: list[bool] = []
         open_length_list: list[float] = []

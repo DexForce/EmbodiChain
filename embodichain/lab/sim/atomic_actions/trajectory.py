@@ -63,6 +63,7 @@ class TrajectoryBuilder:
                 f"target must be torch.Tensor of shape (4, 4) or ({n_envs}, 4, 4)",
                 TypeError,
             )
+        target = target.to(device=self.device, dtype=torch.float32)
         if target.shape == (4, 4):
             target = target.unsqueeze(0).repeat(n_envs, 1, 1)
         if target.shape != (n_envs, 4, 4):
@@ -134,10 +135,17 @@ class TrajectoryBuilder:
         """
         if not (pose.dim() == 3 and pose.shape[1:] == (4, 4)):
             logger.log_error("pose must have shape [N, 4, 4]", ValueError)
+        offset = offset.to(device=pose.device, dtype=pose.dtype)
         if offset.dim() == 1:
             offset = offset.unsqueeze(0)
         if not (offset.dim() == 2 and offset.shape[1] == 3):
             logger.log_error("offset must have shape [N, 3] or [3]", ValueError)
+        if offset.shape[0] not in (1, pose.shape[0]):
+            logger.log_error(
+                f"offset batch size must be 1 or match pose batch size {pose.shape[0]}, "
+                f"but got {offset.shape[0]}",
+                ValueError,
+            )
         result = pose.clone()
         result[:, :3, 3] += offset
         return result

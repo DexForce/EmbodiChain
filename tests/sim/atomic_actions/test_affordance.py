@@ -59,6 +59,7 @@ class TestAntipodalAffordance:
     def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
         aff = AntipodalAffordance()
         generator = Mock()
+        generator.device = torch.device("cpu")
         generator.get_valid_grasp_poses.return_value = (
             False,
             torch.eye(4),
@@ -73,6 +74,43 @@ class TestAntipodalAffordance:
         assert grasp_poses.shape == (1, 4, 4)
         assert costs.shape == (1,)
         assert torch.isinf(costs).all()
+
+    def test_valid_grasp_poses_casts_approach_direction_to_generator_device(self):
+        aff = AntipodalAffordance()
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        generator.get_valid_grasp_poses.return_value = (
+            True,
+            torch.eye(4).unsqueeze(0),
+            0.0,
+            torch.zeros(1),
+        )
+        aff._generator = generator
+
+        aff.get_valid_grasp_poses(
+            torch.eye(4).unsqueeze(0),
+            approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
+        )
+
+        _, approach_direction = generator.get_valid_grasp_poses.call_args.args
+        assert approach_direction.dtype == torch.float32
+        assert approach_direction.device == generator.device
+
+    def test_best_grasp_poses_casts_approach_direction_to_generator_device(self):
+        aff = AntipodalAffordance()
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        generator.get_grasp_poses.return_value = (True, torch.eye(4), 0.05)
+        aff._generator = generator
+
+        aff.get_best_grasp_poses(
+            torch.eye(4).unsqueeze(0),
+            approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
+        )
+
+        _, approach_direction = generator.get_grasp_poses.call_args.args
+        assert approach_direction.dtype == torch.float32
+        assert approach_direction.device == generator.device
 
 
 class TestInteractionPoints:
