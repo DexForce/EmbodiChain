@@ -27,6 +27,8 @@ from embodichain.lab.sim.planners import (
     BasePlanner,
     ToppraPlanner,
     ToppraPlannerCfg,
+    NeuralPlanner,
+    NeuralPlannerCfg,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 from embodichain.utils import logger, configclass
@@ -93,6 +95,7 @@ class MotionGenerator:
 
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
+        "neural": (NeuralPlanner, NeuralPlannerCfg),
     }
 
     def __init__(self, cfg: MotionGenCfg) -> None:
@@ -217,7 +220,11 @@ class MotionGenerator:
         else:
             target_plan_states = target_states
 
-        options.plan_opts.control_part = options.control_part
+        if options.plan_opts is None:
+            if hasattr(self.planner, "default_plan_options"):
+                options.plan_opts = self.planner.default_plan_options()
+            else:
+                options.plan_opts = PlanOptions()
         result = self.planner.plan(
             target_states=target_plan_states, options=options.plan_opts
         )
