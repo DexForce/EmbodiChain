@@ -57,7 +57,7 @@ and every action declares the target type, or tuple of target types, it accepts 
 
 | Target | Constructor | Used by |
 |---|---|---|
-| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos)` | `MoveEndEffector`, `Place` |
+| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos)` | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget` | `JointPositionTarget(qpos)` | `MoveJoints` |
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
 | `GraspTarget` | `GraspTarget(semantics)` | `PickUp` |
@@ -94,7 +94,7 @@ action's `TargetType` before calling `execute`:
 
 | Target | Holds | Accepted by |
 |---|---|---|
-| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)` or `(n_envs,4,4)` | `MoveEndEffector`, `Place` |
+| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)` or `(n_envs,4,4)` | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)` or `(n_envs, control_dof)` | `MoveJoints` |
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
 | `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
@@ -110,6 +110,7 @@ action's `TargetType` before calling `execute`:
 | `Place` | Clears it to `None` |
 | `MoveEndEffector` | Leaves it unchanged |
 | `MoveJoints` | Leaves it unchanged |
+| `Press` | Leaves it unchanged |
 
 If a step fails, `run()` returns `success=False` with the partial trajectory concatenated up
 to (but not including) the failed step, and the `WorldState` going into that step.
@@ -136,6 +137,8 @@ from embodichain.lab.sim.atomic_actions import (
     MoveHeldObjectCfg,
     Place,
     PlaceCfg,
+    Press,
+    PressCfg,
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
@@ -159,6 +162,11 @@ move_held_object_cfg = MoveHeldObjectCfg(
     hand_close_qpos=torch.tensor([0.025, 0.025]),
 )
 move_cfg = MoveEndEffectorCfg(control_part="arm")
+press_cfg = PressCfg(
+    control_part="arm",
+    hand_control_part="hand",
+    hand_close_qpos=torch.tensor([0.025, 0.025]),
+)
 move_joints_cfg = MoveJointsCfg(
     control_part="arm",
     named_joint_positions={"home": torch.zeros(6)},
@@ -170,6 +178,7 @@ engine.register(PickUp(motion_gen, cfg=pickup_cfg))
 engine.register(MoveHeldObject(motion_gen, cfg=move_held_object_cfg))
 engine.register(Place(motion_gen, cfg=place_cfg))
 engine.register(MoveEndEffector(motion_gen, cfg=move_cfg))
+engine.register(Press(motion_gen, cfg=press_cfg))
 engine.register(MoveJoints(motion_gen, cfg=move_joints_cfg))
 
 # 3. Describe the object to pick
@@ -297,6 +306,7 @@ builtin_actions
   - `scripts/tutorials/atomic_action/pickup.py`
   - `scripts/tutorials/atomic_action/move_held_object.py`
   - `scripts/tutorials/atomic_action/place.py`
+  - `scripts/tutorials/atomic_action/press.py`
 
 Run a demo in headless CPU mode with `--auto_play --headless --device cpu` to record
 an MP4 under `outputs/videos`. For example:
