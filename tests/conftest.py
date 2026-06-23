@@ -17,6 +17,8 @@
 import os
 import pytest
 
+os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
+
 
 def pytest_addoption(parser):
     parser.addoption(

@@ -62,7 +62,7 @@ class PytorchSolverCfg(SolverCfg):
     is_only_position_constraint: bool = False
     """Flag to indicate whether the solver should only consider position constraints."""
 
-    num_samples: int = 5
+    num_samples: int = 30
     """Number of samples to generate different joint seeds for IK iterations.
 
     A higher number of samples increases the chances of finding a valid solution

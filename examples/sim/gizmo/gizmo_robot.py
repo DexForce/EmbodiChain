@@ -23,6 +23,7 @@ import numpy as np
 import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
@@ -60,36 +61,48 @@ def main():
     sim.set_manual_update(False)
 
     # Get UR10 URDF path
-    urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
+    ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
+    gripper_urdf_path = get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf")
 
     # Create UR10 robot
     robot_cfg = RobotCfg(
         uid="ur10_gizmo_test",
         urdf_cfg=URDFCfg(
-            components=[{"component_type": "arm", "urdf_path": urdf_path}]
+            components=[
+                {"component_type": "arm", "urdf_path": ur10_urdf_path},
+                {"component_type": "hand", "urdf_path": gripper_urdf_path},
+            ]
         ),
-        control_parts={"arm": ["Joint[1-6]"]},
+        control_parts={
+            "arm": ["JOINT[0-9]"],
+            "hand": ["FINGER[1-2]"],
+        },
         solver_cfg={
-            "arm": PinkSolverCfg(
-                urdf_path=urdf_path,
+            "arm": PytorchSolverCfg(
                 end_link_name="ee_link",
                 root_link_name="base_link",
-                pos_eps=1e-2,
-                rot_eps=5e-2,
-                max_iterations=300,
-                dt=0.1,
+                tcp=[
+                    [0.0, 1.0, 0.0, 0.0],
+                    [-1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.12],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                num_samples=30,
             )
         },
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"Joint[1-6]": 1e4},
-            damping={"Joint[1-6]": 1e3},
+            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
+            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
+            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},
+            drive_type="force",
         ),
+        init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
     )
     robot = sim.add_robot(cfg=robot_cfg)
 
     # Set initial joint positions
     initial_qpos = torch.tensor(
-        [[0, -np.pi / 2, np.pi / 2, 0.0, np.pi / 2, 0.0]],
+        [[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0]],
         dtype=torch.float32,
         device="cpu",
     )
