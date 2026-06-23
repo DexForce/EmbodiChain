@@ -65,7 +65,7 @@
   "llm": {
     "openai_compatible": {
       "api_key": "",
-      "model": "gpt-4o",
+      "model": "gpt-5",
       "base_url": "",
       "default_query": {}
     }
