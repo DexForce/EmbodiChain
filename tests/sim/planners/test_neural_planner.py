@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import torch
+import pytest
 
 from embodichain.lab.sim.planners import (
     MotionGenCfg,
@@ -179,3 +180,32 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
 
     assert result.success is True
     assert torch.allclose(result.positions[0], custom_qpos)
+
+
+def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
+    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+    )
+
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                checkpoint_path=checkpoint_path,
+                control_part="main_arm",
+            )
+        )
+    )
+
+    with pytest.raises(ValueError, match="policy expects"):
+        motion_generator.generate(
+            target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            options=MotionGenOptions(
+                plan_opts=NeuralPlanOptions(
+                    control_part="main_arm",
+                    start_qpos=torch.zeros(NUM_ARM_JOINTS - 1),
+                ),
+            ),
+        )

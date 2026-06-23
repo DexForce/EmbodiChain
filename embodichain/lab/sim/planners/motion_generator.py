@@ -225,6 +225,8 @@ class MotionGenerator:
                 options.plan_opts = self.planner.default_plan_options()
             else:
                 options.plan_opts = PlanOptions()
+        # Planner-specific options (e.g. NeuralPlanOptions) must be set on
+        # plan_opts explicitly, same as ToppraPlanOptions.
         result = self.planner.plan(
             target_states=target_plan_states, options=options.plan_opts
         )

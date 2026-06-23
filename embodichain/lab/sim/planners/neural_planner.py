@@ -71,6 +71,11 @@ class _WaypointTransformerActor(nn.Module):
         super().__init__()
         self.num_waypoints = int(num_waypoints)
         self.use_relative_obs = bool(use_relative_obs)
+        if int(action_dim) != 7:
+            raise ValueError(
+                "Waypoint transformer checkpoints currently assume a 7-DoF arm. "
+                f"Got action_dim={action_dim}."
+            )
         self.state_dim = 7 + 7 + 7 + (7 if self.use_relative_obs else 0)
         self.waypoint_token_dim = 3 + 4 + 1 + 1
 
@@ -417,6 +422,12 @@ class NeuralPlanner(BasePlanner):
             qpos = torch.as_tensor(start_qpos, dtype=torch.float32, device=self.device)
         if qpos.dim() == 1:
             qpos = qpos.unsqueeze(0)
+        if qpos.shape[-1] < self._action_dim:
+            logger.log_error(
+                f"start_qpos has {qpos.shape[-1]} joints, but policy expects "
+                f"{self._action_dim}.",
+                ValueError,
+            )
         return qpos.to(self.device).clone()
 
     def _fk_matrix(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
