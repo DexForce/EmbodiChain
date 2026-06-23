@@ -85,11 +85,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Run the viewer demo without waiting for keyboard input.",
     )
     parser.add_argument(
-        "--debug_state",
-        action="store_true",
-        help="Log robot qpos during replay.",
-    )
-    parser.add_argument(
         "--no_vis_eef_axis",
         action="store_true",
         help="Do not draw the current end-effector/TCP coordinate frame before planning.",
@@ -214,11 +209,6 @@ def make_arm_qpos(values: list[float], device: torch.device) -> torch.Tensor:
     return torch.tensor(values, dtype=torch.float32, device=device)
 
 
-def format_tensor(tensor: torch.Tensor) -> str:
-    rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
-    return str(rounded.tolist())
-
-
 def draw_current_eef_axis(sim: SimulationManager, robot: Robot) -> None:
     eef_pose = robot.compute_fk(
         qpos=robot.get_qpos(name="arm"),
@@ -281,15 +271,9 @@ def run_move_joints_demo(args: argparse.Namespace) -> None:
         sim, args, video_prefix="move_joints_auto_play"
     )
     try:
-        log_stride = max(1, traj.shape[1] // 10)
         for i in range(traj.shape[1]):
             robot.set_qpos(traj[:, i, :])
             sim.update(step=4)
-            if args.debug_state and (i % log_stride == 0 or i == traj.shape[1] - 1):
-                logger.log_info(
-                    f"replay step {i}/{traj.shape[1] - 1}: "
-                    f"arm_qpos={format_tensor(traj[0, i, :6])}"
-                )
             time.sleep(1e-2)
 
         final_qpos = traj[:, -1, :]

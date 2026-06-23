@@ -84,11 +84,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Run the viewer demo without waiting for keyboard input.",
     )
     parser.add_argument(
-        "--debug_state",
-        action="store_true",
-        help="Log robot qpos during replay.",
-    )
-    parser.add_argument(
         "--no_vis_eef_axis",
         action="store_true",
         help="Do not draw the current end-effector/TCP coordinate frame before planning.",
@@ -289,15 +284,9 @@ def run_move_end_effector_demo(args: argparse.Namespace) -> None:
         sim, args, video_prefix="move_end_effector_auto_play"
     )
     try:
-        log_stride = max(1, traj.shape[1] // 10)
         for i in range(traj.shape[1]):
             robot.set_qpos(traj[:, i, :])
             sim.update(step=4)
-            if args.debug_state and (i % log_stride == 0 or i == traj.shape[1] - 1):
-                logger.log_info(
-                    f"replay step {i}/{traj.shape[1] - 1}: "
-                    f"qpos={format_tensor(traj[0, i, :])}"
-                )
             time.sleep(1e-2)
 
         final_qpos = traj[:, -1, :]
