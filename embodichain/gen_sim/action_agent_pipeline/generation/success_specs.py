@@ -20,15 +20,18 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _ArrangementLineSpec,
     _BasketTaskRoles,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
 )
 
 __all__ = [
+    "_make_arrangement_extensions_config",
     "_make_extensions_config",
     "_make_relative_extensions_config",
     "_object_in_container_success",
+    "_validate_arrangement_bundle",
     "_validate_bundle",
     "_validate_relative_bundle",
     "_validate_success_uids",
@@ -111,6 +114,51 @@ def _make_relative_extensions_config(
             side_relation_xy_offsets=side_relation_xy_offsets,
         ),
     }
+
+
+def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
+    return {
+        "agent_arm_slots": {
+            "left": {
+                "arm": "right_arm",
+                "eef": "right_eef",
+            },
+            "right": {
+                "arm": "left_arm",
+                "eef": "left_eef",
+            },
+        },
+        "arm_aim_yaw_offset": {
+            "left": 3.141592653589793,
+            "right": 0.0,
+        },
+        "gripper_open_state": [0.0],
+        "gripper_close_state": [0.04],
+        "ignore_terminations_during_agent": True,
+        "viewer_camera_uid": "cam_high",
+        "agent_success": _make_arrangement_success_spec(spec),
+    }
+
+
+def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
+    terms: list[dict[str, Any]] = []
+    for step in spec.steps:
+        terms.extend(
+            [
+                {
+                    "type": "object_xy_near",
+                    "object": step.runtime_uid,
+                    "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
+                    "tolerance": 0.05,
+                },
+                {
+                    "type": "object_not_fallen",
+                    "object": step.runtime_uid,
+                    "max_tilt": 0.9,
+                },
+            ]
+        )
+    return {"op": "all", "terms": terms}
 
 
 def _make_relative_success_spec(
@@ -303,6 +351,42 @@ def _validate_relative_bundle(
         )
 
 
+def _validate_arrangement_bundle(
+    bundle: Mapping[str, Any],
+    spec: _ArrangementLineSpec,
+) -> None:
+    gym_config = bundle["gym_config"]
+    if gym_config.get("id") != "AtomicActionsAgent-v3":
+        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("robot", {}).get("uid") != "DualUR5":
+        raise ValueError("Generated arrangement config must use DualUR5.")
+
+    rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
+    if len(rigid_uid_list) != len(set(rigid_uid_list)):
+        raise ValueError(f"Duplicate rigid object runtime uid(s): {rigid_uid_list}")
+    rigid_uids = set(rigid_uid_list)
+    background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
+    scene_uids = rigid_uids | background_uids
+    required = {step.runtime_uid for step in spec.steps}
+    missing = required - rigid_uids
+    if missing:
+        raise ValueError(
+            f"Generated arrangement config missing moved rigid object(s): {missing}"
+        )
+
+    _validate_success_uids(
+        gym_config["env"]["extensions"]["agent_success"],
+        rigid_uids=rigid_uids,
+        scene_uids=scene_uids,
+    )
+    registry = gym_config["env"]["events"]["register_info_to_env"]["params"]["registry"]
+    registered = {entry["entity_cfg"]["uid"] for entry in registry}
+    if not required.issubset(registered):
+        raise ValueError(
+            f"Arrangement config registry missing: {sorted(required - registered)}"
+        )
+
+
 def _validate_success_uids(
     success: Mapping[str, Any],
     *,
@@ -325,6 +409,8 @@ def _validate_success_uids(
     }:
         required_keys = ("object", "reference")
     elif success_type in {"object_axis_near", "object_coordinate_near"}:
+        required_keys = ("object",)
+    elif success_type in {"object_xy_near", "object_near_xy"}:
         required_keys = ("object",)
     elif success_type in {"object_not_fallen", "not_fallen"}:
         required_keys = ("object",)

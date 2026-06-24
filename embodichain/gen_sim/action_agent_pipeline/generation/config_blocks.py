@@ -22,6 +22,7 @@ from typing import Any
 import copy
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _ArrangementLineSpec,
     _BasketTaskRoles,
     _RelativePlacementSpec,
     _ResolvedTargetReplacement,
@@ -42,6 +43,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
 
 __all__ = [
     "_make_background_config",
+    "_make_arrangement_dataset_config",
+    "_make_arrangement_events_config",
     "_make_dataset_config",
     "_make_events_config",
     "_make_extra_background_config",
@@ -97,6 +100,47 @@ def _source_body_scale(obj: _SceneObject) -> list[float]:
 
 def _make_relative_events_config(
     spec: _RelativePlacementSpec,
+    registered_runtime_uids: list[str],
+    *,
+    sensor_config_factory: Callable[[], list[dict[str, Any]]],
+) -> dict[str, Any]:
+    return {
+        "record_camera": _record_camera_event_config(sensor_config_factory),
+        "validation_cameras": _validation_cameras_event_config(),
+        "prepare_extra_attr": {
+            "func": "prepare_extra_attr",
+            "mode": "reset",
+            "params": {
+                "attrs": [
+                    {
+                        "name": "object_lengths",
+                        "mode": "callable",
+                        "entity_uids": "all_objects",
+                        "func_name": "compute_object_length",
+                        "func_kwargs": {
+                            "is_svd_frame": True,
+                            "sample_points": 5000,
+                        },
+                    },
+                ]
+            },
+        },
+        "register_info_to_env": {
+            "func": "register_info_to_env",
+            "mode": "reset",
+            "params": {
+                "registry": [
+                    _object_registry_entry(uid)
+                    for uid in sorted(registered_runtime_uids)
+                ],
+                "registration": "affordance_datas",
+                "sim_update": True,
+            },
+        },
+    }
+
+
+def _make_arrangement_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
@@ -300,6 +344,41 @@ def _make_relative_dataset_config(
             },
         }
     }
+
+
+def _make_arrangement_dataset_config(
+    project_name: str,
+    spec: _ArrangementLineSpec,
+) -> dict[str, Any]:
+    return {
+        "lerobot": {
+            "func": "LeRobotRecorder",
+            "mode": "save",
+            "params": {
+                "robot_meta": {
+                    "robot_type": "DualUR5",
+                    "control_freq": 25,
+                },
+                "instruction": {
+                    "lang": _arrangement_dataset_instruction(spec),
+                },
+                "extra": {
+                    "scene_type": project_name,
+                    "task_description": spec.task_description,
+                    "data_type": "sim",
+                },
+                "use_videos": True,
+            },
+        }
+    }
+
+
+def _arrangement_dataset_instruction(spec: _ArrangementLineSpec) -> str:
+    ordered = ", ".join(step.runtime_uid for step in spec.steps)
+    return (
+        "Move the selected objects to the table center and arrange them "
+        f"left-to-right as: {ordered}."
+    )
 
 
 def _relative_dataset_instruction(

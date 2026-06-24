@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "_ArrangementLineSpec",
+    "_ArrangementLineStepSpec",
     "GeneratedActionAgentConfigPaths",
     "TargetReplacementSpec",
     "_BasketTaskRoles",
@@ -119,3 +121,29 @@ class _RelativePlacementSpec:
     reference_is_initial_pose: bool = False
     release_position: list[float] | None = None
     high_position: list[float] | None = None
+
+
+@dataclass(frozen=True)
+class _ArrangementLineStepSpec:
+    source_uid: str
+    runtime_uid: str
+    slot_index: int
+    active_side: str
+    target_xy: list[float]
+    release_position: list[float]
+    high_position: list[float]
+    size_score: float | None = None
+    color: str | None = None
+
+
+@dataclass(frozen=True)
+class _ArrangementLineSpec:
+    table_source_uid: str
+    task_description: str
+    task_prompt_summary: str
+    basic_background_notes: str
+    order_by: str
+    order_direction: str
+    axis: str
+    anchor: str
+    steps: tuple[_ArrangementLineStepSpec, ...]
