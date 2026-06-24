@@ -21,12 +21,12 @@ import os
 import re
 from pathlib import Path
 import numpy as np
-import trimesh
-import pyrender
+import bpy
 from PIL import Image
 from openai import OpenAI
 import itertools
 from scipy.spatial import ConvexHull
+from scipy.spatial.transform import Rotation
 from typing import Dict, Any, List
 
 
@@ -116,16 +116,221 @@ side_profile = [
 ]
 
 
+# ----------------------------------------------------------------------------
+# Blender (bpy) backend
+#
+# trimesh / pyrender are replaced by Blender for mesh loading, rotation
+# handling, rendering and export so that materials survive load -> export.
+# Only the I/O / geometry backend is swapped here; every downstream decision
+# uses the exact same math as before. A "mesh" handed around the pipeline is a
+# ``bpy.types.Object`` whose transform is accumulated in ``matrix_world``.
+# ----------------------------------------------------------------------------
+
+
+def _get_matrix_world(obj):
+    """Return the object's world matrix as a 4x4 numpy array."""
+    return np.array(obj.matrix_world, dtype=np.float64)
+
+
+def _set_matrix_world(obj, M):
+    """Assign a 4x4 numpy array (or list) to the object's world matrix.
+
+    Blender fills a nested-sequence assignment column-major, so the matrix is
+    transposed before assignment to preserve the conventional row-major layout.
+    """
+    obj.matrix_world = np.asarray(M, dtype=np.float64).T.tolist()
+
+
+def _rotation_matrix_4(angle_rad, axis):
+    """4x4 rotation matrix about ``axis`` through the origin (numpy/scipy)."""
+    axis = np.asarray(axis, dtype=np.float64)
+    axis = axis / np.linalg.norm(axis)
+    M = np.eye(4)
+    M[:3, :3] = Rotation.from_rotvec(angle_rad * axis).as_matrix()
+    return M
+
+
+def _bpy_reset_scene():
+    """Delete every object in the current scene and purge orphan data."""
+    if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    try:
+        bpy.ops.outliner.orphans_purge(
+            do_local_ids=True, do_linked_ids=True, do_recursive=True
+        )
+    except Exception:
+        pass
+
+
+def _bpy_import_file(filepath):
+    """Import a mesh file using the importer matching its extension."""
+    filepath = str(filepath)
+    ext = Path(filepath).suffix.lower()
+    if ext in (".glb", ".gltf"):
+        bpy.ops.import_scene.gltf(filepath=filepath)
+    elif ext == ".obj":
+        if hasattr(bpy.ops.wm, "obj_import"):
+            bpy.ops.wm.obj_import(filepath=filepath)
+        else:
+            bpy.ops.import_scene.obj(filepath=filepath)
+    elif ext == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=filepath)
+    elif ext == ".ply":
+        if hasattr(bpy.ops.wm, "ply_import"):
+            bpy.ops.wm.ply_import(filepath=filepath)
+        else:
+            bpy.ops.import_mesh.ply(filepath=filepath)
+    elif ext == ".stl":
+        if hasattr(bpy.ops.wm, "stl_import"):
+            bpy.ops.wm.stl_import(filepath=filepath)
+        else:
+            bpy.ops.import_mesh.stl(filepath=filepath)
+    else:
+        bpy.ops.import_scene.gltf(filepath=filepath)
+
+
+def _bpy_load_object(mesh_input):
+    """Load a mesh file into a single Blender mesh object.
+
+    Imported mesh parts are baked to world space and joined into one object so
+    that all material slots are preserved.
+    """
+    mesh_path = Path(mesh_input).resolve()
+    if not mesh_path.exists():
+        raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
+
+    _bpy_reset_scene()
+    _bpy_import_file(mesh_path)
+
+    mesh_objs = [o for o in bpy.data.objects if o.type == "MESH"]
+    if not mesh_objs:
+        raise ValueError(f"No mesh geometry found in file: {mesh_path}")
+
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in mesh_objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = mesh_objs[0]
+
+    try:
+        bpy.ops.object.make_single_user(
+            object=True, obdata=True, material=False, animation=False
+        )
+    except Exception:
+        pass
+
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+    if len(mesh_objs) > 1:
+        bpy.ops.object.join()
+
+    obj = bpy.context.view_layer.objects.active
+    _set_matrix_world(obj, np.eye(4))
+    return obj
+
+
+def _bpy_world_bounds(obj):
+    """Return ``(min_xyz, max_xyz)`` of the object's world-space AABB."""
+    mw = np.array(obj.matrix_world, dtype=np.float64)
+    n = len(obj.data.vertices)
+    co = np.empty(n * 3, dtype=np.float32)
+    obj.data.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3).astype(np.float64)
+    world = co @ mw[:3, :3].T + mw[:3, 3]
+    return world.min(axis=0), world.max(axis=0)
+
+
+def _bpy_apply_matrix(obj, M4):
+    """Left-multiply a 4x4 (numpy) world transform onto ``obj``."""
+    _set_matrix_world(obj, np.asarray(M4, dtype=np.float64) @ _get_matrix_world(obj))
+
+
+def _bpy_bake_transform(obj):
+    """Bake the object's world matrix into its mesh data."""
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+
+def _bpy_remove_objects(objs):
+    """Remove objects and their now-orphaned data blocks."""
+    for o in objs:
+        if o is None:
+            continue
+        data = o.data
+        try:
+            bpy.data.objects.remove(o, do_unlink=True)
+        except Exception:
+            pass
+        if data is not None and getattr(data, "users", 1) == 0:
+            for coll in (bpy.data.meshes, bpy.data.cameras, bpy.data.lights):
+                try:
+                    coll.remove(data)
+                    break
+                except Exception:
+                    pass
+
+
+def _bpy_setup_world(scene, rgb):
+    """Set a flat background color on the scene world."""
+    world = scene.world
+    if world is None:
+        world = bpy.data.worlds.new("World")
+        scene.world = world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    bg = nodes.get("Background")
+    if bg is None:
+        bg = nodes.new("ShaderNodeBackground")
+    bg.inputs[0].default_value = (rgb[0], rgb[1], rgb[2], 1.0)
+    bg.inputs[1].default_value = 1.0
+
+
+def _bpy_setup_render(scene, res):
+    """Configure a deterministic CPU render at ``res`` x ``res``."""
+    scene.render.engine = "CYCLES"
+    try:
+        scene.cycles.device = "CPU"
+        scene.cycles.samples = 16
+    except Exception:
+        pass
+    scene.render.resolution_x = res
+    scene.render.resolution_y = res
+    scene.render.resolution_percentage = 100
+    scene.render.film_transparent = False
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGB"
+    try:
+        scene.view_settings.view_transform = "Standard"
+    except Exception:
+        pass
+
+
+def _new_sun(scene, name, strength):
+    """Create and link a directional (sun) light."""
+    ld = bpy.data.lights.new(name, type="SUN")
+    ld.energy = strength
+    lo = bpy.data.objects.new(name, ld)
+    scene.collection.objects.link(lo)
+    return lo
+
+
 def normalize_to_unit_cube(mesh):
-    minb, maxb = mesh.bounds
+    minb, maxb = _bpy_world_bounds(mesh)
     size = maxb - minb
     size = np.maximum(size, 1e-8)
     scale = 1.0 / np.max(size)
-    mesh.apply_scale(scale)
-    minb_scaled, maxb_scaled = mesh.bounds
+    S = np.eye(4)
+    S[0, 0] = S[1, 1] = S[2, 2] = scale
+    _bpy_apply_matrix(mesh, S)
+    minb_scaled, maxb_scaled = _bpy_world_bounds(mesh)
     center_scaled = (minb_scaled + maxb_scaled) / 2
     translation = np.array([0.5, 0.5, 0.5]) - center_scaled
-    mesh.apply_translation(translation)
+    T = np.eye(4)
+    T[:3, 3] = translation
+    _bpy_apply_matrix(mesh, T)
 
 
 def compute_support_area(mesh, eps=1e-2):
@@ -142,29 +347,12 @@ def compute_support_area(mesh, eps=1e-2):
         return 0.0
 
 
-import numpy as np
-import trimesh
-from pathlib import Path
-
-
 def init_pose_simple(mesh_input):
-    fallback_mesh = None
-    mesh: trimesh.Trimesh = None
-
-    if isinstance(mesh_input, trimesh.Trimesh):
-        mesh = mesh_input.copy()
-        fallback_mesh = mesh_input.copy()
-    else:
-        mesh_path = Path(mesh_input).resolve()
-        if not mesh_path.exists():
-            raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
-        mesh = trimesh.load(mesh_path, force="mesh")
-        fallback_mesh = mesh.copy()
-    mesh
-    rot_x = trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0])
-    rot_z = trimesh.transformations.rotation_matrix(np.radians(90), [0, 0, 1])
-    combined_transform = trimesh.transformations.concatenate_matrices(rot_z, rot_x)
-    mesh.apply_transform(combined_transform)
+    mesh = _bpy_load_object(mesh_input)
+    rot_x = _rotation_matrix_4(np.radians(90), [1, 0, 0])
+    rot_z = _rotation_matrix_4(np.radians(90), [0, 0, 1])
+    combined_transform = rot_z @ rot_x
+    _bpy_apply_matrix(mesh, combined_transform)
     normalize_to_unit_cube(mesh)
     return mesh
 
@@ -332,19 +520,44 @@ def build_image_inputs(views_data):
 
 
 def render_views(mesh, views, out_dir, res=512):
-    import numpy as np
-    import pyrender
-    from PIL import Image
-    import trimesh
+    out_dir = Path(out_dir)
+    scene = bpy.context.scene
 
-    mesh = mesh.copy()
+    # Render-only copy: center to origin and scale the max extent to 1.
+    minb, maxb = _bpy_world_bounds(mesh)
+    center = (minb + maxb) / 2.0
+    extents = maxb - minb
+    scale = 1.0 / float(np.max(extents))
 
-    mesh.apply_translation(-mesh.bounds.mean(axis=0))
-    scale = 1.0 / np.max(mesh.extents)
-    mesh.apply_scale(scale)
-    mesh_pyr = pyrender.Mesh.from_trimesh(mesh, smooth=True)
-    renderer = pyrender.OffscreenRenderer(res, res)
-    cam = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
+    dup = mesh.copy()
+    dup.data = mesh.data.copy()
+    scene.collection.objects.link(dup)
+    T_center = np.eye(4)
+    T_center[:3, 3] = -center
+    S = np.eye(4)
+    S[0, 0] = S[1, 1] = S[2, 2] = scale
+    _set_matrix_world(dup, (S @ T_center) @ _get_matrix_world(dup))
+
+    _bpy_setup_render(scene, res)
+    _bpy_setup_world(scene, (230.0 / 255.0, 235.0 / 255.0, 245.0 / 255.0))
+
+    cam_data = bpy.data.cameras.new("simready_cam")
+    cam_data.angle = float(np.pi / 3.0)
+    cam_obj = bpy.data.objects.new("simready_cam", cam_data)
+    scene.collection.objects.link(cam_obj)
+    scene.camera = cam_obj
+
+    key = _new_sun(scene, "simready_key", 4.0)
+    fill = _new_sun(scene, "simready_fill", 1.5)
+    back = _new_sun(scene, "simready_back", 1.2)
+
+    # Hide every other renderable object so only the copy is rendered.
+    hidden = []
+    for o in scene.objects:
+        if o.type == "MESH" and o is not dup:
+            hidden.append((o, o.hide_render))
+            o.hide_render = True
+
     results = []
     for name, eye in views:
 
@@ -371,36 +584,26 @@ def render_views(mesh, views, out_dir, res=512):
         M[:3, :3] = R
         M[:3, 3] = eye
 
-        scene = pyrender.Scene(bg_color=[230, 235, 245, 255])
-
-        scene.add(mesh_pyr)
-        scene.add(cam, pose=M)
-
-        scene.add(pyrender.DirectionalLight(color=np.ones(3), intensity=4.0), pose=M)
+        _set_matrix_world(cam_obj, M)
+        _set_matrix_world(key, M)
 
         fill_pose = np.eye(4)
         fill_pose[:3, 3] = eye + np.array([1.0, 1.0, 1.0])
-        scene.add(
-            pyrender.DirectionalLight(color=np.ones(3), intensity=1.5), pose=fill_pose
-        )
+        _set_matrix_world(fill, fill_pose)
 
         back_pose = np.eye(4)
         back_pose[:3, 3] = eye + np.array([-1.0, -1.0, -1.0])
-        scene.add(
-            pyrender.DirectionalLight(color=np.ones(3), intensity=1.2), pose=back_pose
-        )
-
-        color, _ = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
-
-        img = Image.fromarray(color)
-        img = img.convert("RGB")
+        _set_matrix_world(back, back_pose)
 
         path = out_dir / f"{name}.png"
-        img.save(path, quality=95)
+        scene.render.filepath = str(path)
+        bpy.ops.render.render(write_still=True)
 
         results.append({"path": str(path), "name": name, "camera_pose": M.tolist()})
 
-    renderer.delete()
+    for o, flag in hidden:
+        o.hide_render = flag
+    _bpy_remove_objects([dup, cam_obj, key, fill, back])
     return results
 
 
@@ -461,7 +664,7 @@ def ask_mllm_detect_and_classify(views_data, extra_text=""):
             - "category": integer 0|1|2.
             - "main_surface": Only provide a short, specific name of the forward-facing surface when category == 2 (e.g. "screen", "lamp_head", "door_face", "keyboard_surface"). Otherwise null.
             - "orientation_requirement": Only provide a concise canonical resting-orientation instruction when category == 2. You MUST choose exactly one of the following three semantic directions for the object's normal real-world static pose:
-              * "face_up"      -> the main surface is intended to face upward toward +Z / gravity opposite, e.g. smartphone lying flat with screen up, keyboard on table, tray-like objects.Tablet need face_up. Laptop need keyboard facing up to count as face_up, even if screen is more front-facing. etc.
+              * "face_up"      -> the main surface is intended to face upward toward +Z / gravity opposite, e.g. smartphone lying flat with screen up, keyboard on table, tray-like objects. Laptop need keyboard facing up to count as face_up, even if screen is more front-facing.
               * "face_forward" -> the main surface is intended to face the user/target in a vertical stance, e.g. monitor screen, oven front, speaker grille, camera front.
               * "face_down"    -> the main surface is intended to face downward in the usual stable static pose, e.g. brush bristles or contact surface downward when naturally placed/used.
               If the object is category 1 or 0, set null.
@@ -857,16 +1060,15 @@ def rot_z(deg):
 
 
 def apply_rotations(mesh, rotations):
-    R = np.eye(3)
-    T = np.eye(4)
-    T[:3, :3] = rotations
-    mesh.apply_transform(T)
+    R = np.eye(4)
+    R[:3, :3] = rotations
+    _bpy_apply_matrix(mesh, R)
 
 
-def get_aabb_dims(mesh: trimesh.Trimesh):
+def get_aabb_dims(mesh):
 
-    bounds = np.asarray(mesh.bounds, dtype=float)
-    extents = bounds[1] - bounds[0]
+    minb, maxb = _bpy_world_bounds(mesh)
+    extents = np.asarray(maxb, dtype=float) - np.asarray(minb, dtype=float)
     return {
         "height": float(extents[2]),
         "width": float(extents[1]),
@@ -887,7 +1089,7 @@ def dims_dict_to_xyz(dims: dict):
 
 
 def scale_mesh_uniform_to_dimensions(
-    mesh: trimesh.Trimesh,
+    mesh,
     target_dims: dict,
     current_dims: dict | None = None,
     eps: float = 1e-8,
@@ -907,10 +1109,17 @@ def scale_mesh_uniform_to_dimensions(
 
     scale = float(np.median(ratios))
 
-    center = mesh.bounds.mean(axis=0)
-    mesh.apply_translation(-center)
-    mesh.apply_scale(scale)
-    mesh.apply_translation(center)
+    minb, maxb = _bpy_world_bounds(mesh)
+    center = (minb + maxb) / 2.0
+    T_neg = np.eye(4)
+    T_neg[:3, 3] = -center
+    S = np.eye(4)
+    S[0, 0] = S[1, 1] = S[2, 2] = scale
+    T_pos = np.eye(4)
+    T_pos[:3, 3] = center
+    _bpy_apply_matrix(mesh, T_neg)
+    _bpy_apply_matrix(mesh, S)
+    _bpy_apply_matrix(mesh, T_pos)
 
     return mesh, scale
 
@@ -1010,27 +1219,41 @@ CRITICAL RULES:
 
 
 def export_final_mesh(mesh, name, out_dir: Path):
-    out_dir = out_dir.resolve()
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(exist_ok=True, parents=True)
-    bounds = mesh.bounds
-    minb = bounds[0]
-    maxb = bounds[1]
+    minb, maxb = _bpy_world_bounds(mesh)
     bottom_center = np.array(
         [(minb[0] + maxb[0]) / 2.0, (minb[1] + maxb[1]) / 2.0, minb[2]], dtype=float
     )
     T_trans = np.eye(4)
     T_trans[:3, 3] = -bottom_center
-    mesh.apply_transform(T_trans)
-    # out_path = out_dir / f"{name}_simready.glb"
-    out_path = out_dir / f"asset_simready.glb"
+    _bpy_apply_matrix(mesh, T_trans)
+    _bpy_bake_transform(mesh)
+
+    bpy.ops.object.select_all(action="DESELECT")
+    mesh.select_set(True)
+    bpy.context.view_layer.objects.active = mesh
+
+    out_path = out_dir / f"{name}_simready.glb"
     out_path = out_path.resolve()
 
     print(f"Exporting final mesh to: {out_path} (bottom-face center moved to origin)")
-    mesh.export(out_path)
+    bpy.ops.export_scene.gltf(
+        filepath=str(out_path),
+        export_format="GLB",
+        use_selection=True,
+    )
 
     out_path = out_dir / f"asset_simready.obj"
     out_path = out_path.resolve()
-    mesh.export(out_path)
+    if hasattr(bpy.ops.wm, "obj_export"):
+        bpy.ops.wm.obj_export(
+            filepath=str(out_path),
+            export_selected_objects=True,
+            export_materials=True,
+        )
+    else:
+        bpy.ops.export_scene.obj(filepath=str(out_path), use_selection=True)
     return str(out_path)
 
 

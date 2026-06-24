@@ -250,7 +250,12 @@ class PhysicsParser(AssetParser):
         asset.simulation.setdefault("blockers", [])
 
     def _simready_process(self, asset: Asset, asset_root: Path) -> None:
-        mesh_path = asset_root / asset.asset_data.get("path")
+
+        # mesh_path = asset_root / asset.asset_data.get("path")
+        archive_dir = asset_root / "asset_archive"
+        src_name = str(asset.identity.get("source_file"))
+        mesh_path = next(archive_dir.rglob(src_name), None)
+
         out_path = asset_root / "asset_simready"
 
         result = process_mesh(
@@ -277,7 +282,7 @@ class PhysicsParser(AssetParser):
         asset.semantics.update(semantics_generated)
         delete_rendered_pngs(out_path)
         asset.simulation["sim_ready"]["is_sim_ready"] = True
-        sim_ready_path = asset_root / "asset_simready" / "asset_simready.obj"
+        sim_ready_path = asset_root / "asset_simready" / "asset_simready.glb"
         rel_path = sim_ready_path.relative_to(asset_root)
         asset.simulation["sim_ready"]["sim_ready_path"] = str(rel_path)
         return
