@@ -53,8 +53,8 @@ def load_prompt2geometry_config(
         raise FileNotFoundError(f"Prompt2Geometry config not found: {path}")
     raw = json.loads(path.read_text(encoding="utf-8"))
     services = _mapping(raw.get("services"), "services")
-    llm = _mapping(
-        _mapping(raw.get("llm"), "llm").get("openai_compatible"),
+    llm = _optional_mapping(
+        _optional_mapping(raw.get("llm"), "llm").get("openai_compatible"),
         "llm.openai_compatible",
     )
     shared_llm = get_openai_compatible_llm_config(
@@ -88,8 +88,7 @@ def load_prompt2geometry_config(
             str(shared_llm.get("base_url") or llm.get("base_url", "")),
         ).rstrip("/"),
         llm_timeout_s=float(
-            os.getenv("PROMPT2GEOMETRY_LLM_TIMEOUT_S")
-            or llm.get("timeout_s", 120.0)
+            os.getenv("PROMPT2GEOMETRY_LLM_TIMEOUT_S") or llm.get("timeout_s", 120.0)
         ),
     )
 
@@ -107,3 +106,9 @@ def _mapping(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"Prompt2Geometry config key {name} must be an object.")
     return value
+
+
+def _optional_mapping(value: Any, name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    return _mapping(value, name)

@@ -23,9 +23,19 @@ import torch
 
 from embodichain.gen_sim.action_agent_pipeline.runtime import atom_actions
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_actions import (
+    build_parallel_action_stream,
     execute_atomic_action,
+    execute_parallel_atomic_actions,
     normalize_atomic_action_spec,
+    step_env_with_actions,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
+    resolve_arm_side,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
+    GraspCollisionCachePreparationError,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import AgentTaskGraph
 from embodichain.lab.sim.atomic_actions import (
     MoveActionCfg,
     PickUpActionCfg,
@@ -160,6 +170,13 @@ class _FakeBackendAction:
         return True, trajectory, [0, 1] if "left" in self.cfg.control_part else [3, 4]
 
 
+@pytest.fixture(autouse=True)
+def _reset_fake_backend_capture():
+    _FakeBackendAction.capture = None
+    yield
+    _FakeBackendAction.capture = None
+
+
 def test_normalize_atomic_action_spec_rejects_legacy_schema() -> None:
     with pytest.raises(ValueError, match="Legacy action schema"):
         normalize_atomic_action_spec({"action": "move", "robot_name": "left_arm"})
@@ -247,6 +264,94 @@ def test_atom_actions_module_exposes_atomic_runtime_entrypoints() -> None:
     assert atom_actions.execute_atomic_action is execute_atomic_action
     assert atom_actions.normalize_atomic_action_spec is normalize_atomic_action_spec
     assert callable(atom_actions.execute_parallel_atomic_actions)
+
+
+def test_execute_parallel_atomic_actions_requires_env() -> None:
+    with pytest.raises(TypeError, match="env"):
+        execute_parallel_atomic_actions(left_arm_action=torch.zeros((1, 3)))
+
+
+def test_execute_parallel_atomic_actions_rejects_none_env() -> None:
+    with pytest.raises(ValueError, match="env is required"):
+        execute_parallel_atomic_actions(
+            left_arm_action=torch.zeros((1, 3)),
+            env=None,
+        )
+
+
+def test_build_parallel_action_stream_does_not_step_env() -> None:
+    env = _FakeEnv()
+    action_stream = build_parallel_action_stream(
+        left_arm_action=torch.zeros((2, 3)),
+        env=env,
+    )
+
+    assert len(action_stream) == 2
+    assert not hasattr(env, "stepped_actions")
+
+
+def test_step_env_with_actions_steps_and_updates_env() -> None:
+    class _StepEnv:
+        def __init__(self) -> None:
+            self.stepped_actions = []
+            self.update_count = 0
+
+        def step(self, action):
+            self.stepped_actions.append(action)
+
+        def update_obj_info(self) -> None:
+            self.update_count += 1
+
+    env = _StepEnv()
+    actions = [torch.zeros(1, 1), torch.ones(1, 1)]
+
+    step_env_with_actions(env, actions)
+
+    assert env.stepped_actions == actions
+    assert env.update_count == 2
+
+
+def test_agent_task_graph_run_requires_env() -> None:
+    graph = AgentTaskGraph(start="start", goal="goal")
+    with pytest.raises(TypeError, match="env"):
+        graph.run()
+
+
+def test_agent_task_graph_run_rejects_none_env() -> None:
+    graph = AgentTaskGraph(start="start", goal="goal")
+    with pytest.raises(ValueError, match="env is required"):
+        graph.run(env=None)
+
+
+def test_resolve_arm_side_rejects_unavailable_requested_arm() -> None:
+    env = _FakeEnv()
+    env.right_arm_joints = []
+    env.right_eef_joints = []
+    env.robot.control_parts = {"left_arm": [0, 1], "left_eef": [2]}
+
+    with pytest.raises(ValueError, match="Requested right_arm"):
+        resolve_arm_side(env, "right_arm")
+
+
+def test_resolve_arm_side_uses_only_available_arm_for_unspecified_name() -> None:
+    env = _FakeEnv()
+    env.left_arm_joints = []
+    env.left_eef_joints = []
+    env.robot.control_parts = {"right_arm": [3, 4], "right_eef": [5]}
+
+    assert resolve_arm_side(env, "ur5") == "right"
+
+
+def test_resolve_arm_side_rejects_env_without_available_arms() -> None:
+    env = _FakeEnv()
+    env.left_arm_joints = []
+    env.left_eef_joints = []
+    env.right_arm_joints = []
+    env.right_eef_joints = []
+    env.robot.control_parts = {}
+
+    with pytest.raises(ValueError, match="No available arm control parts"):
+        resolve_arm_side(env, "ur5")
 
 
 def test_object_referenced_pose_builds_move_cfg_and_pose_target(monkeypatch) -> None:
@@ -460,4 +565,54 @@ def test_place_action_rejects_qpos_target(monkeypatch) -> None:
                 "cfg": {"sample_interval": 20},
             },
             env=env,
+        )
+
+
+def test_grasp_collision_cache_bridge_error_falls_back(monkeypatch) -> None:
+    warnings = []
+
+    def raise_cache_error(**kwargs):
+        raise GraspCollisionCachePreparationError("cache conversion failed")
+
+    monkeypatch.setattr(
+        atom_actions,
+        "ensure_grasp_collision_cache_from_env_coacd",
+        raise_cache_error,
+    )
+    monkeypatch.setattr(atom_actions, "log_warning", warnings.append)
+
+    atom_actions._prepare_grasp_collision_cache_from_env_coacd(
+        obj_name="apple",
+        mesh_vertices=torch.zeros(1, 3),
+        mesh_triangles=torch.zeros(1, 3, dtype=torch.int64),
+        source_mesh_path="/tmp/fake.obj",
+        max_decomposition_hulls=4,
+        body_scale=None,
+        runtime_kwargs={},
+    )
+
+    assert len(warnings) == 1
+    assert "falling back to the default grasp collision path" in warnings[0]
+    assert "cache conversion failed" in warnings[0]
+
+
+def test_grasp_collision_cache_unexpected_error_propagates(monkeypatch) -> None:
+    def raise_unexpected_error(**kwargs):
+        raise AssertionError("unexpected bug")
+
+    monkeypatch.setattr(
+        atom_actions,
+        "ensure_grasp_collision_cache_from_env_coacd",
+        raise_unexpected_error,
+    )
+
+    with pytest.raises(AssertionError, match="unexpected bug"):
+        atom_actions._prepare_grasp_collision_cache_from_env_coacd(
+            obj_name="apple",
+            mesh_vertices=torch.zeros(1, 3),
+            mesh_triangles=torch.zeros(1, 3, dtype=torch.int64),
+            source_mesh_path="/tmp/fake.obj",
+            max_decomposition_hulls=4,
+            body_scale=None,
+            runtime_kwargs={},
         )

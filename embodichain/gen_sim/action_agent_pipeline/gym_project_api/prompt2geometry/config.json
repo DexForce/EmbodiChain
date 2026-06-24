@@ -1,20 +1,17 @@
 {
   "services": {
     "zimage": {
-      "base_url": "http://192.168.3.23:5013"
+      "base_url": ""
     },
     "sam3": {
-      "base_url": "http://192.168.3.23:5015"
+      "base_url": ""
     },
     "sam3d": {
-      "base_url": "http://192.168.3.23:5016"
+      "base_url": ""
     }
   },
   "llm": {
     "openai_compatible": {
-      "api_key": "sk-7hjyRgBLrhUYUSCpLgPSARk8sz1Sc2vZ2bnt3fy1bkHsI7ak",
-      "model": "gpt-5.5",
-      "base_url": "https://airouter.cloud/v1",
       "timeout_s": 120
     }
   }

@@ -44,7 +44,9 @@ _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placemen
 - `back_left_of` combines positive world x and negative world y.
 - `front_right_of` combines negative world x and positive world y.
 - `back_right_of` combines positive world x and positive world y.
-- `inside` and `on` use the reference object's xy center."""
+- `inside` uses generated container slot offsets; multiple objects sharing a
+  container are distributed along the container XY long axis.
+- `on` uses the reference object's xy center."""
 
 
 class _BasketRolesLike(Protocol):

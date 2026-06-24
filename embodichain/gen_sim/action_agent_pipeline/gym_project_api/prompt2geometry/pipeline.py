@@ -56,14 +56,14 @@ class Prompt2GeometryRequest:
     target_id: str = "asset_0"
     request_id: str = "prompt2geometry_asset_0"
     output_name: str | None = None
-    zimage_base_url: str = "http://192.168.3.23:5013"
+    zimage_base_url: str = ""
     zimage_width: int = 1024
     zimage_height: int = 1024
     zimage_seed: int = 42
     zimage_num_inference_steps: int = 8
     zimage_prompt_suffix: str = "a complete single object, with pure-black background"
-    sam3_base_url: str = "http://192.168.3.23:5015"
-    sam3d_base_url: str = "http://192.168.3.23:5016"
+    sam3_base_url: str = ""
+    sam3d_base_url: str = ""
     sam3d_seed: int = 42
     llm_api_key: str | None = None
     llm_model: str | None = None
@@ -148,7 +148,13 @@ def _generate_image(
     output_root: Path,
 ) -> tuple[Path, dict[str, Any]]:
     image_path = output_root / "zimage" / "zimage.png"
-    client = ZImageClient(base_url=request.zimage_base_url)
+    client = ZImageClient(
+        base_url=_required_service_base_url(
+            os.getenv("PROMPT2GEOMETRY_ZIMAGE_BASE_URL") or request.zimage_base_url,
+            "zimage",
+            "PROMPT2GEOMETRY_ZIMAGE_BASE_URL or --zimage-base-url",
+        )
+    )
     manifest = client.generate_png(
         prompt=_zimage_prompt(request),
         output_path=image_path,
@@ -176,7 +182,11 @@ def _segment_image(
         selection_reason="Use the full generated image as a bbox prompt.",
     )
     sam3_client = SAM3Client(
-        base_url=os.getenv("PROMPT2GEOMETRY_SAM3_BASE_URL") or request.sam3_base_url,
+        base_url=_required_service_base_url(
+            os.getenv("PROMPT2GEOMETRY_SAM3_BASE_URL") or request.sam3_base_url,
+            "SAM3",
+            "PROMPT2GEOMETRY_SAM3_BASE_URL or --sam3-base-url",
+        ),
     )
     health = sam3_client.health()
     _write_json(output_root / "sam3_health.json", health)
@@ -228,7 +238,11 @@ def _generate_geometry(
     )
 
     client = SAM3DClient(
-        base_url=os.getenv("PROMPT2GEOMETRY_SAM3D_BASE_URL") or request.sam3d_base_url,
+        base_url=_required_service_base_url(
+            os.getenv("PROMPT2GEOMETRY_SAM3D_BASE_URL") or request.sam3d_base_url,
+            "SAM3D",
+            "PROMPT2GEOMETRY_SAM3D_BASE_URL or --sam3d-base-url",
+        ),
     )
     health = client.health()
     _write_json(output_root / "sam3d_health.json", health)
@@ -303,6 +317,9 @@ def _final_scaled_glb_path(
 def _extract_glb_stem_from_prompt(
     prompt: str,
     client: OpenAICompatibleClient,
+    *,
+    max_attempts: int = 3,
+    retry_delay_s: float = 1.0,
 ) -> str:
     system_prompt = """
 <role>
@@ -332,13 +349,30 @@ snake_case name for the single main object described by the user.
             ),
         },
     ]
-    while True:
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
         try:
             raw = client.chat_json(messages=messages)
             return _validate_glb_stem_output(raw)
-        except Exception:
-            time.sleep(1.0)
-            continue
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            time.sleep(retry_delay_s)
+    raise RuntimeError(
+        f"Failed to extract GLB file name from prompt after {max_attempts} attempts."
+    ) from last_error
+
+
+def _required_service_base_url(
+    value: str | None, service_name: str, source: str
+) -> str:
+    base_url = str(value or "").strip().rstrip("/")
+    if not base_url:
+        raise ValueError(
+            f"Missing Prompt2Geometry {service_name} base URL. Set {source}."
+        )
+    return base_url
 
 
 def _validate_glb_stem_output(raw: dict[str, Any]) -> str:

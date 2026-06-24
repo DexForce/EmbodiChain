@@ -21,6 +21,9 @@ import pytest
 from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
     compile_agent_graph_spec,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.atom_actions import (
+    AtomicActionSpec,
+)
 
 
 class _FakeGraph:
@@ -97,7 +100,9 @@ def test_compile_agent_graph_accepts_atomic_action_class_spec() -> None:
         graph_cls=_FakeGraph,
     )
 
-    assert graph.edges["e01"]["left_arm_action"] == action
+    left_arm_action = graph.edges["e01"]["left_arm_action"]
+    assert isinstance(left_arm_action, AtomicActionSpec)
+    assert left_arm_action.to_dict() == action
 
 
 def test_compile_agent_graph_rejects_legacy_action_schema() -> None:
@@ -115,6 +120,18 @@ def test_compile_agent_graph_rejects_extra_edge_fields() -> None:
     task_graph["edges"][0]["monitor"] = {"condition": "object visible"}
 
     with pytest.raises(ValueError, match="unsupported fields: monitor"):
+        compile_agent_graph_spec(
+            task_graph,
+            graph_cls=_FakeGraph,
+        )
+
+
+def test_compile_agent_graph_rejects_empty_string_arm_actions() -> None:
+    task_graph = _task_graph(_pick_up_spec("left_arm", "apple"))
+    task_graph["edges"][0]["left_arm_action"] = ""
+    task_graph["edges"][0]["right_arm_action"] = "none"
+
+    with pytest.raises(ValueError, match="must define an arm action"):
         compile_agent_graph_spec(
             task_graph,
             graph_cls=_FakeGraph,

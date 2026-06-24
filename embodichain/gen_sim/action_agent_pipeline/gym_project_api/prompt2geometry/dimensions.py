@@ -95,8 +95,7 @@ def estimate_real_dimensions(
             time.sleep(1.0)
             continue
     raise ValueError(
-        "Failed to estimate object dimensions after "
-        f"{max_attempts} attempts."
+        "Failed to estimate object dimensions after " f"{max_attempts} attempts."
     )
 
 

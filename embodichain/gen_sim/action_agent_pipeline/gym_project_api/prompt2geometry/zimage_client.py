@@ -35,12 +35,14 @@ class ZImageClient:
     def __init__(
         self,
         *,
-        base_url: str = "http://192.168.3.23:5013",
+        base_url: str,
         generation_path: str = "/generate.png",
         timeout_s: float = 300.0,
     ):
         """Initialize the z-image client."""
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.strip().rstrip("/")
+        if not self.base_url:
+            raise ValueError("ZImage base_url must be non-empty.")
         self.generation_path = generation_path
         self.timeout_s = timeout_s
         self._opener = build_opener(ProxyHandler({}))

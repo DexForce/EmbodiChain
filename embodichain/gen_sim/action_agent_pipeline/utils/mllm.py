@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -38,11 +37,12 @@ __all__ = [
 
 
 def apply_proxy_env(proxy_url: str | None) -> None:
-    """Apply an optional proxy URL for OpenAI-compatible clients."""
-    if not proxy_url:
-        return
-    os.environ["HTTP_PROXY"] = proxy_url
-    os.environ["HTTPS_PROXY"] = proxy_url
+    """Deprecated compatibility shim for older callers.
+
+    Proxy configuration is now passed directly to each client instance to avoid
+    mutating process-global environment variables.
+    """
+    return None
 
 
 def _resolve_llm_config(
@@ -73,14 +73,15 @@ def create_openai_client(
         required=required,
         require_base_url=require_base_url,
     )
-    apply_proxy_env(cfg.get("proxy_url"))
-
     kwargs: dict[str, Any] = {
         "api_key": cfg["api_key"],
         "default_query": cfg.get("default_query") or None,
     }
     if cfg.get("base_url"):
         kwargs["base_url"] = cfg["base_url"]
+    http_client = _proxy_http_client(cfg.get("proxy_url"))
+    if http_client is not None:
+        kwargs["http_client"] = http_client
     return OpenAI(**kwargs)
 
 
@@ -100,8 +101,6 @@ def create_chat_openai(
         required=required,
         require_base_url=False,
     )
-    apply_proxy_env(cfg.get("proxy_url"))
-
     kwargs: dict[str, Any] = {
         "temperature": temperature,
         "model": model or cfg.get("model") or DEFAULT_LLM_MODEL,
@@ -109,7 +108,23 @@ def create_chat_openai(
     }
     if cfg.get("base_url"):
         kwargs["base_url"] = cfg["base_url"]
+    http_client = _proxy_http_client(cfg.get("proxy_url"))
+    if http_client is not None:
+        kwargs["http_client"] = http_client
     return UsageTrackedChatModel(
         ChatOpenAI(**kwargs),
         stage=usage_stage,
     )
+
+
+def _proxy_http_client(proxy_url: str | None) -> Any | None:
+    proxy = str(proxy_url or "").strip()
+    if not proxy:
+        return None
+
+    import httpx
+
+    try:
+        return httpx.Client(proxy=proxy, trust_env=False)
+    except TypeError:
+        return httpx.Client(proxies=proxy, trust_env=False)

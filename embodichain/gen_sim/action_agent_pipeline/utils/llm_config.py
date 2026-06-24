@@ -75,9 +75,9 @@ def _load_env_files(paths: tuple[Path, ...] | None = None) -> dict[str, str]:
     """Read local env files, with later paths taking precedence."""
     env_values: dict[str, str] = {}
     for path in paths or (
-        SIMREADY_LLM_ENV_PATH,
-        ACTION_PIPELINE_LLM_ENV_PATH,
         LLM_ENV_PATH,
+        ACTION_PIPELINE_LLM_ENV_PATH,
+        SIMREADY_LLM_ENV_PATH,
     ):
         env_values.update(_load_env_file(path))
     return env_values
@@ -116,7 +116,10 @@ def get_openai_compatible_llm_config(
 ) -> dict[str, Any]:
     """Return shared OpenAI-compatible LLM config for agents and gen-sim."""
     local_env = _load_env_files()
-    json_cfg = _load_gen_config()
+    try:
+        json_cfg = _load_gen_config()
+    except FileNotFoundError:
+        json_cfg = {}
 
     cfg = {
         "api_key": _get_first_value(local_env, "OPENAI_API_KEY")

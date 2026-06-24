@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import pickle
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.coacd_cache import (
 )
 
 __all__ = [
+    "GraspCollisionCachePreparationError",
     "ensure_grasp_collision_cache_from_env_coacd",
     "grasp_collision_cache_path",
 ]
@@ -37,6 +39,10 @@ __all__ = [
 _DEFAULT_CONVEX_DECOMP_DIR = (
     Path.home() / ".cache" / "embodichain_cache" / "convex_decomposition"
 )
+
+
+class GraspCollisionCachePreparationError(RuntimeError):
+    """Raised when env CoACD cache cannot be converted for grasp collision."""
 
 
 def grasp_collision_cache_path(
@@ -105,13 +111,10 @@ def ensure_grasp_collision_cache_from_env_coacd(
     try:
         plane_equations = _plane_equations_from_env_cache(env_cache_path, body_scale)
         _write_grasp_collision_cache(grasp_cache_path, plane_equations)
-    except Exception as exc:
-        return {
-            "status": "skipped",
-            "reason": str(exc),
-            "env_cache_path": env_cache_path.as_posix(),
-            "grasp_cache_path": grasp_cache_path.as_posix(),
-        }
+    except (ImportError, OSError, ValueError, TypeError) as exc:
+        raise GraspCollisionCachePreparationError(
+            f"Failed to convert env CoACD cache {env_cache_path}: {exc}"
+        ) from exc
 
     return {
         "status": "generated",
@@ -172,14 +175,20 @@ def _write_grasp_collision_cache(
         )
         plane_equation_counts[index] = n_equation
 
-    with cache_path.open("wb") as cache_file:
-        pickle.dump(
-            {
-                "plane_equations": plane_equations,
-                "plane_equation_counts": plane_equation_counts,
-            },
-            cache_file,
-        )
+    temp_path = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}")
+    try:
+        with temp_path.open("wb") as cache_file:
+            pickle.dump(
+                {
+                    "plane_equations": plane_equations,
+                    "plane_equation_counts": plane_equation_counts,
+                },
+                cache_file,
+            )
+        os.replace(temp_path, cache_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def _resolve_cache_dir(cache_dir: str | Path | None) -> Path:

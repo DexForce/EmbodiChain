@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -32,10 +33,21 @@ from tempfile import TemporaryDirectory
 import requests
 from requests import exceptions as request_exceptions
 
+__all__ = [
+    "check_health",
+    "collect_image_paths",
+    "download_zip",
+    "extract_gym_project",
+    "main",
+    "process_image",
+    "submit_job",
+    "wait_for_job",
+]
+
 _IMAGE_SUFFIXES = frozenset({".bmp", ".jpeg", ".jpg", ".png", ".webp"})
 _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _PROJECT_ID_RE = re.compile(r"Image2Tabletop-([0-9]+)-v[0-9]+")
-_DEFAULT_SERVER = "http://192.168.3.23:4523"
+_DEFAULT_JOB_TIMEOUT_S = 1800.0
 
 
 def _repo_root() -> Path:
@@ -51,8 +63,20 @@ _DEFAULT_OUTPUT_ROOT = _REPO_ROOT / "gym_project"
 _DEFAULT_IMAGE_INPUT = _DEFAULT_OUTPUT_ROOT / "action_agent_pipeline/images"
 
 
+def _require_server(server: str | None) -> str:
+    resolved = (
+        str(server or os.getenv("IMAGE2TABLETOP_SERVER") or "").strip().rstrip("/")
+    )
+    if not resolved:
+        raise ValueError(
+            "Image2Tabletop API server is required. Pass --server or set "
+            "IMAGE2TABLETOP_SERVER."
+        )
+    return resolved
+
+
 def _server_url(base_url: str, path: str) -> str:
-    return f"{base_url.rstrip('/')}{path}"
+    return f"{_require_server(base_url)}{path}"
 
 
 def check_health(server: str) -> None:
@@ -88,10 +112,21 @@ def submit_job(server: str, image_path: Path) -> str:
     return str(job_id)
 
 
-def wait_for_job(server: str, job_id: str, poll_interval: float) -> dict:
+def wait_for_job(
+    server: str,
+    job_id: str,
+    poll_interval: float,
+    timeout_s: float = _DEFAULT_JOB_TIMEOUT_S,
+) -> dict:
     status_url = _server_url(server, f"/api/image2tabletop/status/{job_id}")
+    deadline = time.monotonic() + timeout_s
     while True:
-        response = requests.get(status_url, timeout=30)
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            raise TimeoutError(
+                f"job {job_id} did not complete within {timeout_s}s: {status_url}"
+            )
+        response = requests.get(status_url, timeout=min(30, max(0.001, remaining_s)))
         response.raise_for_status()
         data = response.json()
         status = data.get("status")
@@ -100,7 +135,7 @@ def wait_for_job(server: str, job_id: str, poll_interval: float) -> dict:
             return data
         if status == "failed":
             raise RuntimeError(f"job failed: {data}")
-        time.sleep(poll_interval)
+        time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
 
 
 def download_zip(server: str, job_id: str, output_dir: Path) -> Path:
@@ -216,10 +251,11 @@ def process_image(
     output_root: Path,
     poll_interval: float,
     overwrite: bool,
+    job_timeout_s: float = _DEFAULT_JOB_TIMEOUT_S,
 ) -> Path:
     job_id = submit_job(server, image_path)
     print(f"submitted job: {job_id} image={image_path}", flush=True)
-    wait_for_job(server, job_id, poll_interval)
+    wait_for_job(server, job_id, poll_interval, timeout_s=job_timeout_s)
     with TemporaryDirectory(
         prefix=f"{job_id}_image2tabletop_download_"
     ) as temp_dir_name:
@@ -235,8 +271,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--server",
-        default=_DEFAULT_SERVER,
-        help=f"Image2Tabletop demo API server. Defaults to {_DEFAULT_SERVER}",
+        default=None,
+        help="Image2Tabletop demo API server. Defaults to IMAGE2TABLETOP_SERVER.",
     )
     parser.add_argument(
         "--image",
@@ -258,6 +294,7 @@ def main() -> int:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--poll-interval", type=float, default=10.0)
+    parser.add_argument("--job-timeout-s", type=float, default=_DEFAULT_JOB_TIMEOUT_S)
     parser.add_argument(
         "--skip-health-check",
         action="store_true",
@@ -273,18 +310,20 @@ def main() -> int:
     args = parser.parse_args()
 
     image_paths = collect_image_paths(Path(args.image))
+    server = _require_server(args.server)
     if not args.skip_health_check:
-        check_health(args.server)
+        check_health(server)
 
     project_paths = []
     for image_path in image_paths:
         project_paths.append(
             process_image(
-                server=args.server,
+                server=server,
                 image_path=image_path,
                 output_root=Path(args.output_root or _DEFAULT_OUTPUT_ROOT),
                 poll_interval=args.poll_interval,
                 overwrite=args.overwrite,
+                job_timeout_s=args.job_timeout_s,
             )
         )
 

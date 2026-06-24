@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -158,7 +158,7 @@ def build_pipeline_record(
     source_sha256 = _file_sha256(source_gym_config)
     record: dict[str, Any] = {
         "schema_version": schema_version,
-        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "task_name": args.task_name,
         "source_mode": resolution.mode,
         "source_id": f"gym_config_sha256:{source_sha256}",
@@ -291,6 +291,7 @@ def _source_request_record(
                 "image2scene_download_dir": str(args.image2scene_download_dir),
                 "image2scene_output_root": str(args.image2scene_output_root),
                 "image2scene_gen_config": str(args.image2scene_gen_config),
+                "image2scene_client_url": args.image2scene_client_url or args.server,
                 "image2scene_llm_config": str(args.image2scene_llm_config),
             }
         )

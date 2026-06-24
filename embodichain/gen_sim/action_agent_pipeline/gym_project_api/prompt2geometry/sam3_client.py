@@ -49,7 +49,9 @@ class SAM3Client:
         timeout_s: float = 120.0,
         poll_interval_s: float = 2.0,
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.strip().rstrip("/")
+        if not self.base_url:
+            raise ValueError("SAM3 base_url must be non-empty.")
         self.boxes_path = boxes_path
         self.health_path = health_path
         self.timeout_s = timeout_s
@@ -165,8 +167,14 @@ class SAM3Client:
 
         _append_progress(progress_path, result)
         _print_progress("segmentation", result, verbose=verbose)
+        deadline = time.monotonic() + self.timeout_s
         while True:
-            time.sleep(self.poll_interval_s)
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                raise SAM3ClientError(
+                    f"SAM3 async job timed out after {self.timeout_s}s: {result}"
+                )
+            time.sleep(min(self.poll_interval_s, remaining_s))
             job = self._get_json(status_url)
             _append_progress(progress_path, job)
             _print_progress("segmentation", job, verbose=verbose)
@@ -261,6 +269,4 @@ def _validate_segmentation_result(result: dict[str, Any]) -> None:
             raise SAM3ClientError(f"SAM3 segmentation {index} must be an object.")
         target_id = segmentation.get("target_id")
         if not isinstance(target_id, str) or not target_id.strip():
-            raise SAM3ClientError(
-                f"SAM3 segmentation {index} must contain target_id."
-            )
+            raise SAM3ClientError(f"SAM3 segmentation {index} must contain target_id.")

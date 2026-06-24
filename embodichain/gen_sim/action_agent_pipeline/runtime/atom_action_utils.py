@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from embodichain.utils.logger import log_error
+__all__ = ["get_arm_states", "resolve_arm_side"]
 
 
 def _available_arm_sides(env) -> list[str]:
@@ -30,19 +30,23 @@ def _available_arm_sides(env) -> list[str]:
 def resolve_arm_side(env, robot_name: str) -> str:
     """Resolve robot_name to an available left/right graph slot."""
     name = robot_name or ""
+    available_sides = _available_arm_sides(env)
     if "right" in name:
         side = "right"
     elif "left" in name:
         side = "left"
     else:
-        sides = _available_arm_sides(env)
-        side = "right" if sides == ["right"] else "left"
+        if not available_sides:
+            raise ValueError(
+                "No available arm control parts were found for action-agent runtime. "
+                f"Robot control parts are {getattr(env.robot, 'control_parts', None)}."
+            )
+        side = "right" if available_sides == ["right"] else "left"
 
-    if side not in _available_arm_sides(env):
-        log_error(
-            f"Requested {side}_arm for robot_name='{robot_name}', but available "
+    if side not in available_sides:
+        raise ValueError(
+            f"Requested {side}_arm for robot_name={robot_name!r}, but available "
             f"control parts are {getattr(env.robot, 'control_parts', None)}.",
-            error_type=ValueError,
         )
     return side
 
