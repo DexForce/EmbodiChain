@@ -103,7 +103,9 @@ class AgentTaskGraph:
         self.outgoing[source].append(edge_id)
         return self
 
-    def run(self, env=None, **kwargs) -> ExecutedActionList:
+    def run(self, *, env, **kwargs) -> ExecutedActionList:
+        if env is None:
+            raise ValueError("env is required to run an agent task graph.")
         current = self.start
         executed_actions: list[Any] = []
         transitions = 0

@@ -25,32 +25,56 @@ import struct
 import pytest
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.generation import (
-    ur5_basket_config as ur5_basket_config_generation,
-)
 from embodichain.gen_sim.action_agent_pipeline.cli import (
-    run_agent_pipeline as run_agent_pipeline_cli,
+    target_replacements as target_replacements_cli,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation import (
+    action_agent_config as action_agent_config_generation,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
+    make_dual_ur5_robot_config,
+    make_light_config,
+    make_sensor_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
     MESH_FRAME_NORMALIZATION_POLICY_VERSION,
     MeshFrameNormalizer,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.ur5_basket_config import (
+from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
-    generate_ur5_basket_config_from_project,
+    generate_action_agent_config_from_project,
 )
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
 
 
-def test_ur5_basket_generator_uses_parallel_handoff(
+def test_action_agent_templates_load_fresh_json_copies() -> None:
+    first_robot = make_dual_ur5_robot_config(robot_init_z=0.42)
+    second_robot = make_dual_ur5_robot_config(robot_init_z=0.84)
+    first_sensors = make_sensor_config()
+    second_sensors = make_sensor_config()
+    first_lights = make_light_config()
+    second_lights = make_light_config()
+
+    first_robot["control_parts"]["left_arm"].append("MUTATED_JOINT")
+    first_sensors[0]["uid"] = "mutated_camera"
+    first_lights["direct"][0]["uid"] = "mutated_light"
+
+    assert second_robot["init_pos"] == pytest.approx([2.0, 0.0, 0.84])
+    assert first_robot["init_pos"] == pytest.approx([2.0, 0.0, 0.42])
+    assert second_robot["control_parts"]["left_arm"] == ["LEFT_JOINT[1-6]"]
+    assert second_sensors[0]["uid"] == "cam_high"
+    assert second_lights["direct"][0]["uid"] == "main_light"
+
+
+def test_action_agent_config_generator_uses_parallel_handoff(
     tmp_path: Path,
 ) -> None:
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_agent",
         target_body_scale=0.6,
@@ -72,13 +96,13 @@ def test_ur5_basket_generator_uses_parallel_handoff(
     _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["wicker_basket"]["shape"]["fpath"])
-    table_top_z = ur5_basket_config_generation._mesh_config_world_zmax(
+    table_top_z = action_agent_config_generation._mesh_config_world_zmax(
         background_objects["table"]
     )
     expected_robot_init_z = (
         table_top_z
-        + ur5_basket_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
-        - ur5_basket_config_generation._DUAL_UR5_ARM_COMPONENT_Z
+        + action_agent_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
+        - action_agent_config_generation._DUAL_UR5_ARM_COMPONENT_Z
     )
     assert gym_config["robot"]["init_pos"] == pytest.approx(
         [2.0, 0.0, expected_robot_init_z]
@@ -167,7 +191,7 @@ def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_agent",
     )
@@ -310,7 +334,7 @@ def test_target_replacements_generate_meshes_and_replace_paths(
     _write_project(project_dir)
     calls = _patch_prompt2geometry(monkeypatch)
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_agent",
         target_replacements=[
@@ -356,7 +380,7 @@ def test_target_replacements_can_sync_runtime_names(
     _write_project(project_dir)
     _patch_prompt2geometry(monkeypatch)
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_agent",
         target_replacements=[
@@ -400,7 +424,7 @@ def test_pipeline_auto_replacement_uses_rotated_robot_view_order() -> None:
     }
 
     assert (
-        run_agent_pipeline_cli._auto_replacement_source_uid(
+        target_replacements_cli._auto_replacement_source_uid(
             gym_config,
             replacement_number=1,
             option_name="--target_replacement1",
@@ -408,7 +432,7 @@ def test_pipeline_auto_replacement_uses_rotated_robot_view_order() -> None:
         == "bread_2"
     )
     assert (
-        run_agent_pipeline_cli._auto_replacement_source_uid(
+        target_replacements_cli._auto_replacement_source_uid(
             gym_config,
             replacement_number=2,
             option_name="--target_replacement2",
@@ -442,7 +466,7 @@ def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
         encoding="utf-8",
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_agent",
         target_body_scale=0.8,
@@ -488,17 +512,17 @@ def test_task_description_generates_relative_left_of_config(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_resolve_table_mesh_world_zmax",
         lambda scene_dir, table_obj: None,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_relative_agent",
         task_name="AppleLeftOfBasket",
@@ -573,17 +597,17 @@ def test_task_description_generates_relative_front_of_config(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_resolve_table_mesh_world_zmax",
         lambda scene_dir, table_obj: None,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_front_relative_agent",
         task_name="AppleFrontOfApple",
@@ -669,12 +693,12 @@ def test_task_description_generates_self_relative_front_left_config(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_self_relative_agent",
         task_description="用左臂把薯片袋子往左前移动",
@@ -732,17 +756,17 @@ def test_task_description_generates_relative_front_right_config(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_resolve_table_mesh_world_zmax",
         lambda scene_dir, table_obj: None,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_front_right_relative_agent",
         task_description="用右臂把 apple_1 放到 basket_3 右前",
@@ -765,19 +789,23 @@ def test_task_description_generates_relative_front_right_config(
 
 
 def test_side_relation_offsets_use_robot_view_front_back_convention() -> None:
-    assert ur5_basket_config_generation._side_relation_xy_offsets("front_of") == (
+    assert action_agent_config_generation._side_relation_xy_offsets("front_of") == (
         -0.16,
         0.0,
     )
-    assert ur5_basket_config_generation._side_relation_xy_offsets("behind") == (
+    assert action_agent_config_generation._side_relation_xy_offsets("behind") == (
         0.16,
         0.0,
     )
-    assert ur5_basket_config_generation._side_relation_xy_offsets("front_left_of") == (
+    assert action_agent_config_generation._side_relation_xy_offsets(
+        "front_left_of"
+    ) == (
         -0.16,
         -0.16,
     )
-    assert ur5_basket_config_generation._side_relation_xy_offsets("back_right_of") == (
+    assert action_agent_config_generation._side_relation_xy_offsets(
+        "back_right_of"
+    ) == (
         0.16,
         0.16,
     )
@@ -796,9 +824,9 @@ def test_relative_relation_aliases_include_diagonal_chinese_directions(
     raw_relation: str,
     normalized: str,
 ) -> None:
-    assert ur5_basket_config_generation._normalize_relative_relation(raw_relation) == (
-        normalized
-    )
+    assert action_agent_config_generation._normalize_relative_relation(
+        raw_relation
+    ) == (normalized)
 
 
 def test_task_description_on_container_is_compiled_as_inside(
@@ -817,17 +845,17 @@ def test_task_description_on_container_is_compiled_as_inside(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_resolve_table_mesh_world_zmax",
         lambda scene_dir, table_obj: None,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_above_container_agent",
         task_description="把 apple_1 放到 basket_3 上方然后松手",
@@ -861,17 +889,17 @@ def test_task_description_respects_explicit_left_arm(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_resolve_table_mesh_world_zmax",
         lambda scene_dir, table_obj: None,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_left_arm_agent",
         task_description="左臂把 apple_1 放到 basket_3 左边",
@@ -911,12 +939,12 @@ def test_task_description_respects_explicit_right_arm(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_right_arm_agent",
         task_description="右臂把 apple_2 放到 basket_3 右边",
@@ -958,12 +986,12 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_demo3_relative_agent",
         task_description="用右臂把咖啡杯子放到垫子上",
@@ -1053,12 +1081,12 @@ def test_task_description_allows_single_rigid_with_background_reference(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_single_rigid_agent",
         task_description="用左臂抓薯片袋子放到垫子上",
@@ -1115,17 +1143,17 @@ def test_task_description_generates_dual_arm_relative_config(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_resolve_table_mesh_world_zmax",
         lambda scene_dir, table_obj: None,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_dual_relative_agent",
         task_description=(
@@ -1216,6 +1244,99 @@ def test_task_description_generates_dual_arm_relative_config(
     assert '"obj_name":"apple_1"' in atom_actions
 
 
+def test_dual_inside_same_container_uses_container_long_axis_slots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "left",
+                },
+                {
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "right",
+                },
+            ],
+            "task_prompt_summary": "Use both arms to put both apples into basket_3.",
+            "basic_background_notes": "Both apples share the same target container.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_inside_agent",
+        task_description="双臂把两个 apple 放进 basket_3",
+        prewarm_coacd_cache=False,
+    )
+
+    assert _stable_summary(paths.summary) == {
+        "mode": "dual_arm_relative_placement",
+        "placements": [
+            {
+                "moved_object": "apple_2",
+                "reference_object": "wicker_basket",
+                "relation": "inside",
+                "active_arm": "left_arm",
+                "release_offset": [-0.04, 0.0, 0.12],
+            },
+            {
+                "moved_object": "apple_1",
+                "reference_object": "wicker_basket",
+                "relation": "inside",
+                "active_arm": "right_arm",
+                "release_offset": [0.04, 0.0, 0.12],
+            },
+        ],
+    }
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["op"] == "all"
+    assert {
+        (term["type"], term["object"], term["container"]) for term in success["terms"]
+    } == {
+        ("object_in_container", "apple_2", "wicker_basket"),
+        ("object_in_container", "apple_1", "wicker_basket"),
+    }
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    for text in (task_prompt, atom_actions):
+        assert '"offset":[-0.04,0.0,0.22]' in text
+        assert '"offset":[0.04,0.0,0.22]' in text
+        assert (
+            '"atomic_action_class":"PlaceAction","robot_name":"left_arm",'
+            '"control":"arm","target_pose":{"reference":"object",'
+            '"obj_name":"wicker_basket","offset":[-0.04,0.0,0.12]}' in text
+        )
+        assert (
+            '"atomic_action_class":"PlaceAction","robot_name":"right_arm",'
+            '"control":"arm","target_pose":{"reference":"object",'
+            '"obj_name":"wicker_basket","offset":[0.04,0.0,0.12]}' in text
+        )
+    assert "container XY long axis" in task_prompt
+
+
 def test_task_description_rejects_dual_relative_same_arm(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1242,13 +1363,13 @@ def test_task_description_rejects_dual_relative_same_arm(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
     with pytest.raises(ValueError, match="one left arm and one right arm"):
-        generate_ur5_basket_config_from_project(
+        generate_action_agent_config_from_project(
             project_dir,
             tmp_path / "bad_dual_relative_agent",
             task_description="双臂分别移动两个苹果",
@@ -1291,12 +1412,12 @@ def test_task_description_dual_auto_assigns_complementary_arms(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_dual_auto_relative_agent",
         task_description="双臂分别移动两个苹果",
@@ -1326,12 +1447,12 @@ def test_task_description_on_object_uses_object_on_object_success(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_stack_agent",
         task_description="把 apple_2 放到 apple_1 上方并松手",
@@ -1373,13 +1494,13 @@ def test_task_description_rejects_unknown_llm_uid(
         }
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_call_relative_task_llm",
         fake_call_relative_task_llm,
     )
 
     with pytest.raises(ValueError, match="unknown moved_object"):
-        generate_ur5_basket_config_from_project(
+        generate_action_agent_config_from_project(
             project_dir,
             tmp_path / "bad_agent",
             task_description="把 missing_bread 放到 basket_3 左边",
@@ -1405,7 +1526,7 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
         encoding="utf-8",
     )
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_high_table_agent",
     )
@@ -1413,8 +1534,8 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     expected_init_z = (
         1.18
-        + ur5_basket_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
-        - ur5_basket_config_generation._DUAL_UR5_ARM_COMPONENT_Z
+        + action_agent_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
+        - action_agent_config_generation._DUAL_UR5_ARM_COMPONENT_Z
     )
     assert gym_config["robot"]["init_pos"][2] == pytest.approx(expected_init_z)
     assert gym_config["light"]["direct"][0]["intensity"] == 40.0
@@ -1426,7 +1547,7 @@ def test_tabletop_z_placement_uses_normalized_mesh_bounds(
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_z_agent",
         target_body_scale=0.8,
@@ -1437,15 +1558,17 @@ def test_tabletop_z_placement_uses_normalized_mesh_bounds(
     table_config = next(
         obj for obj in gym_config["background"] if obj["uid"] == "table"
     )
-    table_top_z = ur5_basket_config_generation._mesh_config_world_zmax(table_config)
+    table_top_z = action_agent_config_generation._mesh_config_world_zmax(table_config)
     expected_min_z = (
-        table_top_z + ur5_basket_config_generation._TABLETOP_OBJECT_CLEARANCE
+        table_top_z + action_agent_config_generation._TABLETOP_OBJECT_CLEARANCE
     )
     for obj_config in [
         *[obj for obj in gym_config["background"] if obj["uid"] != "table"],
         *gym_config["rigid_object"],
     ]:
-        min_z, _ = ur5_basket_config_generation._mesh_config_world_z_bounds(obj_config)
+        min_z, _ = action_agent_config_generation._mesh_config_world_z_bounds(
+            obj_config
+        )
         assert min_z == pytest.approx(expected_min_z)
 
 
@@ -1456,7 +1579,7 @@ def test_table_mesh_world_zmax_reads_glb_vertices(tmp_path: Path) -> None:
         mesh_path,
         [(-0.5, -0.5, 0.0), (0.5, -0.5, 1.2), (0.0, 0.5, 0.4)],
     )
-    table_obj = ur5_basket_config_generation._SceneObject(
+    table_obj = action_agent_config_generation._SceneObject(
         source_uid="table",
         source_role="background",
         config=_mesh_object(
@@ -1468,7 +1591,7 @@ def test_table_mesh_world_zmax_reads_glb_vertices(tmp_path: Path) -> None:
     )
     table_obj.config["body_scale"] = [1.0, 1.0, 2.0]
 
-    assert ur5_basket_config_generation._resolve_table_mesh_world_zmax(
+    assert action_agent_config_generation._resolve_table_mesh_world_zmax(
         scene_dir,
         table_obj,
     ) == pytest.approx(2.5)
@@ -1831,7 +1954,7 @@ def _patch_prompt2geometry(monkeypatch: pytest.MonkeyPatch) -> list:
         return {"scaled_mesh_path": str(mesh_path)}
 
     monkeypatch.setattr(
-        ur5_basket_config_generation,
+        action_agent_config_generation,
         "_run_prompt2geometry_replacement",
         fake_run_prompt2geometry_replacement,
     )

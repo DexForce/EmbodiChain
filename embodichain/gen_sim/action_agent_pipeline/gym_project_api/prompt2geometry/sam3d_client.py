@@ -44,7 +44,9 @@ class SAM3DClient:
         timeout_s: float = 1800.0,
         poll_interval_s: float = 5.0,
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.strip().rstrip("/")
+        if not self.base_url:
+            raise ValueError("SAM3D base_url must be non-empty.")
         self.generation_path = generation_path
         self.health_path = health_path
         self.timeout_s = timeout_s
@@ -205,8 +207,14 @@ class SAM3DClient:
 
         _append_progress(progress_path, result)
         _print_progress("3D-generation", result, verbose=verbose)
+        deadline = time.monotonic() + self.timeout_s
         while True:
-            time.sleep(self.poll_interval_s)
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                raise SAM3DClientError(
+                    f"SAM3D async job timed out after {self.timeout_s}s: {result}"
+                )
+            time.sleep(min(self.poll_interval_s, remaining_s))
             job = self._get_json(status_url)
             _append_progress(progress_path, job)
             _print_progress("3D-generation", job, verbose=verbose)

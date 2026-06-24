@@ -24,7 +24,7 @@ import torch
 import tqdm
 
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (  # noqa: F401
-    AtomicActionsAgentEnv,
+    AgenticGenSimEnv,
 )
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,

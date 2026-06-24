@@ -24,7 +24,8 @@ import hashlib
 import json
 import math
 import re
-import struct
+
+from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 
 __all__ = [
     "GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES",
@@ -40,8 +41,6 @@ GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 0.0
 GLB_LOCAL_X_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES
 
 _SAFE_STEM_RE = re.compile(r"[^0-9a-zA-Z_.-]+")
-_GLB_JSON_CHUNK_TYPE = 0x4E4F534A
-_GLB_BINARY_CHUNK_TYPE = 0x004E4942
 _TEXTURE_EXTENSION_BY_MIME_TYPE = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -378,7 +377,7 @@ def _extract_glb_base_color_texture(source_path: Path) -> _TextureAsset | None:
     if source_path.suffix.lower() != ".glb":
         return None
 
-    doc, binary_chunk = _read_glb(source_path)
+    doc, binary_chunk = read_glb(source_path)
     material = _first_textured_material(doc)
     if material is None:
         return None
@@ -434,36 +433,6 @@ def _first_textured_material(doc: dict[str, Any]) -> dict[str, Any] | None:
         if "index" in base_color_texture:
             return material
     return None
-
-
-def _read_glb(source_path: Path) -> tuple[dict[str, Any], bytes]:
-    data = source_path.read_bytes()
-    if len(data) < 12:
-        raise ValueError(f"GLB file is too small: {source_path}")
-    magic, version, declared_length = struct.unpack_from("<4sII", data, 0)
-    if magic != b"glTF" or version != 2:
-        raise ValueError(f"Only GLB version 2 files are supported: {source_path}")
-    if declared_length > len(data):
-        raise ValueError(f"GLB length header exceeds file size: {source_path}")
-
-    offset = 12
-    doc: dict[str, Any] | None = None
-    binary_chunk = b""
-    while offset + 8 <= declared_length:
-        chunk_length, chunk_type = struct.unpack_from("<II", data, offset)
-        offset += 8
-        chunk_end = offset + chunk_length
-        if chunk_end > declared_length:
-            raise ValueError(f"GLB chunk exceeds file size: {source_path}")
-        chunk = data[offset:chunk_end]
-        offset = chunk_end
-        if chunk_type == _GLB_JSON_CHUNK_TYPE:
-            doc = json.loads(chunk.decode("utf-8"))
-        elif chunk_type == _GLB_BINARY_CHUNK_TYPE:
-            binary_chunk = chunk
-    if doc is None:
-        raise ValueError(f"GLB file does not contain a JSON chunk: {source_path}")
-    return doc, binary_chunk
 
 
 def _buffer_view_bytes(

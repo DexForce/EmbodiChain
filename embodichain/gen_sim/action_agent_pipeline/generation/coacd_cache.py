@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 import hashlib
+import os
 
 from embodichain.utils.logger import log_info
 
@@ -175,7 +176,14 @@ def _generate_coacd_cache(
         in_mesh,
         max_convex_hull_num=int(max_convex_hull_num),
     )
-    mesh_list_to_file(cache_path.as_posix(), out_mesh_list)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}")
+    try:
+        mesh_list_to_file(temp_path.as_posix(), out_mesh_list)
+        os.replace(temp_path, cache_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def _repo_root() -> Path:

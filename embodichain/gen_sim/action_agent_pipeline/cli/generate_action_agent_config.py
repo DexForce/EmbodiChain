@@ -19,9 +19,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from embodichain.gen_sim.action_agent_pipeline.generation.ur5_basket_config import (
+from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
-    generate_ur5_basket_config_from_project,
+    generate_action_agent_config_from_project,
 )
 
 __all__ = ["cli"]
@@ -30,8 +30,7 @@ __all__ = ["cli"]
 def cli() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate a Dual-UR5 basket-placement action-agent config from an "
-            "exported tabletop gym project."
+            "Generate an action-agent config from an " "exported tabletop gym project."
         )
     )
     parser.add_argument(
@@ -171,7 +170,7 @@ def cli() -> None:
     task_description = _resolve_task_description(args)
     target_replacements = _resolve_target_replacements(args)
 
-    paths = generate_ur5_basket_config_from_project(
+    paths = generate_action_agent_config_from_project(
         gym_project=args.gym_project,
         output_dir=args.output_dir,
         task_name=args.task_name,

@@ -1,0 +1,106 @@
+{
+  "uid": "DualUR5",
+  "urdf_cfg": {
+    "fname": "dual_ur5_dh_pgi_basket",
+    "components": [
+      {
+        "component_type": "left_arm",
+        "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+        "transform": [
+          [0.0, -1.0, 0.0, -0.3],
+          [1.0, 0.0, 0.0, -1.45],
+          [0.0, 0.0, 1.0, 0.4],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      {
+        "component_type": "left_hand",
+        "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+      },
+      {
+        "component_type": "right_arm",
+        "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+        "transform": [
+          [0.0, -1.0, 0.0, 0.3],
+          [1.0, 0.0, 0.0, -1.45],
+          [0.0, 0.0, 1.0, 0.4],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      {
+        "component_type": "right_hand",
+        "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+      }
+    ]
+  },
+  "init_pos": [2.0, 0.0, 0.0],
+  "init_rot": [0.0, 0.0, -90.0],
+  "init_qpos": [
+    0,
+    0,
+    -1.57,
+    -1.57,
+    1.57,
+    1.57,
+    -1.57,
+    -1.57,
+    -1.57,
+    -1.57,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "drive_pros": {
+    "stiffness": {
+      "LEFT_JOINT[1-6]": 10000.0,
+      "RIGHT_JOINT[1-6]": 10000.0,
+      "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 100.0,
+      "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 100.0
+    },
+    "damping": {
+      "LEFT_JOINT[1-6]": 1000.0,
+      "RIGHT_JOINT[1-6]": 1000.0,
+      "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 10.0,
+      "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 10.0
+    },
+    "max_effort": {
+      "LEFT_JOINT[1-6]": 100000.0,
+      "RIGHT_JOINT[1-6]": 100000.0,
+      "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1000.0,
+      "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1000.0
+    }
+  },
+  "control_parts": {
+    "left_arm": ["LEFT_JOINT[1-6]"],
+    "left_eef": ["LEFT_GRIPPER_FINGER[1-2]_JOINT_1"],
+    "right_arm": ["RIGHT_JOINT[1-6]"],
+    "right_eef": ["RIGHT_GRIPPER_FINGER[1-2]_JOINT_1"]
+  },
+  "solver_cfg": {
+    "left_arm": {
+      "class_type": "PytorchSolver",
+      "end_link_name": "left_ee_link",
+      "root_link_name": "left_base_link",
+      "tcp": [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.16],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    },
+    "right_arm": {
+      "class_type": "PytorchSolver",
+      "end_link_name": "right_ee_link",
+      "root_link_name": "right_base_link",
+      "tcp": [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.16],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    }
+  }
+}

@@ -98,6 +98,7 @@ def test_grasp_cache_bridge_uses_existing_env_coacd_obj(tmp_path) -> None:
     assert set(cache) == {"plane_equations", "plane_equation_counts"}
     assert cache["plane_equations"].shape[-1] == 4
     assert cache["plane_equation_counts"].numel() == 1
+    assert not list(env_cache_path.parent.glob("*.tmp.*"))
 
     second_result = ensure_grasp_collision_cache_from_env_coacd(
         mesh_vertices=mesh_vertices,

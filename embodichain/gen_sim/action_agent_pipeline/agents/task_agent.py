@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,8 @@ from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.utility import load_txt
 
 __all__ = ["TaskAgent"]
+
+TASK_GRAPH_CACHE_SCHEMA_VERSION = "task_graph_prompt_v1"
 
 
 class TaskAgent(AgentBase):
@@ -52,21 +56,92 @@ class TaskAgent(AgentBase):
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
         file_path = Path(log_dir) / "agent_task_graph.json"
+        metadata_path = file_path.with_suffix(".metadata.json")
+        prompt = getattr(TaskPrompt, self.prompt_name)(**kwargs)
+        prompt_hash = _stable_text_hash(prompt)
 
-        if not kwargs.get("regenerate", False) and file_path.exists():
+        if (
+            not kwargs.get("regenerate", False)
+            and file_path.exists()
+            and _metadata_matches(
+                metadata_path,
+                prompt_hash=prompt_hash,
+                prompt_name=self.prompt_name,
+                task_name=self.task_name,
+            )
+        ):
             print(f"Task graph already exists at {file_path}.")
             return load_txt(file_path)
 
-        prompt = getattr(TaskPrompt, self.prompt_name)(**kwargs)
         response = self.llm.invoke(prompt)
         print(f"\033[92m\nTask agent output:\n{response.content}\n\033[0m")
 
         content = normalize_json_content(response.content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
+        _write_metadata(
+            metadata_path,
+            prompt_hash=prompt_hash,
+            prompt_name=self.prompt_name,
+            task_name=self.task_name,
+        )
         print(f"Generated task graph saved to {file_path}")
 
         return content
 
     def act(self, *args, **kwargs):
         return super().act(*args, **kwargs)
+
+
+def _stable_text_hash(content: Any) -> str:
+    text = _prompt_to_hash_text(content)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _prompt_to_hash_text(prompt: Any) -> str:
+    to_string = getattr(prompt, "to_string", None)
+    if callable(to_string):
+        return str(to_string())
+    return str(prompt)
+
+
+def _metadata_matches(
+    metadata_path: Path,
+    *,
+    prompt_hash: str,
+    prompt_name: str,
+    task_name: str,
+) -> bool:
+    if not metadata_path.is_file():
+        return False
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get("schema_version") == TASK_GRAPH_CACHE_SCHEMA_VERSION
+        and metadata.get("prompt_hash") == prompt_hash
+        and metadata.get("prompt_name") == prompt_name
+        and metadata.get("task_name") == task_name
+    )
+
+
+def _write_metadata(
+    metadata_path: Path,
+    *,
+    prompt_hash: str,
+    prompt_name: str,
+    task_name: str,
+) -> None:
+    metadata = {
+        "schema_version": TASK_GRAPH_CACHE_SCHEMA_VERSION,
+        "prompt_hash": prompt_hash,
+        "prompt_name": prompt_name,
+        "task_name": task_name,
+    }
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )

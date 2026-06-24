@@ -30,6 +30,10 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import 
     get_arm_states,
     resolve_arm_side,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
+    GraspCollisionCachePreparationError,
+    ensure_grasp_collision_cache_from_env_coacd,
+)
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     MoveAction,
@@ -49,14 +53,16 @@ from embodichain.toolkits.graspkit.pg_grasp import (
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     GRASP_ANNOTATOR_CACHE_DIR,
 )
-from embodichain.utils.logger import log_info
+from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.math import get_offset_pose
 
 __all__ = [
     "AtomicActionSpec",
+    "build_parallel_action_stream",
     "execute_atomic_action",
     "execute_parallel_atomic_actions",
     "normalize_atomic_action_spec",
+    "step_env_with_actions",
 ]
 
 
@@ -103,14 +109,19 @@ class AtomicActionSpec:
     @classmethod
     def from_mapping(cls, spec: Mapping[str, Any]) -> "AtomicActionSpec":
         normalized = normalize_atomic_action_spec(spec)
+        return cls.from_normalized(normalized)
+
+    @classmethod
+    def from_normalized(cls, normalized: Mapping[str, Any]) -> "AtomicActionSpec":
+        """Build an atomic action spec from already-normalized data."""
         return cls(
             atomic_action_class=normalized["atomic_action_class"],
             robot_name=normalized["robot_name"],
             control=normalized["control"],
-            target_object=normalized.get("target_object", {}),
-            target_pose=normalized.get("target_pose", {}),
-            target_qpos=normalized.get("target_qpos", {}),
-            cfg=normalized["cfg"],
+            target_object=dict(normalized.get("target_object", {})),
+            target_pose=dict(normalized.get("target_pose", {})),
+            target_qpos=dict(normalized.get("target_qpos", {})),
+            cfg=dict(normalized["cfg"]),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -434,11 +445,36 @@ def execute_atomic_action(
 def execute_parallel_atomic_actions(
     left_arm_action=None,
     right_arm_action=None,
-    env=None,
+    *,
+    env,
     return_result: bool = False,
     **runtime_kwargs,
 ):
     """Execute left/right atomic action specs as one synchronized stream."""
+    actions = build_parallel_action_stream(
+        left_arm_action=left_arm_action,
+        right_arm_action=right_arm_action,
+        env=env,
+        **runtime_kwargs,
+    )
+    step_env_with_actions(env, actions)
+    if return_result:
+        return {
+            "actions": actions,
+        }
+    return actions
+
+
+def build_parallel_action_stream(
+    left_arm_action=None,
+    right_arm_action=None,
+    *,
+    env,
+    **runtime_kwargs,
+) -> list[torch.Tensor]:
+    """Build a synchronized left/right atomic action stream without stepping env."""
+    if env is None:
+        raise ValueError("env is required to build parallel atomic actions.")
     left_arm_action = _resolve_action_spec(left_arm_action, env, runtime_kwargs)
     right_arm_action = _resolve_action_spec(right_arm_action, env, runtime_kwargs)
 
@@ -483,17 +519,22 @@ def execute_parallel_atomic_actions(
         actions[:, arm_index] = action
 
     actions = torch.from_numpy(actions).to(dtype=torch.float32).unsqueeze(1)
-    actions = list(actions.unbind(dim=0))
+    return list(actions.unbind(dim=0))
 
+
+def step_env_with_actions(
+    env,
+    actions: list[torch.Tensor],
+    *,
+    update_obj_info: bool = True,
+) -> None:
+    """Step an environment through a prebuilt action stream."""
+    if env is None:
+        raise ValueError("env is required to step action stream.")
     for action in tqdm(actions):
         env.step(action)
-        env.update_obj_info()
-
-    if return_result:
-        return {
-            "actions": actions,
-        }
-    return actions
+        if update_obj_info:
+            env.update_obj_info()
 
 
 def _resolve_action_spec(action_spec, env, runtime_kwargs: dict[str, Any]):
@@ -943,10 +984,6 @@ def _prepare_grasp_collision_cache_from_env_coacd(
         return
 
     try:
-        from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
-            ensure_grasp_collision_cache_from_env_coacd,
-        )
-
         result = ensure_grasp_collision_cache_from_env_coacd(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
@@ -954,7 +991,16 @@ def _prepare_grasp_collision_cache_from_env_coacd(
             max_decomposition_hulls=max_decomposition_hulls,
             body_scale=body_scale,
         )
-    except Exception:
+    except (
+        ImportError,
+        ModuleNotFoundError,
+        OSError,
+        GraspCollisionCachePreparationError,
+    ) as exc:
+        log_warning(
+            "Failed to prepare grasp collision cache from environment CoACD cache; "
+            f"falling back to the default grasp collision path: {exc}"
+        )
         return
 
     if result.get("status") == "generated":

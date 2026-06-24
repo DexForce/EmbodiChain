@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from embodichain.gen_sim.action_agent_pipeline.utils.mllm import create_chat_openai
+from embodichain.utils.logger import log_warning
 
 __all__ = ["create_llm", "task_llm"]
 
@@ -47,7 +48,8 @@ def _create_llm_safe(*, temperature=0.0, model=None, usage_stage=None):
             model=model,
             usage_stage=usage_stage,
         )
-    except Exception:
+    except Exception as exc:
+        log_warning(f"Failed to initialize action-agent LLM: {exc}")
         return None
 
 

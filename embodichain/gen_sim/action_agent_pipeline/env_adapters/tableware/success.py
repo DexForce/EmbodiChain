@@ -99,7 +99,10 @@ def _constant(env, value: bool) -> torch.Tensor:
 
 
 def _pose(env, uid: str) -> torch.Tensor:
-    return env.sim.get_rigid_object(uid).get_local_pose(to_matrix=True)
+    obj = env.sim.get_rigid_object(uid)
+    if obj is None:
+        raise ValueError(f"Unknown rigid object uid: {uid!r}.")
+    return obj.get_local_pose(to_matrix=True)
 
 
 def _position(env, uid: str) -> torch.Tensor:

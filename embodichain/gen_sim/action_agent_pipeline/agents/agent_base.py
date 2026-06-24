@@ -21,6 +21,8 @@ import os
 
 from embodichain.utils.utility import load_txt
 
+__all__ = ["AgentBase"]
+
 
 def _resolve_prompt_path(file_name: str, config_dir: str | None = None) -> str:
     # If absolute path, use directly

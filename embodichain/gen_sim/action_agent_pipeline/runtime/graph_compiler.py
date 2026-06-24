@@ -154,7 +154,9 @@ def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
         if edge_id in edge_ids:
             raise ValueError(f"Duplicate graph edge id '{edge_id}'.")
         edge_ids.add(edge_id)
-        if edge.get("left_arm_action") is None and edge.get("right_arm_action") is None:
+        if _is_empty_action_spec(edge.get("left_arm_action")) and _is_empty_action_spec(
+            edge.get("right_arm_action")
+        ):
             raise ValueError(f"Nominal edge '{edge_id}' must define an arm action.")
 
         for node_key in ("source", "target"):
@@ -212,9 +214,7 @@ def _validate_nominal_path(
 
 
 def _compile_action(spec: Any, action_module: Any) -> Any:
-    if spec is None:
-        return None
-    if isinstance(spec, str) and spec.strip().lower() in {"", "none", "null"}:
+    if _is_empty_action_spec(spec):
         return None
     if not isinstance(spec, Mapping):
         raise TypeError(f"Action spec must be a mapping or null, but got {type(spec)}.")
@@ -236,7 +236,17 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
             "target_qpos."
         )
 
-    return action_module.normalize_atomic_action_spec(spec)
+    normalized = action_module.normalize_atomic_action_spec(spec)
+    spec_cls = getattr(action_module, "AtomicActionSpec", None)
+    if spec_cls is None:
+        return normalized
+    return spec_cls.from_normalized(normalized)
+
+
+def _is_empty_action_spec(spec: Any) -> bool:
+    return spec is None or (
+        isinstance(spec, str) and spec.strip().lower() in {"", "none", "null"}
+    )
 
 
 def _reject_recovery_keys(task_spec: Mapping[str, Any]) -> None:
