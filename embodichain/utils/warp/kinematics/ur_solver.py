@@ -30,6 +30,7 @@ def normalize_to_pi(angle: float) -> float:
     # return (angle + wp.pi) % (2.0 * wp.pi) - wp.pi
     return wp.atan2(wp.sin(angle), wp.cos(angle))
 
+
 @wp.struct
 class URParam:
     d1: float
