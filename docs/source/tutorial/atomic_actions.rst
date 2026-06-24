@@ -34,23 +34,14 @@ For the full design overview, architecture diagram, and extension guide see
 The Code
 --------
 
-The tutorial corresponds to the ``atomic_actions.py`` script in the
-``scripts/tutorials/atomic_action`` directory.
+Focused demo scripts are available for the five built-in primitives in the
+``scripts/tutorials/atomic_action`` directory:
 
-Focused demo scripts are also available for the five built-in primitives:
-
-- ``move_end_effector_atomic_actions.py``
-- ``move_joints_atomic_actions.py``
-- ``pickup_atomic_actions.py``
-- ``move_held_object_atomic_actions.py``
-- ``place_atomic_actions.py``
-
-.. dropdown:: Code for atomic_actions.py
-    :icon: code
-
-    .. literalinclude:: ../../../scripts/tutorials/atomic_action/atomic_actions.py
-        :language: python
-        :linenos:
+- ``move_end_effector.py``
+- ``move_joints.py``
+- ``pickup.py``
+- ``move_held_object.py``
+- ``place.py``
 
 Typical Usage
 -------------
