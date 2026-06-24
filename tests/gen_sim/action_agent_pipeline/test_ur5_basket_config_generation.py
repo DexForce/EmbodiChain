@@ -44,6 +44,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config im
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
+    _apply_arrangement_task_response,
+    _arrangement_line_slot_positions,
+)
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
@@ -1244,6 +1248,200 @@ def test_task_description_generates_dual_arm_relative_config(
     assert '"obj_name":"apple_1"' in atom_actions
 
 
+def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> None:
+    scene_objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid="table",
+            source_role="background",
+            config=_mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            ),
+        ),
+        action_agent_config_generation._SceneObject(
+            source_uid="cube_red",
+            source_role="rigid_object",
+            config=_mesh_object(
+                "cube_red",
+                "mesh_assets/cube/cube_red.glb",
+                [0.0, 0.20, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+        ),
+        action_agent_config_generation._SceneObject(
+            source_uid="cube_blue",
+            source_role="rigid_object",
+            config=_mesh_object(
+                "cube_blue",
+                "mesh_assets/cube/cube_blue.glb",
+                [0.0, -0.10, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+        ),
+        action_agent_config_generation._SceneObject(
+            source_uid="cube_green",
+            source_role="rigid_object",
+            config=_mesh_object(
+                "cube_green",
+                "mesh_assets/cube/cube_green.glb",
+                [0.0, 0.00, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+        ),
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+
+    spec = _apply_arrangement_task_response(
+        response={
+            "objects": ["cube_red", "cube_green", "cube_blue"],
+            "order_by": "color",
+            "ordered_attributes": ["red", "green", "blue"],
+            "object_attributes": {
+                "cube_blue": {"color": "blue"},
+                "cube_red": {"color": "red"},
+                "cube_green": {"color": "green"},
+            },
+            "task_prompt_summary": "Arrange the cubes red, green, blue.",
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=rigid_objects,
+        scene_dir=tmp_path,
+        task_description="将红、绿、蓝三个方块按从左到右红、绿、蓝的顺序排成一行",
+    )
+
+    assert [step.source_uid for step in spec.steps] == [
+        "cube_red",
+        "cube_green",
+        "cube_blue",
+    ]
+    assert [step.color for step in spec.steps] == ["red", "green", "blue"]
+    assert [step.slot_index for step in spec.steps] == [0, 1, 2]
+    assert [step.target_xy[1] for step in spec.steps] == sorted(
+        step.target_xy[1] for step in spec.steps
+    )
+
+
+def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
+    slots = _arrangement_line_slot_positions(
+        anchor_xy=[0.10, -0.20],
+        count=3,
+        spacing=0.08,
+        line_axis="left_to_right",
+    )
+
+    assert slots == [
+        [0.10, -0.28],
+        [0.10, -0.20],
+        [0.10, -0.12],
+    ]
+
+
+def test_task_description_generates_size_order_arrangement_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_arrangement_project(project_dir)
+
+    def fake_call_arrangement_task_llm(**kwargs):
+        size_by_uid = {
+            item["source_uid"]: item["size_score"]
+            for item in kwargs["scene_summary"]
+            if item["role"] == "rigid_object"
+        }
+        assert size_by_uid["cube_2"] > size_by_uid["cube_1"] > size_by_uid["cube_3"]
+        return {
+            "objects": ["cube_1", "cube_2", "cube_3"],
+            "order_by": "size",
+            "order_direction": "descending",
+            "anchor": "table_center",
+            "line_axis": "left_to_right",
+            "task_prompt_summary": (
+                "Move the three cubes to the table center and arrange them "
+                "from large to small left-to-right."
+            ),
+            "basic_background_notes": "All three cubes are movable task objects.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_arrangement_task_llm",
+        fake_call_arrangement_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_arrangement_agent",
+        task_name="BlocksRankingSize",
+        task_description="桌上有三个颜色随机的方块，将它们移动到桌子中央，并按从左到右由大到小排列。",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    assert set(rigid_objects) == {"cube_1", "cube_2", "cube_3"}
+    assert {obj["body_type"] for obj in rigid_objects.values()} == {"dynamic"}
+    assert rigid_objects["cube_2"]["body_scale"] == [1.0, 1.0, 1.0]
+
+    assert _stable_summary(paths.summary) == {
+        "mode": "arrangement_line",
+        "axis": "left_to_right",
+        "anchor": "table_center",
+        "order_by": "size",
+        "order_direction": "descending",
+        "placements": [
+            {
+                "object": "cube_2",
+                "source_uid": "cube_2",
+                "slot_index": 0,
+                "active_arm": "left_arm",
+                "target_xy": [0.0, -0.07],
+            },
+            {
+                "object": "cube_1",
+                "source_uid": "cube_1",
+                "slot_index": 1,
+                "active_arm": "right_arm",
+                "target_xy": [0.0, 0.0],
+            },
+            {
+                "object": "cube_3",
+                "source_uid": "cube_3",
+                "slot_index": 2,
+                "active_arm": "right_arm",
+                "target_xy": [0.0, 0.07],
+            },
+        ],
+    }
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    assert success["op"] == "all"
+    xy_targets = {
+        (term["object"], tuple(term["target_xy"]))
+        for term in success["terms"]
+        if term["type"] == "object_xy_near"
+    }
+    assert xy_targets == {
+        ("cube_2", (0.0, -0.07)),
+        ("cube_1", (0.0, 0.0)),
+        ("cube_3", (0.0, 0.07)),
+    }
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert "Generate one deterministic nominal graph with exactly 12 nominal edges" in (
+        task_prompt
+    )
+    assert task_prompt.count('"atomic_action_class":"PickUpAction"') == 3
+    assert task_prompt.count('"atomic_action_class":"PlaceAction"') == 3
+    assert task_prompt.count('"reference":"absolute"') >= 6
+    assert atom_actions.count('"atomic_action_class":"PickUpAction"') == 3
+    assert atom_actions.count('"atomic_action_class":"PlaceAction"') == 3
+
+
 def test_dual_inside_same_container_uses_container_long_axis_slots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1708,6 +1906,62 @@ def _write_demo3_role_project(project_dir: Path) -> None:
             )
         ],
         "rigid_object": [cup, pad, fork],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_arrangement_project(project_dir: Path) -> None:
+    _write_minimal_glb(
+        project_dir / "mesh_assets/table/table_0.glb",
+        [(-0.60, -0.40, 0.0), (0.60, -0.40, 0.0), (0.0, 0.40, 0.0)],
+    )
+    for uid, size in {
+        "cube_1": 0.04,
+        "cube_2": 0.06,
+        "cube_3": 0.03,
+    }.items():
+        _write_minimal_glb(
+            project_dir / f"mesh_assets/cube/{uid}/{uid}.glb",
+            [
+                (-size / 2.0, -size / 2.0, 0.0),
+                (size / 2.0, -size / 2.0, 0.0),
+                (0.0, size / 2.0, size),
+            ],
+        )
+
+    gym_config = {
+        "id": "Image2Tabletop-1790000000-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "cube_1",
+                "mesh_assets/cube/cube_1/cube_1.glb",
+                [0.0, 0.08, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "cube_2",
+                "mesh_assets/cube/cube_2/cube_2.glb",
+                [0.0, -0.08, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "cube_3",
+                "mesh_assets/cube/cube_3/cube_3.glb",
+                [0.0, 0.16, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+        ],
     }
     (project_dir / "gym_config.json").write_text(
         json.dumps(gym_config, indent=2),

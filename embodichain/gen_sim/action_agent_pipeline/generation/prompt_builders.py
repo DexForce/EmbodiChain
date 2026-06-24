@@ -24,6 +24,9 @@ from typing import Any, Protocol
 
 __all__ = [
     "make_agent_config",
+    "make_arrangement_atom_actions_prompt",
+    "make_arrangement_basic_background",
+    "make_arrangement_task_prompt",
     "make_basket_atom_actions_prompt",
     "make_basket_basic_background",
     "make_basket_task_prompt",
@@ -82,6 +85,29 @@ class _RelativeSpecLike(_RelativePlacementLike, Protocol):
     basic_background_notes: str
 
 
+class _ArrangementStepLike(Protocol):
+    source_uid: str
+    runtime_uid: str
+    slot_index: int
+    active_side: str
+    target_xy: Sequence[float]
+    release_position: Sequence[float]
+    high_position: Sequence[float]
+    size_score: float | None
+    color: str | None
+
+
+class _ArrangementSpecLike(Protocol):
+    task_description: str
+    task_prompt_summary: str
+    basic_background_notes: str
+    order_by: str
+    order_direction: str
+    axis: str
+    anchor: str
+    steps: Sequence[_ArrangementStepLike]
+
+
 def make_agent_config() -> dict[str, Any]:
     return {
         "TaskAgent": {
@@ -105,6 +131,139 @@ def make_agent_config() -> dict[str, Any]:
             }
         },
     }
+
+
+def make_arrangement_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _ArrangementSpecLike,
+) -> str:
+    edge_count = len(spec.steps) * 4
+    step_blocks = "\n\n".join(
+        _arrangement_step_prompt_block(index, step)
+        for index, step in enumerate(spec.steps, start=1)
+    )
+    final_order = ", ".join(
+        f"`{step.runtime_uid}` at slot {step.slot_index}" for step in spec.steps
+    )
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from a simple task description by the config-stage
+LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Arrangement plan:
+- Layout axis: `{spec.axis}`. Slot 0 is the robot-view leftmost slot, and later
+  slots move monotonically toward robot-view right.
+- Anchor: `{spec.anchor}` in the exported {project_name} environment.
+- Ordering rule: `{spec.order_by}` with direction `{spec.order_direction}`.
+- Final order: {final_order}.
+
+Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
+Use only the atomic action class JSON specs shown below. Do not add recovery,
+monitor, search, alignment, or extra lift edges. Use `PlaceAction` for each
+release-place step so lowering, gripper opening, and upward retreat remain one
+atomic action. The arm not listed for a step must remain null.
+
+{step_blocks}
+
+Final state: all listed objects must rest near their assigned absolute XY slots
+and remain upright. Use the exact absolute target_pose JSON specs shown above;
+do not rewrite slot placement as object-referenced poses.
+"""
+
+
+def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> str:
+    active_arm = f"{step.active_side}_arm"
+    active_slot = f"{step.active_side}_arm_action"
+    inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
+    base_edge = (index - 1) * 4
+    return f"""{base_edge + 1}. Pick up `{step.runtime_uid}` for slot {step.slot_index}:
+   - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
+   - {inactive_slot}: null
+
+{base_edge + 2}. Move `{step.runtime_uid}` to the high staging pose above slot {step.slot_index}:
+   - {active_slot}: {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45)}
+   - {inactive_slot}: null
+
+{base_edge + 3}. Place `{step.runtime_uid}` at slot {step.slot_index}:
+   - {active_slot}: {_format_place_absolute_spec(active_arm, step.release_position, sample_interval=80, lift_height=_PLACE_LIFT_HEIGHT)}
+   - {inactive_slot}: null
+
+{base_edge + 4}. Return `{active_arm}` to its initial pose:
+   - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
+   - {inactive_slot}: null"""
+
+
+def make_arrangement_basic_background(
+    project_name: str,
+    spec: _ArrangementSpecLike,
+) -> str:
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    object_lines = "\n".join(
+        _arrangement_object_background_line(step) for step in spec.steps
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 multi-object line arrangement
+task generated from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
+
+Interactive task objects and target slots:
+{object_lines}
+
+Config-stage LLM notes:
+{notes}
+"""
+
+
+def _arrangement_object_background_line(step: _ArrangementStepLike) -> str:
+    attrs = []
+    if step.color:
+        attrs.append(f"color={step.color}")
+    if step.size_score is not None:
+        attrs.append(f"size_score={float(step.size_score):.6g}")
+    attr_text = f" ({', '.join(attrs)})" if attrs else ""
+    return (
+        f"- {step.runtime_uid}: source `{step.source_uid}`{attr_text}, "
+        f"slot {step.slot_index} at xy={list(step.target_xy)}, "
+        f"handled by {step.active_side}_arm."
+    )
+
+
+def make_arrangement_atom_actions_prompt(spec: _ArrangementSpecLike) -> str:
+    blocks = "\n\n".join(_arrangement_atom_action_block(step) for step in spec.steps)
+    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Line Arrangement
+
+Use only atomic action class JSON specs backed by `PickUpAction`, `MoveAction`, and
+`PlaceAction`. Each object is moved to an absolute slot pose computed by the
+config-stage generator. Keep the non-active arm null for each listed object.
+
+{blocks}
+"""
+
+
+def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
+    active_arm = f"{step.active_side}_arm"
+    return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
+- Pick up:
+  {_format_pick_up_spec(active_arm, step.runtime_uid)}
+- High staging:
+  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45)}
+- Place:
+  {_format_place_absolute_spec(active_arm, step.release_position, sample_interval=80, lift_height=_PLACE_LIFT_HEIGHT)}
+- Return:
+  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
 
 
 def make_relative_task_prompt(
