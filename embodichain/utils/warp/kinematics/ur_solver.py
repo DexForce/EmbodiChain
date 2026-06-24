@@ -24,6 +24,12 @@ wp_vec6f = wp.types.vector(length=6, dtype=float)
 wp_vec48f = wp.types.vector(length=48, dtype=float)
 
 
+@wp.func
+def normalize_to_pi(angle: float) -> float:
+    # TODO: Cannot work in warp.
+    # return (angle + wp.pi) % (2.0 * wp.pi) - wp.pi
+    return wp.atan2(wp.sin(angle), wp.cos(angle))
+
 @wp.struct
 class URParam:
     d1: float
@@ -391,12 +397,12 @@ def ur_ik_kernel(
         q4 = theta[j * DOF + 3]
         q5 = theta[j * DOF + 4]
         q6 = theta[j * DOF + 5]
-        qpos[qpos_start + 0] = q1
-        qpos[qpos_start + 1] = q2
-        qpos[qpos_start + 2] = q3
-        qpos[qpos_start + 3] = q4
-        qpos[qpos_start + 4] = q5
-        qpos[qpos_start + 5] = q6
+        qpos[qpos_start + 0] = normalize_to_pi(q1)
+        qpos[qpos_start + 1] = normalize_to_pi(q2)
+        qpos[qpos_start + 2] = normalize_to_pi(q3)
+        qpos[qpos_start + 3] = normalize_to_pi(q4)
+        qpos[qpos_start + 4] = normalize_to_pi(q5)
+        qpos[qpos_start + 5] = normalize_to_pi(q6)
 
         fk_result = ur_single_fk(q1, q2, q3, q4, q5, q6, params)
         t_err, r_err = _ur_transform_err(fk_result, target_pose)
