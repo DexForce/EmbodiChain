@@ -14,14 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate moving a held object to an object-centric target pose."""
+"""Demonstrate PickUp on an upright object with configurable approach."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 import time
-from collections.abc import Sequence
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -37,20 +36,13 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
     GraspTarget,
-    HeldObjectPoseTarget,
-    MoveEndEffector,
-    MoveEndEffectorCfg,
-    MoveHeldObject,
-    MoveHeldObjectCfg,
     ObjectSemantics,
     PickUp,
     PickUpCfg,
-    EndEffectorPoseTarget,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     LightCfg,
-    MarkerCfg,
     RenderCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
@@ -70,6 +62,12 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    draw_axis_marker,
+    get_tutorial_window_size,
+    start_auto_play_recording,
+    stop_auto_play_recording,
+)
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "GRIPPER_FINGER1_JOINT_1"
@@ -79,44 +77,45 @@ GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_TCP_Z = 0.15
 
-OBJECT_LABEL = "sugar_box"
-OBJECT_MESH_PATH = "SugarBox/sugar_box_usd/sugar_box.usda"
+OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
 OBJECT_XY = (-0.42, -0.08)
 OBJECT_CLEARANCE = 0.0
-OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
-OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
-OBJECT_INIT_ROT = (0.0, 0.0, 0.0)
-OBJECT_BODY_SCALE = (0.8, 0.8, 0.8)
-OBJECT_MASS = 0.05
-OBJECT_USE_USD_PROPERTIES = False
 
-MOVE_SAMPLE_INTERVAL = 60
+OBJECT_PRESETS = {
+    "sugar_box": {
+        "label": "sugar_box",
+        "mesh_path": "SugarBox/sugar_box_usd/sugar_box.usda",
+        "init_rot": (0.0, 0.0, 0.0),
+        "body_scale": (0.8, 0.8, 0.8),
+        "mass": 0.05,
+        "use_usd_properties": False,
+    },
+}
+
 PICK_SAMPLE_INTERVAL = 120
-MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
-DEFAULT_AUTO_PLAY_LOOK_AT = (
-    (-1.6, -1.5, 1.2),
-    (0.0, 0.0, 0.25),
-    (0.0, 0.0, 1.0),
-)
-RECORD_WIDTH = 640
-RECORD_HEIGHT = 480
-VIEWER_WIDTH = 1600
-VIEWER_HEIGHT = 900
-AUTO_PLAY_RECORD_FPS = 20
-AUTO_PLAY_RECORD_MAX_MEMORY = 2048
-EEF_AXIS_LEN = 0.06
-EEF_AXIS_SIZE = 0.003
 TABLE_SIZE = [1.0, 1.4, 0.05]
 TABLE_TOP_Z = -0.045
+
+APPROACH_DIRECTIONS = {
+    "top": (0.0, 0.0, -1.0),
+    "side": (0.0, 1.0, 0.0),
+    "side_y": (0.0, -1.0, 0.0),
+}
 
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveHeldObject holding a sugar box in the gripper."
+        description="Demonstrate PickUp on an upright object."
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--object",
+        choices=sorted(OBJECT_PRESETS.keys()),
+        default="sugar_box",
+        help="Object preset to pick.",
+    )
     parser.add_argument(
         "--n_sample",
         type=int,
@@ -134,62 +133,25 @@ def parse_arguments() -> argparse.Namespace:
         help="Run the viewer demo without waiting for keyboard input.",
     )
     parser.add_argument(
+        "--approach",
+        choices=["top", "side", "side_y", "custom"],
+        default="top",
+        help="Pick approach direction preset.",
+    )
+    parser.add_argument(
+        "--custom_approach_direction",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("X", "Y", "Z"),
+        help="World-frame approach direction used when --approach custom.",
+    )
+    parser.add_argument(
         "--no_vis_eef_axis",
         action="store_true",
         help="Do not draw the current end-effector/TCP coordinate frame before planning.",
     )
     return parser.parse_args()
-
-
-def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
-    """Return the viewer window size used by this tutorial."""
-    return VIEWER_WIDTH, VIEWER_HEIGHT
-
-
-def start_auto_play_recording(
-    sim: SimulationManager,
-    args: argparse.Namespace,
-    video_prefix: str,
-    look_at: tuple[
-        Sequence[float],
-        Sequence[float],
-        Sequence[float],
-    ] = DEFAULT_AUTO_PLAY_LOOK_AT,
-) -> bool:
-    """Start recording for ``--auto_play`` tutorial runs."""
-    if not getattr(args, "auto_play", False):
-        return False
-
-    original_width = sim.sim_config.width
-    original_height = sim.sim_config.height
-    try:
-        sim.sim_config.width = RECORD_WIDTH
-        sim.sim_config.height = RECORD_HEIGHT
-        if not sim.start_window_record(
-            fps=AUTO_PLAY_RECORD_FPS,
-            max_memory=AUTO_PLAY_RECORD_MAX_MEMORY,
-            video_prefix=video_prefix,
-            look_at=look_at,
-            use_sim_time=True,
-        ):
-            raise RuntimeError("Failed to start auto_play recording.")
-    finally:
-        sim.sim_config.width = original_width
-        sim.sim_config.height = original_height
-    return True
-
-
-def stop_auto_play_recording(
-    sim: SimulationManager,
-    recording_started: bool,
-) -> None:
-    """Stop recording and wait until the mp4 has been written."""
-    if not recording_started:
-        return
-
-    if sim.is_window_recording():
-        sim.stop_window_record()
-    sim.wait_window_record_saves()
 
 
 def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
@@ -269,28 +231,29 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(cfg=cfg)
 
 
-def create_pick_object(sim: SimulationManager) -> RigidObject:
+def create_pick_object(sim: SimulationManager, object_name: str) -> RigidObject:
+    preset = OBJECT_PRESETS[object_name]
     cfg = RigidObjectCfg(
-        uid=OBJECT_LABEL,
-        shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
+        uid=preset["label"],
+        shape=MeshCfg(fpath=get_data_path(preset["mesh_path"])),
         attrs=RigidBodyAttributesCfg(
-            mass=OBJECT_MASS,
+            mass=preset["mass"],
             dynamic_friction=0.97,
             static_friction=0.99,
         ),
         max_convex_hull_num=16,
         init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.0],
-        init_rot=OBJECT_INIT_ROT,
-        body_scale=OBJECT_BODY_SCALE,
-        use_usd_properties=OBJECT_USE_USD_PROPERTIES,
+        init_rot=preset["init_rot"],
+        body_scale=preset["body_scale"],
+        use_usd_properties=preset["use_usd_properties"],
     )
     obj = sim.add_rigid_object(cfg=cfg)
-    obj.cfg.init_pos = compute_tabletop_init_pos(obj, cfg.init_rot)
+    obj.cfg.init_pos = _compute_tabletop_init_pos(obj, cfg.init_rot)
     obj.reset()
     return obj
 
 
-def compute_tabletop_init_pos(
+def _compute_tabletop_init_pos(
     obj: RigidObject, init_rot: tuple[float, float, float]
 ) -> tuple[float, float, float]:
     vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
@@ -338,8 +301,9 @@ def build_gripper_collision_cfg() -> GripperCollisionCfg:
 def create_object_semantics(
     obj: RigidObject, args: argparse.Namespace
 ) -> ObjectSemantics:
+    label = OBJECT_PRESETS[args.object]["label"]
     return ObjectSemantics(
-        label=OBJECT_LABEL,
+        label=label,
         geometry={
             "mesh_vertices": obj.get_vertices(env_ids=[0], scale=True)[0],
             "mesh_triangles": obj.get_triangles(env_ids=[0])[0],
@@ -370,90 +334,102 @@ def get_hand_open_close_qpos(
     return hand_open, hand_close
 
 
+def resolve_approach_direction(
+    args: argparse.Namespace, device: torch.device
+) -> torch.Tensor:
+    if args.approach == "custom":
+        if args.custom_approach_direction is None:
+            raise ValueError(
+                "--custom_approach_direction is required when --approach custom."
+            )
+        direction = args.custom_approach_direction
+    else:
+        direction = APPROACH_DIRECTIONS[args.approach]
+
+    approach_direction = torch.tensor(direction, dtype=torch.float32, device=device)
+    norm = torch.linalg.norm(approach_direction)
+    if norm < 1e-6:
+        raise ValueError("approach_direction must be non-zero.")
+    return approach_direction / norm
+
+
 def make_pre_pick_eef_pose(robot: Robot, position: torch.Tensor) -> torch.Tensor:
     pose = robot.compute_fk(
         qpos=robot.get_qpos(name="arm"),
         name="arm",
         to_matrix=True,
-    )[0].clone()
-    pose[:3, 3] = position
+    ).clone()
+    pose[:, :3, 3] = position
     return pose
 
 
-def make_object_target_pose(device: torch.device) -> torch.Tensor:
-    pose = torch.eye(4, dtype=torch.float32, device=device)
-    pose[:3, :3] = torch.tensor(
-        [
-            [0.0, 0.0, -1.0],
-            [0.0, 1.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ],
-        dtype=torch.float32,
-        device=device,
+def initialize_pre_pick_robot_pose(
+    robot: Robot,
+    obj: RigidObject,
+    hand_open: torch.Tensor,
+) -> None:
+    obj_pose = obj.get_local_pose(to_matrix=True)
+    move_position = obj_pose[:, :3, 3].clone()
+    move_position[:, 2] = 0.36
+    pre_pick_pose = make_pre_pick_eef_pose(robot, move_position)
+    ik_success, arm_qpos = robot.compute_ik(
+        pose=pre_pick_pose,
+        joint_seed=robot.get_qpos(name="arm"),
+        name="arm",
     )
-    pose[:3, 3] = torch.tensor([-0.3, -0.3, 0.5], dtype=torch.float32, device=device)
-    return pose
+    if not torch.all(ik_success):
+        raise RuntimeError("Failed to initialize the robot at the pre-pick pose.")
+
+    n_envs = robot.get_qpos().shape[0]
+    hand_qpos = hand_open.unsqueeze(0).repeat(n_envs, 1)
+    for target in (False, True):
+        robot.set_qpos(arm_qpos, name="arm", target=target)
+        robot.set_qpos(hand_qpos, name="hand", target=target)
+    robot.clear_dynamics()
 
 
 def compute_pick_close_end_step() -> int:
     motion_waypoints = PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS
     n_approach = int(round(motion_waypoints) * 0.6)
-    return MOVE_SAMPLE_INTERVAL + n_approach + HAND_INTERP_STEPS
+    return n_approach + HAND_INTERP_STEPS
 
 
-def draw_current_eef_axis(sim: SimulationManager, robot: Robot) -> None:
-    eef_pose = robot.compute_fk(
-        qpos=robot.get_qpos(name="arm"),
-        name="arm",
-        to_matrix=True,
-    )
-    sim.draw_marker(
-        cfg=MarkerCfg(
-            name="current_eef_axis",
-            marker_type="axis",
-            axis_xpos=eef_pose,
-            axis_size=EEF_AXIS_SIZE,
-            axis_len=EEF_AXIS_LEN,
-        )
+def format_tensor(tensor: torch.Tensor) -> str:
+    rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
+    return str(rounded.tolist())
+
+
+def draw_pick_object_axis(sim: SimulationManager, obj: RigidObject) -> None:
+    draw_axis_marker(
+        sim,
+        "pickup_object_axis",
+        obj.get_local_pose(to_matrix=True),
     )
 
 
-def build_action_sequence(
+def build_pickup_cfg(
     hand_open: torch.Tensor,
     hand_close: torch.Tensor,
-    device: torch.device,
-) -> list:
-    move_cfg = MoveEndEffectorCfg(
-        control_part="arm",
-        sample_interval=MOVE_SAMPLE_INTERVAL,
-    )
-    pickup_cfg = PickUpCfg(
+    approach_direction: torch.Tensor,
+) -> PickUpCfg:
+    return PickUpCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_open_qpos=hand_open,
         hand_close_qpos=hand_close,
-        approach_direction=torch.tensor(
-            OBJECT_APPROACH_DIRECTION, dtype=torch.float32, device=device
-        ),
+        approach_direction=approach_direction,
         pre_grasp_distance=0.15,
         lift_height=0.16,
         sample_interval=PICK_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
     )
-    move_held_object_cfg = MoveHeldObjectCfg(
-        control_part="arm",
-        hand_control_part="hand",
-        hand_close_qpos=hand_close,
-        sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
-    )
-    return [move_cfg, pickup_cfg, move_held_object_cfg]
 
 
-def run_move_held_object_demo(args: argparse.Namespace) -> None:
+def run_pickup_demo(args: argparse.Namespace) -> None:
     sim = initialize_simulation(args)
     robot = create_robot(sim)
     create_table(sim)
-    obj = create_pick_object(sim)
+    obj = create_pick_object(sim, args.object)
 
     settle_object(sim, obj, step=5)
     semantics = create_object_semantics(obj, args)
@@ -461,51 +437,38 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
-    action_cfgs = build_action_sequence(hand_open, hand_close, sim.device)
+    approach_direction = resolve_approach_direction(args, sim.device)
+    initialize_pre_pick_robot_pose(robot, obj, hand_open)
+    pickup_cfg = build_pickup_cfg(hand_open, hand_close, approach_direction)
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    _action_classes = {
-        "move_end_effector": MoveEndEffector,
-        "pick_up": PickUp,
-        "move_held_object": MoveHeldObject,
-    }
-    for cfg in action_cfgs:
-        atomic_engine.register(_action_classes[cfg.name](motion_gen, cfg=cfg))
+    atomic_engine.register(PickUp(motion_gen, cfg=pickup_cfg))
 
     if not args.headless:
         sim.open_window()
     if not args.no_vis_eef_axis:
-        draw_current_eef_axis(sim, robot)
+        draw_pick_object_axis(sim, obj)
     if not args.auto_play:
-        input("Inspect the sugar box, then press Enter to plan...")
+        input(f"Inspect the upright {args.object}, then press Enter to plan...")
 
-    obj_pose = obj.get_local_pose(to_matrix=True)
-    move_position = obj_pose[0, :3, 3].clone()
-    move_position[2] = 0.36
-    move_target = make_pre_pick_eef_pose(robot, move_position)
-    move_held_object_target = HeldObjectPoseTarget(
-        object_target_pose=make_object_target_pose(sim.device)
+    logger.log_info(
+        f"Planning pick_up for {args.object} with "
+        f"approach_direction={format_tensor(approach_direction)}"
     )
-
-    logger.log_info("Planning move_end_effector -> pick_up -> move_held_object")
     start_time = time.time()
     is_success, traj, _ = atomic_engine.run(
-        steps=[
-            ("move_end_effector", EndEffectorPoseTarget(xpos=move_target)),
-            ("pick_up", GraspTarget(semantics=semantics)),
-            ("move_held_object", move_held_object_target),
-        ]
+        steps=[("pick_up", GraspTarget(semantics=semantics))]
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
     if not is_success:
-        logger.log_warning("Failed to plan move_held_object demo trajectory.")
+        logger.log_warning("Failed to plan pickup demo trajectory.")
         return
 
     if not args.auto_play:
-        input("Press Enter to replay the move_held_object demo...")
+        input("Press Enter to replay the pickup demo...")
 
     recording_started = start_auto_play_recording(
-        sim, args, video_prefix="move_held_object_auto_play"
+        sim, args, video_prefix=f"pickup_{args.object}_auto_play"
     )
     try:
         post_grasp_clear_step = compute_pick_close_end_step()
@@ -519,7 +482,9 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
                 logger.log_info(f"Object dynamics cleared after grasp at step={i}")
             time.sleep(1e-2)
 
-        logger.log_info("MoveHeldObject keeps the sugar box suspended in the gripper.")
+        logger.log_info(
+            f"PickUp keeps the upright {args.object} suspended in the gripper."
+        )
 
         final_qpos = traj[:, -1, :]
         for i in range(POST_TRAJECTORY_STEPS):
@@ -535,7 +500,7 @@ def run_move_held_object_demo(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_arguments()
-    run_move_held_object_demo(args)
+    run_pickup_demo(args)
 
 
 if __name__ == "__main__":
