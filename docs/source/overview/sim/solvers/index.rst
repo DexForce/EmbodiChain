@@ -48,7 +48,7 @@ approaches implemented in the repository:
 Analytical IK
 ~~~~~~~~~~~~~
 
-Analytical solvers (see the OPW) exploit kinematic
+Analytical solvers (see the OPW and UR solvers) exploit kinematic
 structure to derive algebraic inverse mappings. Benefits include:
 
 - very fast runtime
@@ -77,7 +77,7 @@ embed loop-closure constraints in the solver as equality constraints.
 Choosing a solver
 -----------------
 
-- Use analytic solvers (OPW for 6-DOF arms or SRS for 7-DOF arms) when available for speed and
+- Use analytic solvers (OPW for 6-DOF arms, UR for the Universal Robots family, or SRS for 7-DOF arms) when available for speed and
    determinism.
 - Use numerical solvers (PyTorch/optimization, Differential) when you need
    flexibility.
@@ -96,4 +96,5 @@ See also
     pinocchio_solver.md
     opw_solver.md
     srs_solver.md
+    ur_solver.md
     neural_ik_solver.md

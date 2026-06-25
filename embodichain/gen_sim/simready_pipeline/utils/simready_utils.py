@@ -147,6 +147,28 @@ import trimesh
 from pathlib import Path
 
 
+def init_pose_simple(mesh_input):
+    fallback_mesh = None
+    mesh: trimesh.Trimesh = None
+
+    if isinstance(mesh_input, trimesh.Trimesh):
+        mesh = mesh_input.copy()
+        fallback_mesh = mesh_input.copy()
+    else:
+        mesh_path = Path(mesh_input).resolve()
+        if not mesh_path.exists():
+            raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
+        mesh = trimesh.load(mesh_path, force="mesh")
+        fallback_mesh = mesh.copy()
+    mesh
+    rot_x = trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0])
+    rot_z = trimesh.transformations.rotation_matrix(np.radians(90), [0, 0, 1])
+    combined_transform = trimesh.transformations.concatenate_matrices(rot_z, rot_x)
+    mesh.apply_transform(combined_transform)
+    normalize_to_unit_cube(mesh)
+    return mesh
+
+
 def init_pose(mesh_input):
 
     fallback_mesh = None
@@ -439,7 +461,7 @@ def ask_mllm_detect_and_classify(views_data, extra_text=""):
             - "category": integer 0|1|2.
             - "main_surface": Only provide a short, specific name of the forward-facing surface when category == 2 (e.g. "screen", "lamp_head", "door_face", "keyboard_surface"). Otherwise null.
             - "orientation_requirement": Only provide a concise canonical resting-orientation instruction when category == 2. You MUST choose exactly one of the following three semantic directions for the object's normal real-world static pose:
-              * "face_up"      -> the main surface is intended to face upward toward +Z / gravity opposite, e.g. smartphone lying flat with screen up, keyboard on table, tray-like objects.
+              * "face_up"      -> the main surface is intended to face upward toward +Z / gravity opposite, e.g. smartphone lying flat with screen up, keyboard on table, tray-like objects.Tablet need face_up. Laptop need keyboard facing up to count as face_up, even if screen is more front-facing. etc.
               * "face_forward" -> the main surface is intended to face the user/target in a vertical stance, e.g. monitor screen, oven front, speaker grille, camera front.
               * "face_down"    -> the main surface is intended to face downward in the usual stable static pose, e.g. brush bristles or contact surface downward when naturally placed/used.
               If the object is category 1 or 0, set null.
@@ -490,14 +512,14 @@ def ask_mllm_primary_surface(
     - Carries the object's core function (viewing, operating, aiming, serving, pressing, interacting, etc.)
     - Faces the human user or line-of-sight in normal use
     - Is unique and human-accessible (not a symmetrical or bottom/support surface)
-    - Should prioritize the **front-facing view**, even if other angles also partially show it (e.g., top-down view of a laptop shows screen but front view is preferred)
+    - Should prioritize the **front-facing view**, even if other angles also partially show it.
 
     Additional guidance based on prior classification:
     - Detected object: {object_name}
     - Possible main surface: {main_surface}
     - Orientation requirement: {orientation_requirement}
 
-    If {main_surface} or {orientation_requirement} are provided (not "None"), use them to help identify which image shows the main functional surface. If they conflict with visual evidence, prioritize visual evidence. 
+    If {main_surface} or {orientation_requirement} are provided (not "None"), use them to help identify which image shows the main functional surface. If they conflict with visual evidence, prioritize visual evidence.
 
     Return a single valid JSON string with exactly one field:
 
@@ -999,12 +1021,16 @@ def export_final_mesh(mesh, name, out_dir: Path):
     T_trans = np.eye(4)
     T_trans[:3, 3] = -bottom_center
     mesh.apply_transform(T_trans)
-    out_path = out_dir / f"{name}_simready.obj"
+    # out_path = out_dir / f"{name}_simready.glb"
+    out_path = out_dir / f"asset_simready.glb"
     out_path = out_path.resolve()
 
     print(f"Exporting final mesh to: {out_path} (bottom-face center moved to origin)")
     mesh.export(out_path)
 
+    out_path = out_dir / f"asset_simready.obj"
+    out_path = out_path.resolve()
+    mesh.export(out_path)
     return str(out_path)
 
 
@@ -1029,8 +1055,8 @@ def process_mesh(file, name=None, extra_text="", out_dir="renders", res=1024):
         name = file.stem
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(exist_ok=True, parents=True)
-    mesh = init_pose(file)
-
+    # mesh = init_pose(file)
+    mesh = init_pose_simple(file)
     images_first = render_views(
         mesh, diagonal_views + cardinal_views + up_down_views, out_dir, res
     )

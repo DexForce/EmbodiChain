@@ -1,0 +1,167 @@
+name: Docs Pages Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build and deploy manually (for example: main or v0.2.2)"
+        required: false
+        type: string
+      artifact_run_id:
+        description: "Existing CI/CD Pipeline run ID to deploy from instead of rebuilding"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-from-artifact:
+    if: >
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.artifact_run_id != '')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download docs site artifact from CI/CD Pipeline run
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          run-id: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.artifact_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./docs-site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs-site
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  build-and-deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
+    runs-on: Linux
+    env:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DISABLE_REQUIRE: 1
+      DOCS_MAX_VERSIONS: 5
+    container:
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
+      volumes:
+        - "/cache:/cache"
+        - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
+        - "/usr/share/vulkan/implicit_layer.d:/usr/share/vulkan/implicit_layer.d"
+        - "/usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d"
+        - "/tmp/.X11-unix:/tmp/.X11-unix"
+        - "/dev/shm/shared:/dev/shm/shared"
+        - "/usr/share/nvidia:/usr/share/nvidia"
+      options: --memory 100g --gpus device=0 --shm-size 53687091200
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || 'main' }}
+      - uses: ./.github/actions/activate-conda
+
+      - name: Restore full multi-version docs site
+        uses: actions/cache/restore@v4
+        with:
+          path: docs/build/html
+          key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            docs-full-site-${{ github.repository }}-
+
+      - name: Merge versions from live GitHub Pages
+        shell: bash
+        run: |
+          SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          TARGET_REF="${{ inputs.ref != '' && inputs.ref || 'main' }}"
+          SKIP_VERSION="main"
+          if [[ "${TARGET_REF}" == v* ]]; then
+            SKIP_VERSION="${TARGET_REF}"
+          fi
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/merge_published_site.py \
+            --build-dir ${GITHUB_WORKSPACE}/docs/build/html \
+            --site-base-url "${SITE_URL}" \
+            --skip-version "${SKIP_VERSION}"
+
+      - name: Build docs site
+        shell: bash
+        run: |
+          TARGET_REF="${{ inputs.ref != '' && inputs.ref || 'main' }}"
+          pip install -e ".[gensim]" \
+            --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+            --trusted-host pyp.open3dv.site \
+            --extra-index-url https://download.blender.org/pypi/
+          pip install -r docs/requirements.txt
+          python3 docs/scripts/sync_readme.py
+          cd ${GITHUB_WORKSPACE}/docs
+          pip uninstall pymeshlab -y
+          pip install pymeshlab==2023.12.post3
+
+          if [[ "${TARGET_REF}" == v* ]]; then
+            echo "Building docs for release tag ${TARGET_REF}..."
+            sphinx-build source build/html/${TARGET_REF}
+            cd build/html
+
+            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
+            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS:-5} ]]; do
+              echo "Pruning old version: ${TAG_DIRS[0]}"
+              rm -rf "${TAG_DIRS[0]}"
+              TAG_DIRS=("${TAG_DIRS[@]:1}")
+            done
+          else
+            echo "Building dev docs for ${TARGET_REF}..."
+            rm -rf build/html/main
+            sphinx-build source build/html/main
+            cd build/html
+          fi
+
+          python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
+            --build-dir .
+
+      - name: Upload docs site artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site-manual
+          path: ${{ github.workspace }}/docs/build/html
+
+  deploy-manual-build:
+    if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download manually built docs site
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-site-manual
+          path: ./docs-site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs-site
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

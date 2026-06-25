@@ -22,3 +22,4 @@ from .pink_solver import PinkSolverCfg, PinkSolver
 from .opw_solver import OPWSolverCfg, OPWSolver
 from .srs_solver import SRSSolverCfg, SRSSolver
 from .neural_ik_solver import NeuralIKSolverCfg, NeuralIKSolver
+from .ur_solver import URSolverCfg, URSolver
