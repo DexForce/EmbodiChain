@@ -165,6 +165,11 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     "urdf_cfg should be a dictionary. Skipping urdf_cfg merge."
                 )
         else:
-            setattr(base_cfg, key, getattr(robot_cfg, key))
+            # Only apply keys the base RobotCfg.from_dict recognized.
+            # Subclass-only variant fields (e.g. version, arm_kind) are not
+            # present on a plain RobotCfg and are already set by _build_defaults;
+            # skip them instead of raising AttributeError.
+            if hasattr(robot_cfg, key):
+                setattr(base_cfg, key, getattr(robot_cfg, key))
 
     return base_cfg
