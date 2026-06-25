@@ -28,7 +28,7 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim.solvers import SolverCfg
 from embodichain.lab.sim.cfg import RobotCfg, URDFCfg
 
-all = [
+__all__ = [
     "ChassisManager",
     "TorsoManager",
     "HeadManager",
@@ -219,11 +219,11 @@ class HandManager:
                 ]
         elif brand == DexforceW1HandBrand.DH_PGC_GRIPPER:
             base_link_name = f"{prefix.lower()}_base_link_1"
-            root_link_name = (f"{prefix.lower()}_finger2_link",)
+            root_link_name = f"{prefix.lower()}_finger2_link"
             joint_names = [f"{prefix}_FINGER1_JOINT", f"{prefix}_FINGER2_JOINT"]
         elif brand == DexforceW1HandBrand.DH_PGC_GRIPPER_M:
             base_link_name = f"{prefix.lower()}_base_link_1"
-            root_link_name = (f"{prefix.lower()}_finger2",)
+            root_link_name = f"{prefix.lower()}_finger2"
             joint_names = [f"{prefix}_FINGER1", f"{prefix}_FINGER2"]
         else:
             raise ValueError(f"Unknown hand brand: {brand}")
@@ -735,12 +735,5 @@ def build_dexforce_w1_cfg(
 
     if solver_cfg is not None:
         cfg.solver_cfg = solver_cfg
-    else:
-        cfg.solver_cfg = build_dexforce_w1_solver_cfg(
-            arm_kind=arm_kind,
-            arm_sides=arm_sides,
-            component_versions=component_versions,
-            urdf_cfg=urdf_cfg,
-        )
 
     return cfg

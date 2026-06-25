@@ -253,7 +253,6 @@ class W1ArmKineParams:
                 "rotation_directions",
                 np.array(data["rotation_directions"], dtype=float),
             )
-        inst.validate()
         return inst
 
     def to_torch(
