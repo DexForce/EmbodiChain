@@ -22,9 +22,9 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import RenderCfg
-from embodichain.training.rl.buffer import RolloutBuffer
-from embodichain.training.rl.collector import SyncCollector
-from embodichain.training.rl.utils import flatten_dict_observation
+from embodichain.learning.rl.buffer import RolloutBuffer
+from embodichain.learning.rl.collector import SyncCollector
+from embodichain.learning.rl.utils import flatten_dict_observation
 from embodichain.lab.gym.envs.tasks.rl import build_env
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
 from embodichain.lab.sim import SimulationManagerCfg, SimulationManager

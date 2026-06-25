@@ -21,7 +21,7 @@ from typing import Callable
 import torch
 from tensordict import TensorDict
 
-from embodichain.training.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from .base import BaseCollector
 
 __all__ = ["SyncCollector"]

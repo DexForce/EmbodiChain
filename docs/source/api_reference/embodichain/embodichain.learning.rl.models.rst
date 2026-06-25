@@ -1,7 +1,7 @@
-embodichain.training.rl.models
+embodichain.learning.rl.models
 ==============================
 
-.. automodule:: embodichain.training.rl.models
+.. automodule:: embodichain.learning.rl.models
 
 Overview
 --------
@@ -19,7 +19,7 @@ Policy-network registration and model construction APIs for RL agents.
       get_registered_policy_names
       register_policy
 
-.. automodule:: embodichain.training.rl.models
+.. automodule:: embodichain.learning.rl.models
    :members:
    :undoc-members:
    :show-inheritance:

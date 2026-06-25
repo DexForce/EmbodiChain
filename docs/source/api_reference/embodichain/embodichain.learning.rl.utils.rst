@@ -1,7 +1,7 @@
-embodichain.training.rl.utils
+embodichain.learning.rl.utils
 =============================
 
-.. automodule:: embodichain.training.rl.utils
+.. automodule:: embodichain.learning.rl.utils
 
 Overview
 --------
@@ -20,7 +20,7 @@ data conversion, and training orchestration.
 Configuration Helpers
 ---------------------
 
-.. automodule:: embodichain.training.rl.utils.config
+.. automodule:: embodichain.learning.rl.utils.config
    :members:
    :undoc-members:
    :show-inheritance:
@@ -28,7 +28,7 @@ Configuration Helpers
 General Helpers
 ---------------
 
-.. automodule:: embodichain.training.rl.utils.helper
+.. automodule:: embodichain.learning.rl.utils.helper
    :members:
    :undoc-members:
    :show-inheritance:
@@ -36,7 +36,7 @@ General Helpers
 Trainer Utilities
 -----------------
 
-.. automodule:: embodichain.training.rl.utils.trainer
+.. automodule:: embodichain.learning.rl.utils.trainer
    :members:
    :undoc-members:
    :show-inheritance:

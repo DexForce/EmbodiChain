@@ -173,7 +173,7 @@ torchrun --nproc_per_node=2 -m embodichain train-rl \
 The direct module entry point remains available:
 
 ```bash
-python -m embodichain.training.rl.train --config configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain.learning.rl.train --config configs/agents/rl/basic/cart_pole/train_config.yaml
 ```
 
 ### Arguments

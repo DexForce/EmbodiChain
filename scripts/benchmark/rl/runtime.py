@@ -27,10 +27,10 @@ import torch
 from tensordict import TensorDict
 from torch.utils.tensorboard import SummaryWriter
 
-from embodichain.training.rl.algo import build_algo
-from embodichain.training.rl.models import build_mlp_from_cfg, build_policy
-from embodichain.training.rl.utils import dict_to_tensordict, flatten_dict_observation
-from embodichain.training.rl.utils.trainer import Trainer
+from embodichain.learning.rl.algo import build_algo
+from embodichain.learning.rl.models import build_mlp_from_cfg, build_policy
+from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 from embodichain.lab.gym.envs.tasks.rl import build_env
 from embodichain.lab.gym.utils.gym_utils import DEFAULT_MANAGER_MODULES, config_to_cfg

@@ -98,7 +98,7 @@ class TestRLTraining:
 
     def test_training_pipeline(self):
         """Test RL training pipeline with multiple parallel environments."""
-        from embodichain.training.rl.train import train_from_config
+        from embodichain.learning.rl.train import train_from_config
 
         # This should run without errors
         train_from_config(self.temp_train_config_path)

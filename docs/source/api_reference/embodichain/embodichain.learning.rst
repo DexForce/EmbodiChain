@@ -1,7 +1,7 @@
-embodichain.training
+embodichain.learning
 ====================
 
-.. automodule:: embodichain.training
+.. automodule:: embodichain.learning
 
    .. rubric:: Submodules
 
@@ -12,7 +12,7 @@ embodichain.training
 Reinforcement Learning
 ----------------------
 
-.. automodule:: embodichain.training.rl
+.. automodule:: embodichain.learning.rl
    :members:
    :undoc-members:
    :show-inheritance:

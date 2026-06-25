@@ -1,16 +1,16 @@
-# RL Training
+# RL Learning
 
 ## Entry Points
 
 | What | Path |
 |------|------|
-| CLI entry | `embodichain/agents/rl/train.py` → `parse_args()` + `train_from_config(config_path)` |
-| Trainer class | `embodichain/agents/rl/utils/trainer.py` → `Trainer` |
-| Package init | `embodichain/agents/rl/__init__.py` — re-exports `algo`, `buffer`, `models`, `utils` |
+| CLI entry | `embodichain/learning/rl/train.py` → `parse_args()` + `train_from_config(config_path)` |
+| Trainer class | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
+| Package init | `embodichain/learning/rl/__init__.py` — re-exports `algo`, `buffer`, `models`, `utils` |
 
 Run training:
 ```bash
-python -m embodichain.agents.rl.train --config <path-to-yaml-or-json> [--distributed | --no-distributed]
+python -m embodichain.learning.rl.train --config <path-to-yaml-or-json> [--distributed | --no-distributed]
 ```
 
 ## Overview
@@ -48,7 +48,7 @@ train_from_config()
 
 ## PPO Algorithm
 
-**Source**: `embodichain/agents/rl/algo/ppo.py`
+**Source**: `embodichain/learning/rl/algo/ppo.py`
 
 - Config: `PPOCfg(AlgorithmCfg)` — `n_epochs=10`, `clip_coef=0.2`, `ent_coef=0.01`, `vf_coef=0.5`.
 - Inherits `AlgorithmCfg` defaults: `lr=3e-4`, `batch_size=64`, `gamma=0.99`, `gae_lambda=0.95`, `max_grad_norm=0.5`.
@@ -62,7 +62,7 @@ train_from_config()
 
 ### GRPO Algorithm
 
-**Source**: `embodichain/agents/rl/algo/grpo.py`
+**Source**: `embodichain/learning/rl/algo/grpo.py`
 
 - Config: `GRPOCfg(AlgorithmCfg)` — `group_size=4`, `kl_coef=0.02`, `ent_coef=0.0`, `reset_every_rollout=True`, `truncate_at_first_done=True`.
 - Maintains a frozen `ref_policy` deepcopy for KL penalty when `kl_coef > 0`.
@@ -70,7 +70,7 @@ train_from_config()
 
 ### Algorithm Registry
 
-**Source**: `embodichain/agents/rl/algo/__init__.py`
+**Source**: `embodichain/learning/rl/algo/__init__.py`
 
 ```python
 _ALGO_REGISTRY = {"ppo": (PPOCfg, PPO), "grpo": (GRPOCfg, GRPO)}
@@ -81,7 +81,7 @@ When `distributed=True`, wraps the policy in `DistributedDataParallel` before pa
 
 ## Rollout Buffer
 
-**Source**: `embodichain/agents/rl/buffer/standard_buffer.py`
+**Source**: `embodichain/learning/rl/buffer/standard_buffer.py`
 
 - `RolloutBuffer(num_envs, rollout_len, obs_dim, action_dim, device)`.
 - Preallocates a single TensorDict with batch shape `[num_envs, rollout_len + 1]`.
@@ -91,14 +91,14 @@ When `distributed=True`, wraps the policy in `DistributedDataParallel` before pa
 
 ### Buffer Utilities
 
-**Source**: `embodichain/agents/rl/buffer/utils.py`
+**Source**: `embodichain/learning/rl/buffer/utils.py`
 
 - `transition_view(rollout, flatten)` — slices `[:, :-1]` on transition fields, optionally reshapes to `[N*T]`.
 - `iterate_minibatches(rollout, batch_size, device)` — yields shuffled minibatches from a flattened rollout.
 
 ## Actor-Critic Models
 
-**Source**: `embodichain/agents/rl/models/`
+**Source**: `embodichain/learning/rl/models/`
 
 ### Policy ABC (`policy.py`)
 - `Policy(nn.Module, ABC)` — requires `forward()`, `get_value()`, `evaluate_actions()`.
@@ -125,7 +125,7 @@ build_mlp_from_cfg(module_cfg, in_dim, out_dim)  # expects {"type": "mlp", "netw
 
 ## Training Pipeline
 
-**Source**: `embodichain/agents/rl/utils/trainer.py`
+**Source**: `embodichain/learning/rl/utils/trainer.py`
 
 `Trainer.__init__` creates `RolloutBuffer` and `SyncCollector`.
 
@@ -142,7 +142,7 @@ Distributed training:
 
 ### Collector
 
-**Source**: `embodichain/agents/rl/collector/sync_collector.py`
+**Source**: `embodichain/learning/rl/collector/sync_collector.py`
 
 `SyncCollector(env, policy, device, reset_every_rollout)`:
 - `collect(num_steps, rollout, on_step_callback)` — steps env synchronously, writing obs/action/reward/done into the preallocated rollout TensorDict.
@@ -151,7 +151,7 @@ Distributed training:
 
 ### Helper Utilities
 
-**Source**: `embodichain/agents/rl/utils/helper.py`
+**Source**: `embodichain/learning/rl/utils/helper.py`
 
 - `flatten_dict_observation(obs: TensorDict)` → `[num_envs, obs_dim]` tensor.
 - `dict_to_tensordict(obs_dict, device)` → converts env observation mapping to TensorDict.

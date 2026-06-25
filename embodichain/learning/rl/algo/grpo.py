@@ -22,8 +22,8 @@ from typing import Dict
 import torch
 from tensordict import TensorDict
 
-from embodichain.training.rl.buffer import iterate_minibatches, transition_view
-from embodichain.training.rl.utils import AlgorithmCfg
+from embodichain.learning.rl.buffer import iterate_minibatches, transition_view
+from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
 

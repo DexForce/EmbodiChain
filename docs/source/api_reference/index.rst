@@ -27,5 +27,5 @@ The following modules are available in the core ``embodichain`` framework:
    data_pipeline
    lab
    toolkits
-   training
+   learning
    utils

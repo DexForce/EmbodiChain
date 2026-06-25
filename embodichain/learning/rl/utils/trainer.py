@@ -28,8 +28,8 @@ from tensordict import TensorDict
 from typing import Dict
 
 from embodichain.lab.gym.envs.managers.action_manager import ActionManager
-from embodichain.training.rl.buffer import RolloutBuffer
-from embodichain.training.rl.collector import SyncCollector
+from embodichain.learning.rl.buffer import RolloutBuffer
+from embodichain.learning.rl.collector import SyncCollector
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from .helper import flatten_dict_observation
 

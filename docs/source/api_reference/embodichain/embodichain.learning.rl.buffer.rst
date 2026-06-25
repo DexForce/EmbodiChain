@@ -1,7 +1,7 @@
-embodichain.training.rl.buffer
+embodichain.learning.rl.buffer
 ==============================
 
-.. automodule:: embodichain.training.rl.buffer
+.. automodule:: embodichain.learning.rl.buffer
 
 Overview
 --------
@@ -16,12 +16,12 @@ RL algorithms.
    standard_buffer
    utils
 
-.. currentmodule:: embodichain.training.rl.buffer
+.. currentmodule:: embodichain.learning.rl.buffer
 
 Rollout Buffer Classes
 ----------------------
 
-.. automodule:: embodichain.training.rl.buffer.standard_buffer
+.. automodule:: embodichain.learning.rl.buffer.standard_buffer
    :members:
    :undoc-members:
    :show-inheritance:
@@ -29,7 +29,7 @@ Rollout Buffer Classes
 Buffer Utilities
 ----------------
 
-.. automodule:: embodichain.training.rl.buffer.utils
+.. automodule:: embodichain.learning.rl.buffer.utils
    :members:
    :undoc-members:
    :show-inheritance:
