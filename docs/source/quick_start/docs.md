@@ -56,5 +56,3 @@ This generates both `versions.json` (for the sidebar version selector) and `inde
 > Old release versions beyond `DOCS_MAX_VERSIONS` (default: 5 in CI) are automatically pruned during CI builds.
 >
 > CI merges missing version directories from the live GitHub Pages site before each build so a `main` push cannot wipe docs built for release tags. See `docs/scripts/merge_published_site.py` and `tests/docs/test_merge_published_site.py`.
->
-> Production deployment uses a dedicated GitHub Pages workflow that consumes the built multi-version site artifact. This keeps tag-based release docs publishing working even when the `github-pages` environment only allows deployments from the default branch workflow context.

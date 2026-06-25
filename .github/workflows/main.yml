@@ -137,11 +137,10 @@ jobs:
           path: docs/build/html
           key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
 
-      - name: Upload docs site artifact
+      - name: Upload docs artifact
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: docs-site
           path: ${{ github.workspace }}/docs/build/html
 
   test:
@@ -166,6 +165,22 @@ jobs:
           export HF_ENDPOINT=https://hf-mirror.com
           pytest tests/docs -q --confcutdir=tests/docs
           pytest tests
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
 
   release-build:
     if: startsWith(github.ref, 'refs/tags/v')
