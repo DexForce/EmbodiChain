@@ -111,7 +111,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--no_vis_eef_axis",
         action="store_true",
-        help="Do not draw the current end-effector/TCP coordinate frame before planning.",
+        help="Do not draw the press target coordinate frame before planning.",
     )
     return parser.parse_args()
 
@@ -259,13 +259,10 @@ def log_block_state(block: RigidObject, label: str) -> None:
     )
 
 
-def draw_current_eef_axis(sim: SimulationManager, robot: Robot) -> None:
-    eef_pose = robot.compute_fk(
-        qpos=robot.get_qpos(name="arm"),
-        name="arm",
-        to_matrix=True,
-    )
-    draw_axis_marker(sim, "current_eef_axis", eef_pose)
+def draw_press_target_axis(sim: SimulationManager, press_target: torch.Tensor) -> None:
+    if press_target.dim() == 2:
+        press_target = press_target.unsqueeze(0)
+    draw_axis_marker(sim, "press_target_axis", press_target)
 
 
 def compute_press_center_check(
@@ -357,8 +354,6 @@ def run_press_demo(args: argparse.Namespace) -> None:
 
     if not args.headless:
         sim.open_window()
-    if not args.no_vis_eef_axis:
-        draw_current_eef_axis(sim, robot)
     if not args.auto_play:
         input("Inspect the wooden block, then press Enter to plan...")
 
@@ -371,6 +366,8 @@ def run_press_demo(args: argparse.Namespace) -> None:
 
     move_target = make_top_down_eef_pose(move_position)
     press_target = make_top_down_eef_pose(press_position)
+    if not args.no_vis_eef_axis:
+        draw_press_target_axis(sim, press_target)
 
     logger.log_info("Planning MoveEndEffector -> Press")
     start_time = time.time()
