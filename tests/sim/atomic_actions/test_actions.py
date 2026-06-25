@@ -14,291 +14,369 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for atomic action implementations (MoveAction, PickUpAction, PlaceAction)."""
+"""Tests for the concrete atomic action classes."""
 
 from __future__ import annotations
 
 import pytest
 import torch
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock, patch
 
+from embodichain.lab.sim.atomic_actions.affordance import (
+    AntipodalAffordance,
+)
 from embodichain.lab.sim.atomic_actions.core import (
-    ActionCfg,
-    Affordance,
+    ActionResult,
+    GraspTarget,
+    HeldObjectState,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
+    EndEffectorPoseTarget,
+    WorldState,
 )
 from embodichain.lab.sim.atomic_actions.actions import (
-    MoveAction,
-    MoveActionCfg,
-    PickUpAction,
-    PickUpActionCfg,
-    PlaceAction,
-    PlaceActionCfg,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
+    MoveJoints,
+    MoveJointsCfg,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
 )
 
-# ---------------------------------------------------------------------------
-# Mock Helpers
-# ---------------------------------------------------------------------------
-
-NUM_ENVS = 2  # number of parallel environments used in tests
-ARM_DOF = 6  # typical arm joint count
-HAND_DOF = 2  # typical hand joint count
+NUM_ENVS = 2
+ARM_DOF = 6
+HAND_DOF = 2
 TOTAL_DOF = ARM_DOF + HAND_DOF
 
 
-def _make_mock_robot(
-    num_envs: int = NUM_ENVS,
-    arm_dof: int = ARM_DOF,
-    hand_dof: int = HAND_DOF,
-) -> Mock:
-    """Create a mock Robot with arm and hand control parts."""
+def _make_mock_robot():
     robot = Mock()
     robot.device = torch.device("cpu")
-    robot.dof = arm_dof + hand_dof
+    robot.dof = TOTAL_DOF
 
     def get_qpos(name=None):
         if name == "arm":
-            return torch.zeros(num_envs, arm_dof)
+            return torch.zeros(NUM_ENVS, ARM_DOF)
         if name == "hand":
-            return torch.zeros(num_envs, hand_dof)
-        # Full qpos
-        return torch.zeros(num_envs, arm_dof + hand_dof)
+            return torch.zeros(NUM_ENVS, HAND_DOF)
+        return torch.zeros(NUM_ENVS, TOTAL_DOF)
 
     robot.get_qpos = get_qpos
 
     def get_joint_ids(name=None):
         if name == "arm":
-            return list(range(arm_dof))
+            return list(range(ARM_DOF))
         if name == "hand":
-            return list(range(arm_dof, arm_dof + hand_dof))
-        return list(range(arm_dof + hand_dof))
+            return list(range(ARM_DOF, TOTAL_DOF))
+        return list(range(TOTAL_DOF))
 
     robot.get_joint_ids = get_joint_ids
 
-    # compute_ik: return success and identity-like qpos
     def compute_ik(pose=None, qpos_seed=None, name=None, joint_seed=None):
         seed = joint_seed if joint_seed is not None else qpos_seed
         if seed is None:
-            seed = torch.zeros(num_envs, arm_dof)
-        success = torch.ones(num_envs, dtype=torch.bool)
-        return success, seed.clone()
+            seed = torch.zeros(NUM_ENVS, ARM_DOF)
+        return torch.ones(NUM_ENVS, dtype=torch.bool), seed.clone()
 
     robot.compute_ik = compute_ik
 
-    # compute_fk: return identity-like poses
+    def compute_batch_ik(pose=None, name=None, joint_seed=None):
+        if joint_seed is not None:
+            return (
+                torch.ones(joint_seed.shape[:2], dtype=torch.bool),
+                joint_seed.clone(),
+            )
+        return torch.ones(NUM_ENVS, dtype=torch.bool), torch.zeros(NUM_ENVS, ARM_DOF)
+
+    robot.compute_batch_ik = compute_batch_ik
+
     def compute_fk(qpos=None, name=None, to_matrix=True):
-        n = qpos.shape[0] if qpos is not None else num_envs
-        poses = torch.eye(4).unsqueeze(0).repeat(n, 1, 1)
-        return poses
+        n = qpos.shape[0] if qpos is not None else NUM_ENVS
+        return torch.eye(4).unsqueeze(0).repeat(n, 1, 1)
 
     robot.compute_fk = compute_fk
-
     return robot
 
 
-def _make_mock_motion_generator(robot: Mock | None = None) -> Mock:
-    """Create a mock MotionGenerator."""
+def _make_mock_motion_generator():
     mg = Mock()
-    mg.robot = robot or _make_mock_robot()
-    mg.device = mg.robot.device
+    mg.robot = _make_mock_robot()
+    mg.device = torch.device("cpu")
     return mg
 
 
+def _hand_open():
+    return torch.zeros(HAND_DOF, dtype=torch.float32)
+
+
+def _hand_close():
+    return torch.full((HAND_DOF,), 0.025, dtype=torch.float32)
+
+
 # ---------------------------------------------------------------------------
-# MoveAction
+# MoveEndEffector
 # ---------------------------------------------------------------------------
 
 
-class TestMoveActionHelpers:
-    """Tests for MoveAction helper methods that don't need simulation."""
-
+class TestMoveEndEffectorAction:
     def setup_method(self):
-        self.robot = _make_mock_robot()
-        self.mg = _make_mock_motion_generator(self.robot)
-        self.cfg = MoveActionCfg(sample_interval=50)
-        self.action = MoveAction(self.mg, cfg=self.cfg)
+        self.mg = _make_mock_motion_generator()
 
-    def test_init_sets_attributes(self):
-        assert self.action.n_envs == NUM_ENVS
-        assert self.action.dof == ARM_DOF
-        assert self.action.device == torch.device("cpu")
+    def test_target_type_is_pose_target(self):
+        assert MoveEndEffector.TargetType is EndEffectorPoseTarget
 
-    def test_resolve_pose_target_from_4x4(self):
-        target = torch.eye(4)
-        is_success, result = self.action._resolve_pose_target(
-            target, action_name="TestAction"
-        )
-        assert is_success is True
-        assert result.shape == (NUM_ENVS, 4, 4)
-        # Single pose should be repeated for all envs
-        for i in range(NUM_ENVS):
-            assert torch.equal(result[i], torch.eye(4))
+    def test_default_name_is_explicit(self):
+        assert MoveEndEffectorCfg().name == "move_end_effector"
 
-    def test_resolve_pose_target_from_batched(self):
-        target = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
-        target[:, 2, 3] = 0.5  # offset z for each env
-        is_success, result = self.action._resolve_pose_target(
-            target, action_name="TestAction"
-        )
-        assert is_success is True
-        assert result.shape == (NUM_ENVS, 4, 4)
-        for i in range(NUM_ENVS):
-            assert result[i, 2, 3].item() == pytest.approx(0.5)
-
-    def test_resolve_start_qpos_defaults_to_current(self):
-        result = self.action._resolve_start_qpos(None)
-        assert result.shape == (NUM_ENVS, ARM_DOF)
-
-    def test_resolve_start_qpos_broadcasts_single(self):
-        single = torch.ones(ARM_DOF)
-        result = self.action._resolve_start_qpos(single)
-        assert result.shape == (NUM_ENVS, ARM_DOF)
-        for i in range(NUM_ENVS):
-            assert torch.equal(result[i], single)
-
-    def test_compute_three_phase_waypoints_sums_to_sample_interval(self):
-        hand_interp_steps = 5
-        first, second, third = self.action._compute_three_phase_waypoints(
-            hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="lift",
-        )
-        assert first + second + third == self.cfg.sample_interval
-        assert first >= 2
-        assert third >= 2
-
-    def test_interpolate_hand_qpos_shape(self):
-        n_waypoints = 10
-        start = torch.zeros(HAND_DOF)
-        end = torch.ones(HAND_DOF)
-        result = self.action._interpolate_hand_qpos(start, end, n_waypoints)
-        assert result.shape == (n_waypoints, HAND_DOF)
-        # First and last should match endpoints
-        assert torch.allclose(result[0], start)
-        assert torch.allclose(result[-1], end)
-
-    def test_interpolate_hand_qpos_linear(self):
-        """Verify linear interpolation between two hand configs."""
-        n_waypoints = 3
-        start = torch.tensor([0.0, 0.0])
-        end = torch.tensor([1.0, 1.0])
-        result = self.action._interpolate_hand_qpos(start, end, n_waypoints)
-        expected_mid = torch.tensor([0.5, 0.5])
-        assert torch.allclose(result[1], expected_mid, atol=1e-6)
+    def test_execute_returns_full_dof_trajectory(self):
+        action = MoveEndEffector(self.mg, MoveEndEffectorCfg(sample_interval=10))
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
+        ):
+            state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+            result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
+        assert isinstance(result, ActionResult)
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
+        # MoveEndEffector preserves held_object.
+        assert result.next_state.held_object is None
 
 
 # ---------------------------------------------------------------------------
-# PickUpAction
+# MoveJoints
 # ---------------------------------------------------------------------------
 
 
-class TestPickUpActionInit:
-    """Tests for PickUpAction initialization and config validation."""
-
+class TestMoveJointsAction:
     def setup_method(self):
-        self.robot = _make_mock_robot()
-        self.mg = _make_mock_motion_generator(self.robot)
+        self.mg = _make_mock_motion_generator()
 
-    def _make_cfg(self, **overrides):
-        defaults = dict(
-            hand_open_qpos=torch.tensor([0.0, 0.0]),
-            hand_close_qpos=torch.tensor([0.025, 0.025]),
-            control_part="arm",
-            hand_control_part="hand",
-            pre_grasp_distance=0.15,
-            lift_height=0.15,
-            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
-        )
-        defaults.update(overrides)
-        return PickUpActionCfg(**defaults)
+    def test_target_type_accepts_explicit_and_named_joint_targets(self):
+        assert MoveJoints.TargetType == (JointPositionTarget, NamedJointPositionTarget)
 
-    def test_init_sets_hand_joint_ids(self):
-        cfg = self._make_cfg()
-        action = PickUpAction(self.mg, cfg=cfg)
-        assert action.hand_joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
-        assert action.joint_ids == list(range(ARM_DOF)) + list(
-            range(ARM_DOF, ARM_DOF + HAND_DOF)
+    def test_default_name_is_explicit(self):
+        assert MoveJointsCfg().name == "move_joints"
+
+    def test_execute_with_explicit_qpos_returns_full_dof_trajectory(self):
+        action = MoveJoints(self.mg, MoveJointsCfg(sample_interval=10))
+        target_qpos = torch.full((ARM_DOF,), 0.5)
+        hand_qpos = torch.full((NUM_ENVS, HAND_DOF), 0.25)
+        last_qpos = torch.cat([torch.zeros(NUM_ENVS, ARM_DOF), hand_qpos], dim=1)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="mug"
         )
-        assert action.dof == TOTAL_DOF
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+
+        def interpolate(trajectory, interp_num, device):
+            assert trajectory.shape == (NUM_ENVS, 2, ARM_DOF)
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(
+                JointPositionTarget(qpos=target_qpos),
+                WorldState(last_qpos=last_qpos, held_object=held),
+            )
+
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
+        assert torch.allclose(result.trajectory[:, -1, :ARM_DOF], target_qpos)
+        assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], hand_qpos)
+        assert result.next_state.held_object is held
+
+    def test_execute_with_named_qpos_resolves_cfg_target(self):
+        action = MoveJoints(
+            self.mg,
+            MoveJointsCfg(
+                sample_interval=8,
+                named_joint_positions={"home": torch.full((ARM_DOF,), 0.2)},
+            ),
+        )
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: trajectory[
+                :, -1:, :
+            ].repeat(1, interp_num, 1),
+        ):
+            result = action.execute(
+                NamedJointPositionTarget(name="home"),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+        assert result.success is True
+        assert torch.allclose(
+            result.next_state.last_qpos[:, :ARM_DOF],
+            torch.full((NUM_ENVS, ARM_DOF), 0.2),
+        )
+
+    def test_unknown_named_qpos_raises(self):
+        action = MoveJoints(self.mg, MoveJointsCfg())
+        with pytest.raises(KeyError, match="missing"):
+            action.execute(
+                NamedJointPositionTarget(name="missing"),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
 
 
 # ---------------------------------------------------------------------------
-# PlaceAction
+# PickUp
 # ---------------------------------------------------------------------------
 
 
-class TestPlaceActionInit:
-    """Tests for PlaceAction initialization."""
-
+class TestPickUpAction:
     def setup_method(self):
-        self.robot = _make_mock_robot()
-        self.mg = _make_mock_motion_generator(self.robot)
+        self.mg = _make_mock_motion_generator()
 
-    def _make_cfg(self, **overrides):
-        defaults = dict(
-            hand_open_qpos=torch.tensor([0.0, 0.0]),
-            hand_close_qpos=torch.tensor([0.025, 0.025]),
-            control_part="arm",
-            hand_control_part="hand",
-            lift_height=0.15,
+    def test_target_type_is_grasp_target(self):
+        assert PickUp.TargetType is GraspTarget
+
+    def test_execute_populates_held_object_state(self):
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
         )
-        defaults.update(overrides)
-        return PlaceActionCfg(**defaults)
+        action = PickUp(self.mg, cfg)
 
-    def test_init_sets_hand_joint_ids(self):
-        cfg = self._make_cfg()
-        action = PlaceAction(self.mg, cfg=cfg)
-        assert action.hand_joint_ids == list(range(ARM_DOF, ARM_DOF + HAND_DOF))
-        assert action.dof == TOTAL_DOF
+        # Fake affordance that returns a single identity grasp pose.
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (torch.eye(4).unsqueeze(0), torch.tensor([0.5]))
+                for _ in range(NUM_ENVS)
+            ]
+        )
+
+        entity = Mock()
+        entity.get_local_pose = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="mug",
+            entity=entity,
+        )
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+            result = action.execute(GraspTarget(semantics=sem), state)
+        assert result.success is True
+        assert result.trajectory.shape[0] == NUM_ENVS
+        assert result.trajectory.shape[2] == TOTAL_DOF
+        assert isinstance(result.next_state.held_object, HeldObjectState)
+        assert result.next_state.held_object.semantics is sem
 
 
 # ---------------------------------------------------------------------------
-# AtomicAction._apply_offset
+# MoveHeldObject
 # ---------------------------------------------------------------------------
 
 
-class TestAtomicActionApplyOffset:
-    """Tests for the shared _apply_offset method inherited from AtomicAction."""
-
+class TestMoveHeldObjectAction:
     def setup_method(self):
-        self.robot = _make_mock_robot()
-        self.mg = _make_mock_motion_generator(self.robot)
-        self.cfg = MoveActionCfg()
-        self.action = MoveAction(self.mg, cfg=self.cfg)
+        self.mg = _make_mock_motion_generator()
 
-    def test_apply_offset_batched(self):
-        # [N, 4, 4] poses, [N, 3] offsets
-        poses = torch.eye(4).unsqueeze(0).repeat(3, 1, 1)
-        offsets = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-        result = self.action._apply_offset(poses, offsets)
-        assert result.shape == (3, 4, 4)
-        assert result[0, :3, 3].tolist() == pytest.approx([1.0, 0.0, 0.0])
-        assert result[1, :3, 3].tolist() == pytest.approx([0.0, 1.0, 0.0])
-        assert result[2, :3, 3].tolist() == pytest.approx([0.0, 0.0, 1.0])
+    def test_target_type_is_held_object_target(self):
+        assert MoveHeldObject.TargetType is HeldObjectPoseTarget
 
-    def test_apply_offset_broadcasts_single_offset(self):
-        # [N, 4, 4] poses, [3] single offset broadcast to all
-        poses = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
-        offset = torch.tensor([0.1, 0.2, 0.3])
-        result = self.action._apply_offset(poses, offset)
-        assert result.shape == (2, 4, 4)
-        for i in range(2):
-            assert result[i, :3, 3].tolist() == pytest.approx([0.1, 0.2, 0.3])
+    def test_default_name_is_explicit(self):
+        assert (
+            MoveHeldObjectCfg(hand_close_qpos=_hand_close()).name == "move_held_object"
+        )
 
-    def test_apply_offset_preserves_rotation(self):
-        """Offset only affects translation; rotation part stays unchanged."""
-        poses = torch.eye(4).unsqueeze(0).repeat(1, 1, 1)
-        # Set a non-trivial rotation
-        poses[0, 0, 1] = -1.0
-        poses[0, 1, 0] = 1.0
-        offset = torch.tensor([1.0, 2.0, 3.0])
-        result = self.action._apply_offset(poses, offset)
-        # Rotation block should be unchanged
-        assert torch.equal(result[0, :3, :3], poses[0, :3, :3])
+    def test_requires_held_object_in_state(self):
+        cfg = MoveHeldObjectCfg(
+            hand_close_qpos=_hand_close(),
+            sample_interval=10,
+        )
+        action = MoveHeldObject(self.mg, cfg)
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        with pytest.raises(Exception):
+            action.execute(HeldObjectPoseTarget(object_target_pose=torch.eye(4)), state)
+
+    def test_preserves_held_object(self):
+        cfg = MoveHeldObjectCfg(
+            hand_close_qpos=_hand_close(),
+            sample_interval=10,
+        )
+        action = MoveHeldObject(self.mg, cfg)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="mug"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF), held_object=held)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
+        ):
+            result = action.execute(
+                HeldObjectPoseTarget(object_target_pose=torch.eye(4)), state
+            )
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
+        assert result.next_state.held_object is held
 
 
-if __name__ == "__main__":
-    # For visual debugging
-    test = TestMoveActionHelpers()
-    test.setup_method()
-    test.test_compute_three_phase_waypoints_sums_to_sample_interval()
+# ---------------------------------------------------------------------------
+# Place
+# ---------------------------------------------------------------------------
+
+
+class TestPlaceAction:
+    def setup_method(self):
+        self.mg = _make_mock_motion_generator()
+
+    def test_target_type_is_pose_target(self):
+        assert Place.TargetType is EndEffectorPoseTarget
+
+    def test_execute_clears_held_object(self):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+        )
+        action = Place(self.mg, cfg)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="mug"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF), held_object=held)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
+        assert result.success is True
+        assert result.trajectory.shape[2] == TOTAL_DOF
+        assert result.next_state.held_object is None

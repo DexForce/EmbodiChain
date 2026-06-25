@@ -14,178 +14,218 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for atomic action engine (registry, SemanticAnalyzer, AtomicActionEngine)."""
+"""Tests for atomic_actions.engine."""
 
 from __future__ import annotations
 
 import pytest
 import torch
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
+from embodichain.lab.sim.atomic_actions.affordance import Affordance
 from embodichain.lab.sim.atomic_actions.core import (
-    ActionCfg,
-    Affordance,
+    ActionResult,
+    AtomicAction,
+    GraspTarget,
+    HeldObjectState,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
+    EndEffectorPoseTarget,
+    WorldState,
 )
 from embodichain.lab.sim.atomic_actions.engine import (
     AtomicActionEngine,
-    SemanticAnalyzer,
     get_registered_actions,
     register_action,
     unregister_action,
 )
 
 # ---------------------------------------------------------------------------
-# Global Action Registry
+# Global registry (kept from old design)
 # ---------------------------------------------------------------------------
 
 
 class TestGlobalRegistry:
-    """Tests for register_action / unregister_action / get_registered_actions."""
-
     def teardown_method(self):
-        # Clean up any test registrations
         unregister_action("_test_dummy")
 
     def test_register_and_retrieve(self):
-        mock_cls = Mock()
-        register_action("_test_dummy", mock_cls)
-        registry = get_registered_actions()
-        assert "_test_dummy" in registry
-        assert registry["_test_dummy"] is mock_cls
+        cls = Mock()
+        register_action("_test_dummy", cls)
+        assert get_registered_actions()["_test_dummy"] is cls
 
-    def test_unregister_removes_entry(self):
+    def test_unregister(self):
         register_action("_test_dummy", Mock())
         unregister_action("_test_dummy")
         assert "_test_dummy" not in get_registered_actions()
 
     def test_unregister_nonexistent_is_noop(self):
-        # Should not raise
-        unregister_action("_nonexistent_action")
+        unregister_action("_does_not_exist")
 
     def test_get_registered_actions_returns_copy(self):
-        """Mutating the returned dict should not affect the global registry."""
-        result = get_registered_actions()
-        result["_should_not_persist"] = Mock()
+        out = get_registered_actions()
+        out["_should_not_persist"] = Mock()
         assert "_should_not_persist" not in get_registered_actions()
 
 
 # ---------------------------------------------------------------------------
-# SemanticAnalyzer
+# Engine run() semantics
 # ---------------------------------------------------------------------------
 
 
-class TestSemanticAnalyzer:
-    """Tests for SemanticAnalyzer."""
+NUM_ENVS = 2
+TOTAL_DOF = 8
 
-    def setup_method(self):
-        self.analyzer = SemanticAnalyzer()
 
-    def test_analyze_returns_object_semantics(self):
-        sem = self.analyzer.analyze("mug")
-        assert isinstance(sem, ObjectSemantics)
-        assert sem.label == "mug"
-        assert isinstance(sem.affordance, Affordance)
+def _make_mg():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = TOTAL_DOF
+    robot.get_qpos.return_value = torch.zeros(NUM_ENVS, TOTAL_DOF)
 
-    def test_analyze_caches_by_default(self):
-        sem1 = self.analyzer.analyze("bottle")
-        sem2 = self.analyzer.analyze("bottle")
-        assert sem1 is sem2
+    mg = Mock()
+    mg.robot = robot
+    mg.device = torch.device("cpu")
+    return mg
 
-    def test_analyze_bypasses_cache_with_geometry(self):
-        sem1 = self.analyzer.analyze("bottle")
-        sem2 = self.analyzer.analyze(
-            "bottle", geometry={"bounding_box": [0.2, 0.2, 0.2]}
+
+def _fake_action(name, target_type, *, sets_held=False, clears_held=False, fails=False):
+    action = Mock(spec=AtomicAction)
+    action.TargetType = target_type
+    action.cfg = Mock()
+    action.cfg.name = name
+
+    def execute(target, state):
+        if fails:
+            return ActionResult(
+                success=False,
+                trajectory=torch.empty(NUM_ENVS, 0, TOTAL_DOF),
+                next_state=state,
+            )
+        held = state.held_object
+        if sets_held:
+            sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="x")
+            held = HeldObjectState(
+                semantics=sem,
+                object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+                grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            )
+        if clears_held:
+            held = None
+        traj = torch.zeros(NUM_ENVS, 5, TOTAL_DOF)
+        return ActionResult(
+            success=True,
+            trajectory=traj,
+            next_state=WorldState(
+                last_qpos=traj[:, -1, :].clone(),
+                held_object=held,
+            ),
         )
-        assert sem1 is not sem2
 
-    def test_analyze_no_cache(self):
-        sem1 = self.analyzer.analyze("cup", use_cache=False)
-        sem2 = self.analyzer.analyze("cup", use_cache=False)
-        assert sem1 is not sem2
-
-    def test_clear_cache(self):
-        self.analyzer.analyze("can")
-        self.analyzer.clear_cache()
-        # After clearing, a new object should be created
-        sem1 = self.analyzer.analyze("can")
-        sem2 = self.analyzer.analyze("can")
-        assert sem1 is sem2  # re-cached after clear
+    action.execute = Mock(side_effect=execute)
+    return action
 
 
-# ---------------------------------------------------------------------------
-# AtomicActionEngine._resolve_target
-# ---------------------------------------------------------------------------
-
-
-class TestResolveTarget:
-    """Tests for AtomicActionEngine._resolve_target with various input types."""
-
+class TestEngineRun:
     def setup_method(self):
-        self.robot = Mock()
-        self.robot.device = torch.device("cpu")
-        self.robot.dof = 6
-        self.robot.get_qpos.return_value = torch.zeros(1, 6)
-        self.robot.get_joint_ids.return_value = list(range(6))
+        self.mg = _make_mg()
+        self.engine = AtomicActionEngine(self.mg)
 
-        self.mg = Mock()
-        self.mg.robot = self.robot
-        self.mg.device = torch.device("cpu")
+    def test_register_and_lookup(self):
+        action = _fake_action("pick_up", GraspTarget, sets_held=True)
+        self.engine.register(action)
+        assert "pick_up" in self.engine.actions
 
-        self.engine = AtomicActionEngine(self.mg, actions_cfg_list=[])
+    def test_register_with_explicit_name_overrides_cfg(self):
+        action = _fake_action("pick_up", GraspTarget, sets_held=True)
+        self.engine.register(action, name="custom")
+        assert "custom" in self.engine.actions
 
-    def test_tensor_passthrough(self):
-        tensor = torch.eye(4)
-        result = self.engine._resolve_target(tensor)
-        assert result is tensor
+    def test_run_concatenates_trajectories(self):
+        a = _fake_action("a", EndEffectorPoseTarget)
+        b = _fake_action("b", EndEffectorPoseTarget)
+        self.engine.register(a, name="a")
+        self.engine.register(b, name="b")
+        ok, traj, _ = self.engine.run(
+            [
+                ("a", EndEffectorPoseTarget(torch.eye(4))),
+                ("b", EndEffectorPoseTarget(torch.eye(4))),
+            ]
+        )
+        assert ok is True
+        assert traj.shape == (NUM_ENVS, 10, TOTAL_DOF)
 
-    def test_object_semantics_passthrough(self):
-        sem = ObjectSemantics(affordance=Affordance(), geometry={})
-        result = self.engine._resolve_target(sem)
-        assert result is sem
+    def test_run_threads_world_state(self):
+        pick = _fake_action("pick", GraspTarget, sets_held=True)
+        move = _fake_action("move", HeldObjectPoseTarget)
+        place = _fake_action("place", EndEffectorPoseTarget, clears_held=True)
+        self.engine.register(pick, name="pick")
+        self.engine.register(move, name="move")
+        self.engine.register(place, name="place")
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="x")
+        ok, _, final_state = self.engine.run(
+            [
+                ("pick", GraspTarget(sem)),
+                ("move", HeldObjectPoseTarget(torch.eye(4))),
+                ("place", EndEffectorPoseTarget(torch.eye(4))),
+            ]
+        )
+        assert ok is True
+        # The move action saw a non-None held_object (set by pick).
+        move_state_arg = move.execute.call_args_list[0].args[1]
+        assert move_state_arg.held_object is not None
+        # Final state cleared by place.
+        assert final_state.held_object is None
 
-    def test_string_resolved_via_semantic_analyzer(self):
-        result = self.engine._resolve_target("mug")
-        assert isinstance(result, ObjectSemantics)
-        assert result.label == "mug"
+    def test_run_stops_on_first_failure(self):
+        a = _fake_action("a", EndEffectorPoseTarget)
+        b = _fake_action("b", EndEffectorPoseTarget, fails=True)
+        c = _fake_action("c", EndEffectorPoseTarget)
+        self.engine.register(a, name="a")
+        self.engine.register(b, name="b")
+        self.engine.register(c, name="c")
+        ok, traj, _ = self.engine.run(
+            [
+                ("a", EndEffectorPoseTarget(torch.eye(4))),
+                ("b", EndEffectorPoseTarget(torch.eye(4))),
+                ("c", EndEffectorPoseTarget(torch.eye(4))),
+            ]
+        )
+        assert ok is False
+        # `c` should not have been called.
+        c.execute.assert_not_called()
+        # We still get back the partial trajectory accumulated from `a`.
+        assert traj.shape == (NUM_ENVS, 5, TOTAL_DOF)
 
-    def test_dict_with_pose_key(self):
-        pose = torch.eye(4)
-        result = self.engine._resolve_target({"pose": pose})
-        assert result is pose
+    def test_run_raises_on_unknown_action_name(self):
+        with pytest.raises(KeyError, match="ghost"):
+            self.engine.run([("ghost", EndEffectorPoseTarget(torch.eye(4)))])
 
-    def test_dict_with_pose_raises_on_non_tensor(self):
-        with pytest.raises(TypeError, match="must be a torch.Tensor"):
-            self.engine._resolve_target({"pose": "not_a_tensor"})
+    def test_run_raises_on_target_type_mismatch(self):
+        a = _fake_action("a", EndEffectorPoseTarget)
+        self.engine.register(a, name="a")
+        with pytest.raises(TypeError, match="target"):
+            self.engine.run([("a", HeldObjectPoseTarget(torch.eye(4)))])
 
-    def test_dict_with_semantics_key(self):
-        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="bottle")
-        result = self.engine._resolve_target({"semantics": sem})
-        assert result is sem
+    def test_run_raises_on_tuple_target_type_mismatch(self):
+        a = _fake_action("a", (JointPositionTarget, NamedJointPositionTarget))
+        self.engine.register(a, name="a")
+        with pytest.raises(
+            TypeError, match="JointPositionTarget.*NamedJointPositionTarget"
+        ):
+            self.engine.run([("a", EndEffectorPoseTarget(torch.eye(4)))])
 
-    def test_dict_with_semantics_raises_on_wrong_type(self):
-        with pytest.raises(TypeError, match="must be an ObjectSemantics"):
-            self.engine._resolve_target({"semantics": "wrong"})
-
-    def test_dict_with_label_uses_analyzer(self):
-        result = self.engine._resolve_target({"label": "apple"})
-        assert isinstance(result, ObjectSemantics)
-        assert result.label == "apple"
-
-    def test_dict_without_label_raises(self):
-        with pytest.raises(ValueError, match="must provide 'label'"):
-            self.engine._resolve_target({"geometry": {}})
-
-    def test_dict_with_non_string_label_raises(self):
-        with pytest.raises(TypeError, match="must be a string"):
-            self.engine._resolve_target({"label": 123})
-
-    def test_unsupported_type_raises(self):
-        with pytest.raises(TypeError, match="target must be"):
-            self.engine._resolve_target(42)
-
-
-if __name__ == "__main__":
-    test = TestSemanticAnalyzer()
-    test.setup_method()
-    test.test_analyze_returns_object_semantics()
+    def test_run_seeds_state_from_robot_when_none_provided(self):
+        a = _fake_action("a", EndEffectorPoseTarget)
+        self.engine.register(a, name="a")
+        seed_qpos = self.mg.robot.get_qpos.return_value
+        self.engine.run([("a", EndEffectorPoseTarget(torch.eye(4)))])
+        # First call's state argument
+        state_arg = a.execute.call_args_list[0].args[1]
+        assert state_arg.last_qpos.shape == (NUM_ENVS, TOTAL_DOF)
+        assert state_arg.held_object is None
+        assert state_arg.last_qpos.data_ptr() != seed_qpos.data_ptr()
+        seed_qpos.fill_(1.0)
+        assert torch.equal(state_arg.last_qpos, torch.zeros(NUM_ENVS, TOTAL_DOF))

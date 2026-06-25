@@ -17,7 +17,7 @@ Follow the tutorials in this order for the best learning experience:
 5. :doc:`sensor` — Add cameras and capture RGB/depth/segmentation data.
 6. :doc:`solver` — Configure IK solvers for end-effector control.
 7. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
-8. :doc:`atomic_actions` — Use built-in action primitives (pick, place, move).
+8. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
 9. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
 
 **Phase 2: Environments**

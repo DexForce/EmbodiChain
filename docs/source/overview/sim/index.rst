@@ -116,7 +116,7 @@ Choosing Where to Start
   kinematics.
 - Use :doc:`planners/index` when a target pose or joint goal must become a
   time-ordered trajectory.
-- Use :doc:`atomic_actions` when building scripted manipulation from reusable
+- Use :doc:`atomic actions <atomic_actions/index>` when building scripted manipulation from reusable
   motion primitives.
 
 Documentation Quality Notes
@@ -140,4 +140,4 @@ See Also
    sim_sensor.md
    solvers/index
    planners/index
-   atomic_actions.md
+   atomic_actions/index

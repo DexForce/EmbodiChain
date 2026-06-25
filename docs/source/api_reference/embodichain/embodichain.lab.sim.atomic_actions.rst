@@ -8,16 +8,31 @@ embodichain.lab.sim.atomic_actions
    .. autosummary::
 
       Affordance
+      AntipodalAffordance
       InteractionPoints
       ObjectSemantics
+      EndEffectorPoseTarget
+      JointPositionTarget
+      NamedJointPositionTarget
+      GraspTarget
+      HeldObjectPoseTarget
+      Target
+      HeldObjectState
+      WorldState
+      ActionResult
       ActionCfg
       AtomicAction
-      MoveActionCfg
-      MoveAction
-      PickUpActionCfg
-      PickUpAction
-      PlaceActionCfg
-      PlaceAction
+      TrajectoryBuilder
+      MoveEndEffectorCfg
+      MoveEndEffector
+      MoveJointsCfg
+      MoveJoints
+      PickUpCfg
+      PickUp
+      MoveHeldObjectCfg
+      MoveHeldObject
+      PlaceCfg
+      Place
       AtomicActionEngine
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
@@ -29,6 +44,10 @@ Core
     :members:
     :show-inheritance:
 
+.. autoclass:: AntipodalAffordance
+    :members:
+    :show-inheritance:
+
 .. autoclass:: InteractionPoints
     :members:
     :show-inheritance:
@@ -37,41 +56,100 @@ Core
     :members:
     :show-inheritance:
 
+.. autoclass:: EndEffectorPoseTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: JointPositionTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: NamedJointPositionTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: GraspTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: HeldObjectPoseTarget
+    :members:
+    :show-inheritance:
+
+.. autodata:: Target
+
+.. autoclass:: HeldObjectState
+    :members:
+    :show-inheritance:
+
+.. autoclass:: WorldState
+    :members:
+    :show-inheritance:
+
+.. autoclass:: ActionResult
+    :members:
+    :show-inheritance:
+
 .. autoclass:: ActionCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
 
 .. autoclass:: AtomicAction
+    :members:
+    :show-inheritance:
+
+Trajectory helpers
+------------------
+
+.. autoclass:: TrajectoryBuilder
     :members:
     :show-inheritance:
 
 Actions
 -------
 
-.. autoclass:: MoveActionCfg
+.. autoclass:: MoveEndEffectorCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
     :show-inheritance:
 
-.. autoclass:: MoveAction
-    :members:
-    :show-inheritance:
-
-.. autoclass:: PickUpActionCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
-    :show-inheritance:
-
-.. autoclass:: PickUpAction
+.. autoclass:: MoveEndEffector
     :members:
     :show-inheritance:
 
-.. autoclass:: PlaceActionCfg
+.. autoclass:: MoveJointsCfg
     :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
+    :exclude-members: __init__, copy, replace, to_dict
     :show-inheritance:
 
-.. autoclass:: PlaceAction
+.. autoclass:: MoveJoints
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PickUpCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: PickUp
+    :members:
+    :show-inheritance:
+
+.. autoclass:: MoveHeldObjectCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: MoveHeldObject
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PlaceCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: Place
     :members:
     :show-inheritance:
 

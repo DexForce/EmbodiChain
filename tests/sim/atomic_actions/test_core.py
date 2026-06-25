@@ -14,155 +14,144 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for atomic action core module (Affordance, InteractionPoints, ObjectSemantics, ActionCfg)."""
+"""Tests for atomic_actions.core (typed targets, WorldState, ActionResult, ObjectSemantics)."""
 
 from __future__ import annotations
+
+import dataclasses
 
 import pytest
 import torch
 
+from embodichain.lab.sim.atomic_actions.affordance import Affordance
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
-    Affordance,
-    InteractionPoints,
+    ActionResult,
+    GraspTarget,
+    HeldObjectState,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
     ObjectSemantics,
+    EndEffectorPoseTarget,
+    WorldState,
 )
 
-# ---------------------------------------------------------------------------
-# Affordance
-# ---------------------------------------------------------------------------
 
+class TestTypedTargets:
+    def test_pose_target_holds_tensor(self):
+        x = torch.eye(4)
+        assert EndEffectorPoseTarget(xpos=x).xpos is x
 
-class TestAffordance:
-    """Tests for the Affordance base dataclass."""
+    def test_pose_target_is_frozen(self):
+        t = EndEffectorPoseTarget(xpos=torch.eye(4))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.xpos = torch.zeros(4, 4)  # type: ignore[misc]
 
-    def test_default_values(self):
-        aff = Affordance()
-        assert aff.object_label == ""
-        assert aff.geometry == {}
-        assert aff.custom_config == {}
+    def test_joint_position_target_holds_qpos(self):
+        qpos = torch.zeros(6)
+        assert JointPositionTarget(qpos=qpos).qpos is qpos
 
-    def test_mesh_vertices_returns_tensor(self):
-        vertices = torch.randn(10, 3)
-        aff = Affordance(geometry={"mesh_vertices": vertices})
-        assert torch.equal(aff.mesh_vertices, vertices)
+    def test_joint_position_target_is_frozen(self):
+        t = JointPositionTarget(qpos=torch.zeros(6))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.qpos = torch.ones(6)  # type: ignore[misc]
 
-    def test_mesh_vertices_returns_none_when_missing(self):
-        aff = Affordance()
-        assert aff.mesh_vertices is None
+    def test_named_joint_position_target_holds_name(self):
+        assert NamedJointPositionTarget(name="home").name == "home"
 
-    def test_mesh_vertices_raises_on_wrong_type(self):
-        aff = Affordance(geometry={"mesh_vertices": [1, 2, 3]})
-        with pytest.raises(TypeError, match="must be a torch.Tensor"):
-            _ = aff.mesh_vertices
+    def test_named_joint_position_target_is_frozen(self):
+        t = NamedJointPositionTarget(name="home")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.name = "ready"  # type: ignore[misc]
 
-    def test_mesh_triangles_returns_tensor(self):
-        triangles = torch.randint(0, 10, (5, 3))
-        aff = Affordance(geometry={"mesh_triangles": triangles})
-        assert torch.equal(aff.mesh_triangles, triangles)
+    def test_grasp_target_holds_semantics(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
+        assert GraspTarget(semantics=sem).semantics is sem
 
-    def test_mesh_triangles_returns_none_when_missing(self):
-        aff = Affordance()
-        assert aff.mesh_triangles is None
+    def test_grasp_target_is_frozen(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
+        t = GraspTarget(semantics=sem)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.semantics = ObjectSemantics(  # type: ignore[misc]
+                affordance=Affordance(), geometry={}, label="other"
+            )
 
-    def test_mesh_triangles_raises_on_wrong_type(self):
-        aff = Affordance(geometry={"mesh_triangles": "bad"})
-        with pytest.raises(TypeError, match="must be a torch.Tensor"):
-            _ = aff.mesh_triangles
+    def test_held_object_target_holds_pose(self):
+        x = torch.eye(4)
+        assert HeldObjectPoseTarget(object_target_pose=x).object_target_pose is x
 
-    def test_custom_config_get_set(self):
-        aff = Affordance()
-        aff.set_custom_config("key_a", 42)
-        assert aff.get_custom_config("key_a") == 42
-        assert aff.get_custom_config("missing") is None
-        assert aff.get_custom_config("missing", "default") == "default"
-
-    def test_get_batch_size_returns_one(self):
-        # Base Affordance always returns 1
-        assert Affordance().get_batch_size() == 1
-
-
-# ---------------------------------------------------------------------------
-# InteractionPoints
-# ---------------------------------------------------------------------------
-
-
-class TestInteractionPoints:
-    """Tests for InteractionPoints affordance."""
-
-    def test_default_points_shape(self):
-        ip = InteractionPoints()
-        assert ip.points.shape == (1, 3)
-
-    def test_get_batch_size_matches_points(self):
-        points = torch.randn(5, 3)
-        ip = InteractionPoints(points=points)
-        assert ip.get_batch_size() == 5
-
-    def test_get_points_by_type_returns_matching_subset(self):
-        points = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-        ip = InteractionPoints(points=points, point_types=["push", "poke", "push"])
-        result = ip.get_points_by_type("push")
-        assert result is not None
-        assert result.shape == (2, 3)
-        assert torch.equal(result[0], points[0])
-        assert torch.equal(result[1], points[2])
-
-    def test_get_points_by_type_returns_none_for_missing_type(self):
-        ip = InteractionPoints(points=torch.zeros(2, 3), point_types=["push", "push"])
-        assert ip.get_points_by_type("poke") is None
-
-    def test_get_approach_direction_from_normals(self):
-        normals = torch.tensor([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
-        ip = InteractionPoints(points=torch.zeros(2, 3), normals=normals)
-        # Approach is opposite of normal
-        assert torch.equal(ip.get_approach_direction(0), torch.tensor([0.0, 0.0, -1.0]))
-        assert torch.equal(ip.get_approach_direction(1), torch.tensor([-1.0, 0.0, 0.0]))
-
-    def test_get_approach_direction_default_without_normals(self):
-        ip = InteractionPoints(points=torch.zeros(1, 3))
-        direction = ip.get_approach_direction(0)
-        assert torch.equal(direction, torch.tensor([0.0, 0.0, 1.0]))
-
-
-# ---------------------------------------------------------------------------
-# ObjectSemantics
-# ---------------------------------------------------------------------------
+    def test_held_object_target_is_frozen(self):
+        t = HeldObjectPoseTarget(object_target_pose=torch.eye(4))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.object_target_pose = torch.zeros(4, 4)  # type: ignore[misc]
 
 
 class TestObjectSemantics:
-    """Tests for ObjectSemantics dataclass."""
-
-    def test_post_init_binds_label_and_geometry(self):
-        geometry = {"bounding_box": [0.1, 0.2, 0.3]}
+    def test_does_not_mutate_affordance_geometry(self):
+        # The redesign removes the __post_init__ aliasing footgun.
         aff = Affordance()
-        sem = ObjectSemantics(
-            affordance=aff,
-            geometry=geometry,
-            label="mug",
-        )
-        assert sem.affordance.object_label == "mug"
-        assert sem.affordance.geometry is geometry
+        geometry = {"bounding_box": [0.1, 0.1, 0.1]}
+        ObjectSemantics(affordance=aff, geometry=geometry, label="mug")
+        # affordance should not have a geometry attribute, or if it does it should
+        # NOT be the same object as the semantics' geometry dict.
+        assert getattr(aff, "geometry", None) is not geometry
+
+    def test_sets_object_label_on_affordance(self):
+        aff = Affordance()
+        ObjectSemantics(affordance=aff, geometry={}, label="mug")
+        assert aff.object_label == "mug"
 
     def test_default_optional_fields(self):
-        sem = ObjectSemantics(
-            affordance=Affordance(),
-            geometry={},
-        )
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
         assert sem.label == "none"
         assert sem.properties == {}
         assert sem.entity is None
 
 
-# ---------------------------------------------------------------------------
-# ActionCfg
-# ---------------------------------------------------------------------------
+class TestHeldObjectState:
+    def test_required_fields(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
+        s = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        assert s.semantics is sem
+        assert s.object_to_eef.shape == (1, 4, 4)
+        assert s.grasp_xpos.shape == (1, 4, 4)
+
+
+class TestWorldState:
+    def test_constructs_with_last_qpos_only(self):
+        qpos = torch.zeros(2, 6)
+        ws = WorldState(last_qpos=qpos)
+        assert ws.last_qpos is qpos
+        assert ws.held_object is None
+
+    def test_carries_held_object(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        ws = WorldState(last_qpos=torch.zeros(1, 6), held_object=held)
+        assert ws.held_object is held
+
+
+class TestActionResult:
+    def test_shape_contract(self):
+        traj = torch.zeros(2, 10, 8)
+        ws = WorldState(last_qpos=torch.zeros(2, 8))
+        res = ActionResult(success=True, trajectory=traj, next_state=ws)
+        assert res.success is True
+        assert res.trajectory.shape == (2, 10, 8)
+        assert res.next_state is ws
 
 
 class TestActionCfg:
-    """Tests for ActionCfg defaults."""
-
-    def test_default_values(self):
+    def test_defaults(self):
         cfg = ActionCfg()
         assert cfg.name == "default"
         assert cfg.control_part == "arm"
