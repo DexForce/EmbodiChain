@@ -14,10 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified benchmark for OPW and Pytorch kinematic solvers.
+"""Unified benchmark for OPW, UR, and Pytorch kinematic solvers.
 
 Measures IK wall-clock latency, pose accuracy, success rate, and memory usage
-across OPW (Warp CUDA vs CPU) and Pytorch solver (CPU vs optional CUDA).
+across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), and the
+Pytorch solver (CPU vs optional CUDA).
 Run: python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark
 """
 
@@ -36,6 +37,7 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.solvers.opw_solver import OPWSolverCfg
 from embodichain.lab.sim.solvers.pytorch_solver import PytorchSolver, PytorchSolverCfg
+from embodichain.lab.sim.solvers.ur_solver import URSolver, URSolverCfg
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
@@ -46,8 +48,20 @@ OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
 PYTORCH_LOWER_LIMITS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 PYTORCH_UPPER_LIMITS = [2.5, 2.5, 2.5, 2.5, 2.5, 2.5]
 
+# UR10 analytic IK is robust over the full range; use +/- pi (matching test_ur_solver)
+# with a small safety margin applied at sampling time.
+UR_LOWER_LIMITS = [-np.pi, -np.pi, -np.pi, -np.pi, -np.pi, -np.pi]
+UR_UPPER_LIMITS = [np.pi, np.pi, np.pi, np.pi, np.pi, np.pi]
+UR_JOINT_NAMES = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Joint6"]
+UR_TCP = [
+    [0.0, 1.0, 0.0, 0.0],
+    [-1.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.12],
+    [0.0, 0.0, 0.0, 1.0],
+]
+
 SAMPLE_SIZES = [100, 1000, 10000]
-SUPPORTED_SOLVERS = ("opw", "pytorch")
+SUPPORTED_SOLVERS = ("opw", "pytorch", "ur")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -62,7 +76,7 @@ def _parse_args() -> argparse.Namespace:
         choices=(*SUPPORTED_SOLVERS, "all"),
         default=["all"],
         help=(
-            "Solvers to benchmark. Use one or more of: opw, pytorch, all. "
+            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, all. "
             "Default: all"
         ),
     )
@@ -80,6 +94,18 @@ def _sync_cuda() -> None:
     """Synchronize CUDA stream when available."""
     if torch.cuda.is_available():
         torch.cuda.synchronize()
+
+
+def _ensure_warp_initialized() -> None:
+    """Initialize the Warp runtime if it has not been initialized yet.
+
+    Solvers that launch Warp kernels (e.g. the analytic UR/OPW solvers) require
+    an initialized Warp runtime. ``SimulationManager`` normally handles this, but
+    the benchmark drives the solvers directly, so we initialize it here.
+    """
+    import warp as wp
+
+    wp.init()
 
 
 def _reset_peak_gpu_memory() -> None:
@@ -659,8 +685,195 @@ def benchmark_opw_solver() -> tuple[list[dict[str, object]], list[dict[str, obje
     return perf_rows, metric_rows
 
 
+def _init_ur_solver(device: torch.device) -> URSolver:
+    """Initialize the UR analytic IK solver on the target device."""
+    solver_cfg = URSolverCfg(
+        ur_type="ur10",
+        end_link_name="ee_link",
+        root_link_name="base_link",
+        joint_names=UR_JOINT_NAMES,
+        tcp=UR_TCP,
+        user_qpos_limits=[UR_LOWER_LIMITS, UR_UPPER_LIMITS],
+    )
+    return solver_cfg.init_solver(device=device)
+
+
+def _timed_ur_ik_call(
+    solver: URSolver,
+    fk_xpos: torch.Tensor,
+    qpos_seed: torch.Tensor,
+) -> tuple[float, dict[str, float], float, torch.Tensor, torch.Tensor]:
+    """Run a timed UR analytic IK call and return elapsed/memory/outputs."""
+    _reset_peak_gpu_memory()
+    mem_before = _memory_snapshot()
+    _sync_cuda()
+
+    start = time.perf_counter()
+    for i in range(3):
+        if i == 1:  # skip first run to avoid initialization overhead
+            start = time.perf_counter()
+        ik_success, ik_qpos = solver.get_ik(fk_xpos, qpos_seed=qpos_seed)
+    _sync_cuda()
+    elapsed = time.perf_counter() - start
+    elapsed /= 2.0
+
+    mem_after = _memory_snapshot()
+    deltas = {
+        "cpu_mb": mem_after["cpu_mb"] - mem_before["cpu_mb"],
+        "gpu_mb": mem_after["gpu_mb"] - mem_before["gpu_mb"],
+    }
+    return elapsed, deltas, _peak_gpu_memory_mb(), ik_success, ik_qpos
+
+
+def benchmark_ur_solver() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Benchmark the UR analytic IK solver for CPU and optional CUDA."""
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+
+    _ensure_warp_initialized()
+
+    cpu_solver = _init_ur_solver(device=torch.device("cpu"))
+    has_cuda = torch.cuda.is_available()
+    cuda_solver = _init_ur_solver(device=torch.device("cuda")) if has_cuda else None
+
+    print("\n=== UR Analytic Solver Benchmark ===")
+    if not has_cuda:
+        print("  CUDA unavailable; CUDA benchmark is skipped.")
+
+    for n_sample in SAMPLE_SIZES:
+        print(f"**** Test over {n_sample} samples:")
+
+        qpos_cpu = _sample_qpos(
+            n_samples=n_sample,
+            lower_limits=UR_LOWER_LIMITS,
+            upper_limits=UR_UPPER_LIMITS,
+            margin=1e-1,
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+        )
+        fk_xpos_cpu = cpu_solver.get_fk(qpos_cpu)
+        (
+            cpu_elapsed,
+            cpu_mem,
+            cpu_peak_gpu,
+            cpu_success,
+            cpu_ik_qpos,
+        ) = _timed_ur_ik_call(cpu_solver, fk_xpos_cpu, qpos_cpu)
+        check_xpos_cpu = cpu_solver.get_fk(cpu_ik_qpos)
+        cpu_t_err, cpu_r_err = get_pose_err(fk_xpos_cpu, check_xpos_cpu)
+
+        cpu_result = {
+            "cost_time_ms": cpu_elapsed * 1000.0,
+            "cpu_delta_mb": cpu_mem["cpu_mb"],
+            "gpu_delta_mb": cpu_mem["gpu_mb"],
+            "peak_gpu_mb": cpu_peak_gpu,
+            "success_rate": float(cpu_success.float().mean().item()),
+            "translation_err_mm": cpu_t_err.mean().item() * 1000.0,
+            "rotation_err_deg": cpu_r_err.mean().item() * 180.0 / np.pi,
+        }
+
+        perf_rows.append(
+            {
+                "sample_size": n_sample,
+                "impl": "ur_cpu",
+                "component": "ur_ik",
+                "cost_time_ms": f"{cpu_result['cost_time_ms']:.6f}",
+                "cpu_delta_mb": f"{cpu_result['cpu_delta_mb']:.6f}",
+                "gpu_delta_mb": f"{cpu_result['gpu_delta_mb']:.6f}",
+                "peak_gpu_mb": f"{cpu_result['peak_gpu_mb']:.6f}",
+            }
+        )
+        metric_rows.append(
+            {
+                "sample_size": n_sample,
+                "impl": "ur_cpu",
+                "component": "ur_ik",
+                "success_rate": f"{cpu_result['success_rate']:.6f}",
+                "translation_err_mm": f"{cpu_result['translation_err_mm']:.6f}",
+                "rotation_err_deg": f"{cpu_result['rotation_err_deg']:.6f}",
+            }
+        )
+
+        print(f"===UR CPU IK time:   {cpu_result['cost_time_ms']:.6f} ms")
+        print(f"   Translation mean error: {cpu_result['translation_err_mm']:.6f} mm")
+        print(
+            f"   Rotation mean error:    {cpu_result['rotation_err_deg']:.6f} degrees"
+        )
+        print(f"   Success rate:           {cpu_result['success_rate'] * 100.0:.2f}%")
+        print(
+            "   "
+            f"CPU Δ={cpu_result['cpu_delta_mb']:+.1f} MB  "
+            f"GPU Δ={cpu_result['gpu_delta_mb']:+.1f} MB  "
+            f"peak GPU={cpu_result['peak_gpu_mb']:.1f} MB"
+        )
+
+        if has_cuda and cuda_solver is not None:
+            qpos_cuda = qpos_cpu.to(torch.device("cuda"))
+            fk_xpos_cuda = cuda_solver.get_fk(qpos_cuda)
+            (
+                cuda_elapsed,
+                cuda_mem,
+                cuda_peak_gpu,
+                cuda_success,
+                cuda_ik_qpos,
+            ) = _timed_ur_ik_call(cuda_solver, fk_xpos_cuda, qpos_cuda)
+            check_xpos_cuda = cuda_solver.get_fk(cuda_ik_qpos)
+            cuda_t_err, cuda_r_err = get_pose_err(fk_xpos_cuda, check_xpos_cuda)
+
+            cuda_result = {
+                "cost_time_ms": cuda_elapsed * 1000.0,
+                "cpu_delta_mb": cuda_mem["cpu_mb"],
+                "gpu_delta_mb": cuda_mem["gpu_mb"],
+                "peak_gpu_mb": cuda_peak_gpu,
+                "success_rate": float(cuda_success.float().mean().item()),
+                "translation_err_mm": cuda_t_err.mean().item() * 1000.0,
+                "rotation_err_deg": cuda_r_err.mean().item() * 180.0 / np.pi,
+            }
+
+            perf_rows.append(
+                {
+                    "sample_size": n_sample,
+                    "impl": "ur_cuda",
+                    "component": "ur_ik",
+                    "cost_time_ms": f"{cuda_result['cost_time_ms']:.6f}",
+                    "cpu_delta_mb": f"{cuda_result['cpu_delta_mb']:.6f}",
+                    "gpu_delta_mb": f"{cuda_result['gpu_delta_mb']:.6f}",
+                    "peak_gpu_mb": f"{cuda_result['peak_gpu_mb']:.6f}",
+                }
+            )
+            metric_rows.append(
+                {
+                    "sample_size": n_sample,
+                    "impl": "ur_cuda",
+                    "component": "ur_ik",
+                    "success_rate": f"{cuda_result['success_rate']:.6f}",
+                    "translation_err_mm": f"{cuda_result['translation_err_mm']:.6f}",
+                    "rotation_err_deg": f"{cuda_result['rotation_err_deg']:.6f}",
+                }
+            )
+
+            print(f"===UR CUDA IK time:  {cuda_result['cost_time_ms']:.6f} ms")
+            print(
+                f"   Translation mean error: {cuda_result['translation_err_mm']:.6f} mm"
+            )
+            print(
+                f"   Rotation mean error:    {cuda_result['rotation_err_deg']:.6f} degrees"
+            )
+            print(
+                f"   Success rate:           {cuda_result['success_rate'] * 100.0:.2f}%"
+            )
+            print(
+                "   "
+                f"CPU Δ={cuda_result['cpu_delta_mb']:+.1f} MB  "
+                f"GPU Δ={cuda_result['gpu_delta_mb']:+.1f} MB  "
+                f"peak GPU={cuda_result['peak_gpu_mb']:.1f} MB"
+            )
+
+    return perf_rows, metric_rows
+
+
 def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
-    """Run unified OPW + Pytorch kinematic solver benchmarks."""
+    """Run unified OPW + UR + Pytorch kinematic solver benchmarks."""
     solvers_to_run = _normalize_selected_solvers(selected_solvers)
 
     print("=" * 60)
@@ -675,6 +888,7 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         "opw-specific joint limits."
     )
     print("- Pytorch solver: UR10 URDF-based PytorchSolver with " "UR10 joint limits.")
+    print("- UR solver: analytic UR10 IK via URSolverCfg with UR10 DH parameters.")
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -688,6 +902,11 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         pytorch_perf_rows, pytorch_metric_rows = benchmark_pytorch_solver()
         perf_rows.extend(pytorch_perf_rows)
         metric_rows.extend(pytorch_metric_rows)
+
+    if "ur" in solvers_to_run:
+        ur_perf_rows, ur_metric_rows = benchmark_ur_solver()
+        perf_rows.extend(ur_perf_rows)
+        metric_rows.extend(ur_metric_rows)
 
     leaderboard_rows = _build_leaderboard_rows(metric_rows)
 

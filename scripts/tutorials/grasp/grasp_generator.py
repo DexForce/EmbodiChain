@@ -28,7 +28,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.utils import logger
@@ -129,16 +129,14 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
             "hand": ["FINGER[1-2]"],
         },
         solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
+            "arm": URSolverCfg(
+                ur_type="ur10",
                 tcp=[
                     [0.0, 1.0, 0.0, 0.0],
                     [-1.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, 1.0, 0.12],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
-                num_samples=30,
             )
         },
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
