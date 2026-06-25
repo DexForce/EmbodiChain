@@ -156,6 +156,16 @@ class CobotMagicCfg(RobotCfg):
             max_depenetration_velocity=1e1,
         )
 
+    @property
+    def _pk_urdf_path(self) -> str:
+        """URDF used for FK/IK serial chains (arm-only, gripper-stripped).
+
+        .. attention::
+            The root_link->end_link kinematics here must match the arm in the
+            simulation URDF. A DOF drift guard in the tests checks this.
+        """
+        return get_data_path("CobotMagicArm/CobotMagicNoGripper.urdf")
+
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
     ) -> Dict[str, "pk.SerialChain"]:
@@ -163,7 +173,7 @@ class CobotMagicCfg(RobotCfg):
             create_pk_serial_chain,
         )
 
-        urdf_path = get_data_path("CobotMagicArm/CobotMagicNoGripper.urdf")
+        urdf_path = self._pk_urdf_path
 
         left_arm_chain = create_pk_serial_chain(
             urdf_path=urdf_path,

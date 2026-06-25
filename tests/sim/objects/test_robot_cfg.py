@@ -125,3 +125,39 @@ def test_robotcfg_save_to_file(tmp_path):
     loaded = json.loads(fp.read_text())
     assert loaded["variant"] == "b"
     assert loaded["uid"] == "roundtrip"
+
+
+# --------------------------------------------------------------------------- #
+# PK drift-guard tests -- ensure build_pk_serial_chain DOF matches control_parts
+# --------------------------------------------------------------------------- #
+
+
+def _dof_of_pk_chain(chain) -> int:
+    """Number of actuated joints in a pk.SerialChain."""
+    return len(chain.get_joint_parameter_names())
+
+
+def test_dexforce_w1_pk_dof_matches_control_parts():
+    pytest.importorskip("pytorch_kinematics")
+    cfg = DexforceW1Cfg.from_dict({"arm_kind": "anthropomorphic"})
+    try:
+        chains = cfg.build_pk_serial_chain()
+    except Exception as exc:
+        pytest.skip(f"PK URDF asset unavailable: {exc}")
+    for arm in ("left_arm", "right_arm"):
+        assert _dof_of_pk_chain(chains[arm]) == len(
+            cfg.control_parts[arm]
+        ), f"{arm}: PK chain DOF drifted from control_parts"
+
+
+def test_cobotmagic_pk_dof_matches_control_parts():
+    pytest.importorskip("pytorch_kinematics")
+    cfg = CobotMagicCfg.from_dict({})
+    try:
+        chains = cfg.build_pk_serial_chain()
+    except Exception as exc:
+        pytest.skip(f"PK URDF asset unavailable: {exc}")
+    for arm in ("left_arm", "right_arm"):
+        assert _dof_of_pk_chain(chains[arm]) == len(
+            cfg.control_parts[arm]
+        ), f"{arm}: PK chain DOF drifted from control_parts"

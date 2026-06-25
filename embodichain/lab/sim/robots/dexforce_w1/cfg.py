@@ -284,6 +284,17 @@ class DexforceW1Cfg(RobotCfg):
 
     # to_dict, to_string, save_to_file inherited from RobotCfg
 
+    def _pk_urdf_path(self) -> str:
+        """URDF used for FK/IK serial chains, by arm kind.
+
+        .. attention::
+            The root_link->end_link kinematics here must match the arms in the
+            simulation (assembled) URDF. A DOF drift guard in the tests checks this.
+        """
+        if self.arm_kind == DexforceW1ArmKind.INDUSTRIAL:
+            return get_data_path("DexforceW1V021/DexforceW1_v02_2.urdf")
+        return get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
+
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
     ) -> Dict[str, "pk.SerialChain"]:
@@ -291,10 +302,7 @@ class DexforceW1Cfg(RobotCfg):
             create_pk_serial_chain,
         )
 
-        if DexforceW1ArmKind.INDUSTRIAL == self.arm_kind:
-            urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_2.urdf")
-        elif DexforceW1ArmKind.ANTHROPOMORPHIC == self.arm_kind:
-            urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
+        urdf_path = self._pk_urdf_path()
 
         left_arm_chain = create_pk_serial_chain(
             urdf_path=urdf_path,
