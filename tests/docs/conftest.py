@@ -21,19 +21,25 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "docs" / "scripts" / "merge_published_site.py"
+_CLEAN_SCRIPT = _REPO_ROOT / "docs" / "scripts" / "clean_docs_artifact_paths.py"
+_MERGE_SCRIPT = _REPO_ROOT / "docs" / "scripts" / "merge_published_site.py"
+_VALIDATE_SCRIPT = _REPO_ROOT / "docs" / "scripts" / "validate_docs_site.py"
 
 
-def _load_merge_module():
-    spec = importlib.util.spec_from_file_location("merge_published_site", _SCRIPT)
+def _load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load {_SCRIPT}")
+        raise ImportError(f"Cannot load {path}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules["merge_published_site"] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-_merge = _load_merge_module()
+_clean = _load_module("clean_docs_artifact_paths", _CLEAN_SCRIPT)
+_merge = _load_module("merge_published_site", _MERGE_SCRIPT)
+_validate = _load_module("validate_docs_site", _VALIDATE_SCRIPT)
+clean_docs_artifact_paths = _clean.clean_docs_artifact_paths
 load_versions_manifest = _merge.load_versions_manifest
 merge_published_site = _merge.merge_published_site
+validate_docs_site = _validate.validate_docs_site

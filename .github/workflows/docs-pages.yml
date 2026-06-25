@@ -14,6 +14,16 @@ on:
         description: "Existing CI/CD Pipeline run ID to deploy from instead of rebuilding"
         required: false
         type: string
+      artifact_name:
+        description: "Artifact name to deploy when artifact_run_id is set"
+        required: false
+        default: "docs-site"
+        type: string
+      skip_cache_restore:
+        description: "Skip restoring the multi-version docs cache during manual rebuild"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -38,13 +48,35 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download docs site artifact from CI/CD Pipeline run
         uses: actions/download-artifact@v4
         with:
-          name: docs-site
+          name: ${{ github.event_name == 'workflow_run' && 'docs-site' || inputs.artifact_name }}
           run-id: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.artifact_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ./docs-site
+
+      - name: Validate docs site artifact
+        shell: bash
+        run: |
+          SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          SOURCE_REF="${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.ref }}"
+          if [[ "${SOURCE_REF}" == v* ]]; then
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir ./docs-site \
+              --require-version "${SOURCE_REF}"
+          elif [[ "${SOURCE_REF}" == main || -z "${SOURCE_REF}" ]]; then
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir ./docs-site \
+              --require-version main \
+              --preserve-live-tags \
+              --site-base-url "${SITE_URL}"
+          else
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir ./docs-site
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -81,6 +113,7 @@ jobs:
       - uses: ./.github/actions/activate-conda
 
       - name: Restore full multi-version docs site
+        if: ${{ !inputs.skip_cache_restore }}
         uses: actions/cache/restore@v4
         with:
           path: docs/build/html
@@ -136,6 +169,29 @@ jobs:
 
           python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
             --build-dir .
+
+      - name: Clean docs artifact paths
+        shell: bash
+        run: |
+          python3 docs/scripts/clean_docs_artifact_paths.py \
+            --build-dir docs/build/html
+
+      - name: Validate docs site
+        shell: bash
+        run: |
+          SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          TARGET_REF="${{ inputs.ref != '' && inputs.ref || 'main' }}"
+          if [[ "${TARGET_REF}" == v* ]]; then
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir docs/build/html \
+              --require-version "${TARGET_REF}"
+          else
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir docs/build/html \
+              --require-version main \
+              --preserve-live-tags \
+              --site-base-url "${SITE_URL}"
+          fi
 
       - name: Upload docs site artifact
         uses: actions/upload-artifact@v4

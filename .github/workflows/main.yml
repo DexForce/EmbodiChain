@@ -129,6 +129,30 @@ jobs:
           python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
             --build-dir .
 
+      - name: Clean docs artifact paths
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          python3 docs/scripts/clean_docs_artifact_paths.py \
+            --build-dir docs/build/html
+
+      - name: Validate docs site
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir docs/build/html \
+              --require-version "${GITHUB_REF_NAME}"
+          else
+            python3 docs/scripts/validate_docs_site.py \
+              --build-dir docs/build/html \
+              --require-version main \
+              --preserve-live-tags \
+              --site-base-url "${SITE_URL}"
+          fi
+
       # Default-branch cache only (tag-scoped caches are not visible on main).
       - name: Save full multi-version docs site
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
