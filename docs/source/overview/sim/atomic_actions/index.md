@@ -297,3 +297,10 @@ builtin_actions
   - `scripts/tutorials/atomic_action/pickup.py`
   - `scripts/tutorials/atomic_action/move_held_object.py`
   - `scripts/tutorials/atomic_action/place.py`
+
+Run a demo in headless CPU mode with `--auto_play --headless --device cpu` to record
+an MP4 under `outputs/videos`. For example:
+
+```bash
+python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
+```

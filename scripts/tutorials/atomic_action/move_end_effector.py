@@ -164,24 +164,40 @@ def format_tensor(tensor: torch.Tensor) -> str:
     return str(rounded.tolist())
 
 
-def run_move_end_effector_demo(args: argparse.Namespace) -> None:
+def main() -> None:
+    """Move the robot end effector to one target pose using atomic actions."""
+    args = parse_arguments()
+
+    # ------------------------------------------------------------------ #
+    # Step 1: Set up simulation and robot                                 #
+    # ------------------------------------------------------------------ #
     sim = initialize_simulation(args)
     robot = create_robot(sim)
+
+    # ------------------------------------------------------------------ #
+    # Step 2: Create a MotionGenerator for the robot                      #
+    # ------------------------------------------------------------------ #
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
 
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(
-                control_part="arm",
-                sample_interval=MOVE_SAMPLE_INTERVAL,
-            ),
-        )
+    # ------------------------------------------------------------------ #
+    # Step 3: Configure the MoveEndEffector atomic action                 #
+    # ------------------------------------------------------------------ #
+    move_cfg = MoveEndEffectorCfg(
+        control_part="arm",
+        sample_interval=MOVE_SAMPLE_INTERVAL,
     )
 
+    # ------------------------------------------------------------------ #
+    # Step 4: Build the AtomicActionEngine                                #
+    # ------------------------------------------------------------------ #
+    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+    atomic_engine.register(MoveEndEffector(motion_gen, cfg=move_cfg))
+
+    # ------------------------------------------------------------------ #
+    # Step 5: Define and visualize the end-effector target                #
+    # ------------------------------------------------------------------ #
     target_pose = make_top_down_eef_pose(sim.device)
     if not args.headless:
         sim.open_window()
@@ -190,6 +206,9 @@ def run_move_end_effector_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input("Inspect the robot, then press Enter to plan MoveEndEffector...")
 
+    # ------------------------------------------------------------------ #
+    # Step 6: Plan the declared (name, typed_target) sequence             #
+    # ------------------------------------------------------------------ #
     logger.log_info(
         f"Planning MoveEndEffector to xpos={format_tensor(target_pose[:3, 3])}"
     )
@@ -203,6 +222,9 @@ def run_move_end_effector_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input("Press Enter to replay the MoveEndEffector demo...")
 
+    # ------------------------------------------------------------------ #
+    # Step 7: Replay the planned trajectory                               #
+    # ------------------------------------------------------------------ #
     recording_started = start_auto_play_recording(
         sim, args, video_prefix="move_end_effector_auto_play"
     )
@@ -222,11 +244,6 @@ def run_move_end_effector_demo(args: argparse.Namespace) -> None:
 
     if not args.auto_play:
         input("Press Enter to exit the simulation...")
-
-
-def main() -> None:
-    args = parse_arguments()
-    run_move_end_effector_demo(args)
 
 
 if __name__ == "__main__":

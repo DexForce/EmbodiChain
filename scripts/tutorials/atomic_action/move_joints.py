@@ -158,13 +158,26 @@ def draw_start_eef_axis(sim: SimulationManager, robot: Robot) -> None:
     draw_axis_marker(sim, "move_joints_start_eef_axis", eef_pose)
 
 
-def run_move_joints_demo(args: argparse.Namespace) -> None:
+def main() -> None:
+    """Move the robot arm through named and explicit joint targets."""
+    args = parse_arguments()
+
+    # ------------------------------------------------------------------ #
+    # Step 1: Set up simulation and robot                                 #
+    # ------------------------------------------------------------------ #
     sim = initialize_simulation(args)
     robot = create_robot(sim)
+
+    # ------------------------------------------------------------------ #
+    # Step 2: Create a MotionGenerator for the robot                      #
+    # ------------------------------------------------------------------ #
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
 
+    # ------------------------------------------------------------------ #
+    # Step 3: Configure the MoveJoints atomic action                      #
+    # ------------------------------------------------------------------ #
     ready_qpos = make_arm_qpos([0.35, -1.20, 1.30, -1.65, -1.57, 0.20], sim.device)
     home_qpos = make_arm_qpos([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], sim.device)
     move_joints_cfg = MoveJointsCfg(
@@ -173,9 +186,15 @@ def run_move_joints_demo(args: argparse.Namespace) -> None:
         named_joint_positions={"ready": ready_qpos},
     )
 
+    # ------------------------------------------------------------------ #
+    # Step 4: Build the AtomicActionEngine                                #
+    # ------------------------------------------------------------------ #
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
     atomic_engine.register(MoveJoints(motion_gen, cfg=move_joints_cfg))
 
+    # ------------------------------------------------------------------ #
+    # Step 5: Open the viewer and show the starting end-effector frame    #
+    # ------------------------------------------------------------------ #
     if not args.headless:
         sim.open_window()
     if not args.no_vis_eef_axis:
@@ -183,6 +202,9 @@ def run_move_joints_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input("Inspect the robot, then press Enter to plan MoveJoints...")
 
+    # ------------------------------------------------------------------ #
+    # Step 6: Plan the declared (name, typed_target) sequence             #
+    # ------------------------------------------------------------------ #
     logger.log_info(
         "Planning MoveJoints: NamedJointPositionTarget('ready') -> explicit home qpos"
     )
@@ -199,6 +221,9 @@ def run_move_joints_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input("Press Enter to replay the MoveJoints demo...")
 
+    # ------------------------------------------------------------------ #
+    # Step 7: Replay the planned trajectory                               #
+    # ------------------------------------------------------------------ #
     recording_started = start_auto_play_recording(
         sim, args, video_prefix="move_joints_auto_play"
     )
@@ -218,11 +243,6 @@ def run_move_joints_demo(args: argparse.Namespace) -> None:
 
     if not args.auto_play:
         input("Press Enter to exit the simulation...")
-
-
-def main() -> None:
-    args = parse_arguments()
-    run_move_joints_demo(args)
 
 
 if __name__ == "__main__":

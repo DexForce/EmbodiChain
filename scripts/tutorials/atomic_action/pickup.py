@@ -51,7 +51,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     AntipodalSamplerCfg,
@@ -61,7 +61,6 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
 from embodichain.utils import logger
-from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_tutorial_window_size,
@@ -79,7 +78,6 @@ GRIPPER_TCP_Z = 0.15
 
 OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
 OBJECT_XY = (-0.42, -0.08)
-OBJECT_CLEARANCE = 0.0
 
 OBJECT_PRESETS = {
     "sugar_box": {
@@ -95,8 +93,6 @@ OBJECT_PRESETS = {
 PICK_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
-TABLE_SIZE = [1.0, 1.4, 0.05]
-TABLE_TOP_Z = -0.045
 
 APPROACH_DIRECTIONS = {
     "top": (0.0, 0.0, -1.0),
@@ -217,20 +213,6 @@ def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
     return sim.add_robot(cfg=cfg)
 
 
-def create_table(sim: SimulationManager) -> RigidObject:
-    cfg = RigidObjectCfg(
-        uid="table",
-        shape=CubeCfg(size=TABLE_SIZE),
-        body_type="static",
-        attrs=RigidBodyAttributesCfg(
-            dynamic_friction=0.8,
-            static_friction=0.9,
-        ),
-        init_pos=[-0.30, 0.10, TABLE_TOP_Z - 0.5 * TABLE_SIZE[2]],
-    )
-    return sim.add_rigid_object(cfg=cfg)
-
-
 def create_pick_object(sim: SimulationManager, object_name: str) -> RigidObject:
     preset = OBJECT_PRESETS[object_name]
     cfg = RigidObjectCfg(
@@ -248,30 +230,10 @@ def create_pick_object(sim: SimulationManager, object_name: str) -> RigidObject:
         use_usd_properties=preset["use_usd_properties"],
     )
     obj = sim.add_rigid_object(cfg=cfg)
-    obj.cfg.init_pos = _compute_tabletop_init_pos(obj, cfg.init_rot)
-    obj.reset()
+
+    # Settle the object to ensure it is resting on the ground before planning
+    sim.update(step=10)
     return obj
-
-
-def _compute_tabletop_init_pos(
-    obj: RigidObject, init_rot: tuple[float, float, float]
-) -> tuple[float, float, float]:
-    vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
-    rot = torch.as_tensor(init_rot, dtype=torch.float32, device=vertices.device)
-    rot = rot.unsqueeze(0) * torch.pi / 180.0
-    upright_rot = matrix_from_euler(rot, "XYZ")[0]
-    rotated_vertices = vertices @ upright_rot.T
-    bottom_z = rotated_vertices[:, 2].min().item()
-    z = TABLE_TOP_Z + OBJECT_CLEARANCE - bottom_z
-    return (OBJECT_XY[0], OBJECT_XY[1], z)
-
-
-def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
-    obj.reset()
-    sim.update(step=step)
-    obj.clear_dynamics()
 
 
 def build_grasp_generator_cfg(args: argparse.Namespace) -> GraspGeneratorCfg:
@@ -407,12 +369,31 @@ def draw_pick_object_axis(sim: SimulationManager, obj: RigidObject) -> None:
     )
 
 
-def build_pickup_cfg(
-    hand_open: torch.Tensor,
-    hand_close: torch.Tensor,
-    approach_direction: torch.Tensor,
-) -> PickUpCfg:
-    return PickUpCfg(
+def main() -> None:
+    """Pick up an object using an antipodal grasp affordance."""
+    args = parse_arguments()
+
+    # ------------------------------------------------------------------ #
+    # Step 1: Set up simulation, robot, and object                 #
+    # ------------------------------------------------------------------ #
+    sim = initialize_simulation(args)
+    robot = create_robot(sim)
+    obj = create_pick_object(sim, args.object)
+
+    # ------------------------------------------------------------------ #
+    # Step 2: Create a MotionGenerator for the robot                      #
+    # ------------------------------------------------------------------ #
+    motion_gen = MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
+    )
+
+    # ------------------------------------------------------------------ #
+    # Step 3: Configure the PickUp atomic action                          #
+    # ------------------------------------------------------------------ #
+    hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
+    approach_direction = resolve_approach_direction(args, sim.device)
+    initialize_pre_pick_robot_pose(robot, obj, hand_open)
+    pickup_cfg = PickUpCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_open_qpos=hand_open,
@@ -424,24 +405,16 @@ def build_pickup_cfg(
         hand_interp_steps=HAND_INTERP_STEPS,
     )
 
-
-def run_pickup_demo(args: argparse.Namespace) -> None:
-    sim = initialize_simulation(args)
-    robot = create_robot(sim)
-    create_table(sim)
-    obj = create_pick_object(sim, args.object)
-
-    settle_object(sim, obj, step=5)
-    semantics = create_object_semantics(obj, args)
-    motion_gen = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
-    )
-    hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
-    approach_direction = resolve_approach_direction(args, sim.device)
-    initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    pickup_cfg = build_pickup_cfg(hand_open, hand_close, approach_direction)
+    # ------------------------------------------------------------------ #
+    # Step 4: Build the AtomicActionEngine                                #
+    # ------------------------------------------------------------------ #
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
     atomic_engine.register(PickUp(motion_gen, cfg=pickup_cfg))
+
+    # ------------------------------------------------------------------ #
+    # Step 5: Describe the object with ObjectSemantics                    #
+    # ------------------------------------------------------------------ #
+    semantics = create_object_semantics(obj, args)
 
     if not args.headless:
         sim.open_window()
@@ -450,6 +423,9 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input(f"Inspect the upright {args.object}, then press Enter to plan...")
 
+    # ------------------------------------------------------------------ #
+    # Step 6: Plan the declared (name, typed_target) sequence             #
+    # ------------------------------------------------------------------ #
     logger.log_info(
         f"Planning pick_up for {args.object} with "
         f"approach_direction={format_tensor(approach_direction)}"
@@ -467,6 +443,9 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
     if not args.auto_play:
         input("Press Enter to replay the pickup demo...")
 
+    # ------------------------------------------------------------------ #
+    # Step 7: Replay the planned trajectory                               #
+    # ------------------------------------------------------------------ #
     recording_started = start_auto_play_recording(
         sim, args, video_prefix=f"pickup_{args.object}_auto_play"
     )
@@ -496,11 +475,6 @@ def run_pickup_demo(args: argparse.Namespace) -> None:
 
     if not args.auto_play:
         input("Press Enter to exit the simulation...")
-
-
-def main() -> None:
-    args = parse_arguments()
-    run_pickup_demo(args)
 
 
 if __name__ == "__main__":

@@ -9,10 +9,10 @@ The following actions are available out of the box:
 
 | Action | Arm | Target type | Motion phases | Demo |
 |---|---|---|---|---|
-| `MoveEndEffector` | Single | `EndEffectorPoseTarget` — EEF pose | Move end-effector to pose | <img src="../../../_static/atomic_actions/move.gif" alt="MoveEndEffector" width="480" style="max-width: 100%;" /> |
-| `MoveJoints` | Single | `JointPositionTarget` or `NamedJointPositionTarget` — qpos | Interpolate control-part joints | |
-| `PickUp` | Single | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../../_static/atomic_actions/pick.gif" alt="PickUp" width="480" style="max-width: 100%;" /> |
-| `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | |
+| `MoveEndEffector` | Single | `EndEffectorPoseTarget` — EEF pose | Move end-effector to pose | <img src="../../../_static/atomic_actions/move_end_effector.gif" alt="MoveEndEffector" width="480" style="max-width: 100%;" /> |
+| `MoveJoints` | Single | `JointPositionTarget` or `NamedJointPositionTarget` — qpos | Interpolate control-part joints | <img src="../../../_static/atomic_actions/move_joints.gif" alt="MoveJoints" width="480" style="max-width: 100%;" /> |
+| `PickUp` | Single | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp" width="480" style="max-width: 100%;" /> |
+| `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject" width="480" style="max-width: 100%;" /> |
 | `Place` | Single | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
 
 ---
@@ -29,7 +29,7 @@ Moves the end-effector to a target pose in free space.
 **Target:** `EndEffectorPoseTarget(xpos=...)` where `xpos` is a `torch.Tensor` of shape `(4, 4)` or
 `(n_envs, 4, 4)` — a homogeneous EEF pose.
 
-![MoveEndEffector demo](../../../_static/atomic_actions/move.gif)
+![MoveEndEffector demo](../../../_static/atomic_actions/move_end_effector.gif)
 
 ---
 
@@ -49,6 +49,8 @@ home poses, recovery motions, or any motion where a qpos target is clearer than 
   `(n_envs, control_dof)`.
 - `NamedJointPositionTarget(name=...)` where `name` is resolved from
   `MoveJointsCfg.named_joint_positions`.
+
+![MoveJoints demo](../../../_static/atomic_actions/move_joints.gif)
 
 ---
 
@@ -72,7 +74,7 @@ Three-phase grasp motion: *approach → close gripper → lift*.
 pose at execute time. On success, the returned `WorldState` carries a populated
 `held_object` (`HeldObjectState`).
 
-![PickUp demo](../../../_static/atomic_actions/pick.gif)
+![PickUp demo](../../../_static/atomic_actions/pickup.gif)
 
 ---
 
@@ -95,6 +97,8 @@ types describe runtime held-object state and an action-specific target pose.
 **Target:** `HeldObjectPoseTarget(object_target_pose=...)` where `object_target_pose` is a
 `torch.Tensor` of shape `(4, 4)` or `(n_envs, 4, 4)` — the desired pose of the held object.
 The action converts this to an EEF target via the stored object-to-EEF transform.
+
+![MoveHeldObject demo](../../../_static/atomic_actions/move_held_object.gif)
 
 ---
 

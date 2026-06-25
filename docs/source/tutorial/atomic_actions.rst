@@ -20,7 +20,7 @@ Key Features
 - **Built-in primitives** — ``MoveEndEffector``, ``MoveJoints``, ``PickUp``, ``MoveHeldObject``,
   and ``Place``
   cover the most common tabletop manipulation workflows out of the box.
-  See :doc:`/overview/sim/atomic_actions` for configs and target types.
+  See :doc:`/overview/sim/atomic_actions/index` for configs and target types.
 - **Extensible registry** — custom action *classes* can be registered globally with
   ``register_action``; action *instances* are registered per-engine under a name.
 - **Engine orchestration** — ``AtomicActionEngine.run(steps, state)`` sequences named
@@ -29,7 +29,7 @@ Key Features
   ready to replay in the simulator.
 
 For the full design overview, architecture diagram, and extension guide see
-:doc:`/overview/sim/atomic_actions`.
+:doc:`/overview/sim/atomic_actions/index`.
 
 The Code
 --------
@@ -42,6 +42,18 @@ Focused demo scripts are available for the five built-in primitives in the
 - ``pickup.py``
 - ``move_held_object.py``
 - ``place.py``
+
+Each script supports interactive inspection by default. Add ``--auto_play`` to skip
+keyboard prompts, and combine it with ``--headless --device cpu`` to record an MP4 under
+``outputs/videos``:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/move_joints.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/move_held_object.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/place.py --headless --auto_play --device cpu
 
 Typical Usage
 -------------
@@ -247,4 +259,4 @@ Notes & Best Practices
 - For static (non-physics) playback, iterate over ``trajectory[:, i]`` and call
   ``robot.set_qpos`` directly; for physics-enabled playback, feed waypoints through your
   controller or gym wrapper instead.
-- To add a new action type, see :doc:`/overview/sim/atomic_actions`.
+- To add a new action type, see :doc:`/overview/sim/atomic_actions/index`.
