@@ -48,6 +48,7 @@ class URSolverCfg(SolverCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        # from https://github.com/Victorlouisdg/ur-analytic-ik/blob/main/src/ur_analytic_ik/dh_parameters.hh
         if self.ur_type == "ur3":
             self.d1 = 0.1519
             self.d4 = 0.11235

@@ -14,7 +14,7 @@ agents, and effective Sim2Real transfer for real-world robotic systems.
    EmbodiChain is in Alpha and under active development: * More
    features will be continually added in the coming months. You can find
    more details in the
-   `roadmap <https://dexforce.github.io/EmbodiChain/resources/roadmap.html>`__.
+   `roadmap <https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html>`__.
    * Since this is an early release, we welcome feedback (bug reports,
    feature requests, etc.) via GitHub Issues.
 
@@ -57,6 +57,13 @@ We welcome contributions! Please see the
 `CONTRIBUTING.md <CONTRIBUTING.md>`__ file in this repository for
 guidelines on how to get started.
 
+Publications
+------------
+
+See `Academic
+Publications <docs/source/resources/publications/README.md>`__ for a
+complete list of academic papers related to EmbodiChain.
+
 Citation
 --------
 
@@ -83,13 +90,3 @@ citing our work:
       year = {2025},
       journal = {TechRxiv}
       }
-
-.. code-block:: bibtex
-
-   @inproceedings{Sim2RealVLA,
-       title = {Sim2Real {VLA}: Zero-Shot Generalization of Synthesized Skills to Realistic Manipulation},
-       author = {Runyi Zhao, Sheng Xu, Ruixing Jin, Yueci Deng, Yunxin Tai, Kui Jia, Guiliang Liu},
-       booktitle = {The Fourteenth International Conference on Learning Representations, ICLR},
-       year = {2026},
-       url = {https://openreview.net/forum?id=H4SyKHjd4c}
-   }
