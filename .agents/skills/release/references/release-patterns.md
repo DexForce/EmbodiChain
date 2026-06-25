@@ -35,10 +35,12 @@
 ## Style patterns
 
 - Releases are tag-based and follow semantic versioning with a `v` prefix.
+- The GitHub release title can be short, such as `V0.2.2`, while the first body heading stays `EmbodiChain v0.2.2 Release Notes`.
 - GitHub release bodies are structured, not free-form.
 - The first paragraph usually summarizes the main theme of the release.
 - Dependency upgrades and compatibility breaks are called out explicitly.
-- Feature bullets cite the contributor and PR number.
+- Feature bullets cite the contributor and PR number in the form `by @author in #123`.
+- Example: `Added emissive light mode to randomize_indirect_lighting by @yuecideng in #274`.
 - Documentation and CI/CD fixes are treated as first-class release content.
 
 ## Release workflow cues
@@ -46,4 +48,3 @@
 - Tag pushes trigger the release build path in `.github/workflows/`.
 - Release builds produce package distributions.
 - Docs builds preserve older versioned documentation when a new tag is published.
-

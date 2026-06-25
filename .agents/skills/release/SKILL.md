@@ -22,7 +22,8 @@ Use this skill when the task is about an EmbodiChain release flow:
 
 EmbodiChain releases consistently use:
 
-- a versioned title like `EmbodiChain v0.2.1 Release Notes`
+- a GitHub release title that may be short, e.g. `V0.2.2`
+- a first body heading like `EmbodiChain v0.2.2 Release Notes`
 - `Highlights`
 - `Breaking Changes` when needed
 - `New Features`
@@ -33,6 +34,17 @@ EmbodiChain releases consistently use:
 - a short contributor summary
 
 Keep bullets short and action-oriented. Prefer the same wording style used in prior releases: feature-focused, PR-linked, and tied to the author.
+
+Use this exact bullet pattern for release-note items whenever attribution is known:
+
+- `Added emissive light mode to randomize_indirect_lighting by @yuecideng in #274`
+
+Format rules:
+
+- lead with the past-tense change description
+- append `by @<author> in #<pr>` for each merged PR bullet
+- keep `All Commits Since` entries attributed the same way
+- if a change has no PR number yet, resolve it before drafting the release notes
 
 ## What to check
 
@@ -50,4 +62,3 @@ When asked to draft a release, produce:
 2. a concise summary paragraph
 3. sectioned bullets in the repo's existing style
 4. any release blockers or verification notes
-
