@@ -1,3 +1,19 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
 import torch
 import numpy as np
 import warp as wp
@@ -141,7 +157,7 @@ class URSolver(BaseSolver):
                 - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, n_solution, num_joints).
                 - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).
         """
-        N_SOL = 8
+        N_SOL = 512
         DOF = 6
         if target_xpos.shape == (4, 4):
             target_xpos_batch = target_xpos[None, :, :]
@@ -157,11 +173,17 @@ class URSolver(BaseSolver):
         xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
         all_qpos_wp = wp.zeros(n_sample * N_SOL * DOF, dtype=float, device=wp_device)
         all_ik_valid_wp = wp.zeros(n_sample * N_SOL, dtype=int, device=wp_device)
-
+        lower_qpos_limits_wp = wp.from_torch(self.lower_qpos_limits)
+        upper_qpos_limits_wp = wp.from_torch(self.upper_qpos_limits)
         wp.launch(
             kernel=ur_ik_kernel,
             dim=(n_sample,),
-            inputs=[xpos_wp, self._ur_params],
+            inputs=[
+                xpos_wp,
+                self._ur_params,
+                lower_qpos_limits_wp,
+                upper_qpos_limits_wp,
+            ],
             outputs=[all_qpos_wp, all_ik_valid_wp],
             device=wp_device,
         )

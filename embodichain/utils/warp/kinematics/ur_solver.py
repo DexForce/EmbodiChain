@@ -200,21 +200,56 @@ def _ur_solve_234(
     return theta2a, theta3a, theta4a, theta2b, theta3b, theta4b
 
 
+@wp.func
+def _shift_to_limit(q: float, lo: float, hi: float) -> float:
+    """Return an FK-equivalent value of ``q`` shifted by +/- 2*pi inside [lo, hi].
+
+    UR joints are 2*pi-periodic, so ``q`` and ``q +/- 2*pi`` yield identical
+    forward kinematics. When a 2*pi-shifted representative falls inside the
+    joint limits it is returned; otherwise ``q`` itself is returned as a
+    repeated fallback (the validity check later flags out-of-limit values).
+
+    Args:
+        q: Joint angle normalized to [-pi, pi].
+        lo: Lower joint limit.
+        hi: Upper joint limit.
+
+    Returns:
+        A 2*pi-shifted copy of ``q`` inside [lo, hi] when one exists, else ``q``.
+    """
+    two_pi = 2.0 * wp.pi
+    q_plus = q + two_pi
+    if q_plus >= lo and q_plus <= hi:
+        return q_plus
+    q_minus = q - two_pi
+    if q_minus >= lo and q_minus <= hi:
+        return q_minus
+    return q
+
+
 @wp.kernel
 def ur_ik_kernel(
     xpos: wp.array(dtype=float),  # [n_sample * 16]  row-major 4x4 target poses
     params: URParam,
-    qpos: wp.array(dtype=float),  # [n_sample * N_SOL * DOF]  output joint solutions
-    ik_valid: wp.array(dtype=int),  # [n_sample * N_SOL]         output validity flags
+    lower_qpos_limits_wp: wp.array(dtype=float),  # [6]  lower joint limits
+    upper_qpos_limits_wp: wp.array(dtype=float),  # [6]  upper joint limits
+    qpos: wp.array(dtype=float),  # [n_sample * 512 * DOF]  output joint solutions
+    ik_valid: wp.array(dtype=int),  # [n_sample * 512]         output validity flags
 ):
-    """Compute all 8 analytical IK solutions for a batch of UR end-effector poses.
+    """Compute expanded analytical IK solutions for a batch of UR poses.
 
-    Each thread handles one target pose and writes 8 candidate solutions plus FK-based
-    validity flags into the output arrays.
+    Each thread handles one target pose. The 8 base analytical solutions are
+    expanded to ``8 * 2**6 = 512`` candidates: for every base solution and every
+    joint, a second FK-equivalent value shifted by +/- 2*pi is generated when it
+    falls inside the joint limits (UR joints are 2*pi-periodic, so this preserves
+    the end-effector pose). When no shifted value fits the limits, the joint's own
+    value is repeated. Each candidate is flagged valid only if the base FK matches
+    the target *and* every joint lies within its limits.
     """
     i = wp.tid()
     DOF = int(6)
     N_SOL = int(8)
+    N_SHIFT = int(64)  # 2**6 per-joint +/- 2*pi shift combinations
     base = i * 16
 
     # Load rotation and translation from the row-major 4x4 target pose.
@@ -389,24 +424,77 @@ def ur_ik_kernel(
         t6_5nb,  # sol 7
     )
 
-    # Write solutions and perform FK-based validity check.
+    # Expand each of the 8 base solutions into 2**6 = 64 per-joint +/- 2*pi shift
+    # variants, yielding 8 * 64 = 512 candidates total. Shifting is FK-equivalent
+    # and only applied when it lands inside the joint limits; otherwise the joint's
+    # own value is repeated. Validity requires both FK match and joint-limit fit.
     for j in range(N_SOL):
-        qpos_start = i * DOF * N_SOL + j * DOF
-        q1 = theta[j * DOF + 0]
-        q2 = theta[j * DOF + 1]
-        q3 = theta[j * DOF + 2]
-        q4 = theta[j * DOF + 3]
-        q5 = theta[j * DOF + 4]
-        q6 = theta[j * DOF + 5]
-        qpos[qpos_start + 0] = normalize_to_pi(q1)
-        qpos[qpos_start + 1] = normalize_to_pi(q2)
-        qpos[qpos_start + 2] = normalize_to_pi(q3)
-        qpos[qpos_start + 3] = normalize_to_pi(q4)
-        qpos[qpos_start + 4] = normalize_to_pi(q5)
-        qpos[qpos_start + 5] = normalize_to_pi(q6)
+        q1 = normalize_to_pi(theta[j * DOF + 0])
+        q2 = normalize_to_pi(theta[j * DOF + 1])
+        q3 = normalize_to_pi(theta[j * DOF + 2])
+        q4 = normalize_to_pi(theta[j * DOF + 3])
+        q5 = normalize_to_pi(theta[j * DOF + 4])
+        q6 = normalize_to_pi(theta[j * DOF + 5])
+
+        # Precompute the per-joint shifted representative inside [lo, hi].
+        q1_shift = _shift_to_limit(q1, lower_qpos_limits_wp[0], upper_qpos_limits_wp[0])
+        q2_shift = _shift_to_limit(q2, lower_qpos_limits_wp[1], upper_qpos_limits_wp[1])
+        q3_shift = _shift_to_limit(q3, lower_qpos_limits_wp[2], upper_qpos_limits_wp[2])
+        q4_shift = _shift_to_limit(q4, lower_qpos_limits_wp[3], upper_qpos_limits_wp[3])
+        q5_shift = _shift_to_limit(q5, lower_qpos_limits_wp[4], upper_qpos_limits_wp[4])
+        q6_shift = _shift_to_limit(q6, lower_qpos_limits_wp[5], upper_qpos_limits_wp[5])
 
         fk_result = ur_single_fk(q1, q2, q3, q4, q5, q6, params)
         t_err, r_err = _ur_transform_err(fk_result, target_pose)
-        ik_valid[i * N_SOL + j] = int(1)
+        fk_ok = int(1)
         if t_err > float(1e-2) or r_err > float(1e-1):
-            ik_valid[i * N_SOL + j] = int(0)
+            fk_ok = int(0)
+
+        for k in range(N_SHIFT):
+            out_start = i * DOF * N_SOL * N_SHIFT + (j * N_SHIFT + k) * DOF
+            oq1 = q1 if (k & 1) == 0 else q1_shift
+            oq2 = q2 if (k & 2) == 0 else q2_shift
+            oq3 = q3 if (k & 4) == 0 else q3_shift
+            oq4 = q4 if (k & 8) == 0 else q4_shift
+            oq5 = q5 if (k & 16) == 0 else q5_shift
+            oq6 = q6 if (k & 32) == 0 else q6_shift
+            qpos[out_start + 0] = oq1
+            qpos[out_start + 1] = oq2
+            qpos[out_start + 2] = oq3
+            qpos[out_start + 3] = oq4
+            qpos[out_start + 4] = oq5
+            qpos[out_start + 5] = oq6
+
+            valid = fk_ok
+            tol = float(1e-9)
+            if (
+                oq1 < lower_qpos_limits_wp[0] - tol
+                or oq1 > upper_qpos_limits_wp[0] + tol
+            ):
+                valid = int(0)
+            if (
+                oq2 < lower_qpos_limits_wp[1] - tol
+                or oq2 > upper_qpos_limits_wp[1] + tol
+            ):
+                valid = int(0)
+            if (
+                oq3 < lower_qpos_limits_wp[2] - tol
+                or oq3 > upper_qpos_limits_wp[2] + tol
+            ):
+                valid = int(0)
+            if (
+                oq4 < lower_qpos_limits_wp[3] - tol
+                or oq4 > upper_qpos_limits_wp[3] + tol
+            ):
+                valid = int(0)
+            if (
+                oq5 < lower_qpos_limits_wp[4] - tol
+                or oq5 > upper_qpos_limits_wp[4] + tol
+            ):
+                valid = int(0)
+            if (
+                oq6 < lower_qpos_limits_wp[5] - tol
+                or oq6 > upper_qpos_limits_wp[5] + tol
+            ):
+                valid = int(0)
+            ik_valid[i * N_SOL * N_SHIFT + j * N_SHIFT + k] = valid

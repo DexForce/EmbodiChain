@@ -131,22 +131,8 @@ class BaseSolverTest:
     def test_ik(self):
         # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
         arm_name = "arm"
-        # qpos_limit = self.robot.get_qpos_limits(name=arm_name)
-        qpos_limit = torch.tensor(
-            [
-                [
-                    [-3.14, 3.14],
-                    [-3.14, 3.14],
-                    [-3.14, 3.14],
-                    [-3.14, 3.14],
-                    [-3.14, 3.14],
-                    [-3.14, 3.14],
-                ]
-            ],
-            dtype=torch.float32,
-            device=self.robot.device,
-        )
         # generate a small grid of qpos samples from the joint limits (low/high)
+        qpos_limit = self.robot.get_qpos_limits(name=arm_name)
         sample_qpos = grid_sample_qpos_from_limits(
             qpos_limit, steps_per_joint=8, device=self.robot.device, max_samples=65536
         )
