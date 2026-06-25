@@ -92,6 +92,30 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.drive_pros.stiffness == {"J[1-2]": 1e4}
 
 
+from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
+from embodichain.lab.sim.solvers import OPWSolverCfg
+
+
+def test_cobotmagic_from_dict_and_roundtrip():
+    cfg = CobotMagicCfg.from_dict({})
+    assert cfg.uid == "CobotMagic"
+    assert set(cfg.control_parts.keys()) == {
+        "left_arm",
+        "left_eef",
+        "right_arm",
+        "right_eef",
+    }
+    assert isinstance(cfg.solver_cfg["left_arm"], OPWSolverCfg)
+    assert isinstance(cfg.solver_cfg["right_arm"], OPWSolverCfg)
+
+    d = cfg.to_dict()
+    assert d["uid"] == "CobotMagic"
+    cfg2 = CobotMagicCfg.from_dict(d)
+    assert cfg2.uid == "CobotMagic"
+    assert cfg2.control_parts == cfg.control_parts
+    assert isinstance(cfg2.solver_cfg["left_arm"], OPWSolverCfg)
+
+
 def test_robotcfg_save_to_file(tmp_path):
     cfg = _RoundTripCfg.from_dict({"variant": "b"})
     fp = tmp_path / "cfg.json"

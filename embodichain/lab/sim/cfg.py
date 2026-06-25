@@ -1156,11 +1156,18 @@ class URDFCfg:
                 self.add_component(component_type, urdf_path, transform, **params)
 
         if sensors is not None:
-            if not isinstance(sensors, list):
+            # Accept both list and dict; serialization round-trips an empty
+            # dict when no sensors are configured (the field default).
+            if isinstance(sensors, dict) and not sensors:
+                self.sensors = []
+            elif not isinstance(sensors, (list, dict)):
                 logger.log_error(
-                    f"sensors must be a list of dicts, got {type(sensors)}"
+                    f"sensors must be a list of dicts or a dict, got {type(sensors)}"
                 )
                 self.sensors = []
+            elif isinstance(sensors, dict):
+                # dict keyed by sensor_name -> config
+                self.sensors = list(sensors.values())
             else:
                 # Optionally check each sensor dict
                 valid_sensors = []
