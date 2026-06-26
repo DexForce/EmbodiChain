@@ -37,6 +37,7 @@ from urllib.request import urlopen
 _INVALID_ARTIFACT_CHARS = frozenset('"<>:|*?\r\n')
 
 __all__ = [
+    "flatten_nested_version_dirs",
     "load_versions_manifest",
     "merge_published_site",
     "normalize_artifact_paths",
@@ -117,6 +118,53 @@ def normalize_artifact_paths(root: Path) -> list[tuple[Path, Path | None]]:
     return changes
 
 
+def _cleanup_empty_dirs(root: Path) -> None:
+    for directory in sorted(
+        root.rglob("*"), key=lambda item: len(item.parts), reverse=True
+    ):
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+
+
+def flatten_nested_version_dirs(build_dir: Path) -> list[tuple[Path, Path | None]]:
+    """Move nested downloaded version dirs to the build root.
+
+    ``wget -nH`` removes the host component but keeps URL path components. For
+    project Pages URLs this can produce ``build/html/EmbodiChain/v0.2.2``. The
+    version manifest generator only scans top-level ``v*`` directories, so keep
+    release versions directly under ``build/html``.
+
+    Args:
+        build_dir: Sphinx output root (``docs/build/html``).
+
+    Returns:
+        ``(old_path, new_path)`` pairs. ``new_path`` is ``None`` when a nested
+        duplicate was removed because the top-level version already exists.
+    """
+    build_dir = build_dir.resolve()
+    changes: list[tuple[Path, Path | None]] = []
+    candidates = [
+        candidate
+        for candidate in build_dir.rglob("v*")
+        if candidate.is_dir()
+        and candidate.parent != build_dir
+        and (candidate / "index.html").is_file()
+    ]
+    candidates.sort(key=lambda candidate: len(candidate.parts))
+
+    for candidate in candidates:
+        target = build_dir / candidate.name
+        if target.exists():
+            shutil.rmtree(candidate)
+            changes.append((candidate, None))
+        else:
+            candidate.rename(target)
+            changes.append((candidate, target))
+
+    _cleanup_empty_dirs(build_dir)
+    return changes
+
+
 def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None:
     """Download one version subtree with wget (available in CI containers)."""
     url = f"{site_base_url.rstrip('/')}/{version}/"
@@ -142,10 +190,10 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
     )
     if result.returncode != 0:
         print(f"wget failed for {url} (exit {result.returncode})", file=sys.stderr)
-        return
 
     # wget may create dest.parent/<version>/ or preserve extra URL path
     # segments such as dest.parent/EmbodiChain/<version>/; normalize that.
+    flatten_nested_version_dirs(dest.parent)
     if not dest.is_dir():
         candidates = [
             candidate
@@ -162,12 +210,10 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
         changes = normalize_artifact_paths(dest)
         if changes:
             print(f"Normalized {len(changes)} artifact path(s) in {version}.")
+    elif result.returncode != 0:
+        return
 
-    for directory in sorted(
-        dest.parent.rglob("*"), key=lambda item: len(item.parts), reverse=True
-    ):
-        if directory.is_dir() and not any(directory.iterdir()):
-            directory.rmdir()
+    _cleanup_empty_dirs(dest.parent)
 
 
 def merge_published_site(
@@ -237,6 +283,16 @@ def merge_published_site(
     final_changes = normalize_artifact_paths(build_dir)
     if final_changes:
         print(f"Normalized {len(final_changes)} artifact path(s) in build tree.")
+
+    final_flattened = flatten_nested_version_dirs(build_dir)
+    if final_flattened:
+        print(f"Flattened {len(final_flattened)} nested version dir(s) in build tree.")
+
+    post_flatten_changes = normalize_artifact_paths(build_dir)
+    if post_flatten_changes:
+        print(
+            f"Normalized {len(post_flatten_changes)} flattened artifact path(s) in build tree."
+        )
 
     return merged
 
