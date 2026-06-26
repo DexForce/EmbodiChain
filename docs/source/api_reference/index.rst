@@ -24,6 +24,8 @@ The following modules are available in the core ``embodichain`` framework:
 
    agents
    data
+   data_pipeline
    lab
    toolkits
+   learning
    utils

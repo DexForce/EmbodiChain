@@ -3,7 +3,7 @@
 Reinforcement Learning Training
 ================================
 
-.. currentmodule:: embodichain.agents.rl
+.. currentmodule:: embodichain.learning.rl
 
 This tutorial shows you how to train reinforcement learning agents using EmbodiChain's RL framework. You'll learn how to configure training via JSON or YAML, set up environments, policies, and algorithms, and launch training sessions.
 
@@ -196,12 +196,12 @@ For GRPO: use ``actor_only`` policy. Set ``kl_coef=0`` for from-scratch training
 Training Script
 ~~~~~~~~~~~~~~~
 
-The training script (``train.py``) is located in ``embodichain/agents/rl/``:
+The training script (``train.py``) is located in ``embodichain/learning/rl/``:
 
 .. dropdown:: Code for train.py
    :icon: code
 
-   .. literalinclude:: ../../../embodichain/agents/rl/train.py
+   .. literalinclude:: ../../../embodichain/learning/rl/train.py
       :language: python
       :linenos:
 
@@ -307,14 +307,14 @@ Adding a New Algorithm
 
 To add a new algorithm:
 
-1. Create a new algorithm class in ``embodichain/agents/rl/algo/``
+1. Create a new algorithm class in ``embodichain/learning/rl/algo/``
 2. Implement ``update(rollout)`` and consume the shared rollout ``TensorDict``
 3. Register in ``algo/__init__.py``:
 
 .. code-block:: python
 
    from tensordict import TensorDict
-   from embodichain.agents.rl.algo import BaseAlgorithm, register_algo
+   from embodichain.learning.rl.algo import BaseAlgorithm, register_algo
    
    @register_algo("my_algo")
    class MyAlgorithm(BaseAlgorithm):
@@ -339,7 +339,7 @@ To add a new policy:
 
 .. code-block:: python
 
-   from embodichain.agents.rl.models import register_policy, Policy
+   from embodichain.learning.rl.models import register_policy, Policy
    
    @register_policy("my_policy")
    class MyPolicy(Policy):

@@ -227,9 +227,11 @@ topics:
       - ik-solvers
     status: active
 
-  - id: rl-training
-    title: RL Training Pipeline
+  - id: rl-learning
+    title: RL Learning Pipeline
     aliases:
+      - rl learning
+      - learning rl
       - rl training
       - reinforcement learning
       - ppo
@@ -246,18 +248,19 @@ topics:
       - critic
       - buffer
       - rollout
+      - learning
       - training
       - collector
       - policy
       - reward
     paths:
-      - topics/rl-training/rl-training.md
+      - topics/rl-learning/rl-learning.md
     source_of_truth:
-      - embodichain/agents/rl/train.py
-      - embodichain/agents/rl/algo/
-      - embodichain/agents/rl/buffer/
-      - embodichain/agents/rl/models/
-      - embodichain/agents/rl/collector/
+      - embodichain/learning/rl/train.py
+      - embodichain/learning/rl/algo/
+      - embodichain/learning/rl/buffer/
+      - embodichain/learning/rl/models/
+      - embodichain/learning/rl/collector/
     related_topics:
       - env-framework
       - manager-functor

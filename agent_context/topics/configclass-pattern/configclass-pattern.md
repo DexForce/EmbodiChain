@@ -104,7 +104,7 @@ This powers config loading from YAML/JSON files.
 ### Algorithm config (RL)
 
 ```python
-# embodichain/agents/rl/utils/config.py
+# embodichain/learning/rl/utils/config.py
 @configclass
 class AlgorithmCfg:
     device: str = "cuda"
@@ -114,7 +114,7 @@ class AlgorithmCfg:
     gae_lambda: float = 0.95
     max_grad_norm: float = 0.5
 
-# embodichain/agents/rl/algo/ppo.py
+# embodichain/learning/rl/algo/ppo.py
 @configclass
 class PPOCfg(AlgorithmCfg):
     n_epochs: int = 10

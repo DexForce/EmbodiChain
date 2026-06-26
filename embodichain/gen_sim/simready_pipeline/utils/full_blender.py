@@ -792,8 +792,8 @@ IMPORTANT:
 
 Your task: choose which image is upright based on common human-world object orientation knowledge.
 
-Image A = first image  
-Image B = second image  
+Image A = first image
+Image B = second image
 
 Rules:
 - Think about gravity, support base, typical usage posture.
@@ -844,7 +844,7 @@ def ask_llm_full_side_profile(object_name, views_data):
     ]
 
     prompt = f"""
-            You are a visual reasoning model. 
+            You are a visual reasoning model.
 
             An object of category: "{object_name}" is shown in TWO images. Both images show the same object in upright posture, but from different angles.
 

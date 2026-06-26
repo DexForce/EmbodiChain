@@ -17,4 +17,3 @@ Canonical source: `.agents/skills/release/`
 
 1. Use this adapter for release work.
 2. Then follow `.agents/skills/release/SKILL.md`.
-
