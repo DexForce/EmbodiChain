@@ -179,7 +179,7 @@ def _auto_replacement_source_uid(
             "to disambiguate."
         )
 
-    selected = positioned_objects[replacement_number - 1]
+    selected = positioned_objects[-replacement_number]
     source_uid = selected["object"]["uid"]
     print(
         f"Resolved {option_name} auto source -> {source_uid!r} "
