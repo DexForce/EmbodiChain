@@ -566,7 +566,9 @@ def test_task_description_generates_relative_left_of_config(
         "Generate one deterministic nominal graph with exactly 4 nominal edges"
         in task_prompt
     )
-    assert '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in task_prompt
+    assert (
+        '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in task_prompt
+    )
     assert '"atomic_action_class":"PlaceAction","robot_name":"right_arm"' in task_prompt
     assert '"obj_name":"apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
