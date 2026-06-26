@@ -24,7 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import load_versions_manifest, merge_published_site
+from .conftest import (
+    load_versions_manifest,
+    merge_published_site,
+    normalize_artifact_paths,
+)
 
 
 def _write_published_site(root: Path, versions: list[str], latest: str) -> None:
@@ -152,3 +156,36 @@ def test_main_push_after_tag_preserves_releases(
     for name in ("v0.1.0", "v0.2.0", "v0.3.0"):
         assert (build_dir / name).is_dir(), f"missing {name} after main push simulation"
     assert "rebuilt" in (build_dir / "main" / "index.html").read_text(encoding="utf-8")
+
+
+def test_normalize_artifact_paths_strips_wget_query_filenames(tmp_path: Path) -> None:
+    """Regression for Actions artifact uploads rejecting wget query filenames."""
+    version_dir = tmp_path / "build" / "html" / "v0.2.2"
+    static_dir = version_dir / "_static"
+    static_dir.mkdir(parents=True)
+    query_file = static_dir / "clipboard.min.js?v=a7894cd8"
+    query_file.write_text("console.log('copy');", encoding="utf-8")
+
+    changes = normalize_artifact_paths(version_dir)
+
+    assert changes == [(query_file, static_dir / "clipboard.min.js")]
+    assert not query_file.exists()
+    assert (static_dir / "clipboard.min.js").read_text(encoding="utf-8") == (
+        "console.log('copy');"
+    )
+
+
+def test_normalize_artifact_paths_removes_duplicate_query_file(tmp_path: Path) -> None:
+    """Keep the browser-addressable asset when wget also saves a query copy."""
+    static_dir = tmp_path / "v0.2.2" / "_static"
+    static_dir.mkdir(parents=True)
+    safe_file = static_dir / "clipboard.min.js"
+    query_file = static_dir / "clipboard.min.js?v=a7894cd8"
+    safe_file.write_text("existing", encoding="utf-8")
+    query_file.write_text("duplicate", encoding="utf-8")
+
+    changes = normalize_artifact_paths(tmp_path)
+
+    assert changes == [(query_file, None)]
+    assert safe_file.read_text(encoding="utf-8") == "existing"
+    assert not query_file.exists()
