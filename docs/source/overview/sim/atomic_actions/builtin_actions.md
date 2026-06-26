@@ -14,6 +14,7 @@ The following actions are available out of the box:
 | `PickUp` | Single | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp" width="480" style="max-width: 100%;" /> |
 | `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject" width="480" style="max-width: 100%;" /> |
 | `Place` | Single | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
+| `Press` | Single | `EndEffectorPoseTarget` — EEF press pose | Close gripper → press down → return | <img src="../../../_static/atomic_actions/press.gif" alt="Press" width="480" style="max-width: 100%;" /> |
 
 ---
 
@@ -123,3 +124,26 @@ down to the target pose. On success, the returned `WorldState` clears `held_obje
 `(4, 4)` or `(n_envs, 4, 4)`.
 
 ![Place demo](../../../_static/atomic_actions/place.gif)
+
+---
+
+## `Press`
+
+Three-phase contact motion: *close gripper → press down → return*. This is useful
+for button-like or contact-based interactions where the end-effector should reach a
+target pose and then return to the pre-press arm pose.
+
+`Press` does not create or clear `WorldState.held_object`; it preserves the state
+threaded into it.
+
+| Config field | Default | Description |
+|---|---|---|
+| `hand_close_qpos` | `None` | **Required.** Gripper closed joint positions |
+| `hand_control_part` | `"hand"` | Robot control part for the gripper |
+| `hand_interp_steps` | `5` | Waypoints for the gripper close phase |
+| `sample_interval` | `80` | Total waypoints across all three phases |
+
+**Target:** `EndEffectorPoseTarget(xpos=...)` — the EEF pose to press, a `torch.Tensor`
+of shape `(4, 4)` or `(n_envs, 4, 4)`.
+
+![Press demo](../../../_static/atomic_actions/press.gif)
