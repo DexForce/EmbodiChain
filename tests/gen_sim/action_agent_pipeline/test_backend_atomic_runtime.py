@@ -551,6 +551,8 @@ def test_target_object_builds_pick_up_cfg(monkeypatch) -> None:
     assert capture[0]["cfg"].pre_grasp_distance == pytest.approx(0.07)
     assert isinstance(capture[0]["target"], GraspTarget)
     assert capture[0]["target"].semantics.label == "apple"
+    assert capture[0]["target"].semantics.affordance.mesh_vertices is not None
+    assert capture[0]["target"].semantics.affordance.mesh_triangles is not None
 
 
 def test_place_action_builds_place_cfg(monkeypatch) -> None:
