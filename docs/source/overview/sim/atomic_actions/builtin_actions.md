@@ -14,7 +14,7 @@ The following actions are available out of the box:
 | `PickUp` | Single | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp" width="480" style="max-width: 100%;" /> |
 | `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject" width="480" style="max-width: 100%;" /> |
 | `Place` | Single | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
-| `CoordinatedPickment` | Dual | `CoordinatedPickmentTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | |
+| `CoordinatedPickment` | Dual | `CoordinatedPickmentTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | <img src="../../../_static/atomic_actions/coordinated_pickment.gif" alt="CoordinatedPickment" width="480" style="max-width: 100%;" /> |
 | `CoordinatedPlacement` | Dual | `CoordinatedPlacementTarget` — paired held-object poses | Align placing/support objects → release placing hand → retreat | |
 
 ---
@@ -148,6 +148,8 @@ while keeping both grippers closed. On success, the returned `WorldState` carrie
 
 **Target:** `CoordinatedPickmentTarget(...)` with a target object pose, object
 semantics, and left/right object-to-EEF transforms.
+
+![CoordinatedPickment demo](../../../_static/atomic_actions/coordinated_pickment.gif)
 
 ---
 
