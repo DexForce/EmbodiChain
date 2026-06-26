@@ -36,13 +36,16 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
-    MoveAction,
-    MoveActionCfg,
+    EndEffectorPoseTarget,
+    GraspTarget,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
     ObjectSemantics,
-    PickUpAction,
-    PickUpActionCfg,
-    PlaceAction,
-    PlaceActionCfg,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
+    WorldState,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
@@ -88,9 +91,9 @@ SUPPORTED_CFG_KEYS = {
 
 
 ATOMIC_ACTION_REGISTRY = {
-    "PickUpAction": (PickUpAction, PickUpActionCfg),
-    "MoveAction": (MoveAction, MoveActionCfg),
-    "PlaceAction": (PlaceAction, PlaceActionCfg),
+    "PickUpAction": (PickUp, PickUpCfg),
+    "MoveAction": (MoveEndEffector, MoveEndEffectorCfg),
+    "PlaceAction": (Place, PlaceCfg),
 }
 
 
@@ -397,28 +400,25 @@ def execute_atomic_action(
         return action_np
 
     target = _resolve_target(env, spec, runtime_kwargs)
-    is_left, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
+    _, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
         env, spec.robot_name
     )
     cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
-    start_qpos = _resolve_action_start_qpos(
-        env,
-        spec,
-        is_left=is_left,
-        arm_joints=arm_joints,
-        eef_joints=eef_joints,
-    )
+    target = _build_typed_target(spec, target)
+    state = WorldState(last_qpos=env.robot.get_qpos().clone())
     action_cls = _get_atomic_action_class(spec.atomic_action_class)
     action = action_cls(motion_generator=_make_motion_generator(env), cfg=cfg)
-    is_success, trajectory, joint_ids = action.execute(
+    result = action.execute(
         target=target,
-        start_qpos=start_qpos,
+        state=state,
     )
-    if not is_success:
+    if not result.success:
         raise RuntimeError(
             f"Atomic action failed: atomic_action_class={spec.atomic_action_class}, "
             f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
         )
+    trajectory = result.trajectory[:, :, arm_joints + eef_joints]
+    joint_ids = arm_joints + eef_joints
 
     action_np = _trajectory_to_agent_action(
         env,
@@ -656,6 +656,16 @@ def _get_atomic_action_class(atomic_action_class: str):
     return action_class
 
 
+def _build_typed_target(spec: AtomicActionSpec, target):
+    if spec.atomic_action_class == "PickUpAction":
+        return GraspTarget(semantics=target)
+    if spec.atomic_action_class == "PlaceAction":
+        return EndEffectorPoseTarget(xpos=target)
+    if spec.atomic_action_class == "MoveAction":
+        return EndEffectorPoseTarget(xpos=target)
+    raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
+
+
 def _build_action_cfg(
     env,
     spec: AtomicActionSpec,
@@ -670,48 +680,30 @@ def _build_action_cfg(
     if spec.atomic_action_class == "PickUpAction":
         if spec.control != "arm":
             raise ValueError("PickUpAction atomic action requires control='arm'.")
-        return PickUpActionCfg(
+        return PickUpCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
             hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device),
             hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device),
-            **_cfg_supported_kwargs(PickUpActionCfg, cfg_values),
+            **_cfg_supported_kwargs(PickUpCfg, cfg_values),
         )
 
     if spec.atomic_action_class == "PlaceAction":
         if spec.control != "arm":
             raise ValueError("PlaceAction atomic action requires control='arm'.")
-        return PlaceActionCfg(
+        return PlaceCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
             hand_open_qpos=_state_to_hand_qpos(env.open_state, hand_dof, device),
             hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device),
-            **_cfg_supported_kwargs(PlaceActionCfg, cfg_values),
+            **_cfg_supported_kwargs(PlaceCfg, cfg_values),
         )
 
     control_part = arm_part if spec.control == "arm" else hand_part
-    return MoveActionCfg(
+    return MoveEndEffectorCfg(
         control_part=control_part,
-        **_cfg_supported_kwargs(MoveActionCfg, cfg_values),
+        **_cfg_supported_kwargs(MoveEndEffectorCfg, cfg_values),
     )
-
-
-def _resolve_action_start_qpos(
-    env,
-    spec: AtomicActionSpec,
-    *,
-    is_left: bool,
-    arm_joints: list[int],
-    eef_joints: list[int],
-):
-    if spec.control == "hand":
-        _, _, _, _, current_gripper_state = get_arm_states(env, spec.robot_name)
-        return _state_to_hand_qpos(
-            current_gripper_state,
-            len(eef_joints),
-            env.robot.device,
-        ).reshape(1, len(eef_joints))
-    return _current_arm_qpos(env, is_left, arm_joints)
 
 
 def _resolve_target(env, spec: AtomicActionSpec, runtime_kwargs: dict[str, Any]):
