@@ -35,18 +35,18 @@ __all__ = [
     "make_relative_task_prompt",
 ]
 
-_BASKET_LEFT_RELEASE_OFFSET_Y = -0.04
-_BASKET_RIGHT_RELEASE_OFFSET_Y = 0.04
+_BASKET_LEFT_RELEASE_OFFSET_Y = 0.04
+_BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
 _PLACE_LIFT_HEIGHT = 0.10
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
-- `left_of` means negative world y relative to the reference object.
-- `right_of` means positive world y relative to the reference object.
-- `front_of` means negative world x relative to the reference object.
-- `behind` means positive world x relative to the reference object.
-- `front_left_of` combines negative world x and negative world y.
-- `back_left_of` combines positive world x and negative world y.
-- `front_right_of` combines negative world x and positive world y.
-- `back_right_of` combines positive world x and positive world y.
+- `left_of` means positive world y relative to the reference object.
+- `right_of` means negative world y relative to the reference object.
+- `front_of` means positive world x relative to the reference object.
+- `behind` means negative world x relative to the reference object.
+- `front_left_of` combines positive world x and positive world y.
+- `back_left_of` combines negative world x and positive world y.
+- `front_right_of` combines positive world x and negative world y.
+- `back_right_of` combines negative world x and negative world y.
 - `inside` uses generated container slot offsets; multiple objects sharing a
   container are distributed along the container XY long axis.
 - `on` uses the reference object's xy center."""
@@ -793,9 +793,9 @@ outside the table edge to avoid initial robot-table contact.
 
 The interactive objects are:
 - {roles.left_target_runtime_uid}: the {left_target_text} mesh initially on the
-  negative-y side (source object {roles.left_target_source_uid}).
+  positive-y side (source object {roles.left_target_source_uid}).
 - {roles.right_target_runtime_uid}: the {right_target_text} mesh initially on the
-  positive-y side (source object {roles.right_target_source_uid}).
+  negative-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
 

@@ -249,7 +249,7 @@ def _side_axis_value(obj: _SceneObject) -> float:
 
 
 def _position_side_axis_value(position: list[float]) -> float:
-    return float(position[_DUAL_UR5_SIDE_AXIS_INDEX])
+    return -float(position[_DUAL_UR5_SIDE_AXIS_INDEX])
 
 
 def _arm_side_for_position(position: list[float]) -> str:

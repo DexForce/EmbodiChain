@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,7 +52,7 @@ class AgentGraphEdge:
     right_arm_action: Any = None
 
 
-class ExecutedActionList:
+class ExecutedActionList(Sequence[Any]):
     """Action sequence already executed online by the graph runtime."""
 
     already_executed = True

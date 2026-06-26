@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import SimpleNamespace
 
 import pytest
@@ -35,7 +36,10 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import 
 from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
     GraspCollisionCachePreparationError,
 )
-from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import AgentTaskGraph
+from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import (
+    AgentTaskGraph,
+    ExecutedActionList,
+)
 from embodichain.lab.sim.atomic_actions import (
     MoveActionCfg,
     PickUpActionCfg,
@@ -321,6 +325,17 @@ def test_agent_task_graph_run_rejects_none_env() -> None:
     graph = AgentTaskGraph(start="start", goal="goal")
     with pytest.raises(ValueError, match="env is required"):
         graph.run(env=None)
+
+
+def test_executed_action_list_is_sequence() -> None:
+    actions = [torch.zeros(1, 2), torch.ones(1, 2)]
+    action_list = ExecutedActionList(actions)
+
+    assert isinstance(action_list, Sequence)
+    assert action_list.already_executed
+    assert len(action_list) == 2
+    assert action_list[1] is actions[1]
+    assert list(action_list) == actions
 
 
 def test_resolve_arm_side_rejects_unavailable_requested_arm() -> None:
