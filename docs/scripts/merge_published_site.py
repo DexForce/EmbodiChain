@@ -34,7 +34,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-__all__ = ["load_versions_manifest", "merge_published_site"]
+_INVALID_ARTIFACT_CHARS = frozenset('"<>:|*?\r\n')
+
+__all__ = [
+    "load_versions_manifest",
+    "merge_published_site",
+    "normalize_artifact_paths",
+]
 
 
 def load_versions_manifest(
@@ -67,6 +73,48 @@ def _copy_local_version(src: Path, dest: Path) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
+    normalize_artifact_paths(dest)
+
+
+def _safe_artifact_name(name: str) -> str:
+    """Return a filesystem-agnostic artifact name for one path component."""
+    name = name.split("?", 1)[0].split("#", 1)[0] or "download"
+    return "".join("_" if char in _INVALID_ARTIFACT_CHARS else char for char in name)
+
+
+def normalize_artifact_paths(root: Path) -> list[tuple[Path, Path | None]]:
+    """Normalize paths that GitHub artifact upload rejects.
+
+    Recursive ``wget`` mirrors URLs with query strings as literal filenames
+    such as ``clipboard.min.js?v=a7894cd8``. Browsers resolve that URL against
+    the real file ``clipboard.min.js``, so the mirrored query-string copy is
+    redundant and invalid for Actions artifacts.
+
+    Args:
+        root: Directory tree to normalize.
+
+    Returns:
+        ``(old_path, new_path)`` pairs. ``new_path`` is ``None`` when the
+        invalid duplicate was removed because the safe target already existed.
+    """
+    changes: list[tuple[Path, Path | None]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        safe_name = _safe_artifact_name(path.name)
+        if safe_name == path.name:
+            continue
+
+        target = path.with_name(safe_name)
+        if target.exists():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            changes.append((path, None))
+        else:
+            path.rename(target)
+            changes.append((path, target))
+
+    return changes
 
 
 def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None:
@@ -105,6 +153,11 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
             nested = dest.parent / version
             if nested.is_dir() and nested != dest:
                 nested.rename(dest)
+
+    if dest.is_dir():
+        changes = normalize_artifact_paths(dest)
+        if changes:
+            print(f"Normalized {len(changes)} artifact path(s) in {version}.")
 
 
 def merge_published_site(
