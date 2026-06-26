@@ -100,6 +100,8 @@ class _RelativePlacementStepSpec:
     reference_is_initial_pose: bool = False
     release_position: list[float] | None = None
     high_position: list[float] | None = None
+    orientation_goal: str = "preserve"
+    orientation_align_to_runtime_uid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,8 @@ class _RelativePlacementSpec:
     reference_is_initial_pose: bool = False
     release_position: list[float] | None = None
     high_position: list[float] | None = None
+    orientation_goal: str = "preserve"
+    orientation_align_to_runtime_uid: str | None = None
 
 
 @dataclass(frozen=True)

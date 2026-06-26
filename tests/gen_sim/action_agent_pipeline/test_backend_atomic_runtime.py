@@ -44,7 +44,12 @@ from embodichain.lab.sim.atomic_actions import (
     ActionResult,
     EndEffectorPoseTarget,
     GraspTarget,
+    HeldObjectPoseTarget,
+    HeldObjectState,
+    JointPositionTarget,
     MoveEndEffectorCfg,
+    MoveHeldObjectCfg,
+    MoveJointsCfg,
     PickUpCfg,
     PlaceCfg,
     WorldState,
@@ -54,6 +59,7 @@ from embodichain.lab.sim.atomic_actions import (
 class _FakeRobot:
     uid = "fake_robot"
     device = torch.device("cpu")
+    dof = 6
     control_parts = {
         "left_arm": [0, 1],
         "left_eef": [2],
@@ -63,6 +69,9 @@ class _FakeRobot:
 
     def get_qpos(self):
         return torch.zeros(1, 6)
+
+    def get_joint_ids(self, name: str):
+        return list(self.control_parts[name])
 
 
 class _FakeObject:
@@ -76,10 +85,19 @@ class _FakeObject:
         return self._pose.unsqueeze(0)
 
     def get_vertices(self, env_ids=None, scale: bool = True):
-        return [torch.tensor([[0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [0.0, 0.01, 0.0]])]
+        return [
+            torch.tensor(
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.3, 0.0, 0.0],
+                    [0.0, 0.1, 0.0],
+                    [0.0, 0.0, 0.05],
+                ]
+            )
+        ]
 
     def get_triangles(self, env_ids=None):
-        return [torch.tensor([[0, 1, 2]])]
+        return [torch.tensor([[0, 1, 2], [0, 1, 3]])]
 
     def get_body_scale(self, env_ids=None):
         return torch.ones(1, 3)
@@ -111,6 +129,14 @@ class _FakeEnv:
         self.right_arm_current_gripper_state = torch.tensor([0.0])
         self.open_state = torch.tensor([0.05])
         self.close_state = torch.tensor([0.0])
+        self.stepped_actions = []
+        self.update_count = 0
+
+    def step(self, action):
+        self.stepped_actions.append(action)
+
+    def update_obj_info(self) -> None:
+        self.update_count += 1
 
     def get_current_qpos_agent(self):
         return self.left_arm_current_qpos, self.right_arm_current_qpos
@@ -162,7 +188,57 @@ class _FakeBackendAction:
     def execute(self, target, state, **kwargs):
         if self.capture is not None:
             self.capture[-1].update({"target": target, "state": state})
-        if self.cfg.name in {"pick_up", "place"}:
+        if self.cfg.name == "move_joints":
+            joint_ids = self.motion_generator.robot.get_joint_ids(self.cfg.control_part)
+            trajectory = state.last_qpos.unsqueeze(1).repeat(1, 2, 1)
+            trajectory[:, -1, joint_ids] = target.qpos.reshape(1, -1)
+            return ActionResult(
+                success=True,
+                trajectory=trajectory,
+                next_state=WorldState(
+                    last_qpos=trajectory[:, -1, :],
+                    held_object=state.held_object,
+                ),
+            )
+        if self.cfg.name == "move_held_object":
+            trajectory = torch.tensor(
+                [
+                    [
+                        [0.1, 0.2, 0.0, 0.0, 0.0, 0.0],
+                        [0.25, 0.35, 0.0, 0.0, 0.0, 0.0],
+                    ]
+                ],
+                dtype=torch.float32,
+            )
+            return ActionResult(
+                success=True,
+                trajectory=trajectory,
+                next_state=WorldState(
+                    last_qpos=trajectory[:, -1, :],
+                    held_object=state.held_object,
+                ),
+            )
+        if self.cfg.name == "pick_up":
+            trajectory = torch.tensor(
+                [
+                    [
+                        [0.1, 0.2, 0.3, 0.0, 0.0, 0.0],
+                        [0.2, 0.3, 0.4, 0.0, 0.0, 0.0],
+                    ]
+                ],
+                dtype=torch.float32,
+            )
+            held = HeldObjectState(
+                semantics=target.semantics,
+                object_to_eef=torch.eye(4).unsqueeze(0),
+                grasp_xpos=torch.eye(4).unsqueeze(0),
+            )
+            return ActionResult(
+                success=True,
+                trajectory=trajectory,
+                next_state=WorldState(last_qpos=trajectory[:, -1, :], held_object=held),
+            )
+        if self.cfg.name == "place":
             trajectory = torch.tensor(
                 [
                     [
@@ -220,11 +296,27 @@ def test_normalize_atomic_action_spec_rejects_legacy_schema() -> None:
         normalize_atomic_action_spec({"action": "move", "robot_name": "left_arm"})
 
 
+def test_normalize_atomic_action_spec_rejects_old_action_names() -> None:
+    with pytest.raises(ValueError, match="Unsupported atomic action class"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveAction",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_pose": {
+                    "reference": "relative",
+                    "offset": [0.0, 0.0, 0.1],
+                },
+                "cfg": {},
+            }
+        )
+
+
 def test_normalize_atomic_action_spec_rejects_legacy_target_kind_schema() -> None:
     with pytest.raises(ValueError, match="Legacy target.kind schema"):
         normalize_atomic_action_spec(
             {
-                "atomic_action_class": "MoveAction",
+                "atomic_action_class": "MoveEndEffector",
                 "robot_name": "left_arm",
                 "control": "arm",
                 "target": {"kind": "pose_relative_to_object", "obj_name": "apple"},
@@ -237,7 +329,7 @@ def test_normalize_atomic_action_spec_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError, match="Unsupported atomic action spec fields"):
         normalize_atomic_action_spec(
             {
-                "atomic_action_class": "MoveAction",
+                "atomic_action_class": "MoveJoints",
                 "robot_name": "left_arm",
                 "control": "arm",
                 "target_qpos": {"source": "initial"},
@@ -251,7 +343,7 @@ def test_normalize_atomic_action_spec_rejects_multiple_target_fields() -> None:
     with pytest.raises(ValueError, match="exactly one of target_object"):
         normalize_atomic_action_spec(
             {
-                "atomic_action_class": "MoveAction",
+                "atomic_action_class": "MoveJoints",
                 "robot_name": "left_arm",
                 "control": "arm",
                 "target_pose": {
@@ -268,7 +360,7 @@ def test_normalize_atomic_action_spec_rejects_orientation_field() -> None:
     with pytest.raises(ValueError, match="Unsupported target_pose fields"):
         normalize_atomic_action_spec(
             {
-                "atomic_action_class": "MoveAction",
+                "atomic_action_class": "MoveEndEffector",
                 "robot_name": "left_arm",
                 "control": "arm",
                 "target_pose": {
@@ -283,10 +375,10 @@ def test_normalize_atomic_action_spec_rejects_orientation_field() -> None:
 
 
 def test_normalize_atomic_action_spec_rejects_pickup_pose_target() -> None:
-    with pytest.raises(ValueError, match="PickUpAction requires control='arm'"):
+    with pytest.raises(ValueError, match="PickUp requires control='arm'"):
         normalize_atomic_action_spec(
             {
-                "atomic_action_class": "PickUpAction",
+                "atomic_action_class": "PickUp",
                 "robot_name": "left_arm",
                 "control": "arm",
                 "target_pose": {
@@ -325,7 +417,7 @@ def test_build_parallel_action_stream_does_not_step_env() -> None:
     )
 
     assert len(action_stream) == 2
-    assert not hasattr(env, "stepped_actions")
+    assert env.stepped_actions == []
 
 
 def test_step_env_with_actions_steps_and_updates_env() -> None:
@@ -370,6 +462,79 @@ def test_executed_action_list_is_sequence() -> None:
     assert len(action_list) == 2
     assert action_list[1] is actions[1]
     assert list(action_list) == actions
+
+
+def test_agent_task_graph_threads_world_state_between_edges(monkeypatch) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    graph = AgentTaskGraph(start="v0", goal="v3")
+    graph.add_node("v0").add_node("v1").add_node("v2").add_node("v3")
+    graph.add_edge(
+        "e01",
+        "v0",
+        "v1",
+        left_arm_action={
+            "atomic_action_class": "PickUp",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object": {"obj_name": "apple", "affordance": "antipodal"},
+            "cfg": {},
+        },
+    )
+    graph.add_edge(
+        "e12",
+        "v1",
+        "v2",
+        left_arm_action={
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.1],
+                "frame": "world",
+                "orientation_goal": "preserve",
+            },
+            "cfg": {},
+        },
+    )
+    graph.add_edge(
+        "e23",
+        "v2",
+        "v3",
+        left_arm_action={
+            "atomic_action_class": "Place",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, -0.1],
+                "frame": "world",
+            },
+            "cfg": {},
+        },
+    )
+
+    actions = graph.run(env=env, allow_grasp_annotation=True)
+
+    assert isinstance(actions, ExecutedActionList)
+    assert len(capture) == 3
+    assert capture[0]["state"].held_object is None
+    assert capture[1]["state"].held_object is not None
+    assert capture[2]["state"].held_object is not None
 
 
 def test_resolve_arm_side_rejects_unavailable_requested_arm() -> None:
@@ -421,7 +586,7 @@ def test_object_referenced_pose_builds_move_cfg_and_pose_target(monkeypatch) -> 
 
     action = execute_atomic_action(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveEndEffector",
             "robot_name": "left_arm",
             "control": "arm",
             "target_pose": {
@@ -442,7 +607,7 @@ def test_object_referenced_pose_builds_move_cfg_and_pose_target(monkeypatch) -> 
     assert capture[0]["target"].xpos[:3, 3].tolist() == pytest.approx([0.5, 0.0, 0.4])
 
 
-def test_gripper_state_qpos_target_interpolates_hand_action(monkeypatch) -> None:
+def test_gripper_state_qpos_target_uses_move_joints(monkeypatch) -> None:
     env = _FakeEnv()
     capture = []
     _FakeBackendAction.capture = capture
@@ -460,7 +625,7 @@ def test_gripper_state_qpos_target_interpolates_hand_action(monkeypatch) -> None
 
     action = execute_atomic_action(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveJoints",
             "robot_name": "left_arm",
             "control": "hand",
             "target_qpos": {"source": "gripper_state", "state": "open"},
@@ -469,15 +634,18 @@ def test_gripper_state_qpos_target_interpolates_hand_action(monkeypatch) -> None
         env=env,
     )
 
-    assert action.shape == (7, 3)
-    assert capture == []
+    assert action.shape == (4, 3)
+    assert isinstance(capture[0]["cfg"], MoveJointsCfg)
+    assert capture[0]["cfg"].control_part == "left_eef"
+    assert isinstance(capture[0]["target"], JointPositionTarget)
+    assert capture[0]["target"].qpos.tolist() == pytest.approx([0.05])
     assert action[0].tolist() == pytest.approx([0.1, 0.2, 0.0])
-    assert action[4].tolist() == pytest.approx([0.1, 0.2, 0.05])
+    assert action[1].tolist() == pytest.approx([0.1, 0.2, 0.05])
     assert action[-1].tolist() == pytest.approx([0.1, 0.2, 0.05])
     assert env.left_arm_current_gripper_state.tolist() == pytest.approx([0.05])
 
 
-def test_initial_qpos_target_interpolates_arm_action(monkeypatch) -> None:
+def test_initial_qpos_target_uses_move_joints(monkeypatch) -> None:
     env = _FakeEnv()
     capture = []
     _FakeBackendAction.capture = capture
@@ -495,7 +663,7 @@ def test_initial_qpos_target_interpolates_arm_action(monkeypatch) -> None:
 
     action = execute_atomic_action(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveJoints",
             "robot_name": "right_arm",
             "control": "arm",
             "target_qpos": {"source": "initial"},
@@ -504,8 +672,11 @@ def test_initial_qpos_target_interpolates_arm_action(monkeypatch) -> None:
         env=env,
     )
 
-    assert action.shape == (4, 3)
-    assert capture == []
+    assert action.shape == (2, 3)
+    assert isinstance(capture[0]["cfg"], MoveJointsCfg)
+    assert capture[0]["cfg"].control_part == "right_arm"
+    assert isinstance(capture[0]["target"], JointPositionTarget)
+    assert capture[0]["target"].qpos.tolist() == pytest.approx([-0.3, -0.4])
     assert action[0].tolist() == pytest.approx([0.3, 0.4, 0.0])
     assert action[-1].tolist() == pytest.approx([-0.3, -0.4, 0.0])
     assert env.right_arm_current_qpos.tolist() == pytest.approx([-0.3, -0.4])
@@ -529,7 +700,7 @@ def test_target_object_builds_pick_up_cfg(monkeypatch) -> None:
 
     execute_atomic_action(
         {
-            "atomic_action_class": "PickUpAction",
+            "atomic_action_class": "PickUp",
             "robot_name": "left_arm",
             "control": "arm",
             "target_object": {
@@ -573,7 +744,7 @@ def test_place_action_builds_place_cfg(monkeypatch) -> None:
 
     action = execute_atomic_action(
         {
-            "atomic_action_class": "PlaceAction",
+            "atomic_action_class": "Place",
             "robot_name": "left_arm",
             "control": "arm",
             "target_pose": {
@@ -592,6 +763,82 @@ def test_place_action_builds_place_cfg(monkeypatch) -> None:
     assert capture[0]["cfg"].lift_height == pytest.approx(0.06)
 
 
+def test_move_held_object_builds_cfg_and_object_pose_target(monkeypatch) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+    semantics = atom_actions._build_object_semantics(
+        env,
+        {"obj_name": "apple", "affordance": "antipodal"},
+        {"allow_grasp_annotation": True},
+    )
+    state = WorldState(
+        last_qpos=env.robot.get_qpos().clone(),
+        held_object=HeldObjectState(
+            semantics=semantics,
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=torch.eye(4).unsqueeze(0),
+        ),
+    )
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    action = execute_atomic_action(
+        {
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "object",
+                "obj_name": "apple",
+                "offset": [0.0, 0.0, 0.2],
+                "orientation_goal": "upright",
+            },
+            "cfg": {"sample_interval": 13},
+        },
+        env=env,
+        state=state,
+    )
+
+    assert action.shape == (2, 3)
+    assert isinstance(capture[0]["cfg"], MoveHeldObjectCfg)
+    assert capture[0]["cfg"].control_part == "left_arm"
+    assert capture[0]["cfg"].hand_control_part == "left_eef"
+    assert isinstance(capture[0]["target"], HeldObjectPoseTarget)
+    assert capture[0]["target"].object_target_pose[:3, 3].tolist() == pytest.approx(
+        [0.4, -0.2, 0.3]
+    )
+
+
+def test_move_held_object_requires_prior_pickup() -> None:
+    env = _FakeEnv()
+    with pytest.raises(ValueError, match="requires a held object"):
+        execute_atomic_action(
+            {
+                "atomic_action_class": "MoveHeldObject",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object_pose": {
+                    "reference": "relative",
+                    "offset": [0.0, 0.0, 0.1],
+                    "frame": "world",
+                    "orientation_goal": "preserve",
+                },
+                "cfg": {},
+            },
+            env=env,
+        )
+
+
 def test_place_action_rejects_qpos_target(monkeypatch) -> None:
     env = _FakeEnv()
     monkeypatch.setattr(
@@ -607,11 +854,11 @@ def test_place_action_rejects_qpos_target(monkeypatch) -> None:
 
     with pytest.raises(
         ValueError,
-        match="PlaceAction requires control='arm' and target_pose",
+        match="Place requires control='arm' and target_pose",
     ):
         execute_atomic_action(
             {
-                "atomic_action_class": "PlaceAction",
+                "atomic_action_class": "Place",
                 "robot_name": "left_arm",
                 "control": "arm",
                 "target_qpos": {"source": "initial"},

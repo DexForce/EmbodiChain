@@ -129,6 +129,8 @@ def _with_self_relative_absolute_targets(
         reference_is_initial_pose=primary.reference_is_initial_pose,
         release_position=primary.release_position,
         high_position=primary.high_position,
+        orientation_goal=primary.orientation_goal,
+        orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
     )
 
 
@@ -158,6 +160,8 @@ def _with_self_relative_absolute_target(
         reference_is_initial_pose=True,
         release_position=release_position,
         high_position=high_position,
+        orientation_goal=placement.orientation_goal,
+        orientation_align_to_runtime_uid=placement.orientation_align_to_runtime_uid,
     )
 
 
@@ -252,6 +256,8 @@ def _replace_relative_spec_placements(
         reference_is_initial_pose=primary.reference_is_initial_pose,
         release_position=primary.release_position,
         high_position=primary.high_position,
+        orientation_goal=primary.orientation_goal,
+        orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
     )
 
 
@@ -380,6 +386,8 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
             "relation": spec.relation,
             "active_arm": f"{spec.active_side}_arm",
             "release_offset": spec.release_offset,
+            "orientation_goal": spec.orientation_goal,
+            "orientation_align_to": spec.orientation_align_to_runtime_uid,
         }
     return {
         "mode": "dual_arm_relative_placement",
@@ -390,6 +398,8 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
                 "relation": placement.relation,
                 "active_arm": f"{placement.active_side}_arm",
                 "release_offset": placement.release_offset,
+                "orientation_goal": placement.orientation_goal,
+                "orientation_align_to": placement.orientation_align_to_runtime_uid,
             }
             for placement in spec.placements
         ],

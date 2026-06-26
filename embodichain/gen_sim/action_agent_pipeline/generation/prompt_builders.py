@@ -75,6 +75,8 @@ class _RelativePlacementLike(Protocol):
     reference_is_initial_pose: bool
     high_position: Sequence[float] | None
     release_position: Sequence[float] | None
+    orientation_goal: str
+    orientation_align_to_runtime_uid: str | None
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -164,7 +166,7 @@ Arrangement plan:
 
 Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
 Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges. Use `PlaceAction` for each
+monitor, search, alignment, or extra lift edges. Use `Place` for each
 release-place step so lowering, gripper opening, and upward retreat remain one
 atomic action. The arm not listed for a step must remain null.
 
@@ -245,8 +247,8 @@ def make_arrangement_atom_actions_prompt(spec: _ArrangementSpecLike) -> str:
     blocks = "\n\n".join(_arrangement_atom_action_block(step) for step in spec.steps)
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Line Arrangement
 
-Use only atomic action class JSON specs backed by `PickUpAction`, `MoveAction`, and
-`PlaceAction`. Each object is moved to an absolute slot pose computed by the
+Use only the native atomic action class JSON specs shown below. Each object is
+moved to an absolute slot pose computed by the
 config-stage generator. Keep the non-active arm null for each listed object.
 
 {blocks}
@@ -321,7 +323,7 @@ Object and arm mapping:
 
 Generate one deterministic nominal graph with exactly 4 nominal edges. Use only
 the atomic action class JSON specs shown below. Do not add recovery, monitor, search,
-alignment, or extra lift edges. Use `PlaceAction` for the release-place step so
+alignment, or extra lift edges. Use `Place` for the release-place step so
 lowering, gripper opening, and upward retreat remain one atomic action. The
 inactive arm must remain null in every edge.
 
@@ -431,7 +433,7 @@ Object and arm mapping:
 
 Generate one deterministic nominal graph with exactly 6 nominal edges. Use only
 the atomic action class JSON specs shown below. Do not add recovery, monitor, search,
-alignment, or extra lift edges. Use `PlaceAction` for each release-place step so
+alignment, or extra lift edges. Use `Place` for each release-place step so
 lowering, gripper opening, and upward retreat remain one atomic action.
 
 1. Pick up both moved objects simultaneously:
@@ -503,7 +505,7 @@ Config-stage LLM notes:
 
 The execution-stage LLM should generate graph JSON that grasps the moved object,
 moves it to the configured high staging pose, places it at the release pose with
-one `PlaceAction`, and returns the active arm to its initial pose.
+one `Place`, and returns the active arm to its initial pose.
 """
 
 
@@ -538,7 +540,7 @@ Config-stage LLM notes:
 {notes}
 
 The execution-stage LLM should generate graph JSON that grasps both moved
-objects, stages and places the first moved object with one `PlaceAction`, then
+objects, stages and places the first moved object with one `Place`, then
 stages and places the second moved object while the first arm returns to its
 initial pose. Each arm must release its moved object before returning to its
 initial pose.
@@ -565,8 +567,8 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
 
-Use only atomic action class JSON specs backed by `PickUpAction`, `MoveAction`, and
-`PlaceAction`. The active arm is `{active_arm}`. Keep `{inactive_arm}` null in
+Use only the native atomic action class JSON specs shown below. The active arm
+is `{active_arm}`. Keep `{inactive_arm}` null in
 the nominal graph.
 
 Use exactly these action patterns:
@@ -611,8 +613,7 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
 
-Use only atomic action class JSON specs backed by `PickUpAction`, `MoveAction`, and
-`PlaceAction`.
+Use only the native atomic action class JSON specs shown below.
 - `{first_arm}` manipulates `{first.moved_runtime_uid}`.
 - `{second_arm}` manipulates `{second.moved_runtime_uid}`.
 
@@ -712,20 +713,20 @@ Object and arm mapping:
 - Both target objects must be released into `{roles.container_runtime_uid}`.
 
 Generate one deterministic nominal graph with the following semantic sequence.
-Do not add extra alignment, search, recovery, or monitor steps. Use `PlaceAction`
+Do not add extra alignment, search, recovery, or monitor steps. Use `Place`
 for each release-place step so lowering, gripper opening, and upward retreat
-remain one atomic action. The left arm must finish its `PlaceAction` retreat
+remain one atomic action. The left arm must finish its `Place` retreat
 before the right arm enters the shared container workspace, but the left
 return-to-initial action and the right high-staging action must execute
 simultaneously in one graph edge. Generate exactly 6
 nominal edges, one edge for each numbered step below. Do not split the
 simultaneous grasp or the simultaneous left-return/right-staging action into
-separate edges. Do not split a `PlaceAction` into separate lower-to-release,
+separate edges. Do not split a `Place` into separate lower-to-release,
 open-gripper, or upward-retreat edges.
 
 A target object is not considered placed when it is only above the
 {roles.container_runtime_uid}. For each arm, the placement order must be: move
-to a high staging pose above the container, then execute one `PlaceAction` at
+to a high staging pose above the container, then execute one `Place` at
 the release pose inside the container, then return the arm to its initial pose.
 Never use `target_qpos` source `initial` for an arm that has not already
 released its held target object.
@@ -804,24 +805,24 @@ grasp {roles.left_target_runtime_uid} while the right UR5 grasps
 {roles.right_target_runtime_uid} in the same graph edge. After both
 {target_plural} are held, the left UR5 places
 {roles.left_target_runtime_uid} into {roles.container_runtime_uid} with one
-`PlaceAction`. The next graph edge is a parallel handoff: the left UR5 returns
+`Place`. The next graph edge is a parallel handoff: the left UR5 returns
 to its initial pose while the right UR5 simultaneously moves its
 already-grasped {roles.right_target_runtime_uid} to the high staging pose above
 {roles.container_runtime_uid}. The right UR5 then places
-{roles.right_target_runtime_uid} with one `PlaceAction` and returns to its
+{roles.right_target_runtime_uid} with one `Place` and returns to its
 initial pose. To change the insertion order later, edit the task prompt sequence
 and keep the same atomic action API.
 
 The {roles.container_runtime_uid} area is a shared workspace. A UR5 should
-complete its `PlaceAction` retreat before the other UR5 moves to the container,
+complete its `Place` retreat before the other UR5 moves to the container,
 otherwise the two arms may collide near the container. The right UR5 should keep
 holding {roles.right_target_runtime_uid} while the left UR5 performs its
-placement. Once that `PlaceAction` is complete, the right UR5 may move toward
+placement. Once that `Place` is complete, the right UR5 may move toward
 the container while the left UR5 simultaneously returns to its initial pose; it
 must not wait for the left return-to-initial motion to finish.
 
 A target object at a high pose above `{roles.container_runtime_uid}` is only
-staged, not placed. Each arm must execute a `PlaceAction` at the container
+staged, not placed. Each arm must execute a `Place` at the container
 release pose before any return-to-initial motion.
 
 Always plan to the current `{roles.container_runtime_uid}` object pose from the
@@ -859,20 +860,20 @@ def make_basket_atom_actions_prompt(roles: _BasketRolesLike) -> str:
     )
     return f"""### Atomic Action Class JSON Specs for UR5BreadBasket Dual-UR5 Placement
 
-Use only atomic action class JSON specs backed by `PickUpAction`, `MoveAction`, and
-`PlaceAction`. Use `robot_name="left_arm"` only for
+Use only the native atomic action class JSON specs shown below. Use
+`robot_name="left_arm"` only for
 `{roles.left_target_runtime_uid}` and `robot_name="right_arm"` only for
 `{roles.right_target_runtime_uid}`.
 
 The nominal task starts with simultaneous dual-arm pick-up, followed by a
 left-first placement with an overlapped handoff to the right arm:
-- The first nominal edge must use `atomic_action_class:"PickUpAction"` for both arms.
+- The first nominal edge must use `atomic_action_class:"PickUp"` for both arms.
 - While the left arm places its target, keep the right hand closed with a
   `target_qpos` whose source is `gripper_state` and state is `close`.
 - After the left arm releases `{roles.left_target_runtime_uid}`, first move it
-  upward to clear the container as part of the same `PlaceAction`.
+  upward to clear the container as part of the same `Place`.
 - The next nominal edge must pair the left arm's initial `target_qpos` move with
-  the right arm's object-referenced `target_pose` high-staging move. Do not split this
+  the right arm's object-referenced `target_object_pose` high-staging move. Do not split this
   parallel handoff into separate edges.
 - After the parallel handoff edge, the remaining right-side placement steps put
   the actual action in `right_arm_action` and set `left_arm_action` to null.
@@ -906,7 +907,7 @@ def _format_pick_up_spec(
 ) -> str:
     return _compact_json(
         {
-            "atomic_action_class": "PickUpAction",
+            "atomic_action_class": "PickUp",
             "robot_name": robot_name,
             "control": "arm",
             "target_object": {
@@ -927,18 +928,24 @@ def _format_pose_object_spec(
     offset: tuple[float, float, float] | list[float],
     *,
     sample_interval: int,
+    orientation_goal: str = "preserve",
+    align_to: str | None = None,
 ) -> str:
     x, y, z = offset
+    target_object_pose = {
+        "reference": "object",
+        "obj_name": obj_name,
+        "offset": [float(x), float(y), float(z)],
+        "orientation_goal": orientation_goal,
+    }
+    if align_to is not None:
+        target_object_pose["align_to"] = align_to
     return _compact_json(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveHeldObject",
             "robot_name": robot_name,
             "control": "arm",
-            "target_pose": {
-                "reference": "object",
-                "obj_name": obj_name,
-                "offset": [float(x), float(y), float(z)],
-            },
+            "target_object_pose": target_object_pose,
             "cfg": {"sample_interval": sample_interval},
         }
     )
@@ -986,6 +993,8 @@ def _format_relative_pose_spec(
             robot_name,
             position,
             sample_interval=sample_interval,
+            orientation_goal=placement.orientation_goal,
+            align_to=placement.orientation_align_to_runtime_uid,
         )
 
     offset = placement.high_offset if pose_kind == "high" else placement.release_offset
@@ -994,6 +1003,8 @@ def _format_relative_pose_spec(
         placement.reference_runtime_uid,
         offset,
         sample_interval=sample_interval,
+        orientation_goal=placement.orientation_goal,
+        align_to=placement.orientation_align_to_runtime_uid,
     )
 
 
@@ -1028,16 +1039,22 @@ def _format_pose_absolute_spec(
     position: Sequence[float],
     *,
     sample_interval: int,
+    orientation_goal: str = "preserve",
+    align_to: str | None = None,
 ) -> str:
+    target_object_pose = {
+        "reference": "absolute",
+        "position": [float(value) for value in position],
+        "orientation_goal": orientation_goal,
+    }
+    if align_to is not None:
+        target_object_pose["align_to"] = align_to
     return _compact_json(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveHeldObject",
             "robot_name": robot_name,
             "control": "arm",
-            "target_pose": {
-                "reference": "absolute",
-                "position": [float(value) for value in position],
-            },
+            "target_object_pose": target_object_pose,
             "cfg": {"sample_interval": sample_interval},
         }
     )
@@ -1070,7 +1087,7 @@ def _format_place_spec(
 ) -> str:
     return _compact_json(
         {
-            "atomic_action_class": "PlaceAction",
+            "atomic_action_class": "Place",
             "robot_name": robot_name,
             "control": "arm",
             "target_pose": dict(target_pose),
@@ -1094,7 +1111,7 @@ def _format_gripper_spec(
         cfg["post_hold_steps"] = post_hold_steps
     return _compact_json(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveJoints",
             "robot_name": robot_name,
             "control": "hand",
             "target_qpos": {"source": "gripper_state", "state": state},
@@ -1110,7 +1127,7 @@ def _format_initial_qpos_spec(
 ) -> str:
     return _compact_json(
         {
-            "atomic_action_class": "MoveAction",
+            "atomic_action_class": "MoveJoints",
             "robot_name": robot_name,
             "control": "arm",
             "target_qpos": {"source": "initial"},

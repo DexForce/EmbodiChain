@@ -54,7 +54,7 @@ _MAX_EEF_DISTANCE_M = float(
 )
 _POST_GRASP_HOLD_STEPS = int(os.environ.get("RUN_DEXSIM_GRASP_HOLD_STEPS", "10"))
 _PICK_UP_SPEC_RE = re.compile(
-    r'"atomic_action_class"\s*:\s*"PickUpAction".*?'
+    r'"atomic_action_class"\s*:\s*"PickUp".*?'
     r'"robot_name"\s*:\s*"(?P<robot_name>[^"]+)".*?'
     r'"obj_name"\s*:\s*"(?P<obj_name>[^"]+)"',
     re.DOTALL,
@@ -199,7 +199,7 @@ def _assert_semantic_grasp_lifts_object(
         gym_env.reset()
         z_before = float(_object_xyz(env, obj_name)[2])
         action_spec = {
-            "atomic_action_class": "PickUpAction",
+            "atomic_action_class": "PickUp",
             "robot_name": robot_name,
             "control": "arm",
             "target_object": {

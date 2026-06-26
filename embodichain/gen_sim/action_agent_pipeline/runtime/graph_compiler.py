@@ -222,18 +222,19 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
         raise ValueError(
             "Legacy fn/kwargs action schema is not supported. Use atomic action "
             "class JSON spec with atomic_action_class, robot_name, control, cfg, "
-            "and exactly one of target_object, target_pose, or target_qpos."
+            "and exactly one of target_object, target_pose, target_qpos, or "
+            "target_object_pose."
         )
     if "action" in spec:
         raise ValueError(
             "Legacy action schema is not supported. Use atomic_action_class with "
-            "PickUpAction, MoveAction, or PlaceAction."
+            "PickUp, MoveEndEffector, MoveJoints, MoveHeldObject, or Place."
         )
     if spec.get("atomic_action_class") is None:
         raise ValueError(
             "Atomic action class schema requires atomic_action_class, robot_name, "
             "control, cfg, and exactly one of target_object, target_pose, or "
-            "target_qpos."
+            "target_qpos, or target_object_pose."
         )
 
     normalized = action_module.normalize_atomic_action_spec(spec)

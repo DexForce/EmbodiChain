@@ -144,22 +144,26 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert "negative-x side" not in basic_background
     assert "positive-x side" not in basic_background
     left_high_offset_spec = (
-        '"robot_name":"left_arm","control":"arm","target_pose":{"reference":"object",'
-        '"obj_name":"wicker_basket","offset":[0.0,0.04,0.22]'
+        '"atomic_action_class":"MoveHeldObject","robot_name":"left_arm",'
+        '"control":"arm","target_object_pose":{"reference":"object",'
+        '"obj_name":"wicker_basket","offset":[0.0,0.04,0.22],'
+        '"orientation_goal":"preserve"}'
     )
     right_high_offset_spec = (
-        '"robot_name":"right_arm","control":"arm","target_pose":{"reference":"object",'
-        '"obj_name":"wicker_basket","offset":[0.0,-0.04,0.22]'
+        '"atomic_action_class":"MoveHeldObject","robot_name":"right_arm",'
+        '"control":"arm","target_object_pose":{"reference":"object",'
+        '"obj_name":"wicker_basket","offset":[0.0,-0.04,0.22],'
+        '"orientation_goal":"preserve"}'
     )
     assert left_high_offset_spec in task_prompt
     assert right_high_offset_spec in task_prompt
     assert (
-        '"atomic_action_class":"PlaceAction","robot_name":"left_arm","control":"arm",'
+        '"atomic_action_class":"Place","robot_name":"left_arm","control":"arm",'
         '"target_pose":{"reference":"object","obj_name":"wicker_basket",'
         '"offset":[0.0,0.04,0.12]}' in task_prompt
     )
     assert (
-        '"atomic_action_class":"PlaceAction","robot_name":"right_arm","control":"arm",'
+        '"atomic_action_class":"Place","robot_name":"right_arm","control":"arm",'
         '"target_pose":{"reference":"object","obj_name":"wicker_basket",'
         '"offset":[0.0,-0.04,0.12]}' in task_prompt
     )
@@ -177,12 +181,12 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         maxsplit=1,
     )[0]
     assert (
-        '"robot_name":"left_arm","control":"arm","target_qpos":{"source":"initial"}'
-        in handoff_edge
+        '"atomic_action_class":"MoveJoints","robot_name":"left_arm","control":"arm",'
+        '"target_qpos":{"source":"initial"}' in handoff_edge
     )
     assert (
-        '"robot_name":"right_arm","control":"arm","target_pose":{"reference":"object"'
-        in handoff_edge
+        '"atomic_action_class":"MoveHeldObject","robot_name":"right_arm",'
+        '"control":"arm","target_object_pose":{"reference":"object"' in handoff_edge
     )
     assert '"state":"close"' not in handoff_edge
     assert "left_arm_action: null" not in handoff_edge
@@ -566,10 +570,8 @@ def test_task_description_generates_relative_left_of_config(
         "Generate one deterministic nominal graph with exactly 4 nominal edges"
         in task_prompt
     )
-    assert (
-        '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in task_prompt
-    )
-    assert '"atomic_action_class":"PlaceAction","robot_name":"right_arm"' in task_prompt
+    assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in task_prompt
+    assert '"atomic_action_class":"Place","robot_name":"right_arm"' in task_prompt
     assert '"obj_name":"apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
     assert "Generate exactly 10 nominal edges" not in task_prompt
@@ -923,7 +925,7 @@ def test_task_description_respects_explicit_left_arm(
     assert paths.summary["active_arm"] == "left_arm"
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert '"atomic_action_class":"PickUpAction","robot_name":"left_arm"' in task_prompt
+    assert '"atomic_action_class":"PickUp","robot_name":"left_arm"' in task_prompt
     assert '"obj_name":"apple_1"' in task_prompt
     assert "right_arm_action: null" in task_prompt
 
@@ -967,9 +969,7 @@ def test_task_description_respects_explicit_right_arm(
     assert paths.summary["active_arm"] == "right_arm"
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert (
-        '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in task_prompt
-    )
+    assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in task_prompt
     assert '"obj_name":"apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
 
@@ -1022,12 +1022,165 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
     assert success["support"] == "pad"
 
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert atom_actions.count('"atomic_action_class":"PickUpAction"') == 1
-    assert (
-        '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in atom_actions
-    )
+    assert atom_actions.count('"atomic_action_class":"PickUp"') == 1
+    assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in atom_actions
     assert '"obj_name":"cup"' in atom_actions
     assert _stable_summary(paths.summary)["relation"] == "on"
+
+
+def test_relative_orientation_intent_generates_horizontal_move_held_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "15_Move Stapler Pad_gym_project"
+    for rel_path in (
+        "mesh_assets/table/table_0.glb",
+        "mesh_assets/pad/colored_pad_1.glb",
+        "mesh_assets/stapler/stapler_1.glb",
+    ):
+        _write_minimal_glb(project_dir / rel_path, _default_mesh_vertices())
+
+    gym_config = {
+        "id": "Image2Tabletop-15-v0",
+        "background": [
+            _mesh_object(
+                "table_0",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, -0.05],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "colored_pad_1",
+                "mesh_assets/pad/colored_pad_1.glb",
+                [0.3, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ),
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "stapler_1",
+                "mesh_assets/stapler/stapler_1.glb",
+                [0.0, 0.1, 0.0],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+    }
+    gym_config["background"][1]["body_scale"] = [1.2, 1.0, 0.3]
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert (
+            kwargs["task_description"]
+            == "使用合适的机械臂将订书机水平摆正到彩色垫子上。"
+        )
+        return {
+            "moved_object": "stapler_1",
+            "reference_object": "colored_pad_1",
+            "goal_relation": "on",
+            "arm": "auto",
+            "orientation_goal": "horizontal",
+            "orientation_reference": "reference_object",
+            "task_prompt_summary": "Place the stapler horizontally on the colored pad.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_stapler_pad_agent",
+        task_name="Demo3_Text",
+        task_description="使用合适的机械臂将订书机水平摆正到彩色垫子上。",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    for text in (task_prompt, atom_actions):
+        assert '"atomic_action_class":"MoveHeldObject"' in text
+        assert '"target_object_pose":{"reference":"object"' in text
+        assert '"obj_name":"colored_pad"' in text
+        assert '"orientation_goal":"horizontal"' in text
+        assert '"align_to":"colored_pad"' in text
+
+    summary = _stable_summary(paths.summary)
+    assert summary["orientation_goal"] == "horizontal"
+    assert summary["orientation_align_to"] == "colored_pad"
+
+
+def test_relative_orientation_upright_does_not_emit_align_to(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+            "orientation_goal": "upright",
+            "orientation_reference": "none",
+            "task_prompt_summary": "Move apple_2 upright to the left of basket_3.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_upright_relative_agent",
+        task_description="把 apple_2 扶正后放到 basket_3 左边",
+        prewarm_coacd_cache=False,
+    )
+
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert '"orientation_goal":"upright"' in atom_actions
+    assert '"align_to"' not in atom_actions
+    assert _stable_summary(paths.summary)["orientation_goal"] == "upright"
+    assert paths.summary["orientation_align_to"] is None
+
+
+def test_relative_orientation_rejects_invalid_enum(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+            "orientation_goal": "diagonal",
+            "task_prompt_summary": "Invalid orientation.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    with pytest.raises(ValueError, match="Unsupported orientation_goal"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "generated_invalid_orientation_agent",
+            task_description="把 apple_2 斜着放到 basket_3 左边",
+            prewarm_coacd_cache=False,
+        )
 
 
 def test_task_description_allows_single_rigid_with_background_reference(
@@ -1223,30 +1376,26 @@ def test_task_description_generates_dual_arm_relative_config(
         task_prompt
     )
     assert (
-        'left_arm_action: {"atomic_action_class":"PickUpAction","robot_name":"left_arm"'
+        'left_arm_action: {"atomic_action_class":"PickUp","robot_name":"left_arm"'
         in task_prompt
     )
     assert (
-        'right_arm_action: {"atomic_action_class":"PickUpAction","robot_name":"right_arm"'
+        'right_arm_action: {"atomic_action_class":"PickUp","robot_name":"right_arm"'
         in task_prompt
     )
     assert (
         '"robot_name":"right_arm","control":"hand","target_qpos":{"source":"gripper_state","state":"close"}'
         in task_prompt
     )
-    assert '"atomic_action_class":"PlaceAction","robot_name":"left_arm"' in task_prompt
-    assert '"atomic_action_class":"PlaceAction","robot_name":"right_arm"' in task_prompt
+    assert '"atomic_action_class":"Place","robot_name":"left_arm"' in task_prompt
+    assert '"atomic_action_class":"Place","robot_name":"right_arm"' in task_prompt
     assert "The inactive arm must remain null" not in task_prompt
     assert "Both arms participate" in basic_background
     assert "left_arm moves `apple_2`" in basic_background
     assert "right_arm moves `apple_1`" in basic_background
-    assert (
-        '"atomic_action_class":"PickUpAction","robot_name":"left_arm"' in atom_actions
-    )
+    assert '"atomic_action_class":"PickUp","robot_name":"left_arm"' in atom_actions
     assert '"obj_name":"apple_2"' in atom_actions
-    assert (
-        '"atomic_action_class":"PickUpAction","robot_name":"right_arm"' in atom_actions
-    )
+    assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in atom_actions
     assert '"obj_name":"apple_1"' in atom_actions
 
 
@@ -1437,11 +1586,11 @@ def test_task_description_generates_size_order_arrangement_config(
     assert "Generate one deterministic nominal graph with exactly 12 nominal edges" in (
         task_prompt
     )
-    assert task_prompt.count('"atomic_action_class":"PickUpAction"') == 3
-    assert task_prompt.count('"atomic_action_class":"PlaceAction"') == 3
+    assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
+    assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert task_prompt.count('"reference":"absolute"') >= 6
-    assert atom_actions.count('"atomic_action_class":"PickUpAction"') == 3
-    assert atom_actions.count('"atomic_action_class":"PlaceAction"') == 3
+    assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
+    assert atom_actions.count('"atomic_action_class":"Place"') == 3
 
 
 def test_dual_inside_same_container_uses_container_long_axis_slots(
@@ -1525,12 +1674,12 @@ def test_dual_inside_same_container_uses_container_long_axis_slots(
         assert '"offset":[-0.04,0.0,0.22]' in text
         assert '"offset":[0.04,0.0,0.22]' in text
         assert (
-            '"atomic_action_class":"PlaceAction","robot_name":"left_arm",'
+            '"atomic_action_class":"Place","robot_name":"left_arm",'
             '"control":"arm","target_pose":{"reference":"object",'
             '"obj_name":"wicker_basket","offset":[-0.04,0.0,0.12]}' in text
         )
         assert (
-            '"atomic_action_class":"PlaceAction","robot_name":"right_arm",'
+            '"atomic_action_class":"Place","robot_name":"right_arm",'
             '"control":"arm","target_pose":{"reference":"object",'
             '"obj_name":"wicker_basket","offset":[0.04,0.0,0.12]}' in text
         )
@@ -2001,11 +2150,21 @@ def _assert_normalized_obj_path(fpath: str) -> None:
 
 
 def _stable_summary(summary: dict) -> dict:
-    return {
+    stable = {
         key: value
         for key, value in summary.items()
         if key not in {"normalized_meshes", "coacd_cache"}
     }
+    if stable.get("orientation_goal") == "preserve":
+        stable.pop("orientation_goal", None)
+    if stable.get("orientation_align_to") is None:
+        stable.pop("orientation_align_to", None)
+    for placement in stable.get("placements", []):
+        if placement.get("orientation_goal") == "preserve":
+            placement.pop("orientation_goal", None)
+        if placement.get("orientation_align_to") is None:
+            placement.pop("orientation_align_to", None)
+    return stable
 
 
 def _obj_vertices(path: Path) -> list[tuple[float, float, float]]:

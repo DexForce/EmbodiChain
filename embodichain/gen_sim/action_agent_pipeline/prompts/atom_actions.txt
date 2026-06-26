@@ -4,27 +4,44 @@ Each non-null graph edge action must be a JSON object with these common fields
 and exactly one target field:
 
 {
-  "atomic_action_class": "PickUpAction|MoveAction|PlaceAction",
+  "atomic_action_class": "PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
   "robot_name": "left_arm|right_arm",
   "control": "arm|hand",
   "cfg": {}
 }
 
-Use only these atomic action classes:
+Use only these native atomic action classes:
 
-1. `PickUpAction`
+1. `PickUp`
    - Required target_object:
      {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
    - Typical cfg:
      {"pre_grasp_distance": 0.08, "sample_interval": 45}
 
-2. `MoveAction`
-   - Use `control: "arm"` with target_pose or arm target_qpos.
-   - Use `control: "hand"` with gripper target_qpos.
-   - Supported target_pose objects:
+2. `MoveHeldObject`
+   - Use only after the same arm has successfully executed `PickUp`.
+   - Moves the already-held object in the air without releasing it.
+   - Required target_object_pose:
+     {"reference": "object", "obj_name": "<reference object>", "offset": [x, y, z], "orientation_goal": "preserve|upright|horizontal"}
+     {"reference": "absolute", "position": [x, y, z], "orientation_goal": "preserve|upright|horizontal"}
+     {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef", "orientation_goal": "preserve|upright|horizontal"}
+   - For horizontal insertion into a container, add `"align_to": "<container uid>"`.
+   - Typical cfg:
+     {"sample_interval": 45}
+
+3. `Place`
+   - Prefer this for placement because one action lowers, opens the gripper,
+     and retreats upward.
+   - Required target_pose:
      {"reference": "object", "obj_name": "<object>", "offset": [x, y, z]}
      {"reference": "absolute", "position": [x, y, z]}
      {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef"}
+   - Typical cfg:
+     {"sample_interval": 80, "lift_height": 0.1}
+
+4. `MoveJoints`
+   - Use `control: "arm"` for arm joint targets.
+   - Use `control: "hand"` for gripper targets.
    - Supported target_qpos objects:
      {"source": "initial"}
      {"source": "gripper_state", "state": "open|close"}
@@ -32,24 +49,24 @@ Use only these atomic action classes:
    - Typical cfg:
      {"sample_interval": 30}
 
-3. `PlaceAction`
-   - Prefer this for placement because one action lowers, opens the gripper,
-     and retreats upward.
-   - Required target_pose. Supported pose targets are the same target_pose objects
-     accepted by `MoveAction`.
+5. `MoveEndEffector`
+   - Use for moving an empty end-effector to a pose.
+   - Do not use it to move a held object; use `MoveHeldObject` instead.
+   - Required target_pose. Supported pose targets are the same as `Place`.
    - Typical cfg:
-     {"sample_interval": 80, "lift_height": 0.1}
+     {"sample_interval": 30}
 
 Rules:
 - Do not output Python code, function calls, or `fn`/`kwargs` action objects.
 - Do not output legacy `action`-based specs.
+- Do not output old action names `PickUpAction`, `MoveAction`, or `PlaceAction`.
 - Use `null` for an idle arm.
 - Keep all values JSON primitives.
 - Each non-null action must contain exactly one of `target_object`, `target_pose`,
-  or `target_qpos`.
+  `target_qpos`, or `target_object_pose`.
 - To keep a holding arm closed while the other arm moves, use:
   {
-    "atomic_action_class": "MoveAction",
+    "atomic_action_class": "MoveJoints",
     "robot_name": "<holding_arm>",
     "control": "hand",
     "cfg": {"sample_interval": 10},

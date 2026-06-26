@@ -47,7 +47,7 @@ class TaskPrompt:
       "source": "v0_start",
       "target": "v1_<state>",
       "left_arm_action": {
-        "atomic_action_class": "PickUpAction|MoveAction|PlaceAction",
+        "atomic_action_class": "PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
         "robot_name": "left_arm|right_arm",
         "control": "arm|hand",
         "target_object": {"obj_name": "<object>", "affordance": "antipodal"},

@@ -235,7 +235,9 @@ def _call_relative_task_llm(
         '      "reference_object": "<source_uid from scene objects, or moved_object/self for initial-position moves>",\n'
         '      "goal_relation": '
         '"inside|on|left_of|right_of|front_of|behind|front_left_of|back_left_of|front_right_of|back_right_of",\n'
-        '      "arm": "left|right|auto"\n'
+        '      "arm": "left|right|auto",\n'
+        '      "orientation_goal": "preserve|upright|horizontal",\n'
+        '      "orientation_reference": "none|reference_object"\n'
         "    }\n"
         "  ],\n"
         '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
@@ -243,7 +245,7 @@ def _call_relative_task_llm(
         '  "action_sketch": [\n'
         '    "grasp moved_object",\n'
         '    "move above the relation target pose",\n'
-        '    "place at the release pose with PlaceAction"\n'
+        '    "place at the release pose with Place"\n'
         "  ]\n"
         "}\n\n"
         "Rules:\n"
@@ -283,6 +285,13 @@ def _call_relative_task_llm(
         "falls into it, use goal_relation='inside'.\n"
         "- If the task says to stack/place one object on another non-container "
         "support, use goal_relation='on'.\n"
+        "- orientation_goal captures the held object's intended pose before "
+        "release. Use 'horizontal' for tasks like 水平摆正, 平放, 横放, or lay "
+        "flat. Use 'upright' for tasks like 扶正, 竖起来, or stand upright. "
+        "Use 'preserve' when no orientation change is requested.\n"
+        "- orientation_reference should be 'reference_object' when the object "
+        "should be aligned to the pad, box, container, or target support; "
+        "otherwise use 'none'.\n"
         "- Do not return numeric offsets, object poses, scales, success JSON, "
         "robot config, or full prompt files. The generator computes those "
         "deterministically.\n\n"
@@ -378,6 +387,8 @@ def _apply_relative_task_response(
         reference_is_initial_pose=primary.reference_is_initial_pose,
         release_position=primary.release_position,
         high_position=primary.high_position,
+        orientation_goal=primary.orientation_goal,
+        orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
     )
 
 
@@ -478,6 +489,15 @@ def _build_relative_placement_step(
         raise ValueError(
             f"Relative placement produced duplicate runtime uid {moved_runtime_uid!r}."
         )
+    orientation_goal = _normalize_orientation_goal(entry.get("orientation_goal"))
+    orientation_reference = _normalize_orientation_reference(
+        entry.get("orientation_reference")
+    )
+    orientation_align_to_runtime_uid = (
+        reference_runtime_uid
+        if orientation_reference == "reference_object" and not reference_is_initial_pose
+        else None
+    )
 
     release_offset = [float(value) for value in release_offset_fn(relation)]
     high_offset = list(release_offset)
@@ -506,6 +526,8 @@ def _build_relative_placement_step(
         release_offset=release_offset,
         high_offset=high_offset,
         reference_is_initial_pose=reference_is_initial_pose,
+        orientation_goal=orientation_goal,
+        orientation_align_to_runtime_uid=orientation_align_to_runtime_uid,
     )
 
 
@@ -643,6 +665,46 @@ def _normalize_relative_arm(value: Any) -> str:
     )
 
 
+def _normalize_orientation_goal(value: Any) -> str:
+    if value is None:
+        return "preserve"
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {"", "none", "null", "default", "preserve", "keep", "保持"}:
+        return "preserve"
+    if text in {"upright", "vertical", "stand_upright", "扶正", "竖直", "竖起来"}:
+        return "upright"
+    if text in {"horizontal", "flat", "lay_flat", "level", "水平", "平放", "横放"}:
+        return "horizontal"
+    raise ValueError(
+        f"Unsupported orientation_goal {value!r}; expected 'preserve', "
+        "'upright', or 'horizontal'."
+    )
+
+
+def _normalize_orientation_reference(value: Any) -> str:
+    if value is None:
+        return "none"
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {"", "none", "null", "default", "no", "false", "无"}:
+        return "none"
+    if text in {
+        "reference_object",
+        "reference",
+        "target",
+        "support",
+        "container",
+        "pad",
+        "box",
+        "参考物体",
+        "目标物体",
+    }:
+        return "reference_object"
+    raise ValueError(
+        f"Unsupported orientation_reference {value!r}; expected 'none' or "
+        "'reference_object'."
+    )
+
+
 def _relative_runtime_uid_mapping(
     rigid_objects: list[_SceneObject],
 ) -> dict[str, str]:
@@ -745,7 +807,7 @@ def _default_relative_action_sketch(
                 f"move above the {placement.relation} release pose relative to "
                 f"{placement.reference_runtime_uid}"
             ),
-            "place at the release pose with PlaceAction",
+            "place at the release pose with Place",
         ]
     sketch = ["grasp both moved objects with their assigned arms"]
     for placement in placements:
@@ -756,7 +818,7 @@ def _default_relative_action_sketch(
                     f"{placement.moved_runtime_uid} above the release pose relative "
                     f"to {placement.reference_runtime_uid}"
                 ),
-                f"place {placement.moved_runtime_uid} with PlaceAction",
+                f"place {placement.moved_runtime_uid} with Place",
             ]
         )
     return sketch

@@ -38,8 +38,14 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     EndEffectorPoseTarget,
     GraspTarget,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
     MoveEndEffector,
     MoveEndEffectorCfg,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
+    MoveJoints,
+    MoveJointsCfg,
     ObjectSemantics,
     PickUp,
     PickUpCfg,
@@ -64,14 +70,26 @@ __all__ = [
     "build_parallel_action_stream",
     "execute_atomic_action",
     "execute_parallel_atomic_actions",
+    "init_parallel_world_states",
     "normalize_atomic_action_spec",
     "step_env_with_actions",
 ]
 
 
-SUPPORTED_ATOMIC_ACTION_CLASSES = {"PickUpAction", "MoveAction", "PlaceAction"}
+SUPPORTED_ATOMIC_ACTION_CLASSES = {
+    "PickUp",
+    "MoveEndEffector",
+    "MoveJoints",
+    "MoveHeldObject",
+    "Place",
+}
 SUPPORTED_CONTROLS = {"arm", "hand"}
-TARGET_SPEC_FIELDS = ("target_object", "target_pose", "target_qpos")
+TARGET_SPEC_FIELDS = (
+    "target_object",
+    "target_pose",
+    "target_qpos",
+    "target_object_pose",
+)
 ACTION_SPEC_FIELDS = {
     "atomic_action_class",
     "robot_name",
@@ -80,6 +98,7 @@ ACTION_SPEC_FIELDS = {
     *TARGET_SPEC_FIELDS,
 }
 SUPPORTED_POSE_REFERENCES = {"object", "absolute", "relative"}
+SUPPORTED_OBJECT_ORIENTATION_GOALS = {"preserve", "upright", "horizontal"}
 SUPPORTED_QPOS_SOURCES = {"initial", "gripper_state", "joint_delta"}
 SUPPORTED_CFG_KEYS = {
     "sample_interval",
@@ -91,9 +110,11 @@ SUPPORTED_CFG_KEYS = {
 
 
 ATOMIC_ACTION_REGISTRY = {
-    "PickUpAction": (PickUp, PickUpCfg),
-    "MoveAction": (MoveEndEffector, MoveEndEffectorCfg),
-    "PlaceAction": (Place, PlaceCfg),
+    "PickUp": (PickUp, PickUpCfg),
+    "MoveEndEffector": (MoveEndEffector, MoveEndEffectorCfg),
+    "MoveJoints": (MoveJoints, MoveJointsCfg),
+    "MoveHeldObject": (MoveHeldObject, MoveHeldObjectCfg),
+    "Place": (Place, PlaceCfg),
 }
 
 
@@ -107,6 +128,7 @@ class AtomicActionSpec:
     target_object: dict[str, Any] = field(default_factory=dict)
     target_pose: dict[str, Any] = field(default_factory=dict)
     target_qpos: dict[str, Any] = field(default_factory=dict)
+    target_object_pose: dict[str, Any] = field(default_factory=dict)
     cfg: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -124,6 +146,7 @@ class AtomicActionSpec:
             target_object=dict(normalized.get("target_object", {})),
             target_pose=dict(normalized.get("target_pose", {})),
             target_qpos=dict(normalized.get("target_qpos", {})),
+            target_object_pose=dict(normalized.get("target_object_pose", {})),
             cfg=dict(normalized["cfg"]),
         )
 
@@ -140,7 +163,17 @@ class AtomicActionSpec:
             spec["target_pose"] = deepcopy(self.target_pose)
         if self.target_qpos:
             spec["target_qpos"] = deepcopy(self.target_qpos)
+        if self.target_object_pose:
+            spec["target_object_pose"] = deepcopy(self.target_object_pose)
         return spec
+
+
+@dataclass(frozen=True)
+class _ExecutedAtomicAction:
+    action: np.ndarray
+    next_state: WorldState | None
+    robot_name: str | None
+    control: str | None
 
 
 def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
@@ -157,12 +190,12 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
     if "action" in spec:
         raise ValueError(
             "Legacy action schema is not supported. Use atomic_action_class with "
-            "PickUpAction, MoveAction, or PlaceAction."
+            "PickUp, MoveEndEffector, MoveJoints, MoveHeldObject, or Place."
         )
     if "target" in spec:
         raise ValueError(
             "Legacy target.kind schema is not supported. Use exactly one of "
-            "target_object, target_pose, or target_qpos."
+            "target_object, target_pose, target_qpos, or target_object_pose."
         )
     unknown_fields = set(spec) - ACTION_SPEC_FIELDS
     if unknown_fields:
@@ -222,7 +255,7 @@ def _normalize_action_target(
     if len(target_fields) != 1:
         raise ValueError(
             "Atomic action spec requires exactly one of target_object, target_pose, "
-            f"or target_qpos; got {target_fields}."
+            f"target_qpos, or target_object_pose; got {target_fields}."
         )
 
     target_field = target_fields[0]
@@ -231,29 +264,41 @@ def _normalize_action_target(
         raise ValueError(f"{target_field} must be a non-empty object.")
     target_spec = dict(target_spec)
 
-    if atomic_action_class == "PickUpAction":
+    if atomic_action_class == "PickUp":
         if control != "arm" or target_field != "target_object":
-            raise ValueError("PickUpAction requires control='arm' and target_object.")
+            raise ValueError("PickUp requires control='arm' and target_object.")
         _validate_target_object(target_spec)
         return target_field, target_spec
 
-    if atomic_action_class == "PlaceAction":
+    if atomic_action_class == "Place":
         if control != "arm" or target_field != "target_pose":
-            raise ValueError("PlaceAction requires control='arm' and target_pose.")
+            raise ValueError("Place requires control='arm' and target_pose.")
         _validate_target_pose(target_spec)
         return target_field, target_spec
 
-    if target_field == "target_pose":
+    if atomic_action_class == "MoveEndEffector":
         if control != "arm":
-            raise ValueError("MoveAction target_pose requires control='arm'.")
+            raise ValueError("MoveEndEffector requires control='arm'.")
+        if target_field != "target_pose":
+            raise ValueError("MoveEndEffector requires target_pose.")
         _validate_target_pose(target_spec)
         return target_field, target_spec
 
-    if target_field == "target_qpos":
+    if atomic_action_class == "MoveJoints":
+        if target_field != "target_qpos":
+            raise ValueError("MoveJoints requires target_qpos.")
         _validate_target_qpos(target_spec, control=control)
         return target_field, target_spec
 
-    raise ValueError("MoveAction requires target_pose or target_qpos.")
+    if atomic_action_class == "MoveHeldObject":
+        if control != "arm" or target_field != "target_object_pose":
+            raise ValueError(
+                "MoveHeldObject requires control='arm' and target_object_pose."
+            )
+        _validate_target_object_pose(target_spec)
+        return target_field, target_spec
+
+    raise ValueError(f"Unsupported atomic action class: {atomic_action_class}.")
 
 
 def _validate_target_object(target_object: Mapping[str, Any]) -> None:
@@ -313,6 +358,66 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
         raise ValueError("relative target_pose frame must be 'world' or 'eef'.")
 
 
+def _validate_target_object_pose(target_object_pose: Mapping[str, Any]) -> None:
+    _validate_target_pose_like(target_object_pose, "target_object_pose")
+    orientation_goal = target_object_pose.get("orientation_goal", "preserve")
+    if orientation_goal not in SUPPORTED_OBJECT_ORIENTATION_GOALS:
+        raise ValueError(
+            "target_object_pose orientation_goal must be one of "
+            f"{sorted(SUPPORTED_OBJECT_ORIENTATION_GOALS)}."
+        )
+    align_to = target_object_pose.get("align_to")
+    if align_to is not None and (not isinstance(align_to, str) or not align_to):
+        raise ValueError("target_object_pose align_to must be a non-empty string.")
+
+
+def _validate_target_pose_like(
+    target_pose: Mapping[str, Any],
+    target_name: str,
+) -> None:
+    reference = target_pose.get("reference")
+    allowed_common = {"orientation_goal", "align_to"}
+    if reference not in SUPPORTED_POSE_REFERENCES:
+        raise ValueError(
+            f"{target_name} reference must be one of {sorted(SUPPORTED_POSE_REFERENCES)}."
+        )
+
+    if reference == "object":
+        _validate_target_fields(
+            target_pose,
+            {"reference", "obj_name", "offset"} | allowed_common,
+            target_name,
+        )
+        obj_name = target_pose.get("obj_name")
+        if not isinstance(obj_name, str) or not obj_name:
+            raise ValueError(f"object {target_name} requires non-empty obj_name.")
+        _xyz(target_pose.get("offset", [0.0, 0.0, 0.0]), "offset")
+        return
+
+    if reference == "absolute":
+        _validate_target_fields(
+            target_pose,
+            {"reference", "position"} | allowed_common,
+            target_name,
+        )
+        position = target_pose.get("position")
+        if not isinstance(position, list) or len(position) != 3:
+            raise ValueError(
+                f"absolute {target_name} requires position with three entries."
+            )
+        return
+
+    _validate_target_fields(
+        target_pose,
+        {"reference", "offset", "frame"} | allowed_common,
+        target_name,
+    )
+    _xyz(target_pose.get("offset", [0.0, 0.0, 0.0]), "offset")
+    frame = target_pose.get("frame", "world")
+    if frame not in {"world", "eef"}:
+        raise ValueError(f"relative {target_name} frame must be 'world' or 'eef'.")
+
+
 def _validate_target_qpos(
     target_qpos: Mapping[str, Any],
     *,
@@ -370,42 +475,48 @@ def execute_atomic_action(
     action_spec: Mapping[str, Any] | AtomicActionSpec,
     *,
     env,
+    state: WorldState | None = None,
     **runtime_kwargs,
 ) -> np.ndarray:
     """Execute one atomic action spec and return local arm+eef qpos actions."""
+    executed = _execute_atomic_action_result(
+        action_spec,
+        env=env,
+        state=state,
+        **runtime_kwargs,
+    )
+    _sync_agent_state_from_atomic_action(
+        env,
+        executed.robot_name,
+        executed.action,
+        executed.control,
+    )
+    return executed.action
+
+
+def _execute_atomic_action_result(
+    action_spec: Mapping[str, Any] | AtomicActionSpec,
+    *,
+    env,
+    state: WorldState | None = None,
+    **runtime_kwargs,
+) -> _ExecutedAtomicAction:
+    """Execute one atomic action spec and keep the typed WorldState result."""
     spec = (
         action_spec
         if isinstance(action_spec, AtomicActionSpec)
         else AtomicActionSpec.from_mapping(action_spec)
     )
-    if spec.atomic_action_class == "MoveAction" and spec.target_qpos:
-        action_np = _execute_move_qpos_action(env, spec)
-        action_np = _append_hold_steps(
-            action_np,
-            int(spec.cfg.get("post_hold_steps", 0)),
-            "atomic qpos action",
-        )
-        _sync_agent_state_from_atomic_action(
-            env,
-            spec.robot_name,
-            action_np,
-            spec.control,
-        )
-        log_info(
-            "Using action-agent qpos action: "
-            f"control={spec.control}, target={_target_summary(spec)}, "
-            f"steps={len(action_np)}.",
-            color="green",
-        )
-        return action_np
 
-    target = _resolve_target(env, spec, runtime_kwargs)
+    target = _resolve_target(env, spec, runtime_kwargs, state=state)
     _, arm_part, hand_part, arm_joints, eef_joints = _select_arm_parts(
         env, spec.robot_name
     )
     cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
     target = _build_typed_target(spec, target)
-    state = WorldState(last_qpos=env.robot.get_qpos().clone())
+    if state is None:
+        state = WorldState(last_qpos=env.robot.get_qpos().clone())
+    state = _state_with_current_agent_qpos(env, spec, state)
     action_cls = _get_atomic_action_class(spec.atomic_action_class)
     action = action_cls(motion_generator=_make_motion_generator(env), cfg=cfg)
     result = action.execute(
@@ -417,8 +528,11 @@ def execute_atomic_action(
             f"Atomic action failed: atomic_action_class={spec.atomic_action_class}, "
             f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
         )
-    trajectory = result.trajectory[:, :, arm_joints + eef_joints]
-    joint_ids = arm_joints + eef_joints
+    if spec.atomic_action_class == "MoveJoints":
+        joint_ids = arm_joints if spec.control == "arm" else eef_joints
+    else:
+        joint_ids = arm_joints + eef_joints
+    trajectory = result.trajectory[:, :, joint_ids]
 
     action_np = _trajectory_to_agent_action(
         env,
@@ -431,7 +545,6 @@ def execute_atomic_action(
         int(spec.cfg.get("post_hold_steps", 0)),
         "atomic action",
     )
-    _sync_agent_state_from_atomic_action(env, spec.robot_name, action_np, spec.control)
     log_info(
         "Using atomic action: "
         f"atomic_action_class={spec.atomic_action_class}, cfg={cfg.__class__.__name__}, "
@@ -439,7 +552,18 @@ def execute_atomic_action(
         f"steps={len(action_np)}.",
         color="green",
     )
-    return action_np
+    next_state = result.next_state
+    if int(spec.cfg.get("post_hold_steps", 0)) > 0:
+        next_state = WorldState(
+            last_qpos=next_state.last_qpos.clone(),
+            held_object=next_state.held_object,
+        )
+    return _ExecutedAtomicAction(
+        action=action_np,
+        next_state=next_state,
+        robot_name=spec.robot_name,
+        control=spec.control,
+    )
 
 
 def execute_parallel_atomic_actions(
@@ -447,21 +571,24 @@ def execute_parallel_atomic_actions(
     right_arm_action=None,
     *,
     env,
+    world_states: dict[str, WorldState] | None = None,
     return_result: bool = False,
     **runtime_kwargs,
 ):
     """Execute left/right atomic action specs as one synchronized stream."""
-    actions = build_parallel_action_stream(
+    result = build_parallel_action_stream(
         left_arm_action=left_arm_action,
         right_arm_action=right_arm_action,
         env=env,
+        world_states=world_states,
+        return_result=True,
         **runtime_kwargs,
     )
+    actions = result["actions"]
     step_env_with_actions(env, actions)
+    _sync_agent_states_from_parallel_actions(env, result["arm_actions"])
     if return_result:
-        return {
-            "actions": actions,
-        }
+        return result
     return actions
 
 
@@ -470,17 +597,37 @@ def build_parallel_action_stream(
     right_arm_action=None,
     *,
     env,
+    world_states: dict[str, WorldState] | None = None,
+    return_result: bool = False,
     **runtime_kwargs,
-) -> list[torch.Tensor]:
+) -> list[torch.Tensor] | dict[str, Any]:
     """Build a synchronized left/right atomic action stream without stepping env."""
     if env is None:
         raise ValueError("env is required to build parallel atomic actions.")
-    left_arm_action = _resolve_action_spec(left_arm_action, env, runtime_kwargs)
-    right_arm_action = _resolve_action_spec(right_arm_action, env, runtime_kwargs)
+    if world_states is None:
+        world_states = init_parallel_world_states(env)
+    left_arm_action = _resolve_action_spec(
+        left_arm_action,
+        env,
+        runtime_kwargs,
+        state=world_states.get("left"),
+    )
+    right_arm_action = _resolve_action_spec(
+        right_arm_action,
+        env,
+        runtime_kwargs,
+        state=world_states.get("right"),
+    )
 
-    left_arm_action = _as_2d_action(left_arm_action, "left_arm_action")
-    right_arm_action = _as_2d_action(right_arm_action, "right_arm_action")
-    arm_actions = {"left": left_arm_action, "right": right_arm_action}
+    left_action_np = _as_2d_action(
+        _executed_action_array(left_arm_action),
+        "left_arm_action",
+    )
+    right_action_np = _as_2d_action(
+        _executed_action_array(right_arm_action),
+        "right_arm_action",
+    )
+    arm_actions = {"left": left_action_np, "right": right_action_np}
 
     if all(action is None for action in arm_actions.values()):
         raise ValueError("At least one atomic arm action must be provided.")
@@ -519,7 +666,36 @@ def build_parallel_action_stream(
         actions[:, arm_index] = action
 
     actions = torch.from_numpy(actions).to(dtype=torch.float32).unsqueeze(1)
-    return list(actions.unbind(dim=0))
+    actions = list(actions.unbind(dim=0))
+    if not return_result:
+        return actions
+    next_world_states = dict(world_states)
+    for side, executed in {
+        "left": left_arm_action,
+        "right": right_arm_action,
+    }.items():
+        if (
+            isinstance(executed, _ExecutedAtomicAction)
+            and executed.next_state is not None
+        ):
+            next_world_states[side] = executed.next_state
+    return {
+        "actions": actions,
+        "world_states": next_world_states,
+        "arm_actions": {
+            "left": left_arm_action,
+            "right": right_arm_action,
+        },
+    }
+
+
+def init_parallel_world_states(env) -> dict[str, WorldState]:
+    """Seed independent per-arm WorldState slots from the current robot qpos."""
+    qpos = env.robot.get_qpos().clone()
+    return {
+        "left": WorldState(last_qpos=qpos.clone()),
+        "right": WorldState(last_qpos=qpos.clone()),
+    }
 
 
 def step_env_with_actions(
@@ -537,99 +713,46 @@ def step_env_with_actions(
             env.update_obj_info()
 
 
-def _resolve_action_spec(action_spec, env, runtime_kwargs: dict[str, Any]):
+def _resolve_action_spec(
+    action_spec,
+    env,
+    runtime_kwargs: dict[str, Any],
+    *,
+    state: WorldState | None,
+):
     if action_spec is None:
         return None
     if isinstance(action_spec, np.ndarray):
         return action_spec
     if isinstance(action_spec, torch.Tensor):
         return action_spec
-    return execute_atomic_action(action_spec, env=env, **runtime_kwargs)
-
-
-def _execute_move_qpos_action(env, spec: AtomicActionSpec) -> np.ndarray:
-    """Execute MoveAction target_qpos locally without extending core MoveAction."""
-    target_qpos = _resolve_qpos_target(env, spec)
-    start_qpos, joint_ids = _qpos_start_and_joint_ids(env, spec)
-    target_qpos = _resolve_batched_qpos(
-        target_qpos,
-        expected_dof=len(joint_ids),
-        device=env.robot.device,
-        name="target_qpos",
-    )
-    sample_interval = int(spec.cfg.get("sample_interval", 80))
-    trajectory = _interpolate_qpos_trajectory(
-        start_qpos,
-        target_qpos,
-        sample_interval,
-    )
-    return _trajectory_to_agent_action(
-        env,
-        spec.robot_name,
-        trajectory,
-        joint_ids,
+    return _execute_atomic_action_result(
+        action_spec,
+        env=env,
+        state=state,
+        **runtime_kwargs,
     )
 
 
-def _qpos_start_and_joint_ids(
+def _executed_action_array(action):
+    if isinstance(action, _ExecutedAtomicAction):
+        return action.action
+    return action
+
+
+def _sync_agent_states_from_parallel_actions(
     env,
-    spec: AtomicActionSpec,
-) -> tuple[torch.Tensor, list[int]]:
-    is_left, _, _, arm_joints, eef_joints = _select_arm_parts(env, spec.robot_name)
-    if spec.control == "hand":
-        _, _, _, _, current_gripper_state = get_arm_states(env, spec.robot_name)
-        start_qpos = _state_to_hand_qpos(
-            current_gripper_state,
-            len(eef_joints),
-            env.robot.device,
+    arm_actions: Mapping[str, Any],
+) -> None:
+    for executed in arm_actions.values():
+        if not isinstance(executed, _ExecutedAtomicAction):
+            continue
+        _sync_agent_state_from_atomic_action(
+            env,
+            executed.robot_name,
+            executed.action,
+            executed.control,
         )
-        return start_qpos.reshape(1, len(eef_joints)), eef_joints
-    return _current_arm_qpos(env, is_left, arm_joints), arm_joints
-
-
-def _resolve_batched_qpos(
-    qpos,
-    *,
-    expected_dof: int,
-    device,
-    name: str,
-) -> torch.Tensor:
-    qpos = torch.as_tensor(qpos, dtype=torch.float32, device=device)
-    if qpos.shape == (expected_dof,):
-        qpos = qpos.reshape(1, expected_dof)
-    if qpos.ndim != 2 or qpos.shape[1] != expected_dof:
-        raise ValueError(
-            f"{name} must have shape ({expected_dof},) or (num_envs, {expected_dof}), "
-            f"got {tuple(qpos.shape)}."
-        )
-    return qpos
-
-
-def _interpolate_qpos_trajectory(
-    start_qpos: torch.Tensor,
-    target_qpos: torch.Tensor,
-    sample_interval: int,
-) -> torch.Tensor:
-    if sample_interval < 2:
-        raise ValueError("sample_interval must be at least 2 for qpos interpolation.")
-    if target_qpos.shape[0] == 1 and start_qpos.shape[0] > 1:
-        target_qpos = target_qpos.repeat(start_qpos.shape[0], 1)
-    if start_qpos.shape != target_qpos.shape:
-        raise ValueError(
-            f"start_qpos and target_qpos must have matching shapes, got "
-            f"{tuple(start_qpos.shape)} and {tuple(target_qpos.shape)}."
-        )
-    weights = torch.linspace(
-        0.0,
-        1.0,
-        steps=sample_interval,
-        dtype=start_qpos.dtype,
-        device=start_qpos.device,
-    ).reshape(1, sample_interval, 1)
-    return (
-        start_qpos.unsqueeze(1)
-        + (target_qpos.unsqueeze(1) - start_qpos.unsqueeze(1)) * weights
-    )
 
 
 def _select_arm_parts(env, robot_name: str):
@@ -645,6 +768,32 @@ def _select_arm_parts(env, robot_name: str):
     return is_left, arm_part, hand_part, list(arm_joints), list(eef_joints)
 
 
+def _state_with_current_agent_qpos(
+    env,
+    spec: AtomicActionSpec,
+    state: WorldState,
+) -> WorldState:
+    qpos = state.last_qpos.clone()
+    _, _, current_arm_qpos, _, current_gripper_state = get_arm_states(
+        env,
+        spec.robot_name,
+    )
+    _, _, _, arm_joints, eef_joints = _select_arm_parts(env, spec.robot_name)
+    if arm_joints:
+        qpos[:, arm_joints] = torch.as_tensor(
+            current_arm_qpos,
+            dtype=torch.float32,
+            device=qpos.device,
+        ).reshape(1, len(arm_joints))
+    if eef_joints:
+        qpos[:, eef_joints] = _state_to_hand_qpos(
+            current_gripper_state,
+            len(eef_joints),
+            qpos.device,
+        ).reshape(1, len(eef_joints))
+    return WorldState(last_qpos=qpos, held_object=state.held_object)
+
+
 def _make_motion_generator(env):
     return MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
@@ -657,12 +806,14 @@ def _get_atomic_action_class(atomic_action_class: str):
 
 
 def _build_typed_target(spec: AtomicActionSpec, target):
-    if spec.atomic_action_class == "PickUpAction":
+    if spec.atomic_action_class == "PickUp":
         return GraspTarget(semantics=target)
-    if spec.atomic_action_class == "PlaceAction":
+    if spec.atomic_action_class in {"MoveEndEffector", "Place"}:
         return EndEffectorPoseTarget(xpos=target)
-    if spec.atomic_action_class == "MoveAction":
-        return EndEffectorPoseTarget(xpos=target)
+    if spec.atomic_action_class == "MoveJoints":
+        return JointPositionTarget(qpos=target)
+    if spec.atomic_action_class == "MoveHeldObject":
+        return HeldObjectPoseTarget(object_target_pose=target)
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
 
 
@@ -677,9 +828,9 @@ def _build_action_cfg(
     cfg_values.pop("post_hold_steps", None)
     device = env.robot.device
 
-    if spec.atomic_action_class == "PickUpAction":
+    if spec.atomic_action_class == "PickUp":
         if spec.control != "arm":
-            raise ValueError("PickUpAction atomic action requires control='arm'.")
+            raise ValueError("PickUp atomic action requires control='arm'.")
         return PickUpCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
@@ -688,9 +839,9 @@ def _build_action_cfg(
             **_cfg_supported_kwargs(PickUpCfg, cfg_values),
         )
 
-    if spec.atomic_action_class == "PlaceAction":
+    if spec.atomic_action_class == "Place":
         if spec.control != "arm":
-            raise ValueError("PlaceAction atomic action requires control='arm'.")
+            raise ValueError("Place atomic action requires control='arm'.")
         return PlaceCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
@@ -699,19 +850,46 @@ def _build_action_cfg(
             **_cfg_supported_kwargs(PlaceCfg, cfg_values),
         )
 
+    if spec.atomic_action_class == "MoveHeldObject":
+        if spec.control != "arm":
+            raise ValueError("MoveHeldObject atomic action requires control='arm'.")
+        return MoveHeldObjectCfg(
+            control_part=arm_part,
+            hand_control_part=hand_part,
+            hand_close_qpos=_state_to_hand_qpos(env.close_state, hand_dof, device),
+            **_cfg_supported_kwargs(MoveHeldObjectCfg, cfg_values),
+        )
+
     control_part = arm_part if spec.control == "arm" else hand_part
-    return MoveEndEffectorCfg(
-        control_part=control_part,
-        **_cfg_supported_kwargs(MoveEndEffectorCfg, cfg_values),
-    )
+    if spec.atomic_action_class == "MoveJoints":
+        return MoveJointsCfg(
+            control_part=control_part,
+            **_cfg_supported_kwargs(MoveJointsCfg, cfg_values),
+        )
+    if spec.atomic_action_class == "MoveEndEffector":
+        return MoveEndEffectorCfg(
+            control_part=control_part,
+            **_cfg_supported_kwargs(MoveEndEffectorCfg, cfg_values),
+        )
+    raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
 
 
-def _resolve_target(env, spec: AtomicActionSpec, runtime_kwargs: dict[str, Any]):
-    if spec.atomic_action_class == "PickUpAction":
+def _resolve_target(
+    env,
+    spec: AtomicActionSpec,
+    runtime_kwargs: dict[str, Any],
+    *,
+    state: WorldState | None,
+):
+    if spec.atomic_action_class == "PickUp":
         return _resolve_pickup_target(env, spec, runtime_kwargs)
-    if spec.atomic_action_class == "MoveAction":
-        return _resolve_move_target(env, spec)
-    if spec.atomic_action_class == "PlaceAction":
+    if spec.atomic_action_class == "MoveEndEffector":
+        return _resolve_move_end_effector_target(env, spec)
+    if spec.atomic_action_class == "MoveJoints":
+        return _resolve_move_joints_target(env, spec)
+    if spec.atomic_action_class == "MoveHeldObject":
+        return _resolve_move_held_object_target(env, spec, state)
+    if spec.atomic_action_class == "Place":
         return _resolve_place_target(env, spec)
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
 
@@ -722,21 +900,37 @@ def _resolve_pickup_target(
     runtime_kwargs: dict[str, Any],
 ):
     if not spec.target_object:
-        raise ValueError("PickUpAction requires target_object.")
+        raise ValueError("PickUp requires target_object.")
     return _build_object_semantics(env, spec.target_object, runtime_kwargs)
 
 
-def _resolve_move_target(env, spec: AtomicActionSpec):
-    if spec.target_pose:
-        return _resolve_pose_target(env, spec)
-    if spec.target_qpos:
-        return _resolve_qpos_target(env, spec)
-    raise ValueError("MoveAction requires target_pose or target_qpos.")
+def _resolve_move_end_effector_target(env, spec: AtomicActionSpec):
+    if not spec.target_pose:
+        raise ValueError("MoveEndEffector requires target_pose.")
+    return _resolve_pose_target(env, spec)
+
+
+def _resolve_move_joints_target(env, spec: AtomicActionSpec):
+    if not spec.target_qpos:
+        raise ValueError("MoveJoints requires target_qpos.")
+    return _resolve_qpos_target(env, spec)
+
+
+def _resolve_move_held_object_target(
+    env,
+    spec: AtomicActionSpec,
+    state: WorldState | None,
+):
+    if not spec.target_object_pose:
+        raise ValueError("MoveHeldObject requires target_object_pose.")
+    if state is None or state.held_object is None:
+        raise ValueError("MoveHeldObject requires a held object from a prior PickUp.")
+    return _resolve_held_object_pose_target(env, spec, state)
 
 
 def _resolve_place_target(env, spec: AtomicActionSpec):
     if not spec.target_pose:
-        raise ValueError("PlaceAction requires target_pose.")
+        raise ValueError("Place requires target_pose.")
     return _resolve_pose_target(env, spec)
 
 
@@ -749,6 +943,192 @@ def _resolve_pose_target(env, spec: AtomicActionSpec):
     if reference == "relative":
         return _resolve_relative_pose_target(env, spec)
     raise ValueError(f"Unsupported target_pose reference: {reference}.")
+
+
+def _resolve_held_object_pose_target(
+    env,
+    spec: AtomicActionSpec,
+    state: WorldState,
+) -> torch.Tensor:
+    target_pose_spec = spec.target_object_pose
+    pose_spec = AtomicActionSpec(
+        atomic_action_class="MoveEndEffector",
+        robot_name=spec.robot_name,
+        control="arm",
+        target_pose={
+            key: deepcopy(value)
+            for key, value in target_pose_spec.items()
+            if key not in {"orientation_goal", "align_to"}
+        },
+        cfg={},
+    )
+    target_pose = _resolve_pose_target(env, pose_spec)
+    target_pose = _ensure_pose_tensor(target_pose, env.robot.device)
+    current_object_pose = _held_object_current_pose(state, env.robot.device)
+    target_pose[:3, :3] = _resolve_object_orientation(
+        env,
+        target_pose_spec,
+        current_object_pose,
+        state,
+    )
+    return target_pose
+
+
+def _held_object_current_pose(state: WorldState, device) -> torch.Tensor:
+    held = state.held_object
+    if held is None:
+        raise ValueError("Held object state is required.")
+    entity = held.semantics.entity
+    if entity is not None and hasattr(entity, "get_local_pose"):
+        return _ensure_pose_tensor(entity.get_local_pose(to_matrix=True), device)
+    return held.grasp_xpos.to(device=device, dtype=torch.float32).squeeze(0)
+
+
+def _resolve_object_orientation(
+    env,
+    target_pose_spec: Mapping[str, Any],
+    current_object_pose: torch.Tensor,
+    state: WorldState,
+) -> torch.Tensor:
+    orientation_goal = target_pose_spec.get("orientation_goal", "preserve")
+    current_rotation = current_object_pose[:3, :3].clone()
+    if orientation_goal == "preserve":
+        return current_rotation
+
+    mesh_vertices = _held_object_mesh_vertices(state, env.robot.device)
+    local_axes = _principal_local_axes(mesh_vertices)
+    long_axis = local_axes[:, 0]
+    up_axis = local_axes[:, 2]
+    if orientation_goal == "upright":
+        return _rotation_from_axis_targets(
+            local_primary=long_axis,
+            world_primary=torch.tensor([0.0, 0.0, 1.0], device=env.robot.device),
+            local_secondary=up_axis,
+            world_secondary=torch.tensor([1.0, 0.0, 0.0], device=env.robot.device),
+        )
+    if orientation_goal == "horizontal":
+        align_direction = _horizontal_alignment_direction(
+            env,
+            target_pose_spec.get("align_to"),
+            env.robot.device,
+        )
+        return _rotation_from_axis_targets(
+            local_primary=long_axis,
+            world_primary=align_direction,
+            local_secondary=up_axis,
+            world_secondary=torch.tensor([0.0, 0.0, 1.0], device=env.robot.device),
+        )
+    raise ValueError(f"Unsupported orientation_goal: {orientation_goal}.")
+
+
+def _held_object_mesh_vertices(state: WorldState, device) -> torch.Tensor:
+    held = state.held_object
+    if held is None:
+        raise ValueError("Held object state is required.")
+    vertices = held.semantics.geometry.get("mesh_vertices")
+    if vertices is None and held.semantics.entity is not None:
+        vertices = held.semantics.entity.get_vertices(env_ids=[0], scale=True)[0]
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=device)
+    if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+        raise ValueError("Held object mesh_vertices must have shape (N, 3).")
+    return vertices
+
+
+def _principal_local_axes(vertices: torch.Tensor) -> torch.Tensor:
+    mins = vertices.min(dim=0).values
+    maxs = vertices.max(dim=0).values
+    extents = maxs - mins
+    order = torch.argsort(extents, descending=True)
+    axes = torch.eye(3, dtype=torch.float32, device=vertices.device)[:, order]
+    return axes
+
+
+def _horizontal_alignment_direction(env, align_to: str | None, device) -> torch.Tensor:
+    if align_to:
+        target_obj = env.sim.get_rigid_object(align_to)
+        if target_obj is None:
+            raise ValueError(f"No rigid object found for align_to={align_to}.")
+        vertices = torch.as_tensor(
+            target_obj.get_vertices(env_ids=[0], scale=True)[0],
+            dtype=torch.float32,
+            device=device,
+        )
+        extents = vertices.max(dim=0).values - vertices.min(dim=0).values
+        axis_index = 0 if extents[0] >= extents[1] else 1
+        pose = _ensure_pose_tensor(target_obj.get_local_pose(to_matrix=True), device)
+        direction = pose[:3, axis_index]
+        direction = direction.clone()
+        direction[2] = 0.0
+        norm = torch.linalg.norm(direction)
+        if float(norm) > 1e-6:
+            return direction / norm
+    return torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device)
+
+
+def _rotation_from_axis_targets(
+    *,
+    local_primary: torch.Tensor,
+    world_primary: torch.Tensor,
+    local_secondary: torch.Tensor,
+    world_secondary: torch.Tensor,
+) -> torch.Tensor:
+    device = world_primary.device
+    dtype = torch.float32
+    local_primary = _normalize_vector(local_primary.to(device=device, dtype=dtype))
+    world_primary = _normalize_vector(world_primary.to(device=device, dtype=dtype))
+    local_secondary = _orthogonalized_axis(
+        local_secondary.to(device=device, dtype=dtype),
+        local_primary,
+    )
+    world_secondary = _orthogonalized_axis(
+        world_secondary.to(device=device, dtype=dtype),
+        world_primary,
+    )
+    local_basis = torch.stack(
+        [
+            local_primary,
+            local_secondary,
+            _normalize_vector(torch.linalg.cross(local_primary, local_secondary)),
+        ],
+        dim=1,
+    )
+    world_basis = torch.stack(
+        [
+            world_primary,
+            world_secondary,
+            _normalize_vector(torch.linalg.cross(world_primary, world_secondary)),
+        ],
+        dim=1,
+    )
+    return world_basis @ local_basis.transpose(0, 1)
+
+
+def _orthogonalized_axis(axis: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+    axis = axis - torch.dot(axis, reference) * reference
+    if float(torch.linalg.norm(axis)) < 1e-6:
+        fallback = torch.tensor([1.0, 0.0, 0.0], device=reference.device)
+        if float(torch.abs(torch.dot(fallback, reference))) > 0.9:
+            fallback = torch.tensor([0.0, 1.0, 0.0], device=reference.device)
+        axis = fallback - torch.dot(fallback, reference) * reference
+    return _normalize_vector(axis)
+
+
+def _normalize_vector(vector: torch.Tensor) -> torch.Tensor:
+    norm = torch.linalg.norm(vector)
+    if float(norm) < 1e-6:
+        raise ValueError("Cannot normalize a near-zero vector.")
+    return vector / norm
+
+
+def _ensure_pose_tensor(pose, device) -> torch.Tensor:
+    pose = torch.as_tensor(pose, dtype=torch.float32, device=device)
+    if pose.shape == (1, 4, 4):
+        pose = pose.squeeze(0)
+    if pose.shape != (4, 4):
+        raise ValueError(
+            f"Pose target must have shape (4, 4), got {tuple(pose.shape)}."
+        )
+    return pose.clone()
 
 
 def _resolve_qpos_target(env, spec: AtomicActionSpec):

@@ -23,6 +23,7 @@ from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_actions import (
     execute_parallel_atomic_actions,
+    init_parallel_world_states,
 )
 
 __all__ = [
@@ -110,6 +111,7 @@ class AgentTaskGraph:
         current = self.start
         executed_actions: list[Any] = []
         transitions = 0
+        world_states = init_parallel_world_states(env)
 
         while current != self.goal:
             transitions += 1
@@ -117,12 +119,16 @@ class AgentTaskGraph:
                 raise RuntimeError("Agent task graph exceeded max_transitions.")
 
             edge = self.edges[self._next_edge(current)]
-            actions = execute_parallel_atomic_actions(
+            result = execute_parallel_atomic_actions(
                 left_arm_action=edge.left_arm_action,
                 right_arm_action=edge.right_arm_action,
                 env=env,
+                world_states=world_states,
+                return_result=True,
                 **kwargs,
             )
+            actions = result["actions"]
+            world_states = result["world_states"]
             executed_actions.extend(actions)
             current = edge.target
 

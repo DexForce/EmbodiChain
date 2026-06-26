@@ -58,7 +58,7 @@ class _FakeGraph:
 
 def _pick_up_spec(robot_name: str, obj_name: str) -> dict:
     return {
-        "atomic_action_class": "PickUpAction",
+        "atomic_action_class": "PickUp",
         "robot_name": robot_name,
         "control": "arm",
         "target_object": {
