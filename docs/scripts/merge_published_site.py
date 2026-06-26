@@ -144,20 +144,30 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
         print(f"wget failed for {url} (exit {result.returncode})", file=sys.stderr)
         return
 
-    # wget may create dest.parent/<version>/ or nest extra path segments — normalize
+    # wget may create dest.parent/<version>/ or preserve extra URL path
+    # segments such as dest.parent/EmbodiChain/<version>/; normalize that.
     if not dest.is_dir():
-        candidates = list(dest.parent.glob(f"*/{version}"))
-        if len(candidates) == 1 and candidates[0].is_dir():
-            candidates[0].rename(dest)
-        else:
-            nested = dest.parent / version
-            if nested.is_dir() and nested != dest:
-                nested.rename(dest)
+        candidates = [
+            candidate
+            for candidate in dest.parent.rglob(version)
+            if candidate.is_dir() and candidate != dest
+        ]
+        candidates.sort(key=lambda candidate: len(candidate.parts))
+        for candidate in candidates:
+            if (candidate / "index.html").is_file():
+                candidate.rename(dest)
+                break
 
     if dest.is_dir():
         changes = normalize_artifact_paths(dest)
         if changes:
             print(f"Normalized {len(changes)} artifact path(s) in {version}.")
+
+    for directory in sorted(
+        dest.parent.rglob("*"), key=lambda item: len(item.parts), reverse=True
+    ):
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
 
 
 def merge_published_site(
@@ -181,6 +191,11 @@ def merge_published_site(
     build_dir = build_dir.resolve()
     build_dir.mkdir(parents=True, exist_ok=True)
     skip = skip_versions or frozenset()
+    initial_changes = normalize_artifact_paths(build_dir)
+    if initial_changes:
+        print(
+            f"Normalized {len(initial_changes)} existing artifact path(s) in build tree."
+        )
 
     manifest = load_versions_manifest(
         site_base_url=site_base_url,
@@ -218,6 +233,10 @@ def merge_published_site(
                 "Neither published_root nor site_base_url set; cannot merge.",
                 file=sys.stderr,
             )
+
+    final_changes = normalize_artifact_paths(build_dir)
+    if final_changes:
+        print(f"Normalized {len(final_changes)} artifact path(s) in build tree.")
 
     return merged
 
