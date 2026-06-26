@@ -41,9 +41,13 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import (
     ExecutedActionList,
 )
 from embodichain.lab.sim.atomic_actions import (
-    MoveActionCfg,
-    PickUpActionCfg,
-    PlaceActionCfg,
+    ActionResult,
+    EndEffectorPoseTarget,
+    GraspTarget,
+    MoveEndEffectorCfg,
+    PickUpCfg,
+    PlaceCfg,
+    WorldState,
 )
 
 
@@ -155,23 +159,53 @@ class _FakeBackendAction:
                 }
             )
 
-    def execute(self, target, start_qpos=None, **kwargs):
+    def execute(self, target, state, **kwargs):
         if self.capture is not None:
-            self.capture[-1].update({"target": target, "start_qpos": start_qpos})
+            self.capture[-1].update({"target": target, "state": state})
         if self.cfg.name in {"pick_up", "place"}:
             trajectory = torch.tensor(
-                [[[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]]], dtype=torch.float32
+                [
+                    [
+                        [0.1, 0.2, 0.3, 0.0, 0.0, 0.0],
+                        [0.2, 0.3, 0.4, 0.0, 0.0, 0.0],
+                    ]
+                ],
+                dtype=torch.float32,
             )
-            return (
-                True,
-                trajectory,
-                [0, 1, 2] if "left" in self.cfg.control_part else [3, 4, 5],
+            return ActionResult(
+                success=True,
+                trajectory=trajectory,
+                next_state=WorldState(last_qpos=trajectory[:, -1, :]),
             )
         if self.cfg.control_part.endswith("eef"):
-            trajectory = torch.tensor([[[0.0], [0.05]]], dtype=torch.float32)
-            return True, trajectory, [2 if "left" in self.cfg.control_part else 5]
-        trajectory = torch.tensor([[[0.1, 0.2], [0.2, 0.3]]], dtype=torch.float32)
-        return True, trajectory, [0, 1] if "left" in self.cfg.control_part else [3, 4]
+            trajectory = torch.tensor(
+                [
+                    [
+                        [0.1, 0.2, 0.0, 0.0, 0.0, 0.0],
+                        [0.1, 0.2, 0.05, 0.0, 0.0, 0.0],
+                    ]
+                ],
+                dtype=torch.float32,
+            )
+            return ActionResult(
+                success=True,
+                trajectory=trajectory,
+                next_state=WorldState(last_qpos=trajectory[:, -1, :]),
+            )
+        trajectory = torch.tensor(
+            [
+                [
+                    [0.1, 0.2, 0.0, 0.0, 0.0, 0.0],
+                    [0.2, 0.3, 0.0, 0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        return ActionResult(
+            success=True,
+            trajectory=trajectory,
+            next_state=WorldState(last_qpos=trajectory[:, -1, :]),
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -401,10 +435,11 @@ def test_object_referenced_pose_builds_move_cfg_and_pose_target(monkeypatch) -> 
     )
 
     assert action.shape == (2, 3)
-    assert isinstance(capture[0]["cfg"], MoveActionCfg)
+    assert isinstance(capture[0]["cfg"], MoveEndEffectorCfg)
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].sample_interval == 12
-    assert capture[0]["target"][:3, 3].tolist() == pytest.approx([0.5, 0.0, 0.4])
+    assert isinstance(capture[0]["target"], EndEffectorPoseTarget)
+    assert capture[0]["target"].xpos[:3, 3].tolist() == pytest.approx([0.5, 0.0, 0.4])
 
 
 def test_gripper_state_qpos_target_interpolates_hand_action(monkeypatch) -> None:
@@ -510,11 +545,12 @@ def test_target_object_builds_pick_up_cfg(monkeypatch) -> None:
         allow_grasp_annotation=True,
     )
 
-    assert isinstance(capture[0]["cfg"], PickUpActionCfg)
+    assert isinstance(capture[0]["cfg"], PickUpCfg)
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].hand_control_part == "left_eef"
     assert capture[0]["cfg"].pre_grasp_distance == pytest.approx(0.07)
-    assert capture[0]["target"].label == "apple"
+    assert isinstance(capture[0]["target"], GraspTarget)
+    assert capture[0]["target"].semantics.label == "apple"
 
 
 def test_place_action_builds_place_cfg(monkeypatch) -> None:
@@ -549,7 +585,7 @@ def test_place_action_builds_place_cfg(monkeypatch) -> None:
     )
 
     assert action.shape == (2, 3)
-    assert isinstance(capture[0]["cfg"], PlaceActionCfg)
+    assert isinstance(capture[0]["cfg"], PlaceCfg)
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].lift_height == pytest.approx(0.06)
 
