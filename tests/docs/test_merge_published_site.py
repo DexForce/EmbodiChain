@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from .conftest import (
+    download_version_wget,
     load_versions_manifest,
     merge_published_site,
     normalize_artifact_paths,
@@ -115,6 +117,26 @@ def test_merge_does_not_overwrite_existing_version(
     )
 
 
+def test_merge_normalizes_existing_cached_version(
+    build_dir: Path, published_site: Path
+) -> None:
+    """Cached version dirs must be cleaned even when merge skips them."""
+    static_dir = build_dir / "v0.2.0" / "_static"
+    static_dir.mkdir(parents=True)
+    query_file = static_dir / "clipboard.min.js?v=a7894cd8"
+    query_file.write_text("cached", encoding="utf-8")
+
+    merged = merge_published_site(
+        build_dir,
+        published_root=published_site,
+        skip_versions=frozenset({"main"}),
+    )
+
+    assert merged == ["v0.1.0"]
+    assert not query_file.exists()
+    assert (static_dir / "clipboard.min.js").read_text(encoding="utf-8") == "cached"
+
+
 def test_merge_skip_version_for_fresh_tag_build(
     build_dir: Path, published_site: Path
 ) -> None:
@@ -189,3 +211,30 @@ def test_normalize_artifact_paths_removes_duplicate_query_file(tmp_path: Path) -
     assert changes == [(query_file, None)]
     assert safe_file.read_text(encoding="utf-8") == "existing"
     assert not query_file.exists()
+
+
+def test_download_version_wget_promotes_repo_prefixed_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub Pages URLs may make wget create build/html/EmbodiChain/vX.Y.Z."""
+    build_dir = tmp_path / "build" / "html"
+    dest = build_dir / "v0.2.2"
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        static_dir = build_dir / "EmbodiChain" / "v0.2.2" / "_static"
+        static_dir.mkdir(parents=True)
+        (static_dir.parent / "index.html").write_text("nested", encoding="utf-8")
+        (static_dir / "clipboard.min.js?v=a7894cd8").write_text(
+            "copy", encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(args=[], returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    download_version_wget("https://dexforce.github.io/EmbodiChain", "v0.2.2", dest)
+
+    assert (dest / "index.html").read_text(encoding="utf-8") == "nested"
+    assert (dest / "_static" / "clipboard.min.js").read_text(encoding="utf-8") == (
+        "copy"
+    )
+    assert not (build_dir / "EmbodiChain").exists()
