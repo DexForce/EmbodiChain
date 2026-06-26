@@ -147,13 +147,13 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         '"atomic_action_class":"MoveHeldObject","robot_name":"left_arm",'
         '"control":"arm","target_object_pose":{"reference":"object",'
         '"obj_name":"wicker_basket","offset":[0.0,0.04,0.22],'
-        '"orientation_goal":"preserve"}'
+        '"orientation_goal":"preserve","orientation_axis":"none"}'
     )
     right_high_offset_spec = (
         '"atomic_action_class":"MoveHeldObject","robot_name":"right_arm",'
         '"control":"arm","target_object_pose":{"reference":"object",'
         '"obj_name":"wicker_basket","offset":[0.0,-0.04,0.22],'
-        '"orientation_goal":"preserve"}'
+        '"orientation_goal":"preserve","orientation_axis":"none"}'
     )
     assert left_high_offset_spec in task_prompt
     assert right_high_offset_spec in task_prompt
@@ -1028,7 +1028,7 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
     assert _stable_summary(paths.summary)["relation"] == "on"
 
 
-def test_relative_orientation_intent_generates_horizontal_move_held_object(
+def test_relative_orientation_intent_generates_axis_align_move_held_object(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1081,8 +1081,9 @@ def test_relative_orientation_intent_generates_horizontal_move_held_object(
             "reference_object": "colored_pad_1",
             "goal_relation": "on",
             "arm": "auto",
-            "orientation_goal": "horizontal",
+            "orientation_goal": "axis_align",
             "orientation_reference": "reference_object",
+            "orientation_axis": "long_axis",
             "task_prompt_summary": "Place the stapler horizontally on the colored pad.",
         }
 
@@ -1103,15 +1104,37 @@ def test_relative_orientation_intent_generates_horizontal_move_held_object(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    summary = _stable_summary(paths.summary)
+    active_arm = summary["active_arm"]
+    release_offset_json = json.dumps(
+        summary["release_offset"], ensure_ascii=False, separators=(",", ":")
+    )
+    assert (
+        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        in task_prompt
+    )
     for text in (task_prompt, atom_actions):
         assert '"atomic_action_class":"MoveHeldObject"' in text
         assert '"target_object_pose":{"reference":"object"' in text
         assert '"obj_name":"colored_pad"' in text
-        assert '"orientation_goal":"horizontal"' in text
+        assert f'"offset":{release_offset_json}' in text
+        assert '"orientation_goal":"axis_align"' in text
+        assert '"orientation_axis":"long_axis"' in text
         assert '"align_to":"colored_pad"' in text
+        assert (
+            f'"atomic_action_class":"Place","robot_name":"{active_arm}",'
+            '"control":"arm","target_pose":{"reference":"relative",'
+            '"offset":[0.0,0.0,0.0],"frame":"world"},'
+            '"cfg":{"sample_interval":10,"lift_height":0.0}' in text
+        )
+        assert (
+            f'"atomic_action_class":"MoveEndEffector","robot_name":"{active_arm}",'
+            '"control":"arm","target_pose":{"reference":"relative",'
+            '"offset":[0.0,0.0,0.1],"frame":"world"}' in text
+        )
 
-    summary = _stable_summary(paths.summary)
-    assert summary["orientation_goal"] == "horizontal"
+    assert summary["orientation_goal"] == "axis_align"
+    assert summary["orientation_axis"] == "long_axis"
     assert summary["orientation_align_to"] == "colored_pad"
 
 
@@ -1145,10 +1168,19 @@ def test_relative_orientation_upright_does_not_emit_align_to(
         prewarm_coacd_cache=False,
     )
 
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert '"orientation_goal":"upright"' in atom_actions
-    assert '"align_to"' not in atom_actions
+    for text in (task_prompt, atom_actions):
+        assert '"orientation_goal":"upright"' in text
+        assert '"orientation_axis":"none"' in text
+        assert '"align_to"' not in text
+        assert (
+            '"target_pose":{"reference":"relative","offset":[0.0,0.0,0.0],'
+            '"frame":"world"},"cfg":{"sample_interval":10,"lift_height":0.0}' in text
+        )
+        assert '"atomic_action_class":"MoveEndEffector"' in text
     assert _stable_summary(paths.summary)["orientation_goal"] == "upright"
+    assert paths.summary["orientation_axis"] == "none"
     assert paths.summary["orientation_align_to"] is None
 
 
@@ -1179,6 +1211,72 @@ def test_relative_orientation_rejects_invalid_enum(
             project_dir,
             tmp_path / "generated_invalid_orientation_agent",
             task_description="把 apple_2 斜着放到 basket_3 左边",
+            prewarm_coacd_cache=False,
+        )
+
+
+def test_relative_orientation_rejects_invalid_reference_axis_pairing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+            "orientation_goal": "axis_align",
+            "orientation_reference": "reference_object",
+            "orientation_axis": "x",
+            "task_prompt_summary": "Invalid axis pairing.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    with pytest.raises(ValueError, match="reference_object"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "generated_invalid_axis_pairing_agent",
+            task_description="把 apple_2 水平摆正到 basket_3 左边",
+            prewarm_coacd_cache=False,
+        )
+
+
+def test_relative_orientation_rejects_legacy_horizontal_goal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "apple_2",
+            "reference_object": "basket_3",
+            "goal_relation": "left_of",
+            "orientation_goal": "horizontal",
+            "orientation_reference": "reference_object",
+            "orientation_axis": "long_axis",
+            "task_prompt_summary": "Legacy orientation.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    with pytest.raises(ValueError, match="Unsupported orientation_goal"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "generated_legacy_horizontal_agent",
+            task_description="把 apple_2 水平摆正到 basket_3 左边",
             prewarm_coacd_cache=False,
         )
 
@@ -2157,11 +2255,15 @@ def _stable_summary(summary: dict) -> dict:
     }
     if stable.get("orientation_goal") == "preserve":
         stable.pop("orientation_goal", None)
+    if stable.get("orientation_axis") == "none":
+        stable.pop("orientation_axis", None)
     if stable.get("orientation_align_to") is None:
         stable.pop("orientation_align_to", None)
     for placement in stable.get("placements", []):
         if placement.get("orientation_goal") == "preserve":
             placement.pop("orientation_goal", None)
+        if placement.get("orientation_axis") == "none":
+            placement.pop("orientation_axis", None)
         if placement.get("orientation_align_to") is None:
             placement.pop("orientation_align_to", None)
     return stable

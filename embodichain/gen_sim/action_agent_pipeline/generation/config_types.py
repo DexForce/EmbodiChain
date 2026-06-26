@@ -101,6 +101,7 @@ class _RelativePlacementStepSpec:
     release_position: list[float] | None = None
     high_position: list[float] | None = None
     orientation_goal: str = "preserve"
+    orientation_axis: str = "none"
     orientation_align_to_runtime_uid: str | None = None
 
 
@@ -124,6 +125,7 @@ class _RelativePlacementSpec:
     release_position: list[float] | None = None
     high_position: list[float] | None = None
     orientation_goal: str = "preserve"
+    orientation_axis: str = "none"
     orientation_align_to_runtime_uid: str | None = None
 
 

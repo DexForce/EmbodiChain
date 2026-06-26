@@ -77,21 +77,28 @@ class _FakeRobot:
 class _FakeObject:
     cfg = SimpleNamespace(shape=SimpleNamespace(fpath="/tmp/fake.obj"))
 
-    def __init__(self, xyz):
+    def __init__(self, xyz, *, yaw_degrees: float = 0.0, extents=(0.3, 0.1, 0.05)):
         self._pose = torch.eye(4)
         self._pose[:3, 3] = torch.tensor(xyz, dtype=torch.float32)
+        yaw = torch.deg2rad(torch.tensor(float(yaw_degrees)))
+        self._pose[0, 0] = torch.cos(yaw)
+        self._pose[0, 1] = -torch.sin(yaw)
+        self._pose[1, 0] = torch.sin(yaw)
+        self._pose[1, 1] = torch.cos(yaw)
+        self._extents = torch.tensor(extents, dtype=torch.float32)
 
     def get_local_pose(self, to_matrix: bool = True):
         return self._pose.unsqueeze(0)
 
     def get_vertices(self, env_ids=None, scale: bool = True):
+        x, y, z = self._extents.tolist()
         return [
             torch.tensor(
                 [
                     [0.0, 0.0, 0.0],
-                    [0.3, 0.0, 0.0],
-                    [0.0, 0.1, 0.0],
-                    [0.0, 0.0, 0.05],
+                    [x, 0.0, 0.0],
+                    [0.0, y, 0.0],
+                    [0.0, 0.0, z],
                 ]
             )
         ]
@@ -105,7 +112,15 @@ class _FakeObject:
 
 class _FakeSim:
     def __init__(self):
-        self.objects = {"apple": _FakeObject([0.4, -0.2, 0.1])}
+        self.objects = {
+            "apple": _FakeObject([0.4, -0.2, 0.1]),
+            "pad_x": _FakeObject([0.4, 0.0, 0.0], extents=(0.4, 0.1, 0.02)),
+            "pad_y": _FakeObject(
+                [0.4, 0.0, 0.0],
+                yaw_degrees=90.0,
+                extents=(0.4, 0.1, 0.02),
+            ),
+        }
 
     def get_rigid_object(self, uid: str):
         return self.objects.get(uid)
@@ -368,6 +383,100 @@ def test_normalize_atomic_action_spec_rejects_orientation_field() -> None:
                     "obj_name": "apple",
                     "offset": [0.0, 0.0, 0.1],
                     "orientation": "current",
+                },
+                "cfg": {},
+            }
+        )
+
+
+def test_move_held_object_defaults_orientation_axis_to_none() -> None:
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.1],
+                "frame": "world",
+            },
+            "cfg": {},
+        }
+    )
+
+    target = normalized["target_object_pose"]
+    assert target.get("orientation_goal", "preserve") == "preserve"
+    assert target.get("orientation_axis", "none") == "none"
+
+
+def test_move_held_object_rejects_legacy_horizontal_orientation_goal() -> None:
+    with pytest.raises(ValueError, match="orientation_goal"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveHeldObject",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object_pose": {
+                    "reference": "relative",
+                    "offset": [0.0, 0.0, 0.1],
+                    "frame": "world",
+                    "orientation_goal": "horizontal",
+                },
+                "cfg": {},
+            }
+        )
+
+
+def test_move_held_object_rejects_invalid_axis_alignment_pairings() -> None:
+    base_spec = {
+        "atomic_action_class": "MoveHeldObject",
+        "robot_name": "left_arm",
+        "control": "arm",
+        "target_object_pose": {
+            "reference": "relative",
+            "offset": [0.0, 0.0, 0.1],
+            "frame": "world",
+            "orientation_goal": "axis_align",
+        },
+        "cfg": {},
+    }
+
+    with pytest.raises(ValueError, match="without align_to"):
+        normalize_atomic_action_spec(
+            {
+                **base_spec,
+                "target_object_pose": {
+                    **base_spec["target_object_pose"],
+                    "orientation_axis": "long_axis",
+                },
+            }
+        )
+    with pytest.raises(ValueError, match="with align_to"):
+        normalize_atomic_action_spec(
+            {
+                **base_spec,
+                "target_object_pose": {
+                    **base_spec["target_object_pose"],
+                    "orientation_axis": "x",
+                    "align_to": "pad_x",
+                },
+            }
+        )
+
+
+def test_move_held_object_rejects_axis_for_non_axis_align_goals() -> None:
+    with pytest.raises(ValueError, match="orientation_axis='none'"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveHeldObject",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object_pose": {
+                    "reference": "relative",
+                    "offset": [0.0, 0.0, 0.1],
+                    "frame": "world",
+                    "orientation_goal": "lay_flat",
+                    "orientation_axis": "x",
                 },
                 "cfg": {},
             }
@@ -761,6 +870,170 @@ def test_place_action_builds_place_cfg(monkeypatch) -> None:
     assert isinstance(capture[0]["cfg"], PlaceCfg)
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].lift_height == pytest.approx(0.06)
+
+
+def _held_state_with_yaw(
+    env: _FakeEnv,
+    yaw_degrees: float,
+    *,
+    mesh_extents=(0.3, 0.1, 0.05),
+) -> WorldState:
+    yaw = torch.deg2rad(torch.tensor(float(yaw_degrees)))
+    current_pose = torch.eye(4)
+    current_pose[0, 0] = torch.cos(yaw)
+    current_pose[0, 1] = -torch.sin(yaw)
+    current_pose[1, 0] = torch.sin(yaw)
+    current_pose[1, 1] = torch.cos(yaw)
+    semantics = atom_actions._build_object_semantics(
+        env,
+        {"obj_name": "apple", "affordance": "antipodal"},
+        {"allow_grasp_annotation": True},
+    )
+    x, y, z = mesh_extents
+    semantics.geometry["mesh_vertices"] = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [x, 0.0, 0.0],
+            [0.0, y, 0.0],
+            [0.0, 0.0, z],
+        ],
+        dtype=torch.float32,
+    )
+    semantics.entity = None
+    return WorldState(
+        last_qpos=env.robot.get_qpos().clone(),
+        held_object=HeldObjectState(
+            semantics=semantics,
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=current_pose.unsqueeze(0),
+        ),
+    )
+
+
+def _resolved_held_object_direction(
+    env: _FakeEnv,
+    state: WorldState,
+    target_object_pose: dict,
+) -> torch.Tensor:
+    target = atom_actions._resolve_held_object_pose_target(
+        env,
+        atom_actions.AtomicActionSpec(
+            atomic_action_class="MoveHeldObject",
+            robot_name="left_arm",
+            control="arm",
+            target_object_pose=target_object_pose,
+            cfg={},
+        ),
+        state,
+    )
+    direction = target[:3, 0].clone()
+    direction[2] = 0.0
+    return direction / torch.linalg.norm(direction)
+
+
+def test_axis_align_world_axes_preserves_roll_pitch_and_aligns_x_axis() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 37.0)
+
+    direction = _resolved_held_object_direction(
+        env,
+        state,
+        {
+            "reference": "relative",
+            "offset": [0.0, 0.0, 0.1],
+            "frame": "world",
+            "orientation_goal": "axis_align",
+            "orientation_axis": "x",
+        },
+    )
+
+    assert abs(float(torch.dot(direction, torch.tensor([1.0, 0.0, 0.0])))) == (
+        pytest.approx(1.0)
+    )
+
+
+def test_axis_align_world_axes_aligns_y_axis() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 12.0)
+
+    direction = _resolved_held_object_direction(
+        env,
+        state,
+        {
+            "reference": "relative",
+            "offset": [0.0, 0.0, 0.1],
+            "frame": "world",
+            "orientation_goal": "axis_align",
+            "orientation_axis": "y",
+        },
+    )
+
+    assert abs(float(torch.dot(direction, torch.tensor([0.0, 1.0, 0.0])))) == (
+        pytest.approx(1.0)
+    )
+
+
+def test_axis_align_reference_object_long_and_short_axes() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 10.0)
+
+    long_direction = _resolved_held_object_direction(
+        env,
+        state,
+        {
+            "reference": "object",
+            "obj_name": "pad_y",
+            "offset": [0.0, 0.0, 0.1],
+            "orientation_goal": "axis_align",
+            "orientation_axis": "long_axis",
+            "align_to": "pad_y",
+        },
+    )
+    short_direction = _resolved_held_object_direction(
+        env,
+        state,
+        {
+            "reference": "object",
+            "obj_name": "pad_y",
+            "offset": [0.0, 0.0, 0.1],
+            "orientation_goal": "axis_align",
+            "orientation_axis": "short_axis",
+            "align_to": "pad_y",
+        },
+    )
+
+    assert abs(float(torch.dot(long_direction, torch.tensor([0.0, 1.0, 0.0])))) == (
+        pytest.approx(1.0)
+    )
+    assert abs(float(torch.dot(short_direction, torch.tensor([1.0, 0.0, 0.0])))) == (
+        pytest.approx(1.0)
+    )
+
+
+def test_axis_align_selects_smallest_equivalent_yaw() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 170.0)
+
+    target = atom_actions._resolve_held_object_pose_target(
+        env,
+        atom_actions.AtomicActionSpec(
+            atomic_action_class="MoveHeldObject",
+            robot_name="left_arm",
+            control="arm",
+            target_object_pose={
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.1],
+                "frame": "world",
+                "orientation_goal": "axis_align",
+                "orientation_axis": "x",
+            },
+            cfg={},
+        ),
+        state,
+    )
+    final_yaw = torch.rad2deg(torch.atan2(target[1, 0], target[0, 0]))
+
+    assert float(abs(final_yaw)) == pytest.approx(180.0)
 
 
 def test_move_held_object_builds_cfg_and_object_pose_target(monkeypatch) -> None:

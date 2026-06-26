@@ -236,8 +236,9 @@ def _call_relative_task_llm(
         '      "goal_relation": '
         '"inside|on|left_of|right_of|front_of|behind|front_left_of|back_left_of|front_right_of|back_right_of",\n'
         '      "arm": "left|right|auto",\n'
-        '      "orientation_goal": "preserve|upright|horizontal",\n'
-        '      "orientation_reference": "none|reference_object"\n'
+        '      "orientation_goal": "preserve|upright|lay_flat|axis_align",\n'
+        '      "orientation_reference": "none|world_axes|reference_object",\n'
+        '      "orientation_axis": "none|x|y|long_axis|short_axis"\n'
         "    }\n"
         "  ],\n"
         '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
@@ -286,12 +287,20 @@ def _call_relative_task_llm(
         "- If the task says to stack/place one object on another non-container "
         "support, use goal_relation='on'.\n"
         "- orientation_goal captures the held object's intended pose before "
-        "release. Use 'horizontal' for tasks like 水平摆正, 平放, 横放, or lay "
-        "flat. Use 'upright' for tasks like 扶正, 竖起来, or stand upright. "
-        "Use 'preserve' when no orientation change is requested.\n"
-        "- orientation_reference should be 'reference_object' when the object "
-        "should be aligned to the pad, box, container, or target support; "
-        "otherwise use 'none'.\n"
+        "release. Use 'upright' for tasks like 扶正, 竖起来, or stand upright. "
+        "Use 'lay_flat' for tasks like 平放, 横放, or lay flat. Use "
+        "'axis_align' for tasks like 水平摆正, 摆正, or aligning an object to a "
+        "pad, box, container, or support axis. Use 'preserve' when no "
+        "orientation change is requested.\n"
+        "- For axis_align, set orientation_reference='reference_object' and "
+        "orientation_axis='long_axis' when aligning an object such as a stapler "
+        "or shoe to the long side of a pad, box, or container. Use "
+        "orientation_axis='short_axis' only when the task explicitly asks for "
+        "the short side. Use orientation_reference='world_axes' with "
+        "orientation_axis='x' or 'y' only when the task explicitly specifies a "
+        "world/table axis.\n"
+        "- For preserve, upright, and lay_flat, use orientation_reference='none' "
+        "and orientation_axis='none'.\n"
         "- Do not return numeric offsets, object poses, scales, success JSON, "
         "robot config, or full prompt files. The generator computes those "
         "deterministically.\n\n"
@@ -388,6 +397,7 @@ def _apply_relative_task_response(
         release_position=primary.release_position,
         high_position=primary.high_position,
         orientation_goal=primary.orientation_goal,
+        orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
     )
 
@@ -493,6 +503,12 @@ def _build_relative_placement_step(
     orientation_reference = _normalize_orientation_reference(
         entry.get("orientation_reference")
     )
+    orientation_axis = _normalize_orientation_axis(entry.get("orientation_axis"))
+    _validate_orientation_fields(
+        orientation_goal=orientation_goal,
+        orientation_reference=orientation_reference,
+        orientation_axis=orientation_axis,
+    )
     orientation_align_to_runtime_uid = (
         reference_runtime_uid
         if orientation_reference == "reference_object" and not reference_is_initial_pose
@@ -527,6 +543,7 @@ def _build_relative_placement_step(
         high_offset=high_offset,
         reference_is_initial_pose=reference_is_initial_pose,
         orientation_goal=orientation_goal,
+        orientation_axis=orientation_axis,
         orientation_align_to_runtime_uid=orientation_align_to_runtime_uid,
     )
 
@@ -673,11 +690,13 @@ def _normalize_orientation_goal(value: Any) -> str:
         return "preserve"
     if text in {"upright", "vertical", "stand_upright", "扶正", "竖直", "竖起来"}:
         return "upright"
-    if text in {"horizontal", "flat", "lay_flat", "level", "水平", "平放", "横放"}:
-        return "horizontal"
+    if text in {"lay_flat", "flat", "level", "平放", "横放"}:
+        return "lay_flat"
+    if text in {"axis_align", "align_axis", "cardinal_align", "水平摆正", "摆正"}:
+        return "axis_align"
     raise ValueError(
         f"Unsupported orientation_goal {value!r}; expected 'preserve', "
-        "'upright', or 'horizontal'."
+        "'upright', 'lay_flat', or 'axis_align'."
     )
 
 
@@ -687,6 +706,8 @@ def _normalize_orientation_reference(value: Any) -> str:
     text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
     if text in {"", "none", "null", "default", "no", "false", "无"}:
         return "none"
+    if text in {"world_axes", "world_axis", "world", "table_axes", "x_y_axes"}:
+        return "world_axes"
     if text in {
         "reference_object",
         "reference",
@@ -701,8 +722,61 @@ def _normalize_orientation_reference(value: Any) -> str:
         return "reference_object"
     raise ValueError(
         f"Unsupported orientation_reference {value!r}; expected 'none' or "
-        "'reference_object'."
+        "'world_axes' or 'reference_object'."
     )
+
+
+def _normalize_orientation_axis(value: Any) -> str:
+    if value is None:
+        return "none"
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {"", "none", "null", "default", "no", "false", "无"}:
+        return "none"
+    if text in {"x", "world_x", "x_axis", "world_x_axis"}:
+        return "x"
+    if text in {"y", "world_y", "y_axis", "world_y_axis"}:
+        return "y"
+    if text in {"long_axis", "long", "major_axis", "length", "长轴", "长边"}:
+        return "long_axis"
+    if text in {"short_axis", "short", "minor_axis", "width", "短轴", "短边"}:
+        return "short_axis"
+    raise ValueError(
+        f"Unsupported orientation_axis {value!r}; expected 'none', 'x', 'y', "
+        "'long_axis', or 'short_axis'."
+    )
+
+
+def _validate_orientation_fields(
+    *,
+    orientation_goal: str,
+    orientation_reference: str,
+    orientation_axis: str,
+) -> None:
+    if orientation_goal == "axis_align":
+        if orientation_reference == "world_axes":
+            if orientation_axis not in {"x", "y"}:
+                raise ValueError(
+                    "axis_align with orientation_reference='world_axes' requires "
+                    "orientation_axis 'x' or 'y'."
+                )
+            return
+        if orientation_reference == "reference_object":
+            if orientation_axis not in {"long_axis", "short_axis"}:
+                raise ValueError(
+                    "axis_align with orientation_reference='reference_object' "
+                    "requires orientation_axis 'long_axis' or 'short_axis'."
+                )
+            return
+        raise ValueError(
+            "axis_align requires orientation_reference 'world_axes' or "
+            "'reference_object'."
+        )
+
+    if orientation_reference != "none" or orientation_axis != "none":
+        raise ValueError(
+            "preserve, upright, and lay_flat require orientation_reference='none' "
+            "and orientation_axis='none'."
+        )
 
 
 def _relative_runtime_uid_mapping(

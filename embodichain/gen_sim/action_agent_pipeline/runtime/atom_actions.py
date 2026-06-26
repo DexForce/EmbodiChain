@@ -98,7 +98,8 @@ ACTION_SPEC_FIELDS = {
     *TARGET_SPEC_FIELDS,
 }
 SUPPORTED_POSE_REFERENCES = {"object", "absolute", "relative"}
-SUPPORTED_OBJECT_ORIENTATION_GOALS = {"preserve", "upright", "horizontal"}
+SUPPORTED_OBJECT_ORIENTATION_GOALS = {"preserve", "upright", "lay_flat", "axis_align"}
+SUPPORTED_OBJECT_ORIENTATION_AXES = {"none", "x", "y", "long_axis", "short_axis"}
 SUPPORTED_QPOS_SOURCES = {"initial", "gripper_state", "joint_delta"}
 SUPPORTED_CFG_KEYS = {
     "sample_interval",
@@ -366,9 +367,31 @@ def _validate_target_object_pose(target_object_pose: Mapping[str, Any]) -> None:
             "target_object_pose orientation_goal must be one of "
             f"{sorted(SUPPORTED_OBJECT_ORIENTATION_GOALS)}."
         )
+    orientation_axis = target_object_pose.get("orientation_axis", "none")
+    if orientation_axis not in SUPPORTED_OBJECT_ORIENTATION_AXES:
+        raise ValueError(
+            "target_object_pose orientation_axis must be one of "
+            f"{sorted(SUPPORTED_OBJECT_ORIENTATION_AXES)}."
+        )
     align_to = target_object_pose.get("align_to")
     if align_to is not None and (not isinstance(align_to, str) or not align_to):
         raise ValueError("target_object_pose align_to must be a non-empty string.")
+    if orientation_goal == "axis_align":
+        if align_to is None:
+            if orientation_axis not in {"x", "y"}:
+                raise ValueError(
+                    "axis_align without align_to requires orientation_axis 'x' or 'y'."
+                )
+        elif orientation_axis not in {"long_axis", "short_axis"}:
+            raise ValueError(
+                "axis_align with align_to requires orientation_axis 'long_axis' "
+                "or 'short_axis'."
+            )
+    elif orientation_axis != "none" or align_to is not None:
+        raise ValueError(
+            "preserve, upright, and lay_flat require orientation_axis='none' "
+            "and no align_to."
+        )
 
 
 def _validate_target_pose_like(
@@ -376,7 +399,7 @@ def _validate_target_pose_like(
     target_name: str,
 ) -> None:
     reference = target_pose.get("reference")
-    allowed_common = {"orientation_goal", "align_to"}
+    allowed_common = {"orientation_goal", "orientation_axis", "align_to"}
     if reference not in SUPPORTED_POSE_REFERENCES:
         raise ValueError(
             f"{target_name} reference must be one of {sorted(SUPPORTED_POSE_REFERENCES)}."
@@ -958,7 +981,7 @@ def _resolve_held_object_pose_target(
         target_pose={
             key: deepcopy(value)
             for key, value in target_pose_spec.items()
-            if key not in {"orientation_goal", "align_to"}
+            if key not in {"orientation_goal", "orientation_axis", "align_to"}
         },
         cfg={},
     )
@@ -1006,17 +1029,24 @@ def _resolve_object_orientation(
             local_secondary=up_axis,
             world_secondary=torch.tensor([1.0, 0.0, 0.0], device=env.robot.device),
         )
-    if orientation_goal == "horizontal":
-        align_direction = _horizontal_alignment_direction(
-            env,
-            target_pose_spec.get("align_to"),
-            env.robot.device,
-        )
+    if orientation_goal == "lay_flat":
         return _rotation_from_axis_targets(
             local_primary=long_axis,
-            world_primary=align_direction,
+            world_primary=torch.tensor([1.0, 0.0, 0.0], device=env.robot.device),
             local_secondary=up_axis,
             world_secondary=torch.tensor([0.0, 0.0, 1.0], device=env.robot.device),
+        )
+    if orientation_goal == "axis_align":
+        target_direction = _axis_align_target_direction(
+            env,
+            target_pose_spec,
+            env.robot.device,
+        )
+        current_direction = current_rotation @ long_axis.to(
+            device=env.robot.device, dtype=torch.float32
+        )
+        return _yaw_aligned_rotation(
+            current_rotation, current_direction, target_direction
         )
     raise ValueError(f"Unsupported orientation_goal: {orientation_goal}.")
 
@@ -1043,26 +1073,93 @@ def _principal_local_axes(vertices: torch.Tensor) -> torch.Tensor:
     return axes
 
 
-def _horizontal_alignment_direction(env, align_to: str | None, device) -> torch.Tensor:
+def _axis_align_target_direction(
+    env,
+    target_pose_spec: Mapping[str, Any],
+    device,
+) -> torch.Tensor:
+    orientation_axis = target_pose_spec.get("orientation_axis", "none")
+    align_to = target_pose_spec.get("align_to")
     if align_to:
-        target_obj = env.sim.get_rigid_object(align_to)
-        if target_obj is None:
-            raise ValueError(f"No rigid object found for align_to={align_to}.")
-        vertices = torch.as_tensor(
-            target_obj.get_vertices(env_ids=[0], scale=True)[0],
-            dtype=torch.float32,
-            device=device,
+        return _reference_object_axis_direction(env, align_to, orientation_axis, device)
+    if orientation_axis == "x":
+        return torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device)
+    if orientation_axis == "y":
+        return torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32, device=device)
+    raise ValueError(
+        "axis_align without align_to requires orientation_axis 'x' or 'y'."
+    )
+
+
+def _reference_object_axis_direction(
+    env,
+    align_to: str,
+    orientation_axis: str,
+    device,
+) -> torch.Tensor:
+    if orientation_axis not in {"long_axis", "short_axis"}:
+        raise ValueError(
+            "Reference-object axis alignment requires orientation_axis "
+            "'long_axis' or 'short_axis'."
         )
-        extents = vertices.max(dim=0).values - vertices.min(dim=0).values
-        axis_index = 0 if extents[0] >= extents[1] else 1
-        pose = _ensure_pose_tensor(target_obj.get_local_pose(to_matrix=True), device)
-        direction = pose[:3, axis_index]
-        direction = direction.clone()
-        direction[2] = 0.0
-        norm = torch.linalg.norm(direction)
-        if float(norm) > 1e-6:
-            return direction / norm
-    return torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device)
+    target_obj = env.sim.get_rigid_object(align_to)
+    if target_obj is None:
+        raise ValueError(f"No rigid object found for align_to={align_to}.")
+    vertices = torch.as_tensor(
+        target_obj.get_vertices(env_ids=[0], scale=True)[0],
+        dtype=torch.float32,
+        device=device,
+    )
+    extents = vertices.max(dim=0).values - vertices.min(dim=0).values
+    axis_index = 0 if extents[0] >= extents[1] else 1
+    if orientation_axis == "short_axis":
+        axis_index = 1 - axis_index
+    pose = _ensure_pose_tensor(target_obj.get_local_pose(to_matrix=True), device)
+    direction = pose[:3, axis_index].clone()
+    direction[2] = 0.0
+    norm = torch.linalg.norm(direction)
+    if float(norm) < 1e-6:
+        raise ValueError(f"Reference object {align_to!r} has no valid XY axis.")
+    return direction / norm
+
+
+def _yaw_aligned_rotation(
+    current_rotation: torch.Tensor,
+    current_direction: torch.Tensor,
+    target_direction: torch.Tensor,
+) -> torch.Tensor:
+    device = current_rotation.device
+    current_xy = current_direction.to(device=device, dtype=torch.float32).clone()
+    target_xy = target_direction.to(device=device, dtype=torch.float32).clone()
+    current_xy[2] = 0.0
+    target_xy[2] = 0.0
+    current_xy = _normalize_vector(current_xy)
+    target_xy = _normalize_vector(target_xy)
+    same_delta = _signed_yaw_delta(current_xy, target_xy)
+    opposite_delta = _signed_yaw_delta(current_xy, -target_xy)
+    delta = (
+        same_delta
+        if torch.abs(same_delta) <= torch.abs(opposite_delta)
+        else opposite_delta
+    )
+    return _yaw_rotation_matrix(delta, device) @ current_rotation
+
+
+def _signed_yaw_delta(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    cross_z = source[0] * target[1] - source[1] * target[0]
+    dot = source[0] * target[0] + source[1] * target[1]
+    return torch.atan2(cross_z, dot)
+
+
+def _yaw_rotation_matrix(delta: torch.Tensor, device) -> torch.Tensor:
+    c = torch.cos(delta)
+    s = torch.sin(delta)
+    rotation = torch.eye(3, dtype=torch.float32, device=device)
+    rotation[0, 0] = c
+    rotation[0, 1] = -s
+    rotation[1, 0] = s
+    rotation[1, 1] = c
+    return rotation
 
 
 def _rotation_from_axis_targets(
