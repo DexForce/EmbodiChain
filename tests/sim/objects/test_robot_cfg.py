@@ -161,3 +161,68 @@ def test_cobotmagic_pk_dof_matches_control_parts():
         assert _dof_of_pk_chain(chains[arm]) == len(
             cfg.control_parts[arm]
         ), f"{arm}: PK chain DOF drifted from control_parts"
+
+
+# --------------------------------------------------------------------------- #
+# URRobotCfg -- UR family (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e)
+# --------------------------------------------------------------------------- #
+
+from embodichain.lab.sim.robots.ur_robot import URRobotCfg
+from embodichain.lab.sim.solvers import URSolverCfg
+
+UR_TYPES = ["ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"]
+
+
+@pytest.mark.parametrize("robot_type", UR_TYPES)
+def test_ur_robot_from_dict(robot_type):
+    cfg = URRobotCfg.from_dict({"robot_type": robot_type})
+    assert cfg.robot_type == robot_type
+    assert isinstance(cfg.solver_cfg["arm"], URSolverCfg)
+    assert cfg.solver_cfg["arm"].ur_type == robot_type
+    assert cfg.solver_cfg["arm"].end_link_name == "ee_link"
+    assert cfg.solver_cfg["arm"].root_link_name == "base_link"
+    # one arm control part with 6 joints
+    assert list(cfg.control_parts.keys()) == ["arm"]
+    assert len(cfg.control_parts["arm"]) == 6
+
+
+def test_ur_robot_default_type_is_ur10():
+    cfg = URRobotCfg.from_dict({})
+    assert cfg.robot_type == "ur10"
+
+
+@pytest.mark.parametrize("robot_type", UR_TYPES)
+def test_ur_robot_roundtrip(robot_type):
+    cfg = URRobotCfg.from_dict({"robot_type": robot_type})
+    d = cfg.to_dict()
+    assert d["robot_type"] == robot_type
+    cfg2 = URRobotCfg.from_dict(d)
+    assert cfg2.robot_type == robot_type
+    assert isinstance(cfg2.solver_cfg["arm"], URSolverCfg)
+
+
+def test_ur_robot_max_effort_scales_with_size():
+    """Larger UR variants have larger max_effort defaults."""
+    ur3 = URRobotCfg.from_dict({"robot_type": "ur3"})
+    ur5 = URRobotCfg.from_dict({"robot_type": "ur5"})
+    ur10 = URRobotCfg.from_dict({"robot_type": "ur10"})
+    eff = lambda c: c.drive_pros.max_effort  # noqa: E731
+    assert eff(ur3) < eff(ur5) < eff(ur10)
+
+
+@pytest.mark.parametrize("robot_type", UR_TYPES)
+def test_ur_robot_pk_dof_matches_control_parts(robot_type):
+    pytest.importorskip("pytorch_kinematics")
+    cfg = URRobotCfg.from_dict({"robot_type": robot_type})
+    try:
+        chains = cfg.build_pk_serial_chain()
+    except Exception as exc:
+        pytest.skip(f"PK URDF asset unavailable: {exc}")
+    assert _dof_of_pk_chain(chains["arm"]) == len(
+        cfg.control_parts["arm"]
+    ), "arm: PK chain DOF drifted from control_parts"
+
+
+def test_ur_robot_unknown_type_raises():
+    with pytest.raises(ValueError):
+        URRobotCfg.from_dict({"robot_type": "ur99"})

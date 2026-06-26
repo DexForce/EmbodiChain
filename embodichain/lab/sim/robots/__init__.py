@@ -16,5 +16,6 @@
 
 from .dexforce_w1 import *
 from .cobotmagic import CobotMagicCfg
+from .ur_robot import URRobotCfg
 
-__all__ = ["DexforceW1Cfg", "CobotMagicCfg"]
+__all__ = ["DexforceW1Cfg", "CobotMagicCfg", "URRobotCfg"]
