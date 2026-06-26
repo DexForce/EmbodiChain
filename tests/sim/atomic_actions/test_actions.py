@@ -508,10 +508,18 @@ class TestCoordinatedPlacementAction:
         assert placing_xpos[0, 2, 3].item() == pytest.approx(0.12)
         assert support_xpos[0, 2, 3].item() == pytest.approx(0.05)
         assert release is True
-        assert held_state is target.support_held_object
+        assert held_state.semantics is target.support_held_object.semantics
+        assert held_state.object_to_eef.shape == (NUM_ENVS, 4, 4)
+        assert held_state.grasp_xpos.shape == (NUM_ENVS, 4, 4)
+        assert torch.allclose(
+            held_state.object_to_eef,
+            target.support_held_object.object_to_eef.unsqueeze(0).repeat(
+                NUM_ENVS, 1, 1
+            ),
+        )
 
     def test_segment_lengths_sum_to_sample_interval(self):
-        segments = self.action.get_segment_lengths()
+        segments = self.action._compute_segment_lengths(self.cfg.release)
         assert sum(segments.values()) == self.cfg.sample_interval
         assert segments["approach"] >= 2
         assert segments["release"] == self.cfg.hand_interp_steps
@@ -549,4 +557,10 @@ class TestCoordinatedPlacementAction:
         )
         assert result.trajectory[0, -1, ARM_DOF * 2].item() == pytest.approx(0.0)
         assert result.trajectory[0, -1, ARM_DOF * 2 + 1].item() == pytest.approx(0.025)
-        assert result.next_state.held_object is target.support_held_object
+        assert result.next_state.held_object is not None
+        assert (
+            result.next_state.held_object.semantics
+            is target.support_held_object.semantics
+        )
+        assert result.next_state.held_object.object_to_eef.shape == (NUM_ENVS, 4, 4)
+        assert result.next_state.held_object.grasp_xpos.shape == (NUM_ENVS, 4, 4)

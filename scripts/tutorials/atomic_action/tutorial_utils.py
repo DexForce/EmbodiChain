@@ -98,6 +98,7 @@ def draw_axis_marker(
     xpos: torch.Tensor,
     axis_len: float = DEFAULT_AXIS_LEN,
     axis_size: float = DEFAULT_AXIS_SIZE,
+    arena_index: int = -1,
 ) -> None:
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
     sim.draw_marker(
@@ -107,6 +108,7 @@ def draw_axis_marker(
             axis_xpos=xpos,
             axis_size=axis_size,
             axis_len=axis_len,
+            arena_index=arena_index,
         )
     )
 

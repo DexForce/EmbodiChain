@@ -974,11 +974,6 @@ class CoordinatedPlacement(AtomicAction):
             ),
         )
 
-    def get_segment_lengths(self, release: bool | None = None) -> dict[str, int]:
-        """Return waypoint counts for the coordinated placement phase sequence."""
-        release = self.cfg.release if release is None else release
-        return self._compute_segment_lengths(release)
-
     def _validate_hand_qpos_cfg(self) -> None:
         """Ensure all hand state tensors are provided."""
         required_names = (
@@ -1020,18 +1015,39 @@ class CoordinatedPlacement(AtomicAction):
         name: str,
     ) -> torch.Tensor:
         """Resolve a held-object transform into batched shape."""
-        object_to_eef = held_state.object_to_eef.to(
-            device=self.device, dtype=torch.float32
+        return self._resolve_held_matrix(
+            held_state.object_to_eef,
+            f"{name}.object_to_eef",
         )
-        if object_to_eef.shape == (4, 4):
-            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
-        if object_to_eef.shape != (self.n_envs, 4, 4):
+
+    def _resolve_held_matrix(self, matrix: torch.Tensor, name: str) -> torch.Tensor:
+        """Resolve a held-object pose-like matrix into batched shape."""
+        matrix = matrix.to(device=self.device, dtype=torch.float32)
+        if matrix.shape == (4, 4):
+            matrix = matrix.unsqueeze(0).repeat(self.n_envs, 1, 1)
+        if matrix.shape != (self.n_envs, 4, 4):
             logger.log_error(
-                f"{name}.object_to_eef must have shape (4, 4) or "
-                f"({self.n_envs}, 4, 4), but got {object_to_eef.shape}",
+                f"{name} must have shape (4, 4) or ({self.n_envs}, 4, 4), "
+                f"but got {matrix.shape}",
                 ValueError,
             )
-        return object_to_eef
+        return matrix
+
+    def _resolve_held_state(
+        self,
+        held_state: HeldObjectState,
+        name: str,
+        object_to_eef: torch.Tensor,
+    ) -> HeldObjectState:
+        """Return a held-object state normalized to batched tensor shapes."""
+        return HeldObjectState(
+            semantics=held_state.semantics,
+            object_to_eef=object_to_eef,
+            grasp_xpos=self._resolve_held_matrix(
+                held_state.grasp_xpos,
+                f"{name}.grasp_xpos",
+            ),
+        )
 
     def _resolve_target(
         self,
@@ -1058,20 +1074,27 @@ class CoordinatedPlacement(AtomicAction):
             support_height_offset,
             "support_object_target_pose",
         )
-        placing_xpos = torch.bmm(
-            placing_object_pose,
-            self._resolve_object_to_eef(
-                target.placing_held_object, "placing_held_object"
-            ),
+        placing_object_to_eef = self._resolve_object_to_eef(
+            target.placing_held_object,
+            "placing_held_object",
         )
-        support_xpos = torch.bmm(
-            support_object_pose,
-            self._resolve_object_to_eef(
-                target.support_held_object, "support_held_object"
-            ),
+        support_object_to_eef = self._resolve_object_to_eef(
+            target.support_held_object,
+            "support_held_object",
         )
+        placing_xpos = torch.bmm(placing_object_pose, placing_object_to_eef)
+        support_xpos = torch.bmm(support_object_pose, support_object_to_eef)
         release = self.cfg.release if target.release is None else target.release
-        return placing_xpos, support_xpos, release, target.support_held_object
+        return (
+            placing_xpos,
+            support_xpos,
+            release,
+            self._resolve_held_state(
+                target.support_held_object,
+                "support_held_object",
+                support_object_to_eef,
+            ),
+        )
 
     def _resolve_start_qpos(
         self, state: WorldState

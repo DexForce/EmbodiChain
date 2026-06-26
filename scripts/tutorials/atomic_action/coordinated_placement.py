@@ -70,6 +70,12 @@ from embodichain.lab.sim.planners import (
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    draw_axis_marker,
+    get_tutorial_window_size,
+    start_auto_play_recording,
+    stop_auto_play_recording,
+)
 
 DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (-90.0, 0.0, 0.0)
 # DexSim imports this pan GLB with gym raw +Z mapped to local -Y.  The +90deg X
@@ -205,6 +211,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Run the viewer demo without waiting for keyboard input.",
     )
     parser.add_argument(
+        "--no_vis_eef_axis",
+        action="store_true",
+        help="Do not draw coordinated placement target coordinate frames.",
+    )
+    parser.add_argument(
         "--headless_play",
         action="store_true",
         help="Execute planned trajectories without opening the viewer window.",
@@ -260,8 +271,11 @@ def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
 
 def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
     """Create the simulation manager and a light."""
+    width, height = get_tutorial_window_size(args)
     sim = SimulationManager(
         SimulationManagerCfg(
+            width=width,
+            height=height,
             headless=True,
             sim_device=args.device,
             render_cfg=RenderCfg(renderer=args.renderer),
@@ -826,6 +840,30 @@ def log_scene_targets(
         )
 
 
+def draw_coordinated_axes(
+    sim: SimulationManager,
+    support_target_pose: torch.Tensor,
+    placing_target_pose: torch.Tensor,
+) -> None:
+    """Draw coordinate-frame markers for coordinated placement targets."""
+    draw_axis_marker(
+        sim,
+        "support_pan_target_axis",
+        support_target_pose,
+        axis_len=0.08,
+        axis_size=0.004,
+        arena_index=0,
+    )
+    draw_axis_marker(
+        sim,
+        "placing_bread_target_axis",
+        placing_target_pose,
+        axis_len=0.08,
+        axis_size=0.004,
+        arena_index=0,
+    )
+
+
 def log_action_plan(
     robot: Robot,
     action_name: str,
@@ -937,7 +975,7 @@ def run_coordinated_placement_demo(
     state = WorldState(last_qpos=robot.get_qpos().clone())
 
     wait_for_user = not args.auto_play and not args.headless_play
-    if not args.diagnose_plan and not args.headless_play:
+    if not args.diagnose_plan and not args.headless_play and not args.headless:
         sim.open_window()
         if wait_for_user:
             input("Inspect the scene, then press Enter to plan left pick-up...")
@@ -1080,6 +1118,12 @@ def run_coordinated_placement_demo(
         support_target_pose,
         placing_target_pose,
     )
+    if not args.auto_play and not args.no_vis_eef_axis:
+        draw_coordinated_axes(
+            sim,
+            support_target_pose,
+            placing_target_pose,
+        )
     coordinated_target = CoordinatedPlacementTarget(
         placing_object_target_pose=placing_target_pose,
         support_object_target_pose=support_target_pose,
@@ -1106,23 +1150,46 @@ def run_coordinated_placement_demo(
         "coordinated_placement",
         coordinated_traj,
         full_joint_ids,
-        coordinated_action.get_segment_lengths(),
+        coordinated_action._compute_segment_lengths(coordinated_action.cfg.release),
     )
 
     if args.diagnose_plan:
         return
 
-    if wait_for_user:
-        input("Press Enter to execute coordinated placement...")
-    execute_trajectory(
+    recording_started = start_auto_play_recording(
         sim,
-        robot,
-        coordinated_traj,
-        full_joint_ids,
-        bread,
-        pan,
-        args.debug_state,
+        args,
+        video_prefix="coordinated_placement_auto_play",
+        look_at=(
+            (-1.85, 0.0, 1.15),
+            (-0.05, 0.0, 0.72),
+            (0.0, 0.0, 1.0),
+        ),
     )
+    try:
+        if args.auto_play and not args.no_vis_eef_axis:
+            draw_coordinated_axes(
+                sim,
+                support_target_pose,
+                placing_target_pose,
+            )
+        if wait_for_user:
+            input("Press Enter to execute coordinated placement...")
+        execute_trajectory(
+            sim,
+            robot,
+            coordinated_traj,
+            full_joint_ids,
+            bread,
+            pan,
+            args.debug_state,
+        )
+        for _ in range(80):
+            robot.set_qpos(state.last_qpos, joint_ids=full_joint_ids)
+            sim.update(step=2)
+            time.sleep(1e-2)
+    finally:
+        stop_auto_play_recording(sim, recording_started)
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 
