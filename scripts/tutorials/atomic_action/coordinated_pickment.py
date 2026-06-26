@@ -64,6 +64,7 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    draw_axis_marker,
     get_tutorial_window_size,
     start_auto_play_recording,
     stop_auto_play_recording,
@@ -119,6 +120,11 @@ TABLE_INIT_POS, TABLE_INIT_ROT = transform_baseline_pose(
     BASELINE_TABLE_INIT_POS,
     BASELINE_TABLE_INIT_ROT,
     z_offset=SCENE_Z_OFFSET,
+)
+PICKMENT_RECORD_LOOK_AT = (
+    (-2.75, 0.02, 1.35),
+    (0.0, 0.02, 0.75),
+    (0.0, 0.0, 1.0),
 )
 
 
@@ -209,6 +215,11 @@ def parse_arguments() -> argparse.Namespace:
         choices=sorted(OBJECT_PRESETS),
         default="pencil",
         help="Object mesh to grasp in the coordinated pickment demo.",
+    )
+    parser.add_argument(
+        "--no_vis_eef_axis",
+        action="store_true",
+        help="Do not draw the pickment target/grasp coordinate frames before planning.",
     )
     return parser.parse_args()
 
@@ -640,6 +651,36 @@ def log_scene_targets(
     )
 
 
+def draw_pickment_target_axes(
+    sim: SimulationManager,
+    object_target_pose: torch.Tensor,
+    left_grasp_pose: torch.Tensor,
+    right_grasp_pose: torch.Tensor,
+) -> None:
+    """Draw semantic axes for the target object pose and two grasp TCP poses."""
+    draw_axis_marker(
+        sim,
+        "coordinated_pickment_object_target_axis",
+        object_target_pose,
+        axis_len=0.12,
+        axis_size=0.005,
+    )
+    draw_axis_marker(
+        sim,
+        "coordinated_pickment_left_grasp_axis",
+        left_grasp_pose,
+        axis_len=0.07,
+        axis_size=0.0035,
+    )
+    draw_axis_marker(
+        sim,
+        "coordinated_pickment_right_grasp_axis",
+        right_grasp_pose,
+        axis_len=0.07,
+        axis_size=0.0035,
+    )
+
+
 def log_execution_state(
     robot: Robot,
     obj: RigidObject,
@@ -741,6 +782,13 @@ def run_coordinated_pickment_demo(
         left_grasp_pose,
         right_grasp_pose,
     )
+    if not args.no_vis_eef_axis:
+        draw_pickment_target_axes(
+            sim,
+            target_pose,
+            left_grasp_pose,
+            right_grasp_pose,
+        )
 
     left_object_to_eef = torch.bmm(
         invert_pose(object_pose.unsqueeze(0)),
@@ -794,6 +842,7 @@ def run_coordinated_pickment_demo(
         sim,
         args,
         video_prefix=f"coordinated_pickment_{args.object}_auto_play",
+        look_at=PICKMENT_RECORD_LOOK_AT,
     )
     try:
         execute_trajectory(
