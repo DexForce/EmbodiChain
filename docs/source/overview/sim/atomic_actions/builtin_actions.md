@@ -14,6 +14,8 @@ The following actions are available out of the box:
 | `PickUp` | Single | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp" width="480" style="max-width: 100%;" /> |
 | `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject" width="480" style="max-width: 100%;" /> |
 | `Place` | Single | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
+| `CoordinatedPickment` | Dual | `CoordinatedPickmentTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | <img src="../../../_static/atomic_actions/coordinated_pickment.gif" alt="CoordinatedPickment" width="480" style="max-width: 100%;" /> |
+| `CoordinatedPlacement` | Dual | `CoordinatedPlacementTarget` — paired held-object poses | Align placing/support objects → release placing hand → retreat | |
 
 ---
 
@@ -123,3 +125,50 @@ down to the target pose. On success, the returned `WorldState` clears `held_obje
 `(4, 4)` or `(n_envs, 4, 4)`.
 
 ![Place demo](../../../_static/atomic_actions/place.gif)
+
+---
+
+## `CoordinatedPickment`
+
+Dual-arm grasp motion for one shared object. Both arms move to object-relative
+grasp poses, close both grippers, lift the object, and move it to an object pose
+while keeping both grippers closed. On success, the returned `WorldState` carries
+`coordinated_held_object` (`CoordinatedHeldObjectState`) and leaves
+`held_object` as `None`.
+
+| Config field | Default | Description |
+|---|---|---|
+| `control_part` | `"dual_arm"` | Combined arm control part |
+| `left_arm_control_part` / `right_arm_control_part` | `"left_arm"` / `"right_arm"` | Arm control parts for each grasp |
+| `left_hand_control_part` / `right_hand_control_part` | `"left_hand"` / `"right_hand"` | Hand control parts for each gripper |
+| `pre_grasp_distance` | `0.10` | Distance to back away from each grasp TCP |
+| `lift_height` | `0.08` | World-Z lift distance before moving to the target pose |
+| `object_motion_keyframes` | `6` | Sparse object-pose IK keyframes for synchronized motion |
+| `sample_interval` | `120` | Total waypoints across all phases |
+
+**Target:** `CoordinatedPickmentTarget(...)` with a target object pose, object
+semantics, and left/right object-to-EEF transforms.
+
+![CoordinatedPickment demo](../../../_static/atomic_actions/coordinated_pickment.gif)
+
+---
+
+## `CoordinatedPlacement`
+
+Dual-arm placement motion for two already-held objects. The placing arm moves its
+held object to the upper target and releases it; the support arm moves its held
+object to the support target and keeps holding. On success, `WorldState.held_object`
+is the support object and `coordinated_held_object` is cleared.
+
+| Config field | Default | Description |
+|---|---|---|
+| `control_part` | `"dual_arm"` | Combined arm control part |
+| `placing_arm_control_part` / `support_arm_control_part` | `"left_arm"` / `"right_arm"` | Arm control parts for placing and support |
+| `placing_hand_control_part` / `support_hand_control_part` | `"left_hand"` / `"right_hand"` | Hand control parts for placing and support |
+| `release` | `True` | Whether to open the placing hand at the placement pose |
+| `placing_height_offset` / `support_height_offset` | `0.0` / `0.0` | World-Z offsets above each object target |
+| `lift_height` | `0.08` | Placing-arm retreat distance after release |
+| `sample_interval` | `100` | Total waypoints across coordinated placement phases |
+
+**Target:** `CoordinatedPlacementTarget(...)` with placing/support object target
+poses and their corresponding `HeldObjectState` values.
