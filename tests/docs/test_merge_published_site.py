@@ -27,6 +27,7 @@ import pytest
 
 from .conftest import (
     download_version_wget,
+    flatten_nested_version_dirs,
     load_versions_manifest,
     merge_published_site,
     normalize_artifact_paths,
@@ -137,6 +138,27 @@ def test_merge_normalizes_existing_cached_version(
     assert (static_dir / "clipboard.min.js").read_text(encoding="utf-8") == "cached"
 
 
+def test_merge_flattens_existing_repo_prefixed_cached_version(
+    build_dir: Path, published_site: Path
+) -> None:
+    """Restored cache can contain build/html/EmbodiChain/vX.Y.Z."""
+    nested_version = build_dir / "EmbodiChain" / "v0.2.0"
+    nested_version.mkdir(parents=True)
+    (nested_version / "index.html").write_text("nested cached", encoding="utf-8")
+
+    merged = merge_published_site(
+        build_dir,
+        published_root=published_site,
+        skip_versions=frozenset({"main"}),
+    )
+
+    assert merged == ["v0.1.0", "v0.2.0"]
+    assert not (build_dir / "EmbodiChain").exists()
+    assert (build_dir / "v0.2.0" / "index.html").read_text(encoding="utf-8") == (
+        "<html>v0.2.0 published</html>"
+    )
+
+
 def test_merge_skip_version_for_fresh_tag_build(
     build_dir: Path, published_site: Path
 ) -> None:
@@ -213,6 +235,24 @@ def test_normalize_artifact_paths_removes_duplicate_query_file(tmp_path: Path) -
     assert not query_file.exists()
 
 
+def test_flatten_nested_version_dirs_promotes_cached_repo_prefix(
+    tmp_path: Path,
+) -> None:
+    """Nested release directories must be top-level for versions.json discovery."""
+    build_dir = tmp_path / "build" / "html"
+    nested_version = build_dir / "EmbodiChain" / "v0.2.2"
+    nested_version.mkdir(parents=True)
+    (nested_version / "index.html").write_text("nested", encoding="utf-8")
+
+    changes = flatten_nested_version_dirs(build_dir)
+
+    assert changes == [(nested_version.resolve(), build_dir.resolve() / "v0.2.2")]
+    assert not (build_dir / "EmbodiChain").exists()
+    assert (build_dir / "v0.2.2" / "index.html").read_text(encoding="utf-8") == (
+        "nested"
+    )
+
+
 def test_download_version_wget_promotes_repo_prefixed_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -234,6 +274,33 @@ def test_download_version_wget_promotes_repo_prefixed_output(
     download_version_wget("https://dexforce.github.io/EmbodiChain", "v0.2.2", dest)
 
     assert (dest / "index.html").read_text(encoding="utf-8") == "nested"
+    assert (dest / "_static" / "clipboard.min.js").read_text(encoding="utf-8") == (
+        "copy"
+    )
+    assert not (build_dir / "EmbodiChain").exists()
+
+
+def test_download_version_wget_uses_repo_prefixed_output_after_wget_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """wget can return 8 for linked 404s after downloading usable pages."""
+    build_dir = tmp_path / "build" / "html"
+    dest = build_dir / "v0.2.2"
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        static_dir = build_dir / "EmbodiChain" / "v0.2.2" / "_static"
+        static_dir.mkdir(parents=True)
+        (static_dir.parent / "index.html").write_text("partial", encoding="utf-8")
+        (static_dir / "clipboard.min.js?v=a7894cd8").write_text(
+            "copy", encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(args=[], returncode=8)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    download_version_wget("https://dexforce.github.io/EmbodiChain", "v0.2.2", dest)
+
+    assert (dest / "index.html").read_text(encoding="utf-8") == "partial"
     assert (dest / "_static" / "clipboard.min.js").read_text(encoding="utf-8") == (
         "copy"
     )
