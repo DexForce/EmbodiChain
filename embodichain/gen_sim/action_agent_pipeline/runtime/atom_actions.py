@@ -945,11 +945,11 @@ def _build_object_semantics(
     )
     affordance = AntipodalAffordance(
         object_label=obj_name,
+        mesh_vertices=mesh_vertices,
+        mesh_triangles=mesh_triangles,
+        generator_cfg=generator_cfg,
+        gripper_collision_cfg=gripper_collision_cfg,
         force_reannotate=force_reannotate,
-        custom_config={
-            "gripper_collision_cfg": gripper_collision_cfg,
-            "generator_cfg": generator_cfg,
-        },
     )
     return ObjectSemantics(
         label=obj_name,
