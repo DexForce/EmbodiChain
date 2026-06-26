@@ -5,7 +5,7 @@
 ## Features
 
 * **Unified planning interface**: Supports trajectory planning with or without collision checking (collision checking is reserved for future implementation).
-* **Flexible planner selection**: Allows selection of different planners (currently supports TOPPRA for time-optimal planning).
+* **Flexible planner selection**: Supports TOPPRA and NeuralPlanner (experimental).
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
 * **Supports both joint and Cartesian interpolation**: Generates discrete trajectories using either joint space or Cartesian space interpolation.
 * **Convenient sampling**: Supports various sampling strategies via `TrajectorySampleMethod`.

@@ -21,3 +21,5 @@ from .w1_assets import *
 from .eef_assets import *
 from .robot_assets import *
 from .scene_assets import *
+from .solver_assets import *
+from .planner_assets import *
