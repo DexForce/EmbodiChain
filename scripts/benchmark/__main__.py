@@ -22,6 +22,7 @@ Usage examples::
     python -m scripts.benchmark rl --rebuild-report-only
     python -m scripts.benchmark robotics-kinematic-solver -s pytorch
     python -m scripts.benchmark planners-neural-planner --num-waypoints 1 3 5
+    python -m scripts.benchmark atomic-action --smoke
 """
 
 from __future__ import annotations
@@ -64,6 +65,13 @@ def _run_neural_planner_cli(args: argparse.Namespace) -> None:
         compare_toppra=args.compare_toppra,
         include_trial_details=args.save_trial_details,
     )
+
+
+def _run_atomic_action_cli(_: argparse.Namespace) -> None:
+    """Run atomic action benchmark CLI entrypoint."""
+    from scripts.benchmark.atomic_action.run_benchmark import main as atomic_main
+
+    atomic_main()
 
 
 def main() -> None:
@@ -166,6 +174,16 @@ def main() -> None:
         help="Open the simulation viewer window.",
     )
     neural_planner_parser.set_defaults(func=_run_neural_planner_cli)
+
+    # -- atomic-action -------------------------------------------------------
+    atomic_action_parser = subparsers.add_parser(
+        "atomic-action",
+        help="Benchmark atomic actions over object presets and positions.",
+    )
+    from scripts.benchmark.atomic_action.run_benchmark import add_benchmark_args
+
+    add_benchmark_args(atomic_action_parser)
+    atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
 
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
