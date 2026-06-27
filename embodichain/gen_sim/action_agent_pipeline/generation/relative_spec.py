@@ -42,7 +42,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
 
 __all__ = [
     "_SIDE_RELATIONS",
+    "_build_object_manipulation_spec_with_llm",
     "_build_relative_placement_spec_with_llm",
+    "_call_object_manipulation_task_llm",
     "_normalize_relative_relation",
     "_relative_relation_phrase",
     "_relative_scene_runtime_uid_mapping",
@@ -62,6 +64,8 @@ _RELATIVE_RELATIONS = {
 }
 
 _SIDE_RELATIONS = _RELATIVE_RELATIONS - {"inside", "on"}
+_SUPPORTED_MANIPULATION_INTENTS = {"place_relative", "hold_hover"}
+_DEFAULT_HOVER_HEIGHT = 0.10
 
 _SELF_REFERENCE_VALUES = {
     "self",
@@ -207,6 +211,29 @@ def _build_relative_placement_spec_with_llm(
     )
 
 
+def _build_object_manipulation_spec_with_llm(
+    *,
+    scene_objects: list[_SceneObject],
+    project_name: str,
+    task_description: str,
+    model: str | None,
+    release_offset_fn: Callable[[str], Sequence[float]],
+    staging_z_delta: float,
+    pose_sensitive_staging_z_delta: float,
+    task_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
+) -> _RelativePlacementSpec:
+    return _build_relative_placement_spec_with_llm(
+        scene_objects=scene_objects,
+        project_name=project_name,
+        task_description=task_description,
+        model=model,
+        release_offset_fn=release_offset_fn,
+        staging_z_delta=staging_z_delta,
+        pose_sensitive_staging_z_delta=pose_sensitive_staging_z_delta,
+        task_llm_caller=task_llm_caller or _call_object_manipulation_task_llm,
+    )
+
+
 def _call_relative_task_llm(
     *,
     project_name: str,
@@ -330,6 +357,104 @@ def _call_relative_task_llm(
     return extract_json_object(content)
 
 
+def _call_object_manipulation_task_llm(
+    *,
+    project_name: str,
+    task_description: str,
+    scene_summary: list[dict[str, Any]],
+    model: str | None,
+) -> dict[str, Any]:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
+        extract_json_object,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.utils.mllm import (
+        create_chat_openai,
+    )
+
+    prompt = (
+        "Parse a simple Dual-UR5 tabletop object-manipulation task and produce "
+        "one constrained config-level JSON spec. The generator computes offsets, "
+        "robot config, success JSON, and action prompts deterministically.\n\n"
+        "Return exactly one JSON object with this schema:\n"
+        "{\n"
+        '  "manipulations": [\n'
+        "    {\n"
+        '      "intent": "place_relative|hold_hover",\n'
+        '      "moved_object": "<source_uid from rigid_object>",\n'
+        '      "arm": "left|right|auto",\n'
+        '      "reference_object": "<source_uid from scene objects, or moved_object/self for initial-position moves>",\n'
+        '      "goal_relation": "inside|on|left_of|right_of|front_of|behind|front_left_of|back_left_of|front_right_of|back_right_of",\n'
+        '      "hover_height": 0.10,\n'
+        '      "orientation_goal": "preserve|upright|lay_flat|axis_align",\n'
+        '      "orientation_reference": "none|world_axes|reference_object",\n'
+        '      "orientation_axis": "none|x|y|long_axis|short_axis"\n'
+        "    }\n"
+        "  ],\n"
+        '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
+        '  "basic_background_notes": "<short scene/task notes>",\n'
+        '  "action_sketch": ["<short deterministic action sketch>"]\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Use only source_uid values from the scene objects listed below.\n"
+        "- Use intent='hold_hover' when the task asks to pick up, lift, hold, "
+        "or suspend an object in the air without placing or releasing it. For "
+        "hold_hover, omit reference_object and goal_relation, use "
+        "orientation_goal='preserve', orientation_reference='none', "
+        "orientation_axis='none', and hover_height=0.10 unless the user gives a "
+        "specific height.\n"
+        "- Use intent='place_relative' for tasks that ask to place, put, stack "
+        "onto, move beside, move into, or release an object at a spatial target. "
+        "For place_relative, include reference_object and goal_relation.\n"
+        "- Return exactly two manipulations for a dual-arm task. Treat the task "
+        "as dual-arm when it explicitly says 双臂, 两臂, both arms, two arms, "
+        "一只机械臂...另一只机械臂, or separate work for left and right arms.\n"
+        "- Do not mix hold_hover and place_relative in one response; v1 only "
+        "supports homogeneous manipulation intents.\n"
+        "- For dual-arm tasks, use two different moved_object values and one "
+        "left arm plus one right arm. Use arm='auto' only when the user did not "
+        "specify which arm handles that manipulation.\n"
+        "- For place_relative, reference_object may be a rigid_object or a "
+        "background object such as a pad, tray, basket, or container. For "
+        "single-object directional tasks from the object's initial position, "
+        "set reference_object to the moved object or 'self'.\n"
+        "- If the task says to release an object above a basket/container so it "
+        "falls into it, use goal_relation='inside'. If it says to place on a "
+        "non-container support, use goal_relation='on'.\n"
+        "- orientation_goal captures the held object's intended pose before "
+        "release. Use 'upright' for 扶正/竖起来, 'lay_flat' for 平放/横放, "
+        "'axis_align' for 水平摆正/摆正/alignment, and 'preserve' otherwise.\n"
+        "- For axis_align, use orientation_reference='reference_object' with "
+        "orientation_axis='long_axis' for aligning to a pad/box/container long "
+        "side, or orientation_reference='world_axes' with orientation_axis='x' "
+        "or 'y' only when a world/table axis is explicit.\n"
+        "- Do not return numeric offsets, object poses, robot config, success "
+        "JSON, or full prompt files.\n\n"
+        f"Project: {project_name}\n"
+        f"Task description:\n{task_description}\n"
+        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    )
+    llm = create_chat_openai(
+        temperature=0.0,
+        model=model,
+        usage_stage="config_generation.object_manipulation_task",
+    )
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "You produce strict JSON specs for simulation config "
+                    "generation. Do not include markdown."
+                )
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
+    content = getattr(response, "content", response)
+    return extract_json_object(content)
+
+
 def _apply_relative_task_response(
     *,
     response: Mapping[str, Any],
@@ -349,7 +474,7 @@ def _apply_relative_task_response(
 
     placement_entries = _relative_placement_entries(response)
     if len(placement_entries) > 2:
-        raise ValueError("Relative placement supports at most two arm placements.")
+        raise ValueError("Object manipulation supports at most two arm actions.")
 
     forced_arm_sides = _relative_forced_arm_sides(
         placement_entries,
@@ -383,6 +508,7 @@ def _apply_relative_task_response(
     primary = placements[0]
 
     return _RelativePlacementSpec(
+        intent=primary.intent,
         table_source_uid=table_source_uid,
         moved_source_uid=primary.moved_source_uid,
         reference_source_uid=primary.reference_source_uid,
@@ -403,11 +529,12 @@ def _apply_relative_task_response(
         orientation_goal=primary.orientation_goal,
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
+        hover_height=primary.hover_height,
     )
 
 
 def _relative_placement_entries(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    placements = response.get("placements")
+    placements = response.get("manipulations", response.get("placements"))
     if placements is None:
         return [response]
     if not isinstance(placements, list) or not placements:
@@ -476,27 +603,33 @@ def _build_relative_placement_step(
     staging_z_delta: float,
     pose_sensitive_staging_z_delta: float,
 ) -> _RelativePlacementStepSpec:
+    intent = _normalize_manipulation_intent(entry.get("intent"))
     moved_source_uid = _resolve_rigid_source_uid(
         entry.get("moved_object"),
         rigid_objects,
         field_name="moved_object",
     )
-    relation = _normalize_relative_relation(entry.get("goal_relation"))
-    reference_source_uid = _resolve_relative_reference_source_uid(
-        entry.get("reference_object"),
-        moved_source_uid=moved_source_uid,
-        scene_objects=scene_objects,
-    )
-    reference_is_initial_pose = moved_source_uid == reference_source_uid
-    if reference_is_initial_pose and relation not in _SIDE_RELATIONS:
-        raise ValueError(
-            "Initial-position self-relative placement only supports directional "
-            "relations, not inside/on."
+    if intent == "hold_hover":
+        relation = "on"
+        reference_source_uid = moved_source_uid
+        reference_is_initial_pose = True
+    else:
+        relation = _normalize_relative_relation(entry.get("goal_relation"))
+        reference_source_uid = _resolve_relative_reference_source_uid(
+            entry.get("reference_object"),
+            moved_source_uid=moved_source_uid,
+            scene_objects=scene_objects,
         )
+        reference_is_initial_pose = moved_source_uid == reference_source_uid
+        if reference_is_initial_pose and relation not in _SIDE_RELATIONS:
+            raise ValueError(
+                "Initial-position self-relative placement only supports directional "
+                "relations, not inside/on."
+            )
 
-    reference_obj = by_uid[reference_source_uid]
-    if relation == "on" and _is_container_like(reference_obj):
-        relation = "inside"
+        reference_obj = by_uid[reference_source_uid]
+        if relation == "on" and _is_container_like(reference_obj):
+            relation = "inside"
 
     moved_runtime_uid = runtime_uids[moved_source_uid]
     reference_runtime_uid = runtime_uids[reference_source_uid]
@@ -509,6 +642,12 @@ def _build_relative_placement_step(
         entry.get("orientation_reference")
     )
     orientation_axis = _normalize_orientation_axis(entry.get("orientation_axis"))
+    if intent == "hold_hover" and (
+        orientation_goal != "preserve"
+        or orientation_reference != "none"
+        or orientation_axis != "none"
+    ):
+        raise ValueError("hold_hover requires preserve orientation fields.")
     _validate_orientation_fields(
         orientation_goal=orientation_goal,
         orientation_reference=orientation_reference,
@@ -520,13 +659,19 @@ def _build_relative_placement_step(
         else None
     )
 
-    release_offset = [float(value) for value in release_offset_fn(relation)]
+    if intent == "hold_hover":
+        hover_height = _normalize_hover_height(entry.get("hover_height"))
+        release_offset = [0.0, 0.0, hover_height]
+    else:
+        hover_height = _DEFAULT_HOVER_HEIGHT
+        release_offset = [float(value) for value in release_offset_fn(relation)]
     high_offset = list(release_offset)
-    high_offset[2] += float(
-        pose_sensitive_staging_z_delta
-        if orientation_goal != "preserve"
-        else staging_z_delta
-    )
+    if intent == "place_relative":
+        high_offset[2] += float(
+            pose_sensitive_staging_z_delta
+            if orientation_goal != "preserve"
+            else staging_z_delta
+        )
     moved_position = _vector3(
         by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0])
     )
@@ -542,6 +687,7 @@ def _build_relative_placement_step(
     )
 
     return _RelativePlacementStepSpec(
+        intent=intent,
         moved_source_uid=moved_source_uid,
         reference_source_uid=reference_source_uid,
         moved_runtime_uid=moved_runtime_uid,
@@ -554,6 +700,7 @@ def _build_relative_placement_step(
         orientation_goal=orientation_goal,
         orientation_axis=orientation_axis,
         orientation_align_to_runtime_uid=orientation_align_to_runtime_uid,
+        hover_height=hover_height,
     )
 
 
@@ -561,16 +708,57 @@ def _validate_relative_placements(
     placements: tuple[_RelativePlacementStepSpec, ...],
 ) -> None:
     if not placements:
-        raise ValueError("Relative placement requires at least one placement.")
+        raise ValueError("Object manipulation requires at least one manipulation.")
     moved_source_uids = [placement.moved_source_uid for placement in placements]
     if len(moved_source_uids) != len(set(moved_source_uids)):
-        raise ValueError("Relative placements must use distinct moved_object values.")
+        raise ValueError("Object manipulations must use distinct moved_object values.")
+    intents = {placement.intent for placement in placements}
+    if len(intents) > 1:
+        raise ValueError("Mixed manipulation intents are not supported in v1.")
     if len(placements) == 2:
         active_sides = {placement.active_side for placement in placements}
         if active_sides != {"left", "right"}:
             raise ValueError(
-                "Dual-arm relative placement requires one left arm and one right arm."
+                "Dual-arm object manipulation requires one left arm and one right arm."
             )
+
+
+def _normalize_manipulation_intent(value: Any) -> str:
+    if value is None:
+        return "place_relative"
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "relative": "place_relative",
+        "relative_placement": "place_relative",
+        "place": "place_relative",
+        "put": "place_relative",
+        "hold": "hold_hover",
+        "hover": "hold_hover",
+        "pick_hold": "hold_hover",
+        "pick_and_hold": "hold_hover",
+        "lift": "hold_hover",
+        "悬空": "hold_hover",
+        "拿起悬空": "hold_hover",
+    }
+    text = aliases.get(text, text)
+    if text not in _SUPPORTED_MANIPULATION_INTENTS:
+        raise ValueError(
+            f"Unsupported manipulation intent {value!r}; expected one of "
+            f"{sorted(_SUPPORTED_MANIPULATION_INTENTS)}."
+        )
+    return text
+
+
+def _normalize_hover_height(value: Any) -> float:
+    if value is None:
+        return _DEFAULT_HOVER_HEIGHT
+    try:
+        height = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid hover_height {value!r}.") from exc
+    if height <= 0.0 or height > 0.5:
+        raise ValueError("hover_height must be in (0.0, 0.5].")
+    return height
 
 
 def _resolve_rigid_source_uid(
@@ -864,11 +1052,16 @@ def _default_relative_plan_summary(
 ) -> str:
     if len(placements) == 1:
         placement = placements[0]
+        if placement.intent == "hold_hover":
+            return f"Pick up `{placement.moved_runtime_uid}` and keep it hovering."
         return _default_relative_task_summary(
             placement.moved_runtime_uid,
             placement.reference_runtime_uid,
             placement.relation,
         )
+    if all(placement.intent == "hold_hover" for placement in placements):
+        held = ", ".join(placement.moved_runtime_uid for placement in placements)
+        return f"Use both UR5 arms to pick up and hold hovering objects: {held}."
     placement_text = "; ".join(
         f"use the {placement.active_side} UR5 to move "
         f"`{placement.moved_runtime_uid}` "
@@ -876,7 +1069,7 @@ def _default_relative_plan_summary(
         f"`{placement.reference_runtime_uid}`"
         for placement in placements
     )
-    return f"Use both UR5 arms for a dual-arm relative placement: {placement_text}."
+    return f"Use both UR5 arms for object manipulation: {placement_text}."
 
 
 def _default_relative_action_sketch(
@@ -884,6 +1077,12 @@ def _default_relative_action_sketch(
 ) -> list[str]:
     if len(placements) == 1:
         placement = placements[0]
+        if placement.intent == "hold_hover":
+            return [
+                f"grasp {placement.moved_runtime_uid}",
+                "lift and keep the object hovering without release",
+                "keep the gripper closed",
+            ]
         return [
             f"grasp {placement.moved_runtime_uid}",
             (
@@ -893,6 +1092,9 @@ def _default_relative_action_sketch(
             "place at the release pose with Place",
         ]
     sketch = ["grasp both moved objects with their assigned arms"]
+    if all(placement.intent == "hold_hover" for placement in placements):
+        sketch.append("keep both objects hovering with closed grippers")
+        return sketch
     for placement in placements:
         sketch.extend(
             [

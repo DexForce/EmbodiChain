@@ -77,6 +77,8 @@ def _evaluate_spec(
         return _object_axis_near(env, spec)
     if term_type in {"object_lifted", "object_height_above_initial"}:
         return _object_lifted(env, spec)
+    if term_type in {"object_held_by_gripper", "object_gripper_near"}:
+        return _object_held_by_gripper(env, spec)
     raise ValueError(f"Unsupported success term type: {term_type!r}.")
 
 
@@ -231,6 +233,60 @@ def _object_lifted(env, spec: Mapping[str, Any]) -> torch.Tensor:
         device=position.device,
     )
     return position[:, 2] >= initial_height + float(spec.get("min_height", 0.1))
+
+
+def _object_held_by_gripper(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    object_position = _position(env, _object_name(spec))
+    arm_name = str(spec.get("arm", spec.get("robot_name", "")))
+    eef_pose = _arm_eef_pose(env, arm_name).to(
+        dtype=object_position.dtype,
+        device=object_position.device,
+    )
+    if eef_pose.ndim == 2:
+        eef_pose = eef_pose.unsqueeze(0)
+    if eef_pose.shape[0] == 1 and object_position.shape[0] > 1:
+        eef_pose = eef_pose.expand(object_position.shape[0], -1, -1)
+    eef_position = eef_pose[:, :3, 3]
+    near = torch.linalg.norm(object_position - eef_position, dim=-1) <= float(
+        spec.get("max_distance", 0.12)
+    )
+    return near & _gripper_is_closed(env, arm_name, object_position.device)
+
+
+def _arm_eef_pose(env, arm_name: str) -> torch.Tensor:
+    if hasattr(env, "get_current_xpos_agent"):
+        left_pose, right_pose = env.get_current_xpos_agent()
+        return torch.as_tensor(
+            right_pose if "right" in arm_name else left_pose,
+            dtype=torch.float32,
+            device=env.device,
+        )
+    raise ValueError("object_held_by_gripper requires current eef pose access.")
+
+
+def _gripper_is_closed(env, arm_name: str, device: torch.device) -> torch.Tensor:
+    if not hasattr(env, "get_current_gripper_state_agent"):
+        return _constant(env, True)
+    left_state, right_state = env.get_current_gripper_state_agent()
+    state = right_state if "right" in arm_name else left_state
+    state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
+    if state_tensor.numel() == 0:
+        return _constant(env, True)
+    state_tensor = (
+        state_tensor.reshape(1, -1) if state_tensor.ndim == 1 else state_tensor
+    )
+    if state_tensor.shape[0] == 1 and env.num_envs > 1:
+        state_tensor = state_tensor.expand(env.num_envs, -1)
+    close_state = getattr(env, "close_state", None)
+    if close_state is None:
+        return torch.mean(state_tensor, dim=-1) > 0.0
+    close_tensor = torch.as_tensor(close_state, dtype=torch.float32, device=device)
+    close_tensor = (
+        close_tensor.reshape(1, -1) if close_tensor.ndim == 1 else close_tensor
+    )
+    if close_tensor.shape[0] == 1 and state_tensor.shape[0] > 1:
+        close_tensor = close_tensor.expand(state_tensor.shape[0], -1)
+    return torch.linalg.norm(state_tensor - close_tensor, dim=-1) < 1e-3
 
 
 def _axis_index(axis: str) -> int:

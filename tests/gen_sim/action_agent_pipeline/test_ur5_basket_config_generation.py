@@ -48,6 +48,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec impor
     _apply_arrangement_task_response,
     _arrangement_line_slot_positions,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
+    _is_stacking_task_description,
+)
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
@@ -577,7 +580,7 @@ def test_task_description_generates_relative_left_of_config(
     assert "Generate exactly 10 nominal edges" not in task_prompt
 
     assert _stable_summary(paths.summary) == {
-        "mode": "relative_placement",
+        "mode": "object_manipulation",
         "moved_object": "apple_2",
         "reference_object": "wicker_basket",
         "relation": "left_of",
@@ -647,7 +650,7 @@ def test_task_description_generates_relative_front_of_config(
     assert '"offset":[0.16,0.0,0.22]' in atom_actions
 
     assert _stable_summary(paths.summary) == {
-        "mode": "relative_placement",
+        "mode": "object_manipulation",
         "moved_object": "apple_1",
         "reference_object": "apple_2",
         "relation": "front_of",
@@ -738,7 +741,7 @@ def test_task_description_generates_self_relative_front_left_config(
     assert f'"position":[{expected_x},{expected_y},' in task_prompt
 
     assert _stable_summary(paths.summary) == {
-        "mode": "relative_placement",
+        "mode": "object_manipulation",
         "moved_object": "chip_bag",
         "reference_object": "chip_bag",
         "relation": "front_left_of",
@@ -1670,8 +1673,8 @@ def test_task_description_generates_dual_arm_relative_config(
     assert "grasp_pose_object" not in attr_names
 
     assert _stable_summary(paths.summary) == {
-        "mode": "dual_arm_relative_placement",
-        "placements": [
+        "mode": "dual_arm_object_manipulation",
+        "manipulations": [
             {
                 "moved_object": "apple_2",
                 "reference_object": "wicker_basket",
@@ -1717,6 +1720,87 @@ def test_task_description_generates_dual_arm_relative_config(
     assert '"obj_name":"apple_2"' in atom_actions
     assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in atom_actions
     assert '"obj_name":"apple_1"' in atom_actions
+
+
+def test_task_description_generates_dual_hold_hover_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "19_Pick Dual Bottles_gym_project"
+    _write_dual_bottles_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == (
+            "用一只机械臂拿起一个瓶子悬空，并用另一只机械臂拿起另一个瓶子也悬空。"
+        )
+        return {
+            "manipulations": [
+                {
+                    "intent": "hold_hover",
+                    "moved_object": "interact_soda_bottle_1",
+                    "arm": "left",
+                    "hover_height": 0.10,
+                },
+                {
+                    "intent": "hold_hover",
+                    "moved_object": "interact_soda_bottle_2",
+                    "arm": "right",
+                    "hover_height": 0.10,
+                },
+            ],
+            "task_prompt_summary": "Pick up both bottles and keep them hovering.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_hold_hover_agent",
+        task_name="Demo19",
+        task_description=(
+            "用一只机械臂拿起一个瓶子悬空，并用另一只机械臂拿起另一个瓶子也悬空。"
+        ),
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    summary = paths.summary
+    assert summary["mode"] == "dual_arm_object_manipulation"
+    assert [item["intent"] for item in summary["manipulations"]] == [
+        "hold_hover",
+        "hold_hover",
+    ]
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert "exactly 3 nominal edges" in task_prompt
+    assert task_prompt.count('"atomic_action_class":"PickUp"') == 2
+    assert task_prompt.count('"atomic_action_class":"MoveHeldObject"') == 2
+    assert (
+        task_prompt.count('"target_qpos":{"source":"gripper_state","state":"close"}')
+        == 2
+    )
+    assert '"atomic_action_class":"Place"' not in task_prompt
+    assert '"source":"initial"' not in task_prompt
+    assert '"atomic_action_class":"Place"' not in atom_actions
+    assert '"source":"initial"' not in atom_actions
+
+    success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
+    lifted = [term for term in success_terms if term["type"] == "object_lifted"]
+    held = [term for term in success_terms if term["type"] == "object_held_by_gripper"]
+    assert {term["object"] for term in lifted} == {
+        "interact_soda_bottle_1",
+        "interact_soda_bottle_2",
+    }
+    assert {(term["object"], term["arm"]) for term in held} == {
+        ("interact_soda_bottle_1", "left_arm"),
+        ("interact_soda_bottle_2", "right_arm"),
+    }
 
 
 def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> None:
@@ -2057,6 +2141,207 @@ def test_arrangement_layout_fails_when_row_cannot_fit(
         )
 
 
+def test_task_description_generates_three_block_stacking_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "44_Stack Blocks Three_gym_project"
+    _write_stacking_blocks_project(project_dir, count=3)
+
+    def fake_call_stacking_task_llm(**kwargs):
+        return {
+            "objects": ["red_cube_1", "green_cube_2", "blue_cube_3"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["red_cube_1", "green_cube_2", "blue_cube_3"],
+            "order_by": "explicit",
+            "anchor": "table_center",
+            "object_attributes": {
+                "red_cube_1": {"color": "red"},
+                "green_cube_2": {"color": "green"},
+                "blue_cube_3": {"color": "blue"},
+            },
+            "task_prompt_summary": (
+                "Move the cubes to the table center and stack blue on green "
+                "and green on red."
+            ),
+            "basic_background_notes": "Table with red, green, and blue cubes.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fake_call_stacking_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_three_block_stacking_agent",
+        task_name="Demo44",
+        task_description=(
+            "桌上有红、绿、蓝三个方块，将它们移动到桌子中央，并把蓝色方块叠到绿色方块上、绿色方块叠到红色方块上。"
+        ),
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    summary = paths.summary
+    assert summary["mode"] == "stacking"
+    assert summary["stack_mode"] == "on_top"
+    assert summary["bottom_to_top"] == ["red_cube", "green_cube", "blue_cube"]
+    assert [placement["support"] for placement in summary["placements"]] == [
+        None,
+        "red_cube",
+        "green_cube",
+    ]
+    assert all(
+        placement["orientation_goal"] == "axis_align"
+        and placement["orientation_axis"] == "x"
+        for placement in summary["placements"]
+    )
+    target_xy = [
+        placement["target_position"][:2] for placement in summary["placements"]
+    ]
+    assert target_xy == [summary["anchor_xy"]] * 3
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    object_on_terms = [
+        term for term in success["terms"] if term["type"] == "object_on_object"
+    ]
+    assert {(term["object"], term["support"]) for term in object_on_terms} == {
+        ("green_cube", "red_cube"),
+        ("blue_cube", "green_cube"),
+    }
+    assert any(
+        term["type"] == "object_xy_near" and term["object"] == "red_cube"
+        for term in success["terms"]
+    )
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert "Generate one deterministic nominal graph with exactly 21 nominal edges" in (
+        task_prompt
+    )
+    assert "Pick up both" not in task_prompt
+    assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
+    assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
+    assert task_prompt.count('"atomic_action_class":"Place"') == 3
+    assert atom_actions.count('"orientation_goal":"axis_align"') == 6
+
+
+def test_task_description_generates_two_block_stacking_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "45_Stack Blocks Two_gym_project"
+    _write_stacking_blocks_project(project_dir, count=2)
+
+    def fake_call_stacking_task_llm(**kwargs):
+        return {
+            "objects": ["red_cube_1", "green_cube_2"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["red_cube_1", "green_cube_2"],
+            "order_by": "explicit",
+            "anchor": "table_center",
+            "task_prompt_summary": "Stack green on red at the table center.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fake_call_stacking_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_two_block_stacking_agent",
+        task_name="Demo45",
+        task_description="桌上有红、绿两个方块，将它们移动到桌子中央，并把绿色方块叠到红色方块上。",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    summary = paths.summary
+    assert summary["mode"] == "stacking"
+    assert summary["bottom_to_top"] == ["red_cube", "green_cube"]
+    success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
+    assert any(
+        term.get("type") == "object_on_object"
+        and term.get("object") == "green_cube"
+        and term.get("support") == "red_cube"
+        for term in success_terms
+    )
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert "exactly 14 nominal edges" in task_prompt
+    assert "Pick up both" not in task_prompt
+
+
+def test_task_description_generates_nested_bowl_stacking_by_size(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "46_Stack Bowls Three_gym_project"
+    _write_stacking_bowls_project(project_dir, count=3)
+
+    def fake_call_stacking_task_llm(**kwargs):
+        return {
+            "objects": ["interact_bowl_1", "interact_bowl_2", "interact_bowl_3"],
+            "stack_mode": "nested",
+            "bottom_to_top": [],
+            "order_by": "size",
+            "anchor": "table_center",
+            "task_prompt_summary": "Nest the three bowls at the table center.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fake_call_stacking_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_three_bowl_stacking_agent",
+        task_name="Demo46",
+        task_description="将三个碗相互叠放。",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    summary = paths.summary
+    assert summary["mode"] == "stacking"
+    assert summary["stack_mode"] == "nested"
+    assert summary["order_by"] == "size"
+    assert summary["bottom_to_top"] == [
+        "interact_bowl_1",
+        "interact_bowl_2",
+        "interact_bowl_3",
+    ]
+    assert all(
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
+        for placement in summary["placements"]
+    )
+    success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
+    in_container_terms = [
+        term for term in success_terms if term["type"] == "object_in_container"
+    ]
+    assert {(term["object"], term["container"]) for term in in_container_terms} == {
+        ("interact_bowl_2", "interact_bowl_1"),
+        ("interact_bowl_3", "interact_bowl_2"),
+    }
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert "Stack mode: `nested`" in task_prompt
+    assert "exactly 18 nominal edges" in task_prompt
+    assert "High staging orientation" not in atom_actions
+    assert "Align `interact_bowl" not in task_prompt
+
+
+def test_stacking_keyword_routes_before_arrangement() -> None:
+    assert _is_stacking_task_description("将红、绿、蓝三个方块叠成一列")
+    assert _is_stacking_task_description("Stack the bowls at the table center")
+
+
 def test_dual_inside_same_container_uses_container_long_axis_slots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2103,8 +2388,8 @@ def test_dual_inside_same_container_uses_container_long_axis_slots(
     )
 
     assert _stable_summary(paths.summary) == {
-        "mode": "dual_arm_relative_placement",
-        "placements": [
+        "mode": "dual_arm_object_manipulation",
+        "manipulations": [
             {
                 "moved_object": "apple_2",
                 "reference_object": "wicker_basket",
@@ -2237,7 +2522,9 @@ def test_task_description_dual_auto_assigns_complementary_arms(
         prewarm_coacd_cache=False,
     )
 
-    active_arms = [placement["active_arm"] for placement in paths.summary["placements"]]
+    active_arms = [
+        placement["active_arm"] for placement in paths.summary["manipulations"]
+    ]
     assert active_arms == ["right_arm", "left_arm"]
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -2427,6 +2714,29 @@ def test_object_on_object_success_predicate() -> None:
             "xy_radius": 0.08,
             "min_z_offset": 0.02,
             "max_z_offset": 0.35,
+        },
+    )
+
+    assert bool(success.item()) is True
+
+
+def test_object_held_by_gripper_success_predicate() -> None:
+    env = _FakeEnv(
+        {
+            "bottle": [0.0, 0.18, 0.24],
+        }
+    )
+    env.left_eef_pose = _pose_at([0.0, 0.18, 0.25])
+    env.left_gripper_state = torch.tensor([0.04], dtype=torch.float32)
+    env.close_state = torch.tensor([0.04], dtype=torch.float32)
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "object_held_by_gripper",
+            "object": "bottle",
+            "arm": "left_arm",
+            "max_distance": 0.12,
         },
     )
 
@@ -2639,6 +2949,138 @@ def _write_arrangement_project_with_count(
     )
 
 
+def _write_stacking_blocks_project(project_dir: Path, *, count: int) -> None:
+    _write_minimal_glb(
+        project_dir / "mesh_assets/table/table_0.glb",
+        [(-0.60, -0.40, 0.0), (0.60, -0.40, 0.0), (0.0, 0.40, 0.0)],
+    )
+    cube_specs = [
+        ("red_cube_1", "cube_1", "red", [-0.08, -0.10, 0.76]),
+        ("green_cube_2", "cube_2", "green", [0.05, -0.04, 0.76]),
+        ("blue_cube_3", "cube_3", "blue", [-0.04, 0.12, 0.76]),
+    ][:count]
+    rigid_objects = []
+    for index, (uid, mesh_uid, _color, init_pos) in enumerate(cube_specs, start=1):
+        size = 0.035 + index * 0.005
+        _write_minimal_glb(
+            project_dir / f"mesh_assets/cube/{mesh_uid}/{mesh_uid}.glb",
+            [
+                (-size / 2.0, -size / 2.0, 0.0),
+                (size / 2.0, -size / 2.0, 0.0),
+                (0.0, size / 2.0, size),
+            ],
+        )
+        rigid_objects.append(
+            _mesh_object(
+                uid,
+                f"mesh_assets/cube/{mesh_uid}/{mesh_uid}.glb",
+                init_pos,
+                [0.0, 0.0, 0.0],
+            )
+        )
+
+    gym_config = {
+        "id": "Image2Tabletop-stacking-blocks-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": rigid_objects,
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_stacking_bowls_project(project_dir: Path, *, count: int) -> None:
+    _write_minimal_glb(
+        project_dir / "mesh_assets/table/table_0.glb",
+        [(-0.60, -0.40, 0.0), (0.60, -0.40, 0.0), (0.0, 0.40, 0.0)],
+    )
+    rigid_objects = []
+    for index in range(1, count + 1):
+        uid = f"interact_bowl_{index}"
+        radius = 0.025 + (count - index + 1) * 0.008
+        height = 0.025 + (count - index + 1) * 0.006
+        _write_minimal_glb(
+            project_dir / f"mesh_assets/bowl/bowl_{index}/bowl_{index}.glb",
+            [
+                (-radius, -radius, 0.0),
+                (radius, -radius, 0.0),
+                (0.0, radius, height),
+            ],
+        )
+        rigid_objects.append(
+            _mesh_object(
+                uid,
+                f"mesh_assets/bowl/bowl_{index}/bowl_{index}.glb",
+                [round(0.08 * index, 6), round(-0.04 * index, 6), 0.76],
+                [0.0, 0.0, 0.0],
+            )
+        )
+
+    gym_config = {
+        "id": "Image2Tabletop-stacking-bowls-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": rigid_objects,
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_dual_bottles_project(project_dir: Path) -> None:
+    for rel_path in (
+        "mesh_assets/table/table_0.glb",
+        "mesh_assets/soda_bottle/soda_bottle_1/soda_bottle_1.glb",
+        "mesh_assets/soda_bottle/soda_bottle_2/soda_bottle_2.glb",
+    ):
+        _write_minimal_glb(project_dir / rel_path, _default_mesh_vertices())
+
+    gym_config = {
+        "id": "Image2Tabletop-dual-bottles-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "interact_soda_bottle_1",
+                "mesh_assets/soda_bottle/soda_bottle_1/soda_bottle_1.glb",
+                [0.0, 0.18, 0.76],
+                [0.0, 0.0, -90.0],
+            ),
+            _mesh_object(
+                "interact_soda_bottle_2",
+                "mesh_assets/soda_bottle/soda_bottle_2/soda_bottle_2.glb",
+                [0.0, -0.18, 0.76],
+                [0.0, 0.0, -90.0],
+            ),
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _mesh_object(
     uid: str,
     fpath: str,
@@ -2680,13 +3122,21 @@ def _stable_summary(summary: dict) -> dict:
         stable.pop("orientation_axis", None)
     if stable.get("orientation_align_to") is None:
         stable.pop("orientation_align_to", None)
-    for placement in stable.get("placements", []):
+    for placement in [*stable.get("placements", []), *stable.get("manipulations", [])]:
+        if placement.get("intent") == "place_relative":
+            placement.pop("intent", None)
+        if placement.get("hover_height") == 0.1:
+            placement.pop("hover_height", None)
         if placement.get("orientation_goal") == "preserve":
             placement.pop("orientation_goal", None)
         if placement.get("orientation_axis") == "none":
             placement.pop("orientation_axis", None)
         if placement.get("orientation_align_to") is None:
             placement.pop("orientation_align_to", None)
+    if stable.get("intent") == "place_relative":
+        stable.pop("intent", None)
+    if stable.get("hover_height") == 0.1:
+        stable.pop("hover_height", None)
     return stable
 
 
@@ -2954,6 +3404,17 @@ class _FakeEnv:
 
     def __init__(self, positions: dict[str, list[float]]) -> None:
         self.sim = _FakeSim(positions)
+        self.left_eef_pose = _pose_at([0.0, 0.0, 0.0])
+        self.right_eef_pose = _pose_at([0.0, 0.0, 0.0])
+        self.left_gripper_state = torch.tensor([0.0], dtype=torch.float32)
+        self.right_gripper_state = torch.tensor([0.0], dtype=torch.float32)
+        self.close_state = torch.tensor([0.04], dtype=torch.float32)
+
+    def get_current_xpos_agent(self):
+        return self.left_eef_pose, self.right_eef_pose
+
+    def get_current_gripper_state_agent(self):
+        return self.left_gripper_state, self.right_gripper_state
 
 
 class _FakeSim:
@@ -2974,3 +3435,9 @@ class _FakeRigidObject:
         pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
         pose[:, :3, 3] = self._position.reshape(1, 3)
         return pose
+
+
+def _pose_at(position: list[float]) -> torch.Tensor:
+    pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
+    pose[:, :3, 3] = torch.tensor(position, dtype=torch.float32).reshape(1, 3)
+    return pose

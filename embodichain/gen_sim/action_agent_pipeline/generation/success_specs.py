@@ -24,16 +24,19 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _BasketTaskRoles,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
+    _StackingSpec,
 )
 
 __all__ = [
     "_make_arrangement_extensions_config",
     "_make_extensions_config",
     "_make_relative_extensions_config",
+    "_make_stacking_extensions_config",
     "_object_in_container_success",
     "_validate_arrangement_bundle",
     "_validate_bundle",
     "_validate_relative_bundle",
+    "_validate_stacking_bundle",
     "_validate_success_uids",
 ]
 
@@ -120,6 +123,60 @@ def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str,
     }
 
 
+def _make_stacking_extensions_config(spec: _StackingSpec) -> dict[str, Any]:
+    return {
+        **_make_dual_ur5_arm_slot_config(),
+        "gripper_open_state": [0.0],
+        "gripper_close_state": [0.04],
+        "ignore_terminations_during_agent": True,
+        "viewer_camera_uid": "cam_high",
+        "agent_success": _make_stacking_success_spec(spec),
+    }
+
+
+def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
+    terms: list[dict[str, Any]] = []
+    for step in spec.steps:
+        if step.layer_index == 0:
+            terms.append(
+                {
+                    "type": "object_xy_near",
+                    "object": step.runtime_uid,
+                    "target_xy": [
+                        float(spec.anchor_xy[0]),
+                        float(spec.anchor_xy[1]),
+                    ],
+                    "tolerance": 0.03,
+                }
+            )
+        elif spec.stack_mode == "nested":
+            terms.append(
+                _object_in_container_success(
+                    step.runtime_uid,
+                    str(step.support_runtime_uid),
+                )
+            )
+        else:
+            terms.append(
+                {
+                    "type": "object_on_object",
+                    "object": step.runtime_uid,
+                    "support": step.support_runtime_uid,
+                    "xy_radius": 0.06,
+                    "min_z_offset": 0.02,
+                    "max_z_offset": 0.35,
+                }
+            )
+        terms.append(
+            {
+                "type": "object_not_fallen",
+                "object": step.runtime_uid,
+                "max_tilt": 0.9,
+            }
+        )
+    return {"op": "all", "terms": terms}
+
+
 def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
     xy_tolerance = min(0.03, float(spec.spacing) * 0.35)
@@ -152,6 +209,15 @@ def _make_relative_success_spec(
             spec.placements[0],
             side_relation_xy_offsets=side_relation_xy_offsets,
         )
+    if all(placement.intent == "hold_hover" for placement in spec.placements):
+        terms: list[dict[str, Any]] = []
+        for placement in spec.placements:
+            placement_success = _make_relative_placement_success_spec(
+                placement,
+                side_relation_xy_offsets=side_relation_xy_offsets,
+            )
+            terms.extend(placement_success["terms"])
+        return {"op": "all", "terms": terms}
     return {
         "op": "all",
         "terms": [
@@ -169,6 +235,23 @@ def _make_relative_placement_success_spec(
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
+    if placement.intent == "hold_hover":
+        return {
+            "op": "all",
+            "terms": [
+                {
+                    "type": "object_lifted",
+                    "object": placement.moved_runtime_uid,
+                    "min_height": 0.08,
+                },
+                {
+                    "type": "object_held_by_gripper",
+                    "object": placement.moved_runtime_uid,
+                    "arm": f"{placement.active_side}_arm",
+                    "max_distance": 0.12,
+                },
+            ],
+        }
     if placement.relation == "inside":
         return _object_in_container_success(
             placement.moved_runtime_uid,
@@ -310,7 +393,9 @@ def _validate_relative_bundle(
             f"Generated relative config missing moved rigid object(s): {missing_moved}"
         )
     reference_required = {
-        placement.reference_runtime_uid for placement in spec.placements
+        placement.reference_runtime_uid
+        for placement in spec.placements
+        if placement.intent == "place_relative"
     }
     missing_reference = reference_required - scene_uids
     if missing_reference:
@@ -368,6 +453,42 @@ def _validate_arrangement_bundle(
         )
 
 
+def _validate_stacking_bundle(
+    bundle: Mapping[str, Any],
+    spec: _StackingSpec,
+) -> None:
+    gym_config = bundle["gym_config"]
+    if gym_config.get("id") != "AtomicActionsAgent-v3":
+        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("robot", {}).get("uid") != "DualUR5":
+        raise ValueError("Generated stacking config must use DualUR5.")
+
+    rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
+    if len(rigid_uid_list) != len(set(rigid_uid_list)):
+        raise ValueError(f"Duplicate rigid object runtime uid(s): {rigid_uid_list}")
+    rigid_uids = set(rigid_uid_list)
+    background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
+    scene_uids = rigid_uids | background_uids
+    required = {step.runtime_uid for step in spec.steps}
+    missing = required - rigid_uids
+    if missing:
+        raise ValueError(
+            f"Generated stacking config missing moved rigid object(s): {missing}"
+        )
+
+    _validate_success_uids(
+        gym_config["env"]["extensions"]["agent_success"],
+        rigid_uids=rigid_uids,
+        scene_uids=scene_uids,
+    )
+    registry = gym_config["env"]["events"]["register_info_to_env"]["params"]["registry"]
+    registered = {entry["entity_cfg"]["uid"] for entry in registry}
+    if not required.issubset(registered):
+        raise ValueError(
+            f"Stacking config registry missing: {sorted(required - registered)}"
+        )
+
+
 def _validate_success_uids(
     success: Mapping[str, Any],
     *,
@@ -394,6 +515,10 @@ def _validate_success_uids(
     elif success_type in {"object_xy_near", "object_near_xy"}:
         required_keys = ("object",)
     elif success_type in {"object_not_fallen", "not_fallen"}:
+        required_keys = ("object",)
+    elif success_type in {"object_lifted", "object_height_above_initial"}:
+        required_keys = ("object",)
+    elif success_type in {"object_held_by_gripper", "object_gripper_near"}:
         required_keys = ("object",)
     else:
         raise ValueError(f"Unsupported generated success term: {success_type!r}.")

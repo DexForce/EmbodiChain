@@ -23,6 +23,10 @@ from typing import Any
 __all__ = [
     "_ArrangementLineSpec",
     "_ArrangementLineStepSpec",
+    "_ObjectManipulationSpec",
+    "_ObjectManipulationStepSpec",
+    "_StackingSpec",
+    "_StackingStepSpec",
     "GeneratedActionAgentConfigPaths",
     "TargetReplacementSpec",
     "_BasketTaskRoles",
@@ -89,6 +93,7 @@ class _ResolvedTargetReplacement:
 
 @dataclass(frozen=True)
 class _RelativePlacementStepSpec:
+    intent: str
     moved_source_uid: str
     reference_source_uid: str
     moved_runtime_uid: str
@@ -103,10 +108,12 @@ class _RelativePlacementStepSpec:
     orientation_goal: str = "preserve"
     orientation_axis: str = "none"
     orientation_align_to_runtime_uid: str | None = None
+    hover_height: float = 0.10
 
 
 @dataclass(frozen=True)
 class _RelativePlacementSpec:
+    intent: str
     table_source_uid: str
     moved_source_uid: str
     reference_source_uid: str
@@ -127,6 +134,11 @@ class _RelativePlacementSpec:
     orientation_goal: str = "preserve"
     orientation_axis: str = "none"
     orientation_align_to_runtime_uid: str | None = None
+    hover_height: float = 0.10
+
+
+_ObjectManipulationStepSpec = _RelativePlacementStepSpec
+_ObjectManipulationSpec = _RelativePlacementSpec
 
 
 @dataclass(frozen=True)
@@ -158,3 +170,31 @@ class _ArrangementLineSpec:
     line_origin_xy: list[float]
     spacing: float
     layout_clearance: float
+
+
+@dataclass(frozen=True)
+class _StackingStepSpec:
+    source_uid: str
+    runtime_uid: str
+    layer_index: int
+    active_side: str
+    target_position: list[float]
+    high_position: list[float]
+    support_runtime_uid: str | None = None
+    size_score: float | None = None
+    color: str | None = None
+    orientation_goal: str = "preserve"
+    orientation_axis: str = "none"
+
+
+@dataclass(frozen=True)
+class _StackingSpec:
+    table_source_uid: str
+    task_description: str
+    task_prompt_summary: str
+    basic_background_notes: str
+    stack_mode: str
+    order_by: str
+    anchor: str
+    anchor_xy: list[float]
+    steps: tuple[_StackingStepSpec, ...]

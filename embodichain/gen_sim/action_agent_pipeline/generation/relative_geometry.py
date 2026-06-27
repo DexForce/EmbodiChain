@@ -119,6 +119,7 @@ def _with_self_relative_absolute_targets(
     )
     primary = placements[0]
     return _RelativePlacementSpec(
+        intent=primary.intent,
         table_source_uid=spec.table_source_uid,
         moved_source_uid=primary.moved_source_uid,
         reference_source_uid=primary.reference_source_uid,
@@ -139,6 +140,7 @@ def _with_self_relative_absolute_targets(
         orientation_goal=primary.orientation_goal,
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
+        hover_height=primary.hover_height,
     )
 
 
@@ -157,6 +159,7 @@ def _with_self_relative_absolute_target(
     release_position = _offset_position(initial_position, placement.release_offset)
     high_position = _offset_position(initial_position, placement.high_offset)
     return _RelativePlacementStepSpec(
+        intent=placement.intent,
         moved_source_uid=placement.moved_source_uid,
         reference_source_uid=placement.reference_source_uid,
         moved_runtime_uid=placement.moved_runtime_uid,
@@ -171,6 +174,7 @@ def _with_self_relative_absolute_target(
         orientation_goal=placement.orientation_goal,
         orientation_axis=placement.orientation_axis,
         orientation_align_to_runtime_uid=placement.orientation_align_to_runtime_uid,
+        hover_height=placement.hover_height,
     )
 
 
@@ -268,6 +272,7 @@ def _replace_relative_spec_placements(
         orientation_goal=primary.orientation_goal,
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
+        hover_height=primary.hover_height,
     )
 
 
@@ -495,25 +500,29 @@ def _offset_position(
 def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
     if len(spec.placements) == 1:
         return {
-            "mode": "relative_placement",
+            "mode": "object_manipulation",
+            "intent": spec.intent,
             "moved_object": spec.moved_runtime_uid,
             "reference_object": spec.reference_runtime_uid,
             "relation": spec.relation,
             "active_arm": f"{spec.active_side}_arm",
             "release_offset": spec.release_offset,
+            "hover_height": spec.hover_height,
             "orientation_goal": spec.orientation_goal,
             "orientation_axis": spec.orientation_axis,
             "orientation_align_to": spec.orientation_align_to_runtime_uid,
         }
     return {
-        "mode": "dual_arm_relative_placement",
-        "placements": [
+        "mode": "dual_arm_object_manipulation",
+        "manipulations": [
             {
+                "intent": placement.intent,
                 "moved_object": placement.moved_runtime_uid,
                 "reference_object": placement.reference_runtime_uid,
                 "relation": placement.relation,
                 "active_arm": f"{placement.active_side}_arm",
                 "release_offset": placement.release_offset,
+                "hover_height": placement.hover_height,
                 "orientation_goal": placement.orientation_goal,
                 "orientation_axis": placement.orientation_axis,
                 "orientation_align_to": placement.orientation_align_to_runtime_uid,

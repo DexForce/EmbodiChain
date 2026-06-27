@@ -386,6 +386,13 @@ def _relative_dataset_instruction(
     *,
     relation_phrase: Callable[[str], str],
 ) -> str:
+    if spec.intent == "hold_hover":
+        return " ".join(
+            f"Use the {placement.active_side} UR5 to pick up "
+            f"{placement.moved_runtime_uid} and keep it hovering in a closed "
+            "gripper."
+            for placement in spec.placements
+        )
     if len(spec.placements) == 1:
         placement = spec.placements[0]
         return (

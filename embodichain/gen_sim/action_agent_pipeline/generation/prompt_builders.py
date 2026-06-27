@@ -33,6 +33,9 @@ __all__ = [
     "make_relative_atom_actions_prompt",
     "make_relative_basic_background",
     "make_relative_task_prompt",
+    "make_stacking_atom_actions_prompt",
+    "make_stacking_basic_background",
+    "make_stacking_task_prompt",
 ]
 
 _BASKET_LEFT_RELEASE_OFFSET_Y = 0.04
@@ -67,6 +70,7 @@ class _BasketRolesLike(Protocol):
 
 
 class _RelativePlacementLike(Protocol):
+    intent: str
     active_side: str
     moved_runtime_uid: str
     moved_source_uid: str
@@ -81,6 +85,7 @@ class _RelativePlacementLike(Protocol):
     orientation_goal: str
     orientation_axis: str
     orientation_align_to_runtime_uid: str | None
+    hover_height: float
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -117,6 +122,31 @@ class _ArrangementSpecLike(Protocol):
     spacing: float
     layout_clearance: float
     steps: Sequence[_ArrangementStepLike]
+
+
+class _StackingStepLike(Protocol):
+    source_uid: str
+    runtime_uid: str
+    layer_index: int
+    active_side: str
+    target_position: Sequence[float]
+    high_position: Sequence[float]
+    support_runtime_uid: str | None
+    size_score: float | None
+    color: str | None
+    orientation_goal: str
+    orientation_axis: str
+
+
+class _StackingSpecLike(Protocol):
+    task_description: str
+    task_prompt_summary: str
+    basic_background_notes: str
+    stack_mode: str
+    order_by: str
+    anchor: str
+    anchor_xy: Sequence[float]
+    steps: Sequence[_StackingStepLike]
 
 
 def make_agent_config() -> dict[str, Any]:
@@ -323,11 +353,250 @@ def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
 
 
+def make_stacking_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _StackingSpecLike,
+) -> str:
+    edge_count = sum(_stacking_step_edge_count(step) for step in spec.steps)
+    edge_index = 1
+    step_blocks_list = []
+    for step in spec.steps:
+        step_blocks_list.append(_stacking_step_prompt_block(edge_index, step))
+        edge_index += _stacking_step_edge_count(step)
+    step_blocks = "\n\n".join(step_blocks_list)
+    stack_order = ", ".join(
+        f"`{step.runtime_uid}` layer {step.layer_index}" for step in spec.steps
+    )
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from a stacking task description by the config-stage
+LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Stacking plan:
+- Stack mode: `{spec.stack_mode}`.
+- Anchor: `{spec.anchor}` at xy `{list(spec.anchor_xy)}` in the exported {project_name} environment.
+- Ordering rule: `{spec.order_by}`.
+- Bottom-to-top order: {stack_order}.
+
+Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
+Use only the atomic action class JSON specs shown below. Do not add recovery,
+monitor, search, alignment, or extra lift edges. Execute one object at a time;
+do not pick up two objects simultaneously. Move each held object to the high
+staging object pose. If a step has `orientation_goal:"preserve"`, do not add a
+separate high-orientation/alignment edge. Only steps with an explicit
+non-preserve orientation goal may align at the same high pose before moving down
+to the final object pose. Release with the exact relative-zero `Place` spec,
+retreat the empty hand upward, then return that arm to its initial pose.
+
+{step_blocks}
+
+Final state: the objects must be stacked at the configured table-center anchor.
+For `on_top`, each upper layer rests on the previous layer. For `nested`, each
+upper bowl is nested into the previous bowl. Use the exact absolute
+target_object_pose JSON specs shown above; do not rewrite them.
+"""
+
+
+def _stacking_step_edge_count(step: _StackingStepLike) -> int:
+    return 6 if step.orientation_goal == "preserve" else 7
+
+
+def _stacking_step_prompt_block(start_edge: int, step: _StackingStepLike) -> str:
+    active_arm = f"{step.active_side}_arm"
+    active_slot = f"{step.active_side}_arm_action"
+    inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
+    high_preserve_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal="preserve",
+        orientation_axis="none",
+    )
+    if step.orientation_goal == "preserve":
+        high_oriented_spec = high_preserve_spec
+    else:
+        high_oriented_spec = _format_pose_absolute_spec(
+            active_arm,
+            step.high_position,
+            sample_interval=45,
+            orientation_goal=step.orientation_goal,
+            orientation_axis=step.orientation_axis,
+        )
+    release_move_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.target_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+    )
+    if step.orientation_goal == "preserve":
+        return f"""{start_edge}. Pick up `{step.runtime_uid}` for stack layer {step.layer_index}:
+   - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
+   - {inactive_slot}: null
+
+{start_edge + 1}. Move `{step.runtime_uid}` to the high staging pose without changing orientation:
+   - {active_slot}: {high_preserve_spec}
+   - {inactive_slot}: null
+
+{start_edge + 2}. Move `{step.runtime_uid}` down to the final stack object pose without changing orientation:
+   - {active_slot}: {release_move_spec}
+   - {inactive_slot}: null
+
+{start_edge + 3}. Release `{step.runtime_uid}` in-place without moving the object pose:
+   - {active_slot}: {_format_release_only_place_spec(active_arm)}
+   - {inactive_slot}: null
+
+{start_edge + 4}. Retreat `{active_arm}` upward after release:
+   - {active_slot}: {_format_empty_hand_retreat_spec(active_arm)}
+   - {inactive_slot}: null
+
+{start_edge + 5}. Return `{active_arm}` to its initial pose:
+   - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
+   - {inactive_slot}: null"""
+    return f"""{start_edge}. Pick up `{step.runtime_uid}` for stack layer {step.layer_index}:
+   - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
+   - {inactive_slot}: null
+
+{start_edge + 1}. Move `{step.runtime_uid}` to the high staging pose without changing orientation:
+   - {active_slot}: {high_preserve_spec}
+   - {inactive_slot}: null
+
+{start_edge + 2}. Align `{step.runtime_uid}` at the high staging pose if the spec requires it:
+   - {active_slot}: {high_oriented_spec}
+   - {inactive_slot}: null
+
+{start_edge + 3}. Move `{step.runtime_uid}` down to the final stack object pose:
+   - {active_slot}: {release_move_spec}
+   - {inactive_slot}: null
+
+{start_edge + 4}. Release `{step.runtime_uid}` in-place without moving the object pose:
+   - {active_slot}: {_format_release_only_place_spec(active_arm)}
+   - {inactive_slot}: null
+
+{start_edge + 5}. Retreat `{active_arm}` upward after release:
+   - {active_slot}: {_format_empty_hand_retreat_spec(active_arm)}
+   - {inactive_slot}: null
+
+{start_edge + 6}. Return `{active_arm}` to its initial pose:
+   - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
+   - {inactive_slot}: null"""
+
+
+def make_stacking_basic_background(
+    project_name: str,
+    spec: _StackingSpecLike,
+) -> str:
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    object_lines = "\n".join(
+        _stacking_object_background_line(step) for step in spec.steps
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 stacking task generated from a
+simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
+
+Stack mode: `{spec.stack_mode}` at table-center xy `{list(spec.anchor_xy)}`.
+
+Interactive task objects and stack layers:
+{object_lines}
+
+Config-stage LLM notes:
+{notes}
+
+The execution-stage LLM should manipulate one object at a time, release it in
+place, retreat upward with an empty gripper, and then return the active arm to
+its initial pose before starting the next stack layer.
+"""
+
+
+def _stacking_object_background_line(step: _StackingStepLike) -> str:
+    attrs = []
+    if step.color:
+        attrs.append(f"color={step.color}")
+    if step.size_score is not None:
+        attrs.append(f"size_score={float(step.size_score):.6g}")
+    attr_text = f" ({', '.join(attrs)})" if attrs else ""
+    support = step.support_runtime_uid or "table"
+    return (
+        f"- {step.runtime_uid}: source `{step.source_uid}`{attr_text}, "
+        f"layer {step.layer_index}, support `{support}`, "
+        f"target_position={list(step.target_position)}, "
+        f"handled by {step.active_side}_arm."
+    )
+
+
+def make_stacking_atom_actions_prompt(spec: _StackingSpecLike) -> str:
+    blocks = "\n\n".join(_stacking_atom_action_block(step) for step in spec.steps)
+    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Stacking
+
+Use only the native atomic action class JSON specs shown below. Each object is
+moved to an absolute table-center stack pose computed by the config-stage
+generator. Keep the non-active arm null for each listed object.
+
+{blocks}
+"""
+
+
+def _stacking_atom_action_block(step: _StackingStepLike) -> str:
+    active_arm = f"{step.active_side}_arm"
+    high_oriented_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+    )
+    if step.orientation_goal == "preserve":
+        return f"""Object `{step.runtime_uid}` to stack layer {step.layer_index}:
+- Pick up:
+  {_format_pick_up_spec(active_arm, step.runtime_uid)}
+- High staging without orientation change:
+  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal="preserve", orientation_axis="none")}
+- Final stack object pose without orientation change:
+  {_format_pose_absolute_spec(active_arm, step.target_position, sample_interval=45, orientation_goal="preserve", orientation_axis="none")}
+- Release-only Place:
+  {_format_release_only_place_spec(active_arm)}
+- Empty-hand retreat:
+  {_format_empty_hand_retreat_spec(active_arm)}
+- Return:
+  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
+    return f"""Object `{step.runtime_uid}` to stack layer {step.layer_index}:
+- Pick up:
+  {_format_pick_up_spec(active_arm, step.runtime_uid)}
+- High staging without orientation change:
+  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal="preserve", orientation_axis="none")}
+- High staging orientation:
+  {high_oriented_spec}
+- Final stack object pose:
+  {_format_pose_absolute_spec(active_arm, step.target_position, sample_interval=45, orientation_goal=step.orientation_goal, orientation_axis=step.orientation_axis)}
+- Release-only Place:
+  {_format_release_only_place_spec(active_arm)}
+- Empty-hand retreat:
+  {_format_empty_hand_retreat_spec(active_arm)}
+- Return:
+  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
+
+
 def make_relative_task_prompt(
     task_name: str,
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "hold_hover":
+        return _make_hold_hover_task_prompt(task_name, project_name, spec)
     if len(spec.placements) > 1:
         return _make_dual_relative_task_prompt(task_name, project_name, spec)
 
@@ -507,6 +776,8 @@ def _make_dual_relative_task_prompt(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "hold_hover":
+        return _make_hold_hover_task_prompt(task_name, project_name, spec)
     first, second = spec.placements
     first_arm = f"{first.active_side}_arm"
     second_arm = f"{second.active_side}_arm"
@@ -634,6 +905,80 @@ Final state: `{first.moved_runtime_uid}` must be
 `{second.moved_runtime_uid}` must be {_relative_relation_phrase(second.relation)}
 `{second.reference_runtime_uid}`.
 {final_planning_rule}
+"""
+
+
+def _make_hold_hover_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    pick_actions = {
+        f"{placement.active_side}_arm_action": _format_pick_up_spec(
+            f"{placement.active_side}_arm",
+            placement.moved_runtime_uid,
+        )
+        for placement in spec.placements
+    }
+    hover_actions = {
+        f"{placement.active_side}_arm_action": _format_hover_move_spec(
+            f"{placement.active_side}_arm",
+            placement,
+        )
+        for placement in spec.placements
+    }
+    close_actions = {
+        f"{placement.active_side}_arm_action": _format_gripper_spec(
+            f"{placement.active_side}_arm",
+            "close",
+            sample_interval=10,
+            post_hold_steps=20,
+        )
+        for placement in spec.placements
+    }
+    for side in ("left", "right"):
+        pick_actions.setdefault(f"{side}_arm_action", None)
+        hover_actions.setdefault(f"{side}_arm_action", None)
+        close_actions.setdefault(f"{side}_arm_action", None)
+
+    numbered_edges = _format_numbered_edge_blocks(
+        [
+            ("Pick up the selected object(s)", pick_actions),
+            (
+                "Move the held object(s) to the hover pose without releasing",
+                hover_actions,
+            ),
+            ("Keep the gripper(s) closed and finish while holding", close_actions),
+        ]
+    )
+    objects = ", ".join(
+        f"`{placement.moved_runtime_uid}` with {placement.active_side}_arm"
+        for placement in spec.placements
+    )
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from an object-manipulation task description by the
+config-stage LLM. The execution-stage LLM must now generate the graph JSON from
+this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Object and arm mapping:
+- Hold-hover manipulation(s): {objects}.
+- Do not release any held object.
+- Do not return a holding arm to its initial qpos.
+
+Generate one deterministic nominal graph with exactly 3 nominal edges.
+Use only the atomic action class JSON specs shown below. Do not add recovery,
+monitor, search, release, placement, or return-to-initial edges. The final state
+must keep every selected object hovering in a closed gripper.
+
+{numbered_edges}
+
+Final state: every selected object must remain lifted and held by its assigned
+UR5 arm in the exported {project_name} environment config.
 """
 
 
@@ -826,6 +1171,8 @@ def make_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "hold_hover":
+        return _make_hold_hover_basic_background(project_name, spec)
     if len(spec.placements) > 1:
         return _make_dual_relative_basic_background(project_name, spec)
 
@@ -869,6 +1216,8 @@ def _make_dual_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "hold_hover":
+        return _make_hold_hover_basic_background(project_name, spec)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
@@ -906,7 +1255,45 @@ lift with orientation preserved before high-pose orientation adjustment.
 """
 
 
+def _make_hold_hover_basic_background(
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    object_lines = "\n".join(
+        f"- {placement.moved_runtime_uid}: source `{placement.moved_source_uid}`, "
+        f"handled by {placement.active_side}_arm, hover_height={placement.hover_height}."
+        for placement in spec.placements
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 object-manipulation hold-hover
+task generated from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
+
+Hold-hover task objects:
+{object_lines}
+
+Config-stage LLM notes:
+{notes}
+
+The execution-stage LLM should pick up the selected object(s), move them to the
+configured hover pose if needed, and keep the gripper(s) closed. It must not use
+`Place` or return a holding arm to its initial qpos because the final state is
+the object still hovering in the gripper.
+"""
+
+
 def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    if spec.intent == "hold_hover":
+        return _make_hold_hover_atom_actions_prompt(spec)
     if len(spec.placements) > 1:
         return _make_dual_relative_atom_actions_prompt(spec)
 
@@ -931,6 +1318,8 @@ Use exactly these action patterns:
 
 
 def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    if spec.intent == "hold_hover":
+        return _make_hold_hover_atom_actions_prompt(spec)
     first, second = spec.placements
     first_arm = f"{first.active_side}_arm"
     second_arm = f"{second.active_side}_arm"
@@ -958,6 +1347,31 @@ Use these action patterns:
 - Return to initial qpos:
   {_format_initial_qpos_spec("<released_arm>", sample_interval=30)}
 """
+
+
+def _make_hold_hover_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    blocks = "\n\n".join(
+        _hold_hover_atom_action_block(placement) for placement in spec.placements
+    )
+    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Object Manipulation
+
+Use only the native atomic action class JSON specs shown below. The final state
+must keep the listed object(s) held in closed grippers. Do not use `Place` and
+do not return a holding arm to its initial qpos.
+
+{blocks}
+"""
+
+
+def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
+    active_arm = f"{placement.active_side}_arm"
+    return f"""Object `{placement.moved_runtime_uid}` hold-hover:
+- Pick up:
+  {_format_pick_up_spec(active_arm, placement.moved_runtime_uid)}
+- Hover move:
+  {_format_hover_move_spec(active_arm, placement)}
+- Keep gripper closed:
+  {_format_gripper_spec(active_arm, "close", sample_interval=10, post_hold_steps=20)}"""
 
 
 def make_basket_task_prompt(
@@ -1342,6 +1756,27 @@ def _format_relative_pose_spec(
         orientation_goal=resolved_orientation_goal,
         orientation_axis=resolved_orientation_axis,
         align_to=resolved_align_to,
+    )
+
+
+def _format_hover_move_spec(
+    robot_name: str,
+    placement: _RelativePlacementLike,
+) -> str:
+    return _compact_json(
+        {
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": robot_name,
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, float(placement.hover_height)],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 45},
+        }
     )
 
 

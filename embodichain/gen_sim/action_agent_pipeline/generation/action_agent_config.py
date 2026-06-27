@@ -33,6 +33,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _RelativePlacementSpec,
     _ResolvedTargetReplacement,
     _SceneObject,
+    _StackingSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
@@ -55,12 +56,22 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
     make_relative_atom_actions_prompt,
     make_relative_basic_background,
     make_relative_task_prompt,
+    make_stacking_atom_actions_prompt,
+    make_stacking_basic_background,
+    make_stacking_task_prompt,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _build_arrangement_line_spec_with_llm,
     _call_arrangement_task_llm,
     _is_arrangement_task_description,
     _with_arrangement_generated_z_targets,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
+    _build_stacking_spec_with_llm,
+    _call_stacking_task_llm,
+    _is_stacking_task_description,
+    _make_stacking_summary,
+    _with_stacking_generated_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
     make_dual_ur5_robot_config as _make_dual_ur5_robot_config,
@@ -111,11 +122,13 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _with_self_relative_absolute_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
-    _build_relative_placement_spec_with_llm,
-    _call_relative_task_llm,
     _normalize_relative_relation,
     _relative_relation_phrase,
     _relative_scene_runtime_uid_mapping,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.object_manipulation_spec import (
+    _build_object_manipulation_spec_with_llm,
+    _call_object_manipulation_task_llm,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.replacement_generation import (
     _apply_replacement_names,
@@ -131,12 +144,15 @@ from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
     _make_arrangement_extensions_config,
     _make_extensions_config,
     _make_relative_extensions_config,
+    _make_stacking_extensions_config,
     _object_in_container_success,
     _validate_arrangement_bundle,
     _validate_bundle,
     _validate_relative_bundle,
-    _validate_success_uids,
+    _validate_stacking_bundle,
 )
+
+_call_relative_task_llm = _call_object_manipulation_task_llm
 
 __all__ = [
     "GeneratedActionAgentConfigPaths",
@@ -219,6 +235,34 @@ def generate_action_agent_config_from_project(
                 "target_replacements are only supported by the default basket "
                 "template. Do not combine them with task_description."
             )
+        if _is_stacking_task_description(task_description):
+            spec = _build_stacking_spec_with_llm(
+                scene_objects=scene_objects,
+                project_name=project_name,
+                scene_dir=scene_dir,
+                task_description=task_description,
+                model=llm_model,
+                task_llm_caller=_call_stacking_task_llm,
+            )
+            bundle = _build_stacking_bundle(
+                scene_dir=scene_dir,
+                source_config=source_config,
+                spec=spec,
+                project_name=project_name,
+                task_name=task_name,
+                max_episodes=max_episodes,
+                max_episode_steps=max_episode_steps,
+                mesh_normalizer=mesh_normalizer,
+            )
+            _validate_stacking_bundle(bundle, spec)
+            _attach_mesh_normalization_summary(bundle, mesh_normalizer)
+            if prewarm_coacd_cache:
+                _attach_coacd_cache_summary(bundle)
+            return _write_config_bundle(
+                output_dir=output_dir_path,
+                bundle=bundle,
+                overwrite=overwrite,
+            )
         if _is_arrangement_task_description(task_description):
             spec = _build_arrangement_line_spec_with_llm(
                 scene_objects=scene_objects,
@@ -247,7 +291,7 @@ def generate_action_agent_config_from_project(
                 bundle=bundle,
                 overwrite=overwrite,
             )
-        spec = _build_relative_placement_spec_with_llm(
+        spec = _build_object_manipulation_spec_with_llm(
             scene_objects=scene_objects,
             project_name=project_name,
             task_description=task_description,
@@ -588,6 +632,141 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
     }
 
 
+def _build_stacking_bundle(
+    *,
+    scene_dir: Path,
+    source_config: Mapping[str, Any],
+    spec: _StackingSpec,
+    project_name: str,
+    task_name: str,
+    max_episodes: int,
+    max_episode_steps: int,
+    mesh_normalizer: MeshFrameNormalizer,
+) -> dict[str, Any]:
+    scene_objects = _collect_scene_objects(source_config)
+    background_objects = [
+        obj for obj in scene_objects if obj.source_role == "background"
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    by_uid = {obj.source_uid: obj for obj in scene_objects}
+    runtime_uids = _relative_scene_runtime_uid_mapping(
+        scene_objects,
+        table_source_uid=spec.table_source_uid,
+    )
+    moved_source_uids = {step.source_uid for step in spec.steps}
+    for step in spec.steps:
+        runtime_uids[step.source_uid] = step.runtime_uid
+
+    dynamic_rigid_objects = [
+        obj for obj in rigid_objects if obj.source_uid in moved_source_uids
+    ]
+    static_scene_objects = [
+        obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
+    ]
+    table_config = _make_background_config(
+        scene_dir,
+        by_uid[spec.table_source_uid],
+        mesh_normalizer,
+    )
+    table_top_z = _mesh_config_world_zmax(table_config)
+    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
+
+    gym_config = {
+        "id": "AtomicActionsAgent-v3",
+        "max_episodes": int(max_episodes),
+        "max_episode_steps": int(max_episode_steps),
+        "env": {
+            "extensions": {},
+            "events": _make_arrangement_events_config(
+                [step.runtime_uid for step in spec.steps],
+                sensor_config_factory=_make_sensor_config,
+            ),
+            "observations": _make_observations_config(),
+            "dataset": {},
+        },
+        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
+        "sensor": _make_sensor_config(),
+        "light": _make_light_config(),
+        "background": [
+            table_config,
+            *[
+                _make_relative_background_object_config(
+                    scene_dir,
+                    obj,
+                    runtime_uids[obj.source_uid],
+                    max_convex_hull_num=1,
+                    mesh_normalizer=mesh_normalizer,
+                )
+                for obj in static_scene_objects
+            ],
+            *[
+                _make_extra_background_config(
+                    scene_dir,
+                    obj,
+                    mesh_normalizer,
+                    runtime_uid=runtime_uids[obj.source_uid],
+                )
+                for obj in background_objects
+                if obj.source_uid != spec.table_source_uid
+            ],
+        ],
+        "rigid_object": [
+            _make_relative_rigid_object_config(
+                scene_dir=scene_dir,
+                obj=obj,
+                runtime_uid=runtime_uids[obj.source_uid],
+                body_scale=_source_body_scale(obj),
+                max_convex_hull_num=16,
+                mesh_normalizer=mesh_normalizer,
+            )
+            for obj in dynamic_rigid_objects
+        ],
+    }
+    _apply_tabletop_z_placement(gym_config, table_top_z)
+    spec = _with_stacking_generated_targets(spec, gym_config)
+    gym_config["env"]["extensions"] = _make_stacking_extensions_config(spec)
+    gym_config["env"]["dataset"] = _make_stacking_dataset_config(project_name, spec)
+    return {
+        "gym_config": gym_config,
+        "agent_config": make_agent_config(),
+        "task_prompt": make_stacking_task_prompt(task_name, project_name, spec),
+        "basic_background": make_stacking_basic_background(project_name, spec),
+        "atom_actions": make_stacking_atom_actions_prompt(spec),
+        "summary": _make_stacking_summary(spec),
+    }
+
+
+def _make_stacking_dataset_config(
+    project_name: str,
+    spec: _StackingSpec,
+) -> dict[str, Any]:
+    ordered = ", ".join(step.runtime_uid for step in spec.steps)
+    return {
+        "lerobot": {
+            "func": "LeRobotRecorder",
+            "mode": "save",
+            "params": {
+                "robot_meta": {
+                    "robot_type": "DualUR5",
+                    "control_freq": 25,
+                },
+                "instruction": {
+                    "lang": (
+                        "Move the selected objects to the table center and stack "
+                        f"them bottom-to-top as: {ordered}."
+                    ),
+                },
+                "extra": {
+                    "scene_type": project_name,
+                    "task_description": spec.task_description,
+                    "data_type": "sim",
+                },
+                "use_videos": True,
+            },
+        }
+    }
+
+
 def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
     from embodichain.gen_sim.action_agent_pipeline.generation.coacd_cache import (
         prewarm_coacd_cache_for_gym_config,
@@ -631,7 +810,9 @@ def _build_relative_placement_bundle(
     )
     moved_source_uids = {placement.moved_source_uid for placement in spec.placements}
     reference_runtime_uids = {
-        placement.reference_runtime_uid for placement in spec.placements
+        placement.reference_runtime_uid
+        for placement in spec.placements
+        if placement.intent == "place_relative"
     }
     registered_runtime_uids = sorted(
         {runtime_uids[obj.source_uid] for obj in rigid_objects} | reference_runtime_uids
@@ -710,9 +891,10 @@ def _build_relative_placement_bundle(
         ],
     }
     _apply_tabletop_z_placement(gym_config, table_top_z)
-    spec = _with_self_relative_absolute_targets(spec, gym_config)
-    spec = _with_inside_container_slot_offsets(spec, gym_config)
-    spec = _with_on_surface_release_offsets(spec, gym_config)
+    if spec.intent == "place_relative":
+        spec = _with_self_relative_absolute_targets(spec, gym_config)
+        spec = _with_inside_container_slot_offsets(spec, gym_config)
+        spec = _with_on_surface_release_offsets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
         side_relation_xy_offsets=_side_relation_xy_offsets,
