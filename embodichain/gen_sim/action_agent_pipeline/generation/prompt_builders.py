@@ -40,6 +40,7 @@ _BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
 _PLACE_LIFT_HEIGHT = 0.10
 _RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = 10
 _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = 30
+_USE_PLACEMENT_ALIGN_TO = object()
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
 - `left_of` means positive world y relative to the reference object.
 - `right_of` means negative world y relative to the reference object.
@@ -299,6 +300,21 @@ def make_relative_task_prompt(
     )
     pose_sensitive = _is_pose_sensitive_placement(spec)
     if pose_sensitive:
+        safe_high_spec = _format_relative_pose_spec(
+            active_arm,
+            spec,
+            pose_kind="high",
+            sample_interval=45,
+            orientation_goal="preserve",
+            orientation_axis="none",
+            align_to=None,
+        )
+        high_orientation_spec = _format_relative_pose_spec(
+            active_arm,
+            spec,
+            pose_kind="high",
+            sample_interval=45,
+        )
         release_move_spec = _format_relative_pose_spec(
             active_arm,
             spec,
@@ -307,28 +323,37 @@ def make_relative_task_prompt(
         )
         place_spec = _format_release_only_place_spec(active_arm)
         retreat_spec = _format_empty_hand_retreat_spec(active_arm)
-        edge_count = 6
-        release_instruction = f"""3. Move the held object down to the {release_step_label} object pose:
+        edge_count = 7
+        release_instruction = f"""2. Move the held object up to the {high_step_label} pose without changing orientation:
+   - {active_slot}: {safe_high_spec}
+   - {inactive_slot}: null
+
+3. Adjust the held object orientation at the same safe high staging pose:
+   - {active_slot}: {high_orientation_spec}
+   - {inactive_slot}: null
+
+4. Move the held object down to the {release_step_label} object pose:
    - {active_slot}: {release_move_spec}
    - {inactive_slot}: null
 
-4. Release the held object in-place without moving the object pose:
+5. Release the held object in-place without moving the object pose:
    - {active_slot}: {place_spec}
    - {inactive_slot}: null
 
-5. Retreat the now-empty end-effector upward:
+6. Retreat the now-empty end-effector upward:
    - {active_slot}: {retreat_spec}
    - {inactive_slot}: null
 
-6. Return the active arm to its initial pose:
+7. Return the active arm to its initial pose:
    - {active_slot}: {initial_spec}
    - {inactive_slot}: null"""
+        high_instruction = release_instruction
         release_rule = (
-            "For this pose-sensitive placement, `MoveHeldObject` must move the "
-            "object all the way down to the final release object pose. The "
-            "following `Place` must be the exact relative-zero release-only spec "
-            "shown below so it opens the gripper without re-planning a new "
-            "placement pose."
+            "For this pose-sensitive placement, first use `MoveHeldObject` to "
+            "lift the object to the safe high staging pose while preserving its "
+            "current orientation. Only then adjust orientation at that same high "
+            "pose, move down to the final release object pose, and use the exact "
+            "relative-zero release-only `Place` spec shown below."
         )
     else:
         place_spec = _format_relative_place_spec(
@@ -338,7 +363,11 @@ def make_relative_task_prompt(
             lift_height=_PLACE_LIFT_HEIGHT,
         )
         edge_count = 4
-        release_instruction = f"""3. Place the held object at the {release_step_label} pose:
+        high_instruction = f"""2. Move the held object to the {high_step_label} pose:
+   - {active_slot}: {high_spec}
+   - {inactive_slot}: null
+
+3. Place the held object at the {release_step_label} pose:
    - {active_slot}: {place_spec}
    - {inactive_slot}: null
 
@@ -379,11 +408,7 @@ must remain null in every edge.
    - {active_slot}: {pick_spec}
    - {inactive_slot}: null
 
-2. Move the held object to the {high_step_label} pose:
-   - {active_slot}: {high_spec}
-   - {inactive_slot}: null
-
-{release_instruction}
+{high_instruction}
 
 Final state: `{spec.moved_runtime_uid}` must be
 {_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}`.
@@ -538,6 +563,35 @@ def _dual_relative_release_edge_blocks(
     if _is_pose_sensitive_placement(placement):
         return [
             (
+                f"Lift `{placement.moved_runtime_uid}` to the safe high staging "
+                "pose without changing orientation",
+                {
+                    active_slot: _format_relative_pose_spec(
+                        active_arm,
+                        placement,
+                        pose_kind="high",
+                        sample_interval=45,
+                        orientation_goal="preserve",
+                        orientation_axis="none",
+                        align_to=None,
+                    ),
+                    waiting_slot: waiting_value,
+                },
+            ),
+            (
+                f"Adjust `{placement.moved_runtime_uid}` orientation at the same "
+                "safe high staging pose",
+                {
+                    active_slot: _format_relative_pose_spec(
+                        active_arm,
+                        placement,
+                        pose_kind="high",
+                        sample_interval=45,
+                    ),
+                    waiting_slot: waiting_value,
+                },
+            ),
+            (
                 f"Move `{placement.moved_runtime_uid}` down to the final "
                 "release object pose",
                 {
@@ -586,11 +640,13 @@ def _dual_relative_release_edge_blocks(
 def _dual_relative_release_rule(spec: _RelativeSpecLike) -> str:
     if any(_is_pose_sensitive_placement(placement) for placement in spec.placements):
         return (
-            "For pose-sensitive placements, `MoveHeldObject` must move the held "
-            "object all the way down to the final release object pose; the "
-            "following `Place` must be the exact relative-zero release-only spec "
-            "shown below, and then the empty hand retreats upward. For preserve "
-            "placements, keep the normal `Place` release-place action."
+            "For pose-sensitive placements, first lift the held object to the "
+            "safe high staging pose with orientation preserved, then adjust "
+            "orientation at the same high pose before moving down to the final "
+            "release object pose. The following `Place` must be the exact "
+            "relative-zero release-only spec shown below, and then the empty "
+            "hand retreats upward. For preserve placements, keep the normal "
+            "`Place` release-place action."
         )
     return (
         "Use `Place` for each release-place step so lowering, gripper opening, "
@@ -624,6 +680,19 @@ def _relative_release_action_patterns(
   {_format_empty_hand_retreat_spec(robot_name)}"""
     return f"""- Place at the release pose:
   {_format_relative_place_spec(robot_name, placement, sample_interval=80, lift_height=_PLACE_LIFT_HEIGHT)}"""
+
+
+def _relative_high_action_patterns(
+    robot_name: str,
+    placement: _RelativePlacementLike,
+) -> str:
+    if _is_pose_sensitive_placement(placement):
+        return f"""- Safe high staging without orientation change:
+  {_format_relative_pose_spec(robot_name, placement, pose_kind="high", sample_interval=45, orientation_goal="preserve", orientation_axis="none", align_to=None)}
+- High staging orientation adjustment:
+  {_format_relative_pose_spec(robot_name, placement, pose_kind="high", sample_interval=45)}"""
+    return f"""- {_relative_pose_step_label(placement, "High staging")}:
+  {_format_relative_pose_spec(robot_name, placement, pose_kind="high", sample_interval=45)}"""
 
 
 def make_relative_basic_background(
@@ -662,7 +731,9 @@ Config-stage LLM notes:
 The execution-stage LLM should generate graph JSON that grasps the moved object,
 moves it to the configured high staging pose, releases it at the final pose, and
 returns the active arm to its initial pose. Pose-sensitive placements must use a
-final `MoveHeldObject` object-pose move followed by release-only `Place`.
+safe high `MoveHeldObject` lift with orientation preserved before high-pose
+orientation adjustment, then a final object-pose move followed by release-only
+`Place`.
 """
 
 
@@ -701,7 +772,9 @@ objects, stages and releases the first moved object, then stages and releases
 the second moved object while the first arm returns to its initial pose. Each
 arm must release its moved object before returning to its initial pose.
 Pose-sensitive placements must use a final `MoveHeldObject` object-pose move
-followed by release-only `Place`.
+safe high `MoveHeldObject` lift with orientation preserved before high-pose
+orientation adjustment, then a final object-pose move followed by release-only
+`Place`.
 """
 
 
@@ -711,12 +784,7 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
 
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
-    high_spec = _format_relative_pose_spec(
-        active_arm,
-        spec,
-        pose_kind="high",
-        sample_interval=45,
-    )
+    high_actions = _relative_high_action_patterns(active_arm, spec)
     release_actions = _relative_release_action_patterns(active_arm, spec)
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
 
@@ -727,8 +795,7 @@ the nominal graph.
 Use exactly these action patterns:
 - Pick up `{spec.moved_runtime_uid}`:
   {_format_pick_up_spec(active_arm, spec.moved_runtime_uid)}
-- {_relative_pose_step_label(spec, "High staging")}:
-  {high_spec}
+{high_actions}
 {release_actions}
 - Return to initial qpos:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}
@@ -739,18 +806,8 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     first, second = spec.placements
     first_arm = f"{first.active_side}_arm"
     second_arm = f"{second.active_side}_arm"
-    first_high_spec = _format_relative_pose_spec(
-        first_arm,
-        first,
-        pose_kind="high",
-        sample_interval=45,
-    )
-    second_high_spec = _format_relative_pose_spec(
-        second_arm,
-        second,
-        pose_kind="high",
-        sample_interval=45,
-    )
+    first_high_actions = _relative_high_action_patterns(first_arm, first)
+    second_high_actions = _relative_high_action_patterns(second_arm, second)
     first_release_actions = _relative_release_action_patterns(first_arm, first)
     second_release_actions = _relative_release_action_patterns(second_arm, second)
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
@@ -764,11 +821,9 @@ Use these action patterns:
   {_format_pick_up_spec(first_arm, first.moved_runtime_uid)}
 - Second arm pick-up:
   {_format_pick_up_spec(second_arm, second.moved_runtime_uid)}
-- First high staging:
-  {first_high_spec}
+{first_high_actions}
 {first_release_actions}
-- Second high staging:
-  {second_high_spec}
+{second_high_actions}
 {second_release_actions}
 - Keep a holding arm closed:
   {_format_gripper_spec("<holding_arm>", "close", sample_interval=10)}
@@ -1120,7 +1175,17 @@ def _format_relative_pose_spec(
     *,
     pose_kind: str,
     sample_interval: int,
+    orientation_goal: str | None = None,
+    orientation_axis: str | None = None,
+    align_to: str | None | object = _USE_PLACEMENT_ALIGN_TO,
 ) -> str:
+    resolved_orientation_goal = orientation_goal or placement.orientation_goal
+    resolved_orientation_axis = orientation_axis or placement.orientation_axis
+    resolved_align_to = (
+        placement.orientation_align_to_runtime_uid
+        if align_to is _USE_PLACEMENT_ALIGN_TO
+        else align_to
+    )
     if getattr(placement, "reference_is_initial_pose", False):
         position = (
             placement.high_position
@@ -1135,9 +1200,9 @@ def _format_relative_pose_spec(
             robot_name,
             position,
             sample_interval=sample_interval,
-            orientation_goal=placement.orientation_goal,
-            orientation_axis=placement.orientation_axis,
-            align_to=placement.orientation_align_to_runtime_uid,
+            orientation_goal=resolved_orientation_goal,
+            orientation_axis=resolved_orientation_axis,
+            align_to=resolved_align_to,
         )
 
     offset = placement.high_offset if pose_kind == "high" else placement.release_offset
@@ -1146,9 +1211,9 @@ def _format_relative_pose_spec(
         placement.reference_runtime_uid,
         offset,
         sample_interval=sample_interval,
-        orientation_goal=placement.orientation_goal,
-        orientation_axis=placement.orientation_axis,
-        align_to=placement.orientation_align_to_runtime_uid,
+        orientation_goal=resolved_orientation_goal,
+        orientation_axis=resolved_orientation_axis,
+        align_to=resolved_align_to,
     )
 
 

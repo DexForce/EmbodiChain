@@ -98,6 +98,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _resolve_table_mesh_world_zmax,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry import (
+    _POSE_SENSITIVE_STAGING_Z_DELTA,
     _STAGING_Z_DELTA,
     _inside_container_axis_offsets,
     _inside_container_slot_axis_and_distance,
@@ -106,6 +107,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _relative_release_offset,
     _side_relation_xy_offsets,
     _with_inside_container_slot_offsets,
+    _with_on_surface_release_offsets,
     _with_self_relative_absolute_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
@@ -252,6 +254,7 @@ def generate_action_agent_config_from_project(
             model=llm_model,
             release_offset_fn=_relative_release_offset,
             staging_z_delta=_STAGING_Z_DELTA,
+            pose_sensitive_staging_z_delta=_POSE_SENSITIVE_STAGING_Z_DELTA,
             task_llm_caller=_call_relative_task_llm,
         )
         bundle = _build_relative_placement_bundle(
@@ -701,6 +704,7 @@ def _build_relative_placement_bundle(
     _apply_tabletop_z_placement(gym_config, table_top_z)
     spec = _with_self_relative_absolute_targets(spec, gym_config)
     spec = _with_inside_container_slot_offsets(spec, gym_config)
+    spec = _with_on_surface_release_offsets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
         side_relation_xy_offsets=_side_relation_xy_offsets,

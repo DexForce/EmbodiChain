@@ -1109,14 +1109,27 @@ def test_relative_orientation_intent_generates_axis_align_move_held_object(
     release_offset_json = json.dumps(
         summary["release_offset"], ensure_ascii=False, separators=(",", ":")
     )
+    high_offset = list(summary["release_offset"])
+    high_offset[2] = round(float(high_offset[2]) + 0.25, 6)
+    high_offset_json = json.dumps(
+        high_offset, ensure_ascii=False, separators=(",", ":")
+    )
     assert (
-        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        "Generate one deterministic nominal graph with exactly 7 nominal edges"
         in task_prompt
     )
     for text in (task_prompt, atom_actions):
         assert '"atomic_action_class":"MoveHeldObject"' in text
         assert '"target_object_pose":{"reference":"object"' in text
         assert '"obj_name":"colored_pad"' in text
+        assert (
+            f'"offset":{high_offset_json},"orientation_goal":"preserve",'
+            '"orientation_axis":"none"}' in text
+        )
+        assert (
+            f'"offset":{high_offset_json},"orientation_goal":"axis_align",'
+            '"orientation_axis":"long_axis","align_to":"colored_pad"' in text
+        )
         assert f'"offset":{release_offset_json}' in text
         assert '"orientation_goal":"axis_align"' in text
         assert '"orientation_axis":"long_axis"' in text
@@ -1170,7 +1183,12 @@ def test_relative_orientation_upright_does_not_emit_align_to(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    assert (
+        "Generate one deterministic nominal graph with exactly 7 nominal edges"
+        in task_prompt
+    )
     for text in (task_prompt, atom_actions):
+        assert '"orientation_goal":"preserve","orientation_axis":"none"' in text
         assert '"orientation_goal":"upright"' in text
         assert '"orientation_axis":"none"' in text
         assert '"align_to"' not in text
@@ -1182,6 +1200,90 @@ def test_relative_orientation_upright_does_not_emit_align_to(
     assert _stable_summary(paths.summary)["orientation_goal"] == "upright"
     assert paths.summary["orientation_axis"] == "none"
     assert paths.summary["orientation_align_to"] is None
+
+
+def test_relative_on_table_release_offset_uses_tabletop_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "43_Shake Bottle_gym_project"
+    table_vertices = [
+        (-0.5, -0.4, 0.0),
+        (0.5, -0.4, 0.0),
+        (0.0, 0.4, 0.0),
+        (-0.5, -0.4, 0.36),
+        (0.5, -0.4, 0.36),
+        (0.0, 0.4, 0.36),
+    ]
+    bottle_vertices = [
+        (-0.02, 0.0, 0.0),
+        (0.02, 0.0, 0.0),
+        (0.0, 0.02, 0.16),
+    ]
+    _write_minimal_glb(project_dir / "mesh_assets/table/table_0.glb", table_vertices)
+    _write_minimal_glb(
+        project_dir / "mesh_assets/bottle/bottle_1.glb",
+        bottle_vertices,
+    )
+    gym_config = {
+        "id": "Image2Tabletop-43-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, -0.02],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "interact_bottle_1",
+                "mesh_assets/bottle/bottle_1.glb",
+                [0.05, 0.05, 0.36],
+                [90.0, 0.0, 0.0],
+            )
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "interact_bottle_1",
+            "reference_object": "table",
+            "goal_relation": "on",
+            "arm": "left",
+            "orientation_goal": "upright",
+            "orientation_reference": "none",
+            "task_prompt_summary": "Use the left arm to stand the bottle on table.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_bottle_on_table_agent",
+        task_name="Demo43",
+        task_description="用左臂把瓶子扶正放到桌面上",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    summary = _stable_summary(paths.summary)
+    expected_release_z = 0.36 + 0.003
+    assert summary["release_offset"][2] == pytest.approx(expected_release_z)
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    release_offset_json = json.dumps(
+        summary["release_offset"], ensure_ascii=False, separators=(",", ":")
+    )
+    assert f'"offset":{release_offset_json},"orientation_goal":"upright"' in task_prompt
+    assert '"offset":[0.0,0.0,0.2]' not in task_prompt
 
 
 def test_relative_orientation_rejects_invalid_enum(

@@ -162,6 +162,7 @@ def _build_relative_placement_spec_with_llm(
     model: str | None,
     release_offset_fn: Callable[[str], Sequence[float]],
     staging_z_delta: float,
+    pose_sensitive_staging_z_delta: float,
     task_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
 ) -> _RelativePlacementSpec:
     background_objects = [
@@ -202,6 +203,7 @@ def _build_relative_placement_spec_with_llm(
         task_description=task_description,
         release_offset_fn=release_offset_fn,
         staging_z_delta=staging_z_delta,
+        pose_sensitive_staging_z_delta=pose_sensitive_staging_z_delta,
     )
 
 
@@ -337,6 +339,7 @@ def _apply_relative_task_response(
     task_description: str,
     release_offset_fn: Callable[[str], Sequence[float]],
     staging_z_delta: float,
+    pose_sensitive_staging_z_delta: float,
 ) -> _RelativePlacementSpec:
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
@@ -363,6 +366,7 @@ def _apply_relative_task_response(
             forced_side=forced_side,
             release_offset_fn=release_offset_fn,
             staging_z_delta=staging_z_delta,
+            pose_sensitive_staging_z_delta=pose_sensitive_staging_z_delta,
         )
         for entry, forced_side in zip(placement_entries, forced_arm_sides)
     )
@@ -470,6 +474,7 @@ def _build_relative_placement_step(
     forced_side: str | None,
     release_offset_fn: Callable[[str], Sequence[float]],
     staging_z_delta: float,
+    pose_sensitive_staging_z_delta: float,
 ) -> _RelativePlacementStepSpec:
     moved_source_uid = _resolve_rigid_source_uid(
         entry.get("moved_object"),
@@ -517,7 +522,11 @@ def _build_relative_placement_step(
 
     release_offset = [float(value) for value in release_offset_fn(relation)]
     high_offset = list(release_offset)
-    high_offset[2] += float(staging_z_delta)
+    high_offset[2] += float(
+        pose_sensitive_staging_z_delta
+        if orientation_goal != "preserve"
+        else staging_z_delta
+    )
     moved_position = _vector3(
         by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0])
     )

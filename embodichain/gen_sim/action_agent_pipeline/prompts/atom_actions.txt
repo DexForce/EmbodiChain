@@ -21,8 +21,10 @@ Use only these native atomic action classes:
 2. `MoveHeldObject`
    - Use only after the same arm has successfully executed `PickUp`.
    - Moves the already-held object in the air without releasing it.
-   - For pose-sensitive placement, move the held object all the way to the final
-     release object pose before calling release-only `Place`.
+   - For pose-sensitive placement, first move the held object to a safe high
+     staging pose with orientation_goal="preserve"; only then adjust orientation
+     at the same high pose, move down to the final release object pose, and call
+     release-only `Place`.
    - Required target_object_pose:
      {"reference": "object", "obj_name": "<reference object>", "offset": [x, y, z], "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
      {"reference": "absolute", "position": [x, y, z], "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}

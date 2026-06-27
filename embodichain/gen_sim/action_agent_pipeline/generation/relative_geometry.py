@@ -27,6 +27,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _clean_vector3,
     _iter_generated_scene_object_configs,
+    _mesh_config_local_zmin_after_rotation,
+    _mesh_config_world_zmax,
     _mesh_config_world_xy_extents,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
@@ -35,12 +37,15 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
 )
 
 __all__ = [
+    "_POSE_SENSITIVE_STAGING_Z_DELTA",
+    "_STAGING_Z_DELTA",
     "_inside_container_axis_offsets",
     "_inside_container_slot_axis_and_distance",
     "_make_relative_summary",
     "_offset_position",
     "_relative_release_offset",
     "_side_relation_xy_offsets",
+    "_with_on_surface_release_offsets",
     "_with_inside_container_slot_offsets",
     "_with_self_relative_absolute_targets",
 ]
@@ -53,7 +58,9 @@ _CONTAINER_SLOT_FRACTION = 0.25
 _CONTAINER_SLOT_MAX_FRACTION = 0.40
 _CONTAINER_SLOT_AXIS_TIE_RATIO = 0.10
 _STAGING_Z_DELTA = 0.10
+_POSE_SENSITIVE_STAGING_Z_DELTA = 0.25
 _ON_RELEASE_Z_OFFSET = 0.2
+_ON_SURFACE_RELEASE_CLEARANCE = 0.003
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
 
@@ -262,6 +269,111 @@ def _replace_relative_spec_placements(
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
     )
+
+
+def _with_on_surface_release_offsets(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    placements = tuple(
+        _with_on_surface_release_offset(placement, gym_config)
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _with_on_surface_release_offset(
+    placement: _RelativePlacementStepSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementStepSpec:
+    if placement.relation != "on" or placement.reference_is_initial_pose:
+        return placement
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    reference_config = object_configs.get(placement.reference_runtime_uid)
+    moved_config = object_configs.get(placement.moved_runtime_uid)
+    if reference_config is None or moved_config is None:
+        return placement
+
+    reference_top_z = _mesh_config_world_zmax(reference_config)
+    moved_bottom_offset = _target_local_zmin_for_orientation(
+        moved_config,
+        placement.orientation_goal,
+    )
+    if reference_top_z is None or moved_bottom_offset is None:
+        return placement
+
+    reference_origin_z = _clean_vector3(reference_config.get("init_pos", [0, 0, 0]))[2]
+    release_offset = list(placement.release_offset)
+    release_offset[2] = round(
+        float(reference_top_z)
+        - float(reference_origin_z)
+        + _ON_SURFACE_RELEASE_CLEARANCE
+        - float(moved_bottom_offset),
+        6,
+    )
+    high_offset = list(release_offset)
+    high_offset[2] = round(
+        release_offset[2]
+        + (
+            _POSE_SENSITIVE_STAGING_Z_DELTA
+            if placement.orientation_goal != "preserve"
+            else _STAGING_Z_DELTA
+        ),
+        6,
+    )
+    return replace(
+        placement,
+        release_offset=release_offset,
+        high_offset=high_offset,
+    )
+
+
+def _target_local_zmin_for_orientation(
+    obj_config: Mapping[str, Any],
+    orientation_goal: str,
+) -> float | None:
+    if orientation_goal in {"preserve", "axis_align"}:
+        return _mesh_config_local_zmin_after_rotation(obj_config)
+    if orientation_goal == "upright":
+        return 0.0
+    if orientation_goal == "lay_flat":
+        return _lay_flat_local_zmin(obj_config)
+    return _mesh_config_local_zmin_after_rotation(obj_config)
+
+
+def _lay_flat_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+
+    from pathlib import Path
+
+    from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+        _load_mesh_vertices,
+    )
+
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+    scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    extents = [
+        (
+            max(vertex[index] for vertex in vertices)
+            - min(vertex[index] for vertex in vertices)
+        )
+        * scale[index]
+        for index in range(3)
+    ]
+    sorted_extents = sorted(float(extent) for extent in extents)
+    return -0.5 * sorted_extents[1]
 
 
 def _inside_container_slot_axis_and_distance(
