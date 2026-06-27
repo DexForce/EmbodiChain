@@ -8,4 +8,5 @@ Supported Robots
 
    Dexforce W1 <dexforce_w1.md>
    CobotMagic <cobotmagic.md>
+   UR Family <ur_robot.md>
    

@@ -30,6 +30,7 @@ from embodichain.utils.device_utils import standardize_device_string
 
 @configclass
 class URSolverCfg(SolverCfg):
+    class_type: str = "URSolver"
     ur_type: str = "ur10"
     end_link_name: str = "ee_link"
     root_link_name: str = "base_link"
