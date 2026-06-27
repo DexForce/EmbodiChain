@@ -101,6 +101,8 @@ class _ArrangementStepLike(Protocol):
     high_position: Sequence[float]
     size_score: float | None
     color: str | None
+    orientation_goal: str
+    orientation_axis: str
 
 
 class _ArrangementSpecLike(Protocol):
@@ -111,6 +113,9 @@ class _ArrangementSpecLike(Protocol):
     order_direction: str
     axis: str
     anchor: str
+    line_origin_xy: Sequence[float]
+    spacing: float
+    layout_clearance: float
     steps: Sequence[_ArrangementStepLike]
 
 
@@ -144,7 +149,7 @@ def make_arrangement_task_prompt(
     project_name: str,
     spec: _ArrangementSpecLike,
 ) -> str:
-    edge_count = len(spec.steps) * 4
+    edge_count = len(spec.steps) * 6
     step_blocks = "\n\n".join(
         _arrangement_step_prompt_block(index, step)
         for index, step in enumerate(spec.steps, start=1)
@@ -165,20 +170,27 @@ Arrangement plan:
 - Layout axis: `{spec.axis}`. Slot 0 is the robot-view leftmost slot, and later
   slots move monotonically toward robot-view right.
 - Anchor: `{spec.anchor}` in the exported {project_name} environment.
+- Collision-aware line origin xy: `{list(spec.line_origin_xy)}`.
+- Slot spacing: `{float(spec.spacing):.6g}` with clearance `{float(spec.layout_clearance):.6g}`.
 - Ordering rule: `{spec.order_by}` with direction `{spec.order_direction}`.
 - Final order: {final_order}.
 
 Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
 Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges. Use `Place` for each
-release-place step so lowering, gripper opening, and upward retreat remain one
-atomic action. The arm not listed for a step must remain null.
+monitor, search, alignment, or extra lift edges. The absolute target object
+poses are collision-aware slots computed by the config-stage generator; do not
+rewrite them. First move each held object to the high staging pose with
+orientation preserved, then use `MoveHeldObject` at the same high pose to align
+its principal axis to the configured world axis, then move down to the final
+release object pose. Use the exact relative-zero release-only `Place` spec
+shown below. The arm not listed for a step must remain null.
 
 {step_blocks}
 
 Final state: all listed objects must rest near their assigned absolute XY slots
-and remain upright. Use the exact absolute target_pose JSON specs shown above;
-do not rewrite slot placement as object-referenced poses.
+with their principal axes aligned to the configured arrangement axis. Use the
+exact absolute target_object_pose JSON specs shown above; do not rewrite slot
+placement as object-referenced poses.
 """
 
 
@@ -186,20 +198,49 @@ def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> st
     active_arm = f"{step.active_side}_arm"
     active_slot = f"{step.active_side}_arm_action"
     inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
-    base_edge = (index - 1) * 4
+    base_edge = (index - 1) * 6
+    high_preserve_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal="preserve",
+        orientation_axis="none",
+    )
+    high_align_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+    )
+    release_move_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.release_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+    )
     return f"""{base_edge + 1}. Pick up `{step.runtime_uid}` for slot {step.slot_index}:
    - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
    - {inactive_slot}: null
 
-{base_edge + 2}. Move `{step.runtime_uid}` to the high staging pose above slot {step.slot_index}:
-   - {active_slot}: {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45)}
+{base_edge + 2}. Move `{step.runtime_uid}` to the high staging pose above slot {step.slot_index} without changing orientation:
+   - {active_slot}: {high_preserve_spec}
    - {inactive_slot}: null
 
-{base_edge + 3}. Place `{step.runtime_uid}` at slot {step.slot_index}:
-   - {active_slot}: {_format_place_absolute_spec(active_arm, step.release_position, sample_interval=80, lift_height=_PLACE_LIFT_HEIGHT)}
+{base_edge + 3}. Align `{step.runtime_uid}` at the high staging pose to the configured arrangement axis:
+   - {active_slot}: {high_align_spec}
    - {inactive_slot}: null
 
-{base_edge + 4}. Return `{active_arm}` to its initial pose:
+{base_edge + 4}. Move `{step.runtime_uid}` down to the final release object pose at slot {step.slot_index}:
+   - {active_slot}: {release_move_spec}
+   - {inactive_slot}: null
+
+{base_edge + 5}. Release `{step.runtime_uid}` in-place without moving the object pose:
+   - {active_slot}: {_format_release_only_place_spec(active_arm)}
+   - {inactive_slot}: null
+
+{base_edge + 6}. Return `{active_arm}` to its initial pose:
    - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
    - {inactive_slot}: null"""
 
@@ -230,6 +271,11 @@ Interactive task objects and target slots:
 
 Config-stage LLM notes:
 {notes}
+
+The execution-stage LLM should preserve each object's initial orientation while
+lifting to the high staging pose, align the held object to the configured
+arrangement world axis at that safe height, move down to the final object pose,
+release in place, and then return the arm to its initial pose.
 """
 
 
@@ -252,8 +298,9 @@ def make_arrangement_atom_actions_prompt(spec: _ArrangementSpecLike) -> str:
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Line Arrangement
 
 Use only the native atomic action class JSON specs shown below. Each object is
-moved to an absolute slot pose computed by the
-config-stage generator. Keep the non-active arm null for each listed object.
+moved to an absolute collision-aware slot pose computed by the config-stage
+generator. Align at the high pose before moving down to the final object pose.
+Keep the non-active arm null for each listed object.
 
 {blocks}
 """
@@ -264,10 +311,14 @@ def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
     return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
 - Pick up:
   {_format_pick_up_spec(active_arm, step.runtime_uid)}
-- High staging:
-  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45)}
-- Place:
-  {_format_place_absolute_spec(active_arm, step.release_position, sample_interval=80, lift_height=_PLACE_LIFT_HEIGHT)}
+- High staging without orientation change:
+  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal="preserve", orientation_axis="none")}
+- High staging axis alignment:
+  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal=step.orientation_goal, orientation_axis=step.orientation_axis)}
+- Final release object pose:
+  {_format_pose_absolute_spec(active_arm, step.release_position, sample_interval=45, orientation_goal=step.orientation_goal, orientation_axis=step.orientation_axis)}
+- Release-only Place:
+  {_format_release_only_place_spec(active_arm)}
 - Return:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
 

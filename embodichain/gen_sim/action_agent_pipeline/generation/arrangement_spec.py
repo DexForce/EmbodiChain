@@ -69,11 +69,13 @@ _ARRANGEMENT_KEYWORDS = (
     "排成",
     "一行",
 )
-_DEFAULT_RELEASE_Z = 0.12
+_DEFAULT_RELEASE_Z = 0.01
 _DEFAULT_STAGING_Z_DELTA = 0.10
-_SLOT_MARGIN = 0.01
+_SLOT_MARGIN = 0.025
 _MIN_SLOT_SPACING = 0.07
-_MAX_SLOT_SPACING = 0.12
+_LAYOUT_CLEARANCE = 0.025
+_ROW_SEARCH_STEP = 0.025
+_ROW_SEARCH_RADIUS = 0.25
 _SUPPORTED_ORDER_BY = {"size", "color", "explicit"}
 _SUPPORTED_ORDER_DIRECTIONS = {"ascending", "descending", "given"}
 _SUPPORTED_AXES = {"left_to_right"}
@@ -269,12 +271,17 @@ def _apply_arrangement_task_response(
         [rigid_by_uid[uid] for uid in object_source_uids],
         scene_dir=scene_dir,
     )
-    slots = _arrangement_line_slot_positions(
+    slots, line_origin_xy = _arrangement_collision_aware_line_slots(
         anchor_xy=anchor_xy,
+        table_obj=table_obj,
+        objects=[rigid_by_uid[uid] for uid in object_source_uids],
         count=len(ordered_source_uids),
         spacing=spacing,
         line_axis=axis,
+        scene_dir=scene_dir,
+        clearance=_LAYOUT_CLEARANCE,
     )
+    orientation_axis = _arrangement_orientation_axis(axis)
 
     steps = []
     for slot_index, (source_uid, target_xy) in enumerate(
@@ -305,6 +312,8 @@ def _apply_arrangement_task_response(
                 high_position=high_position,
                 size_score=_arrangement_object_size_score(obj, scene_dir=scene_dir),
                 color=_object_color(source_uid, object_attributes),
+                orientation_goal="axis_align",
+                orientation_axis=orientation_axis,
             )
         )
 
@@ -323,6 +332,9 @@ def _apply_arrangement_task_response(
         axis=axis,
         anchor=anchor,
         steps=tuple(steps),
+        line_origin_xy=line_origin_xy,
+        spacing=spacing,
+        layout_clearance=_LAYOUT_CLEARANCE,
     )
 
 
@@ -351,6 +363,202 @@ def _arrangement_line_slot_positions(
             continue
         raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
     return slots
+
+
+def _arrangement_collision_aware_line_slots(
+    *,
+    anchor_xy: Sequence[float],
+    table_obj: _SceneObject,
+    objects: Sequence[_SceneObject],
+    count: int,
+    spacing: float,
+    line_axis: str,
+    scene_dir: Path,
+    clearance: float,
+) -> tuple[list[list[float]], list[float]]:
+    axis = _normalize_axis(line_axis)
+    if axis != "left_to_right":
+        raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
+    if count != len(objects):
+        raise ValueError("Arrangement slot count must match object count.")
+
+    table_bounds = _source_object_xy_bounds(table_obj, scene_dir=scene_dir)
+    if table_bounds is None:
+        raise ValueError("Arrangement requires table mesh XY bounds for safe layout.")
+    table_min, table_max = table_bounds
+    object_footprints = [
+        _arrangement_object_footprint(obj, scene_dir=scene_dir) for obj in objects
+    ]
+    max_half_extent = max(footprint.half_extent for footprint in object_footprints)
+    init_bounds = [footprint.xy_bounds for footprint in object_footprints]
+
+    for x_offset in _row_search_offsets(_ROW_SEARCH_RADIUS, _ROW_SEARCH_STEP):
+        origin = [
+            round(float(anchor_xy[0]) + x_offset, 6),
+            round(float(anchor_xy[1]), 6),
+        ]
+        slots = _arrangement_line_slot_positions(
+            anchor_xy=origin,
+            count=count,
+            spacing=spacing,
+            line_axis=axis,
+        )
+        slot_bounds = [
+            _slot_xy_bounds(slot, max_half_extent=max_half_extent) for slot in slots
+        ]
+        if not _slot_bounds_within_table(
+            slot_bounds,
+            table_min=table_min,
+            table_max=table_max,
+            clearance=clearance,
+        ):
+            continue
+        if any(
+            _xy_bounds_overlap(slot_bound, init_bound, clearance=clearance)
+            for slot_bound in slot_bounds
+            for init_bound in init_bounds
+        ):
+            continue
+        return slots, origin
+
+    raise ValueError(
+        "Unable to generate a collision-free one-line arrangement near the table "
+        "center. The selected objects may be too many, too large, or already "
+        "occupying all candidate row positions; use a larger table or add parking "
+        "slot planning."
+    )
+
+
+def _row_search_offsets(radius: float, step: float) -> list[float]:
+    offsets = [0.0]
+    steps = int(float(radius) / float(step))
+    for index in range(1, steps + 1):
+        value = round(float(index) * float(step), 6)
+        offsets.extend([value, -value])
+    return offsets
+
+
+class _ArrangementFootprint:
+    def __init__(
+        self,
+        *,
+        xy_bounds: tuple[list[float], list[float]],
+        half_extent: float,
+    ) -> None:
+        self.xy_bounds = xy_bounds
+        self.half_extent = half_extent
+
+
+def _arrangement_object_footprint(
+    obj: _SceneObject,
+    *,
+    scene_dir: Path,
+) -> _ArrangementFootprint:
+    bounds = _source_object_xy_bounds(obj, scene_dir=scene_dir)
+    if bounds is None:
+        position = _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))
+        half_extent = _MIN_SLOT_SPACING / 2.0
+        bounds = (
+            [position[0] - half_extent, position[1] - half_extent],
+            [position[0] + half_extent, position[1] + half_extent],
+        )
+    mins, maxs = bounds
+    half_extent = max(
+        (float(maxs[0]) - float(mins[0])) / 2.0,
+        (float(maxs[1]) - float(mins[1])) / 2.0,
+        _MIN_SLOT_SPACING / 2.0,
+    )
+    return _ArrangementFootprint(xy_bounds=bounds, half_extent=half_extent)
+
+
+def _source_object_xy_bounds(
+    obj: _SceneObject,
+    *,
+    scene_dir: Path,
+) -> tuple[list[float], list[float]] | None:
+    config = _resolved_mesh_config(obj, scene_dir=scene_dir)
+    return _mesh_config_world_xy_bounds(config)
+
+
+def _mesh_config_world_xy_bounds(
+    obj_config: Mapping[str, Any],
+) -> tuple[list[float], list[float]] | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+    from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+        _load_mesh_vertices,
+        _mesh_config_transform_matrix,
+        _transform_point,
+    )
+
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+    matrix = _mesh_config_transform_matrix(obj_config)
+    transformed_vertices = [_transform_point(matrix, vertex) for vertex in vertices]
+    x_values = [vertex[0] for vertex in transformed_vertices]
+    y_values = [vertex[1] for vertex in transformed_vertices]
+    return (
+        [min(x_values), min(y_values)],
+        [max(x_values), max(y_values)],
+    )
+
+
+def _slot_xy_bounds(
+    slot: Sequence[float],
+    *,
+    max_half_extent: float,
+) -> tuple[list[float], list[float]]:
+    return (
+        [float(slot[0]) - max_half_extent, float(slot[1]) - max_half_extent],
+        [float(slot[0]) + max_half_extent, float(slot[1]) + max_half_extent],
+    )
+
+
+def _slot_bounds_within_table(
+    slot_bounds: Sequence[tuple[list[float], list[float]]],
+    *,
+    table_min: Sequence[float],
+    table_max: Sequence[float],
+    clearance: float,
+) -> bool:
+    for mins, maxs in slot_bounds:
+        if mins[0] < float(table_min[0]) + clearance:
+            return False
+        if maxs[0] > float(table_max[0]) - clearance:
+            return False
+        if mins[1] < float(table_min[1]) + clearance:
+            return False
+        if maxs[1] > float(table_max[1]) - clearance:
+            return False
+    return True
+
+
+def _xy_bounds_overlap(
+    first: tuple[list[float], list[float]],
+    second: tuple[list[float], list[float]],
+    *,
+    clearance: float,
+) -> bool:
+    first_min, first_max = first
+    second_min, second_max = second
+    return not (
+        first_max[0] + clearance <= second_min[0]
+        or second_max[0] + clearance <= first_min[0]
+        or first_max[1] + clearance <= second_min[1]
+        or second_max[1] + clearance <= first_min[1]
+    )
+
+
+def _arrangement_orientation_axis(line_axis: str) -> str:
+    axis = _normalize_axis(line_axis)
+    if axis == "left_to_right":
+        return "y"
+    raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
 
 
 def _with_arrangement_generated_z_targets(
@@ -626,7 +834,6 @@ def _arrangement_spacing(
         for obj in objects
     )
     spacing = max(max_extent + _SLOT_MARGIN, _MIN_SLOT_SPACING)
-    spacing = min(spacing, _MAX_SLOT_SPACING)
     return round(float(spacing), 6)
 
 

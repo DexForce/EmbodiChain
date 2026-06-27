@@ -140,6 +140,8 @@ class _ArrangementLineStepSpec:
     high_position: list[float]
     size_score: float | None = None
     color: str | None = None
+    orientation_goal: str = "axis_align"
+    orientation_axis: str = "y"
 
 
 @dataclass(frozen=True)
@@ -153,3 +155,6 @@ class _ArrangementLineSpec:
     axis: str
     anchor: str
     steps: tuple[_ArrangementLineStepSpec, ...]
+    line_origin_xy: list[float]
+    spacing: float
+    layout_clearance: float

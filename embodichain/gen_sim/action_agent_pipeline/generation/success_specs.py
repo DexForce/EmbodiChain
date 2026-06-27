@@ -122,6 +122,7 @@ def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str,
 
 def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
+    xy_tolerance = min(0.03, float(spec.spacing) * 0.35)
     for step in spec.steps:
         terms.extend(
             [
@@ -129,7 +130,7 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
                     "type": "object_xy_near",
                     "object": step.runtime_uid,
                     "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
-                    "tolerance": 0.05,
+                    "tolerance": xy_tolerance,
                 },
                 {
                     "type": "object_not_fallen",

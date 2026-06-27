@@ -567,6 +567,12 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
         "anchor": spec.anchor,
         "order_by": spec.order_by,
         "order_direction": spec.order_direction,
+        "line_origin_xy": [
+            float(spec.line_origin_xy[0]),
+            float(spec.line_origin_xy[1]),
+        ],
+        "spacing": float(spec.spacing),
+        "layout_clearance": float(spec.layout_clearance),
         "placements": [
             {
                 "object": step.runtime_uid,
@@ -574,6 +580,8 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
                 "slot_index": step.slot_index,
                 "active_arm": f"{step.active_side}_arm",
                 "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
+                "orientation_goal": step.orientation_goal,
+                "orientation_axis": step.orientation_axis,
             }
             for step in spec.steps
         ],

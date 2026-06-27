@@ -1720,6 +1720,16 @@ def test_task_description_generates_dual_arm_relative_config(
 
 
 def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> None:
+    _write_minimal_glb(
+        tmp_path / "mesh_assets/table/table_0.glb",
+        [(-0.60, -0.40, 0.0), (0.60, -0.40, 0.0), (0.0, 0.40, 0.0)],
+    )
+    for uid in ("cube_red", "cube_blue", "cube_green"):
+        _write_minimal_glb(
+            tmp_path / f"mesh_assets/cube/{uid}.glb",
+            [(-0.02, -0.02, 0.0), (0.02, -0.02, 0.0), (0.0, 0.02, 0.04)],
+        )
+
     scene_objects = [
         action_agent_config_generation._SceneObject(
             source_uid="table",
@@ -1793,6 +1803,12 @@ def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> 
     assert [step.target_xy[1] for step in spec.steps] == sorted(
         step.target_xy[1] for step in spec.steps
     )
+    assert [step.orientation_goal for step in spec.steps] == [
+        "axis_align",
+        "axis_align",
+        "axis_align",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == ["y", "y", "y"]
 
 
 def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
@@ -1863,30 +1879,53 @@ def test_task_description_generates_size_order_arrangement_config(
         "anchor": "table_center",
         "order_by": "size",
         "order_direction": "descending",
+        "line_origin_xy": paths.summary["line_origin_xy"],
+        "spacing": paths.summary["spacing"],
+        "layout_clearance": paths.summary["layout_clearance"],
         "placements": [
             {
                 "object": "cube_2",
                 "source_uid": "cube_2",
                 "slot_index": 0,
                 "active_arm": "right_arm",
-                "target_xy": [0.0, -0.07],
+                "target_xy": paths.summary["placements"][0]["target_xy"],
+                "orientation_goal": "axis_align",
+                "orientation_axis": "y",
             },
             {
                 "object": "cube_1",
                 "source_uid": "cube_1",
                 "slot_index": 1,
                 "active_arm": "left_arm",
-                "target_xy": [0.0, 0.0],
+                "target_xy": paths.summary["placements"][1]["target_xy"],
+                "orientation_goal": "axis_align",
+                "orientation_axis": "y",
             },
             {
                 "object": "cube_3",
                 "source_uid": "cube_3",
                 "slot_index": 2,
                 "active_arm": "left_arm",
-                "target_xy": [0.0, 0.07],
+                "target_xy": paths.summary["placements"][2]["target_xy"],
+                "orientation_goal": "axis_align",
+                "orientation_axis": "y",
             },
         ],
     }
+    target_x_values = [
+        placement["target_xy"][0] for placement in paths.summary["placements"]
+    ]
+    target_y_values = [
+        placement["target_xy"][1] for placement in paths.summary["placements"]
+    ]
+    assert len({round(value, 6) for value in target_x_values}) == 1
+    assert target_y_values == sorted(target_y_values)
+    assert paths.summary["spacing"] >= 0.07
+    assert paths.summary["layout_clearance"] == pytest.approx(0.025)
+    _assert_arrangement_slots_avoid_initial_objects(
+        paths.summary,
+        gym_config,
+    )
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
@@ -1895,22 +1934,127 @@ def test_task_description_generates_size_order_arrangement_config(
         for term in success["terms"]
         if term["type"] == "object_xy_near"
     }
-    assert xy_targets == {
-        ("cube_2", (0.0, -0.07)),
-        ("cube_1", (0.0, 0.0)),
-        ("cube_3", (0.0, 0.07)),
+    expected_xy_targets = {
+        (placement["object"], tuple(placement["target_xy"]))
+        for placement in paths.summary["placements"]
     }
+    assert xy_targets == expected_xy_targets
+    expected_xy_tolerance = min(0.03, paths.summary["spacing"] * 0.35)
+    xy_tolerances = {
+        term["tolerance"]
+        for term in success["terms"]
+        if term["type"] == "object_xy_near"
+    }
+    assert len(xy_tolerances) == 1
+    assert next(iter(xy_tolerances)) == pytest.approx(expected_xy_tolerance)
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 12 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
         task_prompt
     )
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
-    assert task_prompt.count('"reference":"absolute"') >= 6
+    assert task_prompt.count('"reference":"absolute"') >= 9
+    assert task_prompt.count('"orientation_goal":"axis_align"') == 6
+    assert task_prompt.count('"orientation_axis":"y"') == 6
+    assert task_prompt.count('"orientation_goal":"preserve"') == 3
+    assert task_prompt.count('"target_pose":{"reference":"relative"') == 3
+    assert "Collision-aware line origin xy" in task_prompt
     assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
+    assert atom_actions.count('"orientation_goal":"axis_align"') == 6
+    assert atom_actions.count('"orientation_axis":"y"') == 6
     assert atom_actions.count('"atomic_action_class":"Place"') == 3
+
+
+def test_arrangement_collision_aware_layout_scales_to_six_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "six_blocks_gym_project"
+    _write_arrangement_project_with_count(project_dir, count=6, cube_size=0.035)
+
+    def fake_call_arrangement_task_llm(**kwargs):
+        return {
+            "objects": [f"cube_{index}" for index in range(1, 7)],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "left_to_right",
+            "task_prompt_summary": "Arrange six cubes left to right.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_arrangement_task_llm",
+        fake_call_arrangement_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_six_arrangement_agent",
+        task_description="把六个方块从左到右排成一行",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    summary = paths.summary
+    assert len(summary["placements"]) == 6
+    assert summary["spacing"] >= 0.07
+    assert summary["layout_clearance"] == pytest.approx(0.025)
+    assert all(
+        placement["orientation_goal"] == "axis_align"
+        and placement["orientation_axis"] == "y"
+        for placement in summary["placements"]
+    )
+    x_values = [placement["target_xy"][0] for placement in summary["placements"]]
+    y_values = [placement["target_xy"][1] for placement in summary["placements"]]
+    assert len({round(value, 6) for value in x_values}) == 1
+    assert y_values == sorted(y_values)
+    _assert_arrangement_slots_avoid_initial_objects(summary, gym_config)
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert "Generate one deterministic nominal graph with exactly 36 nominal edges" in (
+        task_prompt
+    )
+
+
+def test_arrangement_layout_fails_when_row_cannot_fit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "crowded_blocks_gym_project"
+    _write_arrangement_project_with_count(
+        project_dir,
+        count=6,
+        cube_size=0.12,
+        table_half_x=0.18,
+        table_half_y=0.22,
+    )
+
+    def fake_call_arrangement_task_llm(**kwargs):
+        return {
+            "objects": [f"cube_{index}" for index in range(1, 7)],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "left_to_right",
+            "task_prompt_summary": "Arrange six oversized cubes left to right.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_arrangement_task_llm",
+        fake_call_arrangement_task_llm,
+    )
+
+    with pytest.raises(ValueError, match="collision-free one-line arrangement"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "generated_crowded_arrangement_agent",
+            task_description="把六个大方块从左到右排成一行",
+            prewarm_coacd_cache=False,
+        )
 
 
 def test_dual_inside_same_container_uses_container_long_axis_slots(
@@ -2440,6 +2584,61 @@ def _write_arrangement_project(project_dir: Path) -> None:
     )
 
 
+def _write_arrangement_project_with_count(
+    project_dir: Path,
+    *,
+    count: int,
+    cube_size: float,
+    table_half_x: float = 0.60,
+    table_half_y: float = 0.40,
+) -> None:
+    _write_minimal_glb(
+        project_dir / "mesh_assets/table/table_0.glb",
+        [
+            (-table_half_x, -table_half_y, 0.0),
+            (table_half_x, -table_half_y, 0.0),
+            (0.0, table_half_y, 0.0),
+        ],
+    )
+    rigid_objects = []
+    for index in range(count):
+        uid = f"cube_{index + 1}"
+        _write_minimal_glb(
+            project_dir / f"mesh_assets/cube/{uid}/{uid}.glb",
+            [
+                (-cube_size / 2.0, -cube_size / 2.0, 0.0),
+                (cube_size / 2.0, -cube_size / 2.0, 0.0),
+                (0.0, cube_size / 2.0, cube_size),
+            ],
+        )
+        y = (index - (count - 1) / 2.0) * (cube_size + 0.01)
+        rigid_objects.append(
+            _mesh_object(
+                uid,
+                f"mesh_assets/cube/{uid}/{uid}.glb",
+                [0.0, round(float(y), 6), 0.76],
+                [0.0, 0.0, 0.0],
+            )
+        )
+
+    gym_config = {
+        "id": "Image2Tabletop-arrangement-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": rigid_objects,
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _mesh_object(
     uid: str,
     fpath: str,
@@ -2489,6 +2688,55 @@ def _stable_summary(summary: dict) -> dict:
         if placement.get("orientation_align_to") is None:
             placement.pop("orientation_align_to", None)
     return stable
+
+
+def _assert_arrangement_slots_avoid_initial_objects(
+    summary: dict,
+    gym_config: dict,
+) -> None:
+    clearance = float(summary["layout_clearance"])
+    spacing = float(summary["spacing"])
+    half_extent = max(0.035, (spacing - clearance) / 2.0)
+    initial_bounds = [
+        _xy_bounds_around(obj["init_pos"][:2], half_extent)
+        for obj in gym_config["rigid_object"]
+    ]
+    for placement in summary["placements"]:
+        slot_bounds = _xy_bounds_around(placement["target_xy"], half_extent)
+        assert all(
+            not _xy_bounds_overlap_for_test(
+                slot_bounds,
+                init_bound,
+                clearance=clearance,
+            )
+            for init_bound in initial_bounds
+        )
+
+
+def _xy_bounds_around(
+    xy: list[float],
+    half_extent: float,
+) -> tuple[list[float], list[float]]:
+    return (
+        [float(xy[0]) - half_extent, float(xy[1]) - half_extent],
+        [float(xy[0]) + half_extent, float(xy[1]) + half_extent],
+    )
+
+
+def _xy_bounds_overlap_for_test(
+    first: tuple[list[float], list[float]],
+    second: tuple[list[float], list[float]],
+    *,
+    clearance: float,
+) -> bool:
+    first_min, first_max = first
+    second_min, second_max = second
+    return not (
+        first_max[0] + clearance <= second_min[0]
+        or second_max[0] + clearance <= first_min[0]
+        or first_max[1] + clearance <= second_min[1]
+        or second_max[1] + clearance <= first_min[1]
+    )
 
 
 def _obj_vertices(path: Path) -> list[tuple[float, float, float]]:
