@@ -154,6 +154,26 @@ Serialization
 
 Use this to snapshot tuned configs or persist calibrated parameters.
 
+Dual-Arm Composition
+--------------------
+
+A single-arm robot cfg that follows the ``"arm"`` convention (one ``"arm"`` URDF
+component + ``control_parts["arm"]`` + ``solver_cfg["arm"]``) can be turned into
+a two-arm robot with **no new robot class**, via
+:class:`~embodichain.lab.sim.robots.DualArmRobotCfg`::
+
+    from embodichain.lab.sim.robots import DualArmRobotCfg
+
+    cfg = DualArmRobotCfg.from_dict(
+        {"base_robot": "ur5", "mount": {"preset": "side_by_side", "separation": 0.6}}
+    )
+
+The ``build_dual_arm_cfg`` engine derives left/right ``control_parts``, a per-arm
+``solver_cfg``, and mirrored ``drive_pros`` from the base robot, mounting both
+arms on a shared synthetic ``base_link``. Adding a future single-arm robot
+(e.g. Franka) to the dual-arm workflow is one registry line. See
+:doc:`/resources/robot/dual_arm` for the full reference.
+
 See Also
 --------
 
