@@ -344,6 +344,6 @@ if __name__ == "__main__":
     sim.update(step=1)
     print("DexforceW1 robot added to the simulation.")
 
-    from IPython import embed
+    # from IPython import embed
 
-    embed()
+    # embed()
