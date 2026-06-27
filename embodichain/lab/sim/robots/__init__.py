@@ -16,3 +16,5 @@
 
 from .dexforce_w1 import *
 from .cobotmagic import CobotMagicCfg
+
+__all__ = ["DexforceW1Cfg", "CobotMagicCfg"]
