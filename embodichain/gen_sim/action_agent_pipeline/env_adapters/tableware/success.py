@@ -238,7 +238,10 @@ def _object_lifted(env, spec: Mapping[str, Any]) -> torch.Tensor:
 def _object_held_by_gripper(env, spec: Mapping[str, Any]) -> torch.Tensor:
     object_position = _position(env, _object_name(spec))
     arm_name = str(spec.get("arm", spec.get("robot_name", "")))
-    eef_pose = _arm_eef_pose(env, arm_name).to(
+    eef_pose = _arm_eef_pose(env, arm_name)
+    if eef_pose is None:
+        return _constant(env, False)
+    eef_pose = eef_pose.to(
         dtype=object_position.dtype,
         device=object_position.device,
     )
@@ -253,22 +256,29 @@ def _object_held_by_gripper(env, spec: Mapping[str, Any]) -> torch.Tensor:
     return near & _gripper_is_closed(env, arm_name, object_position.device)
 
 
-def _arm_eef_pose(env, arm_name: str) -> torch.Tensor:
-    if hasattr(env, "get_current_xpos_agent"):
+def _arm_eef_pose(env, arm_name: str) -> torch.Tensor | None:
+    if not hasattr(env, "get_current_xpos_agent"):
+        return None
+    try:
         left_pose, right_pose = env.get_current_xpos_agent()
-        return torch.as_tensor(
-            right_pose if "right" in arm_name else left_pose,
-            dtype=torch.float32,
-            device=env.device,
-        )
-    raise ValueError("object_held_by_gripper requires current eef pose access.")
+    except AttributeError:
+        return None
+    pose = right_pose if "right" in arm_name else left_pose
+    if pose is None:
+        return None
+    return torch.as_tensor(pose, dtype=torch.float32, device=env.device)
 
 
 def _gripper_is_closed(env, arm_name: str, device: torch.device) -> torch.Tensor:
     if not hasattr(env, "get_current_gripper_state_agent"):
-        return _constant(env, True)
-    left_state, right_state = env.get_current_gripper_state_agent()
+        return _constant(env, False)
+    try:
+        left_state, right_state = env.get_current_gripper_state_agent()
+    except AttributeError:
+        return _constant(env, False)
     state = right_state if "right" in arm_name else left_state
+    if state is None:
+        return _constant(env, False)
     state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
     if state_tensor.numel() == 0:
         return _constant(env, True)

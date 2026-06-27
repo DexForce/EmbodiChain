@@ -2743,6 +2743,26 @@ def test_object_held_by_gripper_success_predicate() -> None:
     assert bool(success.item()) is True
 
 
+def test_object_held_by_gripper_returns_false_before_agent_state_init() -> None:
+    env = _FakeEnvWithoutAgentState(
+        {
+            "bottle": [0.0, 0.18, 0.24],
+        }
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "object_held_by_gripper",
+            "object": "bottle",
+            "arm": "left_arm",
+            "max_distance": 0.12,
+        },
+    )
+
+    assert bool(success.item()) is False
+
+
 def _write_project(project_dir: Path) -> None:
     for rel_path in (
         "mesh_assets/table/table_0.glb",
@@ -3415,6 +3435,23 @@ class _FakeEnv:
 
     def get_current_gripper_state_agent(self):
         return self.left_gripper_state, self.right_gripper_state
+
+
+class _FakeEnvWithoutAgentState:
+    num_envs = 1
+    device = torch.device("cpu")
+
+    def __init__(self, positions: dict[str, list[float]]) -> None:
+        self.sim = _FakeSim(positions)
+
+    def get_current_xpos_agent(self):
+        return self.left_arm_current_xpos, self.right_arm_current_xpos
+
+    def get_current_gripper_state_agent(self):
+        return (
+            self.left_arm_current_gripper_state,
+            self.right_arm_current_gripper_state,
+        )
 
 
 class _FakeSim:
