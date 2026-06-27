@@ -145,15 +145,9 @@ class CobotMagicCfg(RobotCfg):
             },
         )
         self.attrs = RigidBodyAttributesCfg(
-            mass=0.1,
             static_friction=0.95,
             dynamic_friction=0.9,
-            linear_damping=0.7,
-            angular_damping=0.7,
             contact_offset=0.001,
-            rest_offset=0.001,
-            restitution=0.01,
-            max_depenetration_velocity=1e1,
         )
 
     @property
@@ -215,7 +209,3 @@ if __name__ == "__main__":
         sim.init_gpu_physics()
 
     print("CobotMagic added to the simulation.")
-
-    # from IPython import embed
-
-    # embed()
