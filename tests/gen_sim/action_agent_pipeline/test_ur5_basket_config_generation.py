@@ -1286,6 +1286,126 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     assert '"offset":[0.0,0.0,0.2]' not in task_prompt
 
 
+def test_relative_on_preserve_uses_object_pose_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "2_Beat Block Hammer_gym_project"
+    cube_vertices = [
+        (-0.03, -0.03, 0.0),
+        (0.03, -0.03, 0.0),
+        (0.03, 0.03, 0.0),
+        (-0.03, -0.03, 0.06),
+        (0.03, -0.03, 0.06),
+        (0.03, 0.03, 0.06),
+    ]
+    hammer_vertices = [
+        (-0.08, -0.01, -0.01),
+        (0.08, -0.01, -0.01),
+        (0.08, 0.01, -0.01),
+        (-0.08, -0.01, 0.02),
+        (0.08, -0.01, 0.02),
+        (0.08, 0.01, 0.02),
+    ]
+    _write_minimal_glb(project_dir / "mesh_assets/table/table_0.glb", cube_vertices)
+    _write_minimal_glb(project_dir / "mesh_assets/cube/cube_1.glb", cube_vertices)
+    _write_minimal_glb(
+        project_dir / "mesh_assets/hammer/hammer_1.glb",
+        hammer_vertices,
+    )
+    gym_config = {
+        "id": "Image2Tabletop-2-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.30],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "cube_1",
+                "mesh_assets/cube/cube_1.glb",
+                [0.0, 0.05, 0.40],
+                [0.0, 0.0, 0.0],
+            ),
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "hammer_1",
+                "mesh_assets/hammer/hammer_1.glb",
+                [0.1, -0.05, 0.40],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "hammer_1",
+            "reference_object": "cube_1",
+            "goal_relation": "on",
+            "arm": "auto",
+            "task_prompt_summary": "Place the hammer on the cube.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_hammer_on_cube_agent",
+        task_name="Demo02",
+        task_description="桌上有一把锤子和一个方块，用机械臂抓住锤子放到方块上",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    summary = _stable_summary(paths.summary)
+    active_arm = summary["active_arm"]
+    moved_object = summary["moved_object"]
+    reference_object = summary["reference_object"]
+    release_offset_json = json.dumps(
+        summary["release_offset"], ensure_ascii=False, separators=(",", ":")
+    )
+
+    assert (
+        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        in task_prompt
+    )
+    for text in (task_prompt, atom_actions):
+        assert "Place at the release pose" not in text
+        assert (
+            f'"atomic_action_class":"MoveHeldObject","robot_name":"{active_arm}",'
+            '"control":"arm","target_object_pose":{"reference":"object",'
+            f'"obj_name":"{reference_object}","offset":{release_offset_json},'
+            '"orientation_goal":"preserve","orientation_axis":"none"}' in text
+        )
+        assert (
+            f'"atomic_action_class":"Place","robot_name":"{active_arm}",'
+            '"control":"arm","target_pose":{"reference":"relative",'
+            '"offset":[0.0,0.0,0.0],"frame":"world"},'
+            '"cfg":{"sample_interval":10,"lift_height":0.0}' in text
+        )
+        assert (
+            f'"atomic_action_class":"MoveEndEffector","robot_name":"{active_arm}",'
+            '"control":"arm","target_pose":{"reference":"relative",'
+            '"offset":[0.0,0.0,0.1],"frame":"world"}' in text
+        )
+
+    assert summary["relation"] == "on"
+    assert moved_object == "hammer"
+    assert reference_object == "cube"
+
+
 def test_relative_orientation_rejects_invalid_enum(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
