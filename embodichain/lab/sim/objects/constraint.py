@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RigidConstraintCfg
     from embodichain.lab.sim.objects.rigid_object import RigidObject
 
+__all__ = ["RigidConstraint"]
+
 
 @dataclass
 class RigidConstraint:
