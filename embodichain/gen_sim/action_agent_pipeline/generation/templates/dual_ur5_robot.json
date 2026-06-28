@@ -81,7 +81,9 @@
   },
   "solver_cfg": {
     "left_arm": {
-      "class_type": "PytorchSolver",
+      "class_type": "URSolver",
+      "ur_type": "ur5",
+      "urdf_path": null,
       "end_link_name": "left_ee_link",
       "root_link_name": "left_base_link",
       "tcp": [
@@ -92,7 +94,9 @@
       ]
     },
     "right_arm": {
-      "class_type": "PytorchSolver",
+      "class_type": "URSolver",
+      "ur_type": "ur5",
+      "urdf_path": null,
       "end_link_name": "right_ee_link",
       "root_link_name": "right_base_link",
       "tcp": [

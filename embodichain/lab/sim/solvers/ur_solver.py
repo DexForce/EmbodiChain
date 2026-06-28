@@ -14,22 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
+import math
+from typing import Any
+
 import numpy as np
+import torch
 import warp as wp
-from embodichain.utils import configclass
-from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
+
 from embodichain.data import get_data_path
+from embodichain.lab.sim.solvers import BaseSolver, SolverCfg
+from embodichain.utils import configclass, logger
+from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.warp.kinematics.ur_solver import (
     URParam,
     ur_ik_kernel,
 )
-import math
-from embodichain.utils.device_utils import standardize_device_string
 
 
 @configclass
 class URSolverCfg(SolverCfg):
+    class_type: str = "URSolver"
     ur_type: str = "ur10"
     end_link_name: str = "ee_link"
     root_link_name: str = "base_link"
@@ -99,6 +103,17 @@ class URSolverCfg(SolverCfg):
             self.urdf_path = get_data_path("UniversalRobots/UR10e/UR10e.urdf")
         else:
             raise ValueError(f"Unknown UR type: {self.ur_type}")
+
+    @classmethod
+    def from_dict(cls, init_dict: dict[str, Any]) -> "URSolverCfg":
+        """Initialize the UR solver configuration from a dictionary."""
+        cfg = cls(ur_type=init_dict.get("ur_type", "ur10"))
+        for key, value in init_dict.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+            else:
+                logger.log_warning(f"Key '{key}' not found in {cls.__name__}.")
+        return cfg
 
     def init_solver(
         self, device: torch.device = torch.device("cpu"), **kwargs

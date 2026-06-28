@@ -25,6 +25,8 @@ import struct
 import pytest
 import torch
 
+from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.gen_sim.action_agent_pipeline.cli import (
     target_replacements as target_replacements_cli,
 )
@@ -75,6 +77,46 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
     assert second_lights["direct"][0]["uid"] == "main_light"
 
 
+def test_dual_ur5_template_uses_ur_solver_config() -> None:
+    robot = make_dual_ur5_robot_config(robot_init_z=0.42)
+
+    left_solver = robot["solver_cfg"]["left_arm"]
+    right_solver = robot["solver_cfg"]["right_arm"]
+
+    assert left_solver["class_type"] == "URSolver"
+    assert right_solver["class_type"] == "URSolver"
+    assert left_solver["ur_type"] == "ur5"
+    assert right_solver["ur_type"] == "ur5"
+    assert left_solver["urdf_path"] is None
+    assert right_solver["urdf_path"] is None
+    assert left_solver["root_link_name"] == "left_base_link"
+    assert left_solver["end_link_name"] == "left_ee_link"
+    assert right_solver["root_link_name"] == "right_base_link"
+    assert right_solver["end_link_name"] == "right_ee_link"
+    assert left_solver["tcp"][2][3] == pytest.approx(0.16)
+    assert right_solver["tcp"][2][3] == pytest.approx(0.16)
+
+
+def test_dual_ur5_template_deserializes_to_ur5_solver_cfg() -> None:
+    robot_cfg = RobotCfg.from_dict(make_dual_ur5_robot_config(robot_init_z=0.42))
+
+    for arm_name, root_link_name, end_link_name in (
+        ("left_arm", "left_base_link", "left_ee_link"),
+        ("right_arm", "right_base_link", "right_ee_link"),
+    ):
+        solver_cfg = robot_cfg.solver_cfg[arm_name]
+        assert isinstance(solver_cfg, URSolverCfg)
+        assert solver_cfg.class_type == "URSolver"
+        assert solver_cfg.ur_type == "ur5"
+        assert solver_cfg.urdf_path is None
+        assert solver_cfg.root_link_name == root_link_name
+        assert solver_cfg.end_link_name == end_link_name
+        assert solver_cfg.d1 == pytest.approx(0.089159)
+        assert solver_cfg.a2 == pytest.approx(-0.425)
+        assert solver_cfg.a3 == pytest.approx(-0.39225)
+        assert solver_cfg.tcp[2][3] == pytest.approx(0.16)
+
+
 def test_action_agent_config_generator_uses_parallel_handoff(
     tmp_path: Path,
 ) -> None:
@@ -115,6 +157,20 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         [-2.0, 0.0, expected_robot_init_z]
     )
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
+    for solver in gym_config["robot"]["solver_cfg"].values():
+        assert solver["class_type"] == "URSolver"
+        assert solver["ur_type"] == "ur5"
+        assert solver["urdf_path"] is None
+
+    robot_cfg = RobotCfg.from_dict(gym_config["robot"])
+    for solver_cfg in robot_cfg.solver_cfg.values():
+        assert isinstance(solver_cfg, URSolverCfg)
+        assert solver_cfg.ur_type == "ur5"
+        assert solver_cfg.urdf_path is None
+        assert solver_cfg.d1 == pytest.approx(0.089159)
+        assert solver_cfg.a2 == pytest.approx(-0.425)
+        assert solver_cfg.a3 == pytest.approx(-0.39225)
+
     extensions = gym_config["env"]["extensions"]
     assert extensions["agent_arm_slots"]["left"] == {
         "arm": "right_arm",
