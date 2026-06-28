@@ -141,3 +141,50 @@ def test_remove_functor_none_env_ids():
     env, _, _ = _make_env()
     remove_rigid_constraint(env, None, name="weld")
     env.sim.remove_rigid_constraint.assert_called_once_with("weld", env_ids=None)
+
+
+from embodichain.lab.gym.envs.managers.event_manager import EventManager
+from embodichain.lab.gym.envs.managers.cfg import EventCfg
+from embodichain.utils import configclass
+
+
+@configclass
+class _AttachEventsCfg:
+    attach: EventCfg = EventCfg(
+        func=create_rigid_constraint,
+        mode="attach",
+        params={
+            "obj_a_cfg": SceneEntityCfg(uid="cube"),
+            "obj_b_cfg": SceneEntityCfg(uid="block"),
+            "name": "weld",
+        },
+    )
+
+
+def test_custom_mode_apply_invokes_functor_with_env_ids(monkeypatch):
+    """EventManager.apply(mode="attach", env_ids) calls the functor once with those env_ids."""
+    # Build a minimal env stand-in that EventManager needs: num_envs, device, sim.
+    env = MagicMock()
+    env.num_envs = 4
+    env.device = torch.device("cpu")
+    env.sim = MagicMock()
+    # SceneEntityCfg.resolve() checks scene.asset_uids for each uid; list them.
+    env.sim.asset_uids = ["cube", "block"]
+    # get_asset returns MockRigidObjectForFunctor instances so isinstance passes.
+    obj_a = MockRigidObjectForFunctor()
+    obj_b = MockRigidObjectForFunctor()
+    env.sim.get_asset.side_effect = lambda uid: {"cube": obj_a, "block": obj_b}[uid]
+    env.sim.create_rigid_constraint = MagicMock()
+
+    monkeypatch.setattr(
+        "embodichain.lab.gym.envs.managers.events.RigidObject",
+        MockRigidObjectForFunctor,
+    )
+
+    manager = EventManager(cfg=_AttachEventsCfg(), env=env)
+
+    env_ids = torch.tensor([0, 1])
+    manager.apply(mode="attach", env_ids=env_ids)
+
+    env.sim.create_rigid_constraint.assert_called_once()
+    assert env.sim.create_rigid_constraint.call_args.kwargs["env_ids"] is env_ids
