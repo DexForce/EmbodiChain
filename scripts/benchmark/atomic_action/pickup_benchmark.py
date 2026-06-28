@@ -42,10 +42,13 @@ from scripts.benchmark.atomic_action.common import (
     format_float,
     format_vector3,
     MeshObjectPreset,
+    object_position_tuple,
     park_rigid_object,
+    PHYSICAL_PICK_MIN_LIFT_M,
     pickup_approach_direction_tuple,
     PositionCase,
     record_static_scene_video,
+    replay_trajectory_for_physical_validation,
     replay_trajectory_with_recording,
     reset_rigid_object,
     reset_rigid_object_xy,
@@ -145,6 +148,7 @@ def _run_case(
             sim=sim,
             settle_steps=2,
         )
+        initial_obj_position = object_position_tuple(obj)
         hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
         initialize_pre_pick_robot_pose(robot, obj, hand_open)
         case_args = _make_pickup_args(args, approach, object_preset, profile)
@@ -184,8 +188,51 @@ def _run_case(
             )
         )
         is_success, traj, final_state = result
+        final_obj_position = None
+        object_lift_delta_m = None
+        object_xy_drift_m = None
+
+        if bool(is_success) and getattr(traj, "ndim", 0) >= 3 and traj.shape[1] > 0:
+            reset_robot(robot, initial_qpos)
+            reset_rigid_object(obj, initial_obj_pose)
+            initialize_pre_pick_robot_pose(robot, obj, hand_open)
+            post_grasp_clear_step = compute_pick_close_end_step()
+            should_clear_object_dynamics = True
+
+            def _on_validation_step(waypoint_index: int) -> None:
+                nonlocal should_clear_object_dynamics
+                if (
+                    should_clear_object_dynamics
+                    and waypoint_index + 1 >= post_grasp_clear_step
+                ):
+                    obj.clear_dynamics()
+                    should_clear_object_dynamics = False
+
+            final_obj_position = replay_trajectory_for_physical_validation(
+                sim=sim,
+                robot=robot,
+                obj=obj,
+                traj=traj,
+                on_step=_on_validation_step,
+            )
+            if final_obj_position is not None:
+                object_lift_delta_m = final_obj_position[2] - initial_obj_position[2]
+                object_xy_drift_m = (
+                    (final_obj_position[0] - initial_obj_position[0]) ** 2
+                    + (final_obj_position[1] - initial_obj_position[1]) ** 2
+                ) ** 0.5
+            reset_robot(robot, initial_qpos)
+            reset_rigid_object(obj, initial_obj_pose)
+
+        held_created = bool(is_success and final_state.held_object is not None)
+        physical_pick_success = bool(
+            held_created
+            and object_lift_delta_m is not None
+            and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M
+        )
+
         video_path = None
-        if should_record_case(args, recorded_count, bool(is_success)):
+        if should_record_case(args, recorded_count, physical_pick_success):
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
             initialize_pre_pick_robot_pose(robot, obj, hand_open)
@@ -231,7 +278,6 @@ def _run_case(
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
-        held_created = bool(is_success and final_state.held_object is not None)
         lift_height_m = None
         if is_success and traj.shape[1] > 0:
             arm_joint_ids = robot.get_joint_ids(name="arm")
@@ -242,7 +288,17 @@ def _run_case(
                 qpos=traj[:, -1, arm_joint_ids], name="arm", to_matrix=True
             )[0]
             lift_height_m = float(final_pose[2, 3] - start_pose[2, 3])
-        success = bool(held_created)
+        success = physical_pick_success
+        if success:
+            failure_reason = ""
+        elif not is_success:
+            failure_reason = "planning_failed"
+        elif not held_created:
+            failure_reason = "held_object_missing"
+        elif object_lift_delta_m is None:
+            failure_reason = "physical_replay_missing"
+        else:
+            failure_reason = "physical_pick_lift_too_low"
         return {
             "case_id": case_id,
             "object_type": object_preset.object_type,
@@ -255,14 +311,21 @@ def _run_case(
             "repeat": repeat,
             "planning_success": bool(is_success),
             "held_created": held_created,
+            "physical_pick_success": physical_pick_success,
             "success": success,
             "cost_time_ms": elapsed * 1000.0,
             "cpu_delta_mb": mem_delta["cpu_mb"],
             "gpu_delta_mb": mem_delta["gpu_mb"],
             "peak_gpu_mb": peak_gpu,
             "lift_height_m": lift_height_m,
+            "object_initial_z_m": initial_obj_position[2],
+            "object_final_z_m": (
+                final_obj_position[2] if final_obj_position is not None else None
+            ),
+            "object_lift_delta_m": object_lift_delta_m,
+            "object_xy_drift_m": object_xy_drift_m,
             "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
-            "failure_reason": "" if success else "held_object_missing",
+            "failure_reason": failure_reason,
             "video_path": str(video_path) if video_path is not None else "",
         }
     except Exception as exc:
@@ -304,12 +367,17 @@ def _run_case(
             "repeat": repeat,
             "planning_success": False,
             "held_created": False,
+            "physical_pick_success": False,
             "success": False,
             "cost_time_ms": 0.0,
             "cpu_delta_mb": 0.0,
             "gpu_delta_mb": 0.0,
             "peak_gpu_mb": 0.0,
             "lift_height_m": None,
+            "object_initial_z_m": None,
+            "object_final_z_m": None,
+            "object_lift_delta_m": None,
+            "object_xy_drift_m": None,
             "trajectory_waypoints": 0,
             "failure_reason": f"exception:{type(exc).__name__}:{exc}",
             "video_path": str(video_path) if video_path is not None else "",
@@ -354,7 +422,14 @@ def _build_rows(results: list[dict[str, object]]):
                 "success_rate": f"{float(result['success']):.6f}",
                 "planning_success_rate": f"{float(result['planning_success']):.6f}",
                 "held_object_rate": f"{float(result['held_created']):.6f}",
+                "physical_pick_success_rate": (
+                    f"{float(result['physical_pick_success']):.6f}"
+                ),
                 "lift_height_m": format_float(result["lift_height_m"]),
+                "object_initial_z_m": format_float(result["object_initial_z_m"]),
+                "object_final_z_m": format_float(result["object_final_z_m"]),
+                "object_lift_delta_m": format_float(result["object_lift_delta_m"]),
+                "object_xy_drift_m": format_float(result["object_xy_drift_m"]),
                 "trajectory_waypoints": result["trajectory_waypoints"],
                 "failure_reason": result["failure_reason"] or "N/A",
             }
@@ -473,6 +548,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 f"abs(opening_axis_z) <= {SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z:.2f}; "
                 "fallback cost += "
                 f"abs(opening_axis_z) * {SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT:.2f}."
+            ),
+            (
+                "Physical success rule: planning success, held-object state "
+                f"created, and object lift delta >= {PHYSICAL_PICK_MIN_LIFT_M:.3f} m."
             ),
             *summarize_video_recording(args, results, video_paths),
         ],
