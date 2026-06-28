@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import math
 from typing import Any
 
@@ -267,3 +269,6 @@ class URSolver(BaseSolver):
         m[3, 3] = 1.0
 
         return m
+
+
+__all__ = ["URSolverCfg", "URSolver"]
