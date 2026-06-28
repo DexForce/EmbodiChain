@@ -139,25 +139,10 @@ class URRobotCfg(RobotCfg):
             ),
         }
 
-        self.min_position_iters = 8
-        self.min_velocity_iters = 2
-
         self.drive_pros = JointDrivePropertiesCfg(
             stiffness=7e4,
             damping=1e3,
             max_effort=_UR_MAX_EFFORT[robot_type],
-        )
-
-        self.attrs = RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            linear_damping=0.7,
-            angular_damping=0.7,
-            contact_offset=0.002,
-            rest_offset=0.0,
-            restitution=0.0,
-            max_depenetration_velocity=10.0,
         )
 
     @property
@@ -204,7 +189,7 @@ if __name__ == "__main__":
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cuda",
+        sim_device="cpu",
         num_envs=2,
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
@@ -222,7 +207,3 @@ if __name__ == "__main__":
     cfg2 = URRobotCfg.from_dict(cfg.to_dict())
     assert cfg2.robot_type == cfg.robot_type
     print(f"URRobot added ({cfg.robot_type}); round-trip OK.")
-
-    from IPython import embed
-
-    embed()
