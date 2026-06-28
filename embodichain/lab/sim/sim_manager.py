@@ -64,6 +64,7 @@ from embodichain.lab.sim.objects import (
     Articulation,
     Robot,
     Light,
+    RigidConstraint,
 )
 from embodichain.lab.sim.objects.gizmo import Gizmo
 from embodichain.lab.sim.sensors import (
@@ -86,6 +87,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectGroupCfg,
     ArticulationCfg,
     RobotCfg,
+    RigidConstraintCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.utils import configclass, logger
@@ -283,6 +285,7 @@ class SimulationManager:
         self._markers: Dict[str, MeshObject] = dict()
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
+        self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._soft_objects: Dict[str, SoftObject] = dict()
         self._cloth_objects: Dict[str, ClothObject] = dict()
@@ -1003,6 +1006,149 @@ class SimulationManager:
             List[str]: list of rigid body uid.
         """
         return list(self._rigid_objects.keys())
+
+    @staticmethod
+    def _broadcast_frame(
+        frame: np.ndarray | None,
+        num_envs: int,
+        env_ids: Sequence[int],
+        name: str,
+    ) -> list[np.ndarray]:
+        """Broadcast a local-frame spec to one matrix per target env.
+
+        Args:
+            frame: None -> identity; (4,4) -> repeated; (N,4,4) -> indexed per env.
+            num_envs: Total number of arenas (used to validate (N,4,4)).
+            env_ids: Target env indices to produce frames for.
+            name: Constraint name (for error messages).
+
+        Returns:
+            A list of (4,4) numpy arrays, one per env in env_ids.
+
+        Raises:
+            RuntimeError: If an (N,4,4) frame's N != num_envs, or shape is invalid.
+        """
+        if frame is None:
+            identity = np.eye(4, dtype=np.float32)
+            return [identity for _ in env_ids]
+        frame_np = np.asarray(frame, dtype=np.float32)
+        if frame_np.shape == (4, 4):
+            return [frame_np for _ in env_ids]
+        if frame_np.ndim == 3 and frame_np.shape[1:] == (4, 4):
+            if frame_np.shape[0] != num_envs:
+                logger.log_error(
+                    f"Constraint '{name}' local frame has shape {frame_np.shape} "
+                    f"but num_envs is {num_envs}. Expected ({num_envs}, 4, 4)."
+                )
+            return [frame_np[i] for i in env_ids]
+        logger.log_error(
+            f"Constraint '{name}' local frame has invalid shape {frame_np.shape}. "
+            "Expected None, (4, 4), or (N, 4, 4)."
+        )
+
+    def create_rigid_constraint(
+        self,
+        cfg: RigidConstraintCfg,
+        env_ids: Sequence[int] | None = None,
+    ) -> RigidConstraint:
+        """Create a fixed constraint between two RigidObjects.
+
+        Binds ``rigid_object_a``'s entity[i] to ``rigid_object_b``'s entity[i]
+        within arena[i], for each env in ``env_ids``. Local frames default to
+        identity (attach at the objects' current relative pose).
+
+        Args:
+            cfg: The constraint configuration.
+            env_ids: Target environment indices. None -> all arenas.
+
+        Returns:
+            The created :class:`RigidConstraint`.
+
+        Raises:
+            RuntimeError: If either object is missing, the name is already in use,
+                a frame shape is invalid, or dexsim fails to create a handle.
+        """
+        # validate constraint type (only fixed supported in v1)
+        if cfg.constraint_type != "fixed":
+            logger.log_error(
+                f"Constraint '{cfg.name}' has unsupported type "
+                f"'{cfg.constraint_type}'. Only 'fixed' is supported in v1."
+            )
+
+        # resolve objects
+        if cfg.rigid_object_a_uid not in self._rigid_objects:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_a_uid}' not found for constraint "
+                f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
+            )
+        if cfg.rigid_object_b_uid not in self._rigid_objects:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_b_uid}' not found for constraint "
+                f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
+            )
+        rigid_object_a = self._rigid_objects[cfg.rigid_object_a_uid]
+        rigid_object_b = self._rigid_objects[cfg.rigid_object_b_uid]
+
+        # validate duplicate name
+        if cfg.name in self._constraints:
+            logger.log_error(
+                f"Constraint '{cfg.name}' already exists. Remove it before recreating."
+            )
+
+        # validate object entity counts match num_envs
+        num_envs = self.num_envs
+        if rigid_object_a.num_instances != num_envs:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_a_uid}' has "
+                f"{rigid_object_a.num_instances} instances but num_envs is {num_envs}."
+            )
+        if rigid_object_b.num_instances != num_envs:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_b_uid}' has "
+                f"{rigid_object_b.num_instances} instances but num_envs is {num_envs}."
+            )
+
+        # resolve target env_ids
+        if env_ids is None:
+            target_env_ids = list(range(num_envs))
+        else:
+            target_env_ids = list(env_ids)
+
+        # broadcast local frames
+        frames_a = self._broadcast_frame(
+            cfg.local_frame_a, num_envs, target_env_ids, cfg.name
+        )
+        frames_b = self._broadcast_frame(
+            cfg.local_frame_b, num_envs, target_env_ids, cfg.name
+        )
+
+        # pre-size handles list with None, fill target envs
+        handles: list = [None] * num_envs
+        for idx, env_id in enumerate(target_env_ids):
+            arena = self.get_env(env_id)
+            name_i = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
+            handle = arena.create_fixed_constraint(
+                name_i,
+                rigid_object_a._entities[env_id],
+                rigid_object_b._entities[env_id],
+                frames_a[idx],
+                frames_b[idx],
+            )
+            if handle is None:
+                logger.log_error(
+                    f"Failed to create constraint '{name_i}' in arena {env_id}."
+                )
+            handles[env_id] = handle
+
+        constraint = RigidConstraint(
+            cfg=cfg,
+            constraint_handles=handles,
+            rigid_object_a=rigid_object_a,
+            rigid_object_b=rigid_object_b,
+            device=self.device,
+        )
+        self._constraints[cfg.name] = constraint
+        return constraint
 
     def get_soft_object_uid_list(self) -> List[str]:
         """Get current soft body uid list

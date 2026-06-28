@@ -222,3 +222,199 @@ def test_rigid_constraint_destroy_all_returns_all_cleared():
     arenas = [MagicMock() for _ in range(4)]
     constraint.destroy(env_ids=None, arena_resolver=lambda i: arenas[i])
     assert all(h is None for h in constraint.constraint_handles)
+
+
+from embodichain.lab.sim.sim_manager import SimulationManager
+
+
+class MockArena:
+    """Mock dexsim arena that records created constraints."""
+
+    def __init__(self, fail_indices=None):
+        self.created = []  # list of (name, actor0, actor1, frame_a, frame_b)
+        self.removed = []  # list of names
+        self.fail_indices = set(fail_indices or [])
+
+    def create_fixed_constraint(self, name, actor0, actor1, local_frame0, local_frame1):
+        self.created.append((name, actor0, actor1, local_frame0, local_frame1))
+        if len(self.created) - 1 in self.fail_indices:
+            return None
+        h = MagicMock()
+        h.get_name.return_value = name
+        h.is_valid.return_value = True
+        h.get_relative_transform.return_value = np.eye(4, dtype=np.float32)
+        return h
+
+    def remove_constraint(self, name):
+        self.removed.append(name)
+
+
+class _RigidConstraintTestSim:
+    """A SimulationManager stand-in exposing only the constraint registry path.
+
+    We avoid constructing a real dexsim World (which needs a GPU/window). Instead
+    we drive create_rigid_constraint by giving it a fake `self` with the
+    attributes the method touches: _rigid_objects, _arenas/_env, num_envs, device.
+    """
+
+    def __init__(self, num_envs=4, arenas=None):
+        self._rigid_objects = {}
+        self._constraints = {}
+        self.device = torch.device("cpu")
+        if num_envs == 1:
+            self._arenas = []
+            self._env = arenas[0] if arenas else MockArena()
+        else:
+            self._arenas = arenas or [MockArena() for _ in range(num_envs)]
+            self._env = None
+
+    @property
+    def num_envs(self):
+        return len(self._arenas) if self._arenas else 1
+
+    def get_env(self, arena_index=-1):
+        if arena_index >= 0 and self._arenas:
+            return self._arenas[arena_index]
+        return self._env
+
+    # bind the real method under test
+    create_rigid_constraint = SimulationManager.create_rigid_constraint
+    _broadcast_frame = staticmethod(SimulationManager._broadcast_frame)
+
+
+def _register_object(sim, uid, num_envs):
+    obj = MagicMock()
+    obj.uid = uid
+    obj.num_instances = num_envs
+    obj._entities = [MagicMock(name=f"{uid}_{i}") for i in range(num_envs)]
+    sim._rigid_objects[uid] = obj
+    return obj
+
+
+def test_create_rigid_constraint_resolves_both_objects_all_envs():
+    """create builds one handle per arena and stores a RigidConstraint."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    _register_object(sim, "cube", 4)
+    _register_object(sim, "block", 4)
+
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    constraint = sim.create_rigid_constraint(cfg)
+
+    assert cfg.name in sim._constraints
+    assert constraint.num_envs == 4
+    assert all(h is not None for h in constraint.constraint_handles)
+    # each arena got exactly one create call with the right actors
+    for i, arena in enumerate(sim._arenas):
+        assert arena.created[0][0] == f"weld_{i}"
+        assert arena.created[0][1] is sim._rigid_objects["cube"]._entities[i]
+        assert arena.created[0][2] is sim._rigid_objects["block"]._entities[i]
+
+
+def test_create_rigid_constraint_single_env_uses_global_env():
+    """Single-env create routes through the global env and keeps the base name."""
+    arena = MockArena()
+    sim = _RigidConstraintTestSim(num_envs=1, arenas=[arena])
+    _register_object(sim, "cube", 1)
+    _register_object(sim, "block", 1)
+
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    constraint = sim.create_rigid_constraint(cfg)
+    assert constraint.constraint_handles[0] is not None
+    assert arena.created[0][0] == "weld"  # base name, no suffix
+
+
+def test_create_rigid_constraint_subset_env_ids():
+    """env_ids subset populates only those arenas; others stay None."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    _register_object(sim, "cube", 4)
+    _register_object(sim, "block", 4)
+
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    constraint = sim.create_rigid_constraint(cfg, env_ids=[0, 2])
+    assert constraint.constraint_handles[0] is not None
+    assert constraint.constraint_handles[1] is None
+    assert constraint.constraint_handles[2] is not None
+    assert constraint.constraint_handles[3] is None
+    # only arenas 0 and 2 got a create call
+    assert len(sim._arenas[0].created) == 1
+    assert len(sim._arenas[1].created) == 0
+    assert len(sim._arenas[2].created) == 1
+    assert len(sim._arenas[3].created) == 0
+
+
+def test_create_rigid_constraint_missing_object_raises():
+    """A missing object uid raises (log_error raises RuntimeError by default)."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    _register_object(sim, "cube", 4)
+    # block not registered
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    with pytest.raises(RuntimeError):
+        sim.create_rigid_constraint(cfg)
+
+
+def test_create_rigid_constraint_duplicate_name_raises():
+    """A duplicate base name raises."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    _register_object(sim, "cube", 4)
+    _register_object(sim, "block", 4)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    sim.create_rigid_constraint(cfg)
+    with pytest.raises(RuntimeError):
+        sim.create_rigid_constraint(cfg)
+
+
+def test_create_rigid_constraint_failed_handle_raises():
+    """If dexsim returns None for a handle, log_error raises."""
+    sim = _RigidConstraintTestSim(
+        num_envs=2, arenas=[MockArena(fail_indices=[0]), MockArena()]
+    )
+    _register_object(sim, "cube", 2)
+    _register_object(sim, "block", 2)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    with pytest.raises(RuntimeError):
+        sim.create_rigid_constraint(cfg)
+
+
+def test_broadcast_frame_none_to_identity():
+    """None frame broadcasts to identity per env."""
+    sim = _RigidConstraintTestSim(num_envs=3)
+    frames = sim._broadcast_frame(None, num_envs=3, env_ids=[0, 1, 2], name="weld")
+    assert len(frames) == 3
+    for f in frames:
+        np.testing.assert_allclose(f, np.eye(4))
+
+
+def test_broadcast_frame_4x4_repeats():
+    """A single 4x4 matrix repeats across all envs."""
+    sim = _RigidConstraintTestSim(num_envs=3)
+    frame = np.eye(4, dtype=np.float32) * 2
+    frames = sim._broadcast_frame(frame, num_envs=3, env_ids=[0, 1, 2], name="weld")
+    assert len(frames) == 3
+    for f in frames:
+        np.testing.assert_allclose(f, frame)
+
+
+def test_broadcast_frame_N4x4_indexes():
+    """An (N,4,4) array indexes per env and requires N == num_envs."""
+    sim = _RigidConstraintTestSim(num_envs=3)
+    frames_in = np.stack([np.eye(4) * i for i in range(3)], axis=0).astype(np.float32)
+    frames = sim._broadcast_frame(frames_in, num_envs=3, env_ids=[0, 1, 2], name="weld")
+    for i, f in enumerate(frames):
+        np.testing.assert_allclose(f, frames_in[i])
+
+    # wrong N raises
+    bad = np.stack([np.eye(4)] * 2, axis=0).astype(np.float32)
+    with pytest.raises(RuntimeError):
+        sim._broadcast_frame(bad, num_envs=3, env_ids=[0, 1, 2], name="weld")
