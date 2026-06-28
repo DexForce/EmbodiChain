@@ -31,10 +31,14 @@ from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     add_common_benchmark_args,
     build_single_action_leaderboard,
+    build_video_output_path,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    replay_trajectory_with_recording,
     reset_robot,
+    resolve_profile,
+    should_record_case,
     timed_call,
     write_markdown_report,
 )
@@ -111,6 +115,8 @@ def _run_case(
     initial_qpos,
     pose_case: PoseCase,
     repeat: int,
+    args: argparse.Namespace,
+    recorded_count: int,
 ):
     """Run one MoveEndEffector case."""
     torch = ensure_torch()
@@ -125,6 +131,20 @@ def _run_case(
         )
     )
     is_success, traj, _ = result
+    video_path = None
+    if should_record_case(args, recorded_count, bool(is_success)):
+        reset_robot(robot, initial_qpos)
+        video_path = replay_trajectory_with_recording(
+            sim=sim,
+            robot=robot,
+            traj=traj,
+            args=args,
+            video_path=build_video_output_path(
+                args, "atomic_action_move_end_effector", f"{pose_case.name}_r{repeat}"
+            ),
+        )
+        reset_robot(robot, initial_qpos)
+
     final_error_m = None
     if is_success and traj.shape[1] > 0:
         arm_joint_ids = robot.get_joint_ids(name="arm")
@@ -151,6 +171,7 @@ def _run_case(
         "final_error_m": final_error_m,
         "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
         "failure_reason": "" if target_reached else "target_not_reached",
+        "video_path": str(video_path) if video_path is not None else "",
     }
 
 
@@ -193,6 +214,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     args = _parse_args() if args is None else args
     if args.repeat < 1:
         raise ValueError("--repeat must be at least 1.")
+    profile = resolve_profile(args)
 
     ensure_repo_root()
     ensure_torch()
@@ -209,14 +231,18 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     )
 
     pose_cases = _select_pose_cases(args.pose_cases)
-    repeat = args.repeat
-    if args.smoke:
+    repeat = 1 if profile == "smoke" else args.repeat
+    if profile == "smoke":
         pose_cases = [POSE_CASES["front_left"]]
-        repeat = 1
 
     print("=" * 60)
     print("MoveEndEffector Atomic Action Benchmark")
     print("=" * 60)
+    print(
+        "Coverage: "
+        f"profile={profile}, {len(pose_cases)} pose case(s) x "
+        f"{repeat} repeat(s)"
+    )
 
     sim = initialize_simulation(args)
     robot = create_robot(sim)
@@ -235,13 +261,23 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     )
 
     results: list[dict[str, object]] = []
+    video_paths: list[str] = []
     print("\n=== MoveEndEffector Target Sweep ===")
     for pose_case in pose_cases:
         for repeat_index in range(repeat):
             result = _run_case(
-                sim, robot, atomic_engine, initial_qpos, pose_case, repeat_index
+                sim,
+                robot,
+                atomic_engine,
+                initial_qpos,
+                pose_case,
+                repeat_index,
+                args,
+                len(video_paths),
             )
             results.append(result)
+            if result["video_path"]:
+                video_paths.append(str(result["video_path"]))
             print(
                 f"  {result['case_id']:<24} "
                 f"time={result['cost_time_ms']:>10.2f} ms | "
@@ -259,8 +295,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         metric_rows=metric_rows,
         leaderboard_rows=leaderboard_rows,
         notes=[
+            f"Profile: {profile}",
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"Success tolerance: {SUCCESS_TOLERANCE_M} m translation error.",
+            "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
         ],
     )
     print(f"Markdown report saved: {report_path}")
