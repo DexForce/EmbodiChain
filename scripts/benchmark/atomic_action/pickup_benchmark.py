@@ -136,9 +136,7 @@ def _run_case(
         compute_pick_close_end_step,
     )
 
-    case_id = (
-        f"{object_preset.object_type}:{position_case.name}:{approach}:r{repeat}"
-    )
+    case_id = f"{object_preset.object_type}:{position_case.name}:{approach}:r{repeat}"
     try:
         reset_robot(robot, initial_qpos)
         initial_obj_pose = reset_rigid_object_xy(
@@ -537,8 +535,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             + ", ".join(describe_object_preset(preset) for preset in object_presets),
             "Position cases: "
             + ", ".join(
-                f"{case.name}/{case.quadrant}/xy={case.xy}"
-                for case in position_cases
+                f"{case.name}/{case.quadrant}/xy={case.xy}" for case in position_cases
             ),
             "PickUp approach cases: " + ", ".join(approaches),
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",

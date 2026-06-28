@@ -37,7 +37,6 @@ from scripts.benchmark.atomic_action.common import (
     resolve_profile,
 )
 
-
 ACTION_MODULES = {
     "move_end_effector": "scripts.benchmark.atomic_action.move_end_effector_benchmark",
     "move_joints": "scripts.benchmark.atomic_action.move_joints_benchmark",
