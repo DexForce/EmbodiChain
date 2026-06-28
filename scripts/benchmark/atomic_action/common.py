@@ -44,6 +44,8 @@ DEFAULT_VIDEO_WIDTH = 640
 DEFAULT_VIDEO_HEIGHT = 480
 DEFAULT_VIDEO_HOLD_STEPS = 120
 DEFAULT_VIDEO_CASE_LIMIT = 0
+SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z = 0.35
+SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT = 0.5
 BENCHMARK_PROFILES = ("smoke", "coverage", "full")
 DEFAULT_BENCHMARK_PROFILE = "coverage"
 DEFAULT_VIDEO_LOOK_AT = (
@@ -249,10 +251,18 @@ def add_video_benchmark_args(parser: argparse.ArgumentParser) -> None:
         help="Record trajectory replay videos for selected successful cases.",
     )
     parser.add_argument(
+        "--record_failed_video",
+        action="store_true",
+        help=(
+            "With --record_video, also record failed cases when a partial "
+            "trajectory or static debug scene is available."
+        ),
+    )
+    parser.add_argument(
         "--video_case_limit",
         type=int,
         default=DEFAULT_VIDEO_CASE_LIMIT,
-        help="Maximum successful cases to record. Use 0 to record all selected cases.",
+        help="Maximum cases to record. Use 0 to record all selected cases.",
     )
     parser.add_argument(
         "--video_dir",
@@ -486,6 +496,16 @@ def format_vector3(vector) -> str:
     return f"({float(vector[0]):.3f},{float(vector[1]):.3f},{float(vector[2]):.3f})"
 
 
+def _is_horizontal_approach_direction(approach_direction) -> bool:
+    """Return true when the requested approach is a side/horizontal approach."""
+    if not hasattr(approach_direction, "detach"):
+        return abs(float(approach_direction[2])) < 1e-4
+    direction = approach_direction.detach()
+    if direction.ndim > 1:
+        direction = direction.reshape(-1, direction.shape[-1])[0]
+    return abs(float(direction[2].to("cpu"))) < 1e-4
+
+
 def create_benchmark_object(
     sim,
     preset: MeshObjectPreset,
@@ -541,6 +561,46 @@ def create_benchmark_object(
 create_mesh_benchmark_object = create_benchmark_object
 
 
+def _make_benchmark_antipodal_affordance_class():
+    """Create an AntipodalAffordance subclass after project imports are available."""
+    from embodichain.lab.sim.atomic_actions import AntipodalAffordance
+
+    class BenchmarkAntipodalAffordance(AntipodalAffordance):
+        """Benchmark affordance that biases side grasps to horizontal closing."""
+
+        def get_valid_grasp_poses(
+            self,
+            obj_poses,
+            approach_direction,
+        ):
+            results = super().get_valid_grasp_poses(
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+            )
+            if not _is_horizontal_approach_direction(approach_direction):
+                return results
+
+            adjusted_results = []
+            for grasp_poses, costs in results:
+                if grasp_poses.ndim < 3 or grasp_poses.shape[0] == 0:
+                    adjusted_results.append((grasp_poses, costs))
+                    continue
+
+                opening_axis_abs_z = grasp_poses[:, :3, 0].abs()[:, 2]
+                keep = opening_axis_abs_z <= SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z
+                if bool(keep.any()):
+                    adjusted_results.append((grasp_poses[keep], costs[keep]))
+                    continue
+
+                adjusted_costs = costs + (
+                    opening_axis_abs_z * SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT
+                )
+                adjusted_results.append((grasp_poses, adjusted_costs))
+            return adjusted_results
+
+    return BenchmarkAntipodalAffordance
+
+
 def create_antipodal_object_semantics(
     obj,
     preset: MeshObjectPreset,
@@ -549,17 +609,18 @@ def create_antipodal_object_semantics(
     build_grasp_generator_cfg: Callable[[argparse.Namespace], object],
 ):
     """Create object semantics with an antipodal grasp affordance."""
-    from embodichain.lab.sim.atomic_actions import AntipodalAffordance, ObjectSemantics
+    from embodichain.lab.sim.atomic_actions import ObjectSemantics
 
     mesh_vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
     mesh_triangles = obj.get_triangles(env_ids=[0])[0]
+    affordance_cls = _make_benchmark_antipodal_affordance_class()
     return ObjectSemantics(
         label=preset.label,
         geometry={
             "mesh_vertices": mesh_vertices,
             "mesh_triangles": mesh_triangles,
         },
-        affordance=AntipodalAffordance(
+        affordance=affordance_cls(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
             gripper_collision_cfg=build_gripper_collision_cfg(),
@@ -691,7 +752,7 @@ def should_record_case(
     """Return whether a benchmark case should emit a replay video."""
     if not getattr(args, "record_video", False):
         return False
-    if not planning_success:
+    if not planning_success and not getattr(args, "record_failed_video", False):
         return False
 
     case_limit = getattr(args, "video_case_limit", DEFAULT_VIDEO_CASE_LIMIT)
@@ -711,6 +772,41 @@ def build_video_output_path(
     safe_case_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", case_id).strip("_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return output_dir / f"{benchmark_name}_{safe_case_id}_{timestamp}.mp4"
+
+
+def summarize_video_recording(
+    args: argparse.Namespace,
+    results: Sequence[dict[str, object]],
+    video_paths: Sequence[str],
+) -> list[str]:
+    """Build report notes that make video coverage explicit."""
+    evaluated_count = len(results)
+    success_count = sum(1 for result in results if bool(result.get("success")))
+    failure_count = evaluated_count - success_count
+    notes = [
+        (
+            "Case/video summary: "
+            f"evaluated={evaluated_count}, success={success_count}, "
+            f"failure={failure_count}, videos={len(video_paths)}"
+        )
+    ]
+    if getattr(args, "record_video", False):
+        if getattr(args, "record_failed_video", False):
+            notes.append(
+                "Video policy: records successful replays and failed-case debug "
+                "videos when trajectory/static scene capture is available."
+            )
+        else:
+            notes.append(
+                "Video policy: records successful replays only; failed cases are "
+                "reported in the tables but do not emit videos."
+            )
+    else:
+        notes.append("Video policy: disabled.")
+    notes.append(
+        "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled")
+    )
+    return notes
 
 
 def _replay_trajectory_with_recording(
@@ -776,6 +872,55 @@ def _replay_trajectory_with_recording(
     return video_path if stop_success else None
 
 
+def _record_static_scene_video(
+    sim,
+    args: argparse.Namespace,
+    video_path: Path,
+    look_at: tuple[
+        Sequence[float],
+        Sequence[float],
+        Sequence[float],
+    ] = DEFAULT_VIDEO_LOOK_AT,
+) -> Path | None:
+    """Record the current scene without replaying a planned trajectory."""
+    video_fps = getattr(args, "video_fps", DEFAULT_VIDEO_FPS)
+    video_max_memory = getattr(args, "video_max_memory", DEFAULT_VIDEO_MAX_MEMORY_MB)
+    video_width = getattr(args, "video_width", DEFAULT_VIDEO_WIDTH)
+    video_height = getattr(args, "video_height", DEFAULT_VIDEO_HEIGHT)
+    video_hold_steps = getattr(args, "video_hold_steps", DEFAULT_VIDEO_HOLD_STEPS)
+
+    original_width = sim.sim_config.width
+    original_height = sim.sim_config.height
+    recording_started = False
+    try:
+        sim.sim_config.width = video_width
+        sim.sim_config.height = video_height
+        recording_started = sim.start_window_record(
+            save_path=str(video_path),
+            fps=video_fps,
+            max_memory=video_max_memory,
+            look_at=look_at,
+            use_sim_time=True,
+        )
+    finally:
+        sim.sim_config.width = original_width
+        sim.sim_config.height = original_height
+
+    if not recording_started:
+        return None
+
+    stop_success = False
+    try:
+        for _ in range(video_hold_steps):
+            sim.update(step=2)
+    finally:
+        if sim.is_window_recording():
+            stop_success = sim.stop_window_record()
+        sim.wait_window_record_saves()
+
+    return video_path if stop_success else None
+
+
 def replay_trajectory_with_recording(
     sim,
     robot,
@@ -809,6 +954,38 @@ def replay_trajectory_with_recording(
             pass
         print(
             "Warning: failed to record benchmark replay video "
+            f"{video_path}: {type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+def record_static_scene_video(
+    sim,
+    args: argparse.Namespace,
+    video_path: Path,
+    look_at: tuple[
+        Sequence[float],
+        Sequence[float],
+        Sequence[float],
+    ] = DEFAULT_VIDEO_LOOK_AT,
+) -> Path | None:
+    """Best-effort static scene recording that never changes benchmark success."""
+    try:
+        return _record_static_scene_video(
+            sim=sim,
+            args=args,
+            video_path=video_path,
+            look_at=look_at,
+        )
+    except Exception as exc:
+        try:
+            if sim.is_window_recording():
+                sim.stop_window_record()
+            sim.wait_window_record_saves()
+        except Exception:
+            pass
+        print(
+            "Warning: failed to record benchmark static debug video "
             f"{video_path}: {type(exc).__name__}: {exc}"
         )
         return None
@@ -926,6 +1103,7 @@ __all__ = [
     "PositionCase",
     "park_rigid_object",
     "pickup_approach_direction_tuple",
+    "record_static_scene_video",
     "replay_trajectory_with_recording",
     "reset_rigid_object",
     "reset_rigid_object_xy",
@@ -936,9 +1114,12 @@ __all__ = [
     "select_pickup_approaches",
     "select_position_cases",
     "should_record_case",
+    "SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z",
+    "SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT",
     "SMOKE_PICKUP_APPROACH_CASES",
     "SMOKE_MESH_OBJECT_TYPES",
     "SMOKE_POSITION_CASE_NAMES",
     "timed_call",
+    "summarize_video_recording",
     "write_markdown_report",
 ]

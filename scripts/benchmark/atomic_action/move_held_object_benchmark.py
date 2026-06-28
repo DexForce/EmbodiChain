@@ -46,6 +46,7 @@ from scripts.benchmark.atomic_action.common import (
     park_rigid_object,
     pickup_approach_direction_tuple,
     PositionCase,
+    record_static_scene_video,
     replay_trajectory_with_recording,
     reset_rigid_object,
     reset_rigid_object_xy,
@@ -56,6 +57,9 @@ from scripts.benchmark.atomic_action.common import (
     select_pickup_approaches,
     select_position_cases,
     should_record_case,
+    SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z,
+    SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT,
+    summarize_video_recording,
     timed_call,
     write_markdown_report,
 )
@@ -320,34 +324,50 @@ def _run_case(
             torch = ensure_torch()
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
-            full_traj = torch.cat((precondition_traj, traj), dim=1)
-            post_grasp_clear_step = compute_pick_close_end_step()
-            should_clear_object_dynamics = True
-
-            def _on_step(waypoint_index: int) -> None:
-                nonlocal should_clear_object_dynamics
-                if (
-                    should_clear_object_dynamics
-                    and waypoint_index + 1 >= post_grasp_clear_step
-                ):
-                    obj.clear_dynamics()
-                    should_clear_object_dynamics = False
-
-            video_path = replay_trajectory_with_recording(
-                sim=sim,
-                robot=robot,
-                traj=full_traj,
-                args=args,
-                video_path=build_video_output_path(
-                    args,
-                    "atomic_action_move_held_object",
-                    (
-                        f"{object_preset.object_type}_{position_case.name}_"
-                        f"{pickup_approach}_{case.name}_r{repeat}"
-                    ),
-                ),
-                on_step=_on_step,
+            video_case_suffix = (
+                f"{object_preset.object_type}_{position_case.name}_"
+                f"{pickup_approach}_{case.name}_r{repeat}"
             )
+            if getattr(traj, "ndim", 0) >= 3 and traj.shape[1] > 0:
+                replay_traj = torch.cat((precondition_traj, traj), dim=1)
+            else:
+                replay_traj = precondition_traj
+
+            if getattr(replay_traj, "ndim", 0) >= 3 and replay_traj.shape[1] > 0:
+                post_grasp_clear_step = compute_pick_close_end_step()
+                should_clear_object_dynamics = True
+
+                def _on_step(waypoint_index: int) -> None:
+                    nonlocal should_clear_object_dynamics
+                    if (
+                        should_clear_object_dynamics
+                        and waypoint_index + 1 >= post_grasp_clear_step
+                    ):
+                        obj.clear_dynamics()
+                        should_clear_object_dynamics = False
+
+                video_path = replay_trajectory_with_recording(
+                    sim=sim,
+                    robot=robot,
+                    traj=replay_traj,
+                    args=args,
+                    video_path=build_video_output_path(
+                        args,
+                        "atomic_action_move_held_object",
+                        video_case_suffix,
+                    ),
+                    on_step=_on_step,
+                )
+            else:
+                video_path = record_static_scene_video(
+                    sim=sim,
+                    args=args,
+                    video_path=build_video_output_path(
+                        args,
+                        "atomic_action_move_held_object",
+                        f"{video_case_suffix}_failed_static",
+                    ),
+                )
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
@@ -376,6 +396,33 @@ def _run_case(
             "video_path": str(video_path) if video_path is not None else "",
         }
     except Exception as exc:
+        video_path = None
+        if should_record_case(args, recorded_count, False):
+            try:
+                reset_robot(robot, initial_qpos)
+                initial_obj_pose = reset_rigid_object_xy(
+                    obj=obj,
+                    base_pose=base_obj_pose,
+                    xy=position_case.xy,
+                    sim=sim,
+                    settle_steps=2,
+                )
+                video_path = record_static_scene_video(
+                    sim=sim,
+                    args=args,
+                    video_path=build_video_output_path(
+                        args,
+                        "atomic_action_move_held_object",
+                        (
+                            f"{object_preset.object_type}_{position_case.name}_"
+                            f"{pickup_approach}_{case.name}_r{repeat}"
+                            "_exception_static"
+                        ),
+                    ),
+                )
+                reset_rigid_object(obj, initial_obj_pose)
+            except Exception:
+                video_path = None
         return {
             "case_id": case_id,
             "object_type": object_preset.object_type,
@@ -397,7 +444,7 @@ def _run_case(
             "precondition_waypoints": 0,
             "trajectory_waypoints": 0,
             "failure_reason": f"exception:{type(exc).__name__}:{exc}",
-            "video_path": "",
+            "video_path": str(video_path) if video_path is not None else "",
         }
 
 
@@ -561,7 +608,13 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             "Held-object target cases: " + ", ".join(case.name for case in cases),
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"n_sample: {1000 if profile == 'smoke' else args.n_sample}",
-            "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
+            (
+                "Side grasp opening-axis rule: prefer candidates with "
+                f"abs(opening_axis_z) <= {SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z:.2f}; "
+                "fallback cost += "
+                f"abs(opening_axis_z) * {SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT:.2f}."
+            ),
+            *summarize_video_recording(args, results, video_paths),
         ],
     )
     print(f"Markdown report saved: {report_path}")

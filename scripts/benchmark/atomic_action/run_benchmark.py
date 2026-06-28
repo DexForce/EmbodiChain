@@ -187,6 +187,7 @@ def _make_child_args(args: argparse.Namespace) -> argparse.Namespace:
         n_sample=1000 if profile == "smoke" else 10000,
         force_reannotate=False,
         record_video=args.record_video,
+        record_failed_video=args.record_failed_video,
         video_case_limit=args.video_case_limit,
         video_dir=args.video_dir,
         video_fps=args.video_fps,
@@ -237,6 +238,8 @@ def _make_child_cli_args(args: argparse.Namespace, action_name: str) -> list[str
             child_args.extend(args.approach_cases)
     if args.record_video:
         child_args.append("--record_video")
+        if args.record_failed_video:
+            child_args.append("--record_failed_video")
     return child_args
 
 
