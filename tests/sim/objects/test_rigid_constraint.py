@@ -279,6 +279,9 @@ class _RigidConstraintTestSim:
 
     # bind the real method under test
     create_rigid_constraint = SimulationManager.create_rigid_constraint
+    remove_rigid_constraint = SimulationManager.remove_rigid_constraint
+    get_rigid_constraint = SimulationManager.get_rigid_constraint
+    get_rigid_constraint_uid_list = SimulationManager.get_rigid_constraint_uid_list
     _broadcast_frame = staticmethod(SimulationManager._broadcast_frame)
 
 
@@ -418,3 +421,80 @@ def test_broadcast_frame_N4x4_indexes():
     bad = np.stack([np.eye(4)] * 2, axis=0).astype(np.float32)
     with pytest.raises(RuntimeError):
         sim._broadcast_frame(bad, num_envs=3, env_ids=[0, 1, 2], name="weld")
+
+
+def test_remove_rigid_constraint_all_envs():
+    """remove with env_ids=None clears every arena and drops the registry entry."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    _register_object(sim, "cube", 4)
+    _register_object(sim, "block", 4)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    sim.create_rigid_constraint(cfg)
+
+    removed = sim.remove_rigid_constraint("weld")
+    assert removed is True
+    assert "weld" not in sim._constraints
+    # each arena got remove_constraint with its per-env name
+    for i, arena in enumerate(sim._arenas):
+        assert f"weld_{i}" in arena.removed
+
+
+def test_remove_rigid_constraint_subset_keeps_others():
+    """remove with a subset env_ids clears only those arenas; registry kept."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    _register_object(sim, "cube", 4)
+    _register_object(sim, "block", 4)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    sim.create_rigid_constraint(cfg)
+
+    removed = sim.remove_rigid_constraint("weld", env_ids=[0, 2])
+    assert removed is True
+    # still in registry because envs 1,3 remain active
+    assert "weld" in sim._constraints
+    assert sim._constraints["weld"].constraint_handles[0] is None
+    assert sim._constraints["weld"].constraint_handles[1] is not None
+    assert sim._constraints["weld"].constraint_handles[2] is None
+    assert sim._constraints["weld"].constraint_handles[3] is not None
+    assert "weld_0" in sim._arenas[0].removed
+    assert "weld_2" in sim._arenas[2].removed
+    assert sim._arenas[1].removed == []
+
+
+def test_remove_rigid_constraint_unknown_name_warns_false():
+    """remove on an unknown name returns False without raising."""
+    sim = _RigidConstraintTestSim(num_envs=4)
+    removed = sim.remove_rigid_constraint("nope")
+    assert removed is False
+
+
+def test_get_rigid_constraint_and_uid_list():
+    """get returns the constraint; uid list lists all registered names."""
+    sim = _RigidConstraintTestSim(num_envs=2)
+    _register_object(sim, "cube", 2)
+    _register_object(sim, "block", 2)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    sim.create_rigid_constraint(cfg)
+    assert sim.get_rigid_constraint("weld") is not None
+    assert sim.get_rigid_constraint("nope") is None
+    assert sim.get_rigid_constraint_uid_list() == ["weld"]
+
+
+def test_partial_remove_then_all_drops_registry():
+    """Subset remove then removing remaining envs drops the registry entry."""
+    sim = _RigidConstraintTestSim(num_envs=2)
+    _register_object(sim, "cube", 2)
+    _register_object(sim, "block", 2)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    sim.create_rigid_constraint(cfg)
+    sim.remove_rigid_constraint("weld", env_ids=[0])
+    assert "weld" in sim._constraints
+    sim.remove_rigid_constraint("weld", env_ids=[1])
+    assert "weld" not in sim._constraints

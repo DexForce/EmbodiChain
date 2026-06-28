@@ -438,6 +438,7 @@ class SimulationManager:
         uid_list.extend(list(self._soft_objects.keys()))
         uid_list.extend(list(self._cloth_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
+        uid_list.extend(list(self._constraints.keys()))
         return uid_list
 
     def _convert_sim_config(
@@ -1165,6 +1166,59 @@ class SimulationManager:
             List[str]: list of cloth body uid.
         """
         return list(self._cloth_objects.keys())
+
+    def remove_rigid_constraint(
+        self,
+        name: str,
+        env_ids: Sequence[int] | None = None,
+    ) -> bool:
+        """Remove a rigid constraint by name.
+
+        With ``env_ids=None`` the constraint is removed from every arena and
+        dropped from the registry. With a subset, only those arenas are cleared;
+        the registry entry is kept until all handles become None.
+
+        Args:
+            name: The base constraint name.
+            env_ids: Subset of arenas to clear. None -> all.
+
+        Returns:
+            True if the constraint was found (and removed or partially removed),
+            False if the name is unknown.
+        """
+        constraint = self._constraints.get(name, None)
+        if constraint is None:
+            logger.log_warning(f"Constraint '{name}' not found. Nothing to remove.")
+            return False
+
+        constraint.destroy(env_ids=env_ids, arena_resolver=self.get_env)
+
+        # drop from registry if no handles remain active
+        if all(h is None for h in constraint.constraint_handles):
+            del self._constraints[name]
+        return True
+
+    def get_rigid_constraint(self, name: str) -> RigidConstraint | None:
+        """Get a rigid constraint by its base name.
+
+        Args:
+            name: The base constraint name.
+
+        Returns:
+            The constraint, or None if not found.
+        """
+        if name not in self._constraints:
+            logger.log_warning(f"Constraint '{name}' not found.")
+            return None
+        return self._constraints[name]
+
+    def get_rigid_constraint_uid_list(self) -> List[str]:
+        """Get the list of registered constraint base names.
+
+        Returns:
+            List[str]: list of constraint names.
+        """
+        return list(self._constraints.keys())
 
     def add_rigid_object_group(self, cfg: RigidObjectGroupCfg) -> RigidObjectGroup:
         """Add a rigid object group to the scene.
@@ -2417,6 +2471,7 @@ class SimulationManager:
         _sever_wrapper_refs("_gizmos")
         _sever_wrapper_refs("_markers")
         _sever_wrapper_refs("_rigid_objects")
+        _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")
         _sever_wrapper_refs("_soft_objects")
         _sever_wrapper_refs("_cloth_objects")
@@ -2439,6 +2494,7 @@ class SimulationManager:
         self._arenas.clear()
         self._markers.clear()
         self._gizmos.clear()
+        self._constraints.clear()
 
         SimulationManager.reset(self.instance_id)
 
