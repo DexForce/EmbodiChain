@@ -96,6 +96,7 @@ class MotionGenerator:
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
+        "neural_refine": (NeuralPlanner, NeuralPlannerCfg),
     }
 
     def __init__(self, cfg: MotionGenCfg) -> None:
@@ -220,17 +221,29 @@ class MotionGenerator:
         else:
             target_plan_states = target_states
 
-        if options.plan_opts is None:
-            if hasattr(self.planner, "default_plan_options"):
-                options.plan_opts = self.planner.default_plan_options()
-            else:
-                options.plan_opts = PlanOptions()
-        # Planner-specific options (e.g. NeuralPlanOptions) must be set on
-        # plan_opts explicitly, same as ToppraPlanOptions.
-        result = self.planner.plan(
-            target_states=target_plan_states, options=options.plan_opts
-        )
+        plan_opts = self._resolve_plan_options(options)
+        result = self.planner.plan(target_states=target_plan_states, options=plan_opts)
         return result
+
+    def _resolve_plan_options(self, options: MotionGenOptions) -> PlanOptions:
+        """Resolve planner-specific options for the active planner."""
+        plan_opts = options.plan_opts
+        if plan_opts is None:
+            plan_opts = self.planner.default_plan_options()
+        elif hasattr(plan_opts, "copy"):
+            plan_opts = plan_opts.copy()
+
+        if (
+            hasattr(plan_opts, "control_part")
+            and getattr(plan_opts, "control_part") is None
+        ):
+            plan_opts.control_part = options.control_part
+        if (
+            hasattr(plan_opts, "start_qpos")
+            and getattr(plan_opts, "start_qpos") is None
+        ):
+            plan_opts.start_qpos = options.start_qpos
+        return plan_opts
 
     def estimate_trajectory_sample_count(
         self,

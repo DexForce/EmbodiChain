@@ -81,10 +81,13 @@ class FakeRobot:
     num_instances = 1
 
     def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:
-        return torch.zeros(1, NUM_ARM_JOINTS)
+        return torch.zeros(self.num_instances, NUM_ARM_JOINTS)
 
-    def get_qpos_limits(self, name: str | None = None) -> torch.Tensor:
-        limits = torch.zeros(1, NUM_ARM_JOINTS, 2)
+    def get_qpos_limits(
+        self, name: str | None = None, env_ids: list[int] | None = None
+    ) -> torch.Tensor:
+        batch = len(env_ids) if env_ids is not None else self.num_instances
+        limits = torch.zeros(batch, NUM_ARM_JOINTS, 2)
         limits[..., 0] = -2.0
         limits[..., 1] = 2.0
         return limits
@@ -93,6 +96,7 @@ class FakeRobot:
         self,
         qpos: torch.Tensor,
         name: str | None = None,
+        env_ids: list[int] | None = None,
         to_matrix: bool = False,
         **kwargs,
     ) -> torch.Tensor:
@@ -110,19 +114,17 @@ class FakeSimulationManager:
         return self.robot
 
 
-def test_neural_planner_is_registered():
-    assert MotionGenerator._support_planner_dict["neural"][0] is NeuralPlanner
-    assert MotionGenerator._support_planner_dict["neural"][1] is NeuralPlannerCfg
-
-
-def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+def _patch_sim_manager(monkeypatch) -> None:
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
         SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
     )
 
-    motion_generator = MotionGenerator(
+
+def _make_motion_generator(tmp_path, monkeypatch) -> MotionGenerator:
+    _patch_sim_manager(monkeypatch)
+    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    return MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
@@ -132,9 +134,18 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
         )
     )
 
-    target_state = PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+
+def test_neural_planner_is_registered():
+    assert MotionGenerator._support_planner_dict["neural"][0] is NeuralPlanner
+    assert MotionGenerator._support_planner_dict["neural"][1] is NeuralPlannerCfg
+    assert MotionGenerator._support_planner_dict["neural_refine"][0] is NeuralPlanner
+    assert MotionGenerator._support_planner_dict["neural_refine"][1] is NeuralPlannerCfg
+
+
+def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
     result = motion_generator.generate(
-        target_states=[target_state],
+        target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
         options=MotionGenOptions(
             plan_opts=NeuralPlanOptions(
                 control_part="main_arm",
@@ -152,21 +163,7 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
 
 
 def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
-    fake_sim = FakeSimulationManager()
-    monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
-    )
-
-    motion_generator = MotionGenerator(
-        cfg=MotionGenCfg(
-            planner_cfg=NeuralPlannerCfg(
-                robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
-                control_part="main_arm",
-            )
-        )
-    )
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
     custom_qpos = torch.ones(NUM_ARM_JOINTS)
     result = motion_generator.generate(
         target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
@@ -182,22 +179,44 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
     assert torch.allclose(result.positions[0], custom_qpos)
 
 
-def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
-    fake_sim = FakeSimulationManager()
-    monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+def test_motion_generator_builds_default_neural_plan_options(tmp_path, monkeypatch):
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
+    custom_qpos = torch.full((NUM_ARM_JOINTS,), 0.25)
+
+    result = motion_generator.generate(
+        target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        options=MotionGenOptions(
+            control_part="main_arm",
+            start_qpos=custom_qpos,
+        ),
     )
 
-    motion_generator = MotionGenerator(
-        cfg=MotionGenCfg(
-            planner_cfg=NeuralPlannerCfg(
-                robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
-                control_part="main_arm",
-            )
-        )
+    assert result.success is True
+    assert torch.allclose(result.positions[0], custom_qpos)
+
+
+def test_motion_generator_does_not_mutate_user_plan_options(tmp_path, monkeypatch):
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
+    custom_qpos = torch.full((NUM_ARM_JOINTS,), 0.5)
+    plan_opts = NeuralPlanOptions()
+
+    result = motion_generator.generate(
+        target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        options=MotionGenOptions(
+            control_part="main_arm",
+            start_qpos=custom_qpos,
+            plan_opts=plan_opts,
+        ),
     )
+
+    assert result.success is True
+    assert torch.allclose(result.positions[0], custom_qpos)
+    assert plan_opts.control_part is None
+    assert plan_opts.start_qpos is None
+
+
+def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
 
     with pytest.raises(ValueError, match="policy expects"):
         motion_generator.generate(
@@ -208,4 +227,52 @@ def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
                     start_qpos=torch.zeros(NUM_ARM_JOINTS - 1),
                 ),
             ),
+        )
+
+
+def test_neural_planner_rejects_joint_move(tmp_path, monkeypatch):
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="EEF_MOVE"):
+        motion_generator.generate(
+            target_states=[
+                PlanState(move_type=MoveType.JOINT_MOVE, qpos=torch.zeros(7))
+            ],
+            options=MotionGenOptions(
+                plan_opts=NeuralPlanOptions(
+                    control_part="main_arm",
+                    start_qpos=torch.zeros(NUM_ARM_JOINTS),
+                ),
+            ),
+        )
+
+
+def test_neural_planner_requires_env_id_for_multi_instance(tmp_path, monkeypatch):
+    motion_generator = _make_motion_generator(tmp_path, monkeypatch)
+    motion_generator.robot.num_instances = 2
+
+    with pytest.raises(ValueError, match="env_id is required"):
+        motion_generator.generate(
+            target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            options=MotionGenOptions(
+                control_part="main_arm",
+                start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            ),
+        )
+
+
+def test_neural_planner_rejects_checkpoint_dof_mismatch(tmp_path, monkeypatch):
+    _patch_sim_manager(monkeypatch)
+    checkpoint_path = _create_fake_checkpoint(tmp_path)
+
+    with pytest.raises(ValueError, match="num_arm_joints=6"):
+        MotionGenerator(
+            cfg=MotionGenCfg(
+                planner_cfg=NeuralPlannerCfg(
+                    robot_uid="fake_robot",
+                    checkpoint_path=checkpoint_path,
+                    control_part="main_arm",
+                    num_arm_joints=6,
+                )
+            )
         )

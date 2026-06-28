@@ -91,6 +91,9 @@ class ToppraPlanner(BasePlanner):
                 NotImplementedError,
             )
 
+    def default_plan_options(self) -> ToppraPlanOptions:
+        return ToppraPlanOptions()
+
     @validate_plan_options(options_cls=ToppraPlanOptions)
     def plan(
         self,

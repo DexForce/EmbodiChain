@@ -23,6 +23,7 @@ import torch
 from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
+from embodichain.lab.sim.planners import MoveType, PlanResult, PlanState
 
 
 def _make_mock_motion_generator(num_envs: int = 2, arm_dof: int = 6) -> Mock:
@@ -35,7 +36,13 @@ def _make_mock_motion_generator(num_envs: int = 2, arm_dof: int = 6) -> Mock:
 
     robot.get_qpos = get_qpos
 
-    def compute_ik(pose=None, qpos_seed=None, name=None, joint_seed=None):
+    def compute_ik(
+        pose=None,
+        qpos_seed=None,
+        name=None,
+        joint_seed=None,
+        env_ids=None,
+    ):
         seed = joint_seed if joint_seed is not None else qpos_seed
         if seed is None:
             seed = torch.zeros(num_envs, arm_dof)
@@ -52,6 +59,7 @@ def _make_mock_motion_generator(num_envs: int = 2, arm_dof: int = 6) -> Mock:
     mg = Mock()
     mg.robot = robot
     mg.device = torch.device("cpu")
+    mg.planner.cfg.planner_type = "toppra"
     return mg
 
 
@@ -211,6 +219,186 @@ class TestPlanJointTraj:
         assert kwargs["interp_num"] == 5
         assert torch.equal(kwargs["trajectory"][:, 0, :], start)
         assert torch.equal(kwargs["trajectory"][:, 1, :], target)
+
+
+class TestPlanArmTraj:
+    def setup_method(self):
+        self.mg = _make_mock_motion_generator()
+        self.builder = TrajectoryBuilder(self.mg)
+
+    def test_non_neural_planner_uses_ik_path(self):
+        start = torch.zeros(2, 6)
+        target_states = [
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        ]
+        expected = torch.ones(2, 5, 6)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=expected,
+        ):
+            ok, out = self.builder.plan_arm_traj(
+                target_states,
+                start,
+                5,
+                control_part="arm",
+                arm_dof=6,
+            )
+
+        assert ok is True
+        assert out is expected
+        assert not self.mg.generate.called
+
+    def test_neural_planner_calls_motion_generator_per_env(self):
+        self.mg.planner.cfg.planner_type = "neural"
+        start = torch.zeros(2, 6)
+        target_states = [
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        ]
+
+        def generate(target_states, options):
+            offset = float(self.mg.generate.call_count)
+            return PlanResult(
+                success=True,
+                positions=torch.stack(
+                    [
+                        options.start_qpos,
+                        options.start_qpos + offset,
+                    ]
+                ),
+            )
+
+        self.mg.generate.side_effect = generate
+
+        expected = torch.ones(2, 4, 6)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=expected,
+        ):
+            ok, out = self.builder.plan_arm_traj(
+                target_states,
+                start,
+                4,
+                control_part="arm",
+                arm_dof=6,
+            )
+
+        assert ok is True
+        assert self.mg.generate.call_count == 2
+        assert out is expected
+
+    def test_neural_planner_failure_returns_false(self):
+        self.mg.planner.cfg.planner_type = "neural"
+        self.mg.generate.return_value = PlanResult(success=False, positions=None)
+        start = torch.zeros(2, 6)
+        target_states = [
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        ]
+
+        ok, out = self.builder.plan_arm_traj(
+            target_states,
+            start,
+            4,
+            control_part="arm",
+            arm_dof=6,
+        )
+
+        assert ok is False
+        assert out.shape == (2, 4, 6)
+
+    def test_raw_neural_planner_does_not_call_final_ik_refine(self):
+        self.mg.planner.cfg.planner_type = "neural"
+        self.mg.robot.compute_ik = Mock()
+        start = torch.zeros(2, 6)
+        target_states = [
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        ]
+        self.mg.generate.return_value = PlanResult(
+            success=True,
+            positions=torch.stack([torch.zeros(6), torch.ones(6)]),
+        )
+
+        expected = torch.ones(2, 4, 6)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=expected,
+        ):
+            ok, out = self.builder.plan_arm_traj(
+                target_states,
+                start,
+                4,
+                control_part="arm",
+                arm_dof=6,
+            )
+
+        assert ok is True
+        assert out is expected
+        self.mg.robot.compute_ik.assert_not_called()
+
+    def test_neural_refine_appends_final_ik_waypoint(self):
+        self.mg.planner.cfg.planner_type = "neural_refine"
+        start = torch.zeros(2, 6)
+        target_states = [
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        ]
+        self.mg.generate.return_value = PlanResult(
+            success=True,
+            positions=torch.stack([torch.zeros(6), torch.ones(6)]),
+        )
+        refined_qpos = torch.full((1, 6), 2.0)
+        self.mg.robot.compute_ik = Mock(
+            return_value=(torch.ones(1, dtype=torch.bool), refined_qpos)
+        )
+
+        expected = torch.ones(2, 4, 6)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=expected,
+        ) as interpolate:
+            ok, out = self.builder.plan_arm_traj(
+                target_states,
+                start,
+                4,
+                control_part="arm",
+                arm_dof=6,
+            )
+
+        assert ok is True
+        assert out is expected
+        assert self.mg.robot.compute_ik.call_count == 2
+        _, kwargs = interpolate.call_args
+        assert kwargs["trajectory"].shape == (2, 3, 6)
+        assert torch.allclose(kwargs["trajectory"][:, -1, :], refined_qpos.expand(2, 6))
+
+    def test_neural_refine_ik_failure_returns_false(self):
+        self.mg.planner.cfg.planner_type = "neural_refine"
+        start = torch.zeros(2, 6)
+        target_states = [
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            [PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        ]
+        self.mg.generate.return_value = PlanResult(
+            success=True,
+            positions=torch.stack([torch.zeros(6), torch.ones(6)]),
+        )
+        self.mg.robot.compute_ik = Mock(
+            return_value=(torch.zeros(1, dtype=torch.bool), torch.zeros(1, 6))
+        )
+
+        ok, out = self.builder.plan_arm_traj(
+            target_states,
+            start,
+            4,
+            control_part="arm",
+            arm_dof=6,
+        )
+
+        assert ok is False
+        assert out.shape == (2, 4, 6)
 
 
 class TestIkSolve:

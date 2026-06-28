@@ -55,7 +55,20 @@ class _RunningObsNormalizer:
 
 
 class _WaypointTransformerActor(nn.Module):
-    """APG waypoint actor runtime copied in lightweight form for inference."""
+    """Lightweight APG waypoint actor used for runtime inference."""
+
+    @staticmethod
+    def expected_obs_dim(
+        action_dim: int, num_waypoints: int, use_relative_obs: bool
+    ) -> int:
+        """Return the observation size implied by the checkpoint metadata."""
+        action_dim = int(action_dim)
+        num_waypoints = int(num_waypoints)
+        obs_dim = action_dim + 7 + num_waypoints * 3
+        obs_dim += num_waypoints * 4 + num_waypoints * 2 + action_dim
+        if use_relative_obs:
+            obs_dim += 7
+        return obs_dim
 
     def __init__(
         self,
@@ -69,20 +82,19 @@ class _WaypointTransformerActor(nn.Module):
         transformer_ff_dim: int | None = None,
     ):
         super().__init__()
+        self.action_dim = int(action_dim)
         self.num_waypoints = int(num_waypoints)
         self.use_relative_obs = bool(use_relative_obs)
-        if int(action_dim) != 7:
-            raise ValueError(
-                "Waypoint transformer checkpoints currently assume a 7-DoF arm. "
-                f"Got action_dim={action_dim}."
-            )
-        self.state_dim = 7 + 7 + 7 + (7 if self.use_relative_obs else 0)
+        self.state_dim = self.action_dim + 7 + self.action_dim
+        if self.use_relative_obs:
+            self.state_dim += 7
         self.waypoint_token_dim = 3 + 4 + 1 + 1
 
-        expected_obs_dim = 7 + 7 + self.num_waypoints * 3
-        expected_obs_dim += self.num_waypoints * 4 + self.num_waypoints * 2 + 7
-        if self.use_relative_obs:
-            expected_obs_dim += 7
+        expected_obs_dim = self.expected_obs_dim(
+            self.action_dim,
+            self.num_waypoints,
+            self.use_relative_obs,
+        )
         if int(obs_dim) != expected_obs_dim:
             raise ValueError(
                 "Waypoint transformer expected obs_dim "
@@ -117,14 +129,15 @@ class _WaypointTransformerActor(nn.Module):
             nn.LayerNorm(hidden_dim),
             _layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.Tanh(),
-            _layer_init(nn.Linear(hidden_dim, action_dim), std=0.01),
+            _layer_init(nn.Linear(hidden_dim, self.action_dim), std=0.01),
         )
 
     def _parse_obs(self, x: torch.Tensor):
         n = self.num_waypoints
+        d = self.action_dim
         cursor = 0
-        joint = x[:, cursor : cursor + 7]
-        cursor += 7
+        joint = x[:, cursor : cursor + d]
+        cursor += d
         eef_pose = x[:, cursor : cursor + 7]
         cursor += 7
         waypoint_pos = x[:, cursor : cursor + 3 * n].reshape(-1, n, 3)
@@ -135,8 +148,8 @@ class _WaypointTransformerActor(nn.Module):
         cursor += n
         valid_mask = x[:, cursor : cursor + n].reshape(-1, n, 1)
         cursor += n
-        last_action = x[:, cursor : cursor + 7]
-        cursor += 7
+        last_action = x[:, cursor : cursor + d]
+        cursor += d
 
         state_parts = [joint, eef_pose, last_action]
         if self.use_relative_obs:
@@ -168,16 +181,18 @@ class _WaypointTransformerActor(nn.Module):
 
 @configclass
 class NeuralPlannerCfg(BasePlannerCfg):
+    """Configuration for the neural motion generation planner."""
+
     planner_type: str = "neural"
 
     checkpoint_path: str = MISSING
-    """Path to an APG waypoint checkpoint (.pt), e.g. from ``download_neural_planner_checkpoint()``."""
+    """Path to an APG waypoint checkpoint."""
 
     control_part: str | None = None
-    """Robot control part used for FK and qpos, e.g. 'left_arm'."""
+    """Robot control part used for FK and qpos, e.g. ``main_arm``."""
 
     max_steps: int | None = None
-    """Maximum rollout steps. If None, uses checkpoint max_episode_steps."""
+    """Maximum rollout steps. If None, uses checkpoint ``max_episode_steps``."""
 
     action_scale: float = 0.2
     """Delta joint scaling factor in radians."""
@@ -186,31 +201,30 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """Number of arm joints controlled by the APG policy."""
 
     pos_eps: float | None = None
-    """Waypoint position threshold. If None, uses checkpoint waypoint_pos_threshold."""
+    """Waypoint position threshold. If None, uses the checkpoint value."""
 
     rot_eps: float | None = None
-    """Waypoint rotation threshold. If None, uses checkpoint waypoint_rot_threshold."""
+    """Waypoint rotation threshold. If None, uses the checkpoint value."""
 
     dt: float = 0.01
-    """Nominal timestep reported in PlanResult."""
+    """Nominal timestep reported in :class:`PlanResult`."""
 
 
 @configclass
 class NeuralPlanOptions(PlanOptions):
+    """Runtime options for :class:`NeuralPlanner`."""
+
     control_part: str | None = None
     start_qpos: torch.Tensor | None = None
     max_steps: int | None = None
+    env_id: int | None = None
 
 
 class NeuralPlanner(BasePlanner):
+    """Learning-based EEF waypoint planner backed by a trained APG policy."""
+
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)
-
-        if self.robot.num_instances > 1:
-            logger.log_error(
-                "NeuralPlanner currently supports one robot instance",
-                NotImplementedError,
-            )
 
         self.cfg: NeuralPlannerCfg = cfg
         if cfg.checkpoint_path is MISSING or not str(cfg.checkpoint_path):
@@ -274,6 +288,19 @@ class NeuralPlanner(BasePlanner):
         self._intermediate_orientation = bool(
             self._ckpt_args.get("waypoint_intermediate_orientation", True)
         )
+        expected_obs_dim = _WaypointTransformerActor.expected_obs_dim(
+            self._action_dim,
+            self._num_waypoints,
+            self._use_relative_obs,
+        )
+        if self._obs_dim != expected_obs_dim:
+            raise ValueError(
+                f"Checkpoint obs_dim {self._obs_dim} does not match "
+                f"num_arm_joints={self._action_dim} for "
+                f"waypoint_max={self._num_waypoints}. Expected obs_dim "
+                f"{expected_obs_dim}. Use a checkpoint trained for this robot "
+                "and control_part."
+            )
 
         self._normalizer = _RunningObsNormalizer(
             ckpt["obs_normalizer"]["mean"].to(self.device),
@@ -313,33 +340,34 @@ class NeuralPlanner(BasePlanner):
         target_states: list[PlanState],
         options: NeuralPlanOptions = NeuralPlanOptions(),
     ) -> PlanResult:
+        """Plan an EEF waypoint trajectory by rolling out the neural policy."""
         if not target_states:
             return PlanResult(success=False, positions=None)
 
         control_part = options.control_part or self.cfg.control_part
         if control_part is None:
-            logger.log_error(
-                "control_part is required for NeuralPlanner",
-                ValueError,
-            )
+            logger.log_error("control_part is required for NeuralPlanner", ValueError)
+        env_id = self._resolve_env_id(options.env_id)
 
         waypoints_pos, waypoints_quat, valid_mask, episode_k = self._parse_waypoints(
             target_states
         )
-        qpos = self._initial_qpos(control_part, options.start_qpos)
-        limits = self.robot.get_qpos_limits(name=control_part)[0].to(self.device)
+        qpos = self._initial_qpos(control_part, options.start_qpos, env_id=env_id)
+        limits = self.robot.get_qpos_limits(name=control_part, env_ids=[env_id])[0].to(
+            self.device
+        )
         lower = limits[: self._action_dim, 0]
         upper = limits[: self._action_dim, 1]
 
         last_action = torch.zeros(1, self._action_dim, device=self.device)
         active_idx = 0
         positions = [qpos.squeeze(0).clone()]
-        xpos_list = [self._fk_matrix(qpos, control_part).squeeze(0)]
+        xpos_list = [self._fk_matrix(qpos, control_part, env_id=env_id).squeeze(0)]
         max_steps = int(options.max_steps or self._max_steps)
 
         with torch.no_grad():
             for _ in range(max_steps):
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
+                ee_pose = self._fk_pose_xyzw(qpos, control_part, env_id=env_id)
                 obs = self._build_obs(
                     qpos[:, : self._action_dim],
                     ee_pose,
@@ -357,9 +385,11 @@ class NeuralPlanner(BasePlanner):
                 last_action = action
 
                 positions.append(qpos.squeeze(0).clone())
-                xpos_list.append(self._fk_matrix(qpos, control_part).squeeze(0))
+                xpos_list.append(
+                    self._fk_matrix(qpos, control_part, env_id=env_id).squeeze(0)
+                )
 
-                ee_pose = self._fk_pose_xyzw(qpos, control_part)
+                ee_pose = self._fk_pose_xyzw(qpos, control_part, env_id=env_id)
                 if self._is_active_reached(
                     ee_pose, waypoints_pos, waypoints_quat, active_idx, episode_k
                 ):
@@ -413,11 +443,27 @@ class NeuralPlanner(BasePlanner):
 
         return waypoint_pos, waypoint_quat, valid_mask, len(target_states)
 
+    def _resolve_env_id(self, env_id: int | None) -> int:
+        if env_id is None:
+            if self.robot.num_instances > 1:
+                logger.log_error(
+                    "env_id is required for NeuralPlanner when the robot has "
+                    f"{self.robot.num_instances} instances.",
+                    ValueError,
+                )
+            return 0
+        if env_id < 0 or env_id >= self.robot.num_instances:
+            logger.log_error(
+                f"env_id must be in [0, {self.robot.num_instances}), got {env_id}.",
+                ValueError,
+            )
+        return int(env_id)
+
     def _initial_qpos(
-        self, control_part: str, start_qpos: torch.Tensor | None
+        self, control_part: str, start_qpos: torch.Tensor | None, *, env_id: int
     ) -> torch.Tensor:
         if start_qpos is None:
-            qpos = self.robot.get_qpos(name=control_part)[0]
+            qpos = self.robot.get_qpos(name=control_part)[env_id]
         else:
             qpos = torch.as_tensor(start_qpos, dtype=torch.float32, device=self.device)
         if qpos.dim() == 1:
@@ -430,11 +476,19 @@ class NeuralPlanner(BasePlanner):
             )
         return qpos.to(self.device).clone()
 
-    def _fk_matrix(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
-        return self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
+    def _fk_matrix(
+        self, qpos: torch.Tensor, control_part: str, *, env_id: int
+    ) -> torch.Tensor:
+        return self.robot.compute_fk(
+            qpos=qpos, name=control_part, env_ids=[env_id], to_matrix=True
+        )
 
-    def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
-        fk = self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=False)
+    def _fk_pose_xyzw(
+        self, qpos: torch.Tensor, control_part: str, *, env_id: int
+    ) -> torch.Tensor:
+        fk = self.robot.compute_fk(
+            qpos=qpos, name=control_part, env_ids=[env_id], to_matrix=False
+        )
         pos = fk[:, :3]
         quat_xyzw = convert_quat(fk[:, 3:7], to="xyzw")
         return torch.cat([pos, quat_xyzw], dim=-1)
