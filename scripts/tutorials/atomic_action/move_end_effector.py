@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -38,27 +37,17 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    LightCfg,
-    RenderCfg,
-    RobotCfg,
-    URDFCfg,
-)
+from embodichain.lab.sim.cfg import LightCfg, RenderCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
-
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-GRIPPER_HAND_JOINT_PATTERN = "GRIPPER_FINGER1_JOINT_1"
-GRIPPER_TCP_Z = 0.15
 
 MOVE_SAMPLE_INTERVAL = 80
 POST_TRAJECTORY_STEPS = 120
@@ -106,41 +95,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
 
 
 def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
-    ur5_urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
-    gripper_urdf_path = get_data_path(GRIPPER_URDF_PATH)
-    cfg = RobotCfg(
-        uid="UR5",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur5_urdf_path},
-                {"component_type": "hand", "urdf_path": gripper_urdf_path},
-            ]
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, GRIPPER_HAND_JOINT_PATTERN: 1e3},
-            damping={"JOINT[0-9]": 1e3, GRIPPER_HAND_JOINT_PATTERN: 1e2},
-            max_effort={"JOINT[0-9]": 1e5, GRIPPER_HAND_JOINT_PATTERN: 1e4},
-            drive_type="force",
-        ),
-        control_parts={
-            "arm": ["JOINT[0-9]"],
-            "hand": [GRIPPER_HAND_JOINT_PATTERN],
-        },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-            )
-        },
-        init_qpos=[0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-        init_pos=position,
-    )
+    cfg = create_ur5_gripper_robot_cfg(init_pos=position)
     return sim.add_robot(cfg=cfg)
 
 

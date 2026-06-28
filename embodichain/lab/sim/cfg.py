@@ -1049,10 +1049,16 @@ class URDFCfg:
 
     name_case: dict[str, str] = field(
         default_factory=lambda: {
-            "joint": "upper",
+            "joint": "lower",
             "link": "lower",
         }
     )
+    """Case normalization policy applied to joint/link names during URDF assembly.
+
+    Supported values per key are ``"upper"``, ``"lower"`` or ``"original"``
+    (legacy alias ``"none"``). The default upper-cases joints and lower-cases
+    links. Set ``{"joint": "original"}`` to preserve the source URDF casing.
+    """
 
     def __init__(
         self,
@@ -1117,8 +1123,8 @@ class URDFCfg:
 
         if name_case is None:
             self.name_case = {
-                "joint": "upper",
-                "link": "lower",
+                "joint": "original",
+                "link": "original",
             }
         else:
             self.name_case = name_case

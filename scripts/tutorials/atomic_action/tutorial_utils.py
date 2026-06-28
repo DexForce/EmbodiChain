@@ -23,8 +23,10 @@ from collections.abc import Sequence
 
 import torch
 
+from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager
-from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
+from embodichain.lab.sim.robots import URRobotCfg
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -39,6 +41,10 @@ DEFAULT_AUTO_PLAY_LOOK_AT = (
 )
 DEFAULT_AXIS_LEN = 0.06
 DEFAULT_AXIS_SIZE = 0.003
+
+GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
+GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
+GRIPPER_TCP_Z = 0.15
 
 
 def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
@@ -111,10 +117,81 @@ def draw_axis_marker(
     )
 
 
+def create_ur5_gripper_robot_cfg(
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+) -> RobotCfg:
+    """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
+
+    The arm is taken from :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`
+    so the URDF, joint names and drive defaults match the canonical UR family
+    config. The gripper and tool-center-point offset are added on top to match
+    the existing atomic-action tutorial setups.
+
+    .. attention::
+        :class:`~embodichain.lab.sim.cfg.URDFCfg` defaults to upper-casing joint
+        names during multi-component assembly. The override dict passed to
+        :meth:`URRobotCfg.from_dict` sets
+        ``urdf_cfg.name_case = {"joint": "lower", "link": "lower"}`` so the
+        assembled robot keeps the source URDF's lowercase joint names
+        (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
+        control parts produced by :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`.
+
+    Args:
+        init_pos: Initial root position of the robot in the arena.
+
+    Returns:
+        A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
+    """
+    return URRobotCfg.from_dict(
+        {
+            "robot_type": "ur5",
+            "uid": "UR5",
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "hand",
+                        "urdf_path": GRIPPER_URDF_PATH,
+                    }
+                ],
+            },
+            "control_parts": {
+                "hand": [GRIPPER_HAND_JOINT_PATTERN],
+            },
+            "drive_pros": {
+                "stiffness": {
+                    GRIPPER_HAND_JOINT_PATTERN: 1e3,
+                },
+                "damping": {
+                    GRIPPER_HAND_JOINT_PATTERN: 1e2,
+                },
+                "max_effort": {
+                    GRIPPER_HAND_JOINT_PATTERN: 1e4,
+                },
+            },
+            "solver_cfg": {
+                "arm": {
+                    "tcp": [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                }
+            },
+            "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
+            "init_pos": init_pos,
+        }
+    )
+
+
 __all__ = [
     "DEFAULT_AUTO_PLAY_LOOK_AT",
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
+    "GRIPPER_HAND_JOINT_PATTERN",
+    "GRIPPER_TCP_Z",
+    "GRIPPER_URDF_PATH",
+    "create_ur5_gripper_robot_cfg",
     "get_tutorial_window_size",
     "start_auto_play_recording",
     "stop_auto_play_recording",

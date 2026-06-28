@@ -140,9 +140,9 @@ class URRobotCfg(RobotCfg):
         }
 
         self.drive_pros = JointDrivePropertiesCfg(
-            stiffness=7e4,
-            damping=1e3,
-            max_effort=_UR_MAX_EFFORT[robot_type],
+            stiffness={"arm": 1e4},
+            damping={"arm": 1e3},
+            max_effort={"arm": _UR_MAX_EFFORT[robot_type]},
         )
 
     @property

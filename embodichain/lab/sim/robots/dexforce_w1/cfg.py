@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import enum
-import json
 import numpy as np
 import typing
 import torch
@@ -52,7 +50,7 @@ class DexforceW1Cfg(RobotCfg):
     """DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters."""
 
     version: DexforceW1Version = DexforceW1Version.V021
-    arm_kind: DexforceW1ArmKind = DexforceW1ArmKind.INDUSTRIAL
+    arm_kind: DexforceW1ArmKind = DexforceW1ArmKind.ANTHROPOMORPHIC
     with_default_eef: bool = True
 
     @classmethod
@@ -81,7 +79,7 @@ class DexforceW1Cfg(RobotCfg):
         """
         init_dict = init_dict or {}
         version = init_dict.get("version", DexforceW1Version.V021)
-        arm_kind = init_dict.get("arm_kind", DexforceW1ArmKind.INDUSTRIAL)
+        arm_kind = init_dict.get("arm_kind", DexforceW1ArmKind.ANTHROPOMORPHIC)
         with_default_eef = init_dict.get("with_default_eef", True)
 
         self.version = (
@@ -270,15 +268,9 @@ class DexforceW1Cfg(RobotCfg):
             "min_velocity_iters": 8,
             "drive_pros": drive_pros,
             "attrs": RigidBodyAttributesCfg(
-                mass=1.0,
                 static_friction=0.95,
                 dynamic_friction=0.9,
-                linear_damping=0.7,
-                angular_damping=0.7,
-                contact_offset=0.005,
-                rest_offset=0.001,
-                restitution=0.05,
-                max_depenetration_velocity=10.0,
+                contact_offset=0.001,
             ),
         }
 
@@ -343,7 +335,3 @@ if __name__ == "__main__":
     robot = sim.add_robot(cfg=cfg)
     sim.update(step=1)
     print("DexforceW1 robot added to the simulation.")
-
-    from IPython import embed
-
-    embed()
