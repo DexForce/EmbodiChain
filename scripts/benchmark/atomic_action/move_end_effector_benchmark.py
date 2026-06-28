@@ -149,9 +149,9 @@ def _run_case(
     if is_success and traj.shape[1] > 0:
         arm_joint_ids = robot.get_joint_ids(name="arm")
         final_arm_qpos = traj[:, -1, arm_joint_ids]
-        final_pose = robot.compute_fk(
-            qpos=final_arm_qpos, name="arm", to_matrix=True
-        )[0]
+        final_pose = robot.compute_fk(qpos=final_arm_qpos, name="arm", to_matrix=True)[
+            0
+        ]
         final_error_m = float(torch.linalg.norm(final_pose[:3, 3] - target_pose[:3, 3]))
     target_reached = bool(
         is_success
@@ -286,9 +286,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_single_action_leaderboard(
-        "move_end_effector", metric_rows
-    )
+    leaderboard_rows = build_single_action_leaderboard("move_end_effector", metric_rows)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_move_end_effector",
         perf_rows=perf_rows,

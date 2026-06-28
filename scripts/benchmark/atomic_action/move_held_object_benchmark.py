@@ -334,7 +334,10 @@ def _run_case(
         held_object_z_error_m = None
         held_object_xyz_error_m = None
 
-        if getattr(precondition_traj, "ndim", 0) >= 3 and precondition_traj.shape[1] > 0:
+        if (
+            getattr(precondition_traj, "ndim", 0) >= 3
+            and precondition_traj.shape[1] > 0
+        ):
             if bool(is_success) and getattr(traj, "ndim", 0) >= 3 and traj.shape[1] > 0:
                 validation_traj = torch.cat((precondition_traj, traj), dim=1)
             else:
@@ -373,9 +376,7 @@ def _run_case(
             if bool(is_success) and final_obj_position is not None:
                 held_object_xy_error_m = xy_distance_m(final_obj_position, case.xyz)
                 held_object_z_error_m = abs(final_obj_position[2] - case.xyz[2])
-                held_object_xyz_error_m = xyz_distance_m(
-                    final_obj_position, case.xyz
-                )
+                held_object_xyz_error_m = xyz_distance_m(final_obj_position, case.xyz)
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
@@ -608,9 +609,7 @@ def _build_rows(results: list[dict[str, object]]):
                 "held_object_xy_error_m": format_float(
                     result["held_object_xy_error_m"]
                 ),
-                "held_object_z_error_m": format_float(
-                    result["held_object_z_error_m"]
-                ),
+                "held_object_z_error_m": format_float(result["held_object_z_error_m"]),
                 "held_object_xyz_error_m": format_float(
                     result["held_object_xyz_error_m"]
                 ),
@@ -727,8 +726,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             + ", ".join(describe_object_preset(preset) for preset in object_presets),
             "Position cases: "
             + ", ".join(
-                f"{case.name}/{case.quadrant}/xy={case.xy}"
-                for case in position_cases
+                f"{case.name}/{case.quadrant}/xy={case.xy}" for case in position_cases
             ),
             "PickUp approach cases: " + ", ".join(approaches),
             "Held-object target cases: " + ", ".join(case.name for case in cases),

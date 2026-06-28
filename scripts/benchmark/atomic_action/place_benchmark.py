@@ -311,7 +311,10 @@ def _run_case(
         place_xy_error_m = None
         place_z_error_m = None
 
-        if getattr(precondition_traj, "ndim", 0) >= 3 and precondition_traj.shape[1] > 0:
+        if (
+            getattr(precondition_traj, "ndim", 0) >= 3
+            and precondition_traj.shape[1] > 0
+        ):
             if bool(is_success) and getattr(traj, "ndim", 0) >= 3 and traj.shape[1] > 0:
                 validation_traj = torch.cat((precondition_traj, traj), dim=1)
             else:
@@ -694,8 +697,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             + ", ".join(describe_object_preset(preset) for preset in object_presets),
             "Position cases: "
             + ", ".join(
-                f"{case.name}/{case.quadrant}/xy={case.xy}"
-                for case in position_cases
+                f"{case.name}/{case.quadrant}/xy={case.xy}" for case in position_cases
             ),
             "PickUp approach cases: " + ", ".join(approaches),
             "Place target cases: " + ", ".join(case.name for case in cases),

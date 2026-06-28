@@ -517,9 +517,7 @@ def _make_press_targets(
     move_position = press_position.clone()
     move_position[2] = object_top_z + PRESS_CLEARANCE
 
-    return make_top_down_eef_pose(move_position), make_top_down_eef_pose(
-        press_position
-    )
+    return make_top_down_eef_pose(move_position), make_top_down_eef_pose(press_position)
 
 
 def _compute_press_center_check(
@@ -640,10 +638,7 @@ def _run_press_case(
                 video_path=build_video_output_path(
                     args,
                     "atomic_action_press",
-                    (
-                        f"{preset.object_type}_{position_case.name}"
-                        f"_r{repeat_index}"
-                    ),
+                    (f"{preset.object_type}_{position_case.name}" f"_r{repeat_index}"),
                 ),
             )
             _reset_robot(robot, initial_qpos)
