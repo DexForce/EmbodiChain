@@ -16,15 +16,60 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from huggingface_hub import hf_hub_download
+
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 # HuggingFace endpoint. Mirrors (e.g. hf-mirror.com) often redirect to the
 # real hub without forwarding the required commit-hash response headers, so we
 # default to the canonical endpoint and rely on the system proxy when needed.
 _HF_ENDPOINT = "https://huggingface.co"
+_NEURAL_PLANNER_LOCAL_CHECKPOINT = Path(
+    "checkpoints/dexforce/neural_motion_generator/franka/franka.pt"
+)
+NEURAL_PLANNER_CHECKPOINT_ENV = "EMBODICHAIN_NEURAL_PLANNER_CHECKPOINT"
 
-__all__ = ["download_neural_planner_checkpoint"]
+__all__ = [
+    "NEURAL_PLANNER_CHECKPOINT_ENV",
+    "download_neural_planner_checkpoint",
+    "get_default_neural_planner_checkpoint_path",
+]
+
+
+def get_default_neural_planner_checkpoint_path(
+    data_root: str | os.PathLike[str] | None = None,
+) -> str:
+    """Return the default local NeuralPlanner checkpoint path."""
+    root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+    return str(Path(root).expanduser() / _NEURAL_PLANNER_LOCAL_CHECKPOINT)
+
+
+def _normalize_existing_checkpoint_path(
+    checkpoint_path: str | os.PathLike[str],
+) -> str:
+    path = os.path.abspath(os.path.expanduser(os.fspath(checkpoint_path)))
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"NeuralPlanner checkpoint not found: {path}")
+    return path
+
+
+def _resolve_local_neural_planner_checkpoint(
+    checkpoint_path: str | os.PathLike[str] | None,
+) -> str | None:
+    if checkpoint_path is not None:
+        return _normalize_existing_checkpoint_path(checkpoint_path)
+
+    env_checkpoint_path = os.environ.get(NEURAL_PLANNER_CHECKPOINT_ENV)
+    if env_checkpoint_path:
+        return _normalize_existing_checkpoint_path(env_checkpoint_path)
+
+    default_checkpoint_path = get_default_neural_planner_checkpoint_path()
+    if os.path.isfile(default_checkpoint_path):
+        return default_checkpoint_path
+
+    return None
 
 
 def download_neural_planner_checkpoint(
@@ -32,11 +77,21 @@ def download_neural_planner_checkpoint(
     filename: str = "franka/franka.pt",
     token: str | None = None,
     endpoint: str = _HF_ENDPOINT,
+    checkpoint_path: str | os.PathLike[str] | None = None,
 ) -> str:
-    """Download a neural planner checkpoint from HuggingFace.
+    """Resolve or download a neural planner checkpoint.
 
-    The repository is gated. Either set the ``HF_TOKEN`` environment variable or
-    run ``huggingface-cli login`` before calling this function.
+    Local checkpoint resolution is tried first, in this order:
+
+    1. The explicit ``checkpoint_path`` argument.
+    2. The ``EMBODICHAIN_NEURAL_PLANNER_CHECKPOINT`` environment variable.
+    3. ``~/.cache/embodichain_data/checkpoints/dexforce/neural_motion_generator/franka/franka.pt``
+       unless ``EMBODICHAIN_DATA_ROOT`` overrides the data root.
+
+    If no local checkpoint is found, the checkpoint is downloaded from
+    HuggingFace. The repository is gated. Either set the ``HF_TOKEN``
+    environment variable or run ``huggingface-cli login`` before calling this
+    function.
 
     If your network requires an HTTP proxy, set ``HTTPS_PROXY`` or
     ``https_proxy`` in the environment before launching Python.
@@ -50,6 +105,8 @@ def download_neural_planner_checkpoint(
         endpoint: HuggingFace-compatible endpoint URL. Defaults to
             ``https://huggingface.co``. Mirrors that merely redirect to the
             real hub are not supported.
+        checkpoint_path: Optional local checkpoint path. If provided, this path
+            must exist and HuggingFace is not used.
 
     Returns:
         str: Local path to the downloaded checkpoint file.
@@ -57,6 +114,10 @@ def download_neural_planner_checkpoint(
     Raises:
         RuntimeError: If the download fails, with authentication instructions.
     """
+    local_checkpoint_path = _resolve_local_neural_planner_checkpoint(checkpoint_path)
+    if local_checkpoint_path is not None:
+        return local_checkpoint_path
+
     # Normalize proxy env vars: the ``requests`` library on Linux requires the
     # lowercase form (``https_proxy``), but users typically export the uppercase
     # form (``HTTPS_PROXY``).

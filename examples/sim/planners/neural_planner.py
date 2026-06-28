@@ -57,6 +57,15 @@ def parse_args() -> argparse.Namespace:
         help="Number of EEF waypoints to send to the neural planner.",
     )
     parser.add_argument(
+        "--checkpoint-path",
+        type=str,
+        default=None,
+        help=(
+            "Local NeuralPlanner checkpoint path. If omitted, local cache and "
+            "HuggingFace are used."
+        ),
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         help="Run without opening the viewer window.",
@@ -188,7 +197,9 @@ def play_trajectory(
 
 def main() -> None:
     args = parse_args()
-    checkpoint_path = download_neural_planner_checkpoint()
+    checkpoint_path = download_neural_planner_checkpoint(
+        checkpoint_path=args.checkpoint_path
+    )
 
     sim_device = _resolve_device(args.device)
     sim = SimulationManager(

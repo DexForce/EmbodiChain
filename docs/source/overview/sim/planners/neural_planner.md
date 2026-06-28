@@ -15,6 +15,13 @@ trained APG checkpoint through `MotionGenerator` to reach Cartesian targets.
 
 Pre-trained checkpoints are hosted on HuggingFace and can be downloaded with
 `download_neural_planner_checkpoint()` (requires `HF_TOKEN` environment variable).
+If you already have `franka.pt`, pass it explicitly or place it at:
+
+```text
+~/.cache/embodichain_data/checkpoints/dexforce/neural_motion_generator/franka/franka.pt
+```
+
+You can also set `EMBODICHAIN_NEURAL_PLANNER_CHECKPOINT=/path/to/franka.pt`.
 
 ```python
 from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
@@ -60,4 +67,11 @@ result = motion_generator.generate(
 python examples/sim/planners/neural_planner.py --headless --device cuda
 ```
 
-The example downloads the checkpoint automatically on first run.
+Use a local checkpoint without HuggingFace:
+
+```bash
+python examples/sim/planners/neural_planner.py --headless --device cuda --checkpoint-path /path/to/franka.pt
+```
+
+The example downloads the checkpoint automatically on first run only when no
+local checkpoint is provided or found in the default cache path.
