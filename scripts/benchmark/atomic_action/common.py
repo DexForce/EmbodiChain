@@ -44,6 +44,10 @@ DEFAULT_VIDEO_WIDTH = 640
 DEFAULT_VIDEO_HEIGHT = 480
 DEFAULT_VIDEO_HOLD_STEPS = 120
 DEFAULT_VIDEO_CASE_LIMIT = 0
+PHYSICAL_PICK_MIN_LIFT_M = 0.04
+PHYSICAL_PLACE_XY_TOLERANCE_M = 0.10
+PHYSICAL_MOVE_HELD_OBJECT_XYZ_TOLERANCE_M = 0.12
+PHYSICAL_VALIDATION_HOLD_STEPS = 80
 SIDE_GRASP_MAX_OPEN_AXIS_ABS_Z = 0.35
 SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT = 0.5
 BENCHMARK_PROFILES = ("smoke", "coverage", "full")
@@ -744,15 +748,72 @@ def park_rigid_object(
         sim.update(step=1)
 
 
+def object_position_tuple(obj) -> tuple[float, float, float]:
+    """Return the current object-frame origin position as a CPU tuple."""
+    pose = obj.get_local_pose(to_matrix=True)
+    xyz = pose[0, :3, 3]
+    if hasattr(xyz, "detach"):
+        xyz = xyz.detach().to("cpu").tolist()
+    return (float(xyz[0]), float(xyz[1]), float(xyz[2]))
+
+
+def xy_distance_m(
+    position: Sequence[float],
+    target: Sequence[float],
+) -> float:
+    """Return XY Euclidean distance in meters."""
+    return math.sqrt(
+        (float(position[0]) - float(target[0])) ** 2
+        + (float(position[1]) - float(target[1])) ** 2
+    )
+
+
+def xyz_distance_m(
+    position: Sequence[float],
+    target: Sequence[float],
+) -> float:
+    """Return XYZ Euclidean distance in meters."""
+    return math.sqrt(
+        (float(position[0]) - float(target[0])) ** 2
+        + (float(position[1]) - float(target[1])) ** 2
+        + (float(position[2]) - float(target[2])) ** 2
+    )
+
+
+def replay_trajectory_for_physical_validation(
+    sim,
+    robot,
+    obj,
+    traj,
+    on_step: Callable[[int], None] | None = None,
+    hold_steps: int = PHYSICAL_VALIDATION_HOLD_STEPS,
+) -> tuple[float, float, float] | None:
+    """Replay a trajectory in physics and return the final object position."""
+    if traj is None or getattr(traj, "ndim", 0) < 3 or traj.shape[1] == 0:
+        return None
+
+    for waypoint_index in range(traj.shape[1]):
+        robot.set_qpos(traj[:, waypoint_index, :])
+        sim.update(step=4)
+        if on_step is not None:
+            on_step(waypoint_index)
+
+    final_qpos = traj[:, -1, :]
+    for _ in range(hold_steps):
+        robot.set_qpos(final_qpos)
+        sim.update(step=2)
+    return object_position_tuple(obj)
+
+
 def should_record_case(
     args: argparse.Namespace,
     recorded_count: int,
-    planning_success: bool,
+    success: bool,
 ) -> bool:
     """Return whether a benchmark case should emit a replay video."""
     if not getattr(args, "record_video", False):
         return False
-    if not planning_success and not getattr(args, "record_failed_video", False):
+    if not success and not getattr(args, "record_failed_video", False):
         return False
 
     case_limit = getattr(args, "video_case_limit", DEFAULT_VIDEO_CASE_LIMIT)
@@ -793,13 +854,13 @@ def summarize_video_recording(
     if getattr(args, "record_video", False):
         if getattr(args, "record_failed_video", False):
             notes.append(
-                "Video policy: records successful replays and failed-case debug "
-                "videos when trajectory/static scene capture is available."
+                "Video policy: records report-success replays and failed-case "
+                "debug videos when trajectory/static scene capture is available."
             )
         else:
             notes.append(
-                "Video policy: records successful replays only; failed cases are "
-                "reported in the tables but do not emit videos."
+                "Video policy: records report-success replays only; failed "
+                "cases are reported in the tables but do not emit videos."
             )
     else:
         notes.append("Video policy: disabled.")
@@ -1099,11 +1160,17 @@ __all__ = [
     "MESH_OBJECT_PRESETS",
     "MeshObjectPreset",
     "PICKUP_APPROACH_CASES",
+    "PHYSICAL_MOVE_HELD_OBJECT_XYZ_TOLERANCE_M",
+    "PHYSICAL_PICK_MIN_LIFT_M",
+    "PHYSICAL_PLACE_XY_TOLERANCE_M",
+    "PHYSICAL_VALIDATION_HOLD_STEPS",
     "POSITION_CASES",
     "PositionCase",
+    "object_position_tuple",
     "park_rigid_object",
     "pickup_approach_direction_tuple",
     "record_static_scene_video",
+    "replay_trajectory_for_physical_validation",
     "replay_trajectory_with_recording",
     "reset_rigid_object",
     "reset_rigid_object_xy",
@@ -1122,4 +1189,6 @@ __all__ = [
     "timed_call",
     "summarize_video_recording",
     "write_markdown_report",
+    "xy_distance_m",
+    "xyz_distance_m",
 ]
