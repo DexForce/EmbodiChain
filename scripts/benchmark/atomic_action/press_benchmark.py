@@ -35,6 +35,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from scripts.benchmark.atomic_action.common import (
+    add_profile_benchmark_args,
+    add_video_benchmark_args,
+    build_video_output_path,
+    COVERAGE_POSITION_CASE_NAMES,
+    park_rigid_object,
+    replay_trajectory_with_recording,
+    reset_rigid_object,
+    reset_rigid_object_xy,
+    resolve_profile,
+    should_record_case,
+    SMOKE_POSITION_CASE_NAMES,
+)
+
 try:
     import psutil
 except ModuleNotFoundError:
@@ -176,6 +190,7 @@ class PressCaseResult:
     hit_step: int | None
     trajectory_waypoints: int
     failure_reason: str
+    video_path: str = ""
 
 
 OBJECT_PRESETS: dict[str, ObjectPreset] = {
@@ -214,24 +229,32 @@ POSITION_CASES: dict[str, PositionCase] = {
 }
 
 DEFAULT_OBJECT_TYPES = ("bottle", "mug")
-DEFAULT_POSITION_CASES = tuple(POSITION_CASES.keys())
+FULL_OBJECT_TYPES = tuple(OBJECT_PRESETS.keys())
+SMOKE_OBJECT_TYPES = ("bottle",)
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add atomic-action benchmark arguments to an argument parser."""
+    add_profile_benchmark_args(parser)
     parser.add_argument(
         "--object_types",
         nargs="+",
         choices=(*OBJECT_PRESETS.keys(), "all"),
-        default=list(DEFAULT_OBJECT_TYPES),
-        help="Object presets to benchmark. Use 'all' to include every preset.",
+        default=None,
+        help=(
+            "Object presets to benchmark. Defaults are selected by --profile; "
+            "use 'all' to include every preset."
+        ),
     )
     parser.add_argument(
         "--position_cases",
         nargs="+",
         choices=(*POSITION_CASES.keys(), "all"),
-        default=list(DEFAULT_POSITION_CASES),
-        help="Initial position cases to benchmark. Use 'all' for all quadrants.",
+        default=None,
+        help=(
+            "Initial position cases to benchmark. Defaults are selected by "
+            "--profile; use 'all' for all near/far cases."
+        ),
     )
     parser.add_argument(
         "--repeat",
@@ -242,7 +265,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="Run one representative case only for quick validation.",
+        help="Alias for --profile smoke.",
     )
     parser.add_argument(
         "--device",
@@ -257,6 +280,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
         default="auto",
         help="Renderer backend used by SimulationManager.",
     )
+    add_video_benchmark_args(parser)
     parser.add_argument(
         "--press_tolerance",
         type=float,
@@ -367,15 +391,41 @@ def _write_markdown_report(
     return report_path
 
 
-def _select_object_presets(object_types: list[str]) -> list[ObjectPreset]:
+def _default_object_types_for_profile(profile: str) -> tuple[str, ...]:
+    """Return default Press primitive object names for a profile."""
+    if profile in ("smoke", "coverage", "full"):
+        return SMOKE_OBJECT_TYPES
+    raise ValueError(f"Unsupported benchmark profile: {profile}")
+
+
+def _select_object_presets(
+    object_types: list[str] | None,
+    profile: str,
+) -> list[ObjectPreset]:
     """Resolve selected object preset names."""
+    if not object_types:
+        object_types = list(_default_object_types_for_profile(profile))
     if "all" in object_types:
         return list(OBJECT_PRESETS.values())
     return [OBJECT_PRESETS[name] for name in object_types]
 
 
-def _select_position_cases(position_cases: list[str]) -> list[PositionCase]:
+def _default_position_cases_for_profile(profile: str) -> tuple[str, ...]:
+    """Return default Press position case names for a profile."""
+    if profile == "smoke":
+        return SMOKE_POSITION_CASE_NAMES
+    if profile in ("coverage", "full"):
+        return COVERAGE_POSITION_CASE_NAMES
+    raise ValueError(f"Unsupported benchmark profile: {profile}")
+
+
+def _select_position_cases(
+    position_cases: list[str] | None,
+    profile: str,
+) -> list[PositionCase]:
     """Resolve selected position case names."""
+    if not position_cases:
+        position_cases = list(_default_position_cases_for_profile(profile))
     if "all" in position_cases:
         return list(POSITION_CASES.values())
     return [POSITION_CASES[name] for name in position_cases]
@@ -551,18 +601,26 @@ def _run_press_case(
     robot: Robot,
     atomic_engine: AtomicActionEngine,
     initial_qpos: torch.Tensor,
+    obj: RigidObject,
+    base_obj_pose: torch.Tensor,
     preset: ObjectPreset,
     position_case: PositionCase,
     repeat_index: int,
     press_tolerance: float,
+    args: argparse.Namespace,
+    recorded_count: int,
 ) -> PressCaseResult:
     """Run one object-position Press benchmark case."""
     case_id = f"{preset.object_type}:{position_case.name}:r{repeat_index}"
-    obj: RigidObject | None = None
     try:
         _reset_robot(robot, initial_qpos)
-        obj = _create_benchmark_object(sim, preset, position_case, repeat_index)
-        settle_object(sim, obj, step=5)
+        initial_obj_pose = reset_rigid_object_xy(
+            obj=obj,
+            base_pose=base_obj_pose,
+            xy=position_case.xy,
+            sim=sim,
+            settle_steps=2,
+        )
         move_target, press_target = _make_press_targets(obj, preset)
 
         elapsed, mem_delta, peak_gpu, planning_success, traj = _timed_atomic_run(
@@ -570,6 +628,27 @@ def _run_press_case(
             move_target=move_target,
             press_target=press_target,
         )
+        video_path = None
+        if should_record_case(args, recorded_count, bool(planning_success)):
+            _reset_robot(robot, initial_qpos)
+            reset_rigid_object(obj, initial_obj_pose)
+            video_path = replay_trajectory_with_recording(
+                sim=sim,
+                robot=robot,
+                traj=traj,
+                args=args,
+                video_path=build_video_output_path(
+                    args,
+                    "atomic_action_press",
+                    (
+                        f"{preset.object_type}_{position_case.name}"
+                        f"_r{repeat_index}"
+                    ),
+                ),
+            )
+            _reset_robot(robot, initial_qpos)
+            reset_rigid_object(obj, initial_obj_pose)
+
         center_hit = False
         xy_error_m: float | None = None
         hit_step: int | None = None
@@ -606,6 +685,7 @@ def _run_press_case(
             hit_step=hit_step,
             trajectory_waypoints=int(traj.shape[1]) if traj.ndim >= 2 else 0,
             failure_reason=failure_reason,
+            video_path=str(video_path) if video_path is not None else "",
         )
     except Exception as exc:
         return PressCaseResult(
@@ -627,9 +707,6 @@ def _run_press_case(
             trajectory_waypoints=0,
             failure_reason=f"exception:{type(exc).__name__}:{exc}",
         )
-    finally:
-        if obj is not None:
-            sim.remove_asset(obj.uid)
 
 
 def _build_perf_rows(results: list[PressCaseResult]) -> list[dict[str, object]]:
@@ -778,6 +855,8 @@ def _build_notes(
     object_presets: list[ObjectPreset],
     position_cases: list[PositionCase],
     repeat: int,
+    video_paths: list[str],
+    profile: str,
 ) -> list[str]:
     """Build report notes with benchmark coverage metadata."""
     quadrant_counts: dict[str, int] = {}
@@ -786,6 +865,7 @@ def _build_notes(
             quadrant_counts.get(position_case.quadrant, 0) + 1
         )
     return [
+        f"Profile: {profile}",
         "Object presets: "
         + ", ".join(
             f"{preset.object_type}/{preset.material_name}/size={preset.size}"
@@ -797,6 +877,7 @@ def _build_notes(
         ),
         f"CPU memory backend: {CPU_MEMORY_BACKEND}",
         f"Repeat per object-position case: {repeat}",
+        "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
         "success_rate is 1 only when planning succeeds and the Press trajectory "
         "reaches the object top center.",
     ]
@@ -807,22 +888,19 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     args = _parse_args() if args is None else args
     if args.repeat < 1:
         raise ValueError("--repeat must be at least 1.")
+    profile = resolve_profile(args)
     _ensure_runtime_imports()
 
-    object_presets = _select_object_presets(args.object_types)
-    position_cases = _select_position_cases(args.position_cases)
-    repeat = args.repeat
-    if args.smoke:
-        object_presets = [OBJECT_PRESETS["bottle"]]
-        position_cases = [POSITION_CASES["q3_near"]]
-        repeat = 1
+    object_presets = _select_object_presets(args.object_types, profile)
+    position_cases = _select_position_cases(args.position_cases, profile)
+    repeat = 1 if profile == "smoke" else args.repeat
 
     print("=" * 60)
     print("Atomic Action Press Benchmark")
     print("=" * 60)
     print(
         "Coverage: "
-        f"{len(object_presets)} object presets x "
+        f"profile={profile}, {len(object_presets)} object presets x "
         f"{len(position_cases)} position cases x {repeat} repeat(s)"
     )
 
@@ -834,10 +912,24 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     atomic_engine = _build_atomic_engine(motion_gen, robot, sim.device)
+    object_pool = {}
+    for object_index, preset in enumerate(object_presets):
+        obj = _create_benchmark_object(sim, preset, position_cases[0], object_index)
+        settle_object(sim, obj, step=2)
+        base_pose = obj.get_local_pose(to_matrix=True).clone()
+        park_rigid_object(obj, base_pose, index=object_index, sim=sim)
+        object_pool[preset.object_type] = (obj, base_pose)
 
     results: list[PressCaseResult] = []
+    video_paths: list[str] = []
     print("\n=== Press Object/Position Sweep ===")
     for preset in object_presets:
+        obj, base_pose = object_pool[preset.object_type]
+        for parked_index, parked_preset in enumerate(object_presets):
+            if parked_preset.object_type == preset.object_type:
+                continue
+            parked_obj, parked_base_pose = object_pool[parked_preset.object_type]
+            park_rigid_object(parked_obj, parked_base_pose, index=parked_index, sim=sim)
         for position_case in position_cases:
             for repeat_index in range(repeat):
                 result = _run_press_case(
@@ -845,12 +937,18 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                     robot=robot,
                     atomic_engine=atomic_engine,
                     initial_qpos=initial_qpos,
+                    obj=obj,
+                    base_obj_pose=base_pose,
                     preset=preset,
                     position_case=position_case,
                     repeat_index=repeat_index,
                     press_tolerance=args.press_tolerance,
+                    args=args,
+                    recorded_count=len(video_paths),
                 )
                 results.append(result)
+                if result.video_path:
+                    video_paths.append(result.video_path)
                 _print_case_result(result)
 
     perf_rows = _build_perf_rows(results)
@@ -861,7 +959,13 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         perf_rows=perf_rows,
         metric_rows=metric_rows,
         leaderboard_rows=leaderboard_rows,
-        notes=_build_notes(object_presets, position_cases, repeat),
+        notes=_build_notes(
+            object_presets,
+            position_cases,
+            repeat,
+            video_paths,
+            profile,
+        ),
     )
 
     print("\n" + "=" * 60)

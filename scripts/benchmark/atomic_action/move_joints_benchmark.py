@@ -31,10 +31,14 @@ from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     add_common_benchmark_args,
     build_single_action_leaderboard,
+    build_video_output_path,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    replay_trajectory_with_recording,
     reset_robot,
+    resolve_profile,
+    should_record_case,
     timed_call,
     write_markdown_report,
 )
@@ -130,6 +134,8 @@ def _run_case(
     initial_qpos,
     case: JointSequenceCase,
     repeat: int,
+    args: argparse.Namespace,
+    recorded_count: int,
 ):
     """Run one MoveJoints case."""
     torch = ensure_torch()
@@ -137,6 +143,20 @@ def _run_case(
     steps = _targets_for_sequence(case, sim.device)
     elapsed, mem_delta, peak_gpu, result = timed_call(lambda: atomic_engine.run(steps))
     is_success, traj, _ = result
+    video_path = None
+    if should_record_case(args, recorded_count, bool(is_success)):
+        reset_robot(robot, initial_qpos)
+        video_path = replay_trajectory_with_recording(
+            sim=sim,
+            robot=robot,
+            traj=traj,
+            args=args,
+            video_path=build_video_output_path(
+                args, "atomic_action_move_joints", f"{case.name}_r{repeat}"
+            ),
+        )
+        reset_robot(robot, initial_qpos)
+
     final_error_rad = None
     if is_success and traj.shape[1] > 0:
         arm_joint_ids = robot.get_joint_ids(name="arm")
@@ -161,6 +181,7 @@ def _run_case(
         "final_error_rad": final_error_rad,
         "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
         "failure_reason": "" if target_reached else "target_not_reached",
+        "video_path": str(video_path) if video_path is not None else "",
     }
 
 
@@ -203,6 +224,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     args = _parse_args() if args is None else args
     if args.repeat < 1:
         raise ValueError("--repeat must be at least 1.")
+    profile = resolve_profile(args)
 
     ensure_repo_root()
     ensure_torch()
@@ -219,14 +241,18 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     )
 
     cases = _select_cases(args.sequence_cases)
-    repeat = args.repeat
-    if args.smoke:
+    repeat = 1 if profile == "smoke" else args.repeat
+    if profile == "smoke":
         cases = [SEQUENCE_CASES["ready_home"]]
-        repeat = 1
 
     print("=" * 60)
     print("MoveJoints Atomic Action Benchmark")
     print("=" * 60)
+    print(
+        "Coverage: "
+        f"profile={profile}, {len(cases)} sequence case(s) x "
+        f"{repeat} repeat(s)"
+    )
 
     sim = initialize_simulation(args)
     robot = create_robot(sim)
@@ -248,13 +274,23 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     )
 
     results: list[dict[str, object]] = []
+    video_paths: list[str] = []
     print("\n=== MoveJoints Sequence Sweep ===")
     for case in cases:
         for repeat_index in range(repeat):
             result = _run_case(
-                sim, robot, atomic_engine, initial_qpos, case, repeat_index
+                sim,
+                robot,
+                atomic_engine,
+                initial_qpos,
+                case,
+                repeat_index,
+                args,
+                len(video_paths),
             )
             results.append(result)
+            if result["video_path"]:
+                video_paths.append(str(result["video_path"]))
             print(
                 f"  {result['case_id']:<24} "
                 f"time={result['cost_time_ms']:>10.2f} ms | "
@@ -270,8 +306,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         metric_rows=metric_rows,
         leaderboard_rows=leaderboard_rows,
         notes=[
+            f"Profile: {profile}",
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"Success tolerance: {SUCCESS_TOLERANCE_RAD} rad joint error.",
+            "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
         ],
     )
     print(f"Markdown report saved: {report_path}")

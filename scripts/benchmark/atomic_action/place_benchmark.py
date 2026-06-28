@@ -31,11 +31,31 @@ from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     add_common_benchmark_args,
     add_grasp_benchmark_args,
+    add_object_position_benchmark_args,
+    add_pickup_approach_benchmark_args,
     build_single_action_leaderboard,
+    build_video_output_path,
+    create_antipodal_object_semantics,
+    create_benchmark_object,
+    describe_object_preset,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    format_vector3,
+    MeshObjectPreset,
+    park_rigid_object,
+    pickup_approach_direction_tuple,
+    PositionCase,
+    replay_trajectory_with_recording,
+    reset_rigid_object,
+    reset_rigid_object_xy,
     reset_robot,
+    resolve_pickup_approach_direction,
+    resolve_profile,
+    select_mesh_object_presets,
+    select_pickup_approaches,
+    select_position_cases,
+    should_record_case,
     timed_call,
     write_markdown_report,
 )
@@ -58,18 +78,22 @@ PICK_SAMPLE_INTERVAL = 120
 PLACE_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 PLACE_LIFT_HEIGHT = 0.14
-OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
     """Add Place benchmark CLI arguments."""
+    add_pickup_approach_benchmark_args(parser)
     parser.add_argument(
         "--place_cases",
         nargs="+",
         choices=(*PLACE_CASES.keys(), "all"),
-        default=list(PLACE_CASES.keys()),
-        help="Place target cases to benchmark. Use 'all' for every case.",
+        default=None,
+        help=(
+            "Place target cases to benchmark. Defaults are selected by "
+            "--profile; use 'all' for every case."
+        ),
     )
+    add_object_position_benchmark_args(parser)
     add_grasp_benchmark_args(parser)
     add_common_benchmark_args(parser)
 
@@ -83,8 +107,13 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _selected_cases(case_names: list[str]) -> list[PlaceCase]:
+def _selected_cases(
+    case_names: list[str] | None,
+    profile: str,
+) -> list[PlaceCase]:
     """Resolve selected place case names."""
+    if not case_names:
+        return [PLACE_CASES["left_bin"]]
     if "all" in case_names:
         return list(PLACE_CASES.values())
     return [PLACE_CASES[name] for name in case_names]
@@ -107,10 +136,15 @@ def _make_place_pose(device, xyz: tuple[float, float, float]):
     return pose
 
 
-def _make_pickup_args(args: argparse.Namespace) -> argparse.Namespace:
+def _make_pickup_args(
+    args: argparse.Namespace,
+    object_preset: MeshObjectPreset,
+    profile: str,
+) -> argparse.Namespace:
     """Build a tutorial-compatible argparse namespace."""
     return argparse.Namespace(
-        n_sample=1000 if args.smoke else args.n_sample,
+        object=object_preset.label,
+        n_sample=1000 if profile == "smoke" else args.n_sample,
         force_reannotate=args.force_reannotate,
         device=args.device,
         renderer=args.renderer,
@@ -118,9 +152,18 @@ def _make_pickup_args(args: argparse.Namespace) -> argparse.Namespace:
     )
 
 
-def _prepare_held_state(sim, robot, obj, motion_gen, args):
+def _prepare_held_state(
+    sim,
+    robot,
+    obj,
+    motion_gen,
+    args,
+    object_preset: MeshObjectPreset,
+    position_case: PositionCase,
+    pickup_approach: str,
+    profile: str,
+):
     """Run PickUp precondition outside the timed Place block."""
-    torch = ensure_torch()
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
         GraspTarget,
@@ -128,7 +171,8 @@ def _prepare_held_state(sim, robot, obj, motion_gen, args):
         PickUpCfg,
     )
     from scripts.tutorials.atomic_action.place import (
-        create_object_semantics,
+        build_grasp_generator_cfg,
+        build_gripper_collision_cfg,
         get_hand_open_close_qpos,
         initialize_pre_pick_robot_pose,
     )
@@ -144,8 +188,8 @@ def _prepare_held_state(sim, robot, obj, motion_gen, args):
                 hand_control_part="hand",
                 hand_open_qpos=hand_open,
                 hand_close_qpos=hand_close,
-                approach_direction=torch.tensor(
-                    OBJECT_APPROACH_DIRECTION, dtype=torch.float32, device=sim.device
+                approach_direction=resolve_pickup_approach_direction(
+                    pickup_approach, position_case, sim.device
                 ),
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
@@ -154,25 +198,37 @@ def _prepare_held_state(sim, robot, obj, motion_gen, args):
             ),
         )
     )
-    semantics = create_object_semantics(obj, _make_pickup_args(args))
+    semantics = create_antipodal_object_semantics(
+        obj=obj,
+        preset=object_preset,
+        args=_make_pickup_args(args, object_preset, profile),
+        build_gripper_collision_cfg=build_gripper_collision_cfg,
+        build_grasp_generator_cfg=build_grasp_generator_cfg,
+    )
     is_success, traj, state = atomic_engine.run(
         steps=[("pick_up", GraspTarget(semantics=semantics))]
     )
     if not is_success or state.held_object is None:
         raise RuntimeError("Failed to prepare held-object state for Place benchmark.")
     robot.set_qpos(state.last_qpos)
-    return state, hand_open, hand_close, int(traj.shape[1])
+    return state, hand_open, hand_close, traj
 
 
 def _run_case(
     sim,
     robot,
-    obj,
     motion_gen,
     initial_qpos,
     args,
+    obj,
+    base_obj_pose,
+    object_preset: MeshObjectPreset,
+    position_case: PositionCase,
+    pickup_approach: str,
     case: PlaceCase,
     repeat: int,
+    recorded_count: int,
+    profile: str,
 ):
     """Run one Place benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
@@ -181,50 +237,148 @@ def _run_case(
         Place,
         PlaceCfg,
     )
+    from scripts.tutorials.atomic_action.place import (
+        compute_pick_close_end_step,
+        initialize_pre_pick_robot_pose,
+    )
 
-    reset_robot(robot, initial_qpos)
-    state, hand_open, hand_close, precondition_waypoints = _prepare_held_state(
-        sim, robot, obj, motion_gen, args
+    case_id = (
+        f"{object_preset.object_type}:{position_case.name}:"
+        f"{pickup_approach}:{case.name}:r{repeat}"
     )
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        Place(
+    try:
+        reset_robot(robot, initial_qpos)
+        initial_obj_pose = reset_rigid_object_xy(
+            obj=obj,
+            base_pose=base_obj_pose,
+            xy=position_case.xy,
+            sim=sim,
+            settle_steps=2,
+        )
+        reset_rigid_object(obj, initial_obj_pose)
+        state, hand_open, hand_close, precondition_traj = _prepare_held_state(
+            sim,
+            robot,
+            obj,
             motion_gen,
-            cfg=PlaceCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                lift_height=PLACE_LIFT_HEIGHT,
-                sample_interval=PLACE_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
+            args,
+            object_preset,
+            position_case,
+            pickup_approach,
+            profile,
         )
-    )
-    place_pose = _make_place_pose(sim.device, case.xyz)
-    elapsed, mem_delta, peak_gpu, result = timed_call(
-        lambda: atomic_engine.run(
-            steps=[("place", EndEffectorPoseTarget(xpos=place_pose))],
-            state=state,
+        approach_direction_text = format_vector3(
+            pickup_approach_direction_tuple(pickup_approach, position_case)
         )
-    )
-    is_success, traj, final_state = result
-    released = bool(is_success and final_state.held_object is None)
-    return {
-        "case_id": f"{case.name}:r{repeat}",
-        "place_case": case.name,
-        "repeat": repeat,
-        "planning_success": bool(is_success),
-        "released": released,
-        "success": released,
-        "cost_time_ms": elapsed * 1000.0,
-        "cpu_delta_mb": mem_delta["cpu_mb"],
-        "gpu_delta_mb": mem_delta["gpu_mb"],
-        "peak_gpu_mb": peak_gpu,
-        "precondition_waypoints": precondition_waypoints,
-        "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
-        "failure_reason": "" if released else "held_object_not_released",
-    }
+        precondition_waypoints = int(precondition_traj.shape[1])
+        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+        atomic_engine.register(
+            Place(
+                motion_gen,
+                cfg=PlaceCfg(
+                    control_part="arm",
+                    hand_control_part="hand",
+                    hand_open_qpos=hand_open,
+                    hand_close_qpos=hand_close,
+                    lift_height=PLACE_LIFT_HEIGHT,
+                    sample_interval=PLACE_SAMPLE_INTERVAL,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
+            )
+        )
+        place_pose = _make_place_pose(sim.device, case.xyz)
+        elapsed, mem_delta, peak_gpu, result = timed_call(
+            lambda: atomic_engine.run(
+                steps=[("place", EndEffectorPoseTarget(xpos=place_pose))],
+                state=state,
+            )
+        )
+        is_success, traj, final_state = result
+        video_path = None
+        if should_record_case(args, recorded_count, bool(is_success)):
+            torch = ensure_torch()
+            reset_robot(robot, initial_qpos)
+            reset_rigid_object(obj, initial_obj_pose)
+            initialize_pre_pick_robot_pose(robot, obj, hand_open)
+            full_traj = torch.cat((precondition_traj, traj), dim=1)
+            post_grasp_clear_step = compute_pick_close_end_step()
+            should_clear_object_dynamics = True
+
+            def _on_step(waypoint_index: int) -> None:
+                nonlocal should_clear_object_dynamics
+                if (
+                    should_clear_object_dynamics
+                    and waypoint_index + 1 >= post_grasp_clear_step
+                ):
+                    obj.clear_dynamics()
+                    should_clear_object_dynamics = False
+
+            video_path = replay_trajectory_with_recording(
+                sim=sim,
+                robot=robot,
+                traj=full_traj,
+                args=args,
+                video_path=build_video_output_path(
+                    args,
+                    "atomic_action_place",
+                    (
+                        f"{object_preset.object_type}_{position_case.name}_"
+                        f"{pickup_approach}_{case.name}_r{repeat}"
+                    ),
+                ),
+                on_step=_on_step,
+            )
+            reset_robot(robot, initial_qpos)
+            reset_rigid_object(obj, initial_obj_pose)
+
+        released = bool(is_success and final_state.held_object is None)
+        return {
+            "case_id": case_id,
+            "object_type": object_preset.object_type,
+            "material": object_preset.material_name,
+            "quadrant": position_case.quadrant,
+            "position_case": position_case.name,
+            "init_xy": position_case.xy,
+            "pickup_approach": pickup_approach,
+            "approach_direction": approach_direction_text,
+            "place_case": case.name,
+            "repeat": repeat,
+            "planning_success": bool(is_success),
+            "released": released,
+            "success": released,
+            "cost_time_ms": elapsed * 1000.0,
+            "cpu_delta_mb": mem_delta["cpu_mb"],
+            "gpu_delta_mb": mem_delta["gpu_mb"],
+            "peak_gpu_mb": peak_gpu,
+            "precondition_waypoints": precondition_waypoints,
+            "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
+            "failure_reason": "" if released else "held_object_not_released",
+            "video_path": str(video_path) if video_path is not None else "",
+        }
+    except Exception as exc:
+        return {
+            "case_id": case_id,
+            "object_type": object_preset.object_type,
+            "material": object_preset.material_name,
+            "quadrant": position_case.quadrant,
+            "position_case": position_case.name,
+            "init_xy": position_case.xy,
+            "pickup_approach": pickup_approach,
+            "approach_direction": "N/A",
+            "place_case": case.name,
+            "repeat": repeat,
+            "planning_success": False,
+            "released": False,
+            "success": False,
+            "cost_time_ms": 0.0,
+            "cpu_delta_mb": 0.0,
+            "gpu_delta_mb": 0.0,
+            "peak_gpu_mb": 0.0,
+            "precondition_waypoints": 0,
+            "trajectory_waypoints": 0,
+            "failure_reason": f"exception:{type(exc).__name__}:{exc}",
+            "video_path": "",
+        }
 
 
 def _build_rows(results: list[dict[str, object]]):
@@ -237,6 +391,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "sample_size": 1,
                 "impl": "place",
                 "case_id": result["case_id"],
+                "object_type": result["object_type"],
+                "material": result["material"],
+                "quadrant": result["quadrant"],
+                "position_case": result["position_case"],
+                "init_xy": f"({result['init_xy'][0]:.3f},{result['init_xy'][1]:.3f})",
+                "pickup_approach": result["pickup_approach"],
+                "approach_direction": result["approach_direction"],
                 "place_case": result["place_case"],
                 "repeat": result["repeat"],
                 "cost_time_ms": format_float(result["cost_time_ms"]),
@@ -250,6 +411,12 @@ def _build_rows(results: list[dict[str, object]]):
                 "sample_size": 1,
                 "impl": "place",
                 "case_id": result["case_id"],
+                "object_type": result["object_type"],
+                "material": result["material"],
+                "quadrant": result["quadrant"],
+                "position_case": result["position_case"],
+                "pickup_approach": result["pickup_approach"],
+                "approach_direction": result["approach_direction"],
                 "place_case": result["place_case"],
                 "success_rate": f"{float(result['success']):.6f}",
                 "planning_success_rate": f"{float(result['planning_success']):.6f}",
@@ -267,48 +434,90 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     args = _parse_args() if args is None else args
     if args.repeat < 1:
         raise ValueError("--repeat must be at least 1.")
+    profile = resolve_profile(args)
 
     ensure_repo_root()
     ensure_torch()
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
     from embodichain.lab.sim.planners import ToppraPlannerCfg
     from scripts.tutorials.atomic_action.place import (
-        create_pick_object,
         create_robot,
         initialize_simulation,
     )
 
-    cases = _selected_cases(args.place_cases)
-    repeat = args.repeat
-    if args.smoke:
-        cases = [PLACE_CASES["left_bin"]]
-        repeat = 1
+    object_presets = select_mesh_object_presets(args.object_types, profile)
+    position_cases = select_position_cases(args.position_cases, profile)
+    approaches = select_pickup_approaches(args.approach_cases, profile)
+    cases = _selected_cases(args.place_cases, profile)
+    repeat = 1 if profile == "smoke" else args.repeat
 
     print("=" * 60)
     print("Place Atomic Action Benchmark")
     print("=" * 60)
+    print(
+        "Coverage: "
+        f"profile={profile}, {len(object_presets)} object(s) x "
+        f"{len(position_cases)} position(s) x {len(approaches)} pickup approach(es) "
+        f"x {len(cases)} place target(s) "
+        f"x {repeat} repeat(s)"
+    )
 
     sim = initialize_simulation(args)
     robot = create_robot(sim)
-    obj = create_pick_object(sim)
     initial_qpos = robot.get_qpos().clone()
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
+    object_pool = {}
+    for object_index, object_preset in enumerate(object_presets):
+        obj = create_benchmark_object(
+            sim=sim,
+            preset=object_preset,
+            position_case=position_cases[0],
+            uid_suffix="pool",
+        )
+        base_pose = obj.get_local_pose(to_matrix=True).clone()
+        park_rigid_object(obj, base_pose, index=object_index, sim=sim)
+        object_pool[object_preset.object_type] = (obj, base_pose)
 
     results: list[dict[str, object]] = []
-    print("\n=== Place Target Sweep ===")
-    for case in cases:
-        for repeat_index in range(repeat):
-            result = _run_case(
-                sim, robot, obj, motion_gen, initial_qpos, args, case, repeat_index
-            )
-            results.append(result)
-            print(
-                f"  {result['case_id']:<18} "
-                f"time={result['cost_time_ms']:>10.2f} ms | "
-                f"success={result['success']}"
-            )
+    video_paths: list[str] = []
+    print("\n=== Place Object/Position/Target Sweep ===")
+    for object_preset in object_presets:
+        obj, base_pose = object_pool[object_preset.object_type]
+        for parked_index, parked_preset in enumerate(object_presets):
+            if parked_preset.object_type == object_preset.object_type:
+                continue
+            parked_obj, parked_base_pose = object_pool[parked_preset.object_type]
+            park_rigid_object(parked_obj, parked_base_pose, index=parked_index, sim=sim)
+        for position_case in position_cases:
+            for pickup_approach in approaches:
+                for case in cases:
+                    for repeat_index in range(repeat):
+                        result = _run_case(
+                            sim,
+                            robot,
+                            motion_gen,
+                            initial_qpos,
+                            args,
+                            obj,
+                            base_pose,
+                            object_preset,
+                            position_case,
+                            pickup_approach,
+                            case,
+                            repeat_index,
+                            len(video_paths),
+                            profile,
+                        )
+                        results.append(result)
+                        if result["video_path"]:
+                            video_paths.append(str(result["video_path"]))
+                        print(
+                            f"  {result['case_id']:<48} "
+                            f"time={result['cost_time_ms']:>10.2f} ms | "
+                            f"success={result['success']}"
+                        )
 
     perf_rows, metric_rows = _build_rows(results)
     leaderboard_rows = build_single_action_leaderboard("place", metric_rows)
@@ -320,8 +529,19 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         notes=[
             "Timed block includes Place only; PickUp precondition is prepared "
             "outside timing.",
+            f"Profile: {profile}",
+            "Object presets: "
+            + ", ".join(describe_object_preset(preset) for preset in object_presets),
+            "Position cases: "
+            + ", ".join(
+                f"{case.name}/{case.quadrant}/xy={case.xy}"
+                for case in position_cases
+            ),
+            "PickUp approach cases: " + ", ".join(approaches),
+            "Place target cases: " + ", ".join(case.name for case in cases),
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
-            f"n_sample: {1000 if args.smoke else args.n_sample}",
+            f"n_sample: {1000 if profile == 'smoke' else args.n_sample}",
+            "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
         ],
     )
     print(f"Markdown report saved: {report_path}")
