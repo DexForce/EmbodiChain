@@ -6,8 +6,8 @@ Supported Robots
 .. toctree::
    :maxdepth: 1
 
+   UR Family <ur_robot.md>
    Dexforce W1 <dexforce_w1.md>
    CobotMagic <cobotmagic.md>
-   UR Family <ur_robot.md>
    Dual-Arm Composition <dual_arm.md>
    

@@ -1,19 +1,53 @@
 # UR Family (UR3 / UR5 / UR10 + e variants)
 
-`URRobotCfg` is a single config class covering the Universal Robots UR family —
-UR3, UR3e, UR5, UR5e, UR10, UR10e — selected via the ``robot_type`` field. The
-kinematic (DH) parameters are owned by ``URSolverCfg``; the robot config owns the
-URDF, control parts, drive properties, and rigid-body attributes.
+`URRobotCfg` covers six Universal Robots manipulators in one configuration class:
+`ur3`, `ur3e`, `ur5`, `ur5e`, `ur10`, and `ur10e`. The images below show the exact
+variants currently documented in EmbodiChain: the compact UR3 pair, the mid-reach
+UR5 pair, and the long-reach UR10 pair, with darker classic models and brighter
+silver-arm e-series renders.
+
+<div style="display: flex; justify-content: center; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/ur/ur3.png" alt="UR3" style="height: 220px; width: auto;"/>
+    <figcaption><b>UR3</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/ur/ur3e.png" alt="UR3e" style="height: 220px; width: auto;"/>
+    <figcaption><b>UR3e</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/ur/ur5.png" alt="UR5" style="height: 220px; width: auto;"/>
+    <figcaption><b>UR5</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/ur/ur5e.png" alt="UR5e" style="height: 220px; width: auto;"/>
+    <figcaption><b>UR5e</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/ur/ur10.png" alt="UR10" style="height: 220px; width: auto;"/>
+    <figcaption><b>UR10</b></figcaption>
+  </figure>
+  <figure style="text-align: center; margin: 10px;">
+    <img src="../../_static/robots/ur/ur10e.png" alt="UR10e" style="height: 220px; width: auto;"/>
+    <figcaption><b>UR10e</b></figcaption>
+  </figure>
+</div>
 
 ## Key Features
 
-- **One class, six variants** — switch with ``robot_type`` (``"ur3"`` / ``"ur3e"``
-  / ``"ur5"`` / ``"ur5e"`` / ``"ur10"`` / ``"ur10e"``).
-- **Analytic UR IK** via ``URSolverCfg`` (Warp GPU kernel, 6-DOF closed-form).
-- **Scale-aware defaults** — ``max_effort`` is sized per variant (UR3 < UR5 < UR10).
-- **Forward kinematics** through ``build_pk_serial_chain`` (pytorch-kinematics),
-  routed via ``_pk_urdf_path`` so it cannot drift from the simulation URDF.
-- **Round-trippable** — ``URRobotCfg.from_dict(cfg.to_dict())`` reproduces the cfg.
+- **One config, six UR variants** selected through `robot_type`.
+- **Image-matched family lineup** from the shortest-reach UR3 pair to the longest-reach UR10 pair.
+- **Classic and e-series styling** with darker legacy arms and brighter silver-arm e-series renders.
+- **Analytic UR inverse kinematics** through `URSolverCfg` and the Warp-based UR solver path.
+- **Simulation-ready defaults** for URDF selection, control parts, drive properties, and rigid-body attributes.
+
+## Visual Differences Across Variants
+
+- **UR3 / UR3e** are the most compact renders in the set and keep the wrist close to the base.
+- **UR5 / UR5e** extend the shoulder-to-wrist span while keeping the same 6-axis arm layout.
+- **UR10 / UR10e** show the longest upper-arm and forearm links, matching the largest reach tier in the family.
+- **Classic models (`ur3`, `ur5`, `ur10`)** appear darker overall, especially on the arm links.
+- **e-series models (`ur3e`, `ur5e`, `ur10e`)** use brighter silver links and lighter joint accents in these renders.
 
 ## Usage
 
@@ -28,35 +62,32 @@ robot = sim.add_robot(cfg=cfg)
 
 ## Robot Parameters
 
-| Parameter          | Description                                                       |
-|--------------------|-------------------------------------------------------------------|
-| ``robot_type``     | UR variant: ``ur3`` / ``ur3e`` / ``ur5`` / ``ur5e`` / ``ur10`` / ``ur10e`` |
-| Number of joints   | 6 revolute + 1 fixed (``ee_link``)                               |
-| Control parts      | ``arm`` (6 joints)                                               |
-| Root / end link    | ``base_link`` / ``ee_link``                                      |
-| Solver             | ``URSolverCfg`` (analytic UR IK, Warp kernel)                    |
-| Drive ``max_effort`` | UR3/UR3e ≈ 56 N·m · UR5/UR5e ≈ 150 N·m · UR10/UR10e ≈ 330 N·m (sim defaults, not factory specs) |
+| Parameter | Description |
+|-----------|-------------|
+| `robot_type` | UR variant: `ur3`, `ur3e`, `ur5`, `ur5e`, `ur10`, or `ur10e` |
+| Number of joints | 6 revolute joints plus the fixed `ee_link` |
+| Control parts | `arm` (6 joints) |
+| Root / end link | `base_link` / `ee_link` |
+| Solver | `URSolverCfg` (analytic UR IK) |
+| Drive `max_effort` | UR3/UR3e about 56 N.m, UR5/UR5e about 150 N.m, UR10/UR10e about 330 N.m |
 
-.. note::
+> **Note:** The `ur5` URDF uses lowercase joint names (`joint1` to `joint6`), while
+> the other variants use `Joint1` to `Joint6`. `URRobotCfg._build_defaults`
+> selects the correct naming scheme automatically.
 
-   The UR5 URDF uses lowercase joint names (``joint1``..``joint6``); every other
-   variant uses ``Joint1``..``Joint6``. ``URRobotCfg._build_defaults`` selects the
-   correct joint-name casing per ``robot_type`` automatically.
+## Variants at a Glance
 
-## Variants at a glance
+| `robot_type` | Preview | URDF | Reach (m) | Payload (kg) |
+|--------------|---------|------|-----------|--------------|
+| `ur3` | Compact classic render | `UniversalRobots/UR3/UR3.urdf` | ~0.5 | 3 |
+| `ur3e` | Compact e-series render | `UniversalRobots/UR3e/UR3e.urdf` | ~0.5 | 3 |
+| `ur5` | Mid-size classic render | `UniversalRobots/UR5/UR5.urdf` | ~0.85 | 5 |
+| `ur5e` | Mid-size e-series render | `UniversalRobots/UR5e/UR5e.urdf` | ~0.85 | 5 |
+| `ur10` | Long-reach classic render | `UniversalRobots/UR10/UR10.urdf` | ~1.3 | 10 |
+| `ur10e` | Long-reach e-series render | `UniversalRobots/UR10e/UR10e.urdf` | ~1.3 | 10 |
 
-| ``robot_type`` | URDF                          | Reach (m) | Payload (kg) |
-|----------------|-------------------------------|-----------|--------------|
-| ``ur3``        | ``UniversalRobots/UR3/UR3.urdf``   | ~0.5  | 3  |
-| ``ur3e``       | ``UniversalRobots/UR3e/UR3e.urdf``  | ~0.5  | 3  |
-| ``ur5``        | ``UniversalRobots/UR5/UR5.urdf``    | ~0.85 | 5  |
-| ``ur5e``       | ``UniversalRobots/UR5e/UR5e.urdf``  | ~0.85 | 5  |
-| ``ur10``       | ``UniversalRobots/UR10/UR10.urdf``  | ~1.3  | 10 |
-| ``ur10e``      | ``UniversalRobots/UR10e/UR10e.urdf`` | ~1.3 | 10 |
+## See Also
 
-See Also
---------
-
-- :doc:`/guides/add_robot` — Adding a new robot (quick reference)
-- :doc:`/tutorial/add_robot` — Adding a new robot (full tutorial)
-- :doc:`/overview/sim/solvers/index` — IK solver reference
+- :doc:`/guides/add_robot` - Adding a new robot (quick reference)
+- :doc:`/tutorial/add_robot` - Adding a new robot (full tutorial)
+- :doc:`/overview/sim/solvers/index` - IK solver reference

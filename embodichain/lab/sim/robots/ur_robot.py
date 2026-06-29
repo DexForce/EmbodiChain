@@ -188,22 +188,23 @@ if __name__ == "__main__":
     from embodichain.lab.sim.cfg import RenderCfg
 
     config = SimulationManagerCfg(
-        headless=True,
+        headless=False,
         sim_device="cpu",
-        num_envs=2,
+        num_envs=1,
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
 
     # Switch the UR variant via robot_type (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e).
-    cfg = URRobotCfg.from_dict({"robot_type": "ur5"})
+    cfg = URRobotCfg.from_dict(
+        {"robot_type": "ur10e", "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]}
+    )
     robot = sim.add_robot(cfg=cfg)
     sim.open_window()
 
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
 
-    # Round-trip check: from_dict(to_dict()) reproduces the cfg.
-    cfg2 = URRobotCfg.from_dict(cfg.to_dict())
-    assert cfg2.robot_type == cfg.robot_type
-    print(f"URRobot added ({cfg.robot_type}); round-trip OK.")
+    from IPython import embed
+
+    embed()  # noqa: F401

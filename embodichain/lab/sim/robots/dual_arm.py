@@ -582,3 +582,7 @@ if __name__ == "__main__":
     assert cfg2.base_robot == cfg.base_robot
     assert cfg2.control_parts == cfg.control_parts
     print(f"DualArm robot added ({cfg.base_robot}); round-trip OK.")
+
+    from IPython import embed
+
+    embed()  # noqa: F401
