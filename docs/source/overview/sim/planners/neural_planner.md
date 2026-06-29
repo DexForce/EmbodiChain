@@ -131,9 +131,72 @@ actions, compare several success notions:
 - `action_success`: the atomic action produced a trajectory.
 - `strict_pose_success`: the final TCP pose is within the script's strict
   threshold, defaulting to 1 mm and 0.05 rad.
+- `all_waypoint_strict_success`: every target waypoint is reached by some
+  trajectory sample within the strict threshold. Use this as the primary planner
+  quality signal for multi-waypoint NMG comparisons.
 - `nmg_threshold_success`: the final TCP pose is within the NMG waypoint
   threshold, defaulting to 5 cm and 0.3 rad.
 - downstream task success: the simulated task outcome after trajectory replay.
 
 Use `strict_pose_success`, `final_pos_error`, `final_rot_error`, and the
 downstream task outcome rather than `action_success` alone.
+
+## Benchmarks
+
+Use the Franka benchmark in three layers:
+
+1. Demo-matched planner benchmark: mirrors this example's fixed start qpos and
+   compact relative TCP offsets.
+2. Reachable-FK planner benchmark: uses a broader bank of FK-generated reachable
+   target poses.
+3. Atomic-action benchmark: runs the Franka `PickUp -> Place -> MoveEndEffector`
+   integration path with planner-only and optional physical replay modes.
+
+Run the first two layers with `franka_planner.py`:
+
+```bash
+PYTHONPATH="$PWD" conda run -n embodichain040 python -m scripts.benchmark.robotics.nmg.franka_planner \
+  --device cuda \
+  --planner all \
+  --trial_source demo_offsets \
+  --neural_checkpoint franka.pt \
+  --sample_interval 120
+```
+
+```bash
+PYTHONPATH="$PWD" conda run -n embodichain040 python -m scripts.benchmark.robotics.nmg.franka_planner \
+  --device cuda \
+  --planner all \
+  --trial_source fk_bank \
+  --neural_checkpoint franka.pt \
+  --sample_interval 120
+```
+
+Run the downstream atomic-action layer separately:
+
+```bash
+PYTHONPATH="$PWD" conda run -n embodichain040 python -m scripts.benchmark.robotics.nmg.franka_pick_place \
+  --device cuda \
+  --planner all \
+  --mode planner \
+  --neural_checkpoint franka.pt \
+  --object sugar_box \
+  --support_surface ground
+```
+
+For visual inspection, run the physical layer with `--open_window`. The
+`attached` object replay mode is useful when you want to inspect the planned
+held-object transform without requiring a successful contact grasp:
+
+```bash
+PYTHONPATH="$PWD" conda run -n embodichain040 python -m scripts.benchmark.robotics.nmg.franka_pick_place \
+  --device cuda \
+  --planner ik_interpolate \
+  --mode physical \
+  --neural_checkpoint franka.pt \
+  --object sugar_box \
+  --support_surface ground \
+  --object_replay_mode attached \
+  --replay_control target \
+  --open_window
+```

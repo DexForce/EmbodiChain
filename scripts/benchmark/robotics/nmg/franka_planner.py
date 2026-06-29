@@ -17,9 +17,10 @@
 """Benchmark Franka end-effector waypoint planning backends.
 
 This benchmark isolates planner quality from grasp annotation and physics. It
-generates reachable Franka TCP waypoint poses from known joint configurations,
-then compares IK+TOPPRA interpolation, NeuralPlanner, and NeuralPlanner with a
-final IK refinement.
+supports a demo-matched waypoint source that mirrors
+examples/sim/planners/neural_planner.py, and a broader reachable-FK source that
+samples target poses from known Franka joint configurations. The downstream
+Franka pick-place benchmark remains the third integration layer.
 Run: python -m scripts.benchmark.robotics.nmg.franka_planner
 """
 
@@ -76,6 +77,18 @@ DEFAULT_ROT_THRESHOLD = 0.05
 DEFAULT_NMG_POS_THRESHOLD = 0.05
 DEFAULT_NMG_ROT_THRESHOLD = 0.3
 PLANNER_NAMES = ("ik_toppra", "neural", "neural_refine")
+TRIAL_SOURCE_NAMES = ("demo_offsets", "fk_bank")
+DEFAULT_TRIAL_SOURCE = "fk_bank"
+DEMO_WAYPOINT_OFFSETS = (
+    (0.10, 0.00, 0.00),
+    (0.10, 0.10, 0.00),
+    (0.00, 0.10, -0.08),
+    (-0.10, 0.10, -0.08),
+    (-0.10, 0.00, 0.00),
+    (0.00, -0.10, 0.00),
+    (0.10, -0.10, -0.06),
+    (0.00, 0.00, -0.12),
+)
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,7 @@ class PlannerTrial:
     """A reachable waypoint planning trial."""
 
     trial_id: int
+    trial_source: str
     start_qpos: torch.Tensor
     target_qpos: torch.Tensor
     waypoints: list[torch.Tensor]
@@ -117,6 +131,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="Local Franka NMG checkpoint. Required for neural planners unless downloadable.",
+    )
+    parser.add_argument(
+        "--trial_source",
+        choices=[*TRIAL_SOURCE_NAMES, "all"],
+        default=DEFAULT_TRIAL_SOURCE,
+        help=(
+            "Waypoint source. 'demo_offsets' mirrors examples/sim/planners/"
+            "neural_planner.py, 'fk_bank' uses broader FK-generated targets, "
+            "and 'all' runs both planner layers."
+        ),
     )
     parser.add_argument(
         "--num_trials",
@@ -204,6 +228,13 @@ def expand_planner_selection(planner: str) -> list[str]:
     if planner == "all":
         return list(PLANNER_NAMES)
     return [planner]
+
+
+def expand_trial_source_selection(trial_source: str) -> list[str]:
+    """Expand trial-source aliases into concrete source names."""
+    if trial_source == "all":
+        return list(TRIAL_SOURCE_NAMES)
+    return [trial_source]
 
 
 def simulation_requires_cuda(args: argparse.Namespace) -> bool:
@@ -331,7 +362,46 @@ def fk_pose(robot: Robot, qpos: torch.Tensor) -> torch.Tensor:
     return robot.compute_fk(qpos=qpos.unsqueeze(0), name=ARM_NAME, to_matrix=True)[0]
 
 
-def make_trials(
+def make_demo_offset_waypoints(
+    start_pose: torch.Tensor, num_waypoints: int
+) -> list[torch.Tensor]:
+    """Create demo-matched compact TCP waypoints around the start pose."""
+    offsets = torch.tensor(
+        DEMO_WAYPOINT_OFFSETS,
+        dtype=start_pose.dtype,
+        device=start_pose.device,
+    )
+    count = max(1, min(int(num_waypoints), offsets.shape[0]))
+    waypoints = start_pose.unsqueeze(0).repeat(count, 1, 1)
+    waypoints[:, :3, 3] += offsets[:count]
+    return [waypoint for waypoint in waypoints]
+
+
+def make_demo_offset_trials(
+    robot: Robot,
+    *,
+    total_trials: int,
+    num_waypoints: int,
+) -> list[PlannerTrial]:
+    """Build demo-matched trials from the NeuralPlanner example path."""
+    start_qpos = torch.tensor(
+        FRANKA_START_QPOS, dtype=torch.float32, device=robot.device
+    )
+    start_pose = fk_pose(robot, start_qpos)
+    waypoints = make_demo_offset_waypoints(start_pose, num_waypoints)
+    return [
+        PlannerTrial(
+            trial_id=trial_id,
+            trial_source="demo_offsets",
+            start_qpos=start_qpos.clone(),
+            target_qpos=torch.empty(0, 7, dtype=torch.float32, device=robot.device),
+            waypoints=[waypoint.clone() for waypoint in waypoints],
+        )
+        for trial_id in range(total_trials)
+    ]
+
+
+def make_fk_bank_trials(
     robot: Robot,
     *,
     total_trials: int,
@@ -355,11 +425,42 @@ def make_trials(
         trials.append(
             PlannerTrial(
                 trial_id=trial_id,
+                trial_source="fk_bank",
                 start_qpos=start_qpos.clone(),
                 target_qpos=target_qpos.clone(),
                 waypoints=waypoints,
             )
         )
+    return trials
+
+
+def make_trials(
+    robot: Robot,
+    *,
+    trial_sources: list[str],
+    total_trials: int,
+    num_waypoints: int,
+    seed: int,
+) -> list[PlannerTrial]:
+    """Build planner trials for the selected benchmark layers."""
+    trials: list[PlannerTrial] = []
+    for source in trial_sources:
+        if source == "demo_offsets":
+            source_trials = make_demo_offset_trials(
+                robot,
+                total_trials=total_trials,
+                num_waypoints=num_waypoints,
+            )
+        elif source == "fk_bank":
+            source_trials = make_fk_bank_trials(
+                robot,
+                total_trials=total_trials,
+                num_waypoints=num_waypoints,
+                seed=seed,
+            )
+        else:
+            raise ValueError(f"Unsupported trial source: {source}")
+        trials.extend(source_trials)
     return trials
 
 
@@ -539,15 +640,24 @@ def pose_error(
     return pos_error, rot_error
 
 
+def trajectory_fk_poses(robot: Robot, positions: torch.Tensor) -> list[torch.Tensor]:
+    """Compute FK poses for trajectory samples one row at a time."""
+    return [fk_pose(robot, qpos) for qpos in positions]
+
+
 def trajectory_quality(
     robot: Robot, positions: torch.Tensor | None, trial: PlannerTrial
 ) -> dict[str, object]:
-    """Compute final pose and joint path quality metrics."""
+    """Compute final pose, waypoint, and joint path quality metrics."""
     if positions is None or positions.numel() == 0:
         return {
             "trajectory_steps": 0,
             "final_tcp_pos_error": None,
             "final_tcp_rot_error": None,
+            "mean_waypoint_pos_error": None,
+            "max_waypoint_pos_error": None,
+            "mean_waypoint_rot_error": None,
+            "max_waypoint_rot_error": None,
             "joint_path_length": 0.0,
             "max_joint_step": 0.0,
             "mean_target_qpos_error": None,
@@ -555,6 +665,14 @@ def trajectory_quality(
         }
     final_pose = fk_pose(robot, positions[-1])
     final_pos, final_rot = pose_error(final_pose, trial.waypoints[-1])
+    trajectory_poses = trajectory_fk_poses(robot, positions)
+    waypoint_pos_errors = []
+    waypoint_rot_errors = []
+    for waypoint in trial.waypoints:
+        pose_errors = [pose_error(pose, waypoint) for pose in trajectory_poses]
+        best_pos, best_rot = min(pose_errors, key=lambda item: item[0])
+        waypoint_pos_errors.append(best_pos)
+        waypoint_rot_errors.append(best_rot)
     deltas = torch.diff(positions, dim=0)
     step_norms = (
         torch.linalg.norm(deltas, dim=-1)
@@ -565,15 +683,46 @@ def trajectory_quality(
     for target_qpos in trial.target_qpos:
         dists = torch.linalg.norm(positions - target_qpos.unsqueeze(0), dim=-1)
         target_errors.append(float(torch.min(dists).item()))
+    mean_target_qpos_error = (
+        sum(target_errors) / len(target_errors) if target_errors else None
+    )
     return {
         "trajectory_steps": int(positions.shape[0]),
         "final_tcp_pos_error": final_pos,
         "final_tcp_rot_error": final_rot,
+        "mean_waypoint_pos_error": sum(waypoint_pos_errors) / len(waypoint_pos_errors),
+        "max_waypoint_pos_error": max(waypoint_pos_errors),
+        "mean_waypoint_rot_error": sum(waypoint_rot_errors) / len(waypoint_rot_errors),
+        "max_waypoint_rot_error": max(waypoint_rot_errors),
         "joint_path_length": float(step_norms.sum().item()),
         "max_joint_step": float(step_norms.max().item()),
-        "mean_target_qpos_error": sum(target_errors) / len(target_errors),
+        "mean_target_qpos_error": mean_target_qpos_error,
         "final_qpos": [float(v) for v in positions[-1].detach().cpu().tolist()],
     }
+
+
+def all_waypoints_within_threshold(
+    robot: Robot,
+    positions: torch.Tensor | None,
+    trial: PlannerTrial,
+    *,
+    pos_threshold: float,
+    rot_threshold: float,
+) -> bool:
+    """Return whether every target waypoint is hit by some trajectory sample."""
+    if positions is None or positions.numel() == 0:
+        return False
+    trajectory_poses = trajectory_fk_poses(robot, positions)
+    for waypoint in trial.waypoints:
+        waypoint_hit = False
+        for pose in trajectory_poses:
+            pos_error, rot_error = pose_error(pose, waypoint)
+            if pos_error <= pos_threshold and rot_error <= rot_threshold:
+                waypoint_hit = True
+                break
+        if not waypoint_hit:
+            return False
+    return True
 
 
 def build_trial_row(
@@ -596,6 +745,16 @@ def build_trial_row(
         and float(final_pos) <= args.pos_success_threshold
         and float(final_rot) <= args.rot_success_threshold
     )
+    all_waypoint_strict_success = (
+        outcome.action_success
+        and all_waypoints_within_threshold(
+            robot,
+            outcome.positions,
+            trial,
+            pos_threshold=args.pos_success_threshold,
+            rot_threshold=args.rot_success_threshold,
+        )
+    )
     nmg_threshold_success = (
         outcome.action_success
         and final_pos is not None
@@ -603,15 +762,28 @@ def build_trial_row(
         and float(final_pos) <= args.nmg_pos_success_threshold
         and float(final_rot) <= args.nmg_rot_success_threshold
     )
+    all_waypoint_nmg_threshold_success = (
+        outcome.action_success
+        and all_waypoints_within_threshold(
+            robot,
+            outcome.positions,
+            trial,
+            pos_threshold=args.nmg_pos_success_threshold,
+            rot_threshold=args.nmg_rot_success_threshold,
+        )
+    )
     row: dict[str, object] = {
         "script": SCRIPT_NAME,
         "planner": planner,
+        "trial_source": trial.trial_source,
         "trial_id": trial.trial_id,
         "warmup": warmup,
         "num_waypoints": len(trial.waypoints),
         "action_success": outcome.action_success,
         "strict_pose_success": bool(strict_success),
+        "all_waypoint_strict_success": bool(all_waypoint_strict_success),
         "nmg_threshold_success": bool(nmg_threshold_success),
+        "all_waypoint_nmg_threshold_success": bool(all_waypoint_nmg_threshold_success),
         "planning_time_sec": outcome.planning_time_sec,
         "cpu_delta_mb": outcome.cpu_delta_mb,
         "gpu_delta_mb": outcome.gpu_delta_mb,
@@ -705,25 +877,43 @@ def measured_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return [row for row in rows if not row.get("warmup", False)]
 
 
-def summarize_by_planner(
+def summarize_by_source_planner(
     rows: list[dict[str, object]],
-) -> list[tuple[str, list[dict[str, object]]]]:
-    """Group measured rows by planner."""
+) -> list[tuple[str, str, list[dict[str, object]]]]:
+    """Group measured rows by trial source and planner."""
     measured = measured_rows(rows)
-    planners = sorted({str(row["planner"]) for row in measured})
+    groups = sorted(
+        {
+            (
+                str(row.get("trial_source", DEFAULT_TRIAL_SOURCE)),
+                str(row["planner"]),
+            )
+            for row in measured
+        }
+    )
     return [
-        (planner, [row for row in measured if row["planner"] == planner])
-        for planner in planners
+        (
+            trial_source,
+            planner,
+            [
+                row
+                for row in measured
+                if row.get("trial_source", DEFAULT_TRIAL_SOURCE) == trial_source
+                and row["planner"] == planner
+            ],
+        )
+        for trial_source, planner in groups
     ]
 
 
 def make_perf_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Build Time & Memory report rows."""
     perf_rows = []
-    for planner, group in summarize_by_planner(rows):
+    for trial_source, planner, group in summarize_by_source_planner(rows):
         times = _numeric_values(group, "planning_time_sec")
         perf_rows.append(
             {
+                "trial_source": trial_source,
                 "planner": planner,
                 "repeat_count": len(group),
                 "cost_time_ms_mean": _fmt_float(
@@ -762,24 +952,59 @@ def make_perf_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 def make_metric_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Build Success & Other Metrics report rows."""
     metric_rows = []
-    for planner, group in summarize_by_planner(rows):
+    for trial_source, planner, group in summarize_by_source_planner(rows):
         final_pos = _mean(_numeric_values(group, "final_tcp_pos_error"))
         final_rot = _mean(_numeric_values(group, "final_tcp_rot_error"))
+        mean_waypoint_pos = _mean(_numeric_values(group, "mean_waypoint_pos_error"))
+        max_waypoint_pos = _mean(_numeric_values(group, "max_waypoint_pos_error"))
+        mean_waypoint_rot = _mean(_numeric_values(group, "mean_waypoint_rot_error"))
+        max_waypoint_rot = _mean(_numeric_values(group, "max_waypoint_rot_error"))
         metric_rows.append(
             {
+                "trial_source": trial_source,
                 "planner": planner,
                 "action_success_rate": _fmt_rate(_rate(group, "action_success")),
                 "strict_pose_success_rate": _fmt_rate(
                     _rate(group, "strict_pose_success")
                 ),
+                "all_waypoint_strict_success_rate": _fmt_rate(
+                    _rate(group, "all_waypoint_strict_success")
+                ),
                 "nmg_threshold_success_rate": _fmt_rate(
                     _rate(group, "nmg_threshold_success")
+                ),
+                "all_waypoint_nmg_threshold_success_rate": _fmt_rate(
+                    _rate(group, "all_waypoint_nmg_threshold_success")
                 ),
                 "final_tcp_pos_err_mm": _fmt_float(
                     None if final_pos is None else final_pos * 1000.0, 3
                 ),
                 "final_tcp_rot_err_deg": _fmt_float(
                     None if final_rot is None else final_rot * 180.0 / math.pi, 3
+                ),
+                "mean_waypoint_pos_err_mm": _fmt_float(
+                    (None if mean_waypoint_pos is None else mean_waypoint_pos * 1000.0),
+                    3,
+                ),
+                "max_waypoint_pos_err_mm": _fmt_float(
+                    None if max_waypoint_pos is None else max_waypoint_pos * 1000.0,
+                    3,
+                ),
+                "mean_waypoint_rot_err_deg": _fmt_float(
+                    (
+                        None
+                        if mean_waypoint_rot is None
+                        else mean_waypoint_rot * 180.0 / math.pi
+                    ),
+                    3,
+                ),
+                "max_waypoint_rot_err_deg": _fmt_float(
+                    (
+                        None
+                        if max_waypoint_rot is None
+                        else max_waypoint_rot * 180.0 / math.pi
+                    ),
+                    3,
                 ),
                 "joint_path_length": _fmt_float(
                     _mean(_numeric_values(group, "joint_path_length")), 4
@@ -796,40 +1021,66 @@ def make_metric_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 
 
 def make_leaderboard_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Build leaderboard rows sorted by strict success then latency."""
+    """Build leaderboard rows sorted by waypoint strict success then latency."""
     leaderboard = []
-    for planner, group in summarize_by_planner(rows):
+    for trial_source, planner, group in summarize_by_source_planner(rows):
         strict_rate = _rate(group, "strict_pose_success") or 0.0
+        waypoint_strict_rate = _rate(group, "all_waypoint_strict_success") or 0.0
         loose_rate = _rate(group, "nmg_threshold_success") or 0.0
+        waypoint_loose_rate = _rate(group, "all_waypoint_nmg_threshold_success") or 0.0
         avg_time = _mean(_numeric_values(group, "planning_time_sec")) or 0.0
         avg_pos = _mean(_numeric_values(group, "final_tcp_pos_error"))
+        avg_waypoint_pos = _mean(_numeric_values(group, "max_waypoint_pos_error"))
         leaderboard.append(
             {
+                "trial_source": trial_source,
                 "planner": planner,
                 "strict_rate": strict_rate,
+                "waypoint_strict_rate": waypoint_strict_rate,
                 "loose_rate": loose_rate,
+                "waypoint_loose_rate": waypoint_loose_rate,
                 "avg_time_ms": avg_time * 1000.0,
                 "avg_pos_mm": None if avg_pos is None else avg_pos * 1000.0,
+                "avg_waypoint_pos_mm": (
+                    None if avg_waypoint_pos is None else avg_waypoint_pos * 1000.0
+                ),
             }
         )
     leaderboard.sort(
         key=lambda row: (
+            str(row["trial_source"]),
+            -float(row["waypoint_strict_rate"]),
             -float(row["strict_rate"]),
+            -float(row["waypoint_loose_rate"]),
             -float(row["loose_rate"]),
             float(row["avg_time_ms"]),
         )
     )
-    return [
-        {
-            "rank": rank,
-            "planner": row["planner"],
-            "overall_success_rate": _fmt_rate(float(row["strict_rate"])),
-            "nmg_threshold_success_rate": _fmt_rate(float(row["loose_rate"])),
-            "avg_cost_time_ms": _fmt_float(float(row["avg_time_ms"]), 2),
-            "avg_final_tcp_pos_err_mm": _fmt_float(row["avg_pos_mm"], 3),
-        }
-        for rank, row in enumerate(leaderboard, start=1)
-    ]
+    rows = []
+    current_source = None
+    source_rank = 0
+    for row in leaderboard:
+        if row["trial_source"] != current_source:
+            current_source = row["trial_source"]
+            source_rank = 1
+        else:
+            source_rank += 1
+        rows.append(
+            {
+                "rank": source_rank,
+                "trial_source": row["trial_source"],
+                "planner": row["planner"],
+                "overall_success_rate": _fmt_rate(float(row["waypoint_strict_rate"])),
+                "final_pose_success_rate": _fmt_rate(float(row["strict_rate"])),
+                "nmg_threshold_success_rate": _fmt_rate(float(row["loose_rate"])),
+                "avg_cost_time_ms": _fmt_float(float(row["avg_time_ms"]), 2),
+                "avg_final_tcp_pos_err_mm": _fmt_float(row["avg_pos_mm"], 3),
+                "avg_max_waypoint_pos_err_mm": _fmt_float(
+                    row["avg_waypoint_pos_mm"], 3
+                ),
+            }
+        )
+    return rows
 
 
 def _markdown_table(rows: list[dict[str, object]]) -> list[str]:
@@ -884,35 +1135,44 @@ def write_markdown_report(
 def make_skipped_rows(
     planners: list[str],
     *,
+    trial_sources: list[str],
     reason: str,
 ) -> list[dict[str, object]]:
     """Build rows for a gracefully skipped live-simulation benchmark."""
     rows = []
-    for planner in planners:
-        rows.append(
-            {
-                "script": SCRIPT_NAME,
-                "planner": planner,
-                "trial_id": 0,
-                "warmup": False,
-                "num_waypoints": 0,
-                "action_success": False,
-                "strict_pose_success": False,
-                "nmg_threshold_success": False,
-                "planning_time_sec": 0.0,
-                "cpu_delta_mb": 0.0,
-                "gpu_delta_mb": 0.0,
-                "peak_gpu_mb": 0.0,
-                "trajectory_steps": 0,
-                "final_tcp_pos_error": None,
-                "final_tcp_rot_error": None,
-                "joint_path_length": 0.0,
-                "max_joint_step": 0.0,
-                "mean_target_qpos_error": None,
-                "final_qpos": None,
-                "skip_reason": reason,
-            }
-        )
+    for trial_source in trial_sources:
+        for planner in planners:
+            rows.append(
+                {
+                    "script": SCRIPT_NAME,
+                    "planner": planner,
+                    "trial_source": trial_source,
+                    "trial_id": 0,
+                    "warmup": False,
+                    "num_waypoints": 0,
+                    "action_success": False,
+                    "strict_pose_success": False,
+                    "all_waypoint_strict_success": False,
+                    "nmg_threshold_success": False,
+                    "all_waypoint_nmg_threshold_success": False,
+                    "planning_time_sec": 0.0,
+                    "cpu_delta_mb": 0.0,
+                    "gpu_delta_mb": 0.0,
+                    "peak_gpu_mb": 0.0,
+                    "trajectory_steps": 0,
+                    "final_tcp_pos_error": None,
+                    "final_tcp_rot_error": None,
+                    "mean_waypoint_pos_error": None,
+                    "max_waypoint_pos_error": None,
+                    "mean_waypoint_rot_error": None,
+                    "max_waypoint_rot_error": None,
+                    "joint_path_length": 0.0,
+                    "max_joint_step": 0.0,
+                    "mean_target_qpos_error": None,
+                    "final_qpos": None,
+                    "skip_reason": reason,
+                }
+            )
     return rows
 
 
@@ -921,6 +1181,7 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
     validate_args(args)
     torch.manual_seed(args.seed)
     planners = expand_planner_selection(args.planner)
+    trial_sources = expand_trial_source_selection(args.trial_source)
 
     if args.save_raw_jsonl:
         raw_path = Path(args.save_raw_jsonl)
@@ -929,7 +1190,7 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
 
     if simulation_requires_cuda(args) and not torch.cuda.is_available():
         reason = "CUDA is unavailable, so the Franka planner benchmark was skipped."
-        rows = make_skipped_rows(planners, reason=reason)
+        rows = make_skipped_rows(planners, trial_sources=trial_sources, reason=reason)
         for row in rows:
             write_raw_jsonl(args.save_raw_jsonl, row)
         write_markdown_report(rows, args.report_path)
@@ -942,6 +1203,7 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
     total_trials = args.warmup_trials + args.num_trials
     trials = make_trials(
         robot,
+        trial_sources=trial_sources,
         total_trials=total_trials,
         num_waypoints=args.num_waypoints,
         seed=args.seed,
@@ -949,8 +1211,8 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for planner in planners:
         motion_gen = build_motion_generator(robot, planner, checkpoint_path, args)
-        for index, trial in enumerate(trials):
-            warmup = index < args.warmup_trials
+        for trial in trials:
+            warmup = trial.trial_id < args.warmup_trials
             robot.set_qpos(trial.start_qpos.unsqueeze(0), name=ARM_NAME, target=False)
             robot.set_qpos(trial.start_qpos.unsqueeze(0), name=ARM_NAME, target=True)
             outcome = run_planner_once(motion_gen, planner, trial, args)

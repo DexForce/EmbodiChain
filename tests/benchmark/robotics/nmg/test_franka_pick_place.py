@@ -25,43 +25,63 @@ import torch
 
 from embodichain.data import get_data_path
 from scripts.benchmark.robotics.nmg.franka_pick_place import (
+    BENCHMARK_PROFILE,
     ContactStats,
+    DEFAULT_ARENA_SPACE,
+    DEFAULT_DEMO_PROFILE,
     DEFAULT_FRANKA_TCP_YAW,
     DEFAULT_FRANKA_TCP_Z,
     DEFAULT_GRASP_AXIS,
     DEFAULT_GRASP_DEPTH_OFFSET,
     DEFAULT_GRIPPER_CLOSE_MARGIN,
+    DEFAULT_OBJECT_SETTLE_STEPS,
     FRANKA_GRIPPER_CLOSING_AXIS_INDEX,
+    GraspPreflight,
     OBJECT_SUPPORT_MARGIN,
     TABLE_COLLIDER_INIT_POS,
     TABLE_COLLIDER_SIZE,
     TABLE_INIT_POS,
     TABLE_TOP_Z,
+    TUTORIAL_OBJECT_INIT_Z,
+    TUTORIAL_OBJECT_SCALE,
+    TUTORIAL_OBJECT_XY,
+    TUTORIAL_POST_TRAJECTORY_STEPS,
+    TUTORIAL_PLACE_PROFILE,
+    TUTORIAL_PLACE_LIFT_HEIGHT,
+    build_grasp_generator_cfg,
     compute_attached_object_pose,
     create_support_table,
     estimate_gripper_opening_range,
     estimate_object_grasp_width,
     evaluate_grasp_preflight,
+    effective_final_hold_steps,
+    effective_pre_plan_hold_steps,
+    effective_replay_control,
     expand_mode_selection,
     expand_planner_selection,
     franka_hand_opening_from_finger_qpos,
     grasp_axis_alignment_cost,
     horizontal_bbox_axis,
     initialize_pre_pick_robot_pose,
+    inspect_viewer_before_trials,
     load_franka_hand_opening_spec,
     empty_replay_diagnostics,
     make_leaderboard_rows,
     make_failed_trial_row,
     make_skipped_rows,
+    make_tutorial_place_eef_pose,
+    make_tutorial_retract_eef_pose,
     physical_gpu_memory_skip_reason,
     _record_contact_stats,
     object_body_scale,
     object_initial_position,
     object_supported_z,
     parse_args,
+    pause_for_tutorial_inspection,
     rerank_grasp_costs_by_axis,
     resolve_object_body_scale,
     resolve_hand_open_close_qpos,
+    should_pause_for_tutorial_inspection,
     simulation_requires_cuda,
     write_markdown_report,
 )
@@ -70,10 +90,22 @@ from scripts.benchmark.robotics.nmg.franka_pick_place import (
 class _FakeSim:
     def __init__(self):
         self.cfg = None
+        self.update_steps = []
 
     def add_rigid_object(self, cfg):
         self.cfg = cfg
         return cfg
+
+    def update(self, step: int):
+        self.update_steps.append(step)
+
+
+class _FakeStdin:
+    def __init__(self, interactive: bool):
+        self.interactive = interactive
+
+    def isatty(self):
+        return self.interactive
 
 
 class _FakeObject:
@@ -232,8 +264,16 @@ def test_cli_defaults_and_selection_expansion():
     assert args.mode == "planner"
     assert args.object == "sugar_box"
     assert args.planner == "all"
+    assert args.demo_profile == DEFAULT_DEMO_PROFILE
+    assert args.demo_profile == TUTORIAL_PLACE_PROFILE
     assert args.headless is True
+    assert args.open_window is False
+    assert args.auto_play is False
     assert args.object_replay_mode == "physics"
+    assert args.support_surface == "ground"
+    assert args.object_xy is None
+    assert args.inspect_seconds == pytest.approx(0.0)
+    assert args.arena_space == pytest.approx(DEFAULT_ARENA_SPACE)
     assert args.object_scale is None
     assert args.grasp_axis == DEFAULT_GRASP_AXIS
     assert args.tcp_z == pytest.approx(DEFAULT_FRANKA_TCP_Z)
@@ -250,6 +290,87 @@ def test_cli_defaults_and_selection_expansion():
     assert expand_mode_selection("both") == ["planner", "physical"]
 
 
+def test_open_window_disables_headless_mode():
+    args = parse_args(["--open_window"])
+
+    assert args.open_window is True
+    assert args.headless is False
+    assert should_pause_for_tutorial_inspection(args) is True
+
+
+def test_auto_play_skips_open_window_tutorial_pause():
+    args = parse_args(["--open_window", "--auto_play"])
+
+    assert args.auto_play is True
+    assert should_pause_for_tutorial_inspection(args) is False
+
+
+def test_inspect_seconds_updates_viewer_before_trials():
+    sim = _FakeSim()
+    args = parse_args(["--inspect_seconds", "0.05"])
+
+    inspect_viewer_before_trials(sim, args)
+
+    assert sim.update_steps == [5]
+
+
+def test_benchmark_profile_does_not_use_tutorial_inspection_pause():
+    args = parse_args(["--open_window", "--demo_profile", "benchmark"])
+
+    assert should_pause_for_tutorial_inspection(args) is False
+
+
+def test_tutorial_profile_replay_matches_tutorial_direct_qpos_loop():
+    args = parse_args([])
+
+    assert effective_pre_plan_hold_steps(args) == 0
+    assert effective_replay_control(args) == "direct"
+    assert effective_final_hold_steps(args) == TUTORIAL_POST_TRAJECTORY_STEPS
+
+
+def test_benchmark_profile_replay_uses_requested_control_and_hold_steps():
+    args = parse_args(
+        [
+            "--demo_profile",
+            "benchmark",
+            "--replay_control",
+            "target",
+            "--hold_steps",
+            "7",
+        ]
+    )
+
+    assert effective_pre_plan_hold_steps(args) == 7
+    assert effective_replay_control(args) == "target"
+    assert effective_final_hold_steps(args) == 87
+
+
+def test_noninteractive_tutorial_inspection_pause_does_not_read_input(monkeypatch):
+    from scripts.benchmark.robotics.nmg import franka_pick_place
+
+    args = parse_args(["--open_window"])
+    monkeypatch.setattr(franka_pick_place.sys, "stdin", _FakeStdin(False))
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _: pytest.fail("input should not be called for noninteractive stdin"),
+    )
+
+    pause_for_tutorial_inspection(args)
+
+
+def test_interactive_tutorial_inspection_pause_reads_input(monkeypatch):
+    from scripts.benchmark.robotics.nmg import franka_pick_place
+
+    calls = []
+    args = parse_args(["--open_window"])
+    monkeypatch.setattr(franka_pick_place.sys, "stdin", _FakeStdin(True))
+    monkeypatch.setattr("builtins.input", lambda prompt: calls.append(prompt))
+
+    pause_for_tutorial_inspection(args)
+
+    assert calls == ["Inspect the object, then press Enter to plan PickUp -> Place..."]
+
+
 def test_cli_accepts_object_scale_and_short_axis_grasp():
     args = parse_args(
         [
@@ -257,12 +378,16 @@ def test_cli_accepts_object_scale_and_short_axis_grasp():
             "0.9",
             "0.9",
             "0.9",
+            "--object_xy",
+            "-0.35",
+            "0.12",
             "--grasp_axis",
             "short",
         ]
     )
 
     assert args.object_scale == pytest.approx([0.9, 0.9, 0.9])
+    assert args.object_xy == pytest.approx([-0.35, 0.12])
     assert args.grasp_axis == "short"
 
 
@@ -289,8 +414,12 @@ def test_object_supported_z_respects_scale_override():
     assert z == pytest.approx(TABLE_TOP_Z + 0.045 + OBJECT_SUPPORT_MARGIN)
 
 
-def test_sugar_box_scale_uses_preset_value_by_default():
-    assert object_body_scale("sugar_box") == pytest.approx((1.0, 1.0, 1.0))
+def test_sugar_box_scale_matches_tutorial_place_profile_by_default():
+    assert object_body_scale("sugar_box") == pytest.approx(TUTORIAL_OBJECT_SCALE)
+    assert resolve_object_body_scale(
+        "sugar_box",
+        demo_profile=BENCHMARK_PROFILE,
+    ) == pytest.approx((1.0, 1.0, 1.0))
 
 
 def test_support_table_is_static_and_below_interaction_plane():
@@ -302,16 +431,105 @@ def test_support_table_is_static_and_below_interaction_plane():
     assert cfg.uid == "support_table_collider"
     assert cfg.shape.size == list(TABLE_COLLIDER_SIZE)
     assert cfg.init_pos == TABLE_COLLIDER_INIT_POS
-    assert TABLE_TOP_Z == pytest.approx(0.0)
+    assert TABLE_TOP_Z == pytest.approx(0.1)
 
 
-def test_sugar_box_initial_position_places_bottom_above_support_plane():
+def test_cli_accepts_legacy_table_support_surface():
+    args = parse_args(["--support_surface", "table"])
+
+    assert args.support_surface == "table"
+
+
+def test_ground_support_surface_matches_tutorial_grasp_filtering():
+    preflight = GraspPreflight(
+        status="ok",
+        object_grasp_width_m=0.09,
+        gripper_min_opening_m=0.07,
+        gripper_max_opening_m=0.16,
+        reason="ok",
+    )
+
+    ground_cfg = build_grasp_generator_cfg(parse_args([]), preflight)
+    table_cfg = build_grasp_generator_cfg(
+        parse_args(["--support_surface", "table"]),
+        preflight,
+    )
+
+    assert ground_cfg.is_filter_ground_collision is False
+    assert table_cfg.is_filter_ground_collision is True
+    assert ground_cfg.antipodal_sampler_cfg.min_length == pytest.approx(0.003)
+
+
+def test_benchmark_profile_grasp_filter_uses_franka_min_opening():
+    preflight = GraspPreflight(
+        status="ok",
+        object_grasp_width_m=0.09,
+        gripper_min_opening_m=0.07,
+        gripper_max_opening_m=0.16,
+        reason="ok",
+    )
+
+    cfg = build_grasp_generator_cfg(
+        parse_args(["--demo_profile", "benchmark"]),
+        preflight,
+    )
+
+    assert cfg.antipodal_sampler_cfg.min_length == pytest.approx(0.07)
+
+
+def test_ground_support_surface_matches_pickup_tutorial_settle_defaults():
+    assert parse_args([]).support_surface == "ground"
+    assert parse_args([]).arena_space == pytest.approx(2.5)
+    assert DEFAULT_OBJECT_SETTLE_STEPS == 10
+
+
+def test_sugar_box_initial_position_matches_pickup_tutorial_settle_pose():
     x, y, z = object_initial_position("sugar_box")
 
+    assert (x, y) == pytest.approx(TUTORIAL_OBJECT_XY)
+    assert z == pytest.approx(TUTORIAL_OBJECT_INIT_Z)
+    assert object_supported_z("sugar_box") > TABLE_TOP_Z
+
+
+def test_object_xy_override_changes_tutorial_initial_position():
+    x, y, z = object_initial_position("sugar_box", object_xy=(-0.35, 0.12))
+
+    assert (x, y) == pytest.approx((-0.35, 0.12))
+    assert z == pytest.approx(TUTORIAL_OBJECT_INIT_Z)
+
+
+def test_benchmark_profile_sugar_box_initial_position_uses_support_plane_z():
+    x, y, z = object_initial_position(
+        "sugar_box",
+        demo_profile=BENCHMARK_PROFILE,
+    )
+
     assert (x, y) == pytest.approx((0.31, 0.0))
-    assert z > TABLE_TOP_Z
+    assert z == pytest.approx(
+        object_supported_z("sugar_box", demo_profile=BENCHMARK_PROFILE),
+        abs=1e-6,
+    )
+
+
+def test_object_xy_override_changes_benchmark_initial_position():
+    x, y, z = object_initial_position(
+        "sugar_box",
+        demo_profile=BENCHMARK_PROFILE,
+        object_xy=(-0.35, 0.12),
+    )
+
+    assert (x, y) == pytest.approx((-0.35, 0.12))
+    assert z == pytest.approx(
+        object_supported_z("sugar_box", demo_profile=BENCHMARK_PROFILE),
+        abs=1e-6,
+    )
+
+
+def test_legacy_table_support_surface_uses_tutorial_xy_and_support_plane_z():
+    _, _, z = object_initial_position("sugar_box", support_surface="table")
+
     assert z == pytest.approx(object_supported_z("sugar_box"), abs=1e-6)
-    assert z - TABLE_TOP_Z > OBJECT_SUPPORT_MARGIN
+    assert z > TABLE_TOP_Z
 
 
 def test_resolve_hand_open_close_qpos_clamps_to_joint_limits():
@@ -432,6 +650,18 @@ def test_compute_attached_object_pose_inverts_object_to_eef_transform():
     object_pose = compute_attached_object_pose(eef_pose, object_to_eef)
 
     assert object_pose[:3, 3].tolist() == pytest.approx([0.3, -0.2, 0.28])
+
+
+def test_tutorial_place_retract_pose_matches_place_lift_height():
+    place_pose = make_tutorial_place_eef_pose(torch.device("cpu"))
+
+    retract_pose = make_tutorial_retract_eef_pose(place_pose)
+
+    assert torch.allclose(retract_pose[:3, :3], place_pose[:3, :3])
+    assert retract_pose[:3, 3].tolist() == pytest.approx([-0.20, 0.28, 0.24])
+    assert retract_pose[2, 3] - place_pose[2, 3] == pytest.approx(
+        TUTORIAL_PLACE_LIFT_HEIGHT
+    )
 
 
 def test_contact_stats_aggregation_tracks_impulse_and_distance_extrema():

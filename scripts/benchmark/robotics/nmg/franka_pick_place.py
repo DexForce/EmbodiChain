@@ -29,6 +29,7 @@ import json
 import math
 import os
 import struct
+import sys
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -89,6 +90,11 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils import logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    draw_axis_marker,
+    start_auto_play_recording,
+    stop_auto_play_recording,
+)
 
 SCRIPT_NAME = "franka_pick_place_nmg"
 ARM_NAME = "main_arm"
@@ -98,7 +104,7 @@ TABLE_UID = "support_table"
 TABLE_COLLIDER_UID = "support_table_collider"
 TABLE_MESH_PATH = "ShopTableSimple/shop_table_simple.ply"
 TABLE_MESH_TOP_Z = 0.8265
-TABLE_TOP_Z = 0.0
+TABLE_TOP_Z = 0.1
 TABLE_INIT_POS = (0.0, 0.0, TABLE_TOP_Z - TABLE_MESH_TOP_Z)
 TABLE_SCALE = (1.0, 1.0, 1.0)
 TABLE_COLLIDER_SIZE = (1.0, 1.0, 0.04)
@@ -108,6 +114,19 @@ TABLE_COLLIDER_INIT_POS = (
     TABLE_TOP_Z - TABLE_COLLIDER_SIZE[2] / 2.0,
 )
 OBJECT_SUPPORT_MARGIN = 0.002
+TUTORIAL_PLACE_PROFILE = "tutorial_place"
+BENCHMARK_PROFILE = "benchmark"
+DEFAULT_DEMO_PROFILE = TUTORIAL_PLACE_PROFILE
+TUTORIAL_OBJECT_NAME = "sugar_box"
+TUTORIAL_OBJECT_XY = (-0.42, -0.08)
+TUTORIAL_OBJECT_INIT_Z = 0.05
+TUTORIAL_OBJECT_SCALE = (0.8, 0.8, 0.8)
+TUTORIAL_PRE_GRASP_DISTANCE = 0.15
+TUTORIAL_PICK_LIFT_HEIGHT = 0.16
+TUTORIAL_PLACE_LIFT_HEIGHT = 0.14
+BENCHMARK_PRE_GRASP_DISTANCE = 0.12
+BENCHMARK_PICK_LIFT_HEIGHT = 0.14
+BENCHMARK_PLACE_LIFT_HEIGHT = 0.14
 
 PICK_SAMPLE_INTERVAL = 120
 PLACE_SAMPLE_INTERVAL = 120
@@ -115,6 +134,7 @@ MOVE_SAMPLE_INTERVAL = 80
 HAND_INTERP_STEPS = 12
 POST_REPLAY_HOLD_STEPS = 80
 POST_GRASP_HOLD_STEPS = 80
+TUTORIAL_POST_TRAJECTORY_STEPS = 240
 
 DEFAULT_POS_THRESHOLD = 1e-3
 DEFAULT_ROT_THRESHOLD = 0.05
@@ -131,6 +151,8 @@ DEFAULT_FRANKA_TCP_Z = 0.1034
 DEFAULT_FRANKA_TCP_YAW = -math.pi / 4.0
 DEFAULT_GRASP_DEPTH_OFFSET = 0.0
 DEFAULT_MIN_PHYSICAL_GPU_FREE_MB = 2048.0
+DEFAULT_ARENA_SPACE = 2.5
+DEFAULT_OBJECT_SETTLE_STEPS = 10
 
 FRANKA_FINGER_LINK_NAMES = ("leftfinger", "rightfinger")
 FRANKA_GRIPPER_CLOSING_AXIS_INDEX = 1
@@ -166,8 +188,6 @@ OBJECT_PRESETS: dict[str, dict[str, Any]] = {
         "mesh_path": "SugarBox/sugar_box_usd/sugar_box.usda",
         "init_pos": (0.31, 0.00, 0.0),
         "init_rot": (0.0, 0.0, 0.0),
-        # Default benchmark scale. Use --object_scale to sweep strict-physics
-        # grasp feasibility without editing this preset.
         "body_scale": (1.0, 1.0, 1.0),
         "mass": 0.05,
         "max_convex_hull_num": 16,
@@ -294,7 +314,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Benchmark Franka PickUp -> Place with IK and NMG planners."
     )
     add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(headless=True)
+    parser.set_defaults(headless=True, arena_space=DEFAULT_ARENA_SPACE)
     parser.add_argument(
         "--planner",
         choices=["ik_interpolate", "neural", "neural_refine", "all"],
@@ -317,10 +337,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Evaluation mode. 'both' runs separate planner and physical rows.",
     )
     parser.add_argument(
+        "--run_kind",
+        choices=["auto", "demo", "benchmark"],
+        default="auto",
+        help=(
+            "Execution kind. 'demo' runs one tutorial-style PickUp -> Place "
+            "sequence without the benchmark loop. 'auto' uses demo when "
+            "--open_window is set, otherwise benchmark."
+        ),
+    )
+    parser.add_argument(
         "--object",
         choices=sorted(OBJECT_PRESETS),
         default="sugar_box",
         help="Object preset used for the pick-place scene.",
+    )
+    parser.add_argument(
+        "--demo_profile",
+        choices=[TUTORIAL_PLACE_PROFILE, BENCHMARK_PROFILE],
+        default=DEFAULT_DEMO_PROFILE,
+        help=(
+            "'tutorial_place' mirrors scripts/tutorials/atomic_action/place.py "
+            "as closely as possible while keeping the Franka robot. 'benchmark' "
+            "uses the original object-target benchmark sequence."
+        ),
     )
     parser.add_argument(
         "--object_scale",
@@ -329,6 +369,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar=("SX", "SY", "SZ"),
         help="Optional object body scale override for strict-physics experiments.",
+    )
+    parser.add_argument(
+        "--object_xy",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("X", "Y"),
+        help=(
+            "Optional world-frame object XY override. This affects both initial "
+            "creation and per-trial object reset."
+        ),
+    )
+    parser.add_argument(
+        "--support_surface",
+        choices=["ground", "table"],
+        default="ground",
+        help=(
+            "Support surface for the object. 'ground' matches the atomic-action "
+            "pickup tutorial and uses the SimulationManager default plane. "
+            "'table' creates the benchmark's legacy hidden table collider and "
+            "visual table mesh."
+        ),
     )
     parser.add_argument(
         "--num_repeats",
@@ -367,6 +429,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--force_reannotate",
         action="store_true",
         help="Force grasp region re-annotation instead of using cached data.",
+    )
+    parser.add_argument(
+        "--open_window",
+        action="store_true",
+        help="Open the simulation viewer window for visual inspection.",
+    )
+    parser.add_argument(
+        "--auto_play",
+        action="store_true",
+        help=(
+            "Run the open-window tutorial profile without waiting for keyboard "
+            "inspection prompts."
+        ),
+    )
+    parser.add_argument(
+        "--inspect_seconds",
+        type=float,
+        default=0.0,
+        help="Optional seconds to keep updating the viewer before starting trials.",
     )
     parser.add_argument(
         "--report_path",
@@ -462,6 +543,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--demo_object_replay_mode",
+        choices=["physics", "attached"],
+        default="attached",
+        help=(
+            "Object replay mode used only by --run_kind demo. The benchmark loop "
+            "continues to use --object_replay_mode."
+        ),
+    )
+    parser.add_argument(
         "--grasp_hold_steps",
         type=int,
         default=DEFAULT_GRASP_HOLD_STEPS,
@@ -524,7 +614,72 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Set <= 0 to disable the preflight skip."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.open_window:
+        args.headless = False
+    if (
+        args.demo_profile == TUTORIAL_PLACE_PROFILE
+        and args.object != TUTORIAL_OBJECT_NAME
+    ):
+        logger.log_warning(
+            f"{TUTORIAL_PLACE_PROFILE} is calibrated for {TUTORIAL_OBJECT_NAME}; "
+            f"received --object {args.object}."
+        )
+    return args
+
+
+def should_pause_for_tutorial_inspection(args: argparse.Namespace) -> bool:
+    """Return whether the open-window tutorial profile should wait for inspection."""
+    return (
+        not args.headless
+        and args.demo_profile == TUTORIAL_PLACE_PROFILE
+        and not args.auto_play
+    )
+
+
+def pause_for_tutorial_inspection(args: argparse.Namespace) -> None:
+    """Pause before planning when the tutorial viewer runs in an interactive shell."""
+    if not should_pause_for_tutorial_inspection(args):
+        return
+    if not sys.stdin.isatty():
+        logger.log_warning(
+            f"{SCRIPT_NAME}: --open_window tutorial inspection prompt skipped "
+            "because stdin is not interactive. Use --auto_play to suppress this "
+            "warning explicitly."
+        )
+        return
+    input("Inspect the object, then press Enter to plan PickUp -> Place...")
+
+
+def inspect_viewer_before_trials(
+    sim: SimulationManager, args: argparse.Namespace
+) -> None:
+    """Keep the viewer alive briefly before benchmark trials start."""
+    if args.inspect_seconds <= 0.0:
+        return
+    steps = max(1, int(round(args.inspect_seconds / (1.0 / 100.0))))
+    sim.update(step=steps)
+
+
+def effective_replay_control(args: argparse.Namespace) -> str:
+    """Return the replay control mode used for this profile."""
+    if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+        return "direct"
+    return args.replay_control
+
+
+def effective_final_hold_steps(args: argparse.Namespace) -> int:
+    """Return the number of final hold iterations used after replay."""
+    if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+        return TUTORIAL_POST_TRAJECTORY_STEPS
+    return args.hold_steps + POST_REPLAY_HOLD_STEPS
+
+
+def effective_pre_plan_hold_steps(args: argparse.Namespace) -> int:
+    """Return physics hold steps inserted before planning."""
+    if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+        return 0
+    return max(args.hold_steps, 1)
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -551,6 +706,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--gripper_close_margin must be >= 0.")
     if args.hold_steps < 0:
         raise ValueError("--hold_steps must be >= 0.")
+    if args.inspect_seconds < 0.0:
+        raise ValueError("--inspect_seconds must be >= 0.")
     if args.min_physical_gpu_free_mb < 0.0:
         raise ValueError("--min_physical_gpu_free_mb must be >= 0.")
 
@@ -621,12 +778,15 @@ def _franka_tcp(
 def resolve_object_body_scale(
     object_name: str,
     object_scale: tuple[float, float, float] | list[float] | None = None,
+    demo_profile: str = DEFAULT_DEMO_PROFILE,
 ) -> tuple[float, float, float]:
     """Return the benchmark scale for an object preset or CLI override."""
     if object_scale is not None:
         if len(object_scale) != 3:
             raise ValueError(f"object_scale must have 3 values, got {object_scale}")
         scale = tuple(float(v) for v in object_scale)
+    elif demo_profile == TUTORIAL_PLACE_PROFILE and object_name == TUTORIAL_OBJECT_NAME:
+        scale = TUTORIAL_OBJECT_SCALE
     else:
         scale = tuple(float(v) for v in OBJECT_PRESETS[object_name]["body_scale"])
     if any(v <= 0.0 for v in scale):
@@ -642,10 +802,11 @@ def object_body_scale(object_name: str) -> tuple[float, float, float]:
 def object_supported_z(
     object_name: str,
     object_scale: tuple[float, float, float] | list[float] | None = None,
+    demo_profile: str = DEFAULT_DEMO_PROFILE,
 ) -> float:
-    """Return the object origin z that places its scaled bottom on the table."""
+    """Return the object origin z that places its scaled bottom on the support plane."""
     preset = OBJECT_PRESETS[object_name]
-    scale = resolve_object_body_scale(object_name, object_scale)
+    scale = resolve_object_body_scale(object_name, object_scale, demo_profile)
     if preset.get("shape") == "cube":
         size_z = float(preset["size"][2]) * scale[2]
         return TABLE_TOP_Z + size_z / 2.0 + OBJECT_SUPPORT_MARGIN
@@ -656,20 +817,50 @@ def object_supported_z(
 def object_initial_position(
     object_name: str,
     object_scale: tuple[float, float, float] | list[float] | None = None,
+    support_surface: str = "ground",
+    demo_profile: str = DEFAULT_DEMO_PROFILE,
+    object_xy: tuple[float, float] | list[float] | None = None,
 ) -> tuple[float, float, float]:
-    """Return the benchmark object position with support-plane z compensation."""
+    """Return the benchmark object position."""
+    if support_surface not in ("ground", "table"):
+        raise ValueError(f"Unsupported support_surface: {support_surface}")
     pos = OBJECT_PRESETS[object_name]["init_pos"]
-    return (float(pos[0]), float(pos[1]), object_supported_z(object_name, object_scale))
+    xy = None if object_xy is None else (float(object_xy[0]), float(object_xy[1]))
+    if demo_profile == TUTORIAL_PLACE_PROFILE and object_name == TUTORIAL_OBJECT_NAME:
+        xy = xy or (float(TUTORIAL_OBJECT_XY[0]), float(TUTORIAL_OBJECT_XY[1]))
+        if support_surface == "ground":
+            return (
+                xy[0],
+                xy[1],
+                TUTORIAL_OBJECT_INIT_Z,
+            )
+        pos = (xy[0], xy[1], pos[2])
+    elif xy is not None:
+        pos = (xy[0], xy[1], pos[2])
+    return (
+        float(pos[0]),
+        float(pos[1]),
+        object_supported_z(object_name, object_scale, demo_profile),
+    )
 
 
 def object_initial_pose(
     object_name: str,
     device: torch.device,
     object_scale: tuple[float, float, float] | list[float] | None = None,
+    support_surface: str = "ground",
+    demo_profile: str = DEFAULT_DEMO_PROFILE,
+    object_xy: tuple[float, float] | list[float] | None = None,
 ) -> torch.Tensor:
     """Return the initial object pose as an unbatched 7D wxyz pose tensor."""
     preset = OBJECT_PRESETS[object_name]
-    pos = object_initial_position(object_name, object_scale)
+    pos = object_initial_position(
+        object_name,
+        object_scale,
+        support_surface,
+        demo_profile,
+        object_xy,
+    )
     yaw = math.radians(float(preset["init_rot"][2]))
     return torch.tensor(
         [
@@ -1148,33 +1339,44 @@ def create_object(
     sim: SimulationManager,
     object_name: str,
     object_scale: tuple[float, float, float] | list[float] | None = None,
+    support_surface: str = "ground",
+    demo_profile: str = DEFAULT_DEMO_PROFILE,
+    object_xy: tuple[float, float] | list[float] | None = None,
 ) -> RigidObject:
     """Create the benchmark object."""
     preset = OBJECT_PRESETS[object_name]
-    scale = resolve_object_body_scale(object_name, object_scale)
+    scale = resolve_object_body_scale(object_name, object_scale, demo_profile)
     shape = (
         CubeCfg(size=list(preset["size"]))
         if preset.get("shape") == "cube"
         else MeshCfg(fpath=get_data_path(preset["mesh_path"]))
     )
+    attrs_kwargs = {
+        "mass": preset["mass"],
+        "dynamic_friction": 0.97,
+        "static_friction": 0.99,
+        "enable_ccd": True,
+    }
+    if demo_profile != TUTORIAL_PLACE_PROFILE:
+        attrs_kwargs["contact_offset"] = 0.004
     cfg = RigidObjectCfg(
         uid=preset["label"],
         shape=shape,
-        attrs=RigidBodyAttributesCfg(
-            mass=preset["mass"],
-            dynamic_friction=0.97,
-            static_friction=0.99,
-            enable_ccd=True,
-            contact_offset=0.004,
-        ),
+        attrs=RigidBodyAttributesCfg(**attrs_kwargs),
         max_convex_hull_num=preset["max_convex_hull_num"],
-        init_pos=object_initial_position(object_name, scale),
+        init_pos=object_initial_position(
+            object_name,
+            scale,
+            support_surface,
+            demo_profile,
+            object_xy,
+        ),
         init_rot=preset["init_rot"],
         body_scale=scale,
         use_usd_properties=preset["use_usd_properties"],
     )
     obj = sim.add_rigid_object(cfg=cfg)
-    sim.update(step=20)
+    sim.update(step=DEFAULT_OBJECT_SETTLE_STEPS)
     return obj
 
 
@@ -1182,9 +1384,19 @@ def reset_object_pose(
     obj: RigidObject,
     object_name: str,
     object_scale: tuple[float, float, float] | list[float] | None = None,
+    support_surface: str = "ground",
+    demo_profile: str = DEFAULT_DEMO_PROFILE,
+    object_xy: tuple[float, float] | list[float] | None = None,
 ) -> torch.Tensor:
     """Reset the benchmark object to its initial pose and return it as a matrix."""
-    pose = object_initial_pose(object_name, obj.device, object_scale).unsqueeze(0)
+    pose = object_initial_pose(
+        object_name,
+        obj.device,
+        object_scale,
+        support_surface,
+        demo_profile,
+        object_xy,
+    ).unsqueeze(0)
     obj.set_local_pose(pose, env_ids=[0])
     obj.clear_dynamics(env_ids=[0])
     return obj.get_local_pose(to_matrix=True)[0].clone()
@@ -1219,6 +1431,22 @@ def make_rest_pose(robot: Robot) -> torch.Tensor:
     return compute_fk_pose(robot, FRANKA_REST_QPOS)
 
 
+def make_tutorial_place_eef_pose(device: torch.device) -> torch.Tensor:
+    """Return the fixed Place target pose used by the atomic-action tutorial."""
+    pose = torch.eye(4, dtype=torch.float32, device=device)
+    pose[:3, :3] = torch.tensor(
+        [
+            [-0.0539, -0.9985, -0.0022],
+            [-0.9977, 0.0540, -0.0401],
+            [0.0401, 0.0000, -0.9992],
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
+    pose[:3, 3] = torch.tensor([-0.20, 0.28, 0.1], dtype=torch.float32, device=device)
+    return pose
+
+
 def make_object_target_pose(obj: RigidObject) -> torch.Tensor:
     """Return a desired object placement pose derived from the live object pose."""
     target = obj.get_local_pose(to_matrix=True)[0].clone()
@@ -1228,6 +1456,17 @@ def make_object_target_pose(obj: RigidObject) -> torch.Tensor:
         device=target.device,
     )
     return target
+
+
+def make_tutorial_retract_eef_pose(place_eef_pose: torch.Tensor) -> torch.Tensor:
+    """Return the final retract pose produced by the tutorial Place action."""
+    retract_pose = place_eef_pose.clone()
+    retract_pose[:3, 3] += torch.tensor(
+        [0.0, 0.0, TUTORIAL_PLACE_LIFT_HEIGHT],
+        dtype=torch.float32,
+        device=place_eef_pose.device,
+    )
+    return retract_pose
 
 
 def make_pre_pick_eef_pose(robot: Robot, position: torch.Tensor) -> torch.Tensor:
@@ -1295,6 +1534,22 @@ def build_grasp_generator_cfg(
     args: argparse.Namespace, preflight: GraspPreflight
 ) -> GraspGeneratorCfg:
     """Build grasp annotation config."""
+    cfg = GraspGeneratorCfg(
+        viser_port=11801,
+        antipodal_sampler_cfg=AntipodalSamplerCfg(
+            n_sample=args.n_sample,
+            max_length=preflight.gripper_max_opening_m,
+            min_length=(
+                0.003
+                if args.demo_profile == TUTORIAL_PLACE_PROFILE
+                else max(0.003, preflight.gripper_min_opening_m)
+            ),
+        ),
+        is_partial_annotate=False,
+        is_filter_ground_collision=args.support_surface == "table",
+    )
+    if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+        return cfg
     return GraspGeneratorCfg(
         viser_port=11801,
         antipodal_sampler_cfg=AntipodalSamplerCfg(
@@ -1303,7 +1558,7 @@ def build_grasp_generator_cfg(
             min_length=max(0.003, preflight.gripper_min_opening_m),
         ),
         is_partial_annotate=False,
-        is_filter_ground_collision=True,
+        is_filter_ground_collision=args.support_surface == "table",
         n_deviated_approach_directions=args.n_deviated_approach_directions,
         n_top_grasps=30,
     )
@@ -1465,14 +1720,23 @@ def build_engine(
         close_margin_m=args.gripper_close_margin,
         franka_urdf_path=franka_urdf_path,
     )
+    tutorial_profile = args.demo_profile == TUTORIAL_PLACE_PROFILE
     pickup_cfg = PickUpCfg(
         control_part=ARM_NAME,
         hand_control_part=HAND_NAME,
         hand_open_qpos=hand_open,
         hand_close_qpos=hand_close,
         approach_direction=resolve_approach_direction(args, robot.device),
-        pre_grasp_distance=0.12,
-        lift_height=0.14,
+        pre_grasp_distance=(
+            TUTORIAL_PRE_GRASP_DISTANCE
+            if tutorial_profile
+            else BENCHMARK_PRE_GRASP_DISTANCE
+        ),
+        lift_height=(
+            TUTORIAL_PICK_LIFT_HEIGHT
+            if tutorial_profile
+            else BENCHMARK_PICK_LIFT_HEIGHT
+        ),
         sample_interval=PICK_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
     )
@@ -1481,7 +1745,11 @@ def build_engine(
         hand_control_part=HAND_NAME,
         hand_open_qpos=hand_open,
         hand_close_qpos=hand_close,
-        lift_height=0.14,
+        lift_height=(
+            TUTORIAL_PLACE_LIFT_HEIGHT
+            if tutorial_profile
+            else BENCHMARK_PLACE_LIFT_HEIGHT
+        ),
         sample_interval=PLACE_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
     )
@@ -1507,10 +1775,12 @@ def build_engine(
 def plan_sequence(
     engine: AtomicActionEngine,
     semantics: ObjectSemantics,
-    object_target_pose: torch.Tensor,
+    target_pose: torch.Tensor,
     rest_pose: torch.Tensor,
+    *,
+    demo_profile: str,
 ) -> PlanOutcome:
-    """Plan the full PickUp -> Place -> MoveEndEffector sequence."""
+    """Plan the requested PickUp/Place sequence."""
     pick_success, pick_traj, pick_state = engine.run(
         steps=[("pick_up", GraspTarget(semantics=semantics))]
     )
@@ -1523,20 +1793,22 @@ def plan_sequence(
             rest_eef_pose=rest_pose,
         )
 
-    object_to_eef = pick_state.held_object.object_to_eef.to(
-        device=object_target_pose.device, dtype=torch.float32
-    )
-    if object_to_eef.shape == (4, 4):
-        object_to_eef = object_to_eef.unsqueeze(0)
-    place_pose = torch.bmm(object_target_pose.unsqueeze(0), object_to_eef)[0]
-
-    finish_success, finish_traj, _ = engine.run(
-        steps=[
+    if demo_profile == TUTORIAL_PLACE_PROFILE:
+        place_pose = target_pose
+        finish_steps = [("place", EndEffectorPoseTarget(xpos=place_pose))]
+    else:
+        object_to_eef = pick_state.held_object.object_to_eef.to(
+            device=target_pose.device, dtype=torch.float32
+        )
+        if object_to_eef.shape == (4, 4):
+            object_to_eef = object_to_eef.unsqueeze(0)
+        place_pose = torch.bmm(target_pose.unsqueeze(0), object_to_eef)[0]
+        finish_steps = [
             ("place", EndEffectorPoseTarget(xpos=place_pose)),
             ("move_end_effector", EndEffectorPoseTarget(xpos=rest_pose)),
-        ],
-        state=pick_state,
-    )
+        ]
+
+    finish_success, finish_traj, _ = engine.run(steps=finish_steps, state=pick_state)
     trajectory = torch.cat([pick_traj, finish_traj], dim=1)
     return PlanOutcome(
         success=finish_success,
@@ -1579,15 +1851,23 @@ def _memory_snapshot() -> dict[str, float]:
 def timed_plan_sequence(
     engine: AtomicActionEngine,
     semantics: ObjectSemantics,
-    object_target_pose: torch.Tensor,
+    target_pose: torch.Tensor,
     rest_pose: torch.Tensor,
+    *,
+    demo_profile: str,
 ) -> tuple[PlanOutcome, float, dict[str, float], float]:
     """Plan once and return time, memory delta, and peak GPU memory."""
     _reset_peak_gpu_memory()
     before = _memory_snapshot()
     _sync_cuda()
     start = time.perf_counter()
-    outcome = plan_sequence(engine, semantics, object_target_pose, rest_pose)
+    outcome = plan_sequence(
+        engine,
+        semantics,
+        target_pose,
+        rest_pose,
+        demo_profile=demo_profile,
+    )
     _sync_cuda()
     elapsed = time.perf_counter() - start
     after = _memory_snapshot()
@@ -1945,9 +2225,11 @@ def replay_trajectory(
         if close_end_idx is None
         else object_delta_from_tcp(robot, obj, traj[:, close_end_idx, :])
     )
+    should_clear_object_dynamics = args.demo_profile == TUTORIAL_PLACE_PROFILE
+    replay_control = effective_replay_control(args)
     try:
         for idx in range(traj.shape[1]):
-            _set_replay_qpos(robot, traj[:, idx, :], mode=args.replay_control)
+            _set_replay_qpos(robot, traj[:, idx, :], mode=replay_control)
             if (
                 args.object_replay_mode == "attached"
                 and close_end_idx is not None
@@ -2010,7 +2292,16 @@ def replay_trajectory(
                     repeat_id=repeat_id,
                     label="after_close",
                 )
-                sim.update(step=args.grasp_hold_steps + POST_GRASP_HOLD_STEPS)
+                if should_clear_object_dynamics:
+                    obj.clear_dynamics(env_ids=[0])
+                    should_clear_object_dynamics = False
+                close_hold_steps = (
+                    0
+                    if args.demo_profile == TUTORIAL_PLACE_PROFILE
+                    else args.grasp_hold_steps + POST_GRASP_HOLD_STEPS
+                )
+                if close_hold_steps > 0:
+                    sim.update(step=close_hold_steps)
                 if args.object_replay_mode == "attached":
                     update_attached_object_pose(
                         robot, obj, traj[:, idx, :], object_to_eef
@@ -2065,8 +2356,14 @@ def replay_trajectory(
             repeat_id=repeat_id,
             label="after_path",
         )
-        _set_replay_qpos(robot, traj[:, -1, :], mode=args.replay_control)
-        sim.update(step=args.hold_steps + POST_REPLAY_HOLD_STEPS)
+        final_hold_steps = effective_final_hold_steps(args)
+        if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+            for _ in range(final_hold_steps):
+                _set_replay_qpos(robot, traj[:, -1, :], mode=replay_control)
+                sim.update(step=2)
+        else:
+            _set_replay_qpos(robot, traj[:, -1, :], mode=replay_control)
+            sim.update(step=final_hold_steps)
         actual_min_hand_opening = min(
             actual_min_hand_opening,
             current_hand_opening(robot, hand_opening_spec),
@@ -2262,8 +2559,16 @@ def build_trial_row(
         "script": SCRIPT_NAME,
         "planner": planner,
         "mode": mode,
+        "demo_profile": args.demo_profile,
         "object": args.object,
-        "object_scale": list(resolve_object_body_scale(args.object, args.object_scale)),
+        "support_surface": args.support_surface,
+        "object_scale": list(
+            resolve_object_body_scale(
+                args.object,
+                args.object_scale,
+                args.demo_profile,
+            )
+        ),
         "gripper_closing_axis_index": FRANKA_GRIPPER_CLOSING_AXIS_INDEX,
         "tcp_z": float(args.tcp_z),
         "tcp_yaw": float(args.tcp_yaw),
@@ -2281,7 +2586,7 @@ def build_trial_row(
         "planning_time_sec": float(planning_time_sec),
         "replay_time_sec": float(replay.replay_time_sec) if replay else 0.0,
         "object_replay_mode": replay.object_replay_mode if replay else None,
-        "replay_control": args.replay_control if replay else None,
+        "replay_control": effective_replay_control(args) if replay else None,
         "cpu_delta_mb": float(mem_delta["cpu_mb"]),
         "gpu_delta_mb": float(mem_delta["gpu_mb"]),
         "peak_gpu_mb": float(peak_gpu_mb),
@@ -2354,7 +2659,14 @@ def run_one_trial(
     args: argparse.Namespace,
 ) -> dict[str, object]:
     """Run one independent benchmark trial."""
-    object_start_pose = reset_object_pose(obj, args.object, args.object_scale)
+    object_start_pose = reset_object_pose(
+        obj,
+        args.object,
+        args.object_scale,
+        args.support_surface,
+        args.demo_profile,
+        args.object_xy,
+    )
     hand_open, _ = get_hand_open_close_qpos(robot)
     set_robot_start_qpos(robot, hand_open)
     try:
@@ -2378,12 +2690,20 @@ def run_one_trial(
             repeat_id=repeat_id,
             warmup=warmup,
             reason=reason,
+            support_surface=args.support_surface,
+            demo_profile=args.demo_profile,
         )
-    sim.update(step=max(args.hold_steps, 1))
+    pre_plan_hold_steps = effective_pre_plan_hold_steps(args)
+    if pre_plan_hold_steps > 0:
+        sim.update(step=pre_plan_hold_steps)
 
     preflight = build_grasp_preflight(obj, robot, franka_urdf_path=franka_urdf_path)
-    object_target_pose = make_object_target_pose(obj)
-    rest_pose = make_rest_pose(robot)
+    if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+        target_pose = make_tutorial_place_eef_pose(robot.device)
+        rest_pose = make_tutorial_retract_eef_pose(target_pose)
+    else:
+        target_pose = make_object_target_pose(obj)
+        rest_pose = make_rest_pose(robot)
     motion_gen = build_motion_generator(robot, planner, checkpoint_path, args)
     engine = build_engine(
         robot,
@@ -2397,15 +2717,30 @@ def run_one_trial(
     outcome, planning_time_sec, mem_delta, peak_gpu_mb = timed_plan_sequence(
         engine,
         semantics,
-        object_target_pose,
+        target_pose,
         rest_pose,
+        demo_profile=args.demo_profile,
     )
+    object_target_pose = target_pose
+    if (
+        args.demo_profile == TUTORIAL_PLACE_PROFILE
+        and outcome.held_object is not None
+        and outcome.place_eef_pose is not None
+    ):
+        object_target_pose = compute_attached_object_pose(
+            outcome.place_eef_pose,
+            outcome.held_object.object_to_eef,
+        )
 
     replay = None
     can_replay = (
         mode == "physical"
         and outcome.success
-        and (not preflight.failed or args.object_replay_mode == "attached")
+        and (
+            not preflight.failed
+            or args.object_replay_mode == "attached"
+            or args.demo_profile == TUTORIAL_PLACE_PROFILE
+        )
     )
     if can_replay:
         hand_opening_spec = load_franka_hand_opening_spec(franka_urdf_path)
@@ -2488,6 +2823,8 @@ def make_skipped_rows(
     *,
     object_name: str,
     reason: str,
+    support_surface: str | None = None,
+    demo_profile: str | None = None,
 ) -> list[dict[str, object]]:
     """Build measured rows for a gracefully skipped live-simulation benchmark."""
     rows: list[dict[str, object]] = []
@@ -2498,7 +2835,9 @@ def make_skipped_rows(
                     "script": SCRIPT_NAME,
                     "planner": planner,
                     "mode": mode,
+                    "demo_profile": demo_profile,
                     "object": object_name,
+                    "support_surface": support_surface,
                     "object_scale": None,
                     "gripper_closing_axis_index": FRANKA_GRIPPER_CLOSING_AXIS_INDEX,
                     "tcp_z": None,
@@ -2558,13 +2897,17 @@ def make_failed_trial_row(
     repeat_id: int,
     warmup: bool,
     reason: str,
+    support_surface: str | None = None,
+    demo_profile: str | None = None,
 ) -> dict[str, object]:
     """Build one failed row when setup cannot reach the planner call."""
     return {
         "script": SCRIPT_NAME,
         "planner": planner,
         "mode": mode,
+        "demo_profile": demo_profile,
         "object": object_name,
+        "support_surface": support_surface,
         "object_scale": None,
         "gripper_closing_axis_index": FRANKA_GRIPPER_CLOSING_AXIS_INDEX,
         "tcp_z": None,
@@ -2783,6 +3126,8 @@ def make_metric_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             {
                 "planner": summary.planner,
                 "mode": summary.mode,
+                "demo_profile": _single_status(summary.rows, "demo_profile"),
+                "support_surface": _single_status(summary.rows, "support_surface"),
                 "object_replay_mode": _single_status(
                     summary.rows, "object_replay_mode"
                 ),
@@ -2922,6 +3267,163 @@ def write_markdown_report(
     return path
 
 
+def selected_run_kind(args: argparse.Namespace) -> str:
+    """Resolve the effective run kind from CLI args."""
+    if args.run_kind != "auto":
+        return args.run_kind
+    if args.open_window:
+        return "demo"
+    return "benchmark"
+
+
+def run_demo(args: argparse.Namespace) -> dict[str, object]:
+    """Run one tutorial-style PickUp -> Place sequence without benchmark repeats."""
+    validate_args(args)
+    torch.manual_seed(args.seed)
+    planner = expand_planner_selection(args.planner)[0]
+    checkpoint_path = resolve_checkpoint(args, [planner])
+
+    sim = make_sim(args)
+    robot, franka_urdf_path = create_franka(
+        sim,
+        tcp_z=args.tcp_z,
+        tcp_yaw=args.tcp_yaw,
+    )
+    if args.support_surface == "table":
+        create_support_table(sim)
+        create_visual_support_table(sim)
+    obj = create_object(
+        sim,
+        args.object,
+        args.object_scale,
+        args.support_surface,
+        args.demo_profile,
+        args.object_xy,
+    )
+
+    if not args.headless:
+        sim.open_window()
+
+    hand_open, _ = get_hand_open_close_qpos(robot)
+    initialize_pre_pick_robot_pose(
+        robot,
+        obj,
+        hand_open,
+        pre_pick_z=args.pre_pick_z,
+    )
+
+    preflight = build_grasp_preflight(obj, robot, franka_urdf_path=franka_urdf_path)
+    motion_gen = build_motion_generator(robot, planner, checkpoint_path, args)
+    engine = build_engine(
+        robot,
+        motion_gen,
+        args,
+        preflight,
+        franka_urdf_path=franka_urdf_path,
+    )
+    semantics = create_object_semantics(obj, args, preflight)
+
+    if args.demo_profile == TUTORIAL_PLACE_PROFILE:
+        target_pose = make_tutorial_place_eef_pose(robot.device)
+        rest_pose = make_tutorial_retract_eef_pose(target_pose)
+    else:
+        target_pose = make_object_target_pose(obj)
+        rest_pose = make_rest_pose(robot)
+
+    if not args.headless:
+        draw_axis_marker(sim, "franka_pick_place_target_axis", target_pose)
+    pause_for_tutorial_inspection(args)
+    inspect_viewer_before_trials(sim, args)
+
+    logger.log_info(
+        f"{SCRIPT_NAME}: running demo planner={planner} "
+        f"support_surface={args.support_surface} replay_mode={args.demo_object_replay_mode}"
+    )
+    outcome, planning_time_sec, mem_delta, peak_gpu_mb = timed_plan_sequence(
+        engine,
+        semantics,
+        target_pose,
+        rest_pose,
+        demo_profile=args.demo_profile,
+    )
+    if not outcome.success:
+        logger.log_warning(f"{SCRIPT_NAME}: demo planning failed.")
+        return build_trial_row(
+            planner=planner,
+            mode="demo",
+            repeat_id=0,
+            warmup=False,
+            outcome=outcome,
+            planning_time_sec=planning_time_sec,
+            mem_delta=mem_delta,
+            peak_gpu_mb=peak_gpu_mb,
+            robot=robot,
+            preflight=preflight,
+            replay=None,
+            args=args,
+        )
+
+    if not args.auto_play and sys.stdin.isatty():
+        input("Press Enter to replay the Franka PickUp -> Place demo...")
+
+    object_target_pose = target_pose
+    if (
+        args.demo_profile == TUTORIAL_PLACE_PROFILE
+        and outcome.held_object is not None
+        and outcome.place_eef_pose is not None
+    ):
+        object_target_pose = compute_attached_object_pose(
+            outcome.place_eef_pose,
+            outcome.held_object.object_to_eef,
+        )
+
+    replay_args = argparse.Namespace(**vars(args))
+    replay_args.object_replay_mode = args.demo_object_replay_mode
+    recording_started = start_auto_play_recording(
+        sim,
+        args,
+        video_prefix=f"{SCRIPT_NAME}_demo",
+    )
+    try:
+        replay = replay_trajectory(
+            sim,
+            robot,
+            obj,
+            outcome.trajectory,
+            object_target_pose,
+            replay_args,
+            held_object=outcome.held_object,
+            planner=planner,
+            mode="demo",
+            repeat_id=0,
+            hand_opening_spec=load_franka_hand_opening_spec(franka_urdf_path),
+        )
+    finally:
+        stop_auto_play_recording(sim, recording_started)
+
+    row = build_trial_row(
+        planner=planner,
+        mode="demo",
+        repeat_id=0,
+        warmup=False,
+        outcome=outcome,
+        planning_time_sec=planning_time_sec,
+        mem_delta=mem_delta,
+        peak_gpu_mb=peak_gpu_mb,
+        robot=robot,
+        preflight=preflight,
+        replay=replay,
+        args=replay_args,
+    )
+    logger.log_info(
+        f"{SCRIPT_NAME}: demo planner_success={row['planner_success']} "
+        f"replay_success={row['replay_success']} preflight={preflight.status}"
+    )
+    if not args.auto_play and sys.stdin.isatty():
+        input("Press Enter to exit the simulation...")
+    return row
+
+
 def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
     """Run the selected planner benchmark trials."""
     validate_args(args)
@@ -2946,6 +3448,8 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
             modes,
             object_name=args.object,
             reason=reason,
+            support_surface=args.support_surface,
+            demo_profile=args.demo_profile,
         )
         for row in rows:
             write_raw_jsonl(args.save_raw_jsonl, row)
@@ -2961,6 +3465,8 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
             modes,
             object_name=args.object,
             reason=skip_reason,
+            support_surface=args.support_surface,
+            demo_profile=args.demo_profile,
         )
         for row in rows:
             write_raw_jsonl(args.save_raw_jsonl, row)
@@ -2976,11 +3482,21 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
         tcp_z=args.tcp_z,
         tcp_yaw=args.tcp_yaw,
     )
-    create_support_table(sim)
-    create_visual_support_table(sim)
-    obj = create_object(sim, args.object, args.object_scale)
+    if args.support_surface == "table":
+        create_support_table(sim)
+        create_visual_support_table(sim)
+    obj = create_object(
+        sim,
+        args.object,
+        args.object_scale,
+        args.support_surface,
+        args.demo_profile,
+        args.object_xy,
+    )
     if not args.headless:
         sim.open_window()
+    pause_for_tutorial_inspection(args)
+    inspect_viewer_before_trials(sim, args)
 
     for planner in planners:
         for mode in modes:
@@ -3010,8 +3526,12 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, object]]:
 
 
 def run_all_benchmarks() -> None:
-    """Parse CLI args and run the Franka pick-place NMG benchmark."""
-    run_benchmark(parse_args())
+    """Parse CLI args and run the selected Franka pick-place path."""
+    args = parse_args()
+    if selected_run_kind(args) == "demo":
+        run_demo(args)
+        return
+    run_benchmark(args)
 
 
 if __name__ == "__main__":
