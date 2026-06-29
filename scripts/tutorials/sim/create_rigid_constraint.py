@@ -19,6 +19,8 @@ This script demonstrates how to attach two rigid objects via a fixed constraint,
 observe the constraint holding their relative pose, and then remove it.
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 
