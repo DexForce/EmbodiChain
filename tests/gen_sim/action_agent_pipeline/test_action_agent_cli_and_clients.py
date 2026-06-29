@@ -268,6 +268,133 @@ def test_image2scene_runtime_gen_config_injects_client_url(tmp_path) -> None:
     )
 
 
+def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import prompt2scene_stage
+
+    output_root = tmp_path / "prompt2scene"
+    llm_config = tmp_path / "llm_config.json"
+    llm_config.write_text("{}", encoding="utf-8")
+    gym_config = output_root / "gym_export/gym_config.json"
+    captured = {}
+
+    def fake_load_llm_config(path):
+        captured["llm_config_path"] = path
+        return "llm-cfg"
+
+    def fake_run_prompt2scene(request, *, llm_cfg):
+        captured["request"] = request
+        captured["llm_cfg"] = llm_cfg
+        gym_config.parent.mkdir(parents=True)
+        gym_config.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(gym_config_path=gym_config)
+
+    class FakePrompt2SceneInput:
+        @classmethod
+        def from_cli_args(cls, *, image_path, text, output_root):
+            return SimpleNamespace(
+                image_path=image_path,
+                text=text,
+                output_root=output_root.expanduser().resolve(),
+            )
+
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "_load_prompt2scene_components",
+        lambda: (fake_load_llm_config, fake_run_prompt2scene, FakePrompt2SceneInput),
+    )
+
+    result = prompt2scene_stage.run_prompt2scene_stage(
+        SimpleNamespace(
+            prompt2scene_text="a tabletop scene with bread and a basket",
+            prompt2scene_output_root=str(output_root),
+            prompt2scene_llm_config=str(llm_config),
+            image=None,
+            image_name=None,
+        )
+    )
+
+    assert result == gym_config
+    assert captured["llm_config_path"] == llm_config
+    assert captured["llm_cfg"] == "llm-cfg"
+    assert captured["request"].text == "a tabletop scene with bread and a basket"
+    assert captured["request"].output_root == output_root.resolve()
+
+
+def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_records import (
+        build_pipeline_record,
+    )
+
+    repo_root = tmp_path
+    source_dir = repo_root / "gym_project/prompt2scene/demo/gym_export"
+    source_dir.mkdir(parents=True)
+    source_config = source_dir / "gym_config.json"
+    source_config.write_text("{}", encoding="utf-8")
+    output_dir = repo_root / "gym_project/action_agent_pipeline/configs/demo"
+    generated_gym_config = output_dir / "fast_gym_config.json"
+    generated_agent_config = output_dir / "agent_config.json"
+    task_prompt = output_dir / "task_prompt.txt"
+    basic_background = output_dir / "basic_background.txt"
+    atom_actions = output_dir / "atom_actions.txt"
+    for path in (
+        generated_gym_config,
+        generated_agent_config,
+        task_prompt,
+        basic_background,
+        atom_actions,
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+
+    record = build_pipeline_record(
+        args=SimpleNamespace(
+            task_name="Demo_Text",
+            task_description="place bread into basket",
+            image_name=None,
+            image=None,
+            use_image2scene=False,
+            prompt2scene_output_root=str(repo_root / "gym_project/prompt2scene/demo"),
+            prompt2scene_llm_config=str(
+                repo_root / "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
+            ),
+            prompt2scene_text="a tabletop scene with bread and a basket",
+            target_body_scale=0.8,
+            target_replacement1=None,
+            target_replacement2=None,
+            sync_replacement_names=False,
+            reuse_target_replacements=True,
+            prewarm_coacd_cache=True,
+            overwrite_config=True,
+            regenerate=True,
+            skip_run_agent=False,
+        ),
+        resolution=SimpleNamespace(path=source_config, mode="prompt2scene"),
+        generated_paths=SimpleNamespace(
+            output_dir=output_dir,
+            gym_config=generated_gym_config,
+            agent_config=generated_agent_config,
+            task_prompt=task_prompt,
+            basic_background=basic_background,
+            atom_actions=atom_actions,
+            summary={},
+        ),
+        history_path=repo_root / "history.json",
+        target_replacements=[],
+        repo_root=repo_root,
+        schema_version=1,
+    )
+
+    assert record["source_mode"] == "prompt2scene"
+    assert record["source_gym_config"] == (
+        "gym_project/prompt2scene/demo/gym_export/gym_config.json"
+    )
+    assert record["prompt2scene_output_root"] == "gym_project/prompt2scene/demo"
+    assert record["prompt2scene_llm_config"] == (
+        "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
+    )
+    assert record["prompt2scene_text"] == "a tabletop scene with bread and a basket"
+
+
 def test_agentic_gen_sim_env_api_and_compat_alias() -> None:
     from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware import (
         agent_env,

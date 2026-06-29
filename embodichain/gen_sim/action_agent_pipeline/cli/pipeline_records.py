@@ -299,6 +299,21 @@ def _source_request_record(
             record["image2scene_extract_dir"] = str(args.image2scene_extract_dir)
         if args.image2scene_merged_output is not None:
             record["image2scene_merged_output"] = str(args.image2scene_merged_output)
+    elif resolution.mode == "prompt2scene":
+        record.update(
+            {
+                "prompt2scene_output_root": _record_path(
+                    Path(args.prompt2scene_output_root).expanduser(),
+                    repo_root,
+                ),
+                "prompt2scene_llm_config": _record_path(
+                    Path(args.prompt2scene_llm_config).expanduser(),
+                    repo_root,
+                ),
+            }
+        )
+        if args.prompt2scene_text:
+            record["prompt2scene_text"] = args.prompt2scene_text
     elif resolution.mode == "image2tabletop":
         record.update(
             {

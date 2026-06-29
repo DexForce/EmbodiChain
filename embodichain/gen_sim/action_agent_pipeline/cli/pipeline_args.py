@@ -30,6 +30,8 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_IMAGE2SCENE_ROOT,
     DEFAULT_JOB_TIMEOUT_S,
     DEFAULT_PIPELINE_HISTORY,
+    DEFAULT_PROMPT2SCENE_LLM_CONFIG,
+    DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
     DEFAULT_TASK_NAME,
 )
 
@@ -76,6 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Use gym_project/environment/image2tabletop/demo_api/client/"
             "image2scene_pipeline.py as the first stage and continue from its "
             "gym_config_merged.json output."
+        ),
+    )
+    parser.add_argument(
+        "--use-prompt2scene",
+        action="store_true",
+        default=False,
+        help=(
+            "Use embodichain.gen_sim.prompt2scene as the first stage and "
+            "continue from its exported gym_config.json output."
         ),
     )
     parser.add_argument(
@@ -152,6 +163,36 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional merged output path passed to image2scene_pipeline.py. "
             "Relative paths are interpreted under --image2scene-root."
+        ),
+    )
+    parser.add_argument(
+        "--prompt2scene-output-root",
+        "--prompt2scene_output_root",
+        dest="prompt2scene_output_root",
+        default=str(DEFAULT_PROMPT2SCENE_OUTPUT_ROOT),
+        help=(
+            "Output directory for the in-repo prompt2scene pipeline. Defaults "
+            f"to {DEFAULT_PROMPT2SCENE_OUTPUT_ROOT.as_posix()}."
+        ),
+    )
+    parser.add_argument(
+        "--prompt2scene-llm-config",
+        "--prompt2scene_llm_config",
+        dest="prompt2scene_llm_config",
+        default=str(DEFAULT_PROMPT2SCENE_LLM_CONFIG),
+        help=(
+            "LLM config JSON used by prompt2scene. Defaults to "
+            f"{DEFAULT_PROMPT2SCENE_LLM_CONFIG.as_posix()}."
+        ),
+    )
+    parser.add_argument(
+        "--prompt2scene-text",
+        "--prompt2scene_text",
+        dest="prompt2scene_text",
+        default=None,
+        help=(
+            "Text prompt passed to prompt2scene. If omitted, prompt2scene uses "
+            "--image or --image-name."
         ),
     )
     parser.add_argument(

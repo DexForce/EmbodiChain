@@ -41,6 +41,9 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_records import (
     pipeline_history_path,
     read_pipeline_history,
 )
+from embodichain.gen_sim.action_agent_pipeline.cli.prompt2scene_stage import (
+    run_prompt2scene_stage,
+)
 
 __all__ = [
     "ProjectResolution",
@@ -75,13 +78,14 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
     use_history = args.base_task_name is not None or args.base_history_index is not None
     selected_modes = [
         args.use_image2scene,
+        args.use_prompt2scene,
         args.use_existing_gym_project,
         use_history,
     ]
     if sum(bool(mode) for mode in selected_modes) > 1:
         raise ValueError(
-            "Use only one of --use-image2scene, --use-existing-gym-project, "
-            "or --base-task-name/--base-history-index."
+            "Use only one of --use-image2scene, --use-prompt2scene, "
+            "--use-existing-gym-project, or --base-task-name/--base-history-index."
         )
 
     if args.use_existing_gym_project:
@@ -95,6 +99,12 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
         return ProjectResolution(
             path=run_image2scene_pipeline(args),
             mode="image2scene",
+        )
+
+    if args.use_prompt2scene:
+        return ProjectResolution(
+            path=run_prompt2scene_stage(args),
+            mode="prompt2scene",
         )
 
     if use_history:
