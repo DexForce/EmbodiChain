@@ -22,6 +22,7 @@ import pytest
 
 from embodichain.lab.sim.robots.dual_arm import (
     DualArmRobotCfg,
+    _transform_from_xyz_rpy,
     build_dual_arm_cfg,
     resolve_mounts,
 )
@@ -56,6 +57,25 @@ def test_resolve_mounts_facing_inward_is_mirrored():
     assert np.allclose(m["right"][:3, 3], [0.0, -0.3, 0.0])
     assert not np.allclose(m["left"][:3, :3], np.eye(3))
     assert np.allclose(m["left"][:3, :3], m["right"][:3, :3].T)
+
+
+def test_resolve_mounts_mirrored_rz_uses_signed_yaw():
+    rz = np.pi / 4
+    m = resolve_mounts({"preset": "mirrored_rz", "separation": 0.6, "rz": rz})
+    assert np.allclose(m["left"][:3, 3], [0.0, 0.3, 0.0])
+    assert np.allclose(m["right"][:3, 3], [0.0, -0.3, 0.0])
+    expected_left = _transform_from_xyz_rpy([0.0, 0.3, 0.0], [0.0, 0.0, rz])
+    expected_right = _transform_from_xyz_rpy([0.0, -0.3, 0.0], [0.0, 0.0, -rz])
+    assert np.allclose(m["left"], expected_left)
+    assert np.allclose(m["right"], expected_right)
+
+
+def test_resolve_mounts_mirrored_rz_defaults_to_zero_yaw():
+    m = resolve_mounts({"preset": "mirrored_rz", "separation": 0.6})
+    assert np.allclose(m["left"][:3, 3], [0.0, 0.3, 0.0])
+    assert np.allclose(m["right"][:3, 3], [0.0, -0.3, 0.0])
+    assert np.allclose(m["left"][:3, :3], np.eye(3))
+    assert np.allclose(m["right"][:3, :3], np.eye(3))
 
 
 def test_resolve_mounts_per_arm_override():
@@ -100,12 +120,12 @@ def _ur5_dual():
 
 def test_build_dual_arm_ur_control_parts():
     cfg = _ur5_dual()
-    assert cfg.control_parts["left_arm"] == [f"LEFT_JOINT{i}" for i in range(1, 7)]
-    assert cfg.control_parts["right_arm"] == [f"RIGHT_JOINT{i}" for i in range(1, 7)]
+    assert cfg.control_parts["left_arm"] == [f"left_joint{i}" for i in range(1, 7)]
+    assert cfg.control_parts["right_arm"] == [f"right_joint{i}" for i in range(1, 7)]
     # dual_arm composite part concatenates both arms (12 joints).
     assert cfg.control_parts["dual_arm"] == (
-        [f"LEFT_JOINT{i}" for i in range(1, 7)]
-        + [f"RIGHT_JOINT{i}" for i in range(1, 7)]
+        [f"left_joint{i}" for i in range(1, 7)]
+        + [f"right_joint{i}" for i in range(1, 7)]
     )
 
 
@@ -217,8 +237,8 @@ def test_dual_arm_ur5_assembled_joint_names_match_prediction():
     tree = ET.parse(fpath)
     joint_names = {j.get("name") for j in tree.findall("joint")}
     for i in range(1, 7):
-        assert f"LEFT_JOINT{i}" in joint_names, (
-            f"predicted LEFT_JOINT{i} not in assembled URDF; "
+        assert f"left_joint{i}" in joint_names, (
+            f"predicted left_joint{i} not in assembled URDF; "
             f"prefix/case convention drifted from URDFAssemblyManager"
         )
-        assert f"RIGHT_JOINT{i}" in joint_names
+        assert f"right_joint{i}" in joint_names

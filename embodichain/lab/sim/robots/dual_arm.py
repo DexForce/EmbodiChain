@@ -67,7 +67,7 @@ __all__ = ["DualArmRobotCfg", "build_dual_arm_cfg", "resolve_mounts"]
 _SIDES = (("left", "left_arm", "left_"), ("right", "right_arm", "right_"))
 
 #: Supported mount presets for :func:`resolve_mounts`.
-_PRESETS = ("side_by_side", "facing_inward")
+_PRESETS = ("side_by_side", "facing_inward", "mirrored_rz")
 
 #: Default mount used when none is specified.
 _DEFAULT_MOUNT: dict = {"preset": "side_by_side", "separation": 0.6}
@@ -100,19 +100,26 @@ _DRIVE_PROPS = (
 # --------------------------------------------------------------------------- #
 
 
-def _prefixed_name(name: str | None, prefix: str, kind: str) -> str | None:
+def _prefixed_name(
+    name: str | None,
+    prefix: str,
+    kind: str,
+    name_case: dict[str, str] | None = None,
+) -> str | None:
     """Apply the same prefix + case convention as ``URDFAssemblyManager``.
 
     Mirrors ``URDFComponentManager._generate_unique_name`` followed by
     ``NameNormalizer``: prepend ``prefix`` unless the name already starts with
-    it, then case-normalize (joints -> UPPER, links -> lower). This keeps the
-    names predicted by the engine identical to the ones written into the
-    assembled URDF; an integration test asserts they match.
+    it, then case-normalize according to ``name_case``. This keeps the names
+    predicted by the engine identical to the ones written into the assembled
+    URDF; an integration test asserts they match.
 
     Args:
         name: The original joint/link name from the single-arm URDF.
         prefix: The side prefix (``"left_"`` / ``"right_"``).
         kind: ``"joint"`` or ``"link"`` (selects the case policy).
+        name_case: Optional joint/link case policy, matching
+            :class:`~embodichain.lab.sim.cfg.URDFCfg`.
 
     Returns:
         The prefixed, case-normalized name.
@@ -122,9 +129,10 @@ def _prefixed_name(name: str | None, prefix: str, kind: str) -> str | None:
     base = name
     if prefix and not name.lower().startswith(prefix.lower()):
         base = f"{prefix}{name}"
-    if kind == "joint":
+    mode = (name_case or {}).get(kind, "original")
+    if mode == "upper":
         return base.upper()
-    if kind == "link":
+    if mode == "lower":
         return base.lower()
     return base
 
@@ -161,6 +169,8 @@ def resolve_mounts(mount_cfg: dict | None) -> Dict[str, np.ndarray]:
       ``-separation/2``, same orientation.
     * ``facing_inward`` -- same ±Y separation, yawed ±90° so the arms face each
       other (mirror-symmetric).
+    * ``mirrored_rz`` -- same ±Y separation, with yaw ``+rz`` on the left arm
+      and ``-rz`` on the right arm.
 
     A per-arm ``left`` / ``right`` override (``{"xyz": [...], "rpy": [...]}``)
     may replace either side; both must be given together or neither.
@@ -183,6 +193,7 @@ def resolve_mounts(mount_cfg: dict | None) -> Dict[str, np.ndarray]:
         )
     separation = float(cfg.get("separation", _DEFAULT_MOUNT["separation"]))
     half = separation / 2.0
+    rz = float(cfg.get("rz", 0.0))
 
     left_override = cfg.get("left")
     right_override = cfg.get("right")
@@ -194,9 +205,12 @@ def resolve_mounts(mount_cfg: dict | None) -> Dict[str, np.ndarray]:
     if preset == "side_by_side":
         left = {"xyz": [0.0, half, 0.0], "rpy": [0.0, 0.0, 0.0]}
         right = {"xyz": [0.0, -half, 0.0], "rpy": [0.0, 0.0, 0.0]}
-    else:  # facing_inward: mirror yaw (+90 / -90 about Z)
+    elif preset == "facing_inward":  # mirror yaw (+90 / -90 about Z)
         left = {"xyz": [0.0, half, 0.0], "rpy": [0.0, 0.0, np.pi / 2]}
         right = {"xyz": [0.0, -half, 0.0], "rpy": [0.0, 0.0, -np.pi / 2]}
+    else:  # mirrored_rz: mirror the user-specified base yaw (+rz / -rz)
+        left = {"xyz": [0.0, half, 0.0], "rpy": [0.0, 0.0, rz]}
+        right = {"xyz": [0.0, -half, 0.0], "rpy": [0.0, 0.0, -rz]}
 
     if left_override:
         left.update(left_override)
@@ -249,7 +263,9 @@ def _resolve_base_cfg(base_robot: str | dict) -> RobotCfg:
 # --------------------------------------------------------------------------- #
 
 
-def _mirror_drive_pros(base_drive: JointDrivePropertiesCfg) -> JointDrivePropertiesCfg:
+def _mirror_drive_pros(
+    base_drive: JointDrivePropertiesCfg, name_case: dict[str, str] | None = None
+) -> JointDrivePropertiesCfg:
     """Mirror a single-arm drive config across left/right arms.
 
     Scalar fields apply to all joints uniformly and are copied verbatim. A
@@ -258,13 +274,14 @@ def _mirror_drive_pros(base_drive: JointDrivePropertiesCfg) -> JointDrivePropert
     assembled (prefixed) joint names.
 
     .. note::
-        Regex-pattern mirroring is best-effort (it uppercases the pattern and
-        prepends the side prefix). It covers the common ``"Joint[1-6]"``-style
-        patterns; UR uses scalar drive properties, so this path is not
-        exercised by the UR integration tests.
+        Regex-pattern mirroring is best-effort. It prepends the side prefix and
+        then applies the configured joint name case, so it stays aligned with
+        the assembled URDF naming policy.
 
     Args:
         base_drive: The single-arm :class:`JointDrivePropertiesCfg`.
+        name_case: Optional joint/link case policy, matching
+            :class:`~embodichain.lab.sim.cfg.URDFCfg`.
 
     Returns:
         A fresh :class:`JointDrivePropertiesCfg` for the dual arm.
@@ -277,9 +294,8 @@ def _mirror_drive_pros(base_drive: JointDrivePropertiesCfg) -> JointDrivePropert
         if isinstance(val, dict):
             mirrored: Dict[str, float] = {}
             for pattern, v in val.items():
-                up = str(pattern).upper()
-                mirrored[f"LEFT_{up}"] = v
-                mirrored[f"RIGHT_{up}"] = v
+                mirrored[_prefixed_name(str(pattern), "left_", "joint", name_case)] = v
+                mirrored[_prefixed_name(str(pattern), "right_", "joint", name_case)] = v
             setattr(new, prop, mirrored)
         else:
             setattr(new, prop, val)
@@ -354,6 +370,7 @@ def _populate_dual_cfg(
             for side, comp_type, _ in _SIDES
         ]
     )
+    name_case = cfg.urdf_cfg.name_case
 
     # control_parts: duplicate every base part into left_/right_ with prefixed
     # joint names (generic over all base parts, e.g. arm *and* eef).
@@ -361,7 +378,7 @@ def _populate_dual_cfg(
     for part_name, joints in base_control.items():
         for side, _comp, prefix in _SIDES:
             new_control[f"{side}_{part_name}"] = [
-                _prefixed_name(j, prefix, "joint") for j in joints
+                _prefixed_name(j, prefix, "joint", name_case) for j in joints
             ]
     if dual_part:
         new_control["dual_arm"] = (
@@ -375,8 +392,8 @@ def _populate_dual_cfg(
     new_solver: Dict[str, SolverCfg] = {}
     for side, _comp, prefix in _SIDES:
         if use_assembled:
-            root = _prefixed_name(base_solver.root_link_name, prefix, "link")
-            end = _prefixed_name(base_solver.end_link_name, prefix, "link")
+            root = _prefixed_name(base_solver.root_link_name, prefix, "link", name_case)
+            end = _prefixed_name(base_solver.end_link_name, prefix, "link", name_case)
         else:
             root = base_solver.root_link_name
             end = base_solver.end_link_name
@@ -385,7 +402,7 @@ def _populate_dual_cfg(
         )
     cfg.solver_cfg = new_solver
 
-    cfg.drive_pros = _mirror_drive_pros(base_cfg.drive_pros)
+    cfg.drive_pros = _mirror_drive_pros(base_cfg.drive_pros, name_case)
     cfg.attrs = base_cfg.attrs.copy()
     cfg.min_position_iters = base_cfg.min_position_iters
     cfg.min_velocity_iters = base_cfg.min_velocity_iters
@@ -563,13 +580,30 @@ if __name__ == "__main__":
     config = SimulationManagerCfg(
         headless=True,
         sim_device="cpu",
-        num_envs=2,
+        num_envs=1,
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
 
     cfg = DualArmRobotCfg.from_dict(
-        {"base_robot": "ur5", "mount": {"preset": "side_by_side", "separation": 0.6}}
+        {
+            "base_robot": "ur5",
+            "mount": {"preset": "side_by_side", "separation": 0.6},
+            "init_qpos": [
+                0.0,
+                0.0,
+                -1.57,
+                -1.57,
+                1.57,
+                1.57,
+                -1.57,
+                -1.57,
+                -1.57,
+                -1.57,
+                0.0,
+                0.0,
+            ],
+        }
     )
     robot = sim.add_robot(cfg=cfg)
     sim.open_window()
