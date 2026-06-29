@@ -21,7 +21,7 @@ the agent should:
 3. Load only the matched Markdown files under `agent_context/`
 4. Avoid reading `docs/source/` unless the user explicitly asks for the Sphinx documentation
 
-Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `rl-training`, `configclass-pattern`, `randomization`.
+Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
@@ -41,11 +41,12 @@ EmbodiChain/
 │   └── skills/
 ├── embodichain/                  # Main Python package
 │   ├── agents/                   # AI agents
-│   │   ├── datasets/             # Datasets and data loaders for model training
-│   │   ├── engine/               # Online Data Streaming Engine
 │   │   ├── hierarchy/            # LLM-based hierarchical agents (task, code, validation)
 │   │   ├── mllm/                 # Multimodal LLM prompt scaffolding
-│   │   └── rl/                   # RL agents: PPO algo, rollout buffer, actor-critic models
+│   │   └── prompts/              # Agent prompt templates
+│   ├── data_pipeline/            # Datasets and online data streaming
+│   ├── learning/                 # Learning systems: RL, IL, frontier model architectures
+│   │   └── rl/                   # RL: PPO/GRPO algo, rollout buffer, collectors, policies
 │   ├── data/                     # Assets, datasets, constants, enums
 │   ├── lab/                      # Simulation lab
 │   │   ├── gym/                  # OpenAI Gym-compatible environments

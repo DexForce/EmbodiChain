@@ -16,4 +16,5 @@
 
 from . import interpolate
 from . import opw_solver
+from . import ur_solver
 from . import warp_trajectory
