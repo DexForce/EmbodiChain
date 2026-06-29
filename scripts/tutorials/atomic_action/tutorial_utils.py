@@ -134,7 +134,8 @@ def create_ur5_gripper_robot_cfg(
         ``urdf_cfg.name_case = {"joint": "lower", "link": "lower"}`` so the
         assembled robot keeps the source URDF's lowercase joint names
         (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
-        control parts produced by :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`.
+        control parts produced by
+        :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`.
 
     Args:
         init_pos: Initial root position of the robot in the arena.

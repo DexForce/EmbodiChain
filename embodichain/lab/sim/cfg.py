@@ -1049,8 +1049,8 @@ class URDFCfg:
 
     name_case: dict[str, str] = field(
         default_factory=lambda: {
-            "joint": "lower",
-            "link": "lower",
+            "joint": "original",
+            "link": "original",
         }
     )
     """Case normalization policy applied to joint/link names during URDF assembly.

@@ -206,7 +206,7 @@ def test_ur_robot_max_effort_scales_with_size():
     ur3 = URRobotCfg.from_dict({"robot_type": "ur3"})
     ur5 = URRobotCfg.from_dict({"robot_type": "ur5"})
     ur10 = URRobotCfg.from_dict({"robot_type": "ur10"})
-    eff = lambda c: c.drive_pros.max_effort  # noqa: E731
+    eff = lambda c: c.drive_pros.max_effort["arm"]  # noqa: E731
     assert eff(ur3) < eff(ur5) < eff(ur10)
 
 
