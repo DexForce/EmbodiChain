@@ -27,6 +27,7 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
 from embodichain.lab.sim.robots import URRobotCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -45,6 +46,23 @@ DEFAULT_AXIS_SIZE = 0.003
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
 GRIPPER_TCP_Z = 0.15
+
+
+def make_ur5_solver_cfg(tcp_z: float) -> URSolverCfg:
+    """Create the UR5 arm solver cfg used by atomic-action tutorials."""
+    cfg = URSolverCfg(
+        ur_type="ur5",
+        end_link_name="ee_link",
+        root_link_name="base_link",
+        tcp=[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, tcp_z],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    cfg.urdf_path = None
+    return cfg
 
 
 def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
@@ -195,6 +213,7 @@ __all__ = [
     "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
     "create_ur5_gripper_robot_cfg",
+    "make_ur5_solver_cfg",
     "get_tutorial_window_size",
     "start_auto_play_recording",
     "stop_auto_play_recording",
