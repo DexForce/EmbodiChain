@@ -1261,6 +1261,115 @@ def test_relative_orientation_upright_does_not_emit_align_to(
     assert paths.summary["orientation_align_to"] is None
 
 
+def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "21_Place_A2B_Right_gym_project"
+    for rel_path in (
+        "mesh_assets/table/table_0.glb",
+        "mesh_assets/cube/cube_1.glb",
+        "mesh_assets/cube/cube_2.glb",
+    ):
+        _write_minimal_glb(project_dir / rel_path, _default_mesh_vertices())
+
+    gym_config = {
+        "id": "Image2Tabletop-21-v0",
+        "background": [
+            _mesh_object(
+                "table_0",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, -0.05],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "interact_cube_1",
+                "mesh_assets/cube/cube_1.glb",
+                [0.0, 0.12, 0.0],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "interact_cube_2",
+                "mesh_assets/cube/cube_2.glb",
+                [0.0, -0.12, 0.0],
+                [0.0, 0.0, 0.0],
+            ),
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "interact_cube_1",
+            "reference_object": "interact_cube_2",
+            "goal_relation": "right_of",
+            "arm": "auto",
+            "orientation_goal": "preserve",
+            "orientation_reference": "none",
+            "orientation_axis": "none",
+            "task_prompt_summary": "Move cube_1 to the right of cube_2.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_cube_relative_agent",
+        task_name="Demo21",
+        task_description="将一个方块移动到另一个方块右边",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    summary = _stable_summary(paths.summary)
+    high_offset = list(summary["release_offset"])
+    high_offset[2] = round(float(high_offset[2]) + 0.25, 6)
+    high_offset_json = json.dumps(
+        high_offset, ensure_ascii=False, separators=(",", ":")
+    )
+    release_offset_json = json.dumps(
+        summary["release_offset"], ensure_ascii=False, separators=(",", ":")
+    )
+
+    assert (
+        "Generate one deterministic nominal graph with exactly 7 nominal edges"
+        in task_prompt
+    )
+    for text in (task_prompt, atom_actions):
+        assert (
+            f'"offset":{high_offset_json},"orientation_goal":"preserve",'
+            '"orientation_axis":"none"}' in text
+        )
+        assert (
+            f'"offset":{high_offset_json},"orientation_goal":"axis_align",'
+            '"orientation_axis":"x"}' in text
+        )
+        assert (
+            f'"offset":{release_offset_json},"orientation_goal":"axis_align",'
+            '"orientation_axis":"x"}' in text
+        )
+        assert '"align_to"' not in text
+        assert '"atomic_action_class":"Place"' in text
+        assert '"atomic_action_class":"MoveEndEffector"' in text
+
+    assert summary["moved_object"] == "interact_cube_1"
+    assert summary["reference_object"] == "interact_cube_2"
+    assert summary["orientation_goal"] == "axis_align"
+    assert summary["orientation_axis"] == "x"
+    assert summary["orientation_align_to"] is None
+
+
 def test_relative_on_table_release_offset_uses_tabletop_surface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
