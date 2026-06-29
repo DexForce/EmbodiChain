@@ -162,6 +162,7 @@ def generate_text_object_asset(
     return {
         "id": object_id,
         "name": object_name,
+        "description": description,
         "status": status,
         "image_path": image_path,
         "raw_geometry_path": raw_geometry_path,

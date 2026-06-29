@@ -183,8 +183,8 @@ def export_gym_config(
             oid = str(obj.get("id", ""))
             if oid:
                 object_meta_by_id[oid] = {
-                    "description": str(obj.get("description", "")).strip(),
-                    "name": str(obj.get("name", "")).strip(),
+                    "description": str(obj.get("description") or "").strip(),
+                    "name": str(obj.get("name") or "").strip(),
                 }
 
     table_info = step_result.get("table") or {}

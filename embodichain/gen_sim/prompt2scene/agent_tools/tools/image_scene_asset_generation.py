@@ -470,6 +470,7 @@ def generate_image_scene_assets(
     object_fields = (
         "id",
         "name",
+        "description",
         "status",
         "image_path",
         "mesh_path",
