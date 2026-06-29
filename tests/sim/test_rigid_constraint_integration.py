@@ -74,7 +74,8 @@ class BaseRigidConstraintTest:
         self.sim.enable_physics(False)
 
         duck_path = get_data_path(DUCK_PATH)
-        # Two dynamic ducks at different heights, welded at identity frames.
+        # Two dynamic ducks at different heights; with default (None) local
+        # frames the constraint welds them at their current relative pose.
         attrs_a = RigidBodyAttributesCfg()
         attrs_a.mass = 0.2
         attrs_b = RigidBodyAttributesCfg()
@@ -101,6 +102,22 @@ class BaseRigidConstraintTest:
         if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
             self.sim.init_gpu_physics()
         self.sim.enable_physics(True)
+
+    def teardown_method(self):
+        """Destroy the simulation and flush the deferred-cleanup queue.
+
+        Mirrors the teardown pattern in ``tests/sim/objects/test_rigid_object.py``.
+        ``conftest.py`` sets ``EMBODICHAIN_SIM_EXIT_PROCESS=0`` so ``destroy()``
+        does not call ``os._exit`` during tests. Guarded for the skip case where
+        ``setup_simulation`` never created a ``sim``.
+        """
+        import gc
+
+        if getattr(self, "sim", None) is not None:
+            self.sim.destroy()
+            SimulationManager.flush_cleanup_queue()
+            self.__dict__.clear()
+        gc.collect()
 
     def test_fixed_constraint_holds_relative_pose(self):
         """Welded objects keep their relative transform; detaching lets them move."""

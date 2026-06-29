@@ -107,8 +107,10 @@ def main():
     print("[INFO]: Scene setup complete with two cubes (cube_a, cube_b).")
 
     # --- Phase 1: attach the two cubes with a fixed constraint ---------------
-    # local_frame_a / local_frame_b default to identity, so the constraint
-    # welds the cubes at their *current* relative pose.
+    # With default (None) local frames the constraint welds the cubes at their
+    # *current* relative pose: local_frame_a defaults to identity and
+    # local_frame_b is computed as inv(pose_B) @ pose_A, so the offset is
+    # preserved rather than the two origins being pulled together.
     constraint = sim.create_rigid_constraint(
         cfg=RigidConstraintCfg(
             name="cube_weld",

@@ -644,9 +644,11 @@ def create_rigid_constraint(
         obj_a_cfg: SceneEntityCfg pointing at the first RigidObject.
         obj_b_cfg: SceneEntityCfg pointing at the second RigidObject.
         name: Base constraint name; per-arena names derived by the sim layer.
-        local_frame_a: Local joint frame on object A. None attaches at the
-            objects' current relative pose. Accepts (4,4) or (N,4,4).
-        local_frame_b: Local joint frame on object B. None -> identity.
+        local_frame_a: Local joint frame on object A. None -> identity (object
+            A's origin). Accepts (4,4) or (N,4,4).
+        local_frame_b: Local joint frame on object B. None -> computed per env as
+            ``inv(pose_B) @ pose_A`` so the constraint welds the objects at their
+            current relative pose. Accepts (4,4) or (N,4,4).
 
     Raises:
         RuntimeError: If either entity is not a RigidObject.

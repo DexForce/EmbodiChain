@@ -27,6 +27,7 @@ from dataclasses import MISSING
 
 from embodichain.lab.sim.cfg import RigidConstraintCfg
 from embodichain.lab.sim.objects.constraint import RigidConstraint
+from embodichain.lab.sim.sim_manager import SimulationManager
 
 
 def test_rigid_constraint_cfg_defaults():
@@ -224,9 +225,6 @@ def test_rigid_constraint_destroy_all_returns_all_cleared():
     assert all(h is None for h in constraint.constraint_handles)
 
 
-from embodichain.lab.sim.sim_manager import SimulationManager
-
-
 class MockArena:
     """Mock dexsim arena that records created constraints."""
 
@@ -283,6 +281,7 @@ class _RigidConstraintTestSim:
     get_rigid_constraint = SimulationManager.get_rigid_constraint
     get_rigid_constraint_uid_list = SimulationManager.get_rigid_constraint_uid_list
     _broadcast_frame = staticmethod(SimulationManager._broadcast_frame)
+    _normalize_env_ids = staticmethod(SimulationManager._normalize_env_ids)
 
 
 def _register_object(sim, uid, num_envs, z=0.0):
@@ -431,6 +430,40 @@ def test_broadcast_frame_N4x4_indexes():
     bad = np.stack([np.eye(4)] * 2, axis=0).astype(np.float32)
     with pytest.raises(RuntimeError):
         sim._broadcast_frame(bad, num_envs=3, env_ids=[0, 1, 2], name="weld")
+
+
+def test_normalize_env_ids_handles_tensor_and_none():
+    """_normalize_env_ids accepts None / tensor / sequence and returns list[int]."""
+    assert SimulationManager._normalize_env_ids(None, 3) == [0, 1, 2]
+    assert SimulationManager._normalize_env_ids(torch.tensor([0, 2]), 4) == [0, 2]
+    assert SimulationManager._normalize_env_ids([1, 3], 4) == [1, 3]
+    out = SimulationManager._normalize_env_ids(torch.tensor([0, 1, 2]), 3)
+    assert isinstance(out, list)
+    assert all(isinstance(i, int) for i in out)
+
+
+def test_create_rigid_constraint_accepts_tensor_env_ids():
+    """A tensor env_ids (as passed by EventManager) yields clean per-arena names.
+
+    Regression for the type-contract mismatch between the functor (which
+    forwards a torch.Tensor) and the sim API. The per-arena dexsim name must be
+    ``"weld_0"`` (not a tensor stringification) so create and remove agree.
+    """
+    sim = _RigidConstraintTestSim(num_envs=2)
+    _register_object(sim, "cube", 2, z=1.4)
+    _register_object(sim, "block", 2, z=1.2)
+
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+    sim.create_rigid_constraint(cfg, env_ids=torch.tensor([0, 1]))
+    for i, arena in enumerate(sim._arenas):
+        assert arena.created[0][0] == f"weld_{i}"  # clean name, no tensor string
+
+    # removal via tensor env_ids must reach the same dexsim name
+    sim.remove_rigid_constraint("weld", env_ids=torch.tensor([0]))
+    assert "weld_0" in sim._arenas[0].removed
+    assert sim._arenas[1].removed == []  # env 1 still attached
 
 
 def test_remove_rigid_constraint_all_envs():

@@ -1047,20 +1047,51 @@ class SimulationManager:
             "Expected None, (4, 4), or (N, 4, 4)."
         )
 
+    @staticmethod
+    def _normalize_env_ids(
+        env_ids: Sequence[int] | torch.Tensor | None,
+        num_envs: int,
+    ) -> list[int]:
+        """Normalize an ``env_ids`` spec to a plain ``list[int]``.
+
+        Accepts ``None`` (-> all envs), a ``torch.Tensor`` (as passed by the
+        :class:`EventManager`), or any ``Sequence[int]``, and returns a list of
+        Python ints. Normalizing here keeps the per-arena constraint names clean
+        (e.g. ``"weld_0"`` rather than relying on a tensor's string form) and
+        avoids depending on implicit tensor-to-int conversions downstream.
+
+        Args:
+            env_ids: None, a tensor, or a sequence of ints.
+            num_envs: Total number of arenas (used when env_ids is None).
+
+        Returns:
+            A list of int env indices.
+        """
+        if env_ids is None:
+            return list(range(num_envs))
+        if isinstance(env_ids, torch.Tensor):
+            return env_ids.detach().cpu().tolist()
+        return [int(i) for i in env_ids]
+
     def create_rigid_constraint(
         self,
         cfg: RigidConstraintCfg,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> RigidConstraint:
         """Create a fixed constraint between two RigidObjects.
 
         Binds ``rigid_object_a``'s entity[i] to ``rigid_object_b``'s entity[i]
         within arena[i], for each env in ``env_ids``. Local frames default to
-        identity (attach at the objects' current relative pose).
+        welding the objects at their *current* relative pose:
+        ``local_frame_a`` defaults to identity (object A's origin) and
+        ``local_frame_b`` defaults to ``inv(pose_B) @ pose_A`` (computed per env),
+        so the offset is preserved rather than the two origins being pulled
+        together. Pass explicit frames to define a specific joint frame.
 
         Args:
             cfg: The constraint configuration.
-            env_ids: Target environment indices. None -> all arenas.
+            env_ids: Target environment indices. Accepts a tensor (as passed by
+                the :class:`EventManager`) or a sequence of ints. None -> all arenas.
 
         Returns:
             The created :class:`RigidConstraint`.
@@ -1109,11 +1140,8 @@ class SimulationManager:
                 f"{rigid_object_b.num_instances} instances but num_envs is {num_envs}."
             )
 
-        # resolve target env_ids
-        if env_ids is None:
-            target_env_ids = list(range(num_envs))
-        else:
-            target_env_ids = list(env_ids)
+        # resolve target env_ids (accepts None / tensor / sequence)
+        target_env_ids = self._normalize_env_ids(env_ids, num_envs)
 
         # broadcast local frames.
         # local_frame_a defaults to identity (object A's origin).
@@ -1182,7 +1210,7 @@ class SimulationManager:
     def remove_rigid_constraint(
         self,
         name: str,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> bool:
         """Remove a rigid constraint by name.
 
@@ -1192,7 +1220,8 @@ class SimulationManager:
 
         Args:
             name: The base constraint name.
-            env_ids: Subset of arenas to clear. None -> all.
+            env_ids: Subset of arenas to clear. Accepts a tensor (as passed by
+                the :class:`EventManager`) or a sequence of ints. None -> all.
 
         Returns:
             True if the constraint was found (and removed or partially removed),
@@ -1203,7 +1232,8 @@ class SimulationManager:
             logger.log_warning(f"Constraint '{name}' not found. Nothing to remove.")
             return False
 
-        constraint.destroy(env_ids=env_ids, arena_resolver=self.get_env)
+        target_env_ids = self._normalize_env_ids(env_ids, constraint.num_envs)
+        constraint.destroy(env_ids=target_env_ids, arena_resolver=self.get_env)
 
         # drop from registry if no handles remain active
         if all(h is None for h in constraint.constraint_handles):

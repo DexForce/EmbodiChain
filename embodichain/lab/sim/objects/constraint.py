@@ -45,15 +45,15 @@ class RigidConstraint:
     Args:
         cfg: The constraint configuration.
         constraint_handles: Per-arena dexsim constraint handles (None where inactive).
-        rigid_object_a: The first RigidObject.
-        rigid_object_b: The second RigidObject.
+        rigid_object_a: The first RigidObject (None only until set at creation).
+        rigid_object_b: The second RigidObject (None only until set at creation).
         device: The torch device.
     """
 
     cfg: RigidConstraintCfg
     constraint_handles: list[Any] = field(default_factory=list)
-    rigid_object_a: RigidObject = None
-    rigid_object_b: RigidObject = None
+    rigid_object_a: RigidObject | None = None
+    rigid_object_b: RigidObject | None = None
     device: torch.device = field(default_factory=torch.device("cpu"))
 
     @property

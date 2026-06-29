@@ -1010,10 +1010,15 @@ class RigidConstraintCfg:
         rigid_object_a_uid: UID of the first RigidObject (must exist in the sim).
         rigid_object_b_uid: UID of the second RigidObject (must exist in the sim).
         local_frame_a: 4x4 joint frame in object A's local coordinates.
-            ``None`` attaches at the objects' current relative pose (identity).
-            Accepts a single ``(4, 4)`` matrix (shared by all envs) or an
-            ``(N, 4, 4)`` array (one frame per env). Defaults to None.
-        local_frame_b: As :attr:`local_frame_a`, for object B. Defaults to None.
+            ``None`` -> identity (object A's origin). Accepts a single
+            ``(4, 4)`` matrix (shared by all envs) or an ``(N, 4, 4)`` array
+            (one frame per env). Defaults to None.
+        local_frame_b: 4x4 joint frame in object B's local coordinates.
+            ``None`` -> the frame is computed per env as ``inv(pose_B) @ pose_A``
+            from the objects' current poses, so the constraint welds the objects
+            at their *current* relative pose (rather than pulling their origins
+            together). An explicit ``(4, 4)`` or ``(N, 4, 4)`` value is used
+            verbatim. Defaults to None.
         constraint_type: Reserved for future typed constraints (prismatic,
             revolute, spherical, d6). Only ``"fixed"`` is supported in v1.
 
@@ -1032,10 +1037,11 @@ class RigidConstraintCfg:
     """UID of the second RigidObject."""
 
     local_frame_a: np.ndarray | None = None
-    """Local joint frame on object A. None -> identity (current relative pose)."""
+    """Local joint frame on object A. None -> identity (object A's origin)."""
 
     local_frame_b: np.ndarray | None = None
-    """Local joint frame on object B. None -> identity (current relative pose)."""
+    """Local joint frame on object B. None -> ``inv(pose_B) @ pose_A`` per env
+    (weld at the objects' current relative pose)."""
 
     constraint_type: Literal["fixed"] = "fixed"
     """Constraint type. Only ``"fixed"`` is supported in v1."""

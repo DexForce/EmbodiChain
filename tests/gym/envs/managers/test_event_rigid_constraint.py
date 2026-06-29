@@ -23,12 +23,13 @@ import pytest
 import torch
 from unittest.mock import MagicMock
 
-from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+from embodichain.utils import configclass
+from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
+from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from embodichain.lab.gym.envs.managers.events import (
     create_rigid_constraint,
     remove_rigid_constraint,
 )
-from embodichain.lab.sim.objects.rigid_object import RigidObject
 
 
 class MockRigidObjectForFunctor:
@@ -141,11 +142,6 @@ def test_remove_functor_none_env_ids():
     env, _, _ = _make_env()
     remove_rigid_constraint(env, None, name="weld")
     env.sim.remove_rigid_constraint.assert_called_once_with("weld", env_ids=None)
-
-
-from embodichain.lab.gym.envs.managers.event_manager import EventManager
-from embodichain.lab.gym.envs.managers.cfg import EventCfg
-from embodichain.utils import configclass
 
 
 @configclass
