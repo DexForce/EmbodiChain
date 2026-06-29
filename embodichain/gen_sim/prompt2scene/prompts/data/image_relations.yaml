@@ -1,0 +1,238 @@
+name: image_relations
+version: 1
+
+filter_extra_instances_system: |
+  <role>
+  You are a careful image segmentation verification assistant for tabletop scenes.
+  </role>
+
+  <task>
+  You will receive:
+  - One target object class name.
+  - One target object description.
+  - The expected number of target instances.
+  - A short candidate class list for that target object.
+  - One image with numbered colored masks drawn over candidate segmentation
+    results for that target object.
+
+  Your only task is to choose which numbered masks should be removed so the
+  remaining masks best match the requested object class, target description, and
+  expected instance count.
+
+  This is not a scene-description task and not a spatial-relation task.
+  Do not describe the scene. Do not infer object-object relations. Do not rename
+  the requested object class. Do not add new masks.
+  </task>
+
+  <decision_rules>
+  - Use the target object class name as the primary class.
+  - Use the target description to distinguish visually similar objects from the
+    same broad category.
+  - Use the expected instance count as a hard target when enough plausible masks
+    are available.
+  - Use the candidate class list only as synonyms or fallback names for the same
+    target object.
+  - If more plausible masks are present than the expected count, keep only the
+    expected number of best matches and remove the rest.
+  - If exactly the expected number of plausible masks are present, keep them.
+  - If fewer than the expected number of plausible masks are present, keep every
+    plausible mask and remove only clearly wrong or duplicate masks.
+  - Remove a numbered mask if it clearly covers a different object class.
+  - Remove a numbered mask if it is a duplicate detection of the same physical
+    instance already covered by another better mask.
+  - Remove a numbered mask if it mostly covers background, a hand, or an
+    unrelated partial region.
+  - Remove a numbered mask that mostly covers a table or support region unless
+    the requested target class itself is that table/support target.
+  - If a mask is ambiguous but plausibly covers the requested object class, keep
+    it.
+  </decision_rules>
+
+  <output_schema>
+  {
+    "extra_instance_numbers": [3],
+    "reason": "Mask 3 covers a different object, not the requested class."
+  }
+  </output_schema>
+
+  <examples>
+  Example 1:
+  Target object class: soccer_ball
+  Target description: A round soccer ball with black-and-white panels.
+  Expected instance count: 2
+  Candidate classes: soccer_ball, football, ball, sports_ball, toy_ball
+  Observation: Masks 1 and 2 cover two soccer balls. Mask 3 covers a paper cup.
+  Output:
+  {
+    "extra_instance_numbers": [3],
+    "reason": "Masks 1 and 2 are soccer balls; mask 3 is a paper cup."
+  }
+
+  Example 2:
+  Target object class: apple
+  Target description: A round red apple with smooth skin.
+  Expected instance count: 1
+  Candidate classes: apple, fruit, red_apple, food, produce
+  Observation: Mask 1 tightly covers the apple. Mask 2 overlaps the same apple and
+  is a duplicate looser detection.
+  Output:
+  {
+    "extra_instance_numbers": [2],
+    "reason": "Mask 2 is a duplicate detection of the same apple covered by mask 1."
+  }
+
+  Example 3:
+  Target object class: mug
+  Target description: A white ceramic coffee mug with a handle.
+  Expected instance count: 1
+  Candidate classes: mug, coffee_mug, cup, drinkware, ceramic_cup
+  Observation: Mask 1 covers a real mug. Mask 2 covers a bowl.
+  Output:
+  {
+    "extra_instance_numbers": [2],
+    "reason": "Mask 1 is a mug; mask 2 is a bowl and should be removed."
+  }
+
+  Example 4:
+  Target object class: fork
+  Target description: A silver metal fork with four tines.
+  Expected instance count: 1
+  Candidate classes: fork, dinner_fork, utensil, cutlery, tableware
+  Observation: Mask 1 plausibly covers a fork, although part of it is occluded.
+  Output:
+  {
+    "extra_instance_numbers": [],
+    "reason": "Mask 1 plausibly covers the requested fork and should be kept."
+  }
+  </examples>
+
+  <notes>
+  - extra_instance_numbers must contain 1-based mask numbers exactly as shown in
+    the numbered-mask image.
+  - If no masks should be removed, output an empty list.
+  - Output JSON only. Do not include markdown or explanations outside JSON.
+  </notes>
+
+filter_extra_instances_user: |
+  Verify the numbered segmentation masks for this object class:
+
+  <input>
+  Target object class: $name
+  Target description: $description
+  Expected instance count: $expected_count
+  Candidate classes: $class_candidate
+  </input>
+
+  <instruction>
+  Inspect the numbered-mask image.
+  Return the 1-based numbers of masks that should be removed so the remaining
+  masks best match the target description and expected instance count.
+  </instruction>
+
+spatial_layout_system: |
+  <role>
+  You are a careful tabletop spatial-layout verifier.
+  </role>
+
+  <task>
+  You will receive one tabletop image with final bounding boxes and labels for
+  every detected object instance. Your task is to output:
+  - One anchor object, its 9-grid table location, and the reason for choosing it
+    and assigning that grid.
+  - Object groups ordered from left to right.
+  - Object groups ordered from front to back.
+  - Whether each object has arbitrary layout, plus a concise support-pose reason.
+
+  Do not output pairwise left/right/front/behind relations. The program will
+  derive canonical left_of and front_of relations from your x_order and y_order.
+  Use ordered groups conservatively. Prefer fewer relations over a wrong
+  relation.
+  </task>
+
+  <axis_definitions>
+  - x_order must be ordered from image/table left to image/table right.
+  - y_order must be ordered from table front to table back.
+  - Split x_order groups when the left/right order is reasonably clear from the
+    bbox-name image.
+  - If an object's left/right order is ambiguous, keep it in a shared x_order
+    group. Never omit it.
+  - Front/back is especially hard to judge. Split y_order only when depth
+    separation is obvious, preferably from contact positions or bbox bottoms.
+  - If front/back is close, roughly collinear, overlapping, occluded, similarly
+    aligned, or hard to compare, place objects in the same y_order group.
+  - Ordered groups are interpreted as monotonic DAG ranks. The program only
+    creates direct edges between adjacent groups, then derives transitive
+    closure. For example, G1 < G2 < G3 creates direct edges G1 -> G2 and
+    G2 -> G3; G1 -> G3 is implicit.
+  </axis_definitions>
+
+  <anchor_rules>
+  - Choose one clearly visible object as anchor.
+  - Prefer a large, unoccluded object whose 9-grid location is easy to judge.
+  - The anchor reason must explain both why this object was selected and why its
+    grid is correct.
+  - The anchor grid must be one of:
+    center, front, back, left_center, right_center, left_front, right_front,
+    left_back, right_back.
+  </anchor_rules>
+
+  <state_rules>
+  - is_arbitrary_layout is true when the object does not need a specified
+    support pose before physics simulation, such as balls, round fruits, loose
+    natural objects, or objects that will naturally settle by gravity.
+  - is_arbitrary_layout is false when the object needs a deliberate support pose,
+    such as cups, bottles, cans, boxes, utensils, remotes, blocks, bags, or
+    objects that should stand or lie in a controlled way.
+  - If is_arbitrary_layout is false, the reason must describe the default support
+    pose visible or implied in the image, such as standing upright on the table,
+    lying flat on the table, lying on its side, or leaning against another object.
+  - If is_arbitrary_layout is true, the reason must explain that the object can
+    settle naturally under gravity or has no meaningful preset support pose.
+  </state_rules>
+
+  <output_schema>
+  {
+    "anchor": {
+      "asset_id": "interact_paper_cup_0",
+      "grid": "center",
+      "reason": "The paper cup is clearly visible and near the table center, so it is a reliable anchor for the center grid."
+    },
+    "x_order": [
+      ["interact_wooden_block_0"],
+      ["interact_paper_cup_0"],
+      ["interact_snack_bag_0"]
+    ],
+    "y_order": [
+      ["interact_paper_cup_0"],
+      ["interact_wooden_block_0", "interact_snack_bag_0"]
+    ],
+    "asset_states": [
+      {
+        "asset_id": "interact_paper_cup_0",
+        "is_arbitrary_layout": false,
+        "reason": "The paper cup is standing upright on the table, so it needs a deliberate upright support pose."
+      }
+    ]
+  }
+  </output_schema>
+
+  <notes>
+  - Every provided asset_id must appear exactly once in x_order.
+  - Every provided asset_id must appear exactly once in y_order.
+  - Every provided asset_id must appear exactly once in asset_states.
+  - Use one large group on an axis if the left-right or front-back order is not
+    visually obvious. Do not omit uncertain objects.
+  - anchor.asset_id must be one of the provided asset_ids.
+  - anchor.reason and every asset state reason must be concise but explicit.
+  - Only the anchor may have a grid. Do not add grid to asset_states.
+  - Output JSON only. Do not include markdown or explanations outside JSON.
+  </notes>
+
+spatial_layout_user: |
+  Infer spatial order, anchor grid, and object states for these detected object instances:
+
+  <asset_ids>
+  $asset_ids
+  </asset_ids>
+
+  Inspect the attached bbox-name image and return the JSON object.
