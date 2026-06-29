@@ -177,7 +177,15 @@ def _arm_qpos_from_state(
 
 
 class MoveEndEffector(AtomicAction):
-    """Plan a free-space end-effector move to a target pose."""
+    """Plan a free-space end-effector move to a target pose.
+
+    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
+    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    action plans a single trajectory that visits every waypoint in order,
+    starting from the inherited ``WorldState.last_qpos`` — IK is solved for each
+    waypoint with the previous waypoint's solution as the seed.
+    """
 
     TargetType: ClassVar[type] = EndEffectorPoseTarget
 
@@ -201,10 +209,7 @@ class MoveEndEffector(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-        target_states_list = [
-            [PlanState(xpos=move_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
+        target_states_list = self._build_target_states(move_xpos)
         ok, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_qpos,
@@ -222,6 +227,23 @@ class MoveEndEffector(AtomicAction):
                 last_qpos=full[:, -1, :].clone(), held_object=state.held_object
             ),
         )
+
+    def _build_target_states(self, move_xpos: torch.Tensor) -> list[list[PlanState]]:
+        """Build per-env PlanState lists from a single- or multi-waypoint target.
+
+        ``move_xpos`` is the resolved target: 3D ``(n_envs, 4, 4)`` for a single
+        waypoint or 4D ``(n_envs, n_waypoint, 4, 4)`` for a trajectory.
+        """
+        if move_xpos.dim() == 3:
+            move_xpos = move_xpos.unsqueeze(1)
+        n_waypoint = move_xpos.shape[1]
+        return [
+            [
+                PlanState(xpos=move_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(n_waypoint)
+            ]
+            for i in range(self.n_envs)
+        ]
 
     def _embed(
         self, arm_traj: torch.Tensor, last_full_qpos: torch.Tensor

@@ -71,7 +71,14 @@ class EndEffectorPoseTarget:
     """End-effector pose target. Used by MoveEndEffector and Place."""
 
     xpos: torch.Tensor
-    """(4, 4) or (n_envs, 4, 4) homogeneous transform."""
+    """Target end-effector homogeneous transform.
+
+    Accepts:
+
+    - ``(4, 4)`` or ``(n_envs, 4, 4)`` — a single waypoint.
+    - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory; waypoints
+      are visited in order. (Only consumed as multi-waypoint by MoveEndEffector.)
+    """
 
 
 @dataclass(frozen=True)

@@ -57,19 +57,45 @@ class TrajectoryBuilder:
         return bool(is_success)
 
     def resolve_pose_target(self, target: torch.Tensor, *, n_envs: int) -> torch.Tensor:
-        """Broadcast a (4, 4) pose to (n_envs, 4, 4) or validate batched shape."""
+        """Resolve an end-effector pose target into batched homogeneous transforms.
+
+        Accepts the following shapes for ``target``:
+
+        - ``(4, 4)`` — broadcast to ``(n_envs, 4, 4)`` (single waypoint).
+        - ``(n_envs, 4, 4)`` — single waypoint, validated and passed through.
+        - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory; each
+          waypoint is visited in order. ``n_waypoint`` may be 1.
+
+        Returns a 3D tensor for single-waypoint inputs and a 4D tensor for
+        multi-waypoint inputs.
+        """
         if not isinstance(target, torch.Tensor):
             logger.log_error(
-                f"target must be torch.Tensor of shape (4, 4) or ({n_envs}, 4, 4)",
+                f"target must be torch.Tensor of shape (4, 4), ({n_envs}, 4, 4), "
+                f"or ({n_envs}, n_waypoint, 4, 4)",
                 TypeError,
             )
         target = target.to(device=self.device, dtype=torch.float32)
         if target.shape == (4, 4):
             target = target.unsqueeze(0).repeat(n_envs, 1, 1)
-        if target.shape != (n_envs, 4, 4):
+        if target.dim() == 3:
+            if target.shape != (n_envs, 4, 4):
+                logger.log_error(
+                    f"target tensor must have shape (4, 4) or ({n_envs}, 4, 4), "
+                    f"but got {target.shape}",
+                    ValueError,
+                )
+        elif target.dim() == 4:
+            if target.shape[0] != n_envs or target.shape[2:] != (4, 4):
+                logger.log_error(
+                    f"multi-waypoint target tensor must have shape "
+                    f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}",
+                    ValueError,
+                )
+        else:
             logger.log_error(
-                f"target tensor must have shape (4, 4) or ({n_envs}, 4, 4), "
-                f"but got {target.shape}",
+                f"target tensor must be (4, 4), ({n_envs}, 4, 4), or "
+                f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}",
                 ValueError,
             )
         return target

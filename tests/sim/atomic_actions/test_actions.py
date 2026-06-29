@@ -148,6 +148,47 @@ class TestMoveEndEffectorAction:
         # MoveEndEffector preserves held_object.
         assert result.next_state.held_object is None
 
+    def test_execute_with_multi_waypoint_visits_each_waypoint(self):
+        action = MoveEndEffector(self.mg, MoveEndEffectorCfg(sample_interval=10))
+        pose0 = torch.eye(4)
+        pose1 = torch.eye(4)
+        pose1[0, 3] = 1.0
+        # (n_envs, n_waypoint, 4, 4) trajectory target
+        multi_xpos = (
+            torch.stack([pose0, pose1], dim=0).unsqueeze(0).repeat(NUM_ENVS, 1, 1, 1)
+        )
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        captured = {}
+
+        def interpolate(trajectory, interp_num, device):
+            captured["keyframes"] = trajectory
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(
+                EndEffectorPoseTarget(xpos=multi_xpos),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
+        # Two waypoints -> two IK calls, in order.
+        assert len(seen_poses) == 2
+        assert torch.allclose(seen_poses[0], pose0.unsqueeze(0).repeat(NUM_ENVS, 1, 1))
+        assert torch.allclose(seen_poses[1], pose1.unsqueeze(0).repeat(NUM_ENVS, 1, 1))
+        # start prepended to the two IK solutions -> 3 keyframes.
+        assert captured["keyframes"].shape == (NUM_ENVS, 3, ARM_DOF)
+
 
 # ---------------------------------------------------------------------------
 # MoveJoints

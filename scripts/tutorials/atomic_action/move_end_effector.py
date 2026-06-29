@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate MoveEndEffector with a single pose target."""
+"""Demonstrate MoveEndEffector with a multi-waypoint pose trajectory."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ POST_TRAJECTORY_STEPS = 120
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveEndEffector with a top-down target pose."
+        description="Demonstrate MoveEndEffector with a multi-waypoint pose trajectory."
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
@@ -159,13 +159,29 @@ def make_top_down_eef_pose(device: torch.device) -> torch.Tensor:
     return pose
 
 
+def make_side_eef_pose(device: torch.device) -> torch.Tensor:
+    """A second waypoint offset from the top-down pose for the multi-waypoint demo."""
+    pose = torch.eye(4, dtype=torch.float32, device=device)
+    pose[:3, :3] = torch.tensor(
+        [
+            [-0.0539, -0.9985, -0.0022],
+            [-0.9977, 0.0540, -0.0401],
+            [0.0401, 0.0000, -0.9992],
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
+    pose[:3, 3] = torch.tensor([0.45, 0.10, 0.30], dtype=torch.float32, device=device)
+    return pose
+
+
 def format_tensor(tensor: torch.Tensor) -> str:
     rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
     return str(rounded.tolist())
 
 
 def main() -> None:
-    """Move the robot end effector to one target pose using atomic actions."""
+    """Move the robot end effector through a multi-waypoint pose trajectory."""
     args = parse_arguments()
 
     # ------------------------------------------------------------------ #
@@ -199,21 +215,38 @@ def main() -> None:
     # Step 5: Define and visualize the end-effector target                #
     # ------------------------------------------------------------------ #
     target_pose = make_top_down_eef_pose(sim.device)
+    side_pose = make_side_eef_pose(sim.device)
     if not args.headless:
         sim.open_window()
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "move_end_effector_target_axis", target_pose)
+        draw_axis_marker(sim, "move_end_effector_side_axis", side_pose)
     if not args.auto_play:
         input("Inspect the robot, then press Enter to plan MoveEndEffector...")
 
     # ------------------------------------------------------------------ #
     # Step 6: Plan the declared (name, typed_target) sequence             #
     # ------------------------------------------------------------------ #
+    # Pass a multi-waypoint trajectory (n_envs, n_waypoint, 4, 4): the
+    # end-effector visits `target_pose` then `side_pose` in a single plan.
+    n_envs = robot.get_qpos().shape[0]
+    multi_waypoint_xpos = (
+        torch.stack([target_pose, side_pose], dim=0)
+        .unsqueeze(0)
+        .repeat(n_envs, 1, 1, 1)
+    )
     logger.log_info(
-        f"Planning MoveEndEffector to xpos={format_tensor(target_pose[:3, 3])}"
+        "Planning MoveEndEffector through multi-waypoint trajectory: "
+        f"xpos0={format_tensor(target_pose[:3, 3])} -> "
+        f"xpos1={format_tensor(side_pose[:3, 3])}"
     )
     is_success, traj, _ = atomic_engine.run(
-        steps=[("move_end_effector", EndEffectorPoseTarget(xpos=target_pose))]
+        steps=[
+            (
+                "move_end_effector",
+                EndEffectorPoseTarget(xpos=multi_waypoint_xpos),
+            )
+        ]
     )
     if not is_success:
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")

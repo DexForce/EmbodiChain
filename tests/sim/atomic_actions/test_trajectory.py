@@ -96,6 +96,19 @@ class TestResolvePoseTarget:
         with pytest.raises(Exception):
             self.builder.resolve_pose_target(torch.eye(3), n_envs=2)
 
+    def test_multi_waypoint_passes_through(self):
+        pose = torch.eye(4).unsqueeze(0).unsqueeze(0).repeat(2, 3, 1, 1)
+        pose[0, 1, :3, 3] = torch.tensor([1.0, 0.0, 0.0])
+        out = self.builder.resolve_pose_target(pose, n_envs=2)
+        assert out.shape == (2, 3, 4, 4)
+        assert torch.equal(out, pose.to(torch.float32))
+
+    def test_multi_waypoint_wrong_envs_raises(self):
+        with pytest.raises(Exception):
+            self.builder.resolve_pose_target(
+                torch.eye(4).unsqueeze(0).unsqueeze(0).repeat(3, 2, 1, 1), n_envs=2
+            )
+
 
 class TestResolveJointTarget:
     def setup_method(self):
