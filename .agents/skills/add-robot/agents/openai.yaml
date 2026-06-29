@@ -1,0 +1,3 @@
+name: add-robot
+canonical_skill: .agents/skills/add-robot/SKILL.md
+project: EmbodiChain

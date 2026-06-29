@@ -172,19 +172,29 @@ class BaseSolver(metaclass=ABCMeta):
                 device=self.device,
             )
 
-            self.compiled_fk = torch.compile(
-                self.pk_serial_chain.forward_kinematics_tensor,
-                fullgraph=True,
-                dynamic=True,
-            )
-            # Warm up on the solver device so Dynamo guards match CUDA/CPU at init
-            # instead of on the first get_fk call (avoids recompile_limit hits in CI).
-            if self.dof > 0:
-                with torch.no_grad():
-                    warmup_qpos = torch.zeros(
-                        1, self.dof, device=self.device, dtype=torch.float32
-                    )
-                    self.compiled_fk(warmup_qpos)
+            self.compiled_fk = self.pk_serial_chain.forward_kinematics_tensor
+            try:
+                compiled_fk = torch.compile(
+                    self.pk_serial_chain.forward_kinematics_tensor,
+                    fullgraph=True,
+                    dynamic=True,
+                )
+                # Warm up on the solver device so Dynamo guards match CUDA/CPU at init
+                # instead of on the first get_fk call (avoids recompile_limit hits in CI).
+                if self.dof > 0:
+                    with torch.no_grad():
+                        warmup_qpos = torch.zeros(
+                            1, self.dof, device=self.device, dtype=torch.float32
+                        )
+                        compiled_fk(warmup_qpos)
+                self.compiled_fk = compiled_fk
+            except Exception as exc:
+                error_message = str(exc).splitlines()[0] if str(exc) else repr(exc)
+                logger.log_warning(
+                    "Failed to compile FK for "
+                    f"{self.root_link_name}->{self.end_link_name}; "
+                    f"falling back to eager FK. Error: {error_message}"
+                )
 
         self._init_qpos_limits()
 

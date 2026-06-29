@@ -16,11 +16,12 @@
 
 import enum
 
-all = [
+__all__ = [
     "DexforceW1Version",
     "DexforceW1ArmKind",
     "DexforceW1ArmSide",
     "DexforceW1Type",
+    "DexforceW1HandBrand",
 ]
 
 

@@ -116,7 +116,15 @@ def configclass(cls, **kwargs):
     else:
         setattr(cls, "__post_init__", custom_post_init)
     # add helper functions for dictionary conversion
-    setattr(cls, "to_dict", class_to_dict)
+    # Only install class_to_dict if no custom to_dict exists anywhere in the
+    # MRO. This lets a @configclass subclass (e.g. RobotCfg) define its own
+    # round-trippable to_dict, and lets subclasses without one inherit it
+    # rather than being shadowed by class_to_dict.
+    if not any(
+        "to_dict" in b.__dict__ and b.__dict__["to_dict"] is not class_to_dict
+        for b in cls.__mro__
+    ):
+        setattr(cls, "to_dict", class_to_dict)
     # setattr(cls, "from_dict", update_class_from_dict)
     setattr(cls, "replace", _replace_class_with_kwargs)
     setattr(cls, "copy", _replace_class_with_kwargs)
