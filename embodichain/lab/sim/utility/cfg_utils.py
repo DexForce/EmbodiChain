@@ -83,7 +83,16 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
         RobotCfg: The merged robot configuration.
     """
 
-    robot_cfg = RobotCfg.from_dict(override_cfg_dict)
+    # Only parse keys the base RobotCfg recognizes, so subclass-only variant
+    # fields (version, arm_kind, ...) set by _build_defaults don't trigger
+    # spurious "Key not found in RobotCfg" warnings from the base from_dict.
+    # NOTE: check RobotCfg.__dataclass_fields__ (not hasattr(base_cfg, k))
+    # because base_cfg is the subclass instance which has subclass-only fields,
+    # and @configclass strips class-level defaults so hasattr(RobotCfg, k)
+    # returns False for all keys.
+    base_fields = RobotCfg.__dataclass_fields__
+    base_safe = {k: v for k, v in override_cfg_dict.items() if k in base_fields}
+    robot_cfg = RobotCfg.from_dict(base_safe)
 
     for key, value in override_cfg_dict.items():
         if key == "solver_cfg":
@@ -154,7 +163,14 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):
-                for component in user_urdf_cfg.get("components", []):
+                components = user_urdf_cfg.get("components", [])
+                # to_dict serializes components as a dict keyed by type;
+                # normalize to a list of dicts for merge_robot_cfg.
+                if isinstance(components, dict):
+                    components = [
+                        {"component_type": k, **v} for k, v in components.items()
+                    ]
+                for component in components:
                     base_cfg.urdf_cfg.add_component(
                         component_type=component.get("component_type"),
                         urdf_path=component.get("urdf_path"),
@@ -165,6 +181,11 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     "urdf_cfg should be a dictionary. Skipping urdf_cfg merge."
                 )
         else:
-            setattr(base_cfg, key, getattr(robot_cfg, key))
+            # Only apply keys the base RobotCfg.from_dict recognized.
+            # Subclass-only variant fields (e.g. version, arm_kind) are not
+            # present on a plain RobotCfg and are already set by _build_defaults;
+            # skip them instead of raising AttributeError.
+            if hasattr(robot_cfg, key):
+                setattr(base_cfg, key, getattr(robot_cfg, key))
 
     return base_cfg
