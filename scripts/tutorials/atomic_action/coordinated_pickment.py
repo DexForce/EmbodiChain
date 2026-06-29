@@ -122,7 +122,7 @@ TABLE_INIT_POS, TABLE_INIT_ROT = transform_baseline_pose(
     z_offset=SCENE_Z_OFFSET,
 )
 PICKMENT_RECORD_LOOK_AT = (
-    (-2.75, 0.02, 1.35),
+    (-0.25, 0.02, 2.5),
     (0.0, 0.02, 0.75),
     (0.0, 0.0, 1.0),
 )
