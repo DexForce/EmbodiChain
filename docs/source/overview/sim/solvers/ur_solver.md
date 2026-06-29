@@ -75,7 +75,7 @@ solver = cfg.init_solver(device="cuda")
 
 ## Main Methods
 
-* `get_fk(self, qpos: torch.Tensor) -> torch.Tensor`  
+* `get_fk(self, qpos: torch.Tensor) -> torch.Tensor`
   Computes the end-effector pose (homogeneous transformation matrix) for the
   given joint positions. Inherited from `BaseSolver` and computed from the URDF
   kinematic chain, with the TCP applied.
@@ -98,7 +98,7 @@ solver = cfg.init_solver(device="cuda")
   #          [  0.0000,   0.0000,   0.0000,   1.0000]]], device='cuda:0')
 ```
 
-* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor, return_all_solutions: bool = False, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]`  
+* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor, return_all_solutions: bool = False, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]`
   Computes joint positions (inverse kinematics) for the given target
   end-effector pose(s) using the closed-form UR solution evaluated in a Warp
   kernel.
@@ -154,11 +154,11 @@ solver = cfg.init_solver(device="cuda")
   print(all_solutions.shape)   # torch.Size([1, 512, 6])
 ```
 
-* `set_tcp(self, tcp: np.ndarray)`  
+* `set_tcp(self, tcp: np.ndarray)`
   Sets the Tool Center Point transform and precomputes its inverse so that IK
   targets are mapped into the flange frame before solving.
 
-* `dh_matrix(theta_i, d_i, a_i, alpha_i) -> torch.Tensor` *(staticmethod)*  
+* `dh_matrix(theta_i, d_i, a_i, alpha_i) -> torch.Tensor` *(staticmethod)*
   Computes a single 4×4 Denavit–Hartenberg transformation matrix from the
   standard DH parameters `(theta, d, a, alpha)`. Useful for building custom FK
   chains or debugging the kinematic model.

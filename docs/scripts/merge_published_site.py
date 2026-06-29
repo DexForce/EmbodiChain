@@ -34,7 +34,14 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-__all__ = ["load_versions_manifest", "merge_published_site"]
+_INVALID_ARTIFACT_CHARS = frozenset('"<>:|*?\r\n')
+
+__all__ = [
+    "flatten_nested_version_dirs",
+    "load_versions_manifest",
+    "merge_published_site",
+    "normalize_artifact_paths",
+]
 
 
 def load_versions_manifest(
@@ -67,6 +74,95 @@ def _copy_local_version(src: Path, dest: Path) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
+    normalize_artifact_paths(dest)
+
+
+def _safe_artifact_name(name: str) -> str:
+    """Return a filesystem-agnostic artifact name for one path component."""
+    name = name.split("?", 1)[0].split("#", 1)[0] or "download"
+    return "".join("_" if char in _INVALID_ARTIFACT_CHARS else char for char in name)
+
+
+def normalize_artifact_paths(root: Path) -> list[tuple[Path, Path | None]]:
+    """Normalize paths that GitHub artifact upload rejects.
+
+    Recursive ``wget`` mirrors URLs with query strings as literal filenames
+    such as ``clipboard.min.js?v=a7894cd8``. Browsers resolve that URL against
+    the real file ``clipboard.min.js``, so the mirrored query-string copy is
+    redundant and invalid for Actions artifacts.
+
+    Args:
+        root: Directory tree to normalize.
+
+    Returns:
+        ``(old_path, new_path)`` pairs. ``new_path`` is ``None`` when the
+        invalid duplicate was removed because the safe target already existed.
+    """
+    changes: list[tuple[Path, Path | None]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        safe_name = _safe_artifact_name(path.name)
+        if safe_name == path.name:
+            continue
+
+        target = path.with_name(safe_name)
+        if target.exists():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            changes.append((path, None))
+        else:
+            path.rename(target)
+            changes.append((path, target))
+
+    return changes
+
+
+def _cleanup_empty_dirs(root: Path) -> None:
+    for directory in sorted(
+        root.rglob("*"), key=lambda item: len(item.parts), reverse=True
+    ):
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+
+
+def flatten_nested_version_dirs(build_dir: Path) -> list[tuple[Path, Path | None]]:
+    """Move nested downloaded version dirs to the build root.
+
+    ``wget -nH`` removes the host component but keeps URL path components. For
+    project Pages URLs this can produce ``build/html/EmbodiChain/v0.2.2``. The
+    version manifest generator only scans top-level ``v*`` directories, so keep
+    release versions directly under ``build/html``.
+
+    Args:
+        build_dir: Sphinx output root (``docs/build/html``).
+
+    Returns:
+        ``(old_path, new_path)`` pairs. ``new_path`` is ``None`` when a nested
+        duplicate was removed because the top-level version already exists.
+    """
+    build_dir = build_dir.resolve()
+    changes: list[tuple[Path, Path | None]] = []
+    candidates = [
+        candidate
+        for candidate in build_dir.rglob("v*")
+        if candidate.is_dir()
+        and candidate.parent != build_dir
+        and (candidate / "index.html").is_file()
+    ]
+    candidates.sort(key=lambda candidate: len(candidate.parts))
+
+    for candidate in candidates:
+        target = build_dir / candidate.name
+        if target.exists():
+            shutil.rmtree(candidate)
+            changes.append((candidate, None))
+        else:
+            candidate.rename(target)
+            changes.append((candidate, target))
+
+    _cleanup_empty_dirs(build_dir)
+    return changes
 
 
 def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None:
@@ -94,17 +190,30 @@ def _download_version_wget(site_base_url: str, version: str, dest: Path) -> None
     )
     if result.returncode != 0:
         print(f"wget failed for {url} (exit {result.returncode})", file=sys.stderr)
+
+    # wget may create dest.parent/<version>/ or preserve extra URL path
+    # segments such as dest.parent/EmbodiChain/<version>/; normalize that.
+    flatten_nested_version_dirs(dest.parent)
+    if not dest.is_dir():
+        candidates = [
+            candidate
+            for candidate in dest.parent.rglob(version)
+            if candidate.is_dir() and candidate != dest
+        ]
+        candidates.sort(key=lambda candidate: len(candidate.parts))
+        for candidate in candidates:
+            if (candidate / "index.html").is_file():
+                candidate.rename(dest)
+                break
+
+    if dest.is_dir():
+        changes = normalize_artifact_paths(dest)
+        if changes:
+            print(f"Normalized {len(changes)} artifact path(s) in {version}.")
+    elif result.returncode != 0:
         return
 
-    # wget may create dest.parent/<version>/ or nest extra path segments — normalize
-    if not dest.is_dir():
-        candidates = list(dest.parent.glob(f"*/{version}"))
-        if len(candidates) == 1 and candidates[0].is_dir():
-            candidates[0].rename(dest)
-        else:
-            nested = dest.parent / version
-            if nested.is_dir() and nested != dest:
-                nested.rename(dest)
+    _cleanup_empty_dirs(dest.parent)
 
 
 def merge_published_site(
@@ -128,6 +237,11 @@ def merge_published_site(
     build_dir = build_dir.resolve()
     build_dir.mkdir(parents=True, exist_ok=True)
     skip = skip_versions or frozenset()
+    initial_changes = normalize_artifact_paths(build_dir)
+    if initial_changes:
+        print(
+            f"Normalized {len(initial_changes)} existing artifact path(s) in build tree."
+        )
 
     manifest = load_versions_manifest(
         site_base_url=site_base_url,
@@ -165,6 +279,20 @@ def merge_published_site(
                 "Neither published_root nor site_base_url set; cannot merge.",
                 file=sys.stderr,
             )
+
+    final_changes = normalize_artifact_paths(build_dir)
+    if final_changes:
+        print(f"Normalized {len(final_changes)} artifact path(s) in build tree.")
+
+    final_flattened = flatten_nested_version_dirs(build_dir)
+    if final_flattened:
+        print(f"Flattened {len(final_flattened)} nested version dir(s) in build tree.")
+
+    post_flatten_changes = normalize_artifact_paths(build_dir)
+    if post_flatten_changes:
+        print(
+            f"Normalized {len(post_flatten_changes)} flattened artifact path(s) in build tree."
+        )
 
     return merged
 
