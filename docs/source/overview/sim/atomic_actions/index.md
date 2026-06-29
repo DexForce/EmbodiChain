@@ -301,6 +301,7 @@ builtin_actions
   - `scripts/tutorials/atomic_action/pickup.py`
   - `scripts/tutorials/atomic_action/move_held_object.py`
   - `scripts/tutorials/atomic_action/place.py`
+  - `scripts/tutorials/atomic_action/press.py`
   - `scripts/tutorials/atomic_action/coordinated_placement.py`
 
 Run a demo in headless CPU mode with `--auto_play --headless --device cpu` to record

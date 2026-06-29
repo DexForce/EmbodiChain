@@ -34,6 +34,8 @@ embodichain.lab.sim.atomic_actions
       MoveHeldObject
       PlaceCfg
       Place
+      PressCfg
+      Press
       CoordinatedPlacementCfg
       CoordinatedPlacement
       AtomicActionEngine
@@ -157,6 +159,15 @@ Actions
     :show-inheritance:
 
 .. autoclass:: Place
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PressCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: Press
     :members:
     :show-inheritance:
 

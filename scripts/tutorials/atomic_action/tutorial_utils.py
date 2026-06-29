@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -39,6 +40,23 @@ DEFAULT_AUTO_PLAY_LOOK_AT = (
 )
 DEFAULT_AXIS_LEN = 0.06
 DEFAULT_AXIS_SIZE = 0.003
+
+
+def make_ur5_solver_cfg(tcp_z: float) -> URSolverCfg:
+    """Create the UR5 arm solver cfg used by atomic-action tutorials."""
+    cfg = URSolverCfg(
+        ur_type="ur5",
+        end_link_name="ee_link",
+        root_link_name="base_link",
+        tcp=[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, tcp_z],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    cfg.urdf_path = None
+    return cfg
 
 
 def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
@@ -117,6 +135,7 @@ __all__ = [
     "DEFAULT_AUTO_PLAY_LOOK_AT",
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
+    "make_ur5_solver_cfg",
     "get_tutorial_window_size",
     "start_auto_play_recording",
     "stop_auto_play_recording",
