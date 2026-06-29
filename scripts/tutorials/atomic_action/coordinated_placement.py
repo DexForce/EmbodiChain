@@ -183,7 +183,7 @@ PAN_HANDLE_CLOSE_QPOS = 0.045
 PAN_PICK_SAMPLE_INTERVAL = 130
 PAN_PICK_HAND_INTERP_STEPS = 32
 BREAD_TARGET_WORLD_YAW_DEG = 0.0
-BREAD_TARGET_HEIGHT_OFFSET = 0.0
+BREAD_TARGET_HEIGHT_OFFSET = 0.1
 SUPPORT_TARGET_HEIGHT_OFFSET = 0.0
 PICK_APPROACH_DISTANCE = 0.12
 PLACE_LIFT_HEIGHT = 0.10
@@ -406,6 +406,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=10.0,
             ),
+            body_scale=(2.0, 2.0, 2.0),
             max_convex_hull_num=8,
             init_pos=list(BREAD_INIT_POS),
             init_rot=list(BREAD_INIT_ROT),
@@ -432,6 +433,7 @@ def create_pan(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
+            body_scale=(2.0, 2.0, 2.0),
             max_convex_hull_num=16,
             init_pos=list(PAN_INIT_POS),
             init_rot=list(PAN_INIT_ROT),
@@ -1161,7 +1163,7 @@ def run_coordinated_placement_demo(
         args,
         video_prefix="coordinated_placement_auto_play",
         look_at=(
-            (-1.85, 0.0, 1.15),
+            (-0.25, 0.0, 2.5),
             (-0.05, 0.0, 0.72),
             (0.0, 0.0, 1.0),
         ),
