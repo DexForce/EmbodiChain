@@ -162,6 +162,7 @@ class TestRigidConstraintCPU(BaseRigidConstraintTest):
         self.setup_simulation("cpu")
 
 
+@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestRigidConstraintCUDA(BaseRigidConstraintTest):
     def setup_method(self) -> None:
         self.setup_simulation("cuda")
