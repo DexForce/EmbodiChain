@@ -58,6 +58,12 @@ def _can_run_sim(device: str) -> bool:
 class BaseRigidConstraintTest:
     """Shared setup for the CPU and CUDA integration tests."""
 
+    def _delta_z(self) -> float:
+        """Return duck_b.z - duck_a.z (env 0) from the bodies' current poses."""
+        pose_a = self.duck_a.get_local_pose(to_matrix=True)
+        pose_b = self.duck_b.get_local_pose(to_matrix=True)
+        return float(pose_b[0, 2, 3] - pose_a[0, 2, 3])
+
     def setup_simulation(self, sim_device: str) -> None:
         if not _can_run_sim(sim_device):
             pytest.skip(
@@ -122,14 +128,16 @@ class BaseRigidConstraintTest:
         delta_z = float(pose_b2[0, 2, 3] - pose_a2[0, 2, 3])
         assert abs(delta_z - initial_delta_z) < 2e-2
 
-        # Detach and confirm they separate (both fall independently).
+        # Detach and confirm the relative pose is no longer held: once free,
+        # the lower duck (duck_b) lands first and the gap closes, so the
+        # relative z drifts away from the value the constraint was holding.
         self.sim.remove_rigid_constraint("weld")
         assert self.sim.get_rigid_constraint("weld") is None
-        z_before = float(self.duck_a.get_local_pose(to_matrix=True)[0, 2, 3])
+        held_delta_z = self._delta_z()
         for _ in range(120):
             self.sim.update(step=1)
-        z_after = float(self.duck_a.get_local_pose(to_matrix=True)[0, 2, 3])
-        assert z_after < z_before - 0.05
+        final_delta_z = self._delta_z()
+        assert abs(final_delta_z - held_delta_z) > 2e-2
 
 
 class TestRigidConstraintCPU(BaseRigidConstraintTest):

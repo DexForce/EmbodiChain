@@ -285,11 +285,21 @@ class _RigidConstraintTestSim:
     _broadcast_frame = staticmethod(SimulationManager._broadcast_frame)
 
 
-def _register_object(sim, uid, num_envs):
+def _register_object(sim, uid, num_envs, z=0.0):
+    """Register a mock RigidObject.
+
+    ``get_local_pose`` returns a real ``(num_envs, 4, 4)`` tensor so the
+    constraint's default ``local_frame_b`` computation (which reads both
+    objects' current poses) works under the mock. ``z`` sets the per-env
+    translation so two objects can be placed at different heights.
+    """
     obj = MagicMock()
     obj.uid = uid
     obj.num_instances = num_envs
     obj._entities = [MagicMock(name=f"{uid}_{i}") for i in range(num_envs)]
+    pose = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(num_envs, 1, 1)
+    pose[:, 2, 3] = z
+    obj.get_local_pose.return_value = pose
     sim._rigid_objects[uid] = obj
     return obj
 
@@ -498,3 +508,49 @@ def test_partial_remove_then_all_drops_registry():
     assert "weld" in sim._constraints
     sim.remove_rigid_constraint("weld", env_ids=[1])
     assert "weld" not in sim._constraints
+
+
+def test_create_rigid_constraint_default_frame_b_preserves_relative_pose():
+    """With local_frame_b=None, frame_b = inv(pose_B) @ pose_A (preserves offset).
+
+    cube_a at z=1.4, cube_b at z=1.2 -> B is 0.2 below A. The computed
+    local_frame_b must translate +0.2 in z (A's pose relative to B) so the
+    constraint welds the cubes at their current relative pose instead of
+    pulling their origins together.
+    """
+    sim = _RigidConstraintTestSim(num_envs=2)
+    _register_object(sim, "cube_a", 2, z=1.4)
+    _register_object(sim, "cube_b", 2, z=1.2)
+
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube_a", rigid_object_b_uid="cube_b"
+    )
+    sim.create_rigid_constraint(cfg)
+
+    for i, arena in enumerate(sim._arenas):
+        # arena.created[0] = (name, actor0, actor1, frame_a, frame_b)
+        frame_a = arena.created[0][3]
+        frame_b = arena.created[0][4]
+        # frame_a defaults to identity
+        np.testing.assert_allclose(frame_a, np.eye(4), atol=1e-6)
+        # frame_b = inv(pose_B) @ pose_A = translate(0, 0, +0.2)
+        np.testing.assert_allclose(frame_b[:3, 3], [0.0, 0.0, 0.2], atol=1e-5)
+
+
+def test_create_rigid_constraint_explicit_frame_b_used_verbatim():
+    """An explicit local_frame_b is broadcast verbatim (no pose computation)."""
+    sim = _RigidConstraintTestSim(num_envs=2)
+    _register_object(sim, "cube_a", 2, z=1.4)
+    _register_object(sim, "cube_b", 2, z=1.2)
+
+    explicit = np.eye(4, dtype=np.float32) * 3.0
+    cfg = RigidConstraintCfg(
+        name="weld",
+        rigid_object_a_uid="cube_a",
+        rigid_object_b_uid="cube_b",
+        local_frame_b=explicit,
+    )
+    sim.create_rigid_constraint(cfg)
+    for arena in sim._arenas:
+        frame_b = arena.created[0][4]
+        np.testing.assert_allclose(frame_b, explicit)

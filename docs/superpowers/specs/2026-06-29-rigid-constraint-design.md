@@ -63,7 +63,7 @@ FUNCTOR LAYER (gym, on-demand)
 1. **One source of truth** — the sim layer owns the constraint registry and all dexsim calls. The functor is a thin adapter: resolve `SceneEntityCfg` → `RigidObject`, then call the sim API.
 2. **Per-arena batch symmetry** — `RigidConstraint` mirrors `RigidObject`: N arenas → N dexsim constraint handles, so `env_id i` ↔ arena `i` ↔ handle `i`. Attach/detach can target a subset of `env_ids`.
 3. **Fixed-first, extensible** — v1 wires only `create_fixed_constraint`; `RigidConstraintCfg.constraint_type` is reserved (`"fixed"` default).
-4. **Local frames default to identity** → attaches at the objects' *current* relative pose. Caller can pass 4×4 or `(N,4,4)`.
+4. **Local frames default to the current relative pose** — `local_frame_a` defaults to identity (object A's origin); `local_frame_b` defaults to `inv(pose_B) @ pose_A` (computed from the objects' current poses), so the constraint welds the objects where they are rather than pulling their origins together. Caller can pass explicit 4×4 or `(N,4,4)` matrices to define a specific joint frame.
 
 ### Why `SimulationManager`, not `RigidObject`, owns the API
 
@@ -215,7 +215,9 @@ task → event_manager.apply(mode="attach", env_ids=gripping_env_ids)
   → env.sim.create_rigid_constraint(cfg, env_ids)
      resolve obj_a, obj_b from self._rigid_objects (raise if missing)
      target_env_ids = env_ids or range(num_envs)
-     frames = broadcast(cfg.local_frame_a)  # None→I, 4x4→repeat, (N,4,4)→index
+     frames_a = broadcast(cfg.local_frame_a)            # None→I, 4x4→repeat, (N,4,4)→index
+     frames_b = broadcast(cfg.local_frame_b) if cfg.local_frame_b is not None
+               else inv(pose_B) @ pose_A per env         # default: weld at current relative pose
      for i in target_env_ids:
         arena = self.get_env(i)
         name_i = cfg.name if num_envs==1 else f"{cfg.name}_{i}"
@@ -254,15 +256,20 @@ v1 lifecycle is `create` → `remove`. Re-attaching after a partial remove requi
 
 At create time the `constraint_handles` list is pre-sized to `num_envs` filled with `None`, then only the `target_env_ids` entries are populated, so arena-index alignment always holds.
 
-### Local-frame broadcasting (once, at create time)
+### Local-frame resolution (once, at create time)
 
-| Input | Normalized per-env |
+`local_frame_a` is broadcast as below. `local_frame_b` is handled differently
+when `None`: instead of identity, it is computed per env as
+`inv(pose_B) @ pose_A` from the objects' current poses, so the default welds the
+objects at their current relative pose (rather than pulling their origins
+together). An explicit `local_frame_b` is broadcast like `local_frame_a`.
+
+| Input (`local_frame_a`, or explicit `local_frame_b`) | Normalized per-env |
 |-------|--------------------|
-| `None` | `np.eye(4)` for all envs → weld at current relative pose |
+| `None` (`local_frame_a`) | `np.eye(4)` for all envs |
+| `None` (`local_frame_b`) | `inv(pose_B) @ pose_A` per env (current relative pose) |
 | `(4, 4)` | same matrix for all envs |
 | `(N, 4, 4)` | `frames[i]` for env `i` (requires N == num_envs) |
-
-`local_frame_b` mirrors this independently.
 
 ### Interaction with reset
 

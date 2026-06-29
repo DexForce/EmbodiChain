@@ -91,7 +91,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import look_at_to_pose
+from embodichain.utils.math import look_at_to_pose, pose_inv
 
 __all__ = [
     "SimulationManager",
@@ -1115,13 +1115,25 @@ class SimulationManager:
         else:
             target_env_ids = list(env_ids)
 
-        # broadcast local frames
+        # broadcast local frames.
+        # local_frame_a defaults to identity (object A's origin).
+        # local_frame_b defaults to the current relative pose of A w.r.t. B
+        # (inv(pose_B) @ pose_A), so that with both frames left as None the
+        # constraint welds the objects at their *current* relative pose instead
+        # of pulling their origins together.
         frames_a = self._broadcast_frame(
             cfg.local_frame_a, num_envs, target_env_ids, cfg.name
         )
-        frames_b = self._broadcast_frame(
-            cfg.local_frame_b, num_envs, target_env_ids, cfg.name
-        )
+        if cfg.local_frame_b is None:
+            pose_a = rigid_object_a.get_local_pose(to_matrix=True)
+            pose_b = rigid_object_b.get_local_pose(to_matrix=True)
+            frame_b = torch.bmm(pose_inv(pose_b), pose_a)  # (N, 4, 4)
+            frame_b = frame_b.cpu().numpy().astype(np.float32)
+            frames_b = [frame_b[i] for i in target_env_ids]
+        else:
+            frames_b = self._broadcast_frame(
+                cfg.local_frame_b, num_envs, target_env_ids, cfg.name
+            )
 
         # pre-size handles list with None, fill target envs
         handles: list = [None] * num_envs
