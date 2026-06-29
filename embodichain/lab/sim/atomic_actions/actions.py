@@ -254,7 +254,14 @@ class MoveEndEffector(AtomicAction):
 
 
 class MoveJoints(AtomicAction):
-    """Plan a joint-space move for the configured control part."""
+    """Plan a joint-space move for the configured control part.
+
+    The :class:`JointPositionTarget` may carry either a single waypoint
+    ``(n_envs, control_dof)`` or a multi-waypoint trajectory
+    ``(n_envs, n_waypoint, control_dof)``. In the multi-waypoint case the
+    action plans a single trajectory that visits every waypoint in order,
+    starting from the inherited ``WorldState.last_qpos``.
+    """
 
     TargetType: ClassVar[tuple[type, ...]] = (
         JointPositionTarget,

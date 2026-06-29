@@ -123,6 +123,26 @@ class TestResolveJointTarget:
                 torch.zeros(5), n_envs=2, joint_dof=6, control_part="arm"
             )
 
+    def test_multi_waypoint_passes_through(self):
+        qpos = torch.arange(24, dtype=torch.float32).reshape(2, 2, 6)
+        out = self.builder.resolve_joint_target(
+            qpos, n_envs=2, joint_dof=6, control_part="arm"
+        )
+        assert out.shape == (2, 2, 6)
+        assert torch.equal(out, qpos.to(torch.float32))
+
+    def test_multi_waypoint_wrong_envs_raises(self):
+        with pytest.raises(Exception):
+            self.builder.resolve_joint_target(
+                torch.zeros(3, 2, 6), n_envs=2, joint_dof=6, control_part="arm"
+            )
+
+    def test_multi_waypoint_wrong_dof_raises(self):
+        with pytest.raises(Exception):
+            self.builder.resolve_joint_target(
+                torch.zeros(2, 2, 5), n_envs=2, joint_dof=6, control_part="arm"
+            )
+
 
 class TestSplitThreePhase:
     def setup_method(self):
@@ -211,6 +231,25 @@ class TestPlanJointTraj:
         assert kwargs["interp_num"] == 5
         assert torch.equal(kwargs["trajectory"][:, 0, :], start)
         assert torch.equal(kwargs["trajectory"][:, 1, :], target)
+
+    def test_interpolates_start_through_multi_waypoints(self):
+        start = torch.zeros(2, 6)
+        waypoints = torch.arange(24, dtype=torch.float32).reshape(2, 2, 6)
+        expected = torch.ones(2, 5, 6)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=expected,
+        ) as interpolate:
+            out = self.builder.plan_joint_traj(start, waypoints, n_waypoints=5)
+
+        assert out is expected
+        _, kwargs = interpolate.call_args
+        assert kwargs["interp_num"] == 5
+        # start prepended, then every waypoint in order
+        assert kwargs["trajectory"].shape == (2, 3, 6)
+        assert torch.equal(kwargs["trajectory"][:, 0, :], start)
+        assert torch.equal(kwargs["trajectory"][:, 1, :], waypoints[:, 0, :])
+        assert torch.equal(kwargs["trajectory"][:, 2, :], waypoints[:, 1, :])
 
 
 class TestIkSolve:

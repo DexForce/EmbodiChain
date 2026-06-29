@@ -221,6 +221,51 @@ class TestMoveJointsAction:
             torch.full((NUM_ENVS, ARM_DOF), 0.2),
         )
 
+    def test_execute_with_multi_waypoint_qpos_visits_each_waypoint(self):
+        action = MoveJoints(self.mg, MoveJointsCfg(sample_interval=10))
+        # (n_envs, n_waypoint, control_dof) trajectory target
+        waypoint_qpos = (
+            torch.stack(
+                [
+                    torch.full((ARM_DOF,), 0.3),
+                    torch.full((ARM_DOF,), 0.7),
+                ],
+                dim=0,
+            )
+            .unsqueeze(0)
+            .repeat(NUM_ENVS, 1, 1)
+        )
+        last_qpos = torch.zeros(NUM_ENVS, TOTAL_DOF)
+
+        captured = {}
+
+        def interpolate(trajectory, interp_num, device):
+            captured["keyframes"] = trajectory
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(
+                JointPositionTarget(qpos=waypoint_qpos),
+                WorldState(last_qpos=last_qpos),
+            )
+
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
+        # start prepended to the two waypoints -> 3 keyframes
+        keyframes = captured["keyframes"]
+        assert keyframes.shape == (NUM_ENVS, 3, ARM_DOF)
+        assert torch.allclose(keyframes[:, 0, :], torch.zeros(NUM_ENVS, ARM_DOF))
+        assert torch.allclose(keyframes[:, 1, :], torch.full((NUM_ENVS, ARM_DOF), 0.3))
+        assert torch.allclose(keyframes[:, 2, :], torch.full((NUM_ENVS, ARM_DOF), 0.7))
+        # final state lands on the last waypoint
+        assert torch.allclose(
+            result.next_state.last_qpos[:, :ARM_DOF],
+            torch.full((NUM_ENVS, ARM_DOF), 0.7),
+        )
+
     def test_unknown_named_qpos_raises(self):
         action = MoveJoints(self.mg, MoveJointsCfg())
         with pytest.raises(KeyError, match="missing"):

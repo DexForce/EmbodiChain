@@ -79,7 +79,14 @@ class JointPositionTarget:
     """Joint-space target for a configured robot control part."""
 
     qpos: torch.Tensor
-    """(control_dof,) or (n_envs, control_dof) target joint positions."""
+    """Target joint positions.
+
+    Accepts:
+
+    - ``(control_dof,)`` or ``(n_envs, control_dof)`` — a single waypoint.
+    - ``(n_envs, n_waypoint, control_dof)`` — a multi-waypoint trajectory;
+      waypoints are visited in order.
+    """
 
 
 @dataclass(frozen=True)

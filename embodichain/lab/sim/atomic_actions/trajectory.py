@@ -103,20 +103,47 @@ class TrajectoryBuilder:
         joint_dof: int,
         control_part: str,
     ) -> torch.Tensor:
-        """Resolve a joint-space target into batched control-part joint positions."""
+        """Resolve a joint-space target into batched control-part joint positions.
+
+        Accepts the following shapes for ``target_qpos``:
+
+        - ``(joint_dof,)`` — broadcast to ``(n_envs, joint_dof)`` (single waypoint).
+        - ``(n_envs, joint_dof)`` — single waypoint, validated and passed through.
+        - ``(n_envs, n_waypoint, joint_dof)`` — a multi-waypoint trajectory; each
+          waypoint is visited in order. ``n_waypoint`` may be 1.
+
+        Returns a 2D tensor for single-waypoint inputs and a 3D tensor for
+        multi-waypoint inputs, leaving downstream planners to treat the trailing
+        axis as the joint dimension.
+        """
         if not isinstance(target_qpos, torch.Tensor):
             logger.log_error(
                 f"target qpos for '{control_part}' must be a torch.Tensor with shape "
-                f"({joint_dof},) or ({n_envs}, {joint_dof})",
+                f"({joint_dof},), ({n_envs}, {joint_dof}), or "
+                f"({n_envs}, n_waypoint, {joint_dof})",
                 TypeError,
             )
         target_qpos = target_qpos.to(device=self.device, dtype=torch.float32)
         if target_qpos.shape == (joint_dof,):
             target_qpos = target_qpos.unsqueeze(0).repeat(n_envs, 1)
-        if target_qpos.shape != (n_envs, joint_dof):
+        if target_qpos.dim() == 2:
+            if target_qpos.shape != (n_envs, joint_dof):
+                logger.log_error(
+                    f"target qpos for '{control_part}' must have shape ({joint_dof},) "
+                    f"or ({n_envs}, {joint_dof}), but got {target_qpos.shape}",
+                    ValueError,
+                )
+        elif target_qpos.dim() == 3:
+            if target_qpos.shape[0] != n_envs or target_qpos.shape[2] != joint_dof:
+                logger.log_error(
+                    f"multi-waypoint target qpos for '{control_part}' must have shape "
+                    f"({n_envs}, n_waypoint, {joint_dof}), but got {target_qpos.shape}",
+                    ValueError,
+                )
+        else:
             logger.log_error(
-                f"target qpos for '{control_part}' must have shape ({joint_dof},) "
-                f"or ({n_envs}, {joint_dof}), but got {target_qpos.shape}",
+                f"target qpos for '{control_part}' must be 1D, 2D, or 3D with "
+                f"trailing dim {joint_dof}, but got {target_qpos.shape}",
                 ValueError,
             )
         return target_qpos
@@ -291,10 +318,21 @@ class TrajectoryBuilder:
         target_qpos: torch.Tensor,
         n_waypoints: int,
     ) -> torch.Tensor:
-        """Interpolate a joint-space trajectory from ``start_qpos`` to ``target_qpos``."""
-        trajectory = torch.stack([start_qpos, target_qpos], dim=1)
+        """Interpolate a joint-space trajectory through one or more target waypoints.
+
+        ``start_qpos`` has shape ``(n_envs, joint_dof)``. ``target_qpos`` is
+        either a single waypoint ``(n_envs, joint_dof)`` or a sequence of
+        waypoints ``(n_envs, n_waypoint, joint_dof)``. The start configuration is
+        prepended to the target waypoints to build the keyframe sequence
+        ``(n_envs, 1 + n_waypoint, joint_dof)``, which is then resampled to
+        ``n_waypoints`` output samples by cumulative-distance piecewise-linear
+        interpolation — so each consecutive waypoint pair is traversed in turn.
+        """
+        if target_qpos.dim() == 2:
+            target_qpos = target_qpos.unsqueeze(1)
+        keyframes = torch.cat([start_qpos.unsqueeze(1), target_qpos], dim=1)
         return interpolate_with_distance(
-            trajectory=trajectory, interp_num=n_waypoints, device=self.device
+            trajectory=keyframes, interp_num=n_waypoints, device=self.device
         )
 
     # ------------------------------------------------------------------

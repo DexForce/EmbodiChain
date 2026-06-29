@@ -179,6 +179,7 @@ def main() -> None:
     # Step 3: Configure the MoveJoints atomic action                      #
     # ------------------------------------------------------------------ #
     ready_qpos = make_arm_qpos([0.35, -1.20, 1.30, -1.65, -1.57, 0.20], sim.device)
+    mid_qpos = make_arm_qpos([0.15, -1.40, 1.45, -1.60, -1.57, 0.10], sim.device)
     home_qpos = make_arm_qpos([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], sim.device)
     move_joints_cfg = MoveJointsCfg(
         control_part="arm",
@@ -205,13 +206,21 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # Step 6: Plan the declared (name, typed_target) sequence             #
     # ------------------------------------------------------------------ #
+    # The second MoveJoints step passes a multi-waypoint trajectory
+    # (n_envs, n_waypoint, control_dof): the arm visits `mid_qpos` then
+    # `home_qpos` in a single planned trajectory.
+    n_envs = robot.get_qpos().shape[0]
+    multi_waypoint_qpos = (
+        torch.stack([mid_qpos, home_qpos], dim=0).unsqueeze(0).repeat(n_envs, 1, 1)
+    )
     logger.log_info(
-        "Planning MoveJoints: NamedJointPositionTarget('ready') -> explicit home qpos"
+        "Planning MoveJoints: NamedJointPositionTarget('ready') -> "
+        "multi-waypoint trajectory (mid -> home)"
     )
     is_success, traj, _ = atomic_engine.run(
         steps=[
             ("move_joints", NamedJointPositionTarget(name="ready")),
-            ("move_joints", JointPositionTarget(qpos=home_qpos)),
+            ("move_joints", JointPositionTarget(qpos=multi_waypoint_qpos)),
         ]
     )
     if not is_success:
