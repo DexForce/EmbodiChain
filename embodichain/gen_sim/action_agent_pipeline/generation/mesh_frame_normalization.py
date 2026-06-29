@@ -29,16 +29,21 @@ from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 
 __all__ = [
     "GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES",
+    "GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES",
     "GLB_LOCAL_X_CORRECTION_DEGREES",
+    "GLB_LOCAL_Z_CORRECTION_DEGREES",
     "MESH_FRAME_NORMALIZATION_POLICY_VERSION",
     "MeshFrameNormalizer",
     "NormalizedMeshResult",
 ]
 
 
-MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_texture_obj_v3"
-GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 0.0
+MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_texture_obj_v5"
+# prompt2scene exports GLBs as Y-up; OBJ loading in the action-agent path is Z-up.
+GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 90.0
+GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES = -90.0
 GLB_LOCAL_X_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES
+GLB_LOCAL_Z_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES
 
 _SAFE_STEM_RE = re.compile(r"[^0-9a-zA-Z_.-]+")
 _TEXTURE_EXTENSION_BY_MIME_TYPE = {
@@ -91,10 +96,15 @@ class MeshFrameNormalizer:
         *,
         output_dir: str | Path,
         local_x_correction_degrees: float = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES,
+        local_z_correction_degrees: float = GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES,
     ) -> None:
         self.output_dir = Path(output_dir).expanduser().resolve()
         self.local_x_correction_degrees = float(local_x_correction_degrees)
-        self.transform = _rotation_x_matrix4(self.local_x_correction_degrees)
+        self.local_z_correction_degrees = float(local_z_correction_degrees)
+        self.transform = _matrix_multiply(
+            _rotation_z_matrix4(self.local_z_correction_degrees),
+            _rotation_x_matrix4(self.local_x_correction_degrees),
+        )
         self.dexsim_engine_version = _dexsim_engine_version()
         self._results_by_source: dict[Path, NormalizedMeshResult] = {}
         self._reports: list[dict[str, Any]] = []
@@ -249,7 +259,7 @@ class MeshFrameNormalizer:
         trimesh = _require_trimesh()
         scene = trimesh.load(str(source_path), force="scene")
         mesh = _scene_to_world_mesh(scene)
-        if self.local_x_correction_degrees:
+        if self.local_x_correction_degrees or self.local_z_correction_degrees:
             mesh.apply_transform(self.transform)
 
         normalized_path.parent.mkdir(parents=True, exist_ok=True)
@@ -457,12 +467,7 @@ def _buffer_view_bytes(
 
 def _rotation_x_matrix4(degrees: float) -> list[list[float]]:
     if degrees == 0.0:
-        return [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ]
+        return _identity_matrix4()
     radians = math.radians(degrees)
     cos_value = math.cos(radians)
     sin_value = math.sin(radians)
@@ -471,6 +476,42 @@ def _rotation_x_matrix4(degrees: float) -> list[list[float]]:
         [0.0, cos_value, -sin_value, 0.0],
         [0.0, sin_value, cos_value, 0.0],
         [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _rotation_z_matrix4(degrees: float) -> list[list[float]]:
+    if degrees == 0.0:
+        return _identity_matrix4()
+    radians = math.radians(degrees)
+    cos_value = math.cos(radians)
+    sin_value = math.sin(radians)
+    return [
+        [cos_value, -sin_value, 0.0, 0.0],
+        [sin_value, cos_value, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _identity_matrix4() -> list[list[float]]:
+    return [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _matrix_multiply(
+    left: list[list[float]],
+    right: list[list[float]],
+) -> list[list[float]]:
+    return [
+        [
+            sum(left[row][index] * right[index][column] for index in range(4))
+            for column in range(4)
+        ]
+        for row in range(4)
     ]
 
 

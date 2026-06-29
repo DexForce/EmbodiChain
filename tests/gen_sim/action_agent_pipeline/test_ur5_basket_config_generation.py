@@ -313,10 +313,17 @@ def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
     assert f"policy_version: {MESH_FRAME_NORMALIZATION_POLICY_VERSION}" in obj_text
     assert f"source_sha256: {source_sha256}" in obj_text
     assert "dexsim_engine_version:" in obj_text
-    assert (
-        "transform: [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],"
-        "[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]]"
-    ) in obj_text
+    transform = _obj_header_json_value(obj_text, "transform")
+    assert _flatten_matrix(transform) == pytest.approx(
+        _flatten_matrix(
+            [
+                [0.0, 0.0, -1.0, 0.0],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+    )
     assert "mtllib material.mtl" in obj_text
     material_text = (normalized_path.parent / "material.mtl").read_text(
         encoding="utf-8"
@@ -326,9 +333,9 @@ def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
     assert f"newmtl {material_name}" in material_text
     assert "map_Kd " not in material_text
     assert _rounded_vertex_set(_obj_vertices(normalized_path)) == {
-        (1.0, 0.0, 0.0),
-        (1.0, 1.0, 0.0),
-        (1.0, 0.0, 1.0),
+        (0.0, -1.0, 0.0),
+        (0.0, -1.0, 1.0),
+        (-1.0, -1.0, 0.0),
     }
 
 
@@ -3392,6 +3399,18 @@ def _single_obj_material_name(obj_text: str) -> str:
     }
     assert len(names) == 1
     return next(iter(names))
+
+
+def _obj_header_json_value(obj_text: str, key: str):
+    prefix = f"# {key}: "
+    for line in obj_text.splitlines():
+        if line.startswith(prefix):
+            return json.loads(line[len(prefix) :])
+    raise AssertionError(f"Missing OBJ header key: {key}")
+
+
+def _flatten_matrix(matrix: list[list[float]]) -> list[float]:
+    return [value for row in matrix for value in row]
 
 
 def _single_map_kd_path(material_text: str, material_name: str) -> str:
