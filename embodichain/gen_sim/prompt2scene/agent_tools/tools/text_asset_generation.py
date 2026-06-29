@@ -283,6 +283,7 @@ def generate_text_table_asset(
         "is_complete_visible_table": bool(
             table_spec.get("is_complete_visible_table", False)
         ),
+        "object_coverage_percent": table_spec.get("object_coverage_percent"),
         "status": status,
         "image_path": image_path,
         "raw_geometry_path": raw_geometry_path,

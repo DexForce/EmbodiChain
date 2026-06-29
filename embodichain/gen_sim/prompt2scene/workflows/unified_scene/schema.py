@@ -42,10 +42,11 @@ class UnifiedTable:
     image_path: str | None = None
     mesh_path: str | None = None
     grid_cells: dict[str, list[str]] | None = None
+    object_coverage_percent: int | None = None
 
     def to_manifest(self) -> dict[str, Any]:
         """Convert the table to JSON-safe data."""
-        return {
+        manifest: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -56,6 +57,9 @@ class UnifiedTable:
             "mesh_path": self.mesh_path,
             "grid_cells": self.grid_cells,
         }
+        if self.object_coverage_percent is not None:
+            manifest["object_coverage_percent"] = self.object_coverage_percent
+        return manifest
 
 
 @dataclass(frozen=True)

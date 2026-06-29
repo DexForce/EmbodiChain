@@ -93,7 +93,7 @@ def build_unified_table(
     grid_cells: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Build a unified table record from scene intake."""
-    return {
+    table: dict[str, Any] = {
         "id": scene_intake.table.id,
         "name": scene_intake.table.name,
         "description": scene_intake.table.description,
@@ -106,6 +106,11 @@ def build_unified_table(
         "mesh_path": None,
         "grid_cells": grid_cells,
     }
+    if scene_intake.table.object_coverage_percent is not None:
+        table["object_coverage_percent"] = (
+            scene_intake.table.object_coverage_percent
+        )
+    return table
 
 
 def build_unified_spatial_anchor(anchor: ImageAnchor | None) -> dict[str, Any] | None:

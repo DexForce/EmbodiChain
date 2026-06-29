@@ -42,6 +42,7 @@ def fit_text_scene_table(
             clutter_result=clutter_layout_result,
             output_root=output_root,
             output_dir=output_dir,
+            object_coverage_percent=table_result.get("object_coverage_percent"),
         )
         log_info(f"text table fit completed status={result.get('status')}")
         return result
@@ -94,6 +95,7 @@ def fit_image_scene_table(
             clutter_result=clutter_result,
             output_root=output_root,
             output_dir=output_dir,
+            object_coverage_percent=generated_table.get("object_coverage_percent"),
         )
         log_info(f"image table fit completed status={result.get('status')}")
         return result

@@ -94,10 +94,19 @@ def fit_table_to_clutter(
     output_dir: Path,
     margin_cm: float = 10.0,
     support_occupancy_ratio: float = 0.80,
+    object_coverage_percent: int | None = None,
     gravity_settle_table: bool = True,
     sim_device: str = "cpu",
 ) -> dict[str, Any]:
-    """Fit a table mesh to an already laid-out clutter result."""
+    """Fit a table mesh to an already laid-out clutter result.
+
+    Args:
+        object_coverage_percent: If set (1-100), overrides
+            ``support_occupancy_ratio`` by converting the percentage to a ratio
+            (e.g. 30 → 0.30). The required table size is computed as
+            clutter_size / ratio. When None, the default
+            ``support_occupancy_ratio`` is used.
+    """
     try:
         import trimesh
     except ImportError as exc:
@@ -166,6 +175,10 @@ def fit_table_to_clutter(
 
     # Compute the required table size and uniform scale.
     clutter_size_cm = (clutter_bounds[1, :2] - clutter_bounds[0, :2]) * 100.0
+    if object_coverage_percent is not None:
+        support_occupancy_ratio = float(
+            np.clip(object_coverage_percent / 100.0, 0.1, 1.0)
+        )
     occupancy = float(np.clip(support_occupancy_ratio, 0.1, 1.0))
     required_size_cm = clutter_size_cm / occupancy + 2.0 * float(margin_cm)
     support_size_cm = np.asarray(initial_support["size_xy"], dtype=np.float64) * 100.0
