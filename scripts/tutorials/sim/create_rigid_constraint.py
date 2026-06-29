@@ -130,6 +130,10 @@ def main():
     assert sim.get_rigid_constraint("cube_weld") is None
     print("\n[INFO]: Removed constraint 'cube_weld'. cube_a and cube_b are now free.")
 
+    import time
+
+    time.sleep(2.0)  # Wait a moment so the viewer can show the constraint removal.
+
     print("[INFO]: Stepping physics while DETACHED (relative pose may drift):")
     _run_phase(sim, cube_a, cube_b, attached=False)
 
