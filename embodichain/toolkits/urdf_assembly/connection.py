@@ -40,7 +40,8 @@ class URDFConnectionManager:
                 components may be attached.
             name_case: Optional mapping controlling how joint and link names are
                 normalized. Supported keys are ``"joint"`` and ``"link"`` with
-                values ``"upper"``, ``"lower"`` or ``"none"``.
+                values ``"upper"``, ``"lower"`` or ``"original"`` (legacy alias
+                ``"none"``).
 
                 When omitted, joints are uppercased and links are lowercased (the
                 previous default behavior).

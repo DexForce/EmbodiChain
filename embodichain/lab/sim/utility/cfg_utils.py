@@ -163,6 +163,14 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):
+                # Merge name_case policy if the override specifies one.
+                user_name_case = user_urdf_cfg.get("name_case")
+                if isinstance(user_name_case, dict):
+                    if base_cfg.urdf_cfg.name_case is None:
+                        base_cfg.urdf_cfg.name_case = dict(user_name_case)
+                    else:
+                        base_cfg.urdf_cfg.name_case.update(user_name_case)
+
                 components = user_urdf_cfg.get("components", [])
                 # to_dict serializes components as a dict keyed by type;
                 # normalize to a list of dicts for merge_robot_cfg.

@@ -19,13 +19,15 @@ class NameNormalizer:
     """Handles name normalization for different entity types."""
 
     VALID_KEYS = {"joint", "link"}
-    VALID_MODES = {"upper", "lower", "none"}
+    VALID_MODES = {"upper", "lower", "none", "original"}
 
     def __init__(self, default_case: dict[str, str] | None = None):
         """Initialize the NameNormalizer with default cases.
 
         Args:
             default_case (dict[str, str] | None): Default normalization modes for "joint" and "link".
+                Each value can be ``"upper"``, ``"lower"``, ``"original"`` (keep source casing),
+                or the legacy alias ``"none"``.
         """
         self._name_case = {
             "joint": "upper",
@@ -46,7 +48,7 @@ class NameNormalizer:
 
         Args:
             key (str): The entity type ("joint" or "link").
-            mode (str): The normalization mode ("upper", "lower", "none").
+            mode (str): The normalization mode ("upper", "lower", "original" or "none").
         """
         if key in self.VALID_KEYS and mode in self.VALID_MODES:
             self._name_case[key] = mode
@@ -64,7 +66,7 @@ class NameNormalizer:
             name (str | None): The original name.
 
         Returns:
-            str | None: The normalized name, or the original value if kind is unknown or mode is "none".
+            str | None: The normalized name, or the original value if kind is unknown or the mode is "original"/"none".
         """
         if name is None:
             return None

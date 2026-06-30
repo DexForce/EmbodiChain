@@ -32,8 +32,8 @@ from embodichain.lab.sim.sensors import (
     SensorCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot, RobotCfg
-from embodichain.data import get_data_path
+from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
+from embodichain.lab.sim.robots import URRobotCfg
 
 NUM_ENVS = 4
 
@@ -108,46 +108,26 @@ class ContactTest:
         Returns:
             Robot: _description_
         """
-        ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
-        pgi_urdf_path = get_data_path("DH_PGC_140_50/DH_PGC_140_50.urdf")
         robot_cfg_dict = {
-            "uid": "UR10_PGI",
+            "robot_type": "ur10",
+            "uid": uid,
             "urdf_cfg": {
                 "components": [
                     {
-                        "component_type": "arm",
-                        "urdf_path": ur10_urdf_path,
-                        "transform": [
-                            [1.0, 0.0, 0.0, 0.0],
-                            [0.0, 1.0, 0.0, 0.0],
-                            [0.0, 0.0, 1.0, 0.0],
-                            [0.0, 0.0, 0.0, 1.0],
-                        ],
-                    },
-                    {
                         "component_type": "hand",
-                        "urdf_path": pgi_urdf_path,
-                        "transform": [
-                            [1.0, 0.0, 0.0, 0.0],
-                            [0.0, 1.0, 0.0, 0.0],
-                            [0.0, 0.0, 1.0, 0.0],
-                            [0.0, 0.0, 0.0, 1.0],
-                        ],
+                        "urdf_path": "DH_PGC_140_50/DH_PGC_140_50.urdf",
                     },
                 ],
             },
             "init_pos": position,
             "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
             "drive_pros": {
-                "stiffness": {"JOINT[1-6]": 1e4, "FINGER[1-2]_JOINT": 1e2},
-                "damping": {"JOINT[1-6]": 1e3, "FINGER[1-2]_JOINT": 1e1},
-                "max_effort": {"JOINT[1-6]": 1e5, "FINGER[1-2]_JOINT": 1e3},
+                "stiffness": {"finger[1-2]_joint": 1e2},
+                "damping": {"finger[1-2]_joint": 1e1},
+                "max_effort": {"finger[1-2]_joint": 1e3},
             },
             "solver_cfg": {
                 "arm": {
-                    "class_type": "PytorchSolver",
-                    "end_link_name": "ee_link",
-                    "root_link_name": "base_link",
                     "tcp": [
                         [1.0, 0.0, 0.0, 0.0],
                         [0.0, 1.0, 0.0, 0.0],
@@ -156,9 +136,9 @@ class ContactTest:
                     ],
                 }
             },
-            "control_parts": {"arm": ["JOINT[1-6]"], "hand": ["FINGER[1-2]_JOINT"]},
+            "control_parts": {"hand": ["finger[1-2]_joint"]},
         }
-        robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(robot_cfg_dict))
+        robot: Robot = self.sim.add_robot(cfg=URRobotCfg.from_dict(robot_cfg_dict))
         return robot
 
     def to_grasp_pose(self, cube: RigidObject):

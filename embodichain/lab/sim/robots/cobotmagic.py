@@ -88,23 +88,23 @@ class CobotMagicCfg(RobotCfg):
         )
         self.control_parts = {
             "left_arm": [
-                "LEFT_JOINT1",
-                "LEFT_JOINT2",
-                "LEFT_JOINT3",
-                "LEFT_JOINT4",
-                "LEFT_JOINT5",
-                "LEFT_JOINT6",
+                "left_joint1",
+                "left_joint2",
+                "left_joint3",
+                "left_joint4",
+                "left_joint5",
+                "left_joint6",
             ],
-            "left_eef": ["LEFT_JOINT7", "LEFT_JOINT8"],
+            "left_eef": ["left_joint7", "left_joint8"],
             "right_arm": [
-                "RIGHT_JOINT1",
-                "RIGHT_JOINT2",
-                "RIGHT_JOINT3",
-                "RIGHT_JOINT4",
-                "RIGHT_JOINT5",
-                "RIGHT_JOINT6",
+                "right_joint1",
+                "right_joint2",
+                "right_joint3",
+                "right_joint4",
+                "right_joint5",
+                "right_joint6",
             ],
-            "right_eef": ["RIGHT_JOINT7", "RIGHT_JOINT8"],
+            "right_eef": ["right_joint7", "right_joint8"],
         }
         self.solver_cfg = {
             "left_arm": OPWSolverCfg(
@@ -126,22 +126,22 @@ class CobotMagicCfg(RobotCfg):
         self.min_velocity_iters = 2
         self.drive_pros = JointDrivePropertiesCfg(
             stiffness={
-                "LEFT_JOINT[1-6]": 7e4,
-                "RIGHT_JOINT[1-6]": 7e4,
-                "LEFT_JOINT[7-8]": 3e2,
-                "RIGHT_JOINT[7-8]": 3e2,
+                "left_joint[1-6]": 7e4,
+                "right_joint[1-6]": 7e4,
+                "left_joint[7-8]": 3e2,
+                "right_joint[7-8]": 3e2,
             },
             damping={
-                "LEFT_JOINT[1-6]": 1e3,
-                "RIGHT_JOINT[1-6]": 1e3,
-                "LEFT_JOINT[7-8]": 3e1,
-                "RIGHT_JOINT[7-8]": 3e1,
+                "left_joint[1-6]": 1e3,
+                "right_joint[1-6]": 1e3,
+                "left_joint[7-8]": 3e1,
+                "right_joint[7-8]": 3e1,
             },
             max_effort={
-                "LEFT_JOINT[1-6]": 3e6,
-                "RIGHT_JOINT[1-6]": 3e6,
-                "LEFT_JOINT[7-8]": 3e3,
-                "RIGHT_JOINT[7-8]": 3e3,
+                "left_joint[1-6]": 3e6,
+                "right_joint[1-6]": 3e6,
+                "left_joint[7-8]": 3e3,
+                "right_joint[7-8]": 3e3,
             },
         )
         self.attrs = RigidBodyAttributesCfg(
