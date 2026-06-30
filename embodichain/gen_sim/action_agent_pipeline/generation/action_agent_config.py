@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+import math
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,
@@ -79,6 +80,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates
     make_sensor_config as _make_sensor_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
+    _clean_vector3,
     _make_background_config,
     _make_arrangement_dataset_config,
     _make_arrangement_events_config,
@@ -172,6 +174,7 @@ def generate_action_agent_config_from_project(
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
     preserve_source_target_body_scale: bool = False,
     preserve_source_scene_geometry: bool = False,
+    source_scene_z_rotation_degrees: float = 0.0,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
@@ -206,6 +209,9 @@ def generate_action_agent_config_from_project(
             source mesh paths and source z placement instead of normalizing GLBs
             to OBJ and re-snapping objects to the tabletop. This is intended for
             prompt2scene exports that already preview correctly in EmbodiChain.
+        source_scene_z_rotation_degrees: World-frame Z rotation applied to
+            generated scene object poses after config generation. Mesh paths and
+            scales are unchanged.
         target_replacements: Optional prompt-generated GLB replacements for
             selected default basket target objects. Each replacement writes to
             ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
@@ -267,6 +273,7 @@ def generate_action_agent_config_from_project(
                 max_episode_steps=max_episode_steps,
                 mesh_normalizer=mesh_normalizer,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
+                source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             )
             _validate_stacking_bundle(bundle, spec)
             _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -296,6 +303,7 @@ def generate_action_agent_config_from_project(
                 max_episode_steps=max_episode_steps,
                 mesh_normalizer=mesh_normalizer,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
+                source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             )
             _validate_arrangement_bundle(bundle, spec)
             _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -328,6 +336,7 @@ def generate_action_agent_config_from_project(
             max_episode_steps=max_episode_steps,
             mesh_normalizer=mesh_normalizer,
             preserve_source_scene_geometry=preserve_source_scene_geometry,
+            source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
         )
         _validate_relative_bundle(bundle, spec)
         _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -373,6 +382,7 @@ def generate_action_agent_config_from_project(
         max_episode_steps=max_episode_steps,
         mesh_normalizer=mesh_normalizer,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
+        source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
     )
     _validate_bundle(bundle, roles)
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -398,6 +408,7 @@ def _build_ur5_basket_bundle(
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
     preserve_source_scene_geometry: bool,
+    source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -492,6 +503,7 @@ def _build_ur5_basket_bundle(
         table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
+    _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
@@ -529,6 +541,7 @@ def _build_arrangement_line_bundle(
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
     preserve_source_scene_geometry: bool,
+    source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -614,6 +627,7 @@ def _build_arrangement_line_bundle(
         table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
+    _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     spec = _with_arrangement_generated_z_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_arrangement_extensions_config(spec)
     gym_config["env"]["dataset"] = _make_arrangement_dataset_config(
@@ -671,6 +685,7 @@ def _build_stacking_bundle(
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
     preserve_source_scene_geometry: bool,
+    source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -756,6 +771,7 @@ def _build_stacking_bundle(
         table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
+    _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     spec = _with_stacking_generated_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_stacking_extensions_config(spec)
     gym_config["env"]["dataset"] = _make_stacking_dataset_config(project_name, spec)
@@ -832,6 +848,71 @@ def _maybe_apply_tabletop_z_placement(
     _apply_tabletop_z_placement(gym_config, table_top_z)
 
 
+def _apply_scene_z_rotation(
+    gym_config: dict[str, Any],
+    rotation_degrees: float,
+) -> None:
+    if not rotation_degrees:
+        return
+    for obj in _iter_scene_pose_configs(gym_config):
+        _rotate_pose_about_world_z(obj, rotation_degrees)
+
+
+def _iter_scene_pose_configs(gym_config: Mapping[str, Any]) -> list[dict[str, Any]]:
+    objects: list[dict[str, Any]] = []
+    for section in ("background", "rigid_object"):
+        value = gym_config.get(section, [])
+        if isinstance(value, Mapping):
+            value = [value]
+        if not isinstance(value, list):
+            continue
+        objects.extend(obj for obj in value if isinstance(obj, dict))
+    return objects
+
+
+def _rotate_pose_about_world_z(
+    obj_config: dict[str, Any],
+    rotation_degrees: float,
+) -> None:
+    position = _clean_vector3(obj_config.get("init_pos", [0.0, 0.0, 0.0]))
+    theta = math.radians(float(rotation_degrees))
+    cos_theta = math.cos(theta)
+    sin_theta = math.sin(theta)
+    obj_config["init_pos"] = [
+        _round_pose_value(position[0] * cos_theta - position[1] * sin_theta),
+        _round_pose_value(position[0] * sin_theta + position[1] * cos_theta),
+        _round_pose_value(position[2]),
+    ]
+
+    rotation = _clean_vector3(obj_config.get("init_rot", [0.0, 0.0, 0.0]))
+    if abs(rotation[0]) < 1e-12 and abs(rotation[1]) < 1e-12:
+        obj_config["init_rot"] = [
+            0.0,
+            0.0,
+            _normalize_degrees(rotation[2] + float(rotation_degrees)),
+        ]
+        return
+
+    from scipy.spatial.transform import Rotation
+
+    original = Rotation.from_euler("xyz", rotation, degrees=True)
+    world_z = Rotation.from_euler("z", float(rotation_degrees), degrees=True)
+    obj_config["init_rot"] = [
+        _round_pose_value(value)
+        for value in (world_z * original).as_euler("xyz", degrees=True)
+    ]
+
+
+def _normalize_degrees(value: float) -> float:
+    normalized = (float(value) + 180.0) % 360.0 - 180.0
+    return _round_pose_value(180.0 if normalized == -180.0 else normalized)
+
+
+def _round_pose_value(value: float) -> float:
+    rounded = round(float(value), 12)
+    return 0.0 if abs(rounded) < 1e-12 else rounded
+
+
 def _build_relative_placement_bundle(
     *,
     scene_dir: Path,
@@ -845,6 +926,7 @@ def _build_relative_placement_bundle(
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
     preserve_source_scene_geometry: bool,
+    source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -946,6 +1028,7 @@ def _build_relative_placement_bundle(
         table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
+    _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     if spec.intent == "place_relative":
         spec = _with_self_relative_absolute_targets(spec, gym_config)
         spec = _with_inside_container_slot_offsets(spec, gym_config)

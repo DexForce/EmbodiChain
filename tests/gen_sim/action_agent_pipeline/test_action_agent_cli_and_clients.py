@@ -358,6 +358,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
                 repo_root / "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
             ),
             prompt2scene_text="a tabletop scene with bread and a basket",
+            prompt2scene_scene_z_rotation_degrees=-90.0,
             target_body_scale=0.8,
             target_replacement1=None,
             target_replacement2=None,
@@ -393,6 +394,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
         "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
     )
     assert record["prompt2scene_text"] == "a tabletop scene with bread and a basket"
+    assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
 
 
 def test_prompt2scene_pipeline_preserves_source_target_scale(
@@ -462,6 +464,7 @@ def test_prompt2scene_pipeline_preserves_source_target_scale(
             task_description="move cup",
             config_output_dir=str(tmp_path / "configs"),
             target_body_scale=0.8,
+            prompt2scene_scene_z_rotation_degrees=-90.0,
             sync_replacement_names=False,
             reuse_target_replacements=True,
             prewarm_coacd_cache=False,
@@ -474,6 +477,7 @@ def test_prompt2scene_pipeline_preserves_source_target_scale(
     assert result == 0
     assert captured["preserve_source_target_body_scale"] is True
     assert captured["preserve_source_scene_geometry"] is True
+    assert captured["source_scene_z_rotation_degrees"] == -90.0
     assert captured["target_body_scale"] == 0.8
 
 

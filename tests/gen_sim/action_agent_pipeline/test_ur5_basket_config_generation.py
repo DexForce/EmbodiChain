@@ -1105,6 +1105,10 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     gym_config["id"] = "Prompt2Scene-test-v0"
     gym_config["rigid_object"][0]["body_scale"] = [0.11, 0.12, 0.13]
     gym_config["rigid_object"][1]["body_scale"] = [0.21, 0.22, 0.23]
+    source_cup_pos = list(gym_config["rigid_object"][0]["init_pos"])
+    source_pad_pos = list(gym_config["rigid_object"][1]["init_pos"])
+    source_cup_rot = list(gym_config["rigid_object"][0]["init_rot"])
+    source_pad_rot = list(gym_config["rigid_object"][1]["init_rot"])
     source_cup_z = gym_config["rigid_object"][0]["init_pos"][2]
     source_pad_z = gym_config["rigid_object"][1]["init_pos"][2]
     gym_config_path.write_text(json.dumps(gym_config, indent=2), encoding="utf-8")
@@ -1131,6 +1135,7 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         target_body_scale=0.8,
         preserve_source_target_body_scale=True,
         preserve_source_scene_geometry=True,
+        source_scene_z_rotation_degrees=-90.0,
         prewarm_coacd_cache=False,
     )
 
@@ -1146,8 +1151,52 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     assert "mesh_assets/normalized" not in background_objects["pad"]["shape"]["fpath"]
     assert rigid_objects["cup"]["init_pos"][2] == source_cup_z
     assert background_objects["pad"]["init_pos"][2] == source_pad_z
+    assert rigid_objects["cup"]["init_pos"] == pytest.approx(
+        [source_cup_pos[1], -source_cup_pos[0], source_cup_pos[2]]
+    )
+    assert background_objects["pad"]["init_pos"] == pytest.approx(
+        [source_pad_pos[1], -source_pad_pos[0], source_pad_pos[2]]
+    )
+    assert rigid_objects["cup"]["init_rot"] == pytest.approx(
+        [source_cup_rot[0], source_cup_rot[1], source_cup_rot[2] - 90.0]
+    )
+    assert background_objects["pad"]["init_rot"] == pytest.approx(
+        [source_pad_rot[0], source_pad_rot[1], source_pad_rot[2] - 90.0]
+    )
     assert paths.summary["mode"] == "object_manipulation"
     assert "normalized_meshes" not in paths.summary
+
+
+def test_apply_scene_z_rotation_rotates_scene_object_poses() -> None:
+    from scipy.spatial.transform import Rotation
+
+    gym_config = {
+        "background": [
+            {
+                "uid": "table",
+                "init_pos": [0.2, -0.3, 0.4],
+                "init_rot": [10.0, 20.0, 30.0],
+            }
+        ],
+        "rigid_object": [
+            {
+                "uid": "cup",
+                "init_pos": [-0.1, 0.5, 0.7],
+                "init_rot": [0.0, 0.0, -45.0],
+            }
+        ],
+    }
+
+    action_agent_config_generation._apply_scene_z_rotation(gym_config, 90.0)
+
+    assert gym_config["background"][0]["init_pos"] == pytest.approx([0.3, 0.2, 0.4])
+    expected_table_rot = (
+        Rotation.from_euler("z", 90.0, degrees=True)
+        * Rotation.from_euler("xyz", [10.0, 20.0, 30.0], degrees=True)
+    ).as_euler("xyz", degrees=True)
+    assert gym_config["background"][0]["init_rot"] == pytest.approx(expected_table_rot)
+    assert gym_config["rigid_object"][0]["init_pos"] == pytest.approx([-0.5, -0.1, 0.7])
+    assert gym_config["rigid_object"][0]["init_rot"] == pytest.approx([0.0, 0.0, 45.0])
 
 
 def test_relative_orientation_intent_generates_axis_align_move_held_object(

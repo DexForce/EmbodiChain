@@ -314,6 +314,9 @@ def _source_request_record(
         )
         if args.prompt2scene_text:
             record["prompt2scene_text"] = args.prompt2scene_text
+        record["prompt2scene_scene_z_rotation_degrees"] = (
+            args.prompt2scene_scene_z_rotation_degrees
+        )
     elif resolution.mode == "image2tabletop":
         record.update(
             {

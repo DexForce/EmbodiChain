@@ -71,6 +71,11 @@ def run_pipeline(args: argparse.Namespace) -> int:
         target_body_scale=args.target_body_scale,
         preserve_source_target_body_scale=resolution.mode == "prompt2scene",
         preserve_source_scene_geometry=resolution.mode == "prompt2scene",
+        source_scene_z_rotation_degrees=(
+            args.prompt2scene_scene_z_rotation_degrees
+            if resolution.mode == "prompt2scene"
+            else 0.0
+        ),
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,

@@ -196,6 +196,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--prompt2scene-scene-z-rotation-degrees",
+        "--prompt2scene_scene_z_rotation_degrees",
+        dest="prompt2scene_scene_z_rotation_degrees",
+        type=float,
+        default=-90.0,
+        help=(
+            "World-frame Z rotation applied when converting prompt2scene "
+            "exports into action-agent configs. Defaults to -90."
+        ),
+    )
+    parser.add_argument(
         "--gym-project-root",
         default=str(DEFAULT_GYM_PROJECT_ROOT),
         help=(

@@ -115,6 +115,16 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--source_scene_z_rotation_degrees",
+        "--source-scene-z-rotation-degrees",
+        type=float,
+        default=0.0,
+        help=(
+            "World-frame Z rotation applied to generated scene object poses. "
+            "Use -90 for prompt2scene exports that need action-agent alignment."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement1",
         "--target-replacement1",
         nargs=2,
@@ -200,6 +210,7 @@ def cli() -> None:
         target_body_scale=args.target_body_scale,
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
         preserve_source_scene_geometry=args.preserve_source_scene_geometry,
+        source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
