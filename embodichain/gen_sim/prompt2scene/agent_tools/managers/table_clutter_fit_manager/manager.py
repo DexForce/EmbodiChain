@@ -252,7 +252,23 @@ def fit_table_to_clutter(
     for oid, scene in shifted_clutter:
         object_path = output_dir / f"{oid}_on_table.glb"
         _copy_scene_with_transform(scene, z_to_y).export(object_path)
-        placed_objects.append({"id": oid, "path": str(object_path)})
+        # Compute world-space AABB bottom-centre (sim Z-up coords) before
+        # the scene is converted to GLB Y-up for export.  This is the
+        # reference position that gym_export uses to derive ``init_pos``.
+        _placed_mesh = _scene_to_mesh(scene, trimesh=trimesh)
+        _placed_b = np.asarray(_placed_mesh.bounds, dtype=np.float64)
+        world_aabb_bottom_center = [
+            float(0.5 * (_placed_b[0, 0] + _placed_b[1, 0])),
+            float(0.5 * (_placed_b[0, 1] + _placed_b[1, 1])),
+            float(_placed_b[0, 2]),
+        ]
+        placed_objects.append(
+            {
+                "id": oid,
+                "path": str(object_path),
+                "world_aabb_bottom_center": world_aabb_bottom_center,
+            }
+        )
 
     # Write the fit manifest.
     final_clutter_bounds = _table_fit_scene_union_bounds(
