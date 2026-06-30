@@ -6,7 +6,7 @@
       "segment_single_object_path": "/predict"
     },
     "sam3d_generation": {
-      "base_url": "http://192.168.3.23:5019",
+      "base_url": "http://10.7.7.32:5019",
       "timeout_s": 1800,
       "health_path": "/health",
       "generate_multiple_objects_path": "/generate_multiple_objects",

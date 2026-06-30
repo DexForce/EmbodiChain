@@ -1094,6 +1094,62 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
     assert _stable_summary(paths.summary)["relation"] == "on"
 
 
+def test_prompt2scene_relative_placement_preserves_metric_source_scale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "prompt2scene_demo/gym_export"
+    _write_demo3_role_project(project_dir)
+    gym_config_path = project_dir / "gym_config.json"
+    gym_config = json.loads(gym_config_path.read_text(encoding="utf-8"))
+    gym_config["id"] = "Prompt2Scene-test-v0"
+    gym_config["rigid_object"][0]["body_scale"] = [0.11, 0.12, 0.13]
+    gym_config["rigid_object"][1]["body_scale"] = [0.21, 0.22, 0.23]
+    source_cup_z = gym_config["rigid_object"][0]["init_pos"][2]
+    source_pad_z = gym_config["rigid_object"][1]["init_pos"][2]
+    gym_config_path.write_text(json.dumps(gym_config, indent=2), encoding="utf-8")
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "moved_object": "cup_1",
+            "reference_object": "pad_1",
+            "goal_relation": "on",
+            "arm": "right",
+            "task_prompt_summary": "Place the cup on the pad.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        gym_config_path,
+        tmp_path / "generated_prompt2scene_relative_agent",
+        task_description="用右臂把咖啡杯子放到垫子上",
+        target_body_scale=0.8,
+        preserve_source_target_body_scale=True,
+        preserve_source_scene_geometry=True,
+        prewarm_coacd_cache=False,
+    )
+
+    generated = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in generated["rigid_object"]}
+    background_objects = {obj["uid"]: obj for obj in generated["background"]}
+
+    assert rigid_objects["cup"]["body_scale"] == [0.11, 0.12, 0.13]
+    assert background_objects["pad"]["body_scale"] == [0.21, 0.22, 0.23]
+    assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".glb"
+    assert Path(background_objects["pad"]["shape"]["fpath"]).suffix == ".glb"
+    assert "mesh_assets/normalized" not in rigid_objects["cup"]["shape"]["fpath"]
+    assert "mesh_assets/normalized" not in background_objects["pad"]["shape"]["fpath"]
+    assert rigid_objects["cup"]["init_pos"][2] == source_cup_z
+    assert background_objects["pad"]["init_pos"][2] == source_pad_z
+    assert paths.summary["mode"] == "object_manipulation"
+    assert "normalized_meshes" not in paths.summary
+
+
 def test_relative_orientation_intent_generates_axis_align_move_held_object(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

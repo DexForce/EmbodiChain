@@ -413,7 +413,7 @@ def _relative_dataset_instruction(
 def _make_background_config(
     scene_dir: Path,
     obj: _SceneObject,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
     shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
     return {
@@ -434,7 +434,7 @@ def _make_background_config(
 def _make_extra_background_config(
     scene_dir: Path,
     obj: _SceneObject,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
     body_scale: Any | None = None,
     runtime_uid: str | None = None,
 ) -> dict[str, Any]:
@@ -464,7 +464,7 @@ def _make_target_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     target_scale: list[float],
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
     replacement: _ResolvedTargetReplacement | None = None,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
@@ -485,7 +485,7 @@ def _make_container_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -505,7 +505,7 @@ def _make_container_background_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
     config = _make_container_object_config(
         scene_dir,
@@ -524,7 +524,7 @@ def _make_relative_background_object_config(
     runtime_uid: str,
     *,
     max_convex_hull_num: int,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
         scene_dir,
@@ -542,7 +542,7 @@ def _make_extra_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -564,7 +564,7 @@ def _make_relative_rigid_object_config(
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
     if max_convex_hull_num == _TARGET_MAX_CONVEX_HULL_NUM:
         resolved_max_convex_hull_num = max_convex_hull_num

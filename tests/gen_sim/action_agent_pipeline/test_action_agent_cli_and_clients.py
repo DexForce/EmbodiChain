@@ -395,6 +395,88 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_text"] == "a tabletop scene with bread and a basket"
 
 
+def test_prompt2scene_pipeline_preserves_source_target_scale(
+    monkeypatch, tmp_path
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import pipeline_runner
+
+    captured = {}
+
+    def fake_resolve_gym_project(args):
+        return SimpleNamespace(path=tmp_path / "gym_config.json", mode="prompt2scene")
+
+    class FakeTargetReplacementSpec:
+        pass
+
+    class FakeGeneratedPaths:
+        output_dir = tmp_path / "configs"
+        gym_config = tmp_path / "configs/fast_gym_config.json"
+        agent_config = tmp_path / "configs/agent_config.json"
+        task_prompt = tmp_path / "configs/task_prompt.txt"
+        basic_background = tmp_path / "configs/basic_background.txt"
+        atom_actions = tmp_path / "configs/atom_actions.txt"
+        summary = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return FakeGeneratedPaths()
+
+    monkeypatch.setattr(
+        pipeline_runner,
+        "resolve_gym_project",
+        fake_resolve_gym_project,
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "resolve_target_replacements",
+        lambda args, spec_cls, path: [],
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "resolve_task_description_for_generation",
+        lambda args: args.task_description,
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "configure_llm_usage_tracking",
+        lambda args: SimpleNamespace(),
+    )
+    monkeypatch.setattr(pipeline_runner, "write_llm_usage_summary", lambda paths: None)
+    monkeypatch.setattr(
+        pipeline_runner, "write_pipeline_manifests", lambda **kwargs: {}
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config",
+        SimpleNamespace(
+            TargetReplacementSpec=FakeTargetReplacementSpec,
+            generate_action_agent_config_from_project=(
+                fake_generate_action_agent_config_from_project
+            ),
+        ),
+    )
+
+    result = pipeline_runner.run_pipeline(
+        SimpleNamespace(
+            task_name="Demo",
+            task_description="move cup",
+            config_output_dir=str(tmp_path / "configs"),
+            target_body_scale=0.8,
+            sync_replacement_names=False,
+            reuse_target_replacements=True,
+            prewarm_coacd_cache=False,
+            overwrite_config=True,
+            skip_run_agent=True,
+            regenerate=True,
+        )
+    )
+
+    assert result == 0
+    assert captured["preserve_source_target_body_scale"] is True
+    assert captured["preserve_source_scene_geometry"] is True
+    assert captured["target_body_scale"] == 0.8
+
+
 def test_agentic_gen_sim_env_api_and_compat_alias() -> None:
     from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware import (
         agent_env,

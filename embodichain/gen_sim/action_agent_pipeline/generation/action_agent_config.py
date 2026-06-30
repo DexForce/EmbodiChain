@@ -170,6 +170,8 @@ def generate_action_agent_config_from_project(
     use_llm_roles: bool = False,
     llm_model: str | None = None,
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
+    preserve_source_target_body_scale: bool = False,
+    preserve_source_scene_geometry: bool = False,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
@@ -197,6 +199,13 @@ def generate_action_agent_config_from_project(
         llm_model: Optional model override for role refinement.
         target_body_scale: Uniform or xyz scale applied to generated target
             objects. Basket-like containers keep their source ``body_scale``.
+        preserve_source_target_body_scale: If true, moved target objects keep
+            their source ``body_scale`` instead of using ``target_body_scale``.
+            This is intended for metric-scaled prompt2scene exports.
+        preserve_source_scene_geometry: If true, generated scene objects keep
+            source mesh paths and source z placement instead of normalizing GLBs
+            to OBJ and re-snapping objects to the tabletop. This is intended for
+            prompt2scene exports that already preview correctly in EmbodiChain.
         target_replacements: Optional prompt-generated GLB replacements for
             selected default basket target objects. Each replacement writes to
             ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
@@ -224,8 +233,12 @@ def generate_action_agent_config_from_project(
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
-    mesh_normalizer = MeshFrameNormalizer(
-        output_dir=output_dir_path / "mesh_assets" / "normalized"
+    mesh_normalizer = (
+        None
+        if preserve_source_scene_geometry
+        else MeshFrameNormalizer(
+            output_dir=output_dir_path / "mesh_assets" / "normalized"
+        )
     )
 
     scene_objects = _collect_scene_objects(source_config)
@@ -253,6 +266,7 @@ def generate_action_agent_config_from_project(
                 max_episodes=max_episodes,
                 max_episode_steps=max_episode_steps,
                 mesh_normalizer=mesh_normalizer,
+                preserve_source_scene_geometry=preserve_source_scene_geometry,
             )
             _validate_stacking_bundle(bundle, spec)
             _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -281,6 +295,7 @@ def generate_action_agent_config_from_project(
                 max_episodes=max_episodes,
                 max_episode_steps=max_episode_steps,
                 mesh_normalizer=mesh_normalizer,
+                preserve_source_scene_geometry=preserve_source_scene_geometry,
             )
             _validate_arrangement_bundle(bundle, spec)
             _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -308,9 +323,11 @@ def generate_action_agent_config_from_project(
             project_name=project_name,
             task_name=task_name,
             target_body_scale=target_body_scale,
+            preserve_source_target_body_scale=preserve_source_target_body_scale,
             max_episodes=max_episodes,
             max_episode_steps=max_episode_steps,
             mesh_normalizer=mesh_normalizer,
+            preserve_source_scene_geometry=preserve_source_scene_geometry,
         )
         _validate_relative_bundle(bundle, spec)
         _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -355,6 +372,7 @@ def generate_action_agent_config_from_project(
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
         mesh_normalizer=mesh_normalizer,
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _validate_bundle(bundle, roles)
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
@@ -378,7 +396,8 @@ def _build_ur5_basket_bundle(
     target_replacements: Sequence[_ResolvedTargetReplacement],
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
+    preserve_source_scene_geometry: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -468,7 +487,11 @@ def _build_ur5_basket_bundle(
             ],
         ],
     }
-    _apply_tabletop_z_placement(gym_config, table_top_z)
+    _maybe_apply_tabletop_z_placement(
+        gym_config,
+        table_top_z,
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+    )
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
@@ -504,7 +527,8 @@ def _build_arrangement_line_bundle(
     task_name: str,
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
+    preserve_source_scene_geometry: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -585,7 +609,11 @@ def _build_arrangement_line_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
-    _apply_tabletop_z_placement(gym_config, table_top_z)
+    _maybe_apply_tabletop_z_placement(
+        gym_config,
+        table_top_z,
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+    )
     spec = _with_arrangement_generated_z_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_arrangement_extensions_config(spec)
     gym_config["env"]["dataset"] = _make_arrangement_dataset_config(
@@ -641,7 +669,8 @@ def _build_stacking_bundle(
     task_name: str,
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
+    preserve_source_scene_geometry: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -722,7 +751,11 @@ def _build_stacking_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
-    _apply_tabletop_z_placement(gym_config, table_top_z)
+    _maybe_apply_tabletop_z_placement(
+        gym_config,
+        table_top_z,
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+    )
     spec = _with_stacking_generated_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_stacking_extensions_config(spec)
     gym_config["env"]["dataset"] = _make_stacking_dataset_config(project_name, spec)
@@ -779,11 +812,24 @@ def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
 
 def _attach_mesh_normalization_summary(
     bundle: dict[str, Any],
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
 ) -> None:
+    if mesh_normalizer is None:
+        return
     reports = mesh_normalizer.reports
     if reports:
         bundle.setdefault("summary", {})["normalized_meshes"] = reports
+
+
+def _maybe_apply_tabletop_z_placement(
+    gym_config: dict[str, Any],
+    table_top_z: float | None,
+    *,
+    preserve_source_scene_geometry: bool,
+) -> None:
+    if preserve_source_scene_geometry:
+        return
+    _apply_tabletop_z_placement(gym_config, table_top_z)
 
 
 def _build_relative_placement_bundle(
@@ -794,9 +840,11 @@ def _build_relative_placement_bundle(
     project_name: str,
     task_name: str,
     target_body_scale: float | list[float] | tuple[float, float, float],
+    preserve_source_target_body_scale: bool,
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer,
+    mesh_normalizer: MeshFrameNormalizer | None,
+    preserve_source_scene_geometry: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -823,7 +871,6 @@ def _build_relative_placement_bundle(
     static_scene_objects = [
         obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
     ]
-    object_scale = _target_body_scale_vector(target_body_scale)
     table_config = _make_background_config(
         scene_dir,
         by_uid[spec.table_source_uid],
@@ -880,7 +927,11 @@ def _build_relative_placement_bundle(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=object_scale,
+                body_scale=(
+                    _source_body_scale(obj)
+                    if preserve_source_target_body_scale
+                    else _target_body_scale_vector(target_body_scale)
+                ),
                 max_convex_hull_num=_relative_rigid_object_max_convex_hull_num(
                     runtime_uids[obj.source_uid],
                     spec,
@@ -890,7 +941,11 @@ def _build_relative_placement_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
-    _apply_tabletop_z_placement(gym_config, table_top_z)
+    _maybe_apply_tabletop_z_placement(
+        gym_config,
+        table_top_z,
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+    )
     if spec.intent == "place_relative":
         spec = _with_self_relative_absolute_targets(spec, gym_config)
         spec = _with_inside_container_slot_offsets(spec, gym_config)

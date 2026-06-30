@@ -95,6 +95,26 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--preserve_source_target_body_scale",
+        "--preserve-source-target-body-scale",
+        action="store_true",
+        default=False,
+        help=(
+            "Keep moved target objects at their source body_scale instead of "
+            "using --target_body_scale."
+        ),
+    )
+    parser.add_argument(
+        "--preserve_source_scene_geometry",
+        "--preserve-source-scene-geometry",
+        action="store_true",
+        default=False,
+        help=(
+            "Keep source mesh paths and source z placement instead of "
+            "normalizing GLBs to OBJ and re-snapping objects to the tabletop."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement1",
         "--target-replacement1",
         nargs=2,
@@ -178,6 +198,8 @@ def cli() -> None:
         use_llm_roles=args.use_llm_roles,
         llm_model=args.llm_model,
         target_body_scale=args.target_body_scale,
+        preserve_source_target_body_scale=args.preserve_source_target_body_scale,
+        preserve_source_scene_geometry=args.preserve_source_scene_geometry,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
