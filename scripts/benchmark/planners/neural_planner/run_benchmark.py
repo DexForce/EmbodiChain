@@ -1001,35 +1001,20 @@ def _benchmark_notes(
     compare_ik: bool,
     compare_toppra: bool,
 ) -> list[str]:
+    impls = [IMPL_NEURAL]
+    if compare_ik:
+        impls.append(IMPL_IK)
+    if compare_toppra:
+        impls.append(IMPL_TOPPRA)
+
+    checkpoint_name = Path(checkpoint_path).name
     return [
-        f"Device: {sim_device}. Checkpoint: {checkpoint_path}.",
-        f"Each (impl, num_waypoints) runs {warmup_trials} warmup trial(s) "
-        f"and {num_trials} measured trial(s).",
-        f"Resample length (--sample-interval): {sample_interval}.",
-        "Scene matches examples/sim/planners/neural_planner.py (Franka Panda, main_arm).",
-        "Pose error compares trajectory TCP samples against each target waypoint.",
-        "final_* fields compare only the last trajectory pose to the last waypoint.",
-        "mean/max_waypoint_* fields take, for each target waypoint, the best pose "
-        "error along the trajectory and then average or max across waypoints.",
-        f"{IMPL_NEURAL}: EEF waypoints -> NeuralPlanner policy rollout.",
-        (
-            f"{IMPL_IK}: sequential IK -> joint interpolation "
-            "(atomic action default arm path)."
-            if compare_ik
-            else f"{IMPL_IK}: not run (pass --compare-ik)."
-        ),
-        (
-            f"{IMPL_TOPPRA}: EEF -> IK interpolation -> TOPPRA joint "
-            "time-parameterization (requires toppra==0.6.3)."
-            if compare_toppra
-            else f"{IMPL_TOPPRA}: not run (pass --compare-toppra)."
-        ),
-        "NeuralPlanner internal success uses the checkpoint reach threshold; "
-        "reported pose errors are strict FK comparisons against target waypoints.",
-        "Quality and Performance tables aggregate measured trials by "
-        "(impl, num_waypoints).",
-        "Performance memory fields are per-trial deltas around timed calls; "
-        "peak_gpu_mb_max is the max peak across trials.",
+        f"Device: {sim_device} | Robot: Franka Panda ({ARM_NAME})",
+        f"Checkpoint: {checkpoint_name} ({checkpoint_path})",
+        f"Trials: {warmup_trials} warmup + {num_trials} measured per "
+        f"(impl, num_waypoints); sample_interval={sample_interval}",
+        f"Planners: {', '.join(impls)}",
+        "success_rate follows each planner; pose errors are FK vs target waypoints.",
     ]
 
 
@@ -1221,10 +1206,7 @@ def run_all_benchmarks(
         summary_rows=summary_rows,
         quality_leaderboard_rows=quality_leaderboard_rows,
         performance_leaderboard_rows=performance_leaderboard_rows,
-        notes=[
-            "CPU/GPU memory fields are deltas measured around timed calls.",
-        ]
-        + notes,
+        notes=notes,
         include_trial_details=include_trial_details,
     )
     print(f"Markdown report saved: {report_path}")
