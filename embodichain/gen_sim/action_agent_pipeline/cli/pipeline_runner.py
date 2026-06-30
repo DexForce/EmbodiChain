@@ -76,6 +76,11 @@ def run_pipeline(args: argparse.Namespace) -> int:
             if resolution.mode == "prompt2scene"
             else 0.0
         ),
+        source_mesh_x_rotation_degrees=(
+            args.prompt2scene_mesh_x_rotation_degrees
+            if resolution.mode == "prompt2scene"
+            else 0.0
+        ),
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,

@@ -289,6 +289,17 @@ def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
         "apple_1.glb",
         "apple_2.glb",
     }
+    for entry in paths.summary["normalized_meshes"]:
+        assert _flatten_matrix(entry["transform"]) == pytest.approx(
+            _flatten_matrix(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+        )
 
 
 def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
@@ -318,9 +329,9 @@ def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
     assert _flatten_matrix(transform) == pytest.approx(
         _flatten_matrix(
             [
-                [0.0, 0.0, -1.0, 0.0],
-                [-1.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ]
         )
@@ -334,9 +345,9 @@ def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
     assert f"newmtl {material_name}" in material_text
     assert "map_Kd " not in material_text
     assert _rounded_vertex_set(_obj_vertices(normalized_path)) == {
-        (0.0, -1.0, 0.0),
-        (0.0, -1.0, 1.0),
-        (-1.0, -1.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 0.0, 1.0),
     }
 
 
@@ -1137,6 +1148,7 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         preserve_source_target_body_scale=True,
         preserve_source_scene_geometry=True,
         source_scene_z_rotation_degrees=-90.0,
+        source_mesh_x_rotation_degrees=90.0,
         prewarm_coacd_cache=False,
     )
 
@@ -1146,10 +1158,10 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
 
     assert rigid_objects["cup"]["body_scale"] == [0.11, 0.12, 0.13]
     assert background_objects["pad"]["body_scale"] == [0.21, 0.22, 0.23]
-    assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".glb"
-    assert Path(background_objects["pad"]["shape"]["fpath"]).suffix == ".glb"
-    assert "mesh_assets/normalized" not in rigid_objects["cup"]["shape"]["fpath"]
-    assert "mesh_assets/normalized" not in background_objects["pad"]["shape"]["fpath"]
+    assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".obj"
+    assert Path(background_objects["pad"]["shape"]["fpath"]).suffix == ".obj"
+    assert "mesh_assets/normalized" in rigid_objects["cup"]["shape"]["fpath"]
+    assert "mesh_assets/normalized" in background_objects["pad"]["shape"]["fpath"]
     assert rigid_objects["cup"]["init_pos"][2] == source_cup_z
     assert background_objects["pad"]["init_pos"][2] == source_pad_z
     assert rigid_objects["cup"]["init_pos"] == pytest.approx(
@@ -1165,7 +1177,18 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         [source_pad_rot[0], source_pad_rot[1], source_pad_rot[2] - 90.0]
     )
     assert paths.summary["mode"] == "object_manipulation"
-    assert "normalized_meshes" not in paths.summary
+    assert "normalized_meshes" in paths.summary
+    for entry in paths.summary["normalized_meshes"]:
+        assert _flatten_matrix(entry["transform"]) == pytest.approx(
+            _flatten_matrix(
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, -1.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+        )
 
 
 def test_apply_scene_z_rotation_rotates_scene_object_poses() -> None:

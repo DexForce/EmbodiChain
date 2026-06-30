@@ -175,6 +175,7 @@ def generate_action_agent_config_from_project(
     preserve_source_target_body_scale: bool = False,
     preserve_source_scene_geometry: bool = False,
     source_scene_z_rotation_degrees: float = 0.0,
+    source_mesh_x_rotation_degrees: float = 0.0,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
@@ -206,12 +207,16 @@ def generate_action_agent_config_from_project(
             their source ``body_scale`` instead of using ``target_body_scale``.
             This is intended for metric-scaled prompt2scene exports.
         preserve_source_scene_geometry: If true, generated scene objects keep
-            source mesh paths and source z placement instead of normalizing GLBs
-            to OBJ and re-snapping objects to the tabletop. This is intended for
-            prompt2scene exports that already preview correctly in EmbodiChain.
+            source z placement instead of re-snapping objects to the tabletop.
+            GLB/GLTF meshes are still normalized to OBJ for consistent
+            action-agent runtime loading.
         source_scene_z_rotation_degrees: World-frame Z rotation applied to
             generated scene object poses after config generation. Mesh paths and
             scales are unchanged.
+        source_mesh_x_rotation_degrees: Local X-axis rotation baked into
+            normalized GLB/GLTF meshes. Keep this at ``0`` for the legacy
+            image2scene path; prompt2scene uses ``90`` to match the action-agent
+            runtime mesh frame.
         target_replacements: Optional prompt-generated GLB replacements for
             selected default basket target objects. Each replacement writes to
             ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
@@ -239,12 +244,9 @@ def generate_action_agent_config_from_project(
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
-    mesh_normalizer = (
-        None
-        if preserve_source_scene_geometry
-        else MeshFrameNormalizer(
-            output_dir=output_dir_path / "mesh_assets" / "normalized"
-        )
+    mesh_normalizer = MeshFrameNormalizer(
+        output_dir=output_dir_path / "mesh_assets" / "normalized",
+        local_x_correction_degrees=source_mesh_x_rotation_degrees,
     )
 
     scene_objects = _collect_scene_objects(source_config)

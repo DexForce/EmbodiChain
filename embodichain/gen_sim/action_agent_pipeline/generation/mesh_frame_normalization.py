@@ -38,10 +38,10 @@ __all__ = [
 ]
 
 
-MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_texture_obj_v5"
-# prompt2scene exports GLBs as Y-up; OBJ loading in the action-agent path is Z-up.
-GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 90.0
-GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES = -90.0
+MESH_FRAME_NORMALIZATION_POLICY_VERSION = "action_agent_glb_scene_texture_obj_v9"
+# Match the legacy action-agent GLB->OBJ path: do not bake extra frame rotations.
+GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES = 0.0
+GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES = 0.0
 GLB_LOCAL_X_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_X_ROTATION_DEGREES
 GLB_LOCAL_Z_CORRECTION_DEGREES = GLB_TO_OBJ_BAKED_Z_ROTATION_DEGREES
 

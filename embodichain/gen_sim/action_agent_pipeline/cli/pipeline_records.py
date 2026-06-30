@@ -317,6 +317,9 @@ def _source_request_record(
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees
         )
+        record["prompt2scene_mesh_x_rotation_degrees"] = (
+            args.prompt2scene_mesh_x_rotation_degrees
+        )
     elif resolution.mode == "image2tabletop":
         record.update(
             {

@@ -110,8 +110,8 @@ def cli() -> None:
         action="store_true",
         default=False,
         help=(
-            "Keep source mesh paths and source z placement instead of "
-            "normalizing GLBs to OBJ and re-snapping objects to the tabletop."
+            "Keep source z placement instead of re-snapping objects to the "
+            "tabletop. GLBs are still normalized to OBJ."
         ),
     )
     parser.add_argument(
@@ -122,6 +122,16 @@ def cli() -> None:
         help=(
             "World-frame Z rotation applied to generated scene object poses. "
             "Use -90 for prompt2scene exports that need action-agent alignment."
+        ),
+    )
+    parser.add_argument(
+        "--source_mesh_x_rotation_degrees",
+        "--source-mesh-x-rotation-degrees",
+        type=float,
+        default=0.0,
+        help=(
+            "Local X-axis rotation baked into normalized GLB/GLTF meshes. "
+            "Use 90 for prompt2scene exports that need mesh-frame alignment."
         ),
     )
     parser.add_argument(
@@ -211,6 +221,7 @@ def cli() -> None:
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
         preserve_source_scene_geometry=args.preserve_source_scene_geometry,
         source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
+        source_mesh_x_rotation_degrees=args.source_mesh_x_rotation_degrees,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,

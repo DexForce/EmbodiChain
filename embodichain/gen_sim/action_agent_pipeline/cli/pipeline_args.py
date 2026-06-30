@@ -207,6 +207,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--prompt2scene-mesh-x-rotation-degrees",
+        "--prompt2scene_mesh_x_rotation_degrees",
+        dest="prompt2scene_mesh_x_rotation_degrees",
+        type=float,
+        default=90.0,
+        help=(
+            "Local X-axis rotation baked into prompt2scene GLB meshes during "
+            "action-agent OBJ normalization. Defaults to 90."
+        ),
+    )
+    parser.add_argument(
         "--gym-project-root",
         default=str(DEFAULT_GYM_PROJECT_ROOT),
         help=(
