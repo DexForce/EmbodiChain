@@ -529,7 +529,11 @@ def _trajectory_fk_poses(result: PlanResult, robot: Robot) -> list[torch.Tensor]
     qpos = result.positions
     if qpos.dim() == 1:
         qpos = qpos.unsqueeze(0)
-    fk = robot.compute_fk(qpos=qpos, name=ARM_NAME, to_matrix=True)
+    fk = robot.compute_batch_fk(
+        qpos=qpos.unsqueeze(0),
+        name=ARM_NAME,
+        to_matrix=True,
+    ).squeeze(0)
     return [fk[i] for i in range(fk.shape[0])]
 
 
