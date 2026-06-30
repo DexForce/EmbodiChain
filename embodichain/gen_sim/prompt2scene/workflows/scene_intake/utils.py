@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from embodichain.gen_sim.prompt2scene.utils.log import log_warning
 from embodichain.gen_sim.prompt2scene.workflows.request import Prompt2SceneInput
 from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
     SceneIntakeAsset,
@@ -66,6 +67,7 @@ def _parse_table(raw_table: dict[str, Any]) -> SceneIntakeTable:
             "complete_table_description",
             "is_complete_visible_table",
             "class_candidate",
+            "object_coverage_percent",
         },
         context="Scene intake table",
     )
@@ -107,12 +109,34 @@ def _parse_table(raw_table: dict[str, Any]) -> SceneIntakeTable:
         raw_name=name,
     )
 
+    object_coverage_percent: int | None = None
+    raw_percent = raw_table.get("object_coverage_percent")
+    if raw_percent is not None:
+        if isinstance(raw_percent, bool):
+            raise ValueError(
+                "Scene intake table.object_coverage_percent must be an integer, "
+                "not a boolean."
+            )
+        try:
+            object_coverage_percent = int(raw_percent)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Scene intake table.object_coverage_percent must be an integer "
+                f"between 1 and 100, got {raw_percent!r}."
+            )
+        if object_coverage_percent not in (10, 30, 50, 70):
+            raise ValueError(
+                "Scene intake table.object_coverage_percent must be one of "
+                f"10, 30, 50, 70, got {object_coverage_percent}."
+            )
+
     return SceneIntakeTable(
         name=name,
         description=description,
         complete_table_description=complete_table_description,
         is_complete_visible_table=is_complete_visible_table,
         class_candidate=class_candidate,
+        object_coverage_percent=object_coverage_percent,
     )
 
 
@@ -214,7 +238,10 @@ def _validate_exact_keys(
 ) -> None:
     extra_keys = sorted(set(value) - allowed_keys)
     if extra_keys:
-        raise ValueError(f"{context} has unexpected keys: {extra_keys}.")
+        log_warning(
+            f"{context} has unexpected keys: {extra_keys}. "
+            f"These fields will be ignored."
+        )
 
 
 def _require_mapping(value: Any, context: str) -> dict[str, Any]:

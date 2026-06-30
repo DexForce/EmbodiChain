@@ -456,6 +456,7 @@ def generate_image_scene_assets(
         "status",
         "is_complete_visible_table",
         "complete_table_description",
+        "object_coverage_percent",
         "table_asset_source",
         "support_normal_source",
         "image_path",
@@ -470,6 +471,7 @@ def generate_image_scene_assets(
     object_fields = (
         "id",
         "name",
+        "description",
         "status",
         "image_path",
         "mesh_path",

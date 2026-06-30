@@ -50,19 +50,24 @@ def build_scene_intake_verifier_messages(
     scene_intake: SceneIntakeSpec,
 ) -> list[dict[str, Any]]:
     """Build messages for scene-intake group and count verification."""
+    table_draft: dict[str, object] = {
+        "name": scene_intake.table.name,
+        "description": scene_intake.table.description,
+        "complete_table_description": (
+            scene_intake.table.complete_table_description
+        ),
+        "is_complete_visible_table": (
+            scene_intake.table.is_complete_visible_table
+        ),
+        "class_candidate": list(scene_intake.table.class_candidate),
+    }
+    if scene_intake.table.object_coverage_percent is not None:
+        table_draft["object_coverage_percent"] = (
+            scene_intake.table.object_coverage_percent
+        )
     scene_intake_json = json.dumps(
         {
-            "table": {
-                "name": scene_intake.table.name,
-                "description": scene_intake.table.description,
-                "complete_table_description": (
-                    scene_intake.table.complete_table_description
-                ),
-                "is_complete_visible_table": (
-                    scene_intake.table.is_complete_visible_table
-                ),
-                "class_candidate": list(scene_intake.table.class_candidate),
-            },
+            "table": table_draft,
             "assets": [
                 {
                     "name": asset.name,

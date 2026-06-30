@@ -94,10 +94,19 @@ def fit_table_to_clutter(
     output_dir: Path,
     margin_cm: float = 10.0,
     support_occupancy_ratio: float = 0.80,
+    object_coverage_percent: int | None = None,
     gravity_settle_table: bool = True,
     sim_device: str = "cpu",
 ) -> dict[str, Any]:
-    """Fit a table mesh to an already laid-out clutter result."""
+    """Fit a table mesh to an already laid-out clutter result.
+
+    Args:
+        object_coverage_percent: If set (1-100), overrides
+            ``support_occupancy_ratio`` by converting the percentage to a ratio
+            (e.g. 30 → 0.30). The required table size is computed as
+            clutter_size / ratio. When None, the default
+            ``support_occupancy_ratio`` is used.
+    """
     try:
         import trimesh
     except ImportError as exc:
@@ -166,6 +175,10 @@ def fit_table_to_clutter(
 
     # Compute the required table size and uniform scale.
     clutter_size_cm = (clutter_bounds[1, :2] - clutter_bounds[0, :2]) * 100.0
+    if object_coverage_percent is not None:
+        support_occupancy_ratio = float(
+            np.clip(object_coverage_percent / 100.0, 0.1, 1.0)
+        )
     occupancy = float(np.clip(support_occupancy_ratio, 0.1, 1.0))
     required_size_cm = clutter_size_cm / occupancy + 2.0 * float(margin_cm)
     support_size_cm = np.asarray(initial_support["size_xy"], dtype=np.float64) * 100.0
@@ -239,7 +252,23 @@ def fit_table_to_clutter(
     for oid, scene in shifted_clutter:
         object_path = output_dir / f"{oid}_on_table.glb"
         _copy_scene_with_transform(scene, z_to_y).export(object_path)
-        placed_objects.append({"id": oid, "path": str(object_path)})
+        # Compute world-space AABB bottom-centre (sim Z-up coords) before
+        # the scene is converted to GLB Y-up for export.  This is the
+        # reference position that gym_export uses to derive ``init_pos``.
+        _placed_mesh = _scene_to_mesh(scene, trimesh=trimesh)
+        _placed_b = np.asarray(_placed_mesh.bounds, dtype=np.float64)
+        world_aabb_bottom_center = [
+            float(0.5 * (_placed_b[0, 0] + _placed_b[1, 0])),
+            float(0.5 * (_placed_b[0, 1] + _placed_b[1, 1])),
+            float(_placed_b[0, 2]),
+        ]
+        placed_objects.append(
+            {
+                "id": oid,
+                "path": str(object_path),
+                "world_aabb_bottom_center": world_aabb_bottom_center,
+            }
+        )
 
     # Write the fit manifest.
     final_clutter_bounds = _table_fit_scene_union_bounds(

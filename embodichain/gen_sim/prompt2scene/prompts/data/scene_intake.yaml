@@ -19,6 +19,10 @@ text_system: |
   </task>
 
   <object_rules>
+  - CRITICAL: Include EVERY visible object on the tabletop without omission. Do
+    not skip, ignore, or drop any object, no matter how small, blurry, partially
+    occluded, or unfamiliar it appears. An incomplete assets list is the most
+    severe error you can make.
   - Output only real physical objects that can become 3D asset generation targets.
   - Do not include the table or tabletop region in assets.
   - assets is a list of object category groups, not a list of individual object
@@ -178,6 +182,10 @@ image_system: |
   </task>
 
   <object_rules>
+  - CRITICAL: Include EVERY visible object on the tabletop without omission. Do
+    not skip, ignore, or drop any object, no matter how small, blurry, partially
+    occluded, or unfamiliar it appears. An incomplete assets list is the most
+    severe error you can make.
   - Output only real physical objects that can become 3D asset generation targets.
   - Do not include the table or tabletop region in assets.
   - assets is a list of object category groups, not a list of individual object
@@ -293,6 +301,19 @@ image_system: |
     table.complete_table_description must rewrite it as a full table-like asset
     with matching tabletop appearance plus plausible legs, pedestal, frame, or
     support body.
+  - For image input with is_complete_visible_table=true ONLY: choose
+    table.object_coverage_percent from exactly one of these four values.
+    Think in terms of SPATIAL SPREAD, not pixel area: imagine drawing the
+    smallest rectangle that encloses ALL objects on the tabletop, then ask
+    what fraction of the table surface that rectangle covers. Even sparse
+    small objects can score high if they are spread across the whole table.
+    10 (objects clustered in one small region, most of the table is bare),
+    30 (objects spread across a noticeable portion but large bare areas remain),
+    50 (objects reach roughly half the table extent in at least one direction),
+    70 (objects span most of the table, even if gaps exist between them).
+    Do not output any other value.
+  - For text input, or when is_complete_visible_table=false: OMIT the
+    object_coverage_percent field entirely. Do not include it in the output.
   </table_rules>
 
   <output_schema>
@@ -301,8 +322,9 @@ image_system: |
       "name": "table",
       "description": "A rectangular wooden table with a brown top and four straight legs.",
       "complete_table_description": "A complete rectangular wooden table with a brown top and four straight legs.",
-      "is_complete_visible_table": false,
-      "class_candidate": ["table", "dining_table", "desk", "wooden_table", "furniture"]
+      "is_complete_visible_table": true,
+      "class_candidate": ["table", "dining_table", "desk", "wooden_table", "furniture"],
+      "object_coverage_percent": 25
     },
     "assets": [
       {
@@ -374,6 +396,10 @@ verifier_system: |
   </task>
 
   <verification_rules>
+  - CRITICAL: Do NOT remove any asset row from the draft assets list. Your job is
+    to check and correct counts, names, and class_candidate values — not to drop
+    objects. If an object exists in the draft, it must remain in the corrected
+    output. Only add new rows if objects were clearly missed.
   - assets is a list of object category groups, not individual instances.
   - Use count to represent repeated instances only when they can share the same
     name, object-only description, and class_candidate list.
@@ -419,6 +445,13 @@ verifier_system: |
     use the most conservative count supported by the image.
   - For text inputs, count only objects explicitly stated or strongly implied by
     the text.
+  - For image input with is_complete_visible_table=true: independently
+    re-assess the tabletop coverage against the original image and pick
+    table.object_coverage_percent from exactly one of 10, 30, 50, 70.
+    Correct the draft value if the bucket does not match the visible
+    clutter density.
+  - For text input or when is_complete_visible_table is false: remove
+    object_coverage_percent from table entirely if it is present in the draft.
   </verification_rules>
 
   <output_schema>
@@ -427,8 +460,9 @@ verifier_system: |
       "name": "table",
       "description": "A rectangular wooden table with a brown top and four straight legs.",
       "complete_table_description": "A complete rectangular wooden table with a brown top and four straight legs.",
-      "is_complete_visible_table": false,
-      "class_candidate": ["table", "dining_table", "desk", "wooden_table", "furniture"]
+      "is_complete_visible_table": true,
+      "class_candidate": ["table", "dining_table", "desk", "wooden_table", "furniture"],
+      "object_coverage_percent": 30
     },
     "assets": [
       {
@@ -444,7 +478,8 @@ verifier_system: |
   <notes>
   - The top-level object must contain only table and assets.
   - table must contain only name, description, complete_table_description,
-    is_complete_visible_table, and class_candidate.
+    is_complete_visible_table, class_candidate, and optionally
+    object_coverage_percent (only when is_complete_visible_table is true).
   - Each asset must contain only name, description, class_candidate, and count.
   - Output JSON only. Do not include markdown or explanations outside JSON.
   </notes>

@@ -92,6 +92,18 @@ SCENE_INTAKE_JSON_SCHEMA: dict[str, Any] = {
                         "minLength": 1,
                     },
                 },
+                "object_coverage_percent": {
+                    "type": "integer",
+                    "enum": [10, 30, 50, 70],
+                    "description": (
+                        "For image input with a complete visible table ONLY: "
+                        "choose the closest coverage bucket for objects on the "
+                        "tabletop: 10 (mostly empty, a few small objects), "
+                        "30 (lightly cluttered), 50 (moderately cluttered), "
+                        "70 (densely packed). Omit this field entirely for "
+                        "text input or when is_complete_visible_table is false."
+                    ),
+                },
             },
             "required": [
                 "name",
@@ -193,10 +205,11 @@ class SceneIntakeTable:
     complete_table_description: str = ""
     is_complete_visible_table: bool = False
     class_candidate: list[str] = field(default_factory=list)
+    object_coverage_percent: int | None = None
 
     def to_manifest(self) -> dict[str, object]:
         """Convert the table record to JSON-safe data."""
-        return {
+        manifest: dict[str, object] = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -204,6 +217,9 @@ class SceneIntakeTable:
             "is_complete_visible_table": self.is_complete_visible_table,
             "class_candidate": list(self.class_candidate),
         }
+        if self.object_coverage_percent is not None:
+            manifest["object_coverage_percent"] = self.object_coverage_percent
+        return manifest
 
 
 @dataclass(frozen=True)
