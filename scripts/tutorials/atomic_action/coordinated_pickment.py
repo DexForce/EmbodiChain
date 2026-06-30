@@ -16,7 +16,7 @@
 
 """Demonstrate dual-arm coordinated pickment with selectable object meshes.
 
-The two UR10 arms pinch opposite sides of one object, lift it together, and move
+The two UR5 arms pinch opposite sides of one object, lift it together, and move
 the object to an object-centric target pose while both grippers stay closed.
 """
 
@@ -94,12 +94,12 @@ def transform_baseline_pose(
     return tuple(float(value) for value in pos), tuple(float(value) for value in rot)
 
 
-ARM_URDF_PATH = "UniversalRobots/UR10/UR10.urdf"
+ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 SCRIPT_DIR = Path(__file__).resolve().parent
 TABLE_MESH_PATH = SCRIPT_DIR / "table.glb"
 GRIPPER_TCP_Z = 0.121
-ROBOT_INIT_POS = (2.25, 0.0, 0.1)
+ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
 RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
@@ -295,8 +295,8 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
     return sim
 
 
-def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR10 robot with one PGI gripper on each arm."""
+def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
+    """Create a dual-UR5 robot with one PGI gripper on each arm."""
     arm_urdf_path = get_cached_data_path(ARM_URDF_PATH)
     gripper_urdf_path = get_cached_data_path(GRIPPER_URDF_PATH)
     tcp = [
@@ -306,7 +306,7 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
         [0.0, 0.0, 0.0, 1.0],
     ]
     cfg = RobotCfg(
-        uid="DualUR10CoordinatedPickment",
+        uid="DualUR5CoordinatedPickment",
         urdf_cfg=URDFCfg(
             components=[
                 {
@@ -322,7 +322,8 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
                 {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
                 {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
             ],
-            fname="dual_ur10_coordinated_pickment",
+            fname="dual_ur5_coordinated_pickment",
+            name_case={"joint": "upper", "link": "lower"},
         ),
         drive_pros=JointDrivePropertiesCfg(
             stiffness={
@@ -862,7 +863,7 @@ def main() -> None:
     """Run the coordinated pickment demo."""
     args = parse_arguments()
     sim = initialize_simulation(args)
-    robot = create_dual_ur10_robot(sim)
+    robot = create_dual_ur5_robot(sim)
     run_coordinated_pickment_demo(args, sim, robot)
 
 

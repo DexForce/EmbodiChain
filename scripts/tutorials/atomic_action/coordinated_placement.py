@@ -16,8 +16,8 @@
 
 """Demonstrate dual-arm coordinated placement with bread and pan meshes.
 
-The left UR10 picks up bread. The right UR10 picks up a pan and moves it to the
-lower alignment pose. The left UR10 places the bread above the pan and releases
+The left UR5 picks up bread. The right UR5 picks up a pan and moves it to the
+lower alignment pose. The left UR5 places the bread above the pan and releases
 it while the right hand keeps holding the pan.
 """
 
@@ -101,7 +101,7 @@ def transform_baseline_pose(
     return tuple(float(value) for value in pos), tuple(float(value) for value in rot)
 
 
-ARM_URDF_PATH = "UniversalRobots/UR10/UR10.urdf"
+ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 SCRIPT_DIR = Path(__file__).resolve().parent
 TABLE_MESH_PATH = SCRIPT_DIR / "table.glb"
@@ -112,7 +112,7 @@ PAN_LABEL = "pan"
 GRIPPER_TCP_Z = 0.121
 PICK_SAMPLE_INTERVAL = 100
 COORDINATED_SAMPLE_INTERVAL = 120
-ROBOT_INIT_POS = (2.25, 0.0, 0.1)
+ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
 RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
@@ -167,7 +167,7 @@ PAN_INIT_POS, PAN_INIT_ROT = transform_baseline_pose(
     world_yaw_correction_deg=PAN_WORLD_YAW_CORRECTION_DEG,
 )
 PAN_INIT_POS = (PAN_INIT_POS[0], PAN_INIT_POS[1], TABLE_TOP_Z + 0.001)
-PAN_TARGET_CENTER_XY = (-0.2, -0.04)
+PAN_TARGET_CENTER_XY = (0.0, -0.04)
 PAN_TARGET_Z_LIFT = 0.06
 BREAD_ON_PAN_CLEARANCE = 0.006
 BREAD_GRASP_Z_CLEARANCE = 0.018
@@ -285,8 +285,8 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
     return sim
 
 
-def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR10 robot with one PGI gripper on each arm."""
+def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
+    """Create a dual-UR5 robot with one PGI gripper on each arm."""
     arm_urdf_path = get_cached_data_path(ARM_URDF_PATH)
     gripper_urdf_path = get_cached_data_path(GRIPPER_URDF_PATH)
     tcp = [
@@ -296,7 +296,7 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
         [0.0, 0.0, 0.0, 1.0],
     ]
     cfg = RobotCfg(
-        uid="DualUR10CoordinatedPlacement",
+        uid="DualUR5CoordinatedPlacement",
         urdf_cfg=URDFCfg(
             components=[
                 {
@@ -312,7 +312,8 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
                 {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
                 {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
             ],
-            fname="dual_ur10_coordinated_placement",
+            fname="dual_ur5_coordinated_placement",
+            name_case={"joint": "upper", "link": "lower"},
         ),
         drive_pros=JointDrivePropertiesCfg(
             stiffness={
@@ -1088,7 +1089,7 @@ def main() -> None:
     """Run the coordinated placement demo."""
     args = parse_arguments()
     sim = initialize_simulation(args)
-    robot = create_dual_ur10_robot(sim)
+    robot = create_dual_ur5_robot(sim)
     run_coordinated_placement_demo(args, sim, robot)
 
 
