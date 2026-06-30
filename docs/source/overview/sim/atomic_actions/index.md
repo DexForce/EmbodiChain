@@ -94,8 +94,8 @@ action's `TargetType` before calling `execute`:
 
 | Target | Holds | Accepted by |
 |---|---|---|
-| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)` or `(n_envs,4,4)` | `MoveEndEffector`, `Place` |
-| `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)` or `(n_envs, control_dof)` | `MoveJoints` |
+| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)` | `MoveEndEffector`, `Place` |
+| `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)` | `MoveJoints` |
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
 | `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
 | `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
