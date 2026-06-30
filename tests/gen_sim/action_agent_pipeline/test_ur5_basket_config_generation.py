@@ -74,7 +74,8 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
     assert first_robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.42])
     assert second_robot["control_parts"]["left_arm"] == ["LEFT_JOINT[1-6]"]
     assert second_sensors[0]["uid"] == "cam_high"
-    assert second_lights["direct"][0]["uid"] == "main_light"
+    assert second_lights["direct"][0]["uid"] == "main_light_1"
+    assert len(second_lights["direct"]) == 8
 
 
 def test_dual_ur5_template_uses_ur_solver_config() -> None:
@@ -2915,7 +2916,11 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
         - action_agent_config_generation._DUAL_UR5_ARM_COMPONENT_Z
     )
     assert gym_config["robot"]["init_pos"][2] == pytest.approx(expected_init_z)
-    assert gym_config["light"]["direct"][0]["intensity"] == 40.0
+    direct_lights = gym_config["light"]["direct"]
+    assert len(direct_lights) == 8
+    assert {light["intensity"] for light in direct_lights} == {80.0}
+    assert {light["radius"] for light in direct_lights} == {600.0}
+    assert {light["init_pos"][2] for light in direct_lights} == {8.0}
 
 
 def test_tabletop_z_placement_uses_normalized_mesh_bounds(
