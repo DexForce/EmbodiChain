@@ -92,6 +92,12 @@ class TrajectoryBuilder:
                     f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}",
                     ValueError,
                 )
+            if target.shape[1] == 0:
+                logger.log_error(
+                    "multi-waypoint target tensor has zero waypoints (shape[1] == 0); "
+                    "at least one waypoint is required.",
+                    ValueError,
+                )
         else:
             logger.log_error(
                 f"target tensor must be (4, 4), ({n_envs}, 4, 4), or "
@@ -164,6 +170,12 @@ class TrajectoryBuilder:
                 logger.log_error(
                     f"multi-waypoint target qpos for '{control_part}' must have shape "
                     f"({n_envs}, n_waypoint, {joint_dof}), but got {target_qpos.shape}",
+                    ValueError,
+                )
+            if target_qpos.shape[1] == 0:
+                logger.log_error(
+                    f"multi-waypoint target qpos for '{control_part}' has zero waypoints "
+                    f"(shape[1] == 0); at least one waypoint is required.",
                     ValueError,
                 )
         else:

@@ -109,6 +109,11 @@ class TestResolvePoseTarget:
                 torch.eye(4).unsqueeze(0).unsqueeze(0).repeat(3, 2, 1, 1), n_envs=2
             )
 
+    def test_multi_waypoint_empty_raises(self):
+        empty = torch.zeros((2, 0, 4, 4), dtype=torch.float32)
+        with pytest.raises(ValueError, match="zero waypoints"):
+            self.builder.resolve_pose_target(empty, n_envs=2)
+
 
 class TestResolveJointTarget:
     def setup_method(self):
@@ -154,6 +159,13 @@ class TestResolveJointTarget:
         with pytest.raises(Exception):
             self.builder.resolve_joint_target(
                 torch.zeros(2, 2, 5), n_envs=2, joint_dof=6, control_part="arm"
+            )
+
+    def test_multi_waypoint_empty_raises(self):
+        empty = torch.zeros((2, 0, 6), dtype=torch.float32)
+        with pytest.raises(ValueError, match="zero waypoints"):
+            self.builder.resolve_joint_target(
+                empty, n_envs=2, joint_dof=6, control_part="arm"
             )
 
 

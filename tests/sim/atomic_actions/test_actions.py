@@ -466,3 +466,72 @@ class TestPlaceAction:
         assert result.success is True
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None
+
+    def test_execute_with_multi_waypoint_visits_each_waypoint(self):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            lift_height=0.1,
+        )
+        action = Place(self.mg, cfg)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="mug"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF), held_object=held)
+
+        pose0 = torch.eye(4)
+        pose1 = torch.eye(4)
+        pose1[0, 3] = 1.0
+        # (n_envs, n_waypoint, 4, 4) trajectory target
+        multi_xpos = (
+            torch.stack([pose0, pose1], dim=0).unsqueeze(0).repeat(NUM_ENVS, 1, 1, 1)
+        )
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        captured = {}
+
+        def interpolate(trajectory, interp_num, device):
+            # Only the down phase carries more than 2 keyframes; capture it.
+            if trajectory.shape[1] > 2:
+                captured["down_keyframes"] = trajectory
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(EndEffectorPoseTarget(xpos=multi_xpos), state)
+
+        assert result.success is True
+        assert result.trajectory.shape[2] == TOTAL_DOF
+        assert result.next_state.held_object is None
+        # IK order: down phase (approach, pose0, pose1) then back phase (retract).
+        assert len(seen_poses) == 4
+        lift_height = cfg.lift_height
+        approach = pose0.clone()
+        approach[2, 3] += lift_height
+        retract = pose1.clone()
+        retract[2, 3] += lift_height
+        assert torch.allclose(
+            seen_poses[0], approach.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        assert torch.allclose(seen_poses[1], pose0.unsqueeze(0).repeat(NUM_ENVS, 1, 1))
+        assert torch.allclose(seen_poses[2], pose1.unsqueeze(0).repeat(NUM_ENVS, 1, 1))
+        assert torch.allclose(
+            seen_poses[3], retract.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        # start prepended to the 3 down-phase IK solutions -> 4 keyframes.
+        assert captured["down_keyframes"].shape == (NUM_ENVS, 4, ARM_DOF)

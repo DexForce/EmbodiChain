@@ -658,7 +658,16 @@ class MoveHeldObject(AtomicAction):
 
 
 class Place(AtomicAction):
-    """Lower the held object to a place pose, open the gripper, retract."""
+    """Lower the held object to a place pose, open the gripper, retract.
+
+    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
+    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    down phase visits every waypoint in order — approaching from above the
+    first waypoint, descending through each waypoint, then opening the gripper
+    at the final waypoint and retracting to above the last waypoint. Starting
+    joint positions are inherited from ``WorldState.last_qpos``.
+    """
 
     TargetType: ClassVar[type] = EndEffectorPoseTarget
 
@@ -686,6 +695,12 @@ class Place(AtomicAction):
 
     def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+        # Normalize a single-waypoint (n_envs, 4, 4) target to (n_envs, 1, 4, 4)
+        # so the multi-waypoint descent path below is uniform.
+        if place_xpos.dim() == 3:
+            place_xpos = place_xpos.unsqueeze(1)
+        n_waypoint = place_xpos.shape[1]
+
         start_arm_qpos = self.builder.resolve_start_qpos(
             _arm_qpos_from_state(state, self.arm_joint_ids, self.robot_dof),
             n_envs=self.n_envs,
@@ -699,16 +714,18 @@ class Place(AtomicAction):
             third_phase_name="back",
         )
 
-        lift_xpos = self.builder.apply_local_offset(
-            place_xpos,
-            torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
-        )
+        lift_offset = torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height
+        # Approach from above the first waypoint; retract to above the last.
+        # For a single waypoint these coincide, matching the legacy behavior.
+        approach_xpos = self.builder.apply_local_offset(place_xpos[:, 0], lift_offset)
+        retract_xpos = self.builder.apply_local_offset(place_xpos[:, -1], lift_offset)
 
-        # Phase 1: down (lift → place)
+        # Phase 1: down (approach → every place waypoint in order)
         target_states_list = [
-            [
-                PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE),
-                PlanState(xpos=place_xpos[i], move_type=MoveType.EEF_MOVE),
+            [PlanState(xpos=approach_xpos[i], move_type=MoveType.EEF_MOVE)]
+            + [
+                PlanState(xpos=place_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(n_waypoint)
             ]
             for i in range(self.n_envs)
         ]
@@ -723,9 +740,9 @@ class Place(AtomicAction):
             return self._fail(state)
         reach_arm_qpos = down_arm[:, -1, :]
 
-        # Phase 3: back (retract to lift)
+        # Phase 3: back (retract to above the last waypoint)
         target_states_list = [
-            [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
+            [PlanState(xpos=retract_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
         ok, back_arm = self.builder.plan_arm_traj(

@@ -304,19 +304,34 @@ def initialize_pre_pick_robot_pose(
     robot.clear_dynamics()
 
 
-def make_place_eef_pose(device: torch.device) -> torch.Tensor:
-    pose = torch.eye(4, dtype=torch.float32, device=device)
-    pose[:3, :3] = torch.tensor(
+def make_place_eef_poses(device: torch.device) -> torch.Tensor:
+    """Build a multi-waypoint place trajectory ``(n_waypoint, 4, 4)``.
+
+    Two waypoints are returned: a higher hover pose and the final release pose.
+    ``Place`` approaches from above the first waypoint, descends through each
+    waypoint in order, opens the gripper at the last, and retracts — so this
+    exercises the multi-waypoint descent path.
+    """
+    rotation = torch.tensor(
         [
-            [-0.0539, -0.9985, -0.0022],
-            [-0.9977, 0.0540, -0.0401],
-            [0.0401, 0.0000, -0.9992],
+            [0.0539, 0.9985, -0.0022],
+            [0.9977, -0.0540, -0.0401],
+            [-0.0401, -0.0000, -0.9992],
         ],
         dtype=torch.float32,
         device=device,
     )
-    pose[:3, 3] = torch.tensor([-0.20, 0.28, 0.1], dtype=torch.float32, device=device)
-    return pose
+    hover_pose = torch.eye(4, dtype=torch.float32, device=device)
+    hover_pose[:3, :3] = rotation
+    hover_pose[:3, 3] = torch.tensor(
+        [-0.40, 0.48, 0.20], dtype=torch.float32, device=device
+    )
+    place_pose = torch.eye(4, dtype=torch.float32, device=device)
+    place_pose[:3, :3] = rotation
+    place_pose[:3, 3] = torch.tensor(
+        [-0.40, 0.48, 0.10], dtype=torch.float32, device=device
+    )
+    return torch.stack([hover_pose, place_pose], dim=0)
 
 
 def compute_pick_close_end_step() -> int:
@@ -385,17 +400,22 @@ def main() -> None:
     # Step 5: Describe the object and define the place target             #
     # ------------------------------------------------------------------ #
     semantics = create_object_semantics(obj, args)
-    place_eef_pose = make_place_eef_pose(sim.device)
+    place_eef_poses = make_place_eef_poses(sim.device)
 
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "place_target_axis", place_eef_pose)
+        draw_axis_marker(sim, "place_target_axis", place_eef_poses[-1])
     if not args.auto_play:
         input("Inspect the object, then press Enter to plan PickUp -> Place...")
 
     # ------------------------------------------------------------------ #
     # Step 6: Plan the declared (name, typed_target) sequence             #
     # ------------------------------------------------------------------ #
-    place_target = EndEffectorPoseTarget(xpos=place_eef_pose)
+    # Pass a multi-waypoint trajectory (n_envs, n_waypoint, 4, 4): Place
+    # approaches from above the first waypoint, descends through each
+    # waypoint in order, opens the gripper at the last, and retracts.
+    n_envs = robot.get_qpos().shape[0]
+    multi_waypoint_xpos = place_eef_poses.unsqueeze(0).repeat(n_envs, 1, 1, 1)
+    place_target = EndEffectorPoseTarget(xpos=multi_waypoint_xpos)
     logger.log_info("Planning PickUp precondition -> Place release trajectory")
     is_success, traj, _ = atomic_engine.run(
         steps=[
