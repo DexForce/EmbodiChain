@@ -223,7 +223,6 @@ def _format_markdown_table(rows: list[dict[str, object]]) -> list[str]:
 
 QUALITY_SUMMARY_COLUMNS = (
     "impl",
-    "num_waypoints",
     "num_trials",
     "success_rate",
     "final_translation_err_mm_mean",
@@ -236,7 +235,6 @@ QUALITY_SUMMARY_COLUMNS = (
 
 PERFORMANCE_SUMMARY_COLUMNS = (
     "impl",
-    "num_waypoints",
     "num_trials",
     "cost_time_ms_mean",
     "cost_time_ms_p95",
@@ -246,6 +244,70 @@ PERFORMANCE_SUMMARY_COLUMNS = (
     "peak_gpu_mb_mean",
     "peak_gpu_mb_max",
 )
+
+_IMPL_REPORT_ORDER = {
+    IMPL_NEURAL: 0,
+    IMPL_IK: 1,
+    IMPL_TOPPRA: 2,
+}
+
+
+def _sort_summary_for_report(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Group summary rows by num_waypoints for side-by-side planner comparison."""
+    return sorted(
+        rows,
+        key=lambda row: (
+            int(row["num_waypoints"]),
+            _IMPL_REPORT_ORDER.get(str(row["impl"]), 99),
+            str(row["impl"]),
+        ),
+    )
+
+
+def _group_summary_by_waypoints(
+    rows: list[dict[str, object]],
+) -> list[tuple[int, list[dict[str, object]]]]:
+    """Return summary rows grouped and sorted by num_waypoints."""
+    groups: dict[int, list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        groups[int(row["num_waypoints"])].append(row)
+
+    grouped: list[tuple[int, list[dict[str, object]]]] = []
+    for num_waypoints in sorted(groups):
+        group_rows = sorted(
+            groups[num_waypoints],
+            key=lambda row: (
+                _IMPL_REPORT_ORDER.get(str(row["impl"]), 99),
+                str(row["impl"]),
+            ),
+        )
+        grouped.append((num_waypoints, group_rows))
+    return grouped
+
+
+def _format_waypoint_grouped_tables(
+    summary_rows: list[dict[str, object]],
+    columns: tuple[str, ...],
+) -> list[str]:
+    """Render one markdown table per num_waypoints value."""
+    grouped = _group_summary_by_waypoints(summary_rows)
+    if not grouped:
+        return ["No data."]
+
+    lines: list[str] = []
+    for index, (num_waypoints, group_rows) in enumerate(grouped):
+        if index > 0:
+            lines.append("")
+        lines.extend(
+            [
+                f"### num_waypoints = {num_waypoints}",
+                "",
+            ]
+        )
+        lines.extend(_format_markdown_table(_project_table_rows(group_rows, columns)))
+    return lines
 
 
 def _project_table_rows(
@@ -279,16 +341,10 @@ def _write_markdown_report(
         "## Quality",
         "",
     ]
-    lines.extend(
-        _format_markdown_table(
-            _project_table_rows(summary_rows, QUALITY_SUMMARY_COLUMNS)
-        )
-    )
+    lines.extend(_format_waypoint_grouped_tables(summary_rows, QUALITY_SUMMARY_COLUMNS))
     lines.extend(["", "## Performance", ""])
     lines.extend(
-        _format_markdown_table(
-            _project_table_rows(summary_rows, PERFORMANCE_SUMMARY_COLUMNS)
-        )
+        _format_waypoint_grouped_tables(summary_rows, PERFORMANCE_SUMMARY_COLUMNS)
     )
     lines.extend(["", "## Leaderboard (Quality)", ""])
     lines.extend(_format_markdown_table(quality_leaderboard_rows))
@@ -787,7 +843,7 @@ def _aggregate_rows(
                 ),
             }
         )
-    return summary_rows
+    return _sort_summary_for_report(summary_rows)
 
 
 def _group_summary_by_impl(
