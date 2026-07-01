@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate MoveEndEffector with a single pose target."""
+"""Demonstrate MoveEndEffector with a multi-waypoint pose trajectory."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -38,27 +37,17 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    LightCfg,
-    RenderCfg,
-    RobotCfg,
-    URDFCfg,
-)
+from embodichain.lab.sim.cfg import LightCfg, RenderCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
-
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-GRIPPER_HAND_JOINT_PATTERN = "GRIPPER_FINGER1_JOINT_1"
-GRIPPER_TCP_Z = 0.15
 
 MOVE_SAMPLE_INTERVAL = 80
 POST_TRAJECTORY_STEPS = 120
@@ -66,7 +55,7 @@ POST_TRAJECTORY_STEPS = 120
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveEndEffector with a top-down target pose."
+        description="Demonstrate MoveEndEffector with a multi-waypoint pose trajectory."
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
@@ -106,41 +95,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
 
 
 def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
-    ur5_urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
-    gripper_urdf_path = get_data_path(GRIPPER_URDF_PATH)
-    cfg = RobotCfg(
-        uid="UR5",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur5_urdf_path},
-                {"component_type": "hand", "urdf_path": gripper_urdf_path},
-            ]
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, GRIPPER_HAND_JOINT_PATTERN: 1e3},
-            damping={"JOINT[0-9]": 1e3, GRIPPER_HAND_JOINT_PATTERN: 1e2},
-            max_effort={"JOINT[0-9]": 1e5, GRIPPER_HAND_JOINT_PATTERN: 1e4},
-            drive_type="force",
-        ),
-        control_parts={
-            "arm": ["JOINT[0-9]"],
-            "hand": [GRIPPER_HAND_JOINT_PATTERN],
-        },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-            )
-        },
-        init_qpos=[0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-        init_pos=position,
-    )
+    cfg = create_ur5_gripper_robot_cfg(init_pos=position)
     return sim.add_robot(cfg=cfg)
 
 
@@ -159,13 +114,29 @@ def make_top_down_eef_pose(device: torch.device) -> torch.Tensor:
     return pose
 
 
+def make_side_eef_pose(device: torch.device) -> torch.Tensor:
+    """A second waypoint offset from the top-down pose for the multi-waypoint demo."""
+    pose = torch.eye(4, dtype=torch.float32, device=device)
+    pose[:3, :3] = torch.tensor(
+        [
+            [-0.0539, -0.9985, -0.0022],
+            [-0.9977, 0.0540, -0.0401],
+            [0.0401, 0.0000, -0.9992],
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
+    pose[:3, 3] = torch.tensor([0.45, 0.10, 0.30], dtype=torch.float32, device=device)
+    return pose
+
+
 def format_tensor(tensor: torch.Tensor) -> str:
     rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
     return str(rounded.tolist())
 
 
 def main() -> None:
-    """Move the robot end effector to one target pose using atomic actions."""
+    """Move the robot end effector through a multi-waypoint pose trajectory."""
     args = parse_arguments()
 
     # ------------------------------------------------------------------ #
@@ -199,21 +170,38 @@ def main() -> None:
     # Step 5: Define and visualize the end-effector target                #
     # ------------------------------------------------------------------ #
     target_pose = make_top_down_eef_pose(sim.device)
+    side_pose = make_side_eef_pose(sim.device)
     if not args.headless:
         sim.open_window()
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "move_end_effector_target_axis", target_pose)
+        draw_axis_marker(sim, "move_end_effector_side_axis", side_pose)
     if not args.auto_play:
         input("Inspect the robot, then press Enter to plan MoveEndEffector...")
 
     # ------------------------------------------------------------------ #
     # Step 6: Plan the declared (name, typed_target) sequence             #
     # ------------------------------------------------------------------ #
+    # Pass a multi-waypoint trajectory (n_envs, n_waypoint, 4, 4): the
+    # end-effector visits `target_pose` then `side_pose` in a single plan.
+    n_envs = robot.get_qpos().shape[0]
+    multi_waypoint_xpos = (
+        torch.stack([target_pose, side_pose], dim=0)
+        .unsqueeze(0)
+        .repeat(n_envs, 1, 1, 1)
+    )
     logger.log_info(
-        f"Planning MoveEndEffector to xpos={format_tensor(target_pose[:3, 3])}"
+        "Planning MoveEndEffector through multi-waypoint trajectory: "
+        f"xpos0={format_tensor(target_pose[:3, 3])} -> "
+        f"xpos1={format_tensor(side_pose[:3, 3])}"
     )
     is_success, traj, _ = atomic_engine.run(
-        steps=[("move_end_effector", EndEffectorPoseTarget(xpos=target_pose))]
+        steps=[
+            (
+                "move_end_effector",
+                EndEffectorPoseTarget(xpos=multi_waypoint_xpos),
+            )
+        ]
     )
     if not is_success:
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")
