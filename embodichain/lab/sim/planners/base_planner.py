@@ -110,6 +110,10 @@ class BasePlanner(ABC):
 
         self.device = self.robot.device
 
+    def default_plan_options(self) -> PlanOptions:
+        """Return planner-specific default runtime options."""
+        return PlanOptions()
+
     @validate_plan_options
     @abstractmethod
     def plan(

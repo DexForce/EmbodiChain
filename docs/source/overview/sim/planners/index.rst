@@ -21,7 +21,7 @@ The `embodichain` project provides a unified interface for robot trajectory plan
 
 - **MotionGenerator**: A unified trajectory planning interface that supports joint/Cartesian interpolation, automatic constraint handling, flexible planner selection, and is easily extensible for collision checking and additional planners.
 - **ToppraPlanner**: A time-optimal trajectory planner based on the TOPPRA library, supporting joint trajectory generation under velocity and acceleration constraints.
-- **NeuralPlanner** (experimental): A learning-based EEF waypoint planner for Franka Panda.
+- **NeuralPlanner**: An experimental neural motion generation backend for end-effector waypoint trajectories, backed by a trained waypoint-conditioned policy.
 - **TrajectorySampleMethod**: An enumeration for trajectory sampling strategies, supporting sampling by time, quantity, or distance.
 
 These tools can be used to generate smooth and dynamically feasible robot trajectories, and are extensible for future collision checking and various sampling requirements.

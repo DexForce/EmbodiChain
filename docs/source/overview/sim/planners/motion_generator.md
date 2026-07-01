@@ -1,11 +1,11 @@
 # MotionGenerator
 
-`MotionGenerator` provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. It is designed to work with different planners (such as ToppraPlanner) and can be extended to support collision checking in the future.
+`MotionGenerator` provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. It selects a backend planner from `MotionGenCfg.planner_cfg`, such as `ToppraPlanner` for joint waypoint time-parameterization or `NeuralPlanner` for experimental end-effector waypoint motion generation.
 
 ## Features
 
 * **Unified planning interface**: Supports trajectory planning with or without collision checking (collision checking is reserved for future implementation).
-* **Flexible planner selection**: Supports TOPPRA and NeuralPlanner (experimental).
+* **Flexible planner selection**: Allows selection of different planners through `planner_cfg.planner_type`.
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
 * **Supports both joint and Cartesian interpolation**: Generates discrete trajectories using either joint space or Cartesian space interpolation.
 * **Convenient sampling**: Supports various sampling strategies via `TrajectorySampleMethod`.
@@ -110,6 +110,43 @@ result = motion_gen.generate(
 )
 ```
 
+#### Neural EEF Waypoint Planning
+
+```python
+from embodichain.lab.sim.planners import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+    MoveType,
+    NeuralPlannerCfg,
+    PlanState,
+)
+
+motion_gen = MotionGenerator(
+    cfg=MotionGenCfg(
+        planner_cfg=NeuralPlannerCfg(
+            robot_uid="Franka",
+            checkpoint_path="/path/to/franka.pt",
+            control_part="main_arm",
+        )
+    )
+)
+
+target_states = [
+    PlanState(move_type=MoveType.EEF_MOVE, xpos=target_pose),
+]
+
+result = motion_gen.generate(
+    target_states=target_states,
+    options=MotionGenOptions(
+        control_part="main_arm",
+        start_qpos=start_qpos,
+    ),
+)
+```
+
+The neural backend only supports `EEF_MOVE` waypoint inputs and currently assumes a compatible 7-DoF checkpoint. It returns a policy rollout rather than a TOPPRA-constrained trajectory.
+
 #### Cartesian Space Planning
 
 ```python
@@ -178,8 +215,9 @@ print(f"Estimated sample count: {sample_count}")
 
 ## Notes
 
-* The planner type can be specified as a string or `PlannerType` enum.
+* The planner type is selected by `planner_cfg.planner_type`.
 * If the robot provides its own joint limits, those will be used; otherwise, default or user-specified limits are applied.
 * For Cartesian interpolation, inverse kinematics (IK) is used to compute joint configurations for each interpolated pose.
+* In atomic actions, the non-neural EEF path is IK plus joint interpolation. The neural planner is used only when the active planner type is `neural`.
 * The class is designed to be extensible for additional planners and collision checking in the future.
 * The sample count estimation is useful for predicting computational load and memory requirements.

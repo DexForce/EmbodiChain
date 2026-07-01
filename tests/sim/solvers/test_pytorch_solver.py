@@ -15,14 +15,13 @@
 # ----------------------------------------------------------------------------
 
 import os
+import math
 import torch
 import pytest
 import numpy as np
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
 from embodichain.data import get_data_path
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 from embodichain.utils.utility import reset_all_seeds
 
 
@@ -65,11 +64,79 @@ def grid_sample_qpos_from_limits(
     return stacked
 
 
+def _franka_tcp() -> list[list[float]]:
+    c = math.cos(-math.pi / 4)
+    s = math.sin(-math.pi / 4)
+    return [
+        [c, -s, 0.0, 0.0],
+        [s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.1034],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _pose_error(
+    target_pose: torch.Tensor, actual_pose: torch.Tensor
+) -> tuple[float, float]:
+    pos_error = float(torch.linalg.norm(actual_pose[:3, 3] - target_pose[:3, 3]))
+    target_quat = quat_from_matrix(target_pose[:3, :3].unsqueeze(0))
+    actual_quat = quat_from_matrix(actual_pose[:3, :3].unsqueeze(0))
+    rot_error = float(quat_error_magnitude(target_quat, actual_quat)[0])
+    return pos_error, rot_error
+
+
+def test_pytorch_solver_ik_respects_rotated_tcp():
+    """FK->IK->FK should remain accurate when TCP contains rotation."""
+    from embodichain.lab.sim.solvers.pytorch_solver import PytorchSolverCfg
+
+    urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
+    cfg = PytorchSolverCfg(
+        urdf_path=urdf,
+        joint_names=[
+            "Joint1",
+            "Joint2",
+            "Joint3",
+            "Joint4",
+            "Joint5",
+            "Joint6",
+            "Joint7",
+        ],
+        end_link_name="ee_link",
+        root_link_name="base_link",
+        tcp=_franka_tcp(),
+        num_samples=30,
+    )
+    solver = cfg.init_solver(device=torch.device("cpu"))
+    start_qpos = torch.tensor(
+        [0.0, -math.pi / 4, 0.0, -3.0 * math.pi / 4, 0.0, math.pi / 2, math.pi / 4],
+        dtype=torch.float32,
+    )
+    target_qpos = start_qpos + torch.tensor(
+        [0.12, -0.08, 0.10, 0.06, -0.07, 0.08, -0.05],
+        dtype=torch.float32,
+    )
+
+    target_pose = solver.get_fk(target_qpos.unsqueeze(0))[0]
+    success, ik_qpos = solver.get_ik(
+        target_pose.unsqueeze(0),
+        qpos_seed=start_qpos.unsqueeze(0),
+    )
+    final_pose = solver.get_fk(ik_qpos[:, 0, :])[0]
+    pos_error, rot_error = _pose_error(target_pose, final_pose)
+
+    assert success.all()
+    assert pos_error < 1e-3
+    assert rot_error < 5e-3
+
+
 # Base test class for CPU and CUDA
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
     def setup_simulation(self, solver_type: str):
+        from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+        from embodichain.lab.sim.cfg import RobotCfg
+
         # Set up simulation with specified device (CPU or CUDA)
         config = SimulationManagerCfg(headless=True, sim_device="cpu")
         self.sim = SimulationManager(config)
@@ -101,7 +168,7 @@ class BaseSolverTest:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
 
         # Wait for robot to stabilize.
         self.sim.update(step=100)

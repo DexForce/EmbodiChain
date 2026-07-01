@@ -23,8 +23,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from embodichain.lab.sim.planners import PlanState
+from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
+from embodichain.lab.sim.planners.neural_planner import NeuralPlanOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.utils import logger
@@ -320,6 +321,15 @@ class TrajectoryBuilder:
         arm_dof: int,
     ) -> tuple[bool, torch.Tensor]:
         """Plan batched arm trajectories for all environments."""
+        if self._uses_neural_planner():
+            return self._plan_arm_traj_with_neural_planner(
+                target_states_list,
+                start_qpos,
+                n_waypoints,
+                control_part=control_part,
+                arm_dof=arm_dof,
+            )
+
         n_envs = start_qpos.shape[0]
         n_state = len(target_states_list[0])
         xpos_traj = torch.zeros(
@@ -347,6 +357,142 @@ class TrajectoryBuilder:
         trajectory = torch.concatenate([start_qpos.unsqueeze(1), trajectory], dim=1)
         interp = interpolate_with_distance(
             trajectory=trajectory, interp_num=n_waypoints, device=self.device
+        )
+        return True, interp
+
+    def _uses_neural_planner(self) -> bool:
+        return self._active_planner_type() in ("neural", "neural_refine")
+
+    def _uses_neural_refine(self) -> bool:
+        return self._active_planner_type() == "neural_refine"
+
+    def _active_planner_type(self) -> str | None:
+        planner = getattr(self.motion_generator, "planner", None)
+        cfg = getattr(planner, "cfg", None)
+        return getattr(cfg, "planner_type", None)
+
+    def _empty_arm_traj(
+        self, n_envs: int, n_waypoints: int, arm_dof: int
+    ) -> torch.Tensor:
+        return torch.zeros(
+            (n_envs, n_waypoints, arm_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+    def _append_final_ik_refine(
+        self,
+        positions: torch.Tensor,
+        target_states: list[PlanState],
+        *,
+        env_idx: int,
+        control_part: str,
+        arm_dof: int,
+    ) -> tuple[bool, torch.Tensor]:
+        """Append an IK-snapped final waypoint for the last EEF target pose."""
+        final_target = target_states[-1]
+        if final_target.move_type != MoveType.EEF_MOVE or final_target.xpos is None:
+            logger.log_warning(
+                "Neural refine requires the final target state to be an EEF pose."
+            )
+            return False, positions
+
+        seed = positions[-1, :arm_dof].unsqueeze(0)
+        success, refined_qpos = self.robot.compute_ik(
+            pose=final_target.xpos.unsqueeze(0),
+            name=control_part,
+            joint_seed=seed,
+            env_ids=[env_idx],
+        )
+        if not self.all_envs_success(success):
+            logger.log_warning(
+                f"Neural refine failed to compute final IK for env {env_idx}."
+            )
+            return False, positions
+
+        refined_qpos = refined_qpos.to(device=self.device, dtype=torch.float32)
+        return True, torch.cat([positions, refined_qpos[:, :arm_dof]], dim=0)
+
+    def _plan_arm_traj_with_neural_planner(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+    ) -> tuple[bool, torch.Tensor]:
+        """Plan each env with NeuralPlanner, then resample to action waypoints."""
+        per_env_trajs = []
+        for env_idx, target_states in enumerate(target_states_list):
+            result = self.motion_generator.generate(
+                target_states=target_states,
+                options=MotionGenOptions(
+                    control_part=control_part,
+                    start_qpos=start_qpos[env_idx],
+                    plan_opts=NeuralPlanOptions(
+                        control_part=control_part,
+                        start_qpos=start_qpos[env_idx],
+                        env_id=env_idx,
+                    ),
+                ),
+            )
+            if not self.all_envs_success(result.success) or result.positions is None:
+                logger.log_warning(
+                    f"NeuralPlanner failed to plan arm trajectory for env {env_idx}."
+                )
+                return (
+                    False,
+                    self._empty_arm_traj(start_qpos.shape[0], n_waypoints, arm_dof),
+                )
+
+            positions = result.positions.to(device=self.device, dtype=torch.float32)
+            if positions.dim() == 3:
+                if positions.shape[0] != 1:
+                    logger.log_warning(
+                        "NeuralPlanner returned a batched trajectory for a single env "
+                        f"request: {positions.shape}."
+                    )
+                    return (
+                        False,
+                        self._empty_arm_traj(start_qpos.shape[0], n_waypoints, arm_dof),
+                    )
+                positions = positions.squeeze(0)
+            if positions.shape[-1] < arm_dof:
+                logger.log_warning(
+                    f"NeuralPlanner returned {positions.shape[-1]} joints, "
+                    f"but '{control_part}' expects {arm_dof}."
+                )
+                return (
+                    False,
+                    self._empty_arm_traj(start_qpos.shape[0], n_waypoints, arm_dof),
+                )
+            positions = positions[:, :arm_dof]
+            if self._uses_neural_refine():
+                ok, positions = self._append_final_ik_refine(
+                    positions,
+                    target_states,
+                    env_idx=env_idx,
+                    control_part=control_part,
+                    arm_dof=arm_dof,
+                )
+                if not ok:
+                    return (
+                        False,
+                        self._empty_arm_traj(start_qpos.shape[0], n_waypoints, arm_dof),
+                    )
+            per_env_trajs.append(positions)
+
+        raw_traj = torch.nn.utils.rnn.pad_sequence(
+            per_env_trajs, batch_first=True, padding_value=0.0
+        )
+        for env_idx, traj in enumerate(per_env_trajs):
+            raw_traj[env_idx, traj.shape[0] :] = traj[-1]
+
+        interp = interpolate_with_distance(
+            trajectory=raw_traj,
+            interp_num=n_waypoints,
+            device=self.device,
         )
         return True, interp
 
