@@ -16,8 +16,8 @@
 
 """Demonstrate dual-arm coordinated placement with bread and pan meshes.
 
-The left UR10 picks up bread. The right UR10 picks up a pan and moves it to the
-lower alignment pose. The left UR10 places the bread above the pan and releases
+The left UR5 picks up bread. The right UR5 picks up a pan and moves it to the
+lower alignment pose. The left UR5 places the bread above the pan and releases
 it while the right hand keeps holding the pan.
 """
 
@@ -68,11 +68,12 @@ from embodichain.lab.sim.planners import (
     ToppraPlannerCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_tutorial_window_size,
+    make_ur5_solver_cfg,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
@@ -105,7 +106,7 @@ def transform_baseline_pose(
     return tuple(float(value) for value in pos), tuple(float(value) for value in rot)
 
 
-ARM_URDF_PATH = "UniversalRobots/UR10/UR10.urdf"
+ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 SCRIPT_DIR = Path(__file__).resolve().parent
 TABLE_MESH_PATH = SCRIPT_DIR / "table.glb"
@@ -116,7 +117,7 @@ PAN_LABEL = "pan"
 GRIPPER_TCP_Z = 0.121
 PICK_SAMPLE_INTERVAL = 100
 COORDINATED_SAMPLE_INTERVAL = 120
-ROBOT_INIT_POS = (2.25, 0.0, 0.1)
+ROBOT_INIT_POS = (1.85, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
 RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
@@ -171,8 +172,9 @@ PAN_INIT_POS, PAN_INIT_ROT = transform_baseline_pose(
     world_yaw_correction_deg=PAN_WORLD_YAW_CORRECTION_DEG,
 )
 PAN_INIT_POS = (PAN_INIT_POS[0], PAN_INIT_POS[1], TABLE_TOP_Z + 0.001)
-PAN_TARGET_CENTER_XY = (-0.2, -0.04)
+PAN_TARGET_CENTER_XY = (-0.06, 0.0)
 PAN_TARGET_Z_LIFT = 0.06
+BREAD_PLACE_TARGET_OFFSET_XY = (-0.06, -0.16)
 BREAD_ON_PAN_CLEARANCE = 0.006
 BREAD_GRASP_Z_CLEARANCE = 0.018
 PAN_GRASP_Z_CLEARANCE = 0.0
@@ -294,18 +296,20 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
     return sim
 
 
-def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR10 robot with one PGI gripper on each arm."""
+def make_prefixed_ur5_solver_cfg(prefix: str) -> URSolverCfg:
+    """Create a UR5 solver cfg for a prefixed arm in the assembled robot."""
+    cfg = make_ur5_solver_cfg(GRIPPER_TCP_Z)
+    cfg.root_link_name = f"{prefix}_base_link"
+    cfg.end_link_name = f"{prefix}_ee_link"
+    return cfg
+
+
+def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
+    """Create a dual-UR5 robot with one PGI gripper on each arm."""
     arm_urdf_path = get_cached_data_path(ARM_URDF_PATH)
     gripper_urdf_path = get_cached_data_path(GRIPPER_URDF_PATH)
-    tcp = [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
     cfg = RobotCfg(
-        uid="DualUR10CoordinatedPlacement",
+        uid="DualUR5CoordinatedPlacement",
         urdf_cfg=URDFCfg(
             components=[
                 {
@@ -321,7 +325,7 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
                 {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
                 {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
             ],
-            fname="dual_ur10_coordinated_placement",
+            fname="dual_ur5_coordinated_placement",
         ),
         drive_pros=JointDrivePropertiesCfg(
             stiffness={
@@ -352,18 +356,8 @@ def create_dual_ur10_robot(sim: SimulationManager) -> Robot:
             "right_hand": ["RIGHT_GRIPPER_FINGER1_JOINT_1"],
         },
         solver_cfg={
-            "left_arm": PytorchSolverCfg(
-                end_link_name="left_ee_link",
-                root_link_name="left_base_link",
-                tcp=tcp,
-                num_samples=30,
-            ),
-            "right_arm": PytorchSolverCfg(
-                end_link_name="right_ee_link",
-                root_link_name="right_base_link",
-                tcp=tcp,
-                num_samples=30,
-            ),
+            "left_arm": make_prefixed_ur5_solver_cfg("left"),
+            "right_arm": make_prefixed_ur5_solver_cfg("right"),
         },
         init_pos=list(ROBOT_INIT_POS),
         init_rot=list(ROBOT_INIT_ROT),
@@ -406,7 +400,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=10.0,
             ),
-            body_scale=(2.0, 2.0, 2.0),
+            body_scale=(1.75, 1.75, 1.75),
             max_convex_hull_num=8,
             init_pos=list(BREAD_INIT_POS),
             init_rot=list(BREAD_INIT_ROT),
@@ -433,7 +427,7 @@ def create_pan(sim: SimulationManager) -> RigidObject:
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
             ),
-            body_scale=(2.0, 2.0, 2.0),
+            body_scale=(1.75, 1.75, 1.75),
             max_convex_hull_num=16,
             init_pos=list(PAN_INIT_POS),
             init_rot=list(PAN_INIT_ROT),
@@ -675,8 +669,8 @@ def build_placing_object_target_pose(
         pan_basin_world[:, :2].min(dim=0).values
         + pan_basin_world[:, :2].max(dim=0).values
     )
-    pose[0, 3] = basin_center_xy[0]
-    pose[1, 3] = basin_center_xy[1]
+    pose[0, 3] = basin_center_xy[0] + BREAD_PLACE_TARGET_OFFSET_XY[0]
+    pose[1, 3] = basin_center_xy[1] + BREAD_PLACE_TARGET_OFFSET_XY[1]
     pan_top_z = pan_basin_world[:, 2].max()
     bread_bottom_z = compute_world_bounds(pose, bread_vertices)[0][2]
     pose[2, 3] += pan_top_z + BREAD_ON_PAN_CLEARANCE - bread_bottom_z
@@ -1200,7 +1194,7 @@ def main() -> None:
     """Run the coordinated placement demo."""
     args = parse_arguments()
     sim = initialize_simulation(args)
-    robot = create_dual_ur10_robot(sim)
+    robot = create_dual_ur5_robot(sim)
     run_coordinated_placement_demo(args, sim, robot)
 
 
