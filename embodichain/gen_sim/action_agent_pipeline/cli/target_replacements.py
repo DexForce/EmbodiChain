@@ -44,37 +44,48 @@ def resolve_target_replacements(
 ) -> list[object]:
     replacements = []
     alias_config = None
-    if args.target_replacement1:
+    generic_replacements = list(getattr(args, "target_replacement", []) or [])
+    legacy_replacements = [
+        (index, values)
+        for index, values in (
+            (1, getattr(args, "target_replacement1", None)),
+            (2, getattr(args, "target_replacement2", None)),
+        )
+        if values
+    ]
+    if generic_replacements and legacy_replacements:
+        raise ValueError(
+            "Use either repeated --target-replacement or legacy "
+            "--target-replacement1/2, not both."
+        )
+
+    replacement_values = (
+        list(enumerate(generic_replacements, start=1))
+        if generic_replacements
+        else legacy_replacements
+    )
+    for index, values in replacement_values:
         alias_config = alias_config or _load_replacement_alias_config(gym_project)
         source_uid, prompt = _resolve_target_replacement_arg(
-            args.target_replacement1,
+            values,
             alias_config,
-            option_name="--target_replacement1",
-            replacement_number=1,
+            option_name=_replacement_option_name(generic_replacements, index),
+            replacement_number=index,
         )
         replacements.append(
             target_replacement_spec_cls(
                 source_uid=source_uid,
                 prompt=prompt,
-                output_dir_name="new1",
-            )
-        )
-    if args.target_replacement2:
-        alias_config = alias_config or _load_replacement_alias_config(gym_project)
-        source_uid, prompt = _resolve_target_replacement_arg(
-            args.target_replacement2,
-            alias_config,
-            option_name="--target_replacement2",
-            replacement_number=2,
-        )
-        replacements.append(
-            target_replacement_spec_cls(
-                source_uid=source_uid,
-                prompt=prompt,
-                output_dir_name="new2",
+                output_dir_name=f"new{index}",
             )
         )
     return replacements
+
+
+def _replacement_option_name(generic_replacements: list[list[str]], index: int) -> str:
+    if generic_replacements:
+        return f"--target_replacement[{index}]"
+    return f"--target_replacement{index}"
 
 
 def _resolve_target_replacement_arg(
@@ -146,9 +157,6 @@ def _auto_replacement_source_uid(
     replacement_number: int,
     option_name: str,
 ) -> str:
-    if replacement_number not in {1, 2}:
-        raise ValueError(f"Unsupported replacement number: {replacement_number}")
-
     duplicate_groups = _duplicated_numbered_rigid_object_groups(gym_config)
     if len(duplicate_groups) != 1:
         candidates = _format_duplicate_group_candidates(duplicate_groups)
@@ -160,18 +168,17 @@ def _auto_replacement_source_uid(
         )
 
     base_name, positioned_objects = duplicate_groups[0]
-    if len(positioned_objects) != 2:
+    if replacement_number > len(positioned_objects):
         candidates = _format_duplicate_group_candidates(duplicate_groups)
         raise ValueError(
-            f"{option_name} auto-selection requires exactly two objects in the "
-            f"duplicated group {base_name!r}, found {len(positioned_objects)}: "
+            f"{option_name} auto-selection requested replacement #{replacement_number} "
+            f"from duplicated group {base_name!r}, but only found "
+            f"{len(positioned_objects)} object(s): "
             f"{candidates}. Use SOURCE_UID PROMPT to disambiguate."
         )
 
-    if (
-        abs(float(positioned_objects[0]["y"]) - float(positioned_objects[1]["y"]))
-        < 1e-9
-    ):
+    y_values = [float(item["y"]) for item in positioned_objects]
+    if len({round(value, 9) for value in y_values}) != len(y_values):
         candidates = _format_duplicate_group_candidates(duplicate_groups)
         raise ValueError(
             f"{option_name} auto-selection requires distinct y coordinates in "

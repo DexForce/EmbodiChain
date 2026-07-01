@@ -42,7 +42,23 @@ from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
     resolve_target_replacements,
 )
 
-__all__ = ["run_pipeline"]
+__all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
+
+PIPELINE_RUNNER_REQUIRED_ARGS = (
+    "config_output_dir",
+    "overwrite_config",
+    "prewarm_coacd_cache",
+    "prompt2scene_mesh_x_rotation_degrees",
+    "prompt2scene_scene_z_rotation_degrees",
+    "regenerate",
+    "reuse_target_replacements",
+    "skip_run_agent",
+    "sync_replacement_names",
+    "target_body_scale",
+    "target_body_scale_mode",
+    "task_description",
+    "task_name",
+)
 
 
 def run_pipeline(args: argparse.Namespace) -> int:

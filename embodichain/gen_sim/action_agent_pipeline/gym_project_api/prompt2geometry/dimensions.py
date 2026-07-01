@@ -71,9 +71,11 @@ def estimate_real_dimensions(
     *,
     object_prompt: str,
     client: OpenAICompatibleClient,
-    max_attempts: int | None = None,
+    max_attempts: int = 3,
 ) -> dict[str, Any]:
     """Estimate real-world object dimensions with schema validation and retry."""
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1.")
     messages = [
         {"role": "system", "content": DIMENSION_ESTIMATION_SYSTEM_PROMPT},
         {
@@ -85,18 +87,19 @@ def estimate_real_dimensions(
             ),
         },
     ]
-    attempt = 1
-    while max_attempts is None or attempt <= max_attempts:
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
         try:
             raw = client.chat_json(messages=messages)
             return _validate_dimension_output(raw)
-        except Exception:
-            attempt += 1
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
             time.sleep(1.0)
-            continue
     raise ValueError(
         "Failed to estimate object dimensions after " f"{max_attempts} attempts."
-    )
+    ) from last_error
 
 
 def _validate_dimension_output(raw: dict[str, Any]) -> dict[str, Any]:

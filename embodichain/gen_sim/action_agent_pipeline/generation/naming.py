@@ -55,6 +55,9 @@ _CONTAINER_KEYWORDS = (
     "tray",
     "crate",
 )
+_DEFAULT_CONTAINER_RUNTIME_UID_ALIASES = {
+    "basket": "wicker_basket",
+}
 
 
 def _target_noun(left_target: _SceneObject, right_target: _SceneObject) -> str:
@@ -86,10 +89,21 @@ def _target_runtime_suffix(base: str) -> str:
     return base
 
 
-def _container_runtime_uid(container: _SceneObject) -> str:
+def _container_runtime_uid(
+    container: _SceneObject,
+    aliases: dict[str, str] | None = None,
+) -> str:
+    """Return the runtime UID for the task container.
+
+    The default aliases preserve legacy basket prompts, where any source name
+    containing ``basket`` is exposed to the agent as ``wicker_basket``.
+    """
     base = _base_name(container)
-    if "basket" in base:
-        return "wicker_basket"
+    for keyword, runtime_uid in (
+        aliases or _DEFAULT_CONTAINER_RUNTIME_UID_ALIASES
+    ).items():
+        if keyword in base:
+            return runtime_uid
     return f"target_{base}"
 
 

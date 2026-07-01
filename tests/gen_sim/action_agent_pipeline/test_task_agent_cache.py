@@ -18,9 +18,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from embodichain.gen_sim.action_agent_pipeline.agents import (
     task_agent as task_agent_module,
 )
+from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
+from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import CompileAgent
 from embodichain.gen_sim.action_agent_pipeline.agents.task_agent import TaskAgent
 
 
@@ -88,3 +92,37 @@ def test_task_agent_cache_hashes_prompt_value_objects(tmp_path, monkeypatch) -> 
     agent.generate(log_dir=tmp_path, task="a")
 
     assert llm.calls == 1
+
+
+def test_compile_agent_uses_base_prompt_loading(tmp_path) -> None:
+    config_path = tmp_path / "agent_config.json"
+    prompt_path = tmp_path / "compile_prompt.txt"
+    prompt_path.write_text("compile instructions", encoding="utf-8")
+
+    agent = CompileAgent(
+        prompt_kwargs={
+            "compile_prompt": {
+                "type": "text",
+                "name": prompt_path.name,
+            }
+        },
+        task_name="UnitTask",
+        config_dir=str(config_path),
+    )
+
+    composed = agent.get_composed_observations(task_graph="{}")
+
+    assert composed["compile_prompt"] == "compile instructions"
+    assert composed["task_graph"] == "{}"
+
+
+def test_agent_base_requires_prompt_kwargs() -> None:
+    class ConcreteAgent(AgentBase):
+        def generate(self, *args, **kwargs):
+            return None
+
+        def act(self, *args, **kwargs):
+            return None
+
+    with pytest.raises(ValueError, match="prompt_kwargs"):
+        ConcreteAgent(task_name="UnitTask")

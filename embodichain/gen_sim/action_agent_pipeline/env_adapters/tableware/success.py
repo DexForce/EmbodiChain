@@ -160,9 +160,12 @@ def _object_in_container(env, spec: Mapping[str, Any]) -> torch.Tensor:
     )
     z_offset = object_position[:, 2] - container_position[:, 2]
     return (
-        (xy_distance <= float(spec.get("xy_radius", spec.get("radius", 0.1))))
-        & (z_offset >= float(spec.get("min_z_offset", -0.03)))
-        & (z_offset <= float(spec.get("max_z_offset", 0.25)))
+        (
+            xy_distance
+            <= float(_success_default(env, spec, "xy_radius", spec.get("radius", 0.1)))
+        )
+        & (z_offset >= float(_success_default(env, spec, "min_z_offset", -0.03)))
+        & (z_offset <= float(_success_default(env, spec, "max_z_offset", 0.25)))
     )
 
 
@@ -183,9 +186,12 @@ def _object_on_object(env, spec: Mapping[str, Any]) -> torch.Tensor:
     )
     z_offset = object_position[:, 2] - support_position[:, 2]
     return (
-        (xy_distance <= float(spec.get("xy_radius", spec.get("radius", 0.08))))
-        & (z_offset >= float(spec.get("min_z_offset", 0.02)))
-        & (z_offset <= float(spec.get("max_z_offset", 0.35)))
+        (
+            xy_distance
+            <= float(_success_default(env, spec, "xy_radius", spec.get("radius", 0.08)))
+        )
+        & (z_offset >= float(_success_default(env, spec, "min_z_offset", 0.02)))
+        & (z_offset <= float(_success_default(env, spec, "max_z_offset", 0.35)))
     )
 
 
@@ -226,7 +232,11 @@ def _object_lifted(env, spec: Mapping[str, Any]) -> torch.Tensor:
     if initial_height is None:
         initial_height = getattr(env, "obj_info", {}).get(object_name, {}).get("height")
     if initial_height is None:
-        initial_height = position[:, 2]
+        raise ValueError(
+            "Success term object_lifted requires an initial height for "
+            f"{object_name!r}. Provide `initial_height` in the spec or call "
+            "env.update_obj_info() during reset."
+        )
     initial_height = _tensor(
         initial_height,
         dtype=position.dtype,
@@ -304,3 +314,17 @@ def _axis_index(axis: str) -> int:
     if axis not in axes:
         raise ValueError(f"Unsupported axis {axis!r}; expected one of x, y, z.")
     return axes[axis]
+
+
+def _success_default(
+    env,
+    spec: Mapping[str, Any],
+    key: str,
+    fallback: Any,
+) -> Any:
+    if key in spec:
+        return spec[key]
+    defaults = getattr(env, "agent_success_defaults", {}) or {}
+    if isinstance(defaults, Mapping) and key in defaults:
+        return defaults[key]
+    return fallback

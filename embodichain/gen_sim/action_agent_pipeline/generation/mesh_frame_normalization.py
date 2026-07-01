@@ -123,11 +123,13 @@ class MeshFrameNormalizer:
         cached = self._results_by_source.get(path)
         if cached is not None:
             if cached.normalized_path.is_file():
-                material_spec = self._material_spec_for(
-                    path,
-                    cached.normalized_path,
-                    cached.source_sha256,
-                )
+                material_spec = self._cached_material_spec_for(cached.normalized_path)
+                if material_spec is None:
+                    material_spec = self._material_spec_for_source(
+                        path,
+                        cached.normalized_path,
+                        cached.source_sha256,
+                    )
                 _repair_obj_material_reference(
                     cached.normalized_path,
                     material_spec.name,
@@ -137,9 +139,13 @@ class MeshFrameNormalizer:
 
         source_sha256 = _file_sha256(path)
         normalized_path = self._normalized_path_for(path, source_sha256)
-        material_spec = self._material_spec_for(path, normalized_path, source_sha256)
         status = "reused" if normalized_path.is_file() else "generated"
         if status == "generated":
+            material_spec = self._material_spec_for_source(
+                path,
+                normalized_path,
+                source_sha256,
+            )
             self._write_normalized_obj(
                 path,
                 normalized_path,
@@ -147,6 +153,13 @@ class MeshFrameNormalizer:
                 material_spec,
             )
         else:
+            material_spec = self._cached_material_spec_for(normalized_path)
+            if material_spec is None:
+                material_spec = self._material_spec_for_source(
+                    path,
+                    normalized_path,
+                    source_sha256,
+                )
             _repair_obj_material_reference(normalized_path, material_spec.name)
             self._ensure_material_library({material_spec.name: material_spec})
 
@@ -185,7 +198,16 @@ class MeshFrameNormalizer:
     def _texture_dir(self) -> Path:
         return self.output_dir / "textures"
 
-    def _material_spec_for(
+    def _cached_material_spec_for(self, normalized_path: Path) -> _MaterialSpec | None:
+        material_name = f"material_{_material_hash_for(normalized_path)}"
+        spec = _read_material_specs(self._material_path()).get(material_name)
+        if spec is None:
+            return None
+        if spec.texture_path and not (self.output_dir / spec.texture_path).is_file():
+            return None
+        return spec
+
+    def _material_spec_for_source(
         self,
         source_path: Path,
         normalized_path: Path,

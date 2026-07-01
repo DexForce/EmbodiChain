@@ -77,15 +77,15 @@ def load_prompt2geometry_config(
         ),
         llm_api_key=_env_or_config(
             "PROMPT2GEOMETRY_LLM_API_KEY",
-            str(shared_llm.get("api_key") or llm.get("api_key", "")),
+            _optional_config_string(shared_llm.get("api_key") or llm.get("api_key")),
         ),
         llm_model=_env_or_config(
             "PROMPT2GEOMETRY_LLM_MODEL",
-            str(shared_llm.get("model") or llm.get("model", "")),
+            _optional_config_string(shared_llm.get("model") or llm.get("model")),
         ),
         llm_base_url=_env_or_config(
             "PROMPT2GEOMETRY_LLM_BASE_URL",
-            str(shared_llm.get("base_url") or llm.get("base_url", "")),
+            _optional_config_string(shared_llm.get("base_url") or llm.get("base_url")),
         ).rstrip("/"),
         llm_timeout_s=float(
             os.getenv("PROMPT2GEOMETRY_LLM_TIMEOUT_S") or llm.get("timeout_s", 120.0)
@@ -95,11 +95,17 @@ def load_prompt2geometry_config(
 
 def _service_base_url(services: dict[str, Any], name: str) -> str:
     section = _mapping(services.get(name), f"services.{name}")
-    return str(section.get("base_url", "")).rstrip("/")
+    return _optional_config_string(section.get("base_url")).rstrip("/")
 
 
 def _env_or_config(env_name: str, config_value: str) -> str:
     return str(os.getenv(env_name) or config_value).strip()
+
+
+def _optional_config_string(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:

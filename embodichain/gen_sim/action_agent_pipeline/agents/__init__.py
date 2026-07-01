@@ -16,9 +16,14 @@
 
 from __future__ import annotations
 
+from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
+from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import CompileAgent
+from embodichain.gen_sim.action_agent_pipeline.agents.llm import create_llm
+from embodichain.gen_sim.action_agent_pipeline.agents.task_agent import TaskAgent
+
 __all__ = [
-    "agent_base",
-    "compile_agent",
-    "llm",
-    "task_agent",
+    "AgentBase",
+    "TaskAgent",
+    "CompileAgent",
+    "create_llm",
 ]

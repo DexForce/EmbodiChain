@@ -23,6 +23,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config im
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
 )
+from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
+    resolve_target_replacements,
+)
 
 __all__ = ["cli"]
 
@@ -149,25 +152,42 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--target_replacement",
+        "--target-replacement",
+        dest="target_replacement",
+        action="append",
+        nargs="+",
+        metavar="SOURCE_OR_PROMPT",
+        default=[],
+        help=(
+            "Generate one replacement foreground interactive object. Repeat for "
+            "0-N replacements. Accepts either PROMPT for auto-selection from "
+            "numbered rigid_object targets, or SOURCE_UID PROMPT for explicit "
+            "selection."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement1",
         "--target-replacement1",
-        nargs=2,
-        metavar=("SOURCE_UID", "PROMPT"),
+        nargs="+",
+        metavar="SOURCE_OR_PROMPT",
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new1 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config."
+            "to replace SOURCE_UID in the generated config. PROMPT alone "
+            "auto-selects the first numbered foreground rigid object."
         ),
     )
     parser.add_argument(
         "--target_replacement2",
         "--target-replacement2",
-        nargs=2,
-        metavar=("SOURCE_UID", "PROMPT"),
+        nargs="+",
+        metavar="SOURCE_OR_PROMPT",
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new2 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config."
+            "to replace SOURCE_UID in the generated config. PROMPT alone "
+            "auto-selects the second numbered foreground rigid object."
         ),
     )
     parser.add_argument(
@@ -278,26 +298,9 @@ def _resolve_task_description(args: argparse.Namespace) -> str | None:
 def _resolve_target_replacements(
     args: argparse.Namespace,
 ) -> list[TargetReplacementSpec]:
-    replacements = []
-    if args.target_replacement1:
-        source_uid, prompt = args.target_replacement1
-        replacements.append(
-            TargetReplacementSpec(
-                source_uid=source_uid,
-                prompt=prompt,
-                output_dir_name="new1",
-            )
-        )
-    if args.target_replacement2:
-        source_uid, prompt = args.target_replacement2
-        replacements.append(
-            TargetReplacementSpec(
-                source_uid=source_uid,
-                prompt=prompt,
-                output_dir_name="new2",
-            )
-        )
-    return replacements
+    return resolve_target_replacements(
+        args, TargetReplacementSpec, Path(args.gym_project)
+    )
 
 
 if __name__ == "__main__":

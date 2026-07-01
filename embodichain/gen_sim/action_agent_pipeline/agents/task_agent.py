@@ -27,6 +27,7 @@ from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
 )
 from embodichain.gen_sim.action_agent_pipeline.prompts import TaskPrompt
 from embodichain.data import database_agent_prompt_dir
+from embodichain.utils.logger import log_info
 from embodichain.utils.utility import load_txt
 
 __all__ = ["TaskAgent"]
@@ -40,7 +41,7 @@ class TaskAgent(AgentBase):
     prompt_name: str
     prompt_kwargs: dict[str, dict[str, Any]]
 
-    def __init__(self, llm, **kwargs) -> None:
+    def __init__(self, llm: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if llm is None:
             raise ValueError(
@@ -70,11 +71,11 @@ class TaskAgent(AgentBase):
                 task_name=self.task_name,
             )
         ):
-            print(f"Task graph already exists at {file_path}.")
+            log_info(f"Task graph already exists at {file_path}.")
             return load_txt(file_path)
 
         response = self.llm.invoke(prompt)
-        print(f"\033[92m\nTask agent output:\n{response.content}\n\033[0m")
+        log_info(f"Task agent output:\n{response.content}", color="green")
 
         content = normalize_json_content(response.content)
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,12 +86,12 @@ class TaskAgent(AgentBase):
             prompt_name=self.prompt_name,
             task_name=self.task_name,
         )
-        print(f"Generated task graph saved to {file_path}")
+        log_info(f"Generated task graph saved to {file_path}")
 
         return content
 
-    def act(self, *args, **kwargs):
-        return super().act(*args, **kwargs)
+    def act(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("TaskAgent only generates task graphs.")
 
 
 def _stable_text_hash(content: Any) -> str:

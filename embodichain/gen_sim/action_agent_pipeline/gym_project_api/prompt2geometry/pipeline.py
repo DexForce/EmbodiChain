@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     from .dimensions import estimate_real_dimensions
@@ -45,6 +46,26 @@ except ImportError:
     from zimage_client import ZImageClient
 
 __all__ = ["Prompt2GeometryRequest", "run_prompt2geometry"]
+
+_GENERATED_OUTPUT_NAMES = (
+    "prompt2geometry_request.json",
+    "zimage",
+    "sam3_health.json",
+    "sam3_box_segmentation_request.json",
+    "sam3_progress.jsonl",
+    "sam3_segmentation_result.json",
+    "segment_box",
+    "sam3_local_outputs.json",
+    "mask_correction",
+    "sam3d",
+    "sam3d_health.json",
+    "sam3d_generation_request.json",
+    "sam3d_progress.jsonl",
+    "sam3d_generation_result.json",
+    "dimension_estimation.json",
+    "mesh_scaling_report.json",
+    "prompt2geometry_result.json",
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +90,7 @@ class Prompt2GeometryRequest:
     llm_model: str | None = None
     llm_base_url: str | None = None
     llm_timeout_s: float = 120.0
+    cleanup_intermediates: bool = True
     verbose: bool = True
 
 
@@ -76,6 +98,7 @@ def run_prompt2geometry(request: Prompt2GeometryRequest) -> dict[str, Any]:
     """Run z-image, SAM3 segmentation, and SAM3D generation."""
     output_root = request.output_root.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    preexisting_paths = _snapshot_output_root_entries(output_root)
     final_glb_path: Path | None = None
     success = False
     try:
@@ -140,7 +163,12 @@ def run_prompt2geometry(request: Prompt2GeometryRequest) -> dict[str, Any]:
         _log_status(request, "done", f"final_glb={final_glb_path}")
         return manifest
     finally:
-        _cleanup_output_root(output_root, keep_path=final_glb_path if success else None)
+        if request.cleanup_intermediates:
+            _cleanup_output_root(
+                output_root,
+                keep_path=final_glb_path if success else None,
+                preexisting_paths=preexisting_paths,
+            )
 
 
 def _generate_image(
@@ -372,6 +400,12 @@ def _required_service_base_url(
         raise ValueError(
             f"Missing Prompt2Geometry {service_name} base URL. Set {source}."
         )
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            f"Prompt2Geometry {service_name} base URL must be an http(s) URL, "
+            f"got {base_url!r}."
+        )
     return base_url
 
 
@@ -421,15 +455,45 @@ def _llm_client_from_request(
     )
 
 
-def _cleanup_output_root(output_root: Path, *, keep_path: Path | None) -> None:
+def _snapshot_output_root_entries(output_root: Path) -> set[Path]:
+    return {
+        child.resolve(strict=False)
+        for child in output_root.iterdir()
+        if child.exists() or child.is_symlink()
+    }
+
+
+def _cleanup_output_root(
+    output_root: Path,
+    *,
+    keep_path: Path | None,
+    preexisting_paths: set[Path] | None = None,
+) -> None:
     output_root = output_root.expanduser().resolve()
     keep_path = keep_path.expanduser().resolve() if keep_path is not None else None
+    if keep_path is not None and not keep_path.is_relative_to(output_root):
+        raise ValueError(f"keep_path must be under output_root: {keep_path}")
     if keep_path is not None and not keep_path.is_file():
         keep_path = None
-    for child in output_root.iterdir():
-        if keep_path is not None and child.resolve() == keep_path:
+    preexisting_paths = preexisting_paths or set()
+
+    for name in _GENERATED_OUTPUT_NAMES:
+        child = output_root / name
+        if not child.exists() and not child.is_symlink():
             continue
-        if child.is_dir() and not child.is_symlink():
+        child_resolved = child.resolve(strict=False)
+        if child_resolved in preexisting_paths:
+            continue
+        if keep_path is not None and child_resolved == keep_path:
+            continue
+        if child.is_symlink():
+            target = child.resolve(strict=False)
+            if not target.is_relative_to(output_root):
+                continue
+            child.unlink()
+        elif child.is_dir():
+            if not child_resolved.is_relative_to(output_root):
+                continue
             shutil.rmtree(child)
         else:
             child.unlink()
@@ -517,6 +581,7 @@ def _request_manifest(request: Prompt2GeometryRequest) -> dict[str, Any]:
         "llm_base_url": request.llm_base_url,
         "has_llm_api_key": bool(request.llm_api_key),
         "llm_timeout_s": request.llm_timeout_s,
+        "cleanup_intermediates": request.cleanup_intermediates,
         "verbose": request.verbose,
     }
 

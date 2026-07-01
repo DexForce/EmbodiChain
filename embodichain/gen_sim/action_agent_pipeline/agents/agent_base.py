@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
-from abc import ABCMeta
+from abc import ABCMeta, abstractmethod
 import os
+from typing import Any
 
 from embodichain.utils.utility import load_txt
 
@@ -60,9 +61,8 @@ def _resolve_prompt_path(file_name: str, config_dir: str | None = None) -> str:
 class AgentBase(metaclass=ABCMeta):
     def __init__(self, **kwargs) -> None:
 
-        assert (
-            "prompt_kwargs" in kwargs.keys()
-        ), "Key prompt_kwargs must exist in config."
+        if "prompt_kwargs" not in kwargs:
+            raise ValueError("Agent config must include `prompt_kwargs`.")
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -82,13 +82,15 @@ class AgentBase(metaclass=ABCMeta):
                     f"Now only support `text` type but {val['type']} is given."
                 )
 
-    def generate(self, *args, **kwargs):
-        pass
+    @abstractmethod
+    def generate(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError
 
-    def act(self, *args, **kwargs):
-        pass
+    @abstractmethod
+    def act(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError
 
-    def get_composed_observations(self, **kwargs):
+    def get_composed_observations(self, **kwargs: Any) -> dict[str, Any]:
         ret = {}
         for key, val in self.prompt_kwargs.items():
             ret[key] = val["content"]

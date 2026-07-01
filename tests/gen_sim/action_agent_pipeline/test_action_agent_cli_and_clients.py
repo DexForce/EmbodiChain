@@ -27,6 +27,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
+    _require_server,
     wait_for_job,
 )
 
@@ -38,6 +39,11 @@ _ACTION_AGENT_PACKAGE_ROOT = (
 def test_image2tabletop_wait_for_job_times_out_without_polling() -> None:
     with pytest.raises(TimeoutError, match="did not complete"):
         wait_for_job("http://example.test", "job-1", poll_interval=0.1, timeout_s=0.0)
+
+
+def test_image2tabletop_server_requires_http_scheme() -> None:
+    with pytest.raises(ValueError, match="http\\(s\\) URL"):
+        _require_server("localhost:4523")
 
 
 def test_action_agent_config_cli_imports() -> None:
@@ -90,6 +96,136 @@ def test_glb_io_is_shared_by_generation_modules() -> None:
 
     assert action_agent_config.read_glb is glb_io.read_glb
     assert mesh_frame_normalization.read_glb is glb_io.read_glb
+
+
+def test_gltf_normalized_accessor_components_are_scaled() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+        _iter_gltf_accessor_vec3,
+    )
+
+    doc = {
+        "bufferViews": [{"buffer": 0, "byteOffset": 0}],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "componentType": 5121,
+                "type": "VEC3",
+                "count": 2,
+                "normalized": True,
+            }
+        ],
+    }
+    vertices = list(
+        _iter_gltf_accessor_vec3(
+            doc,
+            bytes([0, 127, 255, 255, 0, 127]),
+            0,
+        )
+    )
+
+    assert vertices[0] == pytest.approx((0.0, 127.0 / 255.0, 1.0))
+    assert vertices[1] == pytest.approx((1.0, 0.0, 127.0 / 255.0))
+
+
+def test_prompt2geometry_cleanup_only_removes_new_known_outputs(tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.gym_project_api.prompt2geometry.pipeline import (
+        _cleanup_output_root,
+        _snapshot_output_root_entries,
+    )
+
+    output_root = tmp_path / "prompt2geometry"
+    output_root.mkdir()
+    preexisting_dir = output_root / "zimage"
+    preexisting_dir.mkdir()
+    (preexisting_dir / "keep.txt").write_text("keep", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_link = output_root / "sam3d"
+    outside_link.symlink_to(outside, target_is_directory=True)
+    preexisting = _snapshot_output_root_entries(output_root)
+
+    request_path = output_root / "prompt2geometry_request.json"
+    request_path.write_text("{}", encoding="utf-8")
+    result_path = output_root / "apple.glb"
+    result_path.write_text("glb", encoding="utf-8")
+
+    _cleanup_output_root(
+        output_root,
+        keep_path=result_path,
+        preexisting_paths=preexisting,
+    )
+
+    assert result_path.is_file()
+    assert (preexisting_dir / "keep.txt").is_file()
+    assert outside.is_dir()
+    assert outside_link.is_symlink()
+    assert not request_path.exists()
+
+
+def test_dimension_estimation_uses_finite_retry(monkeypatch) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.gym_project_api.prompt2geometry.dimensions import (
+        estimate_real_dimensions,
+    )
+
+    class BadClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat_json(self, *, messages):
+            self.calls += 1
+            return {"length_m": -1}
+
+    client = BadClient()
+    monkeypatch.setattr(
+        "embodichain.gen_sim.action_agent_pipeline.gym_project_api.prompt2geometry.dimensions.time.sleep",
+        lambda _: None,
+    )
+
+    with pytest.raises(ValueError, match="after 3 attempts"):
+        estimate_real_dimensions(object_prompt="apple", client=client)
+
+    assert client.calls == 3
+
+
+def test_prompt2geometry_config_does_not_stringify_none_llm_values(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.gym_project_api.prompt2geometry import (
+        config as prompt2geometry_config,
+    )
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "zimage": {"base_url": "http://zimage.test"},
+                    "sam3": {"base_url": "http://sam3.test"},
+                    "sam3d": {"base_url": "http://sam3d.test"},
+                },
+                "llm": {
+                    "openai_compatible": {
+                        "api_key": None,
+                        "model": None,
+                        "base_url": None,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        prompt2geometry_config,
+        "get_openai_compatible_llm_config",
+        lambda **kwargs: {},
+    )
+
+    cfg = prompt2geometry_config.load_prompt2geometry_config(config_path)
+
+    assert cfg.llm_api_key == ""
+    assert cfg.llm_model == ""
+    assert cfg.llm_base_url == ""
 
 
 def test_coacd_cache_generation_uses_obj_suffixed_temp_path(

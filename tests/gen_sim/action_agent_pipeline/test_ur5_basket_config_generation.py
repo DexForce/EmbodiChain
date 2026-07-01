@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import base64
 import hashlib
 import json
@@ -45,6 +46,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalizati
 from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking import (
     BODY_SCALE_BAKE_POLICY_VERSION,
     bake_body_scale_into_meshes,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
+    _make_observations_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
@@ -120,6 +124,19 @@ def test_dual_ur5_template_deserializes_to_ur5_solver_cfg() -> None:
         assert solver_cfg.a2 == pytest.approx(-0.425)
         assert solver_cfg.a3 == pytest.approx(-0.39225)
         assert solver_cfg.tcp[2][3] == pytest.approx(0.16)
+
+
+def test_observation_joint_ids_derive_from_dual_ur5_robot_config() -> None:
+    robot = make_dual_ur5_robot_config(robot_init_z=0.42)
+
+    observations = _make_observations_config(robot)
+
+    assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
+        12,
+        13,
+        14,
+        15,
+    ]
 
 
 def test_action_agent_config_generator_uses_parallel_handoff(
@@ -599,6 +616,48 @@ def test_pipeline_auto_replacement_uses_rotated_robot_view_order() -> None:
         )
         == "bread_2"
     )
+
+
+def test_target_replacements_accept_repeated_zero_to_n_objects(tmp_path: Path) -> None:
+    project_dir = tmp_path / "gym_project"
+    project_dir.mkdir()
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(
+            {
+                "rigid_object": [
+                    {"uid": "bread_1", "init_pos": [0.0, 0.2, 0.76]},
+                    {"uid": "bread_2", "init_pos": [0.0, 0.0, 0.76]},
+                    {"uid": "bread_3", "init_pos": [0.0, -0.2, 0.76]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    replacements = target_replacements_cli.resolve_target_replacements(
+        SimpleNamespace(
+            target_replacement=[
+                ["bread_1", "red apple"],
+                ["bread_2", "green pear"],
+                ["bread_3", "yellow lemon"],
+            ],
+            target_replacement1=None,
+            target_replacement2=None,
+        ),
+        TargetReplacementSpec,
+        project_dir,
+    )
+
+    assert [replacement.source_uid for replacement in replacements] == [
+        "bread_1",
+        "bread_2",
+        "bread_3",
+    ]
+    assert [replacement.output_dir_name for replacement in replacements] == [
+        "new1",
+        "new2",
+        "new3",
+    ]
 
 
 def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(

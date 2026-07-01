@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -29,6 +28,7 @@ import time
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlparse
 
 import requests
 from requests import exceptions as request_exceptions
@@ -71,6 +71,11 @@ def _require_server(server: str | None) -> str:
         raise ValueError(
             "Image2Tabletop API server is required. Pass --server or set "
             "IMAGE2TABLETOP_SERVER."
+        )
+    parsed = urlparse(resolved)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(
+            "Image2Tabletop API server must be an http(s) URL, got " f"{resolved!r}."
         )
     return resolved
 

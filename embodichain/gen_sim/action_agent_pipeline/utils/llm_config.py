@@ -31,7 +31,7 @@ __all__ = [
     "get_openai_compatible_llm_config",
 ]
 
-DEFAULT_LLM_MODEL = "gpt-4o"
+DEFAULT_LLM_MODEL = os.getenv("EMBODICHAIN_DEFAULT_LLM_MODEL", "gpt-4o")
 CONFIG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = next(
     (

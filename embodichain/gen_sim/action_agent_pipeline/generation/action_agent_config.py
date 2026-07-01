@@ -258,6 +258,7 @@ def generate_action_agent_config_from_project(
     input_path = Path(gym_project).expanduser().resolve()
     gym_config_path = _resolve_gym_config_path(input_path)
     scene_dir = gym_config_path.parent
+    repo_root = _repo_root_from_gym_config_path(gym_config_path)
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
@@ -304,6 +305,7 @@ def generate_action_agent_config_from_project(
                 bundle,
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
+                repo_root=repo_root,
                 prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
@@ -335,6 +337,7 @@ def generate_action_agent_config_from_project(
                 bundle,
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
+                repo_root=repo_root,
                 prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
@@ -369,6 +372,7 @@ def generate_action_agent_config_from_project(
             bundle,
             output_dir=output_dir_path,
             mesh_normalizer=mesh_normalizer,
+            repo_root=repo_root,
             prewarm_coacd_cache=prewarm_coacd_cache,
             overwrite=overwrite,
         )
@@ -415,6 +419,7 @@ def generate_action_agent_config_from_project(
         bundle,
         output_dir=output_dir_path,
         mesh_normalizer=mesh_normalizer,
+        repo_root=repo_root,
         prewarm_coacd_cache=prewarm_coacd_cache,
         overwrite=overwrite,
     )
@@ -477,6 +482,7 @@ def _build_ur5_basket_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
+    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -488,10 +494,10 @@ def _build_ur5_basket_bundle(
                 roles,
                 sensor_config_factory=_make_sensor_config,
             ),
-            "observations": _make_observations_config(),
+            "observations": _make_observations_config(robot_config),
             "dataset": _make_dataset_config(project_name, roles),
         },
-        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
+        "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
@@ -641,6 +647,7 @@ def _build_arrangement_line_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
+    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -652,10 +659,10 @@ def _build_arrangement_line_bundle(
                 [step.runtime_uid for step in spec.steps],
                 sensor_config_factory=_make_sensor_config,
             ),
-            "observations": _make_observations_config(),
+            "observations": _make_observations_config(robot_config),
             "dataset": {},
         },
-        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
+        "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
@@ -811,6 +818,7 @@ def _build_stacking_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
+    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -822,10 +830,10 @@ def _build_stacking_bundle(
                 [step.runtime_uid for step in spec.steps],
                 sensor_config_factory=_make_sensor_config,
             ),
-            "observations": _make_observations_config(),
+            "observations": _make_observations_config(robot_config),
             "dataset": {},
         },
-        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
+        "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [
@@ -935,13 +943,14 @@ def _finalize_and_write_bundle(
     *,
     output_dir: Path,
     mesh_normalizer: MeshFrameNormalizer | None,
+    repo_root: Path | None = None,
     prewarm_coacd_cache: bool,
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
     _attach_body_scale_bake_summary(bundle, output_dir)
     if prewarm_coacd_cache:
-        _attach_coacd_cache_summary(bundle)
+        _attach_coacd_cache_summary(bundle, repo_root=repo_root)
     return _write_config_bundle(
         output_dir=output_dir,
         bundle=bundle,
@@ -949,14 +958,25 @@ def _finalize_and_write_bundle(
     )
 
 
-def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
+def _attach_coacd_cache_summary(
+    bundle: dict[str, Any],
+    *,
+    repo_root: Path | None = None,
+) -> None:
     from embodichain.gen_sim.action_agent_pipeline.generation.coacd_cache import (
         prewarm_coacd_cache_for_gym_config,
     )
 
     bundle.setdefault("summary", {})["coacd_cache"] = (
-        prewarm_coacd_cache_for_gym_config(bundle["gym_config"])
+        prewarm_coacd_cache_for_gym_config(bundle["gym_config"], repo_root=repo_root)
     )
+
+
+def _repo_root_from_gym_config_path(gym_config_path: Path) -> Path:
+    for parent in gym_config_path.resolve().parents:
+        if (parent / "setup.py").is_file() and (parent / "embodichain").is_dir():
+            return parent
+    return gym_config_path.resolve().parent
 
 
 def _attach_body_scale_bake_summary(
@@ -1198,6 +1218,7 @@ def _build_relative_placement_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
+    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1210,10 +1231,10 @@ def _build_relative_placement_bundle(
                 registered_runtime_uids,
                 sensor_config_factory=_make_sensor_config,
             ),
-            "observations": _make_observations_config(),
+            "observations": _make_observations_config(robot_config),
             "dataset": {},
         },
-        "robot": _make_dual_ur5_robot_config(robot_init_z=robot_init_z),
+        "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
         "background": [

@@ -32,16 +32,19 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
 
 def make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
+    """Return a fresh DualUR5 robot config template at the requested z position."""
     config = _load_template("dual_ur5_robot.json")
     config["init_pos"][2] = float(robot_init_z)
     return config
 
 
 def make_sensor_config() -> list[dict[str, Any]]:
+    """Return a fresh default sensor config template."""
     return _load_template("default_sensors.json")
 
 
 def make_light_config() -> dict[str, Any]:
+    """Return a fresh default light config template."""
     return _load_template("default_lights.json")
 
 

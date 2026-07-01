@@ -63,6 +63,7 @@ _ON_RELEASE_Z_OFFSET = 0.2
 _ON_SURFACE_RELEASE_CLEARANCE = 0.003
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
+_DEFAULT_ARM_SLOT_SIDE_ORDER = {"left": 0, "right": 1}
 
 
 def _relative_release_offset(relation: str) -> list[float]:
@@ -424,13 +425,14 @@ def _order_inside_container_slot_indices(
     axis: str,
     object_configs: Mapping[str, Mapping[str, Any]],
     container_config: Mapping[str, Any] | None,
+    side_order: Mapping[str, int] | None = None,
 ) -> list[int]:
     if axis == "y":
-        side_order = {"left": 0, "right": 1}
+        resolved_side_order = dict(side_order or _DEFAULT_ARM_SLOT_SIDE_ORDER)
         return sorted(
             indices,
             key=lambda index: (
-                side_order.get(placements[index].active_side, 1),
+                resolved_side_order.get(placements[index].active_side, 1),
                 _relative_initial_axis_value(
                     placements[index],
                     axis_index=1,

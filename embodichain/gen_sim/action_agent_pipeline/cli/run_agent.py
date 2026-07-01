@@ -106,7 +106,7 @@ def _generate_action_agent_trajectory(
 ) -> bool:
     _, _ = env.reset()
     action_list = env.get_wrapper_attr("create_demo_action_list")(
-        action_sentence=trajectory_idx,
+        action_sentence=str(trajectory_idx),
         save_path=getattr(args, "save_path", ""),
         save_video=getattr(args, "save_video", False),
         debug_mode=getattr(args, "debug_mode", False),

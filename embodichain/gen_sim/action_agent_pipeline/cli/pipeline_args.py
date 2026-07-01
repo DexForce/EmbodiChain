@@ -329,6 +329,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--target_replacement",
+        "--target-replacement",
+        dest="target_replacement",
+        action="append",
+        nargs="+",
+        metavar="SOURCE_OR_PROMPT",
+        default=[],
+        help=(
+            "Generate one replacement foreground interactive object. Repeat for "
+            "0-N replacements. Accepts either PROMPT for auto-selection from "
+            "numbered rigid_object targets, or SOURCE_UID PROMPT for explicit "
+            "selection."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement1",
         "--target-replacement1",
         nargs="+",
@@ -336,7 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new1 from PROMPT. Accepts either "
-            "PROMPT, which auto-selects the lower-y duplicated rigid "
+            "PROMPT, which auto-selects the first duplicated foreground rigid "
             "object, or SOURCE_UID PROMPT for explicit selection."
         ),
     )
@@ -348,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Generate <gym_project>/mesh_assets/new2 from PROMPT. Accepts either "
-            "PROMPT, which auto-selects the higher-y duplicated rigid "
+            "PROMPT, which auto-selects the second duplicated foreground rigid "
             "object, or SOURCE_UID PROMPT for explicit selection."
         ),
     )

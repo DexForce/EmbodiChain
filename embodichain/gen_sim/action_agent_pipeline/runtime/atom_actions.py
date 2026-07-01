@@ -177,6 +177,21 @@ class _ExecutedAtomicAction:
     control: str | None
 
 
+@dataclass(frozen=True)
+class _GraspRuntimeDefaults:
+    antipodal_n_sample: int = 10000
+    antipodal_max_angle: float = float(np.pi / 12)
+    max_open_length: float = 0.088
+    min_open_length: float = 0.003
+    finger_length: float = 0.078
+    point_sample_dense: float = 0.012
+    max_deviation_angle: float = float(np.pi / 6)
+    viser_port: int = 11801
+
+
+_GRASP_RUNTIME_DEFAULTS = _GraspRuntimeDefaults()
+
+
 def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize an atomic action JSON spec."""
     if not isinstance(spec, Mapping):
@@ -497,9 +512,9 @@ def _validate_target_fields(
 def execute_atomic_action(
     action_spec: Mapping[str, Any] | AtomicActionSpec,
     *,
-    env,
+    env: Any,
     state: WorldState | None = None,
-    **runtime_kwargs,
+    **runtime_kwargs: Any,
 ) -> np.ndarray:
     """Execute one atomic action spec and return local arm+eef qpos actions."""
     executed = _execute_atomic_action_result(
@@ -541,7 +556,10 @@ def _execute_atomic_action_result(
         state = WorldState(last_qpos=env.robot.get_qpos().clone())
     state = _state_with_current_agent_qpos(env, spec, state)
     action_cls = _get_atomic_action_class(spec.atomic_action_class)
-    action = action_cls(motion_generator=_make_motion_generator(env), cfg=cfg)
+    action = action_cls(
+        motion_generator=_motion_generator_for_env(env, runtime_kwargs),
+        cfg=cfg,
+    )
     result = action.execute(
         target=target,
         state=state,
@@ -590,14 +608,14 @@ def _execute_atomic_action_result(
 
 
 def execute_parallel_atomic_actions(
-    left_arm_action=None,
-    right_arm_action=None,
+    left_arm_action: Mapping[str, Any] | AtomicActionSpec | np.ndarray | None = None,
+    right_arm_action: Mapping[str, Any] | AtomicActionSpec | np.ndarray | None = None,
     *,
-    env,
+    env: Any,
     world_states: dict[str, WorldState] | None = None,
     return_result: bool = False,
-    **runtime_kwargs,
-):
+    **runtime_kwargs: Any,
+) -> list[torch.Tensor] | dict[str, Any]:
     """Execute left/right atomic action specs as one synchronized stream."""
     result = build_parallel_action_stream(
         left_arm_action=left_arm_action,
@@ -616,13 +634,13 @@ def execute_parallel_atomic_actions(
 
 
 def build_parallel_action_stream(
-    left_arm_action=None,
-    right_arm_action=None,
+    left_arm_action: Mapping[str, Any] | AtomicActionSpec | np.ndarray | None = None,
+    right_arm_action: Mapping[str, Any] | AtomicActionSpec | np.ndarray | None = None,
     *,
-    env,
+    env: Any,
     world_states: dict[str, WorldState] | None = None,
     return_result: bool = False,
-    **runtime_kwargs,
+    **runtime_kwargs: Any,
 ) -> list[torch.Tensor] | dict[str, Any]:
     """Build a synchronized left/right atomic action stream without stepping env."""
     if env is None:
@@ -712,7 +730,7 @@ def build_parallel_action_stream(
     }
 
 
-def init_parallel_world_states(env) -> dict[str, WorldState]:
+def init_parallel_world_states(env: Any) -> dict[str, WorldState]:
     """Seed independent per-arm WorldState slots from the current robot qpos."""
     qpos = env.robot.get_qpos().clone()
     return {
@@ -722,7 +740,7 @@ def init_parallel_world_states(env) -> dict[str, WorldState]:
 
 
 def step_env_with_actions(
-    env,
+    env: Any,
     actions: list[torch.Tensor],
     *,
     update_obj_info: bool = True,
@@ -817,7 +835,27 @@ def _state_with_current_agent_qpos(
     return WorldState(last_qpos=qpos, held_object=state.held_object)
 
 
-def _make_motion_generator(env):
+def _motion_generator_for_env(
+    env: Any,
+    runtime_kwargs: Mapping[str, Any],
+) -> MotionGenerator:
+    if not bool(runtime_kwargs.get("reuse_motion_generator", True)):
+        return _new_motion_generator(env)
+    return _make_motion_generator(env)
+
+
+def _make_motion_generator(env: Any) -> MotionGenerator:
+    robot_uid = env.robot.uid
+    cached = getattr(env, "_action_agent_motion_generator", None)
+    if isinstance(cached, tuple) and len(cached) == 2 and cached[0] == robot_uid:
+        return cached[1]
+
+    motion_generator = _new_motion_generator(env)
+    setattr(env, "_action_agent_motion_generator", (robot_uid, motion_generator))
+    return motion_generator
+
+
+def _new_motion_generator(env: Any) -> MotionGenerator:
     return MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
     )
@@ -1369,12 +1407,24 @@ def _build_object_semantics(
         **_cfg_supported_kwargs(
             AntipodalSamplerCfg,
             {
-                "n_sample": int(runtime_kwargs.get("grasp_antipodal_n_sample", 20000)),
-                "max_angle": runtime_kwargs.get(
-                    "grasp_antipodal_max_angle", np.pi / 12
+                "n_sample": int(
+                    runtime_kwargs.get(
+                        "grasp_antipodal_n_sample",
+                        _GRASP_RUNTIME_DEFAULTS.antipodal_n_sample,
+                    )
                 ),
-                "max_length": runtime_kwargs.get("grasp_max_open_length", 0.088),
-                "min_length": runtime_kwargs.get("grasp_min_open_length", 0.003),
+                "max_angle": runtime_kwargs.get(
+                    "grasp_antipodal_max_angle",
+                    _GRASP_RUNTIME_DEFAULTS.antipodal_max_angle,
+                ),
+                "max_length": runtime_kwargs.get(
+                    "grasp_max_open_length",
+                    _GRASP_RUNTIME_DEFAULTS.max_open_length,
+                ),
+                "min_length": runtime_kwargs.get(
+                    "grasp_min_open_length",
+                    _GRASP_RUNTIME_DEFAULTS.min_open_length,
+                ),
             },
         )
     )
@@ -1382,11 +1432,16 @@ def _build_object_semantics(
         **_cfg_supported_kwargs(
             GraspGeneratorCfg,
             {
-                "viser_port": int(runtime_kwargs.get("grasp_viser_port", 11801)),
+                "viser_port": int(
+                    runtime_kwargs.get(
+                        "grasp_viser_port",
+                        _GRASP_RUNTIME_DEFAULTS.viser_port,
+                    )
+                ),
                 "antipodal_sampler_cfg": antipodal_sampler_cfg,
                 "max_deviation_angle": runtime_kwargs.get(
                     "grasp_max_deviation_angle",
-                    np.pi / 6,
+                    _GRASP_RUNTIME_DEFAULTS.max_deviation_angle,
                 ),
             },
         )
@@ -1408,11 +1463,17 @@ def _build_object_semantics(
         **_cfg_supported_kwargs(
             GripperCollisionCfg,
             {
-                "max_open_length": runtime_kwargs.get("grasp_max_open_length", 0.088),
-                "finger_length": runtime_kwargs.get("grasp_finger_length", 0.078),
+                "max_open_length": runtime_kwargs.get(
+                    "grasp_max_open_length",
+                    _GRASP_RUNTIME_DEFAULTS.max_open_length,
+                ),
+                "finger_length": runtime_kwargs.get(
+                    "grasp_finger_length",
+                    _GRASP_RUNTIME_DEFAULTS.finger_length,
+                ),
                 "point_sample_dense": runtime_kwargs.get(
                     "grasp_point_sample_dense",
-                    0.012,
+                    _GRASP_RUNTIME_DEFAULTS.point_sample_dense,
                 ),
                 "max_decomposition_hulls": max_decomposition_hulls,
                 "env_coacd_source_mesh_path": source_mesh_path,

@@ -42,7 +42,7 @@ def test_coacd_cache_path_matches_dexsim_load_actor_key(tmp_path) -> None:
         cache_dir,
     )
 
-    expected_key = hashlib.md5(
+    expected_key = hashlib.sha256(
         f"{mesh_path.resolve()}|mesh_count=1".encode("utf-8")
     ).hexdigest()
     assert dexsim_coacd_cache_key_for_mesh(mesh_path) == expected_key

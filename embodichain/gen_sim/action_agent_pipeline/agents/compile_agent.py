@@ -27,6 +27,7 @@ from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
     normalize_json_content,
 )
 from embodichain.data import database_agent_prompt_dir
+from embodichain.utils.logger import log_info
 
 __all__ = ["CompileAgent"]
 
@@ -41,11 +42,10 @@ class CompileAgent(AgentBase):
     prompt_kwargs: dict[str, dict[str, Any]]
 
     def __init__(self, **kwargs) -> None:
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-        self.prompt_kwargs = kwargs.get("prompt_kwargs", {})
+        kwargs.setdefault("prompt_kwargs", {})
+        super().__init__(**kwargs)
 
-    def generate(self, **kwargs):
+    def generate(self, **kwargs: Any):
         log_dir = kwargs.get(
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
@@ -60,7 +60,7 @@ class CompileAgent(AgentBase):
                 metadata.get("schema_version") == COMPILED_GRAPH_SCHEMA_VERSION
                 and metadata.get("task_graph_hash") == task_graph_hash
             ):
-                print(f"Compiled graph artifact already exists at {file_path}.")
+                log_info(f"Compiled graph artifact already exists at {file_path}.")
                 return file_path, kwargs, None
 
         content = normalize_json_content(
@@ -75,10 +75,10 @@ class CompileAgent(AgentBase):
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        print(f"Compiled graph artifact saved to {file_path}")
+        log_info(f"Compiled graph artifact saved to {file_path}")
         return file_path, kwargs, content
 
-    def act(self, graph_file_path, **kwargs):
+    def act(self, graph_file_path, **kwargs: Any):
         graph_file_path = Path(graph_file_path)
         if graph_file_path.suffix != ".json":
             raise ValueError("CompileAgent executes compiled graph JSON artifacts.")
@@ -90,11 +90,8 @@ class CompileAgent(AgentBase):
         runtime_kwargs = _runtime_kwargs(kwargs, getattr(self, "prompt_kwargs", {}))
         graph = compile_agent_graph_from_file(graph_file_path)
         result = graph.run(**runtime_kwargs)
-        print("Compiled agent graph executed successfully.")
+        log_info("Compiled agent graph executed successfully.")
         return result
-
-    def get_composed_observations(self, **kwargs):
-        return dict(kwargs)
 
 
 def _stable_json_hash(content: dict[str, Any]) -> str:

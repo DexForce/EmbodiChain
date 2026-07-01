@@ -59,6 +59,15 @@ _GLTF_TYPE_COMPONENT_COUNTS = {
     "VEC4": 4,
     "MAT4": 16,
 }
+_GLTF_NORMALIZED_UNSIGNED_MAX = {
+    5121: 255.0,
+    5123: 65535.0,
+    5125: 4294967295.0,
+}
+_GLTF_NORMALIZED_SIGNED_MAX = {
+    5120: 127.0,
+    5122: 32767.0,
+}
 
 
 def _dual_ur5_init_z_from_table_top(table_top_z: float | None) -> float:
@@ -285,8 +294,8 @@ def _load_mesh_vertices_with_trimesh(
             mesh = scene_or_mesh.dump(concatenate=True)
         else:
             mesh = scene_or_mesh
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ValueError(f"Failed to load mesh vertices from {mesh_path}.") from exc
     vertices = getattr(mesh, "vertices", None)
     if vertices is None or len(vertices) == 0:
         return None
@@ -370,13 +379,26 @@ def _iter_gltf_accessor_vec3(
     stride = int(buffer_view.get("byteStride", component_size * component_count))
     offset = int(buffer_view.get("byteOffset", 0)) + int(accessor.get("byteOffset", 0))
     element_format = "<" + component_format * component_count
+    normalized = bool(accessor.get("normalized", False))
     for index in range(int(accessor["count"])):
         values = struct.unpack_from(
             element_format,
             binary_chunk,
             offset + index * stride,
         )
+        if normalized:
+            values = tuple(
+                _normalize_gltf_component(value, component_type) for value in values
+            )
         yield (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _normalize_gltf_component(value: int | float, component_type: int) -> float:
+    if component_type in _GLTF_NORMALIZED_UNSIGNED_MAX:
+        return float(value) / _GLTF_NORMALIZED_UNSIGNED_MAX[component_type]
+    if component_type in _GLTF_NORMALIZED_SIGNED_MAX:
+        return max(float(value) / _GLTF_NORMALIZED_SIGNED_MAX[component_type], -1.0)
+    return float(value)
 
 
 def _table_mesh_world_matrix(table_config: Mapping[str, Any]) -> list[list[float]]:

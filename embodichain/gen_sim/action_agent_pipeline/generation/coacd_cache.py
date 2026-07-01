@@ -47,9 +47,9 @@ def coacd_cache_path_for_mesh(
     if cache_dir is None:
         cache_dir = _DEFAULT_CONVEX_DECOMP_DIR
 
-    mesh_md5_key = dexsim_coacd_cache_key_for_mesh(mesh_path, mesh_count=mesh_count)
+    mesh_cache_key = dexsim_coacd_cache_key_for_mesh(mesh_path, mesh_count=mesh_count)
     return Path(cache_dir).expanduser().resolve() / (
-        f"{mesh_md5_key}_{int(max_convex_hull_num)}.obj"
+        f"{mesh_cache_key}_{int(max_convex_hull_num)}.obj"
     )
 
 
@@ -62,7 +62,7 @@ def dexsim_coacd_cache_key_for_mesh(
 
     resolved_mesh_path = Path(mesh_path).expanduser().resolve(strict=False)
     mesh_key_data = f"{resolved_mesh_path}|mesh_count={int(mesh_count)}"
-    return hashlib.md5(mesh_key_data.encode("utf-8")).hexdigest()
+    return hashlib.sha256(mesh_key_data.encode("utf-8")).hexdigest()
 
 
 def prewarm_coacd_cache_for_gym_config(
@@ -149,10 +149,6 @@ def _resolve_mesh_path(raw_fpath: str, repo_root: Path) -> Path:
         candidate = path.resolve()
     else:
         candidate = (repo_root / path).resolve()
-        if not candidate.is_file():
-            cwd_candidate = (Path.cwd() / path).resolve()
-            if cwd_candidate.is_file():
-                candidate = cwd_candidate
     if not candidate.is_file():
         raise FileNotFoundError(f"Mesh path for CoACD prewarm not found: {raw_fpath}")
     return candidate

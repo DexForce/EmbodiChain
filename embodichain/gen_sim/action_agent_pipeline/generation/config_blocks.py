@@ -16,10 +16,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 import copy
+import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
@@ -264,17 +265,112 @@ def _object_registry_entry(uid: str) -> dict[str, Any]:
     }
 
 
-def _make_observations_config() -> dict[str, Any]:
+def _make_observations_config(
+    robot_config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    joint_ids = (
+        _derive_observation_joint_ids(robot_config) if robot_config is not None else []
+    )
     return {
         "norm_robot_eef_joint": {
             "func": "normalize_robot_joint_data",
             "mode": "modify",
             "name": "robot/qpos",
             "params": {
-                "joint_ids": [12, 13, 14, 15],
+                "joint_ids": joint_ids,
             },
         }
     }
+
+
+def _derive_observation_joint_ids(robot_config: Mapping[str, Any]) -> list[int]:
+    explicit_joint_ids = robot_config.get("observation_joint_ids")
+    if explicit_joint_ids is not None:
+        return [int(joint_id) for joint_id in explicit_joint_ids]
+
+    control_parts = robot_config.get("control_parts", {})
+    if not isinstance(control_parts, Mapping):
+        raise ValueError("robot.control_parts must be a mapping to derive joint_ids.")
+
+    observation_parts = robot_config.get("observation_joint_parts")
+    if observation_parts is None:
+        observation_parts = _default_observation_joint_parts(control_parts)
+    observation_parts = [str(part) for part in observation_parts]
+    if not observation_parts:
+        return []
+
+    qpos_order = robot_config.get("qpos_control_part_order")
+    if qpos_order is None:
+        qpos_order = _default_qpos_control_part_order(control_parts, observation_parts)
+    qpos_order = [str(part) for part in qpos_order]
+
+    missing_parts = set(observation_parts) - set(control_parts)
+    if missing_parts:
+        raise ValueError(
+            "robot.observation_joint_parts contains unknown control parts: "
+            f"{', '.join(sorted(missing_parts))}."
+        )
+
+    joint_ids: list[int] = []
+    offset = 0
+    for part in qpos_order:
+        part_joint_count = _control_part_joint_count(control_parts.get(part, []))
+        if part in observation_parts:
+            joint_ids.extend(range(offset, offset + part_joint_count))
+        offset += part_joint_count
+
+    init_qpos = robot_config.get("init_qpos")
+    if isinstance(init_qpos, Sequence) and not isinstance(init_qpos, (str, bytes)):
+        dof = len(init_qpos)
+        out_of_range = [joint_id for joint_id in joint_ids if joint_id >= dof]
+        if out_of_range:
+            raise ValueError(
+                "Derived observation joint_ids exceed robot.init_qpos length "
+                f"{dof}: {out_of_range}."
+            )
+
+    return joint_ids
+
+
+def _default_observation_joint_parts(
+    control_parts: Mapping[str, Any],
+) -> list[str]:
+    return [
+        str(name)
+        for name in control_parts
+        if any(token in str(name).lower() for token in ("eef", "hand", "gripper"))
+    ]
+
+
+def _default_qpos_control_part_order(
+    control_parts: Mapping[str, Any],
+    observation_parts: Sequence[str],
+) -> list[str]:
+    observation_part_set = set(observation_parts)
+    non_observation_parts = [
+        str(name) for name in control_parts if str(name) not in observation_part_set
+    ]
+    observation_parts_in_order = [
+        str(name) for name in control_parts if str(name) in observation_part_set
+    ]
+    return non_observation_parts + observation_parts_in_order
+
+
+def _control_part_joint_count(patterns: Any) -> int:
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    if not isinstance(patterns, Sequence):
+        raise ValueError(
+            f"control part joint patterns must be a sequence: {patterns!r}"
+        )
+    return sum(_joint_pattern_count(str(pattern)) for pattern in patterns)
+
+
+def _joint_pattern_count(pattern: str) -> int:
+    count = 1
+    for start, end in re.findall(r"\[([0-9]+)-([0-9]+)\]", pattern):
+        count *= abs(int(end) - int(start)) + 1
+    return count
 
 
 def _make_dataset_config(

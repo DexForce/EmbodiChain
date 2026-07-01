@@ -42,3 +42,28 @@ def test_agentic_gen_sim_env_rejects_reserved_common_agent_config_keys() -> None
         ValueError, match="Agent config contains reserved keys: task_name"
     ):
         env._init_agents(agent_config, task_name="UnitTask")
+
+
+def test_agentic_gen_sim_env_rejects_missing_agent_sections() -> None:
+    env = AgenticGenSimEnv.__new__(AgenticGenSimEnv)
+
+    with pytest.raises(ValueError, match="missing required sections: CompileAgent"):
+        env._init_agents(
+            {
+                "Agent": {"prompt_kwargs": {}},
+                "TaskAgent": {},
+            },
+            task_name="UnitTask",
+        )
+
+
+def test_agentic_gen_sim_env_rejects_batched_state_init() -> None:
+    class BatchedAgenticGenSimEnv(AgenticGenSimEnv):
+        @property
+        def num_envs(self):
+            return 2
+
+    env = BatchedAgenticGenSimEnv.__new__(BatchedAgenticGenSimEnv)
+
+    with pytest.raises(ValueError, match="supports num_envs=1 only"):
+        env.get_states()

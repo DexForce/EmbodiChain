@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from embodichain.gen_sim.action_agent_pipeline.utils.mllm import create_chat_openai
 from embodichain.utils.logger import log_warning
 
@@ -27,7 +29,12 @@ __all__ = ["create_llm", "task_llm"]
 # ------------------------------------------------------------------------------
 
 
-def create_llm(*, temperature=0.0, model=None, usage_stage=None):
+def create_llm(
+    *,
+    temperature: float = 0.0,
+    model: str | None = None,
+    usage_stage: str | None = None,
+) -> Any:
     return create_chat_openai(
         temperature=temperature,
         model=model,
@@ -41,7 +48,12 @@ def create_llm(*, temperature=0.0, model=None, usage_stage=None):
 
 
 # Initialize LLM instances, but handle errors gracefully for documentation builds
-def _create_llm_safe(*, temperature=0.0, model=None, usage_stage=None):
+def _create_llm_safe(
+    *,
+    temperature: float = 0.0,
+    model: str | None = None,
+    usage_stage: str | None = None,
+) -> Any | None:
     try:
         return create_llm(
             temperature=temperature,
@@ -60,7 +72,9 @@ task_llm = _create_llm_safe(
 
 if __name__ == "__main__":
 
-    def call_llm(prompt, temperature=0.0, model=None):
+    def call_llm(
+        prompt: str, temperature: float = 0.0, model: str | None = None
+    ) -> Any:
         llm = create_llm(
             temperature=temperature,
             model=model,

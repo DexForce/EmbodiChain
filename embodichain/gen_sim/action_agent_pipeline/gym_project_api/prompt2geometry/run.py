@@ -98,6 +98,13 @@ def main() -> None:
     )
     parser.add_argument("--sam3d-seed", type=int, default=42)
     parser.add_argument(
+        "--no-cleanup",
+        dest="cleanup_intermediates",
+        action="store_false",
+        default=True,
+        help="Keep prompt2geometry intermediate files instead of cleaning them.",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Disable live progress logs.",
@@ -125,6 +132,7 @@ def main() -> None:
             llm_model=args.llm_model or cfg.llm_model,
             llm_base_url=args.llm_base_url or cfg.llm_base_url,
             llm_timeout_s=args.llm_timeout_s or cfg.llm_timeout_s,
+            cleanup_intermediates=args.cleanup_intermediates,
             verbose=not args.quiet,
         )
     )

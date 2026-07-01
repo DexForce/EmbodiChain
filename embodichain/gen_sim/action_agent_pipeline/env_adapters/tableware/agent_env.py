@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from typing import Any
 
 import torch
 
@@ -40,14 +42,16 @@ _AGENT_KWARGS = _REQUIRED_AGENT_KWARGS | _OPTIONAL_AGENT_KWARGS
 class AgenticGenSimEnv(EmbodiedEnv):
     """Config-driven agent environment for atomic-action tasks."""
 
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
         env_kwargs, agent_kwargs = _split_env_and_agent_kwargs(kwargs)
         super().__init__(cfg, **env_kwargs)
         if bool(getattr(self, "ignore_terminations_during_agent", False)):
             self.cfg.ignore_terminations = True
         self._init_agents(**agent_kwargs)
 
-    def reset(self, seed: int | None = None, options: dict | None = None):
+    def reset(
+        self, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[Any, dict[str, Any]]:
         obs, info = super().reset(seed=seed, options=options)
         self.get_states()
         return obs, info
@@ -60,10 +64,13 @@ class AgenticGenSimEnv(EmbodiedEnv):
         fail = torch.zeros_like(success)
         return success, fail, {}
 
-    def _init_agents(self, agent_config, task_name, agent_config_path=None):
-        self._validate_agent_config_keys("Agent", agent_config["Agent"])
-        self._validate_agent_config_keys("TaskAgent", agent_config["TaskAgent"])
-        self._validate_agent_config_keys("CompileAgent", agent_config["CompileAgent"])
+    def _init_agents(
+        self,
+        agent_config: Mapping[str, Any],
+        task_name: str,
+        agent_config_path: str | None = None,
+    ) -> None:
+        sections = self._validate_agent_config(agent_config)
 
         from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import (
             CompileAgent,
@@ -76,28 +83,49 @@ class AgenticGenSimEnv(EmbodiedEnv):
         )
 
         task_agent_config = self._agent_config_with_prompt_keys(
-            agent_config["Agent"],
+            sections["Agent"],
             _TASK_PROMPT_KEYS,
         )
         compile_agent_config = self._agent_config_with_prompt_keys(
-            agent_config["Agent"],
+            sections["Agent"],
             frozenset(),
         )
         self.task_agent = TaskAgent(
             task_llm,
             **task_agent_config,
-            **agent_config["TaskAgent"],
+            **sections["TaskAgent"],
             task_name=task_name,
             config_dir=agent_config_path,
         )
         self.compile_agent = CompileAgent(
             **compile_agent_config,
-            **agent_config["CompileAgent"],
+            **sections["CompileAgent"],
             task_name=task_name,
             config_dir=agent_config_path,
         )
 
-    def _validate_agent_config_keys(self, section_name, section_config):
+    def _validate_agent_config(
+        self, agent_config: Mapping[str, Any]
+    ) -> dict[str, Mapping[str, Any]]:
+        missing = {"Agent", "TaskAgent", "CompileAgent"} - set(agent_config)
+        if missing:
+            raise ValueError(
+                "Agent config is missing required sections: "
+                f"{', '.join(sorted(missing))}."
+            )
+
+        sections = {}
+        for section_name in ("Agent", "TaskAgent", "CompileAgent"):
+            section_config = agent_config[section_name]
+            if not isinstance(section_config, Mapping):
+                raise ValueError(f"{section_name} config must be a mapping.")
+            self._validate_agent_config_keys(section_name, section_config)
+            sections[section_name] = section_config
+        return sections
+
+    def _validate_agent_config_keys(
+        self, section_name: str, section_config: Mapping[str, Any]
+    ) -> None:
         reserved_keys = _AGENT_RESERVED_KEYS & set(section_config)
         if reserved_keys:
             raise ValueError(
@@ -105,7 +133,9 @@ class AgenticGenSimEnv(EmbodiedEnv):
                 f"{', '.join(sorted(reserved_keys))}."
             )
 
-    def _agent_config_with_prompt_keys(self, agent_config, allowed_keys):
+    def _agent_config_with_prompt_keys(
+        self, agent_config: Mapping[str, Any], allowed_keys: frozenset[str]
+    ) -> dict[str, Any]:
         filtered = deepcopy(agent_config)
         prompt_kwargs = filtered.get("prompt_kwargs", {}) or {}
         filtered["prompt_kwargs"] = {
@@ -113,8 +143,12 @@ class AgenticGenSimEnv(EmbodiedEnv):
         }
         return filtered
 
-    def get_states(self):
-        # TODO: only support num_env = 1 for now
+    def get_states(self) -> None:
+        if int(getattr(self, "num_envs", 1)) != 1:
+            raise ValueError(
+                "AgenticGenSimEnv currently supports num_envs=1 only, got "
+                f"{getattr(self, 'num_envs', None)}."
+            )
         # store robot states in each env.reset
         self.init_qpos = self.robot.get_qpos().squeeze(0)
 
@@ -342,7 +376,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
             color="green",
         )
 
-        print(f"\033[92m\nStart task graph generation.\n\033[0m")
+        logger.log_info("Start task graph generation.", color="green")
         task_agent_input = self.task_agent.get_composed_observations(
             env=self,
             regenerate=regenerate,
@@ -351,7 +385,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
         )
         task_graph = self.task_agent.generate(**task_agent_input)
 
-        print(f"\033[94m\nStart graph compilation.\n\033[0m")
+        logger.log_info("Start graph compilation.", color="blue")
         compile_agent_input = self.compile_agent.get_composed_observations(
             env=self,
             regenerate=regenerate,

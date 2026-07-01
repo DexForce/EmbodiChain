@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 __all__ = [
@@ -72,8 +73,12 @@ DEFAULT_CONFIG_OUTPUT_DIR = DEFAULT_ACTION_AGENT_WORKSPACE / "configs/demo3_text
 DEFAULT_PIPELINE_HISTORY = (
     DEFAULT_ACTION_AGENT_WORKSPACE / "configs/pipeline_history.json"
 )
-DEFAULT_TASK_NAME = "Demo3_Text"
-DEFAULT_TASK_TEMPLATE_NAMES = frozenset({"Demo1_Text"})
+DEFAULT_TASK_NAME = os.getenv("ACTION_AGENT_DEFAULT_TASK_NAME", "ActionAgentTask")
+DEFAULT_TASK_TEMPLATE_NAMES = frozenset(
+    name.strip()
+    for name in os.getenv("ACTION_AGENT_DEFAULT_TASK_TEMPLATE_NAMES", "").split(",")
+    if name.strip()
+)
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 PIPELINE_HISTORY_SCHEMA_VERSION = 1

@@ -361,14 +361,7 @@ def _target_replacement_records(
     args: argparse.Namespace,
     target_replacements: Sequence[object],
 ) -> list[dict[str, str]]:
-    requested_by_output_dir = {
-        output_dir_name: replacement[0]
-        for output_dir_name, replacement in (
-            ("new1", args.target_replacement1),
-            ("new2", args.target_replacement2),
-        )
-        if replacement and len(replacement) == 2
-    }
+    requested_by_output_dir = _requested_replacement_sources_by_output_dir(args)
     records = []
     for replacement in target_replacements:
         output_dir_name = str(getattr(replacement, "output_dir_name"))
@@ -383,6 +376,26 @@ def _target_replacement_records(
             record["requested_source_uid"] = requested_source_uid
         records.append(record)
     return records
+
+
+def _requested_replacement_sources_by_output_dir(
+    args: argparse.Namespace,
+) -> dict[str, str]:
+    generic_replacements = getattr(args, "target_replacement", []) or []
+    if generic_replacements:
+        return {
+            f"new{index}": replacement[0]
+            for index, replacement in enumerate(generic_replacements, start=1)
+            if replacement and len(replacement) == 2
+        }
+    return {
+        output_dir_name: replacement[0]
+        for output_dir_name, replacement in (
+            ("new1", getattr(args, "target_replacement1", None)),
+            ("new2", getattr(args, "target_replacement2", None)),
+        )
+        if replacement and len(replacement) == 2
+    }
 
 
 def _record_path(path: Path, repo_root: Path) -> str:
