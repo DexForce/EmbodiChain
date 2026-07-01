@@ -834,6 +834,11 @@ class RigidObjectCfg(ObjectBaseCfg):
     Reference: https://github.com/SarahWeiii/CoACD
     """
 
+    convex_decomposition_method: str = "coacd"
+    """The method used for convex decomposition of the rigid body.
+    Currently, "coacd" and "vhacd" is supported. If `max_convex_hull_num` is set to larger than 1, the rigid body will be decomposed into multiple convex hulls using the specified method.
+    """
+
     sdf_resolution: int = 0
     """Resolution for the signed distance field (SDF) of the rigid body.
     The spacing of the uniformly sampled SDF is equal to the largest AABB extent of the mesh, divided by the resolution.
