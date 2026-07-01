@@ -149,7 +149,7 @@ class BaseRigidConstraintTest:
         # the lower duck (duck_b) lands first and the gap closes, so the
         # relative z drifts away from the value the constraint was holding.
         self.sim.remove_rigid_constraint("weld")
-        assert self.sim.get_rigid_constraint("weld") is None
+        assert "weld" not in self.sim.get_rigid_constraint_uid_list()
         held_delta_z = self._delta_z()
         for _ in range(120):
             self.sim.update(step=1)

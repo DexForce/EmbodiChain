@@ -256,7 +256,14 @@ class _RigidConstraintTestSim:
     """
 
     def __init__(self, num_envs=4, arenas=None):
+        self._lights = {}
+        self._sensors = {}
+        self._robots = {}
         self._rigid_objects = {}
+        self._rigid_object_groups = {}
+        self._soft_objects = {}
+        self._cloth_objects = {}
+        self._articulations = {}
         self._constraints = {}
         self.device = torch.device("cpu")
         if num_envs == 1:
@@ -282,6 +289,7 @@ class _RigidConstraintTestSim:
     get_rigid_constraint_uid_list = SimulationManager.get_rigid_constraint_uid_list
     _broadcast_frame = staticmethod(SimulationManager._broadcast_frame)
     _normalize_env_ids = staticmethod(SimulationManager._normalize_env_ids)
+    asset_uids = SimulationManager.asset_uids
 
 
 def _register_object(sim, uid, num_envs, z=0.0):
@@ -322,6 +330,22 @@ def test_create_rigid_constraint_resolves_both_objects_all_envs():
         assert arena.created[0][0] == f"weld_{i}"
         assert arena.created[0][1] is sim._rigid_objects["cube"]._entities[i]
         assert arena.created[0][2] is sim._rigid_objects["block"]._entities[i]
+
+
+def test_asset_uids_excludes_constraint_names():
+    """Constraint registry names are not exposed as generic scene assets."""
+    sim = _RigidConstraintTestSim(num_envs=2)
+    _register_object(sim, "cube", 2)
+    _register_object(sim, "block", 2)
+    sim.create_rigid_constraint(
+        RigidConstraintCfg(
+            name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+        )
+    )
+
+    assert "cube" in sim.asset_uids
+    assert "block" in sim.asset_uids
+    assert "weld" not in sim.asset_uids
 
 
 def test_create_rigid_constraint_single_env_uses_global_env():
@@ -397,6 +421,24 @@ def test_create_rigid_constraint_failed_handle_raises():
     )
     with pytest.raises(RuntimeError):
         sim.create_rigid_constraint(cfg)
+
+
+def test_create_rigid_constraint_failure_rolls_back_prior_envs():
+    """A later create failure removes earlier per-arena constraints."""
+    sim = _RigidConstraintTestSim(
+        num_envs=2, arenas=[MockArena(), MockArena(fail_indices=[0])]
+    )
+    _register_object(sim, "cube", 2)
+    _register_object(sim, "block", 2)
+    cfg = RigidConstraintCfg(
+        name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+    )
+
+    with pytest.raises(RuntimeError):
+        sim.create_rigid_constraint(cfg)
+
+    assert "weld_0" in sim._arenas[0].removed
+    assert "weld" not in sim._constraints
 
 
 def test_broadcast_frame_none_to_identity():

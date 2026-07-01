@@ -24,8 +24,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-import numpy as np
-
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
@@ -63,7 +61,7 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=True,
+        headless=args.headless,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
@@ -129,7 +127,7 @@ def main():
 
     # --- Phase 2: remove the constraint ------------------------------------
     sim.remove_rigid_constraint("cube_weld")
-    assert sim.get_rigid_constraint("cube_weld") is None
+    assert "cube_weld" not in sim.get_rigid_constraint_uid_list()
     print("\n[INFO]: Removed constraint 'cube_weld'. cube_a and cube_b are now free.")
 
     import time

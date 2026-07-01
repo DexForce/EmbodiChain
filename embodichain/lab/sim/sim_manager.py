@@ -438,7 +438,6 @@ class SimulationManager:
         uid_list.extend(list(self._soft_objects.keys()))
         uid_list.extend(list(self._cloth_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
-        uid_list.extend(list(self._constraints.keys()))
         return uid_list
 
     def _convert_sim_config(
