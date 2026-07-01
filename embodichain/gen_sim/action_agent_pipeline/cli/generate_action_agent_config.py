@@ -223,6 +223,16 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--convex_decomposition_method",
+        "--convex-decomposition-method",
+        choices=("vhacd", "visacd", "coacd"),
+        default="vhacd",
+        help=(
+            "Convex decomposition backend written to generated mesh objects. "
+            "'visacd' is accepted as an alias for 'vhacd'. Defaults to vhacd."
+        ),
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         default=False,
@@ -260,6 +270,7 @@ def cli() -> None:
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
+        convex_decomposition_method=args.convex_decomposition_method,
         prewarm_coacd_cache=args.prewarm_coacd_cache,
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,

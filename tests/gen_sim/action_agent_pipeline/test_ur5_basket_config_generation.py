@@ -165,6 +165,13 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert rigid_objects["left_apple"]["convex_decomposition_method"] == "vhacd"
+    assert rigid_objects["right_apple"]["convex_decomposition_method"] == "vhacd"
+    assert background_objects["wicker_basket"]["convex_decomposition_method"] == (
+        "vhacd"
+    )
+    assert paths.summary["convex_decomposition_method"] == "vhacd"
+    assert paths.summary["coacd_cache"][0]["status"] == "skipped"
     _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
@@ -1824,9 +1831,10 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     extensions = gym_config["env"]["extensions"]
-    assert extensions["agent_grasp_pose_overrides"]["interact_bottle_1"][
-        "mode"
-    ] == "upright_bottle_side_grasp"
+    assert (
+        extensions["agent_grasp_pose_overrides"]["interact_bottle_1"]["mode"]
+        == "upright_bottle_side_grasp"
+    )
     success = extensions["agent_success"]
     assert success["op"] == "all"
     assert {term["type"] for term in success["terms"]} == {
@@ -3731,7 +3739,13 @@ def _stable_summary(summary: dict) -> dict:
     stable = {
         key: value
         for key, value in summary.items()
-        if key not in {"normalized_meshes", "body_scaled_meshes", "coacd_cache"}
+        if key
+        not in {
+            "normalized_meshes",
+            "body_scaled_meshes",
+            "coacd_cache",
+            "convex_decomposition_method",
+        }
     }
     if stable.get("orientation_goal") == "preserve":
         stable.pop("orientation_goal", None)

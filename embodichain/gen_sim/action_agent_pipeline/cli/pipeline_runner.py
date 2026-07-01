@@ -46,6 +46,7 @@ __all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
 
 PIPELINE_RUNNER_REQUIRED_ARGS = (
     "config_output_dir",
+    "convex_decomposition_method",
     "overwrite_config",
     "prewarm_coacd_cache",
     "prompt2scene_mesh_x_rotation_degrees",
@@ -117,6 +118,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
+        convex_decomposition_method=args.convex_decomposition_method,
         prewarm_coacd_cache=args.prewarm_coacd_cache,
         overwrite=args.overwrite_config,
     )

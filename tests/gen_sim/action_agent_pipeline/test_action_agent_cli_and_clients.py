@@ -546,6 +546,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             target_replacement2=None,
             sync_replacement_names=False,
             reuse_target_replacements=True,
+            convex_decomposition_method="vhacd",
             prewarm_coacd_cache=True,
             overwrite_config=True,
             regenerate=True,
@@ -579,6 +580,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
     assert record["target_body_scale_mode"] == "multiply"
+    assert record["convex_decomposition_method"] == "vhacd"
 
 
 @pytest.mark.parametrize(
@@ -672,6 +674,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
             prompt2scene_mesh_x_rotation_degrees=90.0,
             sync_replacement_names=False,
             reuse_target_replacements=True,
+            convex_decomposition_method="vhacd",
             prewarm_coacd_cache=False,
             overwrite_config=True,
             skip_run_agent=True,
@@ -687,6 +690,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
     assert captured["source_scene_z_rotation_degrees"] == -90.0
     assert captured["source_mesh_x_rotation_degrees"] == 90.0
     assert captured["target_body_scale"] == expected_target_body_scale
+    assert captured["convex_decomposition_method"] == "vhacd"
 
 
 def test_batch_new_pipeline_command_preserves_prompt2scene_scale_by_default(

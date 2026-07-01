@@ -400,6 +400,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--convex-decomposition-method",
+        "--convex_decomposition_method",
+        choices=("vhacd", "visacd", "coacd"),
+        default="vhacd",
+        help=(
+            "Convex decomposition backend written to generated mesh objects. "
+            "'visacd' is accepted as an alias for 'vhacd'. Defaults to vhacd."
+        ),
+    )
+    parser.add_argument(
         "--poll-interval",
         type=float,
         default=10.0,

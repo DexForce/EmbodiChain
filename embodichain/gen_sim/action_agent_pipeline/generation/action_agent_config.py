@@ -185,6 +185,7 @@ def generate_action_agent_config_from_project(
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
+    convex_decomposition_method: str = "vhacd",
     prewarm_coacd_cache: bool = True,
     overwrite: bool = False,
     max_episodes: int = 1,
@@ -242,6 +243,10 @@ def generate_action_agent_config_from_project(
             from the replacement prompts. If false, only mesh paths are replaced.
         reuse_target_replacements: If true, reuse an existing replacement GLB
             at the expected output path when it matches the requested prompt.
+        convex_decomposition_method: Convex decomposition backend written to
+            generated mesh objects whose ``max_convex_hull_num`` is larger than
+            one. ``"vhacd"`` is the action-agent default; ``"visacd"`` is
+            accepted as an alias for ``"vhacd"``.
         prewarm_coacd_cache: If true, precompute environment-side CoACD cache
             files referenced by the generated gym config before writing it.
         overwrite: If false, fail when generated files already exist.
@@ -264,6 +269,9 @@ def generate_action_agent_config_from_project(
     replacement_specs = _normalize_target_replacements(target_replacements)
     source_scene_body_scale_mode = _validate_source_scene_body_scale_mode(
         source_scene_body_scale_mode
+    )
+    convex_decomposition_method = _normalize_convex_decomposition_method(
+        convex_decomposition_method
     )
     mesh_normalizer = MeshFrameNormalizer(
         output_dir=output_dir_path / "mesh_assets" / "normalized",
@@ -306,6 +314,7 @@ def generate_action_agent_config_from_project(
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
                 repo_root=repo_root,
+                convex_decomposition_method=convex_decomposition_method,
                 prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
@@ -338,6 +347,7 @@ def generate_action_agent_config_from_project(
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
                 repo_root=repo_root,
+                convex_decomposition_method=convex_decomposition_method,
                 prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
@@ -373,6 +383,7 @@ def generate_action_agent_config_from_project(
             output_dir=output_dir_path,
             mesh_normalizer=mesh_normalizer,
             repo_root=repo_root,
+            convex_decomposition_method=convex_decomposition_method,
             prewarm_coacd_cache=prewarm_coacd_cache,
             overwrite=overwrite,
         )
@@ -420,6 +431,7 @@ def generate_action_agent_config_from_project(
         output_dir=output_dir_path,
         mesh_normalizer=mesh_normalizer,
         repo_root=repo_root,
+        convex_decomposition_method=convex_decomposition_method,
         prewarm_coacd_cache=prewarm_coacd_cache,
         overwrite=overwrite,
     )
@@ -944,17 +956,99 @@ def _finalize_and_write_bundle(
     output_dir: Path,
     mesh_normalizer: MeshFrameNormalizer | None,
     repo_root: Path | None = None,
+    convex_decomposition_method: str,
     prewarm_coacd_cache: bool,
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
+    convex_decomposition_method = _normalize_convex_decomposition_method(
+        convex_decomposition_method
+    )
+    _apply_convex_decomposition_method(
+        bundle["gym_config"],
+        method=convex_decomposition_method,
+    )
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
     _attach_body_scale_bake_summary(bundle, output_dir)
-    if prewarm_coacd_cache:
+    bundle.setdefault("summary", {})[
+        "convex_decomposition_method"
+    ] = convex_decomposition_method
+    if prewarm_coacd_cache and convex_decomposition_method == "coacd":
         _attach_coacd_cache_summary(bundle, repo_root=repo_root)
+    elif prewarm_coacd_cache:
+        _attach_skipped_coacd_cache_summary(
+            bundle,
+            convex_decomposition_method=convex_decomposition_method,
+        )
     return _write_config_bundle(
         output_dir=output_dir,
         bundle=bundle,
         overwrite=overwrite,
+    )
+
+
+def _normalize_convex_decomposition_method(method: str) -> str:
+    normalized = str(method).strip().lower()
+    if normalized == "visacd":
+        normalized = "vhacd"
+    if normalized not in {"coacd", "vhacd"}:
+        raise ValueError(
+            "convex_decomposition_method must be one of: 'vhacd', 'visacd', 'coacd'"
+        )
+    return normalized
+
+
+def _apply_convex_decomposition_method(
+    gym_config: dict[str, Any],
+    *,
+    method: str,
+) -> None:
+    for obj in _iter_generated_mesh_objects(gym_config):
+        max_convex_hull_num = int(obj.get("max_convex_hull_num", 1))
+        if max_convex_hull_num > 1:
+            obj["convex_decomposition_method"] = method
+
+
+def _iter_generated_mesh_objects(
+    gym_config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    objects = []
+    for section in ("background", "rigid_object"):
+        value = gym_config.get(section, [])
+        if isinstance(value, Mapping):
+            value = [value]
+        if not isinstance(value, list):
+            continue
+        for obj in value:
+            if not isinstance(obj, dict):
+                continue
+            shape = obj.get("shape", {})
+            if isinstance(shape, Mapping) and shape.get("shape_type") == "Mesh":
+                objects.append(obj)
+    return objects
+
+
+def _attach_skipped_coacd_cache_summary(
+    bundle: dict[str, Any],
+    *,
+    convex_decomposition_method: str,
+) -> None:
+    needs_decomposition = any(
+        int(obj.get("max_convex_hull_num", 1)) > 1
+        for obj in _iter_generated_mesh_objects(bundle["gym_config"])
+    )
+    bundle.setdefault("summary", {})["coacd_cache"] = (
+        [
+            {
+                "status": "skipped",
+                "reason": (
+                    "convex_decomposition_method="
+                    f"{convex_decomposition_method}; environment loading uses ACD "
+                    "without CoACD prewarm"
+                ),
+            }
+        ]
+        if needs_decomposition
+        else []
     )
 
 

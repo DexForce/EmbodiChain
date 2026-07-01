@@ -63,9 +63,7 @@ class SimulationManager:
         self._physics_dt = physics_dt
         self._sim_device = sim_device
 
-    def run_gravity_simulation(
-        self, request: GravityDropRequest
-    ) -> GravityDropResult:
+    def run_gravity_simulation(self, request: GravityDropRequest) -> GravityDropResult:
         """Drop one GLB under gravity and return its final pose."""
         glb_path = request.glb_path.expanduser().resolve()
         if not glb_path.is_file():
@@ -91,6 +89,7 @@ class SimulationManager:
                 init_rot=(0.0, 0.0, 0.0),
                 body_type="dynamic",
                 max_convex_hull_num=request.max_convex_hull_num,
+                convex_decomposition_method=request.convex_decomposition_method,
             )
         )
         sim.update(step=300)

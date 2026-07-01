@@ -51,6 +51,7 @@ _DEFAULT_TABLE_ATTRS: dict[str, Any] = {
 }
 
 _DEFAULT_MAX_CONVEX_HULL_NUM = 32
+_DEFAULT_CONVEX_DECOMPOSITION_METHOD = "vhacd"
 
 
 # ---------------------------------------------------------------------------
@@ -182,9 +183,9 @@ def _rotated_aabb_offsets(
     b[0] = verts.min(axis=0)
     b[1] = verts.max(axis=0)
     return (
-        float(0.5 * (b[0, 0] + b[1, 0])),   # AABB centre X → sim X
+        float(0.5 * (b[0, 0] + b[1, 0])),  # AABB centre X → sim X
         float(-0.5 * (b[0, 2] + b[1, 2])),  # -centre Z → sim Y
-        float(b[0, 1]),                       # min Y → sim Z
+        float(b[0, 1]),  # min Y → sim Z
     )
 
 
@@ -337,8 +338,7 @@ def export_gym_config(
     mesh_assets_dir.mkdir(parents=True, exist_ok=True)
 
     table_simready = _resolve_path(
-        table_info.get("simready_geometry_path")
-        or table_info.get("mesh_path", ""),
+        table_info.get("simready_geometry_path") or table_info.get("mesh_path", ""),
         output_root,
     )
     if not table_simready.is_file():
@@ -404,6 +404,7 @@ def export_gym_config(
                 "init_rot": init_rot,
                 "body_scale": body_scale,
                 "max_convex_hull_num": _DEFAULT_MAX_CONVEX_HULL_NUM,
+                "convex_decomposition_method": _DEFAULT_CONVEX_DECOMPOSITION_METHOD,
             }
         )
         wbc = om["world_aabb_bottom_center"]

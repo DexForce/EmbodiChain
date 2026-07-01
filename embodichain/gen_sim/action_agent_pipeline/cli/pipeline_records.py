@@ -197,6 +197,7 @@ def build_pipeline_record(
         ),
         "sync_replacement_names": args.sync_replacement_names,
         "reuse_target_replacements": args.reuse_target_replacements,
+        "convex_decomposition_method": args.convex_decomposition_method,
         "prewarm_coacd_cache": args.prewarm_coacd_cache,
         "overwrite_config": args.overwrite_config,
         "regenerate": args.regenerate,
