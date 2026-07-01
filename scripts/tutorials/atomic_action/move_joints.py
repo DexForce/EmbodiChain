@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -39,27 +38,17 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJointsCfg,
     NamedJointPositionTarget,
 )
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    LightCfg,
-    RenderCfg,
-    RobotCfg,
-    URDFCfg,
-)
+from embodichain.lab.sim.cfg import LightCfg, RenderCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
-    make_ur5_solver_cfg,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
-
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-GRIPPER_HAND_JOINT_PATTERN = "GRIPPER_FINGER1_JOINT_1"
-GRIPPER_TCP_Z = 0.15
 
 MOVE_JOINTS_SAMPLE_INTERVAL = 80
 POST_TRAJECTORY_STEPS = 120
@@ -107,30 +96,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
 
 
 def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
-    ur5_urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
-    gripper_urdf_path = get_data_path(GRIPPER_URDF_PATH)
-    cfg = RobotCfg(
-        uid="UR5",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur5_urdf_path},
-                {"component_type": "hand", "urdf_path": gripper_urdf_path},
-            ]
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, GRIPPER_HAND_JOINT_PATTERN: 1e3},
-            damping={"JOINT[0-9]": 1e3, GRIPPER_HAND_JOINT_PATTERN: 1e2},
-            max_effort={"JOINT[0-9]": 1e5, GRIPPER_HAND_JOINT_PATTERN: 1e4},
-            drive_type="force",
-        ),
-        control_parts={
-            "arm": ["JOINT[0-9]"],
-            "hand": [GRIPPER_HAND_JOINT_PATTERN],
-        },
-        solver_cfg={"arm": make_ur5_solver_cfg(GRIPPER_TCP_Z)},
-        init_qpos=[0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-        init_pos=position,
-    )
+    cfg = create_ur5_gripper_robot_cfg(init_pos=position)
     return sim.add_robot(cfg=cfg)
 
 
@@ -168,6 +134,7 @@ def main() -> None:
     # Step 3: Configure the MoveJoints atomic action                      #
     # ------------------------------------------------------------------ #
     ready_qpos = make_arm_qpos([0.35, -1.20, 1.30, -1.65, -1.57, 0.20], sim.device)
+    mid_qpos = make_arm_qpos([0.15, -1.40, 1.45, -1.60, -1.57, 0.10], sim.device)
     home_qpos = make_arm_qpos([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], sim.device)
     move_joints_cfg = MoveJointsCfg(
         control_part="arm",
@@ -194,13 +161,21 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # Step 6: Plan the declared (name, typed_target) sequence             #
     # ------------------------------------------------------------------ #
+    # The second MoveJoints step passes a multi-waypoint trajectory
+    # (n_envs, n_waypoint, control_dof): the arm visits `mid_qpos` then
+    # `home_qpos` in a single planned trajectory.
+    n_envs = robot.get_qpos().shape[0]
+    multi_waypoint_qpos = (
+        torch.stack([mid_qpos, home_qpos], dim=0).unsqueeze(0).repeat(n_envs, 1, 1)
+    )
     logger.log_info(
-        "Planning MoveJoints: NamedJointPositionTarget('ready') -> explicit home qpos"
+        "Planning MoveJoints: NamedJointPositionTarget('ready') -> "
+        "multi-waypoint trajectory (mid -> home)"
     )
     is_success, traj, _ = atomic_engine.run(
         steps=[
             ("move_joints", NamedJointPositionTarget(name="ready")),
-            ("move_joints", JointPositionTarget(qpos=home_qpos)),
+            ("move_joints", JointPositionTarget(qpos=multi_waypoint_qpos)),
         ]
     )
     if not is_success:

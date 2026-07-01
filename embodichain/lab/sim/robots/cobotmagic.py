@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import TYPE_CHECKING, Dict, List, Any, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -36,6 +36,8 @@ from embodichain.utils import logger
 if TYPE_CHECKING:
     import pytorch_kinematics as pk
 
+__all__ = ["CobotMagicCfg"]
+
 
 @configclass
 class CobotMagicCfg(RobotCfg):
@@ -45,18 +47,13 @@ class CobotMagicCfg(RobotCfg):
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:
-
         cfg = cls()
-        default_cfgs = cls()._build_default_cfgs()
-        for key, value in default_cfgs.items():
-            setattr(cfg, key, value)
+        cfg._build_defaults(init_dict)
+        return merge_robot_cfg(cfg, init_dict)
 
-        cfg = merge_robot_cfg(cfg, init_dict)
-
-        return cfg
-
-    @staticmethod
-    def _build_default_cfgs() -> Dict[str, Any]:
+    def _build_defaults(self, init_dict: dict | None = None) -> None:
+        """Populate default urdf/control/solver/physics for CobotMagic."""
+        init_dict = init_dict or {}
         arm_urdf = get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf")
         left_arm_xpos = np.array(
             [
@@ -74,7 +71,8 @@ class CobotMagicCfg(RobotCfg):
                 [0.0, 0.0, 0.0, 1.000],
             ]
         )
-        urdf_cfg = URDFCfg(
+        self.uid = "CobotMagic"
+        self.urdf_cfg = URDFCfg(
             components=[
                 {
                     "component_type": "left_arm",
@@ -88,79 +86,79 @@ class CobotMagicCfg(RobotCfg):
                 },
             ]
         )
-        return {
-            "uid": "CobotMagic",
-            "urdf_cfg": urdf_cfg,
-            "control_parts": {
-                "left_arm": [
-                    "LEFT_JOINT1",
-                    "LEFT_JOINT2",
-                    "LEFT_JOINT3",
-                    "LEFT_JOINT4",
-                    "LEFT_JOINT5",
-                    "LEFT_JOINT6",
-                ],
-                "left_eef": ["LEFT_JOINT7", "LEFT_JOINT8"],
-                "right_arm": [
-                    "RIGHT_JOINT1",
-                    "RIGHT_JOINT2",
-                    "RIGHT_JOINT3",
-                    "RIGHT_JOINT4",
-                    "RIGHT_JOINT5",
-                    "RIGHT_JOINT6",
-                ],
-                "right_eef": ["RIGHT_JOINT7", "RIGHT_JOINT8"],
-            },
-            "solver_cfg": {
-                "left_arm": OPWSolverCfg(
-                    end_link_name="left_link6",
-                    root_link_name="left_arm_base",
-                    tcp=np.array(
-                        [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
-                    ),
+        self.control_parts = {
+            "left_arm": [
+                "left_joint1",
+                "left_joint2",
+                "left_joint3",
+                "left_joint4",
+                "left_joint5",
+                "left_joint6",
+            ],
+            "left_eef": ["left_joint7", "left_joint8"],
+            "right_arm": [
+                "right_joint1",
+                "right_joint2",
+                "right_joint3",
+                "right_joint4",
+                "right_joint5",
+                "right_joint6",
+            ],
+            "right_eef": ["right_joint7", "right_joint8"],
+        }
+        self.solver_cfg = {
+            "left_arm": OPWSolverCfg(
+                end_link_name="left_link6",
+                root_link_name="left_arm_base",
+                tcp=np.array(
+                    [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
                 ),
-                "right_arm": OPWSolverCfg(
-                    end_link_name="right_link6",
-                    root_link_name="right_arm_base",
-                    tcp=np.array(
-                        [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
-                    ),
-                ),
-            },
-            "min_position_iters": 8,
-            "min_velocity_iters": 2,
-            "drive_pros": JointDrivePropertiesCfg(
-                stiffness={
-                    "LEFT_JOINT[1-6]": 7e4,
-                    "RIGHT_JOINT[1-6]": 7e4,
-                    "LEFT_JOINT[7-8]": 3e2,
-                    "RIGHT_JOINT[7-8]": 3e2,
-                },
-                damping={
-                    "LEFT_JOINT[1-6]": 1e3,
-                    "RIGHT_JOINT[1-6]": 1e3,
-                    "LEFT_JOINT[7-8]": 3e1,
-                    "RIGHT_JOINT[7-8]": 3e1,
-                },
-                max_effort={
-                    "LEFT_JOINT[1-6]": 3e6,
-                    "RIGHT_JOINT[1-6]": 3e6,
-                    "LEFT_JOINT[7-8]": 3e3,
-                    "RIGHT_JOINT[7-8]": 3e3,
-                },
             ),
-            "attrs": RigidBodyAttributesCfg(
-                mass=0.1,
-                static_friction=0.95,
-                dynamic_friction=0.9,
-                linear_damping=0.7,
-                angular_damping=0.7,
-                contact_offset=0.001,
-                rest_offset=0.001,
-                restitution=0.01,
-                max_depenetration_velocity=1e1,
+            "right_arm": OPWSolverCfg(
+                end_link_name="right_link6",
+                root_link_name="right_arm_base",
+                tcp=np.array(
+                    [[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]]
+                ),
             ),
         }
+        self.min_position_iters = 8
+        self.min_velocity_iters = 2
+        self.drive_pros = JointDrivePropertiesCfg(
+            stiffness={
+                "left_joint[1-6]": 7e4,
+                "right_joint[1-6]": 7e4,
+                "left_joint[7-8]": 3e2,
+                "right_joint[7-8]": 3e2,
+            },
+            damping={
+                "left_joint[1-6]": 1e3,
+                "right_joint[1-6]": 1e3,
+                "left_joint[7-8]": 3e1,
+                "right_joint[7-8]": 3e1,
+            },
+            max_effort={
+                "left_joint[1-6]": 3e6,
+                "right_joint[1-6]": 3e6,
+                "left_joint[7-8]": 3e3,
+                "right_joint[7-8]": 3e3,
+            },
+        )
+        self.attrs = RigidBodyAttributesCfg(
+            static_friction=0.95,
+            dynamic_friction=0.9,
+            contact_offset=0.001,
+        )
+
+    @property
+    def _pk_urdf_path(self) -> str:
+        """URDF used for FK/IK serial chains (arm-only, gripper-stripped).
+
+        .. attention::
+            The root_link->end_link kinematics here must match the arm in the
+            simulation URDF. A DOF drift guard in the tests checks this.
+        """
+        return get_data_path("CobotMagicArm/CobotMagicNoGripper.urdf")
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
@@ -169,7 +167,7 @@ class CobotMagicCfg(RobotCfg):
             create_pk_serial_chain,
         )
 
-        urdf_path = get_data_path("CobotMagicArm/CobotMagicNoGripper.urdf")
+        urdf_path = self._pk_urdf_path
 
         left_arm_chain = create_pk_serial_chain(
             urdf_path=urdf_path,
@@ -195,7 +193,7 @@ if __name__ == "__main__":
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cuda",
+        sim_device="cpu",
         num_envs=2,
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
@@ -205,13 +203,9 @@ if __name__ == "__main__":
 
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)
-    sim.open_window()
+    # sim.open_window()
 
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
 
     print("CobotMagic added to the simulation.")
-
-    from IPython import embed
-
-    embed()

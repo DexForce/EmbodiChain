@@ -251,7 +251,15 @@ def _arm_qpos_from_state(
 
 
 class MoveEndEffector(AtomicAction):
-    """Plan a free-space end-effector move to a target pose."""
+    """Plan a free-space end-effector move to a target pose.
+
+    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
+    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    action plans a single trajectory that visits every waypoint in order,
+    starting from the inherited ``WorldState.last_qpos`` — IK is solved for each
+    waypoint with the previous waypoint's solution as the seed.
+    """
 
     TargetType: ClassVar[type] = EndEffectorPoseTarget
 
@@ -275,10 +283,7 @@ class MoveEndEffector(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-        target_states_list = [
-            [PlanState(xpos=move_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
+        target_states_list = self._build_target_states(move_xpos)
         ok, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_qpos,
@@ -296,6 +301,23 @@ class MoveEndEffector(AtomicAction):
                 last_qpos=full[:, -1, :].clone(), held_object=state.held_object
             ),
         )
+
+    def _build_target_states(self, move_xpos: torch.Tensor) -> list[list[PlanState]]:
+        """Build per-env PlanState lists from a single- or multi-waypoint target.
+
+        ``move_xpos`` is the resolved target: 3D ``(n_envs, 4, 4)`` for a single
+        waypoint or 4D ``(n_envs, n_waypoint, 4, 4)`` for a trajectory.
+        """
+        if move_xpos.dim() == 3:
+            move_xpos = move_xpos.unsqueeze(1)
+        n_waypoint = move_xpos.shape[1]
+        return [
+            [
+                PlanState(xpos=move_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(n_waypoint)
+            ]
+            for i in range(self.n_envs)
+        ]
 
     def _embed(
         self, arm_traj: torch.Tensor, last_full_qpos: torch.Tensor
@@ -328,7 +350,14 @@ class MoveEndEffector(AtomicAction):
 
 
 class MoveJoints(AtomicAction):
-    """Plan a joint-space move for the configured control part."""
+    """Plan a joint-space move for the configured control part.
+
+    The :class:`JointPositionTarget` may carry either a single waypoint
+    ``(n_envs, control_dof)`` or a multi-waypoint trajectory
+    ``(n_envs, n_waypoint, control_dof)``. In the multi-waypoint case the
+    action plans a single trajectory that visits every waypoint in order,
+    starting from the inherited ``WorldState.last_qpos``.
+    """
 
     TargetType: ClassVar[tuple[type, ...]] = (
         JointPositionTarget,
@@ -703,7 +732,16 @@ class MoveHeldObject(AtomicAction):
 
 
 class Place(AtomicAction):
-    """Lower the held object to a place pose, open the gripper, retract."""
+    """Lower the held object to a place pose, open the gripper, retract.
+
+    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
+    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    down phase visits every waypoint in order — approaching from above the
+    first waypoint, descending through each waypoint, then opening the gripper
+    at the final waypoint and retracting to above the last waypoint. Starting
+    joint positions are inherited from ``WorldState.last_qpos``.
+    """
 
     TargetType: ClassVar[type] = EndEffectorPoseTarget
 
@@ -731,6 +769,12 @@ class Place(AtomicAction):
 
     def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+        # Normalize a single-waypoint (n_envs, 4, 4) target to (n_envs, 1, 4, 4)
+        # so the multi-waypoint descent path below is uniform.
+        if place_xpos.dim() == 3:
+            place_xpos = place_xpos.unsqueeze(1)
+        n_waypoint = place_xpos.shape[1]
+
         start_arm_qpos = self.builder.resolve_start_qpos(
             _arm_qpos_from_state(state, self.arm_joint_ids, self.robot_dof),
             n_envs=self.n_envs,
@@ -744,16 +788,18 @@ class Place(AtomicAction):
             third_phase_name="back",
         )
 
-        lift_xpos = self.builder.apply_local_offset(
-            place_xpos,
-            torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
-        )
+        lift_offset = torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height
+        # Approach from above the first waypoint; retract to above the last.
+        # For a single waypoint these coincide, matching the legacy behavior.
+        approach_xpos = self.builder.apply_local_offset(place_xpos[:, 0], lift_offset)
+        retract_xpos = self.builder.apply_local_offset(place_xpos[:, -1], lift_offset)
 
-        # Phase 1: down (lift → place)
+        # Phase 1: down (approach → every place waypoint in order)
         target_states_list = [
-            [
-                PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE),
-                PlanState(xpos=place_xpos[i], move_type=MoveType.EEF_MOVE),
+            [PlanState(xpos=approach_xpos[i], move_type=MoveType.EEF_MOVE)]
+            + [
+                PlanState(xpos=place_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(n_waypoint)
             ]
             for i in range(self.n_envs)
         ]
@@ -768,9 +814,9 @@ class Place(AtomicAction):
             return self._fail(state)
         reach_arm_qpos = down_arm[:, -1, :]
 
-        # Phase 3: back (retract to lift)
+        # Phase 3: back (retract to above the last waypoint)
         target_states_list = [
-            [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
+            [PlanState(xpos=retract_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
         ok, back_arm = self.builder.plan_arm_traj(

@@ -71,7 +71,14 @@ class EndEffectorPoseTarget:
     """End-effector pose target. Used by MoveEndEffector and Place."""
 
     xpos: torch.Tensor
-    """(4, 4) or (n_envs, 4, 4) homogeneous transform."""
+    """Target end-effector homogeneous transform.
+
+    Accepts:
+
+    - ``(4, 4)`` or ``(n_envs, 4, 4)`` — a single waypoint.
+    - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory; waypoints
+      are visited in order. (Only consumed as multi-waypoint by MoveEndEffector.)
+    """
 
 
 @dataclass(frozen=True)
@@ -79,7 +86,14 @@ class JointPositionTarget:
     """Joint-space target for a configured robot control part."""
 
     qpos: torch.Tensor
-    """(control_dof,) or (n_envs, control_dof) target joint positions."""
+    """Target joint positions.
+
+    Accepts:
+
+    - ``(control_dof,)`` or ``(n_envs, control_dof)`` — a single waypoint.
+    - ``(n_envs, n_waypoint, control_dof)`` — a multi-waypoint trajectory;
+      waypoints are visited in order.
+    """
 
 
 @dataclass(frozen=True)

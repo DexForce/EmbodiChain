@@ -6,13 +6,13 @@ This page documents the online data streaming pipeline used for live training fr
 - **OnlineDataset**: a PyTorch `IterableDataset` that samples trajectory chunks from the engine in either item mode or batch mode.
 - **ChunkSizeSampler**: an interface for drawing dynamic chunk sizes per iteration step.
 
-These components live under `embodichain/agents/` and are designed to work with standard `DataLoader` patterns.
+These components live under `embodichain/data_pipeline/` and are designed to work with standard `DataLoader` patterns.
 
 ---
 
 ## OnlineDataEngine
 
-**Module:** `embodichain/agents/engine/data.py`
+**Module:** `embodichain/data_pipeline/engine/data.py`
 
 `OnlineDataEngine` manages an in-memory, shared buffer for streaming trajectory data. A typical usage pattern is:
 
@@ -29,7 +29,7 @@ Key ideas:
 ### Minimal setup
 
 ```python
-from embodichain.agents.engine.data import OnlineDataEngine, OnlineDataEngineCfg
+from embodichain.data_pipeline.engine.data import OnlineDataEngine, OnlineDataEngineCfg
 
 cfg = OnlineDataEngineCfg(
     buffer_size=2,           # number of trajectories kept in the ring buffer
@@ -50,7 +50,7 @@ engine.stop()
 
 ## OnlineDataset
 
-**Module:** `embodichain/agents/datasets/online_data.py`
+**Module:** `embodichain/data_pipeline/datasets/online_data.py`
 
 `OnlineDataset` wraps a live `OnlineDataEngine` and exposes a PyTorch `IterableDataset`. It supports two modes:
 
@@ -61,7 +61,7 @@ engine.stop()
 
 ```python
 from torch.utils.data import DataLoader
-from embodichain.agents.datasets import OnlineDataset
+from embodichain.data_pipeline.datasets import OnlineDataset
 
 dataset = OnlineDataset(engine, chunk_size=64)
 loader = DataLoader(
@@ -95,7 +95,7 @@ for batch in loader:
 Pass a `ChunkSizeSampler` instead of an `int` to `chunk_size` to sample a new length each iteration step.
 
 ```python
-from embodichain.agents.datasets.sampler import UniformChunkSampler
+from embodichain.data_pipeline.datasets.sampler import UniformChunkSampler
 
 sampler = UniformChunkSampler(low=16, high=64)
 dataset = OnlineDataset(engine, chunk_size=sampler)
@@ -107,7 +107,7 @@ In batch mode, the sampler is called once per step so all trajectories in the ba
 
 ## ChunkSizeSampler
 
-**Module:** `embodichain/agents/datasets/sampler.py`
+**Module:** `embodichain/data_pipeline/datasets/sampler.py`
 
 `ChunkSizeSampler` is a small interface that returns a positive integer chunk size each time it is called.
 
@@ -119,7 +119,7 @@ Built-in samplers:
 Example (GMM):
 
 ```python
-from embodichain.agents.datasets.sampler import GMMChunkSampler
+from embodichain.data_pipeline.datasets.sampler import GMMChunkSampler
 
 sampler = GMMChunkSampler(
     means=[16.0, 64.0],
@@ -136,12 +136,12 @@ sampler = GMMChunkSampler(
 
 A runnable example that wires everything together is provided in:
 
-- `examples/agents/datasets/online_dataset_demo.py`
+- `examples/data_pipeline/online_dataset_demo.py`
 
 It shows item mode, batch mode, and dynamic chunk sizes. Run it with:
 
 ```bash
-python examples/agents/datasets/online_dataset_demo.py
+python examples/data_pipeline/online_dataset_demo.py
 ```
 
 ---

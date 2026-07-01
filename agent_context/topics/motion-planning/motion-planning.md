@@ -7,6 +7,8 @@
 | Planner registry | `embodichain/lab/sim/planners/__init__.py` |
 | Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `PlanOptions` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
+| Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
+| Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
 | Motion generator | `embodichain/lab/sim/planners/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Planner utilities & data types | `embodichain/lab/sim/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod` |
 
@@ -22,7 +24,8 @@ All planners resolve their robot at init via `SimulationManager.get_instance().g
 
 ```
 BasePlanner (ABC)
-  └─ ToppraPlanner        Time-optimal path parameterization
+  ├─ ToppraPlanner        Time-optimal path parameterization
+  └─ NeuralPlanner (experimental)   APG waypoint rollout
 
 MotionGenerator           Wraps any BasePlanner; adds interpolation and multi-part support
 ```
@@ -30,12 +33,14 @@ MotionGenerator           Wraps any BasePlanner; adds interpolation and multi-pa
 Config hierarchy:
 ```
 BasePlannerCfg            robot_uid (MISSING), planner_type
-  └─ ToppraPlannerCfg     planner_type = "toppra"
+  ├─ ToppraPlannerCfg     planner_type = "toppra"
+  └─ NeuralPlannerCfg     planner_type = "neural", checkpoint_path (MISSING)
 
 MotionGenCfg              planner_cfg (MISSING — must be a BasePlannerCfg subclass)
 
 PlanOptions               (empty base)
-  └─ ToppraPlanOptions    constraints, sample_method, sample_interval
+  ├─ ToppraPlanOptions    constraints, sample_method, sample_interval
+  └─ NeuralPlanOptions    control_part, start_qpos, max_steps
 
 MotionGenOptions          start_qpos, control_part, plan_opts, is_interpolate,
                           interpolate_nums, is_linear, interpolate_position_step,
@@ -60,12 +65,21 @@ Time-optimal path parameterization using the [toppra](https://github.com/hungpha
 | `sample_method` | `TrajectorySampleMethod` | `QUANTITY` | `TIME`, `QUANTITY`, or `DISTANCE` |
 | `sample_interval` | `float \| int` | `0.01` | Time interval (seconds) or sample count depending on method |
 
+### NeuralPlanner (experimental)
+
+Learning-based EEF waypoint planner. Franka Panda only.
+
+- Checkpoint: `download_neural_planner_checkpoint()` from HuggingFace (gated, needs `HF_TOKEN`)
+- Use via `MotionGenerator` with `planner_type="neural"` and `plan_opts=NeuralPlanOptions(...)`
+- Input: `EEF_MOVE` `PlanState` list with 4×4 `xpos`
+- Key cfg: `checkpoint_path` (from download), `control_part`
+
 ### MotionGenerator
 
 Unified interface for trajectory planning with optional pre-interpolation.
 
 - Wraps a `BasePlanner` instance (resolved from `planner_cfg.planner_type`).
-- Supported planner types: `{"toppra": (ToppraPlanner, ToppraPlannerCfg)}`.
+- Supported planner types: `{"toppra": (ToppraPlanner, ToppraPlannerCfg), "neural": (NeuralPlanner, NeuralPlannerCfg)}`.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 
 `MotionGenOptions` fields:
@@ -140,7 +154,7 @@ Describes one waypoint or action:
    ```python
    _support_planner_dict = {
        "toppra": (ToppraPlanner, ToppraPlannerCfg),
-       "my_planner": (MyPlanner, MyPlannerCfg),
+       "neural": (NeuralPlanner, NeuralPlannerCfg),
    }
    ```
 5. Export from `embodichain/lab/sim/planners/__init__.py`.

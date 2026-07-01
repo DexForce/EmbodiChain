@@ -28,8 +28,7 @@ Moves the end-effector to a target pose in free space.
 | `control_part` | `"arm"` | Robot control part to move |
 | `sample_interval` | `50` | Number of waypoints in the trajectory |
 
-**Target:** `EndEffectorPoseTarget(xpos=...)` where `xpos` is a `torch.Tensor` of shape `(4, 4)` or
-`(n_envs, 4, 4)` — a homogeneous EEF pose.
+**Target:** `EndEffectorPoseTarget(xpos=...)` where `xpos` is a `torch.Tensor` of shape `(4, 4)`, `(n_envs, 4, 4)` or `(n_envs, n_waypoint, 4, 4)` — a homogeneous EEF pose.
 
 ![MoveEndEffector demo](../../../_static/atomic_actions/move_end_effector.gif)
 
@@ -47,8 +46,7 @@ home poses, recovery motions, or any motion where a qpos target is clearer than 
 | `named_joint_positions` | `None` | Optional `dict[str, torch.Tensor]` for named qpos targets |
 
 **Targets:**
-- `JointPositionTarget(qpos=...)` where `qpos` is a `torch.Tensor` of shape `(control_dof,)` or
-  `(n_envs, control_dof)`.
+- `JointPositionTarget(qpos=...)` where `qpos` is a `torch.Tensor` of shape `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)`.
 - `NamedJointPositionTarget(name=...)` where `name` is resolved from
   `MoveJointsCfg.named_joint_positions`.
 
@@ -122,7 +120,7 @@ down to the target pose. On success, the returned `WorldState` clears `held_obje
 | `sample_interval` | `80` | Total waypoints across all three phases |
 
 **Target:** `EndEffectorPoseTarget(xpos=...)` — the EEF pose at release, a `torch.Tensor` of shape
-`(4, 4)` or `(n_envs, 4, 4)`.
+`(4, 4)`, `(n_envs, 4, 4)` or `(n_envs, n_waypoint, 4, 4)`.
 
 ![Place demo](../../../_static/atomic_actions/place.gif)
 

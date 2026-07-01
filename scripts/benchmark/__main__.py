@@ -22,6 +22,7 @@ Usage examples::
     python -m scripts.benchmark rl --rebuild-report-only
     python -m scripts.benchmark robotics-kinematic-solver -s pytorch
     python -m scripts.benchmark atomic-action --smoke
+    python -m scripts.benchmark planners-neural-planner --num-waypoints 1 3 5
 """
 
 from __future__ import annotations
@@ -51,6 +52,26 @@ def _run_atomic_action_cli(_: argparse.Namespace) -> None:
     from scripts.benchmark.atomic_action.run_benchmark import main as atomic_main
 
     atomic_main()
+
+
+def _run_neural_planner_cli(args: argparse.Namespace) -> None:
+    """Run NeuralPlanner benchmark with forwarded CLI args."""
+    from scripts.benchmark.planners.neural_planner.run_benchmark import (
+        run_all_benchmarks,
+    )
+
+    run_all_benchmarks(
+        num_waypoints_list=args.num_waypoints,
+        sim_device=args.device,
+        headless=args.headless,
+        checkpoint_path=args.checkpoint_path,
+        num_trials=args.num_trials,
+        warmup_trials=args.warmup_trials,
+        sample_interval=args.sample_interval,
+        compare_ik=args.compare_ik,
+        compare_toppra=args.compare_toppra,
+        include_trial_details=args.save_trial_details,
+    )
 
 
 def main() -> None:
@@ -92,6 +113,77 @@ def main() -> None:
 
     add_benchmark_args(atomic_action_parser)
     atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
+
+    # -- planners-neural-planner --------------------------------------------
+    neural_planner_parser = subparsers.add_parser(
+        "planners-neural-planner",
+        help="Benchmark NeuralPlanner planning latency and quality on Franka.",
+    )
+    neural_planner_parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda"),
+        default="auto",
+        help="Simulation and planner device. Auto uses CUDA when available.",
+    )
+    neural_planner_parser.add_argument(
+        "--num-waypoints",
+        nargs="+",
+        type=int,
+        default=[1, 3, 5],
+        help="Number of EEF waypoints to sweep.",
+    )
+    neural_planner_parser.add_argument(
+        "--num-trials",
+        type=int,
+        default=8,
+        help="Measured trials per (impl, num_waypoints) configuration.",
+    )
+    neural_planner_parser.add_argument(
+        "--warmup-trials",
+        type=int,
+        default=1,
+        help="Warmup trials per configuration; excluded from summary aggregation.",
+    )
+    neural_planner_parser.add_argument(
+        "--sample-interval",
+        type=int,
+        default=20,
+        help="Resampled trajectory length for ik_interpolate and ik_toppra.",
+    )
+    neural_planner_parser.add_argument(
+        "--compare-ik",
+        action="store_true",
+        help="Also benchmark sequential IK plus joint interpolation.",
+    )
+    neural_planner_parser.add_argument(
+        "--compare-toppra",
+        action="store_true",
+        help="Also benchmark EEF IK interpolation followed by TOPPRA.",
+    )
+    neural_planner_parser.add_argument(
+        "--save-trial-details",
+        action="store_true",
+        help="Include per-trial rows in the markdown report.",
+    )
+    neural_planner_parser.add_argument(
+        "--checkpoint-path",
+        type=str,
+        default=None,
+        help="Local neural planner checkpoint path. Skips HuggingFace download.",
+    )
+    neural_planner_parser.add_argument(
+        "--headless",
+        action="store_true",
+        default=True,
+        help="Run simulation headlessly (default: True).",
+    )
+    neural_planner_parser.add_argument(
+        "--no-headless",
+        action="store_false",
+        dest="headless",
+        help="Open the simulation viewer window.",
+    )
+    neural_planner_parser.set_defaults(func=_run_neural_planner_cli)
 
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
