@@ -19,8 +19,10 @@ from __future__ import annotations
 from typing import Any
 
 from embodichain.gen_sim.prompt2scene.workflows.request import InputKind
-from embodichain.gen_sim.prompt2scene.workflows.text_relations.schema import (
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
     TEXT_RELATIONS_JSON_SCHEMA,
+)
+from embodichain.gen_sim.prompt2scene.workflows.text_relations.schema import (
     TextRelationSpec,
 )
 from embodichain.gen_sim.prompt2scene.utils import (
@@ -31,14 +33,14 @@ from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
     TEXT_RELATIONS_STEP,
     WorkflowArtifactWriter,
 )
-from embodichain.gen_sim.prompt2scene.workflows.llm_output import (
+from embodichain.gen_sim.prompt2scene.llms.llm_output import (
     StructuredModelCallError,
     call_structured_json_model_step,
 )
 from embodichain.gen_sim.prompt2scene.workflows.stage_errors import (
     format_attempt_error,
 )
-from embodichain.gen_sim.prompt2scene.workflows.text_relations.prompts import (
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
     build_text_relation_messages,
 )
 from embodichain.gen_sim.prompt2scene.workflows.text_relations.state import (
@@ -93,11 +95,11 @@ def call_llm_text_relations_node(
             schema=TEXT_RELATIONS_JSON_SCHEMA,
             messages=state["messages"],
             context="Text relations",
-            step_name=TEXT_RELATIONS_STEP,
-            output_root=None,
+            
+            
             attempt_count=attempt_count,
-            raw_output_label="extract",
-            artifact_writer=artifact_writer,
+            
+            
         )
     except StructuredModelCallError as exc:
         error = format_attempt_error("Text relations", attempt_count, exc)

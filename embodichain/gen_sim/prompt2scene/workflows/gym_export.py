@@ -26,9 +26,9 @@ from typing import Any
 
 import numpy as np
 
-from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
-    STEP_RESULT_FILENAME,
+from embodichain.gen_sim.prompt2scene.workflows.paths import (
     UNIFIED_SCENE_GEN_STEP,
+    PipelinePaths,
 )
 
 __all__ = ["export_gym_config"]
@@ -53,11 +53,6 @@ _DEFAULT_TABLE_ATTRS: dict[str, Any] = {
 _DEFAULT_MAX_CONVEX_HULL_NUM = 32
 
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
 def _resolve_path(value: str, output_root: Path) -> Path:
     path = Path(value).expanduser()
     if path.is_absolute():
@@ -66,11 +61,43 @@ def _resolve_path(value: str, output_root: Path) -> Path:
 
 
 def _read_json(path: Path) -> dict[str, Any]:
+    if path.is_dir():
+        raise IsADirectoryError(f"Expected JSON file but got directory: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"JSON file not found: {path}")
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object at {path}")
     return data
+
+
+def _resolve_table_fit_manifest_path(
+    *,
+    manifest_path_value: Any,
+    output_root: Path,
+    paths: PipelinePaths,
+) -> Path:
+    if not manifest_path_value:
+        raise FileNotFoundError("table_fit_to_clutter manifest_path is missing or empty")
+
+    resolved = _resolve_path(str(manifest_path_value), output_root)
+    if resolved.is_file():
+        return resolved
+
+    default_manifest = paths.table_fit_manifest
+    if default_manifest.is_file():
+        return default_manifest
+
+    if resolved.is_dir():
+        raise IsADirectoryError(
+            "table_fit_to_clutter manifest_path points to a directory, not a JSON "
+            f"file: value={manifest_path_value!r} resolved={resolved}"
+        )
+    raise FileNotFoundError(
+        "table_fit_to_clutter manifest_path does not point to a JSON file: "
+        f"value={manifest_path_value!r} resolved={resolved}"
+    )
 
 
 def _matrix_to_euler_xyz_deg(matrix: list[list[float]]) -> list[float]:
@@ -188,11 +215,6 @@ def _rotated_aabb_offsets(
     )
 
 
-# ---------------------------------------------------------------------------
-# consolidated object manifest
-# ---------------------------------------------------------------------------
-
-
 def _build_object_manifest(
     output_root: Path,
     step_result: dict[str, Any],
@@ -278,11 +300,6 @@ def _build_object_manifest(
     return consolidated
 
 
-# ---------------------------------------------------------------------------
-# main export
-# ---------------------------------------------------------------------------
-
-
 def export_gym_config(
     output_root: Path,
     *,
@@ -300,99 +317,81 @@ def export_gym_config(
         export_dir = export_dir.expanduser().resolve()
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── data sources ────────────────────────────────────────────────────
-    step_result = _read_json(
-        output_root / UNIFIED_SCENE_GEN_STEP / STEP_RESULT_FILENAME
-    )
+    paths = PipelinePaths(output_root)
+
+    step_result = _read_json(paths.step_result(UNIFIED_SCENE_GEN_STEP))
     table_fit = step_result.get("table_fit_to_clutter") or {}
+    if table_fit.get("status") != "ok":
+        raise RuntimeError(
+            "Cannot export gym_config because table_fit_to_clutter did not "
+            f"succeed: status={table_fit.get('status')!r} "
+            f"reason={table_fit.get('reason', '')}"
+        )
+    manifest_path_value = table_fit.get("manifest_path") or ""
     table_fit_manifest = _read_json(
-        _resolve_path(table_fit.get("manifest_path", ""), output_root)
+        _resolve_table_fit_manifest_path(
+            manifest_path_value=manifest_path_value,
+            output_root=output_root,
+            paths=paths,
+        )
     )
 
-    aligned_by_id: dict[str, dict[str, Any]] = {}
-    aligned_manifest_path = (
-        output_root
-        / UNIFIED_SCENE_GEN_STEP
-        / "glb_gen"
-        / "simready_to_aligned_manifest.json"
-    )
-    if aligned_manifest_path.is_file():
-        for item in _read_json(aligned_manifest_path).get("items", []) or []:
-            if isinstance(item, dict) and item.get("id"):
-                aligned_by_id[str(item["id"])] = item
-
-    # ── consolidated per-object manifest ─────────────────────────────────
-    object_manifest = _build_object_manifest(
-        output_root, step_result, table_fit_manifest, aligned_by_id
-    )
-
-    # ── table ────────────────────────────────────────────────────────────
     table_info = step_result.get("table") or {}
     table_desc = str(
         table_info.get("complete_table_description")
         or table_info.get("description", "")
     ).strip()
+    object_desc_by_id = {
+        str(item.get("id", "")): str(
+            item.get("description") or item.get("name") or ""
+        ).strip()
+        for item in step_result.get("objects") or []
+        if isinstance(item, dict) and item.get("id")
+    }
 
     mesh_assets_dir = export_dir / "mesh_assets"
     mesh_assets_dir.mkdir(parents=True, exist_ok=True)
 
-    table_simready = _resolve_path(
-        table_info.get("simready_geometry_path")
-        or table_info.get("mesh_path", ""),
+    table_fit_output = _resolve_path(
+        table_fit_manifest.get("table_output_path", ""),
         output_root,
     )
-    if not table_simready.is_file():
-        raise FileNotFoundError(f"Table simready GLB not found: {table_simready}")
+    if not table_fit_output.is_file():
+        raise FileNotFoundError(f"Table-fit GLB not found: {table_fit_output}")
     table_dst = mesh_assets_dir / "table" / "table_0.glb"
     table_dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(table_simready, table_dst)
+    shutil.copy2(table_fit_output, table_dst)
 
-    table_surface_z = _glb_max_z(table_simready)
-
-    uniform_scale = 1.0
-    ts = table_fit_manifest.get("table_xy_scale")
-    if isinstance(ts, dict):
-        uniform_scale = float(ts.get("uniform_scale", 1.0))
-
-    # ── objects ──────────────────────────────────────────────────────────
     rigid_objects: list[dict[str, Any]] = []
 
-    total = len(object_manifest)
-    for idx, (oid, om) in enumerate(object_manifest.items()):
-        # Copy simready GLB
+    fitted_objects = [
+        item
+        for item in table_fit_manifest.get("objects", []) or []
+        if isinstance(item, dict) and item.get("id") and item.get("path")
+    ]
+    total = len(fitted_objects)
+    for idx, item in enumerate(fitted_objects):
+        oid = str(item["id"])
         safe_name = oid.replace("interact_", "").strip("_") or "object"
         obj_dir = mesh_assets_dir / safe_name / oid
         obj_dir.mkdir(parents=True, exist_ok=True)
         object_dst = obj_dir / f"{oid}.glb"
-        shutil.copy2(om["simready_path"], object_dst)
+        object_fit_path = _resolve_path(str(item["path"]), output_root)
+        if not object_fit_path.is_file():
+            raise FileNotFoundError(f"Table-fit object GLB not found: {object_fit_path}")
+        shutil.copy2(object_fit_path, object_dst)
 
-        # body_scale.  Image-scene alignment may contain a full simready→aligned
-        # scale; text-scene layout only has the per-object metric scale.
-        sf = om["scale_factor"]
-        scale_glb = om.get("transform_scale") or [sf, sf, sf]
-        body_scale = _glb_scale_to_sim(scale_glb)
-
-        # init_rot
-        init_rot: list[float] = [0.0, 0.0, 0.0]
-        if om["rotation_matrix"] is not None:
-            init_rot = _matrix_to_euler_xyz_deg(
-                _glb_rotation_to_sim(om["rotation_matrix"])
-            )
-
-        # init_pos = world_bc - rotated_aabb_offset
-        ro = _rotated_aabb_offsets(
-            om["simready_path"], om["rotation_matrix"], scale_glb
-        )
-        wbc = om["world_aabb_bottom_center"]
-        if wbc is not None:
-            init_pos = [wbc[0] - ro[0], wbc[1] - ro[1], wbc[2] - ro[2]]
-        else:
-            init_pos = [-ro[0], -ro[1], table_surface_z - ro[2]]
+        # Table-fit GLBs already have the relative layout baked into vertices.
+        # Preview/export should not rebuild placement from simready transforms.
+        init_pos = [0.0, 0.0, 0.0]
+        init_rot = [0.0, 0.0, 0.0]
+        body_scale = [1.0, 1.0, 1.0]
+        description = object_desc_by_id.get(oid, oid)
 
         rigid_objects.append(
             {
                 "uid": oid,
-                "description": om["description"],
+                "description": description,
                 "shape": {
                     "shape_type": "Mesh",
                     "fpath": str(object_dst.relative_to(export_dir)),
@@ -406,14 +405,11 @@ def export_gym_config(
                 "max_convex_hull_num": _DEFAULT_MAX_CONVEX_HULL_NUM,
             }
         )
-        wbc = om["world_aabb_bottom_center"]
-        wbc_flag = "wbc" if wbc is not None else "fallback"
         print(
-            f"  [{idx+1}/{total}] [{oid}] {om['description']}"
-            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src={wbc_flag}"
+            f"  [{idx+1}/{total}] [{oid}] {description}"
+            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src=table_fit_glb"
         )
 
-    # ── write gym config ─────────────────────────────────────────────────
     config = {
         "id": f"Prompt2Scene-{int(time.time() * 1000)}-v0",
         "max_episodes": 10,
@@ -432,7 +428,7 @@ def export_gym_config(
                     "compute_uv": False,
                 },
                 "attrs": dict(_DEFAULT_TABLE_ATTRS),
-                "body_scale": [uniform_scale, uniform_scale, 1.0],
+                "body_scale": [1.0, 1.0, 1.0],
                 "body_type": "kinematic",
                 "init_pos": [0.0, 0.0, 0.0],
                 "init_rot": [0.0, 0.0, 0.0],

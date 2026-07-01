@@ -23,10 +23,8 @@ from typing import Any
 from embodichain.gen_sim.prompt2scene.utils.io import (
     relative_path,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager.scene_geometry import (
-    _compose_json_matrices,
-    _compose_simready_to_aligned_matrix,
-    _decompose_transform_matrix,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
+    GeometryManager,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import write_json
 
@@ -172,16 +170,16 @@ def _simready_to_aligned_manifest_item(
             item_id,
             alignment_matrix,
         )
-    raw_to_aligned_matrix = _compose_json_matrices(
+    raw_to_aligned_matrix = GeometryManager.compose_json_matrices(
         glb_output_axis_transform,
         item_alignment_matrix,
         sam3d_transform,
     )
-    simready_to_aligned_matrix = _compose_simready_to_aligned_matrix(
+    simready_to_aligned_matrix = GeometryManager.compose_simready_to_aligned_matrix(
         raw_to_aligned_matrix=raw_to_aligned_matrix,
         raw_to_simready_matrix=item.get("raw_to_simready_glb_matrix", []),
     )
-    decomposed = _decompose_transform_matrix(simready_to_aligned_matrix)
+    decomposed = GeometryManager.decompose_transform_matrix(simready_to_aligned_matrix)
     return {
         "id": item_id,
         "name": item.get("name", ""),

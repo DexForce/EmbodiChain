@@ -23,17 +23,17 @@ from typing import Any
 
 import numpy as np
 
-from embodichain.gen_sim.prompt2scene.workflows.llm_output import (
+from embodichain.gen_sim.prompt2scene.llms.llm_output import (
     call_structured_json_model_step,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.prompts import (
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
     build_up_down_flip_check_messages,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.metric_scale_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager import (
     GlobalMetricScaleRequest,
     MetricScaleManager,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.schemas import (
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
     UP_DOWN_FLIP_CHECK_JSON_SCHEMA,
 )
 
@@ -47,26 +47,14 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.matplotlib_manager im
     MatplotlibManager,
     RenderImageComparisonRequest,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager.scene_geometry import (
-    _aabb_center,
-    _copy_scene_with_transform,
-    _estimate_support_normal,
-    _load_scene_with_transform,
-    _matrix_from_json,
-    _rotation_between_vectors,
-    _scale_transform,
-    _scene_to_mesh,
-    _support_normal_flip_transform,
-    _xy_aabb_center,
-    _z_up_to_glb_y_up_transform,
-    _z_yaw_transform,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
+    GeometryManager,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import (
     relative_path,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.optimization_manager import (
-    _object_scenes_xy_aabb_manifest,
-    _settle_and_pack_object_footprints,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager import (
+    LayoutManager,
 )
 
 __all__ = ["_export_support_aligned_layout_glbs"]
@@ -106,7 +94,7 @@ def _export_support_aligned_layout_glbs(
         raise FileNotFoundError(
             f"Support reference table GLB not found: {support_reference_path}"
         )
-    support_reference_transform = _matrix_from_json(
+    support_reference_transform = GeometryManager.matrix_from_json(
         table.get("support_reference_transform_matrix")
         or table.get("transform_matrix"),
         name="table.support_reference_transform_matrix",
@@ -119,9 +107,9 @@ def _export_support_aligned_layout_glbs(
     object_scenes = [
         (
             object_id,
-            _load_scene_with_transform(
+            GeometryManager.load_scene_with_transform(
                 path=path,
-                transform=_matrix_from_json(
+                transform=GeometryManager.matrix_from_json(
                     transform,
                     name=f"{object_id}.transform_matrix",
                 ),
@@ -130,9 +118,9 @@ def _export_support_aligned_layout_glbs(
         )
         for object_id, path, transform in object_paths
     ]
-    table_mesh = _scene_to_mesh(support_reference_scene, trimesh=trimesh)
-    support_normal = _estimate_support_normal(table_mesh)
-    normal_alignment = _rotation_between_vectors(
+    table_mesh = GeometryManager.scene_to_mesh(support_reference_scene, trimesh=trimesh)
+    support_normal = GeometryManager.estimate_support_normal(table_mesh)
+    normal_alignment = GeometryManager.rotation_between_vectors(
         support_normal,
         np.array([0.0, 0.0, 1.0]),
     )
@@ -141,7 +129,8 @@ def _export_support_aligned_layout_glbs(
         scene.apply_transform(normal_alignment)
 
     object_bounds = [
-        _scene_to_mesh(scene, trimesh=trimesh).bounds for _, scene in object_scenes
+        GeometryManager.scene_to_mesh(scene, trimesh=trimesh).bounds
+        for _, scene in object_scenes
     ]
     clutter_bounds = np.vstack(
         [
@@ -191,12 +180,14 @@ def _export_support_aligned_layout_glbs(
             object_scenes=object_scenes,
         )
     )
-    metric_scale_transform = _scale_transform(global_metric_scale["scale_factor"])
+    metric_scale_transform = GeometryManager.scale_transform(
+        global_metric_scale["scale_factor"]
+    )
     if float(global_metric_scale["scale_factor"]) != 1.0:
         for _, scene in object_scenes:
             scene.apply_transform(metric_scale_transform)
 
-    footprint_result = _settle_and_pack_object_footprints(
+    footprint_result = LayoutManager.settle_and_pack_object_footprints(
         object_scenes=object_scenes,
         output_dir=output_dir / "footprint_layout",
         output_root=output_root,
@@ -204,11 +195,14 @@ def _export_support_aligned_layout_glbs(
     )
     object_scenes = footprint_result["object_scenes"]
 
-    output_axis_transform = _z_up_to_glb_y_up_transform()
+    output_axis_transform = GeometryManager.z_up_to_glb_y_up_transform()
     object_outputs = []
     for object_id, scene in object_scenes:
         object_output = output_dir / f"{object_id}_aligned.glb"
-        _copy_scene_with_transform(scene, output_axis_transform).export(object_output)
+        GeometryManager.copy_scene_with_transform(
+            scene,
+            output_axis_transform,
+        ).export(object_output)
         object_outputs.append(
             {
                 "id": object_id,
@@ -218,7 +212,7 @@ def _export_support_aligned_layout_glbs(
 
     alignment_matrix = selected_extra_transform @ center_transform @ normal_alignment
     scaled_alignment_matrix = metric_scale_transform @ alignment_matrix
-    final_clutter_aabb_2d_cm = _object_scenes_xy_aabb_manifest(
+    final_clutter_aabb_2d_cm = LayoutManager.object_scenes_xy_aabb_manifest(
         object_scenes=object_scenes,
         trimesh=trimesh,
         unit_scale=100.0,
@@ -270,7 +264,7 @@ def _build_up_down_alignment_candidates(
     spatial_relations: list[dict[str, Any]],
     trimesh: Any,
 ) -> dict[str, dict[str, Any]]:
-    flip_transform = _support_normal_flip_transform(
+    flip_transform = GeometryManager.support_normal_flip_transform(
         support_normal=support_normal,
         normal_alignment=normal_alignment,
     )
@@ -281,12 +275,15 @@ def _build_up_down_alignment_candidates(
         ("flipped", flip_transform),
     ]:
         candidate_object_scenes = [
-            (object_id, _copy_scene_with_transform(scene, pre_yaw_transform))
+            (
+                object_id,
+                GeometryManager.copy_scene_with_transform(scene, pre_yaw_transform),
+            )
             for object_id, scene in object_scenes
         ]
         object_bounds = {
             object_id: np.asarray(
-                _scene_to_mesh(scene, trimesh=trimesh).bounds,
+                GeometryManager.scene_to_mesh(scene, trimesh=trimesh).bounds,
                 dtype=np.float64,
             )
             for object_id, scene in candidate_object_scenes
@@ -295,7 +292,7 @@ def _build_up_down_alignment_candidates(
             object_bounds=object_bounds,
             relations=directional_relations,
         )
-        yaw_transform = _z_yaw_transform(
+        yaw_transform = GeometryManager.z_yaw_transform(
             float(yaw_metadata["yaw_degrees"]),
         )
         for _, scene in candidate_object_scenes:
@@ -325,14 +322,15 @@ def _best_spatial_yaw(
         }
 
     object_centers = {
-        object_id: _aabb_center(bounds) for object_id, bounds in object_bounds.items()
+        object_id: GeometryManager.aabb_center(bounds)
+        for object_id, bounds in object_bounds.items()
     }
     best_yaw = 0
     best_score = -1
     best_raw_gap_sum = float("-inf")
     best_relation_scores: list[dict[str, Any]] = []
     for yaw_degrees in range(360):
-        rotation = _z_yaw_transform(float(yaw_degrees))
+        rotation = GeometryManager.z_yaw_transform(float(yaw_degrees))
         rotated_centers = {
             object_id: _transform_point(rotation, center)
             for object_id, center in object_centers.items()

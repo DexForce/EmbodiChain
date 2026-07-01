@@ -21,7 +21,7 @@ from typing import Any
 from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
     SceneIntakeSpec,
 )
-from embodichain.gen_sim.prompt2scene.workflows.spatial import (
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.spatial_relations import (
     GRID_VALUES,
     RELATION_VALUES,
 )

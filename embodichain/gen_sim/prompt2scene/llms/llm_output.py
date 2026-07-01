@@ -17,13 +17,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Callable
-
-from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
-    WorkflowArtifactWriter,
-    write_next_raw_model_output,
-)
 
 __all__ = [
     "bind_structured_output",
@@ -114,11 +108,7 @@ def call_structured_json_model_step(
     schema: dict[str, Any],
     messages: list[dict[str, Any]],
     context: str,
-    step_name: str,
-    output_root: Path | None,
     attempt_count: int,
-    raw_output_label: str | None = None,
-    artifact_writer: WorkflowArtifactWriter | None = None,
     raw_output_writer: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Call a structured-output model, validate JSON, and persist raw output."""
@@ -142,18 +132,6 @@ def call_structured_json_model_step(
 
     if raw_output_writer is not None:
         raw_output_writer(raw_model_output)
-    elif artifact_writer is not None:
-        artifact_writer.write_next_raw_model_output(
-            payload=raw_model_output,
-            label=raw_output_label,
-        )
-    elif output_root is not None:
-        write_next_raw_model_output(
-            output_root=output_root,
-            step_name=step_name,
-            payload=raw_model_output,
-            label=raw_output_label,
-        )
     return raw_model_output
 
 

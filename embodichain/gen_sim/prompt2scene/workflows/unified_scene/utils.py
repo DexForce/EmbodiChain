@@ -23,7 +23,7 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
     ImageAnchor,
     ImageRelationSpec,
 )
-from embodichain.gen_sim.prompt2scene.workflows.spatial import (
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.spatial_relations import (
     assign_grids_from_anchor_and_orders,
     derive_relations_from_orders,
     transitive_relation_closure,

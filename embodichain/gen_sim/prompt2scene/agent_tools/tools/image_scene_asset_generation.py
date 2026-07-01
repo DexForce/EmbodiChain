@@ -41,7 +41,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_segmentation_ma
     AssetImageToRgbaRequest,
     ImageSegmentationManager,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.image_layout_alignment import (
     _export_support_aligned_layout_glbs,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager import (
@@ -49,23 +49,19 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager impo
     MakeTableSimreadyRequest,
     SimreadyManager,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.metric_scale_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager import (
     METRIC_SCALE_ENABLED,
     EstimateMetricScalesRequest,
+    IMAGE_METRIC_SCALE_JSON_SCHEMA,
     MetricScaleManager,
     MetricScaleObjectInput,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager.scene_geometry import (
-    _compose_sam3d_multi_object_transform,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager import (
-    _write_multi_object_layout_manifests,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.prompts import (
     build_image_metric_scale_messages,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.schemas import (
-    IMAGE_METRIC_SCALE_JSON_SCHEMA,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
+    GeometryManager,
+)
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.layout_manifests import (
+    _write_multi_object_layout_manifests,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import (
     relative_path,
@@ -212,7 +208,7 @@ def generate_image_scene_assets(
             status_parts: list[str] = []
             transform_matrix: list[list[float]] = []
             try:
-                transform = _compose_sam3d_multi_object_transform(
+                transform = GeometryManager.compose_sam3d_multi_object_transform(
                     rotation_quaternion_wxyz=generated.rotation_quaternion_wxyz,
                     translation=generated.translation,
                     scale=generated.scale,

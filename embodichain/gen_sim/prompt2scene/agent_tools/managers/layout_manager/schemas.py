@@ -16,8 +16,4 @@
 
 from __future__ import annotations
 
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.table_clutter_fit_manager.manager import (
-    fit_table_to_clutter,
-)
-
-__all__ = ["fit_table_to_clutter"]
+__all__: list[str] = []

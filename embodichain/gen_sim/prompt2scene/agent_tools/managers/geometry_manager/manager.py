@@ -60,6 +60,172 @@ class GeometryManager:
     the same pattern as service clients.
     """
 
+    @staticmethod
+    def compose_json_matrices(*values: Any) -> list[list[float]]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_json_matrices(*values)
+
+    @staticmethod
+    def compose_simready_to_aligned_matrix(
+        *, raw_to_aligned_matrix: Any, raw_to_simready_matrix: Any
+    ) -> list[list[float]]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_simready_to_aligned_matrix(
+            raw_to_aligned_matrix=raw_to_aligned_matrix,
+            raw_to_simready_matrix=raw_to_simready_matrix,
+        )
+
+    @staticmethod
+    def decompose_transform_matrix(matrix_value: Any) -> dict[str, Any]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._decompose_transform_matrix(matrix_value)
+
+    @staticmethod
+    def support_normal_flip_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._support_normal_flip_transform(**kwargs)
+
+    @staticmethod
+    def z_yaw_transform(yaw_degrees: float) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._z_yaw_transform(yaw_degrees)
+
+    @staticmethod
+    def z_up_to_glb_y_up_transform() -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._z_up_to_glb_y_up_transform()
+
+    @staticmethod
+    def copy_scene_with_transform(scene: Any, transform: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._copy_scene_with_transform(scene, transform)
+
+    @staticmethod
+    def matrix_from_json(value: Any, *, name: str) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._matrix_from_json(value, name=name)
+
+    @staticmethod
+    def load_scene_with_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._load_scene_with_transform(**kwargs)
+
+    @staticmethod
+    def estimate_support_normal(mesh: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._estimate_support_normal(mesh)
+
+    @staticmethod
+    def rotation_between_vectors(source: Any, target: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._rotation_between_vectors(source, target)
+
+    @staticmethod
+    def transform_point(transform: Any, point: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._transform_point(transform, point)
+
+    @staticmethod
+    def aabb_center(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._aabb_center(bounds)
+
+    @staticmethod
+    def xy_aabb_center(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._xy_aabb_center(bounds)
+
+    @staticmethod
+    def xy_aabb_size(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._xy_aabb_size(bounds)
+
+    @staticmethod
+    def aabb_bottom_to_xy_plane_transform(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._aabb_bottom_to_xy_plane_transform(bounds)
+
+    @staticmethod
+    def scale_transform(scale: float) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._scale_transform(scale)
+
+    @staticmethod
+    def compose_sam3d_multi_object_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_sam3d_multi_object_transform(**kwargs)
+
+    @staticmethod
+    def detect_table_fit_support_quad(
+        mesh: Any,
+        *,
+        target_aspect: float,
+    ) -> dict[str, Any]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._detect_table_fit_support_quad(
+            mesh,
+            target_aspect=target_aspect,
+        )
+
+    @staticmethod
+    def load_table_fit_scene_internal_z(path: Path, *, trimesh: Any, y_to_z: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._load_table_fit_scene_internal_z(
+            path,
+            trimesh=trimesh,
+            y_to_z=y_to_z,
+        )
+
+    @staticmethod
+    def table_fit_scene_union_bounds(scenes: list[Any], *, trimesh: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_scene_union_bounds(scenes, trimesh=trimesh)
+
+    @staticmethod
+    def table_fit_bounds_xy_manifest(
+        bounds: Any,
+        *,
+        unit_scale: float,
+    ) -> dict[str, Any]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_bounds_xy_manifest(
+            bounds,
+            unit_scale=unit_scale,
+        )
+
+    @staticmethod
+    def table_fit_uniform_xy_scale_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_uniform_xy_scale_transform(**kwargs)
+
+    @staticmethod
+    def table_fit_safe_positive_ratio(numerator: float, denominator: float) -> float:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_safe_positive_ratio(numerator, denominator)
 
     @staticmethod
     def load_mesh(request: LoadMeshRequest) -> LoadMeshResult:
@@ -228,17 +394,22 @@ class GeometryManager:
         return best
 
     @staticmethod
-    def scene_to_mesh(scene: Any) -> Any:
+    def scene_to_mesh(scene: Any, *, trimesh: Any | None = None) -> Any:
         """Convert a trimesh Scene or mesh-like object to one mesh."""
-        if isinstance(scene, trimesh.Trimesh):
+        trimesh_module = globals()["trimesh"]
+        if trimesh is not None:
+            trimesh_module = trimesh
+        if isinstance(scene, trimesh_module.Trimesh):
             return scene
         dumped = scene.dump(concatenate=True)
-        if isinstance(dumped, trimesh.Trimesh):
+        if isinstance(dumped, trimesh_module.Trimesh):
             return dumped
-        meshes = [item for item in dumped if isinstance(item, trimesh.Trimesh)]
+        meshes = [
+            item for item in dumped if isinstance(item, trimesh_module.Trimesh)
+        ]
         if not meshes:
             raise ValueError("Scene contains no mesh geometry.")
-        return trimesh.util.concatenate(meshes)
+        return trimesh_module.util.concatenate(meshes)
 
     @staticmethod
     def detect_tabletop(

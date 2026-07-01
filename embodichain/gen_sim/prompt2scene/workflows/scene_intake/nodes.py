@@ -18,8 +18,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
     SCENE_INTAKE_JSON_SCHEMA,
+)
+from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
     SceneIntakeSpec,
 )
 from embodichain.gen_sim.prompt2scene.utils import (
@@ -30,14 +32,14 @@ from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
     SCENE_INTAKE_STEP,
     WorkflowArtifactWriter,
 )
-from embodichain.gen_sim.prompt2scene.workflows.llm_output import (
+from embodichain.gen_sim.prompt2scene.llms.llm_output import (
     StructuredModelCallError,
     call_structured_json_model_step,
 )
 from embodichain.gen_sim.prompt2scene.workflows.stage_errors import (
     format_attempt_error,
 )
-from embodichain.gen_sim.prompt2scene.workflows.scene_intake.prompts import (
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
     build_scene_intake_messages,
     build_scene_intake_verifier_messages,
 )
@@ -85,11 +87,11 @@ def call_vlm_scene_intake_node(
             schema=SCENE_INTAKE_JSON_SCHEMA,
             messages=state["messages"],
             context="Scene intake",
-            step_name=SCENE_INTAKE_STEP,
-            output_root=None,
+            
+            
             attempt_count=attempt_count,
-            raw_output_label="extract",
-            artifact_writer=artifact_writer,
+            
+            
         )
     except StructuredModelCallError as exc:
         error = format_attempt_error("Scene intake", attempt_count, exc)
@@ -161,11 +163,11 @@ def call_vlm_verify_scene_intake_node(
             schema=SCENE_INTAKE_JSON_SCHEMA,
             messages=messages,
             context="Scene intake verifier",
-            step_name=SCENE_INTAKE_STEP,
-            output_root=None,
+            
+            
             attempt_count=attempt_count,
-            raw_output_label="verify",
-            artifact_writer=artifact_writer,
+            
+            
         )
     except StructuredModelCallError as exc:
         error = format_attempt_error("Scene intake verifier", attempt_count, exc)

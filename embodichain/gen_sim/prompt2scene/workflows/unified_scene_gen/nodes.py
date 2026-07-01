@@ -45,16 +45,16 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.table_fit_scene import (
 from embodichain.gen_sim.prompt2scene.agent_tools.tools.image_scene_asset_generation import (
     generate_image_scene_assets,
 )
-from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.paths import (
-    UnifiedScenePaths,
+from embodichain.gen_sim.prompt2scene.workflows.paths import (
+    PipelinePaths,
 )
-from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.prompts import (
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
     build_text_metric_scale_messages,
 )
-from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.schema import (
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
     IMAGE_METRIC_SCALE_JSON_SCHEMA,
 )
-from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.scene_update import (
+from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.utils import (
     update_unified_scene,
 )
 
@@ -72,7 +72,7 @@ def load_unified_scene_input_kind_node(
     state: UnifiedSceneGenState,
 ) -> dict[str, object]:
     """Load unified-scene output and determine the generation route."""
-    paths = UnifiedScenePaths(state["output_root"])
+    paths = PipelinePaths(state["output_root"])
     result_path = paths.resolve_scene_result(state["unified_scene_result_path"])
     if not result_path.is_file():
         raise FileNotFoundError(f"Unified scene result not found: {result_path}")
@@ -110,12 +110,12 @@ def generate_text_assets_node(
     if unified_scene is None:
         return {"generation_status": "no_unified_scene"}
 
-    paths = UnifiedScenePaths(state["output_root"])
+    paths = PipelinePaths(state["output_root"])
     output_root = paths.output_root
     image_gen_dir, glb_gen_dir, debug_dir = paths.prepare_generation_dirs()
     log_info(
         "generate_text_assets started "
-        f"output_dir={output_root / UNIFIED_SCENE_GEN_STEP}"
+        f"output_dir={paths.unified_scene_gen_dir}"
     )
 
     table_spec = unified_scene.get("table") or {}
@@ -191,12 +191,12 @@ def generate_image_assets_node(state: UnifiedSceneGenState) -> dict[str, object]
     if unified_scene is None:
         return {"generation_status": "no_unified_scene"}
 
-    paths = UnifiedScenePaths(state["output_root"])
+    paths = PipelinePaths(state["output_root"])
     output_root = paths.output_root
     image_gen_dir, glb_gen_dir, debug_dir = paths.prepare_generation_dirs()
     log_info(
         "generate_image_assets started "
-        f"output_dir={output_root / UNIFIED_SCENE_GEN_STEP}"
+        f"output_dir={paths.unified_scene_gen_dir}"
     )
 
     segments_path = paths.image_segments_result
@@ -261,7 +261,7 @@ def fit_image_table_to_clutter_node(state: UnifiedSceneGenState) -> dict[str, ob
     if state.get("input_kind") != "image":
         return {}
 
-    paths = UnifiedScenePaths(state["output_root"])
+    paths = PipelinePaths(state["output_root"])
     output_root = paths.output_root
     output_dir = paths.table_fit_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -303,7 +303,7 @@ def generate_text_clutter_layout_node(
     if state.get("input_kind") != "text":
         return {}
 
-    paths = UnifiedScenePaths(state["output_root"])
+    paths = PipelinePaths(state["output_root"])
     output_root = paths.output_root
     output_dir = paths.text_clutter_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -353,7 +353,7 @@ def fit_text_table_to_clutter_node(
     if state.get("input_kind") != "text":
         return {}
 
-    paths = UnifiedScenePaths(state["output_root"])
+    paths = PipelinePaths(state["output_root"])
     output_root = paths.output_root
     table_result = state.get("table_result")
     settle_result = state.get("text_clutter_settle_result")
