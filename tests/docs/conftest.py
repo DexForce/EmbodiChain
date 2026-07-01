@@ -37,3 +37,6 @@ def _load_merge_module():
 _merge = _load_merge_module()
 load_versions_manifest = _merge.load_versions_manifest
 merge_published_site = _merge.merge_published_site
+normalize_artifact_paths = _merge.normalize_artifact_paths
+download_version_wget = _merge._download_version_wget
+flatten_nested_version_dirs = _merge.flatten_nested_version_dirs

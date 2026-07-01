@@ -7,48 +7,33 @@ embodichain.agents
 
    .. autosummary::
 
-      datasets
-      engine
-      rl
+      hierarchy
+      mllm
 
-Datasets
---------
+Hierarchy
+---------
 
-.. automodule:: embodichain.agents.datasets
+.. automodule:: embodichain.agents.hierarchy
    :members:
    :undoc-members:
    :show-inheritance:
 
    .. autosummary::
 
-      online_data
-      sampler
+      agent_base
+      code_agent
+      task_agent
+      validation_agent
+      llm
 
-Online Data Engine
-------------------
+MLLM Prompts
+------------
 
-.. automodule:: embodichain.agents.engine
+.. automodule:: embodichain.agents.mllm
    :members:
    :undoc-members:
    :show-inheritance:
 
    .. autosummary::
 
-      data
-
-Reinforcement Learning
-----------------------
-
-.. automodule:: embodichain.agents.rl
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-   .. autosummary::
-
-      algo
-      buffer
-      collector
-      models
-      train
-      utils
+      prompt

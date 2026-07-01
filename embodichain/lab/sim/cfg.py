@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 from collections.abc import Mapping
+import enum
+import json
 import os
 import numpy as np
 import torch
@@ -1426,10 +1428,16 @@ class URDFCfg:
 
     name_case: dict[str, str] = field(
         default_factory=lambda: {
-            "joint": "upper",
-            "link": "lower",
+            "joint": "original",
+            "link": "original",
         }
     )
+    """Case normalization policy applied to joint/link names during URDF assembly.
+
+    Supported values per key are ``"upper"``, ``"lower"`` or ``"original"``
+    (legacy alias ``"none"``). The default upper-cases joints and lower-cases
+    links. Set ``{"joint": "original"}`` to preserve the source URDF casing.
+    """
 
     def __init__(
         self,
@@ -1494,8 +1502,8 @@ class URDFCfg:
 
         if name_case is None:
             self.name_case = {
-                "joint": "upper",
-                "link": "lower",
+                "joint": "original",
+                "link": "original",
             }
         else:
             self.name_case = name_case
@@ -1533,11 +1541,18 @@ class URDFCfg:
                 self.add_component(component_type, urdf_path, transform, **params)
 
         if sensors is not None:
-            if not isinstance(sensors, list):
+            # Accept both list and dict; serialization round-trips an empty
+            # dict when no sensors are configured (the field default).
+            if isinstance(sensors, dict) and not sensors:
+                self.sensors = []
+            elif not isinstance(sensors, (list, dict)):
                 logger.log_error(
-                    f"sensors must be a list of dicts, got {type(sensors)}"
+                    f"sensors must be a list of dicts or a dict, got {type(sensors)}"
                 )
                 self.sensors = []
+            elif isinstance(sensors, dict):
+                # dict keyed by sensor_name -> config
+                self.sensors = list(sensors.values())
             else:
                 # Optionally check each sensor dict
                 valid_sensors = []
@@ -1943,6 +1958,68 @@ class RobotCfg(ArticulationCfg):
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
         return cfg
+
+    def _build_defaults(self, init_dict: dict | None = None) -> None:
+        """Populate default config fields from ``init_dict``.
+
+        Subclasses override this to read variant/version fields from
+        ``init_dict``, set them on ``self``, and populate ``urdf_cfg``,
+        ``control_parts``, ``solver_cfg``, ``drive_pros`` and ``attrs``.
+        The base implementation is a no-op.
+
+        .. attention::
+            Do NOT call :func:`merge_robot_cfg` from here -- the subclass
+            ``from_dict`` calls this hook first, then ``merge_robot_cfg``.
+            Calling ``merge_robot_cfg`` here would recurse, because
+            ``merge_robot_cfg`` itself calls ``RobotCfg.from_dict``.
+
+        Args:
+            init_dict: The raw override dict passed to ``from_dict``.
+        """
+        return None
+
+    def to_dict(self):
+        """Serialize config to a plain dict (enums, numpy, nested configclass)."""
+
+        def serialize(obj, _visited=None):
+            if _visited is None:
+                _visited = set()
+            if isinstance(obj, (dict, object)) and not isinstance(
+                obj, (str, int, float, bool, type(None))
+            ):
+                obj_id = id(obj)
+                if obj_id in _visited:
+                    return None
+                _visited.add(obj_id)
+
+            if isinstance(obj, enum.Enum):
+                return obj.value
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, dict):
+                return {str(k): serialize(v, _visited) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [serialize(v, _visited) for v in obj]
+            if hasattr(obj, "to_dict") and obj is not self:
+                return serialize(obj.to_dict(), _visited)
+            if hasattr(obj, "__dict__"):
+                return {
+                    k: serialize(v, _visited)
+                    for k, v in obj.__dict__.items()
+                    if v is not None
+                }
+            return obj
+
+        return serialize(self)
+
+    def to_string(self):
+        """Return config as a JSON string."""
+        return json.dumps(self.to_dict(), indent=2)
+
+    def save_to_file(self, filepath):
+        """Save config to a local file as JSON."""
+        with open(filepath, "w") as f:
+            f.write(self.to_string())
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs

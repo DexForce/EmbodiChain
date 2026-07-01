@@ -102,10 +102,10 @@ class URDFComponentManager:
                 rewriting mesh references.
             name_case (dict[str, str] | None): Optional mapping controlling
                 how joint and link names are normalized. Supported keys are
-                ``"joint"`` and ``"link"`` with values ``"upper``,
-                ``"lower"`` or ``"none"``. When omitted, joints are
-                uppercased and links are lowercased (the previous default
-                behavior).
+                ``"joint"`` and ``"link"`` with values ``"upper"``,
+                ``"lower"`` or ``"original"`` (legacy alias ``"none"``).
+                When omitted, joints are uppercased and links are lowercased
+                (the previous default behavior).
         """
 
         self.mesh_manager = mesh_manager

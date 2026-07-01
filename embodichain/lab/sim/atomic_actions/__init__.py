@@ -16,26 +16,42 @@
 
 """Atomic action abstraction layer for embodied AI motion generation.
 
-This module provides a unified interface for atomic actions like reach, grasp,
-move, etc., with support for semantic object understanding and extensible
-custom action registration.
+This module provides a unified interface for the atomic motion primitives
+(``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
+``place``), with typed targets, a ``WorldState`` threaded across sequenced
+actions, and extensible custom action registration.
 """
 
-from .core import (
+from .affordance import (
     Affordance,
     AntipodalAffordance,
     InteractionPoints,
-    ObjectSemantics,
+)
+from .core import (
     ActionCfg,
+    ActionResult,
     AtomicAction,
+    GraspTarget,
+    HeldObjectState,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
+    NamedJointPositionTarget,
+    ObjectSemantics,
+    EndEffectorPoseTarget,
+    Target,
+    WorldState,
 )
 from .actions import (
-    MoveAction,
-    PickUpAction,
-    PlaceAction,
-    MoveActionCfg,
-    PickUpActionCfg,
-    PlaceActionCfg,
+    MoveEndEffector,
+    MoveJoints,
+    MoveHeldObject,
+    PickUp,
+    Place,
+    MoveEndEffectorCfg,
+    MoveJointsCfg,
+    MoveHeldObjectCfg,
+    PickUpCfg,
+    PlaceCfg,
 )
 from .engine import (
     AtomicActionEngine,
@@ -43,25 +59,41 @@ from .engine import (
     unregister_action,
     get_registered_actions,
 )
+from .trajectory import TrajectoryBuilder
 
 __all__ = [
     # Core classes
     "Affordance",
-    "GraspPose",
+    "AntipodalAffordance",
     "InteractionPoints",
     "ObjectSemantics",
+    "HeldObjectState",
+    "HeldObjectPoseTarget",
+    "JointPositionTarget",
+    "NamedJointPositionTarget",
+    "EndEffectorPoseTarget",
+    "GraspTarget",
+    "Target",
+    "WorldState",
+    "ActionResult",
     "ActionCfg",
     "AtomicAction",
     # Action implementations
-    "MoveAction",
-    "PickUpAction",
-    "PlaceAction",
-    "MoveActionCfg",
-    "PickUpActionCfg",
-    "PlaceActionCfg",
+    "MoveEndEffector",
+    "MoveJoints",
+    "MoveHeldObject",
+    "PickUp",
+    "Place",
+    "MoveEndEffectorCfg",
+    "MoveJointsCfg",
+    "MoveHeldObjectCfg",
+    "PickUpCfg",
+    "PlaceCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",
     "unregister_action",
     "get_registered_actions",
+    # Trajectory helpers
+    "TrajectoryBuilder",
 ]

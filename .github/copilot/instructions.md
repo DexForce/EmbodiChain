@@ -12,6 +12,7 @@ follow the canonical routing rules in `.agents/skills/project-dev-context/`.
 - Add task environments: `.github/copilot/add-task-env.md`
 - Add functors: `.github/copilot/add-functor.md`
 - Add atomic actions: `.github/copilot/add-atomic-action.md`
+- Add robots: `.github/copilot/add-robot.md`
 - Add tests: `.github/copilot/add-test.md`
 - Run pre-commit checks: `.github/copilot/pre-commit-check.md`
 - Draft or create pull requests: `.github/copilot/pr.md`

@@ -122,13 +122,10 @@
         }
     },
     "robot": {
+        "robot_type": "URRobot",
         "uid": "Manipulator",
         "urdf_cfg": {
             "components": [
-                {
-                    "component_type": "arm",
-                    "urdf_path": "UniversalRobots/UR10/UR10.urdf"
-                },
                 {
                     "component_type": "hand",
                     "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
@@ -147,9 +144,6 @@
         },
         "solver_cfg": {
             "arm": {
-                "class_type": "PytorchSolver",
-                "end_link_name": "ee_link",
-                "root_link_name": "base_link",
                 "tcp": [
                     [1.0, 0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0, 0.0],
@@ -157,9 +151,6 @@
                     [0.0, 0.0, 0.0, 1.0]
                 ]
             }
-        },
-        "control_parts": {
-            "arm": ["JOINT[1-6]"]
         }
     },
     "sensor": [],
