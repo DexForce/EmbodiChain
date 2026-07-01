@@ -316,6 +316,7 @@ def load_mesh_objects_from_cfg(
                     cache_path=cache_dir,
                     actor_type=body_type,
                     max_convex_hull_num=max_convex_hull_num,
+                    method=cfg.convex_decomposition_method,
                 )
             elif cfg.sdf_resolution > 0:
                 obj = env.load_actor(
