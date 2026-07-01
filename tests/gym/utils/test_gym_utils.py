@@ -19,15 +19,41 @@ from __future__ import annotations
 
 import pytest
 import torch
+import argparse
 
 from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
+    add_env_launcher_args_to_parser,
+    init_rollout_buffer_from_config,
+    merge_args_with_gym_config,
     config_to_cfg,
     DEFAULT_MANAGER_MODULES,
-    init_rollout_buffer_from_config,
 )
 from embodichain.utils.utility import load_config, save_config
+
+
+def test_env_launcher_args_include_physics():
+    """Test that launcher args expose the physics backend config selector."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+
+    default_args = parser.parse_args([])
+    assert default_args.physics == "default"
+
+    newton_args = parser.parse_args(["--physics", "newton"])
+    assert newton_args.physics == "newton"
+
+
+def test_merge_args_with_gym_config_includes_physics():
+    """Test that CLI physics config overrides the gym config."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args(["--physics", "newton"])
+
+    merged_config = merge_args_with_gym_config(args, {})
+
+    assert merged_config["physics"] == "newton"
 
 
 class TestInitRolloutBufferFromConfig:

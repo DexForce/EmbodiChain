@@ -49,7 +49,7 @@ from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_cfg)
 
 # 2. Configure a rigid object (cube)
@@ -192,7 +192,7 @@ N denotes the number of parallel environments when using vectorized simulation (
 - Use `static` body type for fixed obstacles or environment pieces (they do not consume dynamic simulation resources).
 - Use `kinematic` for objects whose pose is driven by code (teleporting or animation) but still interact with dynamic objects.
 - For complex meshes, enabling convex decomposition (`RigidObjectCfg.max_convex_hull_num`) or providing a simplified collision mesh improves stability and performance.
-- To use GPU physics, ensure `SimulationManagerCfg.sim_device` is set to `cuda` and call `sim.init_gpu_physics()` before large-batch simulations.
+- To use GPU physics, ensure `SimulationManagerCfg.device` is set to `cuda` and call `sim.init_gpu_physics()` before large-batch simulations.
 
 ## Example: Applying Force and Torque
 

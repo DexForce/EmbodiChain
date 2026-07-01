@@ -325,7 +325,7 @@ if __name__ == "__main__":
         DexforceW1ArmKind,
     )
 
-    config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+    config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict(

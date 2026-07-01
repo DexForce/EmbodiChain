@@ -199,7 +199,9 @@ if __name__ == "__main__":
     )
     sim = SimulationManager(config)
 
-    config = {"init_pos": [0.0, 0.0, 1.0], "init_qpos": [0.1] * 16}
+    config = {
+        "init_pos": [0.0, 0.0, 1.0],
+    }
 
     cfg = CobotMagicCfg.from_dict(config)
     robot = sim.add_robot(cfg=cfg)

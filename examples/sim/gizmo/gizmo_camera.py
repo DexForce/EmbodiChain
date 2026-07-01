@@ -28,7 +28,12 @@ torch.set_printoptions(precision=4, sci_mode=False)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import Camera, CameraCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    RigidObjectCfg,
+    RigidBodyAttributesCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -49,8 +54,9 @@ def main():
         width=1920,
         height=1080,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
     )
 
     # Create simulation context
