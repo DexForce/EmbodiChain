@@ -120,36 +120,6 @@ class HeldObjectPoseTarget:
 
 
 @dataclass(frozen=True)
-class CoordinatedPlacementTarget:
-    """Object-centric target for dual-arm coordinated placement.
-
-    The placing arm moves its held object to the upper target and releases it.
-    The support arm moves its held object to the lower target and keeps holding.
-    """
-
-    placing_object_target_pose: torch.Tensor
-    """Target pose for the object released by the placing arm."""
-
-    support_object_target_pose: torch.Tensor
-    """Target pose for the object held by the support arm."""
-
-    placing_held_object: HeldObjectState
-    """Held-object state for the placing arm."""
-
-    support_held_object: HeldObjectState
-    """Held-object state for the support arm."""
-
-    placing_height_offset: float | None = None
-    """World-Z offset above the placing object target pose."""
-
-    support_height_offset: float | None = None
-    """World-Z offset above the support object target pose."""
-
-    release: bool | None = None
-    """Whether the placing hand releases. ``None`` uses action config."""
-
-
-@dataclass(frozen=True)
 class CoordinatedPickmentTarget:
     """Object-centric target for picking and moving one object with two hands."""
 
@@ -175,7 +145,6 @@ Target = (
     | NamedJointPositionTarget
     | GraspTarget
     | HeldObjectPoseTarget
-    | CoordinatedPlacementTarget
     | CoordinatedPickmentTarget
 )
 
@@ -309,7 +278,6 @@ __all__ = [
     "AtomicAction",
     "CoordinatedHeldObjectState",
     "CoordinatedPickmentTarget",
-    "CoordinatedPlacementTarget",
     "GraspTarget",
     "HeldObjectState",
     "HeldObjectPoseTarget",

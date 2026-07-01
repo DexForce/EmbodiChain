@@ -15,7 +15,6 @@ The following actions are available out of the box:
 | `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject" width="480" style="max-width: 100%;" /> |
 | `Place` | Single | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
 | `CoordinatedPickment` | Dual | `CoordinatedPickmentTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | <img src="../../../_static/atomic_actions/coordinated_pickment.gif" alt="CoordinatedPickment" width="480" style="max-width: 100%;" /> |
-| `CoordinatedPlacement` | Dual | `CoordinatedPlacementTarget` — paired held-object poses | Align placing/support objects → release placing hand → retreat | |
 
 ---
 
@@ -150,23 +149,3 @@ semantics, and left/right object-to-EEF transforms.
 ![CoordinatedPickment demo](../../../_static/atomic_actions/coordinated_pickment.gif)
 
 ---
-
-## `CoordinatedPlacement`
-
-Dual-arm placement motion for two already-held objects. The placing arm moves its
-held object to the upper target and releases it; the support arm moves its held
-object to the support target and keeps holding. On success, `WorldState.held_object`
-is the support object and `coordinated_held_object` is cleared.
-
-| Config field | Default | Description |
-|---|---|---|
-| `control_part` | `"dual_arm"` | Combined arm control part |
-| `placing_arm_control_part` / `support_arm_control_part` | `"left_arm"` / `"right_arm"` | Arm control parts for placing and support |
-| `placing_hand_control_part` / `support_hand_control_part` | `"left_hand"` / `"right_hand"` | Hand control parts for placing and support |
-| `release` | `True` | Whether to open the placing hand at the placement pose |
-| `placing_height_offset` / `support_height_offset` | `0.0` / `0.0` | World-Z offsets above each object target |
-| `lift_height` | `0.08` | Placing-arm retreat distance after release |
-| `sample_interval` | `100` | Total waypoints across coordinated placement phases |
-
-**Target:** `CoordinatedPlacementTarget(...)` with placing/support object target
-poses and their corresponding `HeldObjectState` values.
