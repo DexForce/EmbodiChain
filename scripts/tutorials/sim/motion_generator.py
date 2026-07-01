@@ -77,13 +77,15 @@ def main():
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Initialize simulation
-    sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
+    sim = SimulationManager(SimulationManagerCfg(headless=True, sim_device="cpu"))
     sim.set_manual_update(False)
 
     # Robot configuration
     cfg_dict = {"uid": "CobotMagic"}
     robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
     arm_name = "left_arm"
+
+    sim.open_window()
 
     # # Generate trajectory points
     qpos_list, xpos_list = create_demo_trajectory(robot, arm_name)
