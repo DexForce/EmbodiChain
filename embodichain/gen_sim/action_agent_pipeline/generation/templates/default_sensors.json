@@ -1,0 +1,49 @@
+[
+  {
+    "sensor_type": "Camera",
+    "uid": "cam_high",
+    "width": 960,
+    "height": 540,
+    "intrinsics": [420, 420, 480, 270],
+    "extrinsics": {
+      "pos": [0.4, 0.0, 2.2],
+      "eye": [0.6, 0.0, 1.8],
+      "target": [0.0, 0.0, 0.75],
+      "up": [1.0, 0.0, 0.0]
+    }
+  },
+  {
+    "sensor_type": "Camera",
+    "uid": "cam_wrist_left",
+    "width": 640,
+    "height": 480,
+    "intrinsics": [600, 600, 320, 240],
+    "extrinsics": {
+      "parent": "left_ee_link",
+      "pos": [0.0, 0.12, 0.08],
+      "quat": [
+        -0.0012598701,
+        -0.029051816664441618998,
+        0.9094039177564813,
+        0.41489627504330695
+      ]
+    }
+  },
+  {
+    "sensor_type": "Camera",
+    "uid": "cam_wrist_right",
+    "width": 640,
+    "height": 480,
+    "intrinsics": [600, 600, 320, 240],
+    "extrinsics": {
+      "parent": "right_ee_link",
+      "pos": [0.0, 0.12, 0.08],
+      "quat": [
+        -0.0012598701,
+        -0.029051816664441618998,
+        0.9094039177564813,
+        0.41489627504330695
+      ]
+    }
+  }
+]

@@ -1,0 +1,84 @@
+### Atomic Action Class JSON Specs for Robot Arm Control
+
+Each non-null graph edge action must be a JSON object with these common fields
+and exactly one target field:
+
+{
+  "atomic_action_class": "PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
+  "robot_name": "left_arm|right_arm",
+  "control": "arm|hand",
+  "cfg": {}
+}
+
+Use only these native atomic action classes:
+
+1. `PickUp`
+   - Required target_object:
+     {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
+   - Typical cfg:
+     {"pre_grasp_distance": 0.08, "sample_interval": 45}
+
+2. `MoveHeldObject`
+   - Use only after the same arm has successfully executed `PickUp`.
+   - Moves the already-held object in the air without releasing it.
+   - For pose-sensitive placement, first move the held object to a safe high
+     staging pose with orientation_goal="preserve"; only then adjust orientation
+     at the same high pose, move down to the final release object pose, and call
+     release-only `Place`.
+   - Required target_object_pose:
+     {"reference": "object", "obj_name": "<reference object>", "offset": [x, y, z], "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
+     {"reference": "absolute", "position": [x, y, z], "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
+     {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef", "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
+   - For axis alignment to a pad, box, or container, add `"align_to": "<reference uid>"` and use `"orientation_axis": "long_axis"` or `"short_axis"`.
+   - For axis alignment to world/table axes, use `"orientation_axis": "x"` or `"y"` and omit `align_to`.
+   - Typical cfg:
+     {"sample_interval": 45}
+
+3. `Place`
+   - For ordinary placement, prefer this because one action lowers, opens the
+     gripper, and retreats upward.
+   - For pose-sensitive placement after `MoveHeldObject` has already reached the
+     final release object pose, use release-only Place:
+     {"reference": "relative", "offset": [0.0, 0.0, 0.0], "frame": "world"}
+     with cfg {"sample_interval": 10, "lift_height": 0.0}, then retreat the
+     empty end-effector with `MoveEndEffector`.
+   - Required target_pose:
+     {"reference": "object", "obj_name": "<object>", "offset": [x, y, z]}
+     {"reference": "absolute", "position": [x, y, z]}
+     {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef"}
+   - Typical cfg:
+     {"sample_interval": 80, "lift_height": 0.1}
+
+4. `MoveJoints`
+   - Use `control: "arm"` for arm joint targets.
+   - Use `control: "hand"` for gripper targets.
+   - Supported target_qpos objects:
+     {"source": "initial"}
+     {"source": "gripper_state", "state": "open|close"}
+     {"source": "joint_delta", "joint_index": 5, "delta_degrees": -90}
+   - Typical cfg:
+     {"sample_interval": 30}
+
+5. `MoveEndEffector`
+   - Use for moving an empty end-effector to a pose.
+   - Do not use it to move a held object; use `MoveHeldObject` instead.
+   - Required target_pose. Supported pose targets are the same as `Place`.
+   - Typical cfg:
+     {"sample_interval": 30}
+
+Rules:
+- Do not output Python code, function calls, or `fn`/`kwargs` action objects.
+- Do not output legacy `action`-based specs.
+- Do not output old action names `PickUpAction`, `MoveAction`, or `PlaceAction`.
+- Use `null` for an idle arm.
+- Keep all values JSON primitives.
+- Each non-null action must contain exactly one of `target_object`, `target_pose`,
+  `target_qpos`, or `target_object_pose`.
+- To keep a holding arm closed while the other arm moves, use:
+  {
+    "atomic_action_class": "MoveJoints",
+    "robot_name": "<holding_arm>",
+    "control": "hand",
+    "cfg": {"sample_interval": 10},
+    "target_qpos": {"source": "gripper_state", "state": "close"}
+  }

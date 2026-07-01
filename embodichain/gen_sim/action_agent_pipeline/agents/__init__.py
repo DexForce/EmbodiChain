@@ -16,4 +16,9 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+__all__ = [
+    "agent_base",
+    "compile_agent",
+    "llm",
+    "task_agent",
+]

@@ -78,14 +78,6 @@ Shapes
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-Atomic Actions
---------------
-
-.. automodule:: embodichain.lab.sim.atom_actions
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Objects
 -------
 
@@ -133,6 +125,7 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+
 Shared Types
 ------------
 

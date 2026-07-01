@@ -16,4 +16,6 @@
 
 from __future__ import annotations
 
+"""Config generation helpers for the action-agent pipeline."""
+
 __all__: list[str] = []

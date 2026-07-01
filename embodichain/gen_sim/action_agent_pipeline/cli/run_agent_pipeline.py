@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -14,6 +15,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Run the Image2Tabletop -> config generation -> action-agent pipeline."""
+
 from __future__ import annotations
 
-__all__: list[str] = []
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_runner import run_pipeline
+
+__all__ = ["main"]
+
+
+def main() -> int:
+    return run_pipeline(build_parser().parse_args())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

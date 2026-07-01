@@ -16,4 +16,20 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
+    _SIDE_RELATIONS,
+    _build_object_manipulation_spec_with_llm,
+    _call_object_manipulation_task_llm,
+    _normalize_relative_relation,
+    _relative_relation_phrase,
+    _relative_scene_runtime_uid_mapping,
+)
+
+__all__ = [
+    "_SIDE_RELATIONS",
+    "_build_object_manipulation_spec_with_llm",
+    "_call_object_manipulation_task_llm",
+    "_normalize_relative_relation",
+    "_relative_relation_phrase",
+    "_relative_scene_runtime_uid_mapping",
+]

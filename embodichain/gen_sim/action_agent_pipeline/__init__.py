@@ -16,4 +16,6 @@
 
 from __future__ import annotations
 
+"""Action-agent graph compilation and atomic-action runtime."""
+
 __all__: list[str] = []
