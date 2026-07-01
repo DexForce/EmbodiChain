@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+import math
+from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -27,7 +29,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _clean_vector3,
     _iter_generated_scene_object_configs,
+    _load_mesh_vertices,
     _mesh_config_local_zmin_after_rotation,
+    _mesh_config_transform_matrix,
     _mesh_config_world_zmax,
     _mesh_config_world_xy_extents,
 )
@@ -142,6 +146,7 @@ def _with_self_relative_absolute_targets(
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
         hover_height=primary.hover_height,
+        upright_in_place=primary.upright_in_place,
     )
 
 
@@ -176,6 +181,7 @@ def _with_self_relative_absolute_target(
         orientation_axis=placement.orientation_axis,
         orientation_align_to_runtime_uid=placement.orientation_align_to_runtime_uid,
         hover_height=placement.hover_height,
+        upright_in_place=placement.upright_in_place,
     )
 
 
@@ -274,6 +280,7 @@ def _replace_relative_spec_placements(
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
         hover_height=primary.hover_height,
+        upright_in_place=primary.upright_in_place,
     )
 
 
@@ -313,11 +320,15 @@ def _with_on_surface_release_offset(
     if reference_top_z is None or moved_bottom_offset is None:
         return placement
 
-    reference_origin_z = _clean_vector3(reference_config.get("init_pos", [0, 0, 0]))[2]
+    reference_origin = _clean_vector3(reference_config.get("init_pos", [0, 0, 0]))
+    moved_origin = _clean_vector3(moved_config.get("init_pos", [0, 0, 0]))
     release_offset = list(placement.release_offset)
+    if placement.upright_in_place:
+        release_offset[0] = round(float(moved_origin[0] - reference_origin[0]), 6)
+        release_offset[1] = round(float(moved_origin[1] - reference_origin[1]), 6)
     release_offset[2] = round(
         float(reference_top_z)
-        - float(reference_origin_z)
+        - float(reference_origin[2])
         + _ON_SURFACE_RELEASE_CLEARANCE
         - float(moved_bottom_offset),
         6,
@@ -332,11 +343,16 @@ def _with_on_surface_release_offset(
         ),
         6,
     )
-    return replace(
-        placement,
-        release_offset=release_offset,
-        high_offset=high_offset,
-    )
+    update_kwargs: dict[str, Any] = {
+        "release_offset": release_offset,
+        "high_offset": high_offset,
+    }
+    if placement.upright_in_place:
+        release_position = _offset_position(reference_origin, release_offset)
+        high_position = _offset_position(reference_origin, high_offset)
+        update_kwargs["release_position"] = release_position
+        update_kwargs["high_position"] = high_position
+    return replace(placement, **update_kwargs)
 
 
 def _target_local_zmin_for_orientation(
@@ -346,10 +362,215 @@ def _target_local_zmin_for_orientation(
     if orientation_goal in {"preserve", "axis_align"}:
         return _mesh_config_local_zmin_after_rotation(obj_config)
     if orientation_goal == "upright":
-        return 0.0
+        return _upright_local_zmin(obj_config)
     if orientation_goal == "lay_flat":
         return _lay_flat_local_zmin(obj_config)
     return _mesh_config_local_zmin_after_rotation(obj_config)
+
+
+def _upright_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
+    vertices = _mesh_config_scaled_vertices(obj_config)
+    if not vertices:
+        return None
+
+    rotation = _preview_aware_upright_rotation(
+        vertices,
+        _mesh_config_rotation_basis(obj_config),
+    )
+    return min(_matrix_vector_mul(rotation, vertex)[2] for vertex in vertices)
+
+
+def _mesh_config_scaled_vertices(
+    obj_config: Mapping[str, Any],
+) -> list[tuple[float, float, float]] | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+    scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    return [
+        (
+            float(vertex[0]) * float(scale[0]),
+            float(vertex[1]) * float(scale[1]),
+            float(vertex[2]) * float(scale[2]),
+        )
+        for vertex in vertices
+    ]
+
+
+def _mesh_config_rotation_basis(
+    obj_config: Mapping[str, Any],
+) -> list[list[float]]:
+    matrix = _mesh_config_transform_matrix(obj_config, translation=[0.0, 0.0, 0.0])
+    columns = []
+    for index in range(3):
+        column = [float(matrix[row][index]) for row in range(3)]
+        columns.append(_normalize_vector(column))
+    return _columns_to_matrix(columns)
+
+
+def _preview_aware_upright_rotation(
+    vertices: Sequence[Sequence[float]],
+    preview_rotation: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    axes = _principal_local_axes(vertices)
+    long_axis = axes[0]
+    secondary_axes = list(axes[1:])
+    candidates: list[tuple[float, list[list[float]]]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[_scale_vector(axis, -1.0) for axis in secondary_axes],
+    ]:
+        preview_secondary = _matrix_vector_mul(preview_rotation, secondary_axis)
+        world_secondary = [preview_secondary[0], preview_secondary[1], 0.0]
+        if _vector_norm(world_secondary) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=long_axis,
+            world_primary=[0.0, 0.0, 1.0],
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, preview_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=long_axis,
+        world_primary=[0.0, 0.0, 1.0],
+        local_secondary=axes[2],
+        world_secondary=[1.0, 0.0, 0.0],
+    )
+
+
+def _principal_local_axes(
+    vertices: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    mins = [min(float(vertex[index]) for vertex in vertices) for index in range(3)]
+    maxs = [max(float(vertex[index]) for vertex in vertices) for index in range(3)]
+    extents = [maxs[index] - mins[index] for index in range(3)]
+    order = sorted(range(3), key=lambda index: extents[index], reverse=True)
+    return [[1.0 if axis == index else 0.0 for axis in range(3)] for index in order]
+
+
+def _rotation_from_axis_targets(
+    *,
+    local_primary: Sequence[float],
+    world_primary: Sequence[float],
+    local_secondary: Sequence[float],
+    world_secondary: Sequence[float],
+) -> list[list[float]]:
+    local_primary = _normalize_vector(local_primary)
+    world_primary = _normalize_vector(world_primary)
+    local_secondary = _orthogonalized_axis(local_secondary, local_primary)
+    world_secondary = _orthogonalized_axis(world_secondary, world_primary)
+    local_basis = _columns_to_matrix(
+        [
+            local_primary,
+            local_secondary,
+            _normalize_vector(_cross(local_primary, local_secondary)),
+        ]
+    )
+    world_basis = _columns_to_matrix(
+        [
+            world_primary,
+            world_secondary,
+            _normalize_vector(_cross(world_primary, world_secondary)),
+        ]
+    )
+    return _matrix_multiply(world_basis, _matrix_transpose(local_basis))
+
+
+def _orthogonalized_axis(
+    axis: Sequence[float],
+    reference: Sequence[float],
+) -> list[float]:
+    dot = _dot(axis, reference)
+    projected = [
+        float(axis[index]) - dot * float(reference[index]) for index in range(3)
+    ]
+    if _vector_norm(projected) < 1e-6:
+        fallback = [1.0, 0.0, 0.0]
+        if abs(_dot(fallback, reference)) > 0.9:
+            fallback = [0.0, 1.0, 0.0]
+        fallback_dot = _dot(fallback, reference)
+        projected = [
+            fallback[index] - fallback_dot * float(reference[index])
+            for index in range(3)
+        ]
+    return _normalize_vector(projected)
+
+
+def _rotation_distance_score(
+    rotation: Sequence[Sequence[float]],
+    preview_rotation: Sequence[Sequence[float]],
+) -> float:
+    delta = _matrix_multiply(rotation, _matrix_transpose(preview_rotation))
+    return -sum(float(delta[index][index]) for index in range(3))
+
+
+def _columns_to_matrix(columns: Sequence[Sequence[float]]) -> list[list[float]]:
+    return [[float(columns[col][row]) for col in range(3)] for row in range(3)]
+
+
+def _matrix_multiply(
+    left: Sequence[Sequence[float]],
+    right: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    return [
+        [
+            sum(float(left[row][k]) * float(right[k][col]) for k in range(3))
+            for col in range(3)
+        ]
+        for row in range(3)
+    ]
+
+
+def _matrix_transpose(matrix: Sequence[Sequence[float]]) -> list[list[float]]:
+    return [[float(matrix[col][row]) for col in range(3)] for row in range(3)]
+
+
+def _matrix_vector_mul(
+    matrix: Sequence[Sequence[float]],
+    vector: Sequence[float],
+) -> list[float]:
+    return [
+        sum(float(matrix[row][col]) * float(vector[col]) for col in range(3))
+        for row in range(3)
+    ]
+
+
+def _normalize_vector(vector: Sequence[float]) -> list[float]:
+    norm = _vector_norm(vector)
+    if norm < 1e-6:
+        raise ValueError("Cannot normalize a near-zero vector.")
+    return [float(value) / norm for value in vector]
+
+
+def _scale_vector(vector: Sequence[float], scale: float) -> list[float]:
+    return [float(value) * float(scale) for value in vector]
+
+
+def _dot(left: Sequence[float], right: Sequence[float]) -> float:
+    return sum(float(left[index]) * float(right[index]) for index in range(3))
+
+
+def _cross(left: Sequence[float], right: Sequence[float]) -> list[float]:
+    return [
+        float(left[1]) * float(right[2]) - float(left[2]) * float(right[1]),
+        float(left[2]) * float(right[0]) - float(left[0]) * float(right[2]),
+        float(left[0]) * float(right[1]) - float(left[1]) * float(right[0]),
+    ]
+
+
+def _vector_norm(vector: Sequence[float]) -> float:
+    return math.sqrt(sum(float(value) * float(value) for value in vector))
 
 
 def _lay_flat_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
@@ -501,7 +722,7 @@ def _offset_position(
 
 def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
     if len(spec.placements) == 1:
-        return {
+        summary = {
             "mode": "object_manipulation",
             "intent": spec.intent,
             "moved_object": spec.moved_runtime_uid,
@@ -514,21 +735,33 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
             "orientation_axis": spec.orientation_axis,
             "orientation_align_to": spec.orientation_align_to_runtime_uid,
         }
+        if spec.upright_in_place:
+            summary["upright_in_place"] = True
+        return summary
     return {
         "mode": "dual_arm_object_manipulation",
         "manipulations": [
-            {
-                "intent": placement.intent,
-                "moved_object": placement.moved_runtime_uid,
-                "reference_object": placement.reference_runtime_uid,
-                "relation": placement.relation,
-                "active_arm": f"{placement.active_side}_arm",
-                "release_offset": placement.release_offset,
-                "hover_height": placement.hover_height,
-                "orientation_goal": placement.orientation_goal,
-                "orientation_axis": placement.orientation_axis,
-                "orientation_align_to": placement.orientation_align_to_runtime_uid,
-            }
+            _relative_placement_summary(placement)
             for placement in spec.placements
         ],
     }
+
+
+def _relative_placement_summary(
+    placement: _RelativePlacementStepSpec,
+) -> dict[str, Any]:
+    summary = {
+        "intent": placement.intent,
+        "moved_object": placement.moved_runtime_uid,
+        "reference_object": placement.reference_runtime_uid,
+        "relation": placement.relation,
+        "active_arm": f"{placement.active_side}_arm",
+        "release_offset": placement.release_offset,
+        "hover_height": placement.hover_height,
+        "orientation_goal": placement.orientation_goal,
+        "orientation_axis": placement.orientation_axis,
+        "orientation_align_to": placement.orientation_align_to_runtime_uid,
+    }
+    if placement.upright_in_place:
+        summary["upright_in_place"] = True
+    return summary

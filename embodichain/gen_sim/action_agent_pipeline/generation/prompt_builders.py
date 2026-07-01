@@ -86,6 +86,7 @@ class _RelativePlacementLike(Protocol):
     orientation_axis: str
     orientation_align_to_runtime_uid: str | None
     hover_height: float
+    upright_in_place: bool
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -1728,7 +1729,11 @@ def _format_relative_pose_spec(
         if align_to is _USE_PLACEMENT_ALIGN_TO
         else align_to
     )
-    if getattr(placement, "reference_is_initial_pose", False):
+    if getattr(placement, "reference_is_initial_pose", False) or getattr(
+        placement,
+        "upright_in_place",
+        False,
+    ):
         position = (
             placement.high_position
             if pose_kind == "high"
@@ -1787,9 +1792,13 @@ def _format_relative_place_spec(
     sample_interval: int,
     lift_height: float,
 ) -> str:
-    if getattr(placement, "reference_is_initial_pose", False):
+    if getattr(placement, "reference_is_initial_pose", False) or getattr(
+        placement,
+        "upright_in_place",
+        False,
+    ):
         if placement.release_position is None:
-            raise ValueError("Self-relative placement requires release position.")
+            raise ValueError("Absolute relative placement requires release position.")
         return _format_place_absolute_spec(
             robot_name,
             placement.release_position,
@@ -1956,6 +1965,11 @@ def _format_action_sketch(action_sketch: list[str]) -> str:
 
 
 def _relative_reference_line(spec: _RelativePlacementLike) -> str:
+    if getattr(spec, "upright_in_place", False):
+        return (
+            f"Use `{spec.reference_runtime_uid}` as the support surface while "
+            f"anchoring XY at the initial position of `{spec.moved_runtime_uid}`."
+        )
     if getattr(spec, "reference_is_initial_pose", False):
         return (
             f"Use the initial position of `{spec.moved_runtime_uid}` as the fixed "
@@ -1973,6 +1987,8 @@ def _relative_pose_step_label(
 ) -> str:
     if getattr(spec, "reference_is_initial_pose", False):
         return f"{label} at the absolute initial-position offset"
+    if getattr(spec, "upright_in_place", False):
+        return f"{label} at the initial XY on `{spec.reference_runtime_uid}`"
     return f"{label} relative to `{spec.reference_runtime_uid}`"
 
 
@@ -1980,11 +1996,15 @@ def _relative_final_planning_rule(
     project_name: str,
     spec: _RelativePlacementLike,
 ) -> str:
-    if getattr(spec, "reference_is_initial_pose", False):
+    if getattr(spec, "reference_is_initial_pose", False) or getattr(
+        spec,
+        "upright_in_place",
+        False,
+    ):
         return (
             "Use the exact absolute target_pose JSON specs shown above. Do not "
-            "rewrite this self-relative task as an object-referenced pose, because "
-            "the moved object would become a moving reference after pickup."
+            "rewrite this placement as a table-centered object-referenced pose; "
+            "its XY anchor is the moved object's initial position."
         )
     return (
         f"Always plan to the current object poses from the exported {project_name} "

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from unittest.mock import Mock
 
@@ -111,6 +112,47 @@ class TestAntipodalAffordance:
         _, approach_direction = generator.get_grasp_poses.call_args.args
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
+
+    def test_upright_bottle_side_grasp_bias_prefers_mid_body_side_grasp(self):
+        mesh_vertices = torch.tensor(
+            [
+                [-0.05, -1.0, -0.05],
+                [0.05, -1.0, 0.05],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+        aff = AntipodalAffordance(mesh_vertices=mesh_vertices)
+        aff.set_custom_config(
+            "grasp_pose_bias",
+            {
+                "mode": "upright_bottle_side_grasp",
+                "preferred_height_fraction": [0.35, 0.75],
+                "prefer_side_grasp": True,
+            },
+        )
+        low_pose = torch.eye(4)
+        low_pose[:3, 3] = torch.tensor([0.0, -0.95, 0.0])
+        mid_pose = torch.eye(4)
+        mid_pose[:3, 3] = torch.tensor([0.0, 0.0, 0.0])
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        generator.get_valid_grasp_poses.return_value = (
+            True,
+            torch.stack([low_pose, mid_pose]),
+            torch.tensor([0.03, 0.04]),
+            torch.tensor([0.0, 0.8]),
+        )
+        aff._generator = generator
+
+        is_success, grasp_xpos, open_length = aff.get_best_grasp_poses(
+            torch.eye(4).unsqueeze(0)
+        )
+
+        assert bool(is_success.item()) is True
+        assert torch.allclose(grasp_xpos[0, :3, 3], torch.tensor([0.0, 0.0, 0.0]))
+        assert open_length.item() == pytest.approx(0.04)
+        generator.get_grasp_poses.assert_not_called()
 
 
 class TestInteractionPoints:

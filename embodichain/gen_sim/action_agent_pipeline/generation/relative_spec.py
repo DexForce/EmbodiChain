@@ -72,6 +72,29 @@ _CUBE_LIKE_KEYWORDS = (
     "方块",
     "积木",
 )
+_BOTTLE_LIKE_KEYWORDS = (
+    "bottle",
+    "can",
+    "jar",
+    "tin",
+    "soda",
+    "cola",
+    "罐头",
+    "易拉罐",
+    "瓶",
+    "瓶子",
+)
+_SHORT_BOTTLE_LIKE_KEYWORDS = {"can", "jar", "tin"}
+_UPRIGHT_TASK_KEYWORDS = (
+    "upright",
+    "stand up",
+    "stand upright",
+    "vertical",
+    "扶正",
+    "竖起来",
+    "竖直",
+    "立起来",
+)
 _CUBE_DEFAULT_AXIS = "x"
 _DEFAULT_HOVER_HEIGHT = 0.10
 
@@ -496,6 +519,8 @@ def _apply_relative_task_response(
             scene_objects=scene_objects,
             rigid_objects=rigid_objects,
             runtime_uids=runtime_uids,
+            table_source_uid=table_source_uid,
+            task_description=task_description,
             forced_side=forced_side,
             release_offset_fn=release_offset_fn,
             staging_z_delta=staging_z_delta,
@@ -538,6 +563,7 @@ def _apply_relative_task_response(
         orientation_axis=primary.orientation_axis,
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
         hover_height=primary.hover_height,
+        upright_in_place=primary.upright_in_place,
     )
 
 
@@ -606,6 +632,8 @@ def _build_relative_placement_step(
     scene_objects: list[_SceneObject],
     rigid_objects: list[_SceneObject],
     runtime_uids: Mapping[str, str],
+    table_source_uid: str,
+    task_description: str,
     forced_side: str | None,
     release_offset_fn: Callable[[str], Sequence[float]],
     staging_z_delta: float,
@@ -629,6 +657,28 @@ def _build_relative_placement_step(
             scene_objects=scene_objects,
         )
         reference_is_initial_pose = moved_source_uid == reference_source_uid
+    orientation_goal = _normalize_orientation_goal(entry.get("orientation_goal"))
+    orientation_reference = _normalize_orientation_reference(
+        entry.get("orientation_reference")
+    )
+    orientation_axis = _normalize_orientation_axis(entry.get("orientation_axis"))
+    upright_in_place = _should_upright_in_place(
+        intent=intent,
+        relation=relation,
+        orientation_goal=orientation_goal,
+        moved_object=by_uid[moved_source_uid],
+        reference_source_uid=reference_source_uid,
+        table_source_uid=table_source_uid,
+        task_description=task_description,
+    )
+    if upright_in_place:
+        orientation_goal = "upright"
+        orientation_reference = "none"
+        orientation_axis = "none"
+    if upright_in_place and reference_is_initial_pose:
+        reference_source_uid = table_source_uid
+        reference_is_initial_pose = False
+    if intent != "hold_hover":
         if reference_is_initial_pose and relation not in _SIDE_RELATIONS:
             raise ValueError(
                 "Initial-position self-relative placement only supports directional "
@@ -638,6 +688,7 @@ def _build_relative_placement_step(
         reference_obj = by_uid[reference_source_uid]
         if relation == "on" and _is_container_like(reference_obj):
             relation = "inside"
+            upright_in_place = False
 
     moved_runtime_uid = runtime_uids[moved_source_uid]
     reference_runtime_uid = runtime_uids[reference_source_uid]
@@ -645,11 +696,6 @@ def _build_relative_placement_step(
         raise ValueError(
             f"Relative placement produced duplicate runtime uid {moved_runtime_uid!r}."
         )
-    orientation_goal = _normalize_orientation_goal(entry.get("orientation_goal"))
-    orientation_reference = _normalize_orientation_reference(
-        entry.get("orientation_reference")
-    )
-    orientation_axis = _normalize_orientation_axis(entry.get("orientation_axis"))
     if _should_axis_align_cube_by_default(
         intent=intent,
         moved_object=by_uid[moved_source_uid],
@@ -719,6 +765,7 @@ def _build_relative_placement_step(
         orientation_axis=orientation_axis,
         orientation_align_to_runtime_uid=orientation_align_to_runtime_uid,
         hover_height=hover_height,
+        upright_in_place=upright_in_place,
     )
 
 
@@ -764,6 +811,55 @@ def _is_cube_like_object(obj: _SceneObject) -> bool:
     mesh_parts = Path(mesh_path.replace("\\", "/")).parts[-3:] if mesh_path else ()
     text = " ".join([obj.source_uid, _base_name(obj), *mesh_parts]).lower()
     return any(keyword in text for keyword in _CUBE_LIKE_KEYWORDS)
+
+
+def _is_bottle_like_object(obj: _SceneObject) -> bool:
+    shape = obj.config.get("shape", {}) or {}
+    mesh_path = str(shape.get("fpath", "")) if isinstance(shape, Mapping) else ""
+    mesh_parts = Path(mesh_path.replace("\\", "/")).parts[-4:] if mesh_path else ()
+    description = str(obj.config.get("description", ""))
+    text = " ".join(
+        [obj.source_uid, _base_name(obj), description, *mesh_parts]
+    ).lower()
+    return _has_bottle_like_keyword(text)
+
+
+def _has_bottle_like_keyword(text: str) -> bool:
+    tokens = (
+        text.replace("_", " ").replace("-", " ").replace("/", " ").replace(".", " ")
+    ).split()
+    return any(
+        keyword in tokens if keyword in _SHORT_BOTTLE_LIKE_KEYWORDS else keyword in text
+        for keyword in _BOTTLE_LIKE_KEYWORDS
+    )
+
+
+def _is_upright_task_description(task_description: str) -> bool:
+    text = task_description.strip().lower()
+    return any(keyword in text for keyword in _UPRIGHT_TASK_KEYWORDS)
+
+
+def _should_upright_in_place(
+    *,
+    intent: str,
+    relation: str,
+    orientation_goal: str,
+    moved_object: _SceneObject,
+    reference_source_uid: str,
+    table_source_uid: str,
+    task_description: str,
+) -> bool:
+    if (
+        intent != "place_relative"
+        or relation != "on"
+        or (
+            orientation_goal != "upright"
+            and not _is_upright_task_description(task_description)
+        )
+        or not _is_bottle_like_object(moved_object)
+    ):
+        return False
+    return reference_source_uid in {table_source_uid, moved_object.source_uid}
 
 
 def _normalize_manipulation_intent(value: Any) -> str:

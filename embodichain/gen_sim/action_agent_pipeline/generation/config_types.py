@@ -109,6 +109,7 @@ class _RelativePlacementStepSpec:
     orientation_axis: str = "none"
     orientation_align_to_runtime_uid: str | None = None
     hover_height: float = 0.10
+    upright_in_place: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,7 @@ class _RelativePlacementSpec:
     orientation_axis: str = "none"
     orientation_align_to_runtime_uid: str | None = None
     hover_height: float = 0.10
+    upright_in_place: bool = False
 
 
 _ObjectManipulationStepSpec = _RelativePlacementStepSpec

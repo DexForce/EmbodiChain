@@ -99,7 +99,7 @@ def _make_relative_extensions_config(
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
-    return {
+    extensions = {
         **_make_dual_ur5_arm_slot_config(),
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
@@ -110,6 +110,10 @@ def _make_relative_extensions_config(
             side_relation_xy_offsets=side_relation_xy_offsets,
         ),
     }
+    grasp_pose_overrides = _make_relative_grasp_pose_overrides(spec)
+    if grasp_pose_overrides:
+        extensions["agent_grasp_pose_overrides"] = grasp_pose_overrides
+    return extensions
 
 
 def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
@@ -257,6 +261,25 @@ def _make_relative_placement_success_spec(
             placement.moved_runtime_uid,
             placement.reference_runtime_uid,
         )
+    if placement.relation == "on" and placement.upright_in_place:
+        if placement.release_position is None:
+            raise ValueError(
+                "Upright-in-place success requires an absolute release position."
+            )
+        return {
+            "op": "all",
+            "terms": [
+                *_absolute_xy_success_terms(
+                    placement.moved_runtime_uid,
+                    placement.release_position,
+                ),
+                {
+                    "type": "object_not_fallen",
+                    "object": placement.moved_runtime_uid,
+                    "max_tilt": 0.9,
+                },
+            ],
+        }
     if placement.relation == "on":
         return {
             "type": "object_on_object",
@@ -301,6 +324,23 @@ def _make_relative_placement_success_spec(
             },
         ],
     }
+
+
+def _make_relative_grasp_pose_overrides(
+    spec: _RelativePlacementSpec,
+) -> dict[str, dict[str, Any]]:
+    overrides: dict[str, dict[str, Any]] = {}
+    for placement in spec.placements:
+        if not placement.upright_in_place:
+            continue
+        overrides[placement.moved_runtime_uid] = {
+            "mode": "upright_bottle_side_grasp",
+            "preferred_height_fraction": [0.35, 0.75],
+            "prefer_side_grasp": True,
+            "avoid_ground_release_collision": True,
+            "support": placement.reference_runtime_uid,
+        }
+    return overrides
 
 
 def _absolute_xy_success_terms(

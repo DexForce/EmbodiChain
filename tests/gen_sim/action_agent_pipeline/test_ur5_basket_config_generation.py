@@ -1747,10 +1747,11 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
         (0.5, -0.4, 0.36),
         (0.0, 0.4, 0.36),
     ]
+    bottle_half_height = 0.08
     bottle_vertices = [
-        (-0.02, 0.0, 0.0),
-        (0.02, 0.0, 0.0),
-        (0.0, 0.02, 0.16),
+        (-0.02, -bottle_half_height, -0.01),
+        (0.02, -bottle_half_height, -0.01),
+        (0.0, bottle_half_height, 0.01),
     ]
     _write_minimal_glb(project_dir / "mesh_assets/table/table_0.glb", table_vertices)
     _write_minimal_glb(
@@ -1772,7 +1773,7 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
                 "interact_bottle_1",
                 "mesh_assets/bottle/bottle_1.glb",
                 [0.05, 0.05, 0.36],
-                [90.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
             )
         ],
     }
@@ -1798,23 +1799,56 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
         fake_call_relative_task_llm,
     )
 
+    target_body_scale = 0.8
     paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_bottle_on_table_agent",
         task_name="Demo43",
         task_description="用左臂把瓶子扶正放到桌面上",
-        target_body_scale=0.8,
+        target_body_scale=target_body_scale,
         prewarm_coacd_cache=False,
     )
 
     summary = _stable_summary(paths.summary)
-    expected_release_z = 0.36 + 0.003
-    assert summary["release_offset"][2] == pytest.approx(expected_release_z)
+    expected_release_offset_z = 0.36 + 0.003 + bottle_half_height * target_body_scale
+    expected_release_position = [
+        0.05,
+        0.05,
+        -0.02 + expected_release_offset_z,
+    ]
+    expected_release_offset = [0.05, 0.05, expected_release_offset_z]
+    assert summary["upright_in_place"] is True
+    assert summary["release_offset"][2] == pytest.approx(expected_release_offset_z)
+    assert summary["release_offset"] == pytest.approx(expected_release_offset)
+    assert summary["reference_object"] == "table"
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    extensions = gym_config["env"]["extensions"]
+    assert extensions["agent_grasp_pose_overrides"]["interact_bottle_1"][
+        "mode"
+    ] == "upright_bottle_side_grasp"
+    success = extensions["agent_success"]
+    assert success["op"] == "all"
+    assert {term["type"] for term in success["terms"]} == {
+        "object_axis_near",
+        "object_not_fallen",
+    }
+    axis_targets = {
+        term["axis"]: term["target"]
+        for term in success["terms"]
+        if term["type"] == "object_axis_near"
+    }
+    assert axis_targets == pytest.approx({"x": 0.05, "y": 0.05})
+
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    release_offset_json = json.dumps(
-        summary["release_offset"], ensure_ascii=False, separators=(",", ":")
+    release_position_json = json.dumps(
+        expected_release_position, ensure_ascii=False, separators=(",", ":")
     )
-    assert f'"offset":{release_offset_json},"orientation_goal":"upright"' in task_prompt
+    assert (
+        f'"position":{release_position_json},"orientation_goal":"upright"'
+        in task_prompt
+    )
+    assert '"reference":"object","obj_name":"table"' not in task_prompt
     assert '"offset":[0.0,0.0,0.2]' not in task_prompt
 
 

@@ -190,6 +190,19 @@ class _GraspRuntimeDefaults:
 
 
 _GRASP_RUNTIME_DEFAULTS = _GraspRuntimeDefaults()
+_BOTTLE_LIKE_KEYWORDS = (
+    "bottle",
+    "can",
+    "jar",
+    "tin",
+    "soda",
+    "cola",
+    "罐头",
+    "易拉罐",
+    "瓶",
+    "瓶子",
+)
+_SHORT_BOTTLE_LIKE_KEYWORDS = {"can", "jar", "tin"}
 
 
 def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
@@ -1061,6 +1074,11 @@ def _resolve_object_orientation(
     long_axis = local_axes[:, 0]
     up_axis = local_axes[:, 2]
     if orientation_goal == "upright":
+        if _is_bottle_like_held_object(state, mesh_vertices):
+            return _preview_aware_upright_rotation(
+                local_axes=local_axes,
+                current_rotation=current_rotation,
+            )
         return _rotation_from_axis_targets(
             local_primary=long_axis,
             world_primary=torch.tensor([0.0, 0.0, 1.0], device=env.robot.device),
@@ -1109,6 +1127,81 @@ def _principal_local_axes(vertices: torch.Tensor) -> torch.Tensor:
     order = torch.argsort(extents, descending=True)
     axes = torch.eye(3, dtype=torch.float32, device=vertices.device)[:, order]
     return axes
+
+
+def _is_bottle_like_held_object(state: WorldState, vertices: torch.Tensor) -> bool:
+    held = state.held_object
+    if held is None:
+        return False
+    label = str(getattr(held.semantics, "label", "")).lower()
+    if _has_bottle_like_keyword(label):
+        return True
+    extents = vertices.max(dim=0).values - vertices.min(dim=0).values
+    sorted_extents = torch.sort(extents).values
+    min_extent = torch.clamp(sorted_extents[0], min=1e-6)
+    mid_extent = torch.clamp(sorted_extents[1], min=1e-6)
+    long_extent = sorted_extents[2]
+    return bool(
+        float(long_extent / mid_extent) >= 1.6
+        and float(mid_extent / min_extent) <= 1.35
+    )
+
+
+def _has_bottle_like_keyword(text: str) -> bool:
+    tokens = (
+        text.replace("_", " ").replace("-", " ").replace("/", " ").replace(".", " ")
+    ).split()
+    return any(
+        keyword in tokens if keyword in _SHORT_BOTTLE_LIKE_KEYWORDS else keyword in text
+        for keyword in _BOTTLE_LIKE_KEYWORDS
+    )
+
+
+def _preview_aware_upright_rotation(
+    *,
+    local_axes: torch.Tensor,
+    current_rotation: torch.Tensor,
+) -> torch.Tensor:
+    device = current_rotation.device
+    long_axis = local_axes[:, 0]
+    secondary_axes = [local_axes[:, index] for index in range(1, local_axes.shape[1])]
+    candidates: list[tuple[float, torch.Tensor]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[-axis for axis in secondary_axes],
+    ]:
+        preview_secondary = current_rotation @ secondary_axis.to(
+            device=device, dtype=torch.float32
+        )
+        world_secondary = preview_secondary.clone()
+        world_secondary[2] = 0.0
+        if float(torch.linalg.norm(world_secondary)) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=long_axis,
+            world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, current_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=long_axis,
+        world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
+        local_secondary=local_axes[:, 2],
+        world_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
+    )
+
+
+def _rotation_distance_score(
+    rotation: torch.Tensor,
+    reference_rotation: torch.Tensor,
+) -> float:
+    delta = rotation @ reference_rotation.transpose(0, 1)
+    return float(-torch.trace(delta))
 
 
 def _axis_align_target_direction(
@@ -1489,6 +1582,11 @@ def _build_object_semantics(
         gripper_collision_cfg=gripper_collision_cfg,
         force_reannotate=force_reannotate,
     )
+    grasp_pose_overrides = getattr(env, "agent_grasp_pose_overrides", {}) or {}
+    if isinstance(grasp_pose_overrides, Mapping):
+        grasp_pose_bias = grasp_pose_overrides.get(obj_name)
+        if isinstance(grasp_pose_bias, Mapping):
+            affordance.set_custom_config("grasp_pose_bias", dict(grasp_pose_bias))
     return ObjectSemantics(
         label=obj_name,
         geometry={
