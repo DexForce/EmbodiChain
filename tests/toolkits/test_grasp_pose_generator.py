@@ -102,13 +102,13 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
             ]
         ),
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e3},
-            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e2},
-            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e4},
+            stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
+            damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
+            max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},
             drive_type="force",
         ),
         control_parts={
-            "arm": ["JOINT[0-9]"],
+            "arm": ["Joint[0-9]"],
             "hand": ["FINGER[1-2]"],
         },
         solver_cfg={
