@@ -54,7 +54,7 @@ def _run_neural_planner_cli(args: argparse.Namespace) -> None:
 
     run_all_benchmarks(
         num_waypoints_list=args.num_waypoints,
-        sim_device=args.device,
+        device=args.device,
         headless=args.headless,
         checkpoint_path=args.checkpoint_path,
         num_trials=args.num_trials,

@@ -273,7 +273,7 @@ class NewtonPhysicsCfg(PhysicsCfg):
                 broad_phase=self.broad_phase,
                 requires_grad=self.requires_grad,
             ),
-            sync_to_dexsim=True
+            sync_to_dexsim=True,
         )
         cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
         cfg._visualizer_enabled = self.visualizer_enabled

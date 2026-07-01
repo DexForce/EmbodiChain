@@ -193,7 +193,7 @@ if __name__ == "__main__":
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cpu",
+        device="cpu",
         num_envs=2,
         render_cfg=RenderCfg(renderer="fast-rt"),
     )

@@ -190,11 +190,11 @@ def main() -> None:
     args = parse_args()
     checkpoint_path = download_neural_planner_checkpoint()
 
-    sim_device = _resolve_device(args.device)
+    device = _resolve_device(args.device)
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=args.headless,
-            sim_device=sim_device,
+            device=device,
             num_envs=1,
             arena_space=2.0,
         )

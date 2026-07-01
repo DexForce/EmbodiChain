@@ -203,16 +203,16 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         gpu_index = device.index
         if gpu_index is None:
             gpu_index = torch.cuda.current_device()
-        gym_env_cfg.sim_cfg.sim_device = torch.device(f"cuda:{gpu_index}")
+        gym_env_cfg.sim_cfg.device = torch.device(f"cuda:{gpu_index}")
         if hasattr(gym_env_cfg.sim_cfg, "gpu_id"):
             gym_env_cfg.sim_cfg.gpu_id = gpu_index
     else:
-        gym_env_cfg.sim_cfg.sim_device = torch.device("cpu")
+        gym_env_cfg.sim_cfg.device = torch.device("cpu")
     gym_env_cfg.sim_cfg.headless = headless
     gym_env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
     gym_env_cfg.sim_cfg.gpu_id = gpu_id
     logger.log_info(
-        f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
+        f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, device={gym_env_cfg.sim_cfg.device})"
     )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)

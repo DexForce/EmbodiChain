@@ -60,10 +60,10 @@ def _teardown_newton_physics() -> None:
 class BaseRigidObjectTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device: str, physics: str = "default"):
+    def setup_simulation(self, device: str, physics: str = "default"):
         config = SimulationManagerCfg(
             headless=True,
-            device=sim_device,
+            device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics),
         )
@@ -105,7 +105,7 @@ class BaseRigidObjectTest:
 
         if (
             physics == "default"
-            and sim_device == "cuda"
+            and device == "cuda"
             and getattr(self.sim, "is_use_gpu_physics", False)
         ):
             self.sim.init_gpu_physics()

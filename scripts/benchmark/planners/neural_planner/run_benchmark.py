@@ -475,13 +475,13 @@ def _resolve_checkpoint(checkpoint_path: str | None) -> str | None:
 
 
 def _setup_sim_and_robot(
-    sim_device: str,
+    device: str,
     headless: bool,
 ) -> tuple[SimulationManager, Robot, torch.Tensor, torch.Tensor]:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=headless,
-            sim_device=sim_device,
+            device=device,
             num_envs=1,
             arena_space=2.0,
         )
@@ -1049,7 +1049,7 @@ def _init_toppra_motion_generator(
 
 def _benchmark_notes(
     *,
-    sim_device: str,
+    device: str,
     checkpoint_path: str,
     num_trials: int,
     warmup_trials: int,
@@ -1065,7 +1065,7 @@ def _benchmark_notes(
 
     checkpoint_name = Path(checkpoint_path).name
     return [
-        f"Device: {sim_device} | Robot: Franka Panda ({ARM_NAME})",
+        f"Device: {device} | Robot: Franka Panda ({ARM_NAME})",
         f"Checkpoint: {checkpoint_name} ({checkpoint_path})",
         f"Trials: {warmup_trials} warmup + {num_trials} measured per "
         f"(impl, num_waypoints); sample_interval={sample_interval}",
@@ -1076,7 +1076,7 @@ def _benchmark_notes(
 
 def benchmark_neural_planner(
     num_waypoints_list: list[int],
-    sim_device: str,
+    device: str,
     headless: bool,
     checkpoint_path: str | None,
     *,
@@ -1108,7 +1108,7 @@ def benchmark_neural_planner(
 
     trial_rows: list[dict[str, object]] = []
     notes = _benchmark_notes(
-        sim_device=sim_device,
+        device=device,
         checkpoint_path=resolved_checkpoint,
         num_trials=num_trials,
         warmup_trials=warmup_trials,
@@ -1118,7 +1118,7 @@ def benchmark_neural_planner(
     )
 
     print("\n=== NeuralPlanner Benchmark ===")
-    print(f"Device: {sim_device}")
+    print(f"Device: {device}")
     print(f"Checkpoint: {resolved_checkpoint}")
     print(
         "num_waypoints values: "
@@ -1126,7 +1126,7 @@ def benchmark_neural_planner(
     )
     print(f"num_trials={num_trials} warmup_trials={warmup_trials}")
 
-    _, robot, start_qpos, start_pose = _setup_sim_and_robot(sim_device, headless)
+    _, robot, start_qpos, start_pose = _setup_sim_and_robot(device, headless)
 
     neural_planner = MotionGenerator(
         cfg=MotionGenCfg(
@@ -1211,7 +1211,7 @@ def benchmark_neural_planner(
 
 def run_all_benchmarks(
     num_waypoints_list: list[int] | None = None,
-    sim_device: str = "auto",
+    device: str = "auto",
     headless: bool = True,
     checkpoint_path: str | None = None,
     *,
@@ -1222,7 +1222,7 @@ def run_all_benchmarks(
     compare_toppra: bool = False,
     include_trial_details: bool = False,
 ) -> None:
-    device = _resolve_device(sim_device)
+    device = _resolve_device(device)
     num_waypoints_list = num_waypoints_list or DEFAULT_NUM_WAYPOINTS
 
     print("=" * 60)
@@ -1231,7 +1231,7 @@ def run_all_benchmarks(
 
     result = benchmark_neural_planner(
         num_waypoints_list=num_waypoints_list,
-        sim_device=device,
+        device=device,
         headless=headless,
         checkpoint_path=checkpoint_path,
         num_trials=num_trials,
@@ -1272,7 +1272,7 @@ if __name__ == "__main__":
     cli_args = _parse_args()
     run_all_benchmarks(
         num_waypoints_list=cli_args.num_waypoints,
-        sim_device=cli_args.device,
+        device=cli_args.device,
         headless=cli_args.headless,
         checkpoint_path=cli_args.checkpoint_path,
         num_trials=cli_args.num_trials,

@@ -155,9 +155,14 @@ class NewtonRigidBodyView(RigidBodyViewBase):
     """Adapter around DexSim Newton rigid body scene APIs.
 
     EmbodiChain public rigid-body pose convention is
-    ``(x, y, z, qx, qy, qz, qw)``.
-    DexSim Newton exposes the same pose convention through its unified rigid
-    data API.
+    ``(x, y, z, qx, qy, qz, qw)`` and is **arena-local**: callers of
+    ``set_local_pose`` / ``get_local_pose`` pass and receive poses relative to
+    the per-env arena root node. DexSim Newton's ``POSE`` batch API, however, is
+    a **world-frame** body pose (see ``NewtonRigidDataType.POSE``). This adapter
+    bridges the two by adding (apply) / subtracting (fetch) the arena root
+    xy offset around the batch call, so the backend conforms to the same
+    local-pose contract as the default backend. Arenas are planar-translated
+    with identity rotation, so only the xy translation differs.
     """
 
     _DATA_TYPE = None  # lazily resolved NewtonRigidDataType
@@ -179,6 +184,14 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         self._body_ids: list[int] | None = None
         self._body_ids_tensor: torch.Tensor | None = None
         self._body_ids_finalized: bool = False
+        # Cached per-entity arena root xy offsets (world frame), entity-ordered.
+        # Arena root positions are static after build, so we cache to keep the
+        # per-step ``fetch_pose`` path off a Python loop over arenas.
+        self._arena_xy_cache: tuple[torch.Tensor, int] | None = None
+        # Cached (sorted body ids, argsort indices) for body_id -> entity-index
+        # lookup via ``torch.searchsorted``. Invalidated whenever body IDs are
+        # re-resolved (pre- -> post-finalization interleaved layout).
+        self._body_id_sort_cache: tuple[torch.Tensor, torch.Tensor] | None = None
 
     # -- Lazy enum access ---------------------------------------------------
 
@@ -237,6 +250,8 @@ class NewtonRigidBodyView(RigidBodyViewBase):
         self._body_ids_tensor = torch.as_tensor(
             ids, dtype=torch.int32, device=self.device
         )
+        # Body IDs changed -> any sorted-lookup cache is stale.
+        self._body_id_sort_cache = None
         if self.is_ready:
             self._body_ids_finalized = True
 
@@ -266,9 +281,78 @@ class NewtonRigidBodyView(RigidBodyViewBase):
             self._resolve_body_ids(body_ids),
             self._get_data_type().POSE,
         )
+        # DexSim POSE is world-frame; convert to arena-local for the public API.
+        offsets = self._arena_xy_offsets_for(body_ids)
+        if offsets is not None:
+            data[:, :2] -= offsets
 
     def apply_pose(self, pose: torch.Tensor, body_ids: torch.Tensor) -> None:
+        # Public pose is arena-local; convert to world-frame for DexSim POSE.
+        offsets = self._arena_xy_offsets_for(body_ids)
+        if offsets is not None:
+            pose = pose.clone()
+            pose[:, :2] += offsets
         self._apply_data(body_ids, self._get_data_type().POSE, pose)
+
+    def _arena_xy_offsets_for(
+        self, body_ids: torch.Tensor | None
+    ) -> torch.Tensor | None:
+        """Per-row arena root xy offsets (world frame) aligned with ``body_ids``.
+
+        Returns ``None`` when no conversion is needed (no arenas, or arena count
+        does not match entity count), which makes the caller a safe no-op.
+        Otherwise returns an ``(N, 2)`` float32 tensor to add (local->world,
+        :meth:`apply_pose`) or subtract (world->local, :meth:`fetch_pose`).
+        """
+        all_offsets = self._all_arena_xy_offsets()
+        if all_offsets is None:
+            return None
+        if body_ids is None:
+            # ``fetch_pose`` default: rows are entity-ordered, matching the cache.
+            return all_offsets
+        # Map each requested body id back to its entity index, then index the
+        # entity-ordered offset cache. ``body_ids`` passed to ``apply_pose``
+        # always originate from ``select_body_ids`` (a subset of
+        # ``_body_ids_tensor``), so every value is guaranteed to match. Use a
+        # cached sorted-id lookup + binary search (O((N+M) log N)) instead of an
+        # O(N*M) equality matrix.
+        sorted_ids, sort_idx = self._body_id_sort_lookup()
+        bids = body_ids.to(device=sorted_ids.device, dtype=sorted_ids.dtype)
+        entity_idx = sort_idx[torch.searchsorted(sorted_ids, bids)]
+        return all_offsets[entity_idx]
+
+    def _body_id_sort_lookup(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Cached ``(sorted body ids, argsort indices)`` for body_id lookup.
+
+        ``sort_idx`` maps a position in the sorted body-id array back to the
+        entity index, so ``sort_idx[searchsorted(sorted_ids, ids)]`` resolves
+        any body id to its entity index in O(log N).
+        """
+        if self._body_id_sort_cache is None:
+            self._ensure_body_ids()
+            sorted_ids, sort_idx = torch.sort(self._body_ids_tensor)  # type: ignore[arg-type]
+            self._body_id_sort_cache = (sorted_ids, sort_idx)
+        return self._body_id_sort_cache
+
+    def _all_arena_xy_offsets(self) -> torch.Tensor | None:
+        """Cached entity-ordered ``(num_instances, 2)`` arena root xy offsets."""
+        from embodichain.lab.sim.utility import get_dexsim_arenas
+
+        arenas = get_dexsim_arenas()
+        n = len(self.entities)
+        if len(arenas) == 0 or len(arenas) != n:
+            # Cannot map entities to arenas safely; no-op (preserve behavior).
+            return None
+        if self._arena_xy_cache is not None and self._arena_xy_cache[1] == n:
+            return self._arena_xy_cache[0]
+        offsets = torch.as_tensor(
+            np.stack(
+                [arena.get_root_node().get_local_pose()[:2, 3] for arena in arenas]
+            ).astype(np.float32),
+            device=self.device,
+        )
+        self._arena_xy_cache = (offsets, n)
+        return offsets
 
     # -- RigidBodyViewBase: center of mass (local) ---------------------------
 

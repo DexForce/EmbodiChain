@@ -332,8 +332,8 @@ class BaseArticulationTest:
 class BaseArticulationLinkPhysicsTest:
     """Tests for per-link physics configuration (isolated sim per test)."""
 
-    def setup_simulation(self, sim_device: str) -> None:
-        config = SimulationManagerCfg(headless=True, device=sim_device, num_envs=2)
+    def setup_simulation(self, device: str) -> None:
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=2)
         self.sim = SimulationManager(config)
         self.art_path = get_data_path(ART_PATH)
         assert os.path.isfile(self.art_path)

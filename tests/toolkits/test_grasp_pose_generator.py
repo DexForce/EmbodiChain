@@ -60,7 +60,7 @@ def initialize_simulation() -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=torch.device("cuda"),
+        device=torch.device("cuda"),
         render_cfg=RenderCfg(renderer="auto"),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
