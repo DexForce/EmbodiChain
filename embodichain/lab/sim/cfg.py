@@ -1379,6 +1379,56 @@ class RigidObjectGroupCfg:
 
 
 @configclass
+class RigidConstraintCfg:
+    """Configuration for a fixed constraint between two RigidObjects.
+
+    The constraint binds rigid_object_a's entity[i] to rigid_object_b's entity[i]
+    within arena[i] (one constraint per arena).
+
+    Args:
+        name: Base constraint name. Per-arena names are derived as ``f"{name}"``
+            (single env) or ``f"{name}_{i}"`` (multi env).
+        rigid_object_a_uid: UID of the first RigidObject (must exist in the sim).
+        rigid_object_b_uid: UID of the second RigidObject (must exist in the sim).
+        local_frame_a: 4x4 joint frame in object A's local coordinates.
+            ``None`` -> identity (object A's origin). Accepts a single
+            ``(4, 4)`` matrix (shared by all envs) or an ``(N, 4, 4)`` array
+            (one frame per env). Defaults to None.
+        local_frame_b: 4x4 joint frame in object B's local coordinates.
+            ``None`` -> the frame is computed per env as ``inv(pose_B) @ pose_A``
+            from the objects' current poses, so the constraint welds the objects
+            at their *current* relative pose (rather than pulling their origins
+            together). An explicit ``(4, 4)`` or ``(N, 4, 4)`` value is used
+            verbatim. Defaults to None.
+        constraint_type: Reserved for future typed constraints (prismatic,
+            revolute, spherical, d6). Only ``"fixed"`` is supported in v1.
+
+    .. attention::
+        Both objects must be :class:`RigidObject` instances and must share the
+        same number of arenas.
+    """
+
+    name: str = MISSING
+    """Base name of the constraint (per-arena names are derived from this)."""
+
+    rigid_object_a_uid: str = MISSING
+    """UID of the first RigidObject."""
+
+    rigid_object_b_uid: str = MISSING
+    """UID of the second RigidObject."""
+
+    local_frame_a: np.ndarray | None = None
+    """Local joint frame on object A. None -> identity (object A's origin)."""
+
+    local_frame_b: np.ndarray | None = None
+    """Local joint frame on object B. None -> ``inv(pose_B) @ pose_A`` per env
+    (weld at the objects' current relative pose)."""
+
+    constraint_type: Literal["fixed"] = "fixed"
+    """Constraint type. Only ``"fixed"`` is supported in v1."""
+
+
+@configclass
 class URDFCfg:
     """Standalone configuration class for URDF assembly."""
 

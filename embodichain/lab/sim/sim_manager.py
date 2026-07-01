@@ -63,6 +63,7 @@ from embodichain.lab.sim.objects import (
     Articulation,
     Robot,
     Light,
+    RigidConstraint,
 )
 from embodichain.lab.sim.objects.gizmo import Gizmo
 from embodichain.lab.sim.sensors import (
@@ -86,11 +87,12 @@ from embodichain.lab.sim.cfg import (
     RigidObjectGroupCfg,
     ArticulationCfg,
     RobotCfg,
+    RigidConstraintCfg,
 )
 from embodichain.lab.sim.physics import make_physics_backend
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import look_at_to_pose
+from embodichain.utils.math import look_at_to_pose, pose_inv
 
 __all__ = [
     "SimulationManager",
@@ -348,6 +350,7 @@ class SimulationManager:
         self._markers: Dict[str, MeshObject] = dict()
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
+        self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._soft_objects: Dict[str, SoftObject] = dict()
         self._cloth_objects: Dict[str, ClothObject] = dict()
@@ -1166,6 +1169,201 @@ class SimulationManager:
         """
         return list(self._rigid_objects.keys())
 
+    @staticmethod
+    def _broadcast_frame(
+        frame: np.ndarray | None,
+        num_envs: int,
+        env_ids: Sequence[int],
+        name: str,
+    ) -> list[np.ndarray]:
+        """Broadcast a local-frame spec to one matrix per target env.
+
+        Args:
+            frame: None -> identity; (4,4) -> repeated; (N,4,4) -> indexed per env.
+            num_envs: Total number of arenas (used to validate (N,4,4)).
+            env_ids: Target env indices to produce frames for.
+            name: Constraint name (for error messages).
+
+        Returns:
+            A list of (4,4) numpy arrays, one per env in env_ids.
+
+        Raises:
+            RuntimeError: If an (N,4,4) frame's N != num_envs, or shape is invalid.
+        """
+        if frame is None:
+            identity = np.eye(4, dtype=np.float32)
+            return [identity for _ in env_ids]
+        frame_np = np.asarray(frame, dtype=np.float32)
+        if frame_np.shape == (4, 4):
+            return [frame_np for _ in env_ids]
+        if frame_np.ndim == 3 and frame_np.shape[1:] == (4, 4):
+            if frame_np.shape[0] != num_envs:
+                logger.log_error(
+                    f"Constraint '{name}' local frame has shape {frame_np.shape} "
+                    f"but num_envs is {num_envs}. Expected ({num_envs}, 4, 4)."
+                )
+            return [frame_np[i] for i in env_ids]
+        logger.log_error(
+            f"Constraint '{name}' local frame has invalid shape {frame_np.shape}. "
+            "Expected None, (4, 4), or (N, 4, 4)."
+        )
+
+    @staticmethod
+    def _normalize_env_ids(
+        env_ids: Sequence[int] | torch.Tensor | None,
+        num_envs: int,
+    ) -> list[int]:
+        """Normalize an ``env_ids`` spec to a plain ``list[int]``.
+
+        Accepts ``None`` (-> all envs), a ``torch.Tensor`` (as passed by the
+        :class:`EventManager`), or any ``Sequence[int]``, and returns a list of
+        Python ints. Normalizing here keeps the per-arena constraint names clean
+        (e.g. ``"weld_0"`` rather than relying on a tensor's string form) and
+        avoids depending on implicit tensor-to-int conversions downstream.
+
+        Args:
+            env_ids: None, a tensor, or a sequence of ints.
+            num_envs: Total number of arenas (used when env_ids is None).
+
+        Returns:
+            A list of int env indices.
+        """
+        if env_ids is None:
+            return list(range(num_envs))
+        if isinstance(env_ids, torch.Tensor):
+            return env_ids.detach().cpu().tolist()
+        return [int(i) for i in env_ids]
+
+    def create_rigid_constraint(
+        self,
+        cfg: RigidConstraintCfg,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> RigidConstraint:
+        """Create a fixed constraint between two RigidObjects.
+
+        Binds ``rigid_object_a``'s entity[i] to ``rigid_object_b``'s entity[i]
+        within arena[i], for each env in ``env_ids``. Local frames default to
+        welding the objects at their *current* relative pose:
+        ``local_frame_a`` defaults to identity (object A's origin) and
+        ``local_frame_b`` defaults to ``inv(pose_B) @ pose_A`` (computed per env),
+        so the offset is preserved rather than the two origins being pulled
+        together. Pass explicit frames to define a specific joint frame.
+
+        Args:
+            cfg: The constraint configuration.
+            env_ids: Target environment indices. Accepts a tensor (as passed by
+                the :class:`EventManager`) or a sequence of ints. None -> all arenas.
+
+        Returns:
+            The created :class:`RigidConstraint`.
+
+        Raises:
+            RuntimeError: If either object is missing, the name is already in use,
+                a frame shape is invalid, or dexsim fails to create a handle.
+        """
+        # validate constraint type (only fixed supported in v1)
+        if cfg.constraint_type != "fixed":
+            logger.log_error(
+                f"Constraint '{cfg.name}' has unsupported type "
+                f"'{cfg.constraint_type}'. Only 'fixed' is supported in v1."
+            )
+
+        # resolve objects
+        if cfg.rigid_object_a_uid not in self._rigid_objects:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_a_uid}' not found for constraint "
+                f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
+            )
+        if cfg.rigid_object_b_uid not in self._rigid_objects:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_b_uid}' not found for constraint "
+                f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
+            )
+        rigid_object_a = self._rigid_objects[cfg.rigid_object_a_uid]
+        rigid_object_b = self._rigid_objects[cfg.rigid_object_b_uid]
+
+        # validate duplicate name
+        if cfg.name in self._constraints:
+            logger.log_error(
+                f"Constraint '{cfg.name}' already exists. Remove it before recreating."
+            )
+
+        # validate object entity counts match num_envs
+        num_envs = self.num_envs
+        if rigid_object_a.num_instances != num_envs:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_a_uid}' has "
+                f"{rigid_object_a.num_instances} instances but num_envs is {num_envs}."
+            )
+        if rigid_object_b.num_instances != num_envs:
+            logger.log_error(
+                f"RigidObject '{cfg.rigid_object_b_uid}' has "
+                f"{rigid_object_b.num_instances} instances but num_envs is {num_envs}."
+            )
+
+        # resolve target env_ids (accepts None / tensor / sequence)
+        target_env_ids = self._normalize_env_ids(env_ids, num_envs)
+
+        # broadcast local frames.
+        # local_frame_a defaults to identity (object A's origin).
+        # local_frame_b defaults to the current relative pose of A w.r.t. B
+        # (inv(pose_B) @ pose_A), so that with both frames left as None the
+        # constraint welds the objects at their *current* relative pose instead
+        # of pulling their origins together.
+        frames_a = self._broadcast_frame(
+            cfg.local_frame_a, num_envs, target_env_ids, cfg.name
+        )
+        if cfg.local_frame_b is None:
+            pose_a = rigid_object_a.get_local_pose(to_matrix=True)
+            pose_b = rigid_object_b.get_local_pose(to_matrix=True)
+            frame_b = torch.bmm(pose_inv(pose_b), pose_a)  # (N, 4, 4)
+            frame_b = frame_b.cpu().numpy().astype(np.float32)
+            frames_b = [frame_b[i] for i in target_env_ids]
+        else:
+            frames_b = self._broadcast_frame(
+                cfg.local_frame_b, num_envs, target_env_ids, cfg.name
+            )
+
+        # pre-size handles list with None, fill target envs
+        handles: list = [None] * num_envs
+        try:
+            for idx, env_id in enumerate(target_env_ids):
+                arena = self.get_env(env_id)
+                name_i = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
+                handle = arena.create_fixed_constraint(
+                    name_i,
+                    rigid_object_a._entities[env_id],
+                    rigid_object_b._entities[env_id],
+                    frames_a[idx],
+                    frames_b[idx],
+                )
+                if handle is None:
+                    logger.log_error(
+                        f"Failed to create constraint '{name_i}' in arena {env_id}."
+                    )
+                handles[env_id] = handle
+        except Exception:
+            # Ensure partially created per-arena constraints are removed if a later
+            # arena fails, so create/remove semantics stay consistent.
+            RigidConstraint(
+                cfg=cfg,
+                constraint_handles=handles,
+                rigid_object_a=rigid_object_a,
+                rigid_object_b=rigid_object_b,
+                device=self.device,
+            ).destroy(env_ids=target_env_ids, arena_resolver=self.get_env)
+            raise
+
+        constraint = RigidConstraint(
+            cfg=cfg,
+            constraint_handles=handles,
+            rigid_object_a=rigid_object_a,
+            rigid_object_b=rigid_object_b,
+            device=self.device,
+        )
+        self._constraints[cfg.name] = constraint
+        return constraint
+
     def get_soft_object_uid_list(self) -> List[str]:
         """Get current soft body uid list
 
@@ -1181,6 +1379,61 @@ class SimulationManager:
             List[str]: list of cloth body uid.
         """
         return list(self._cloth_objects.keys())
+
+    def remove_rigid_constraint(
+        self,
+        name: str,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> bool:
+        """Remove a rigid constraint by name.
+
+        With ``env_ids=None`` the constraint is removed from every arena and
+        dropped from the registry. With a subset, only those arenas are cleared;
+        the registry entry is kept until all handles become None.
+
+        Args:
+            name: The base constraint name.
+            env_ids: Subset of arenas to clear. Accepts a tensor (as passed by
+                the :class:`EventManager`) or a sequence of ints. None -> all.
+
+        Returns:
+            True if the constraint was found (and removed or partially removed),
+            False if the name is unknown.
+        """
+        constraint = self._constraints.get(name, None)
+        if constraint is None:
+            logger.log_warning(f"Constraint '{name}' not found. Nothing to remove.")
+            return False
+
+        target_env_ids = self._normalize_env_ids(env_ids, constraint.num_envs)
+        constraint.destroy(env_ids=target_env_ids, arena_resolver=self.get_env)
+
+        # drop from registry if no handles remain active
+        if all(h is None for h in constraint.constraint_handles):
+            del self._constraints[name]
+        return True
+
+    def get_rigid_constraint(self, name: str) -> RigidConstraint | None:
+        """Get a rigid constraint by its base name.
+
+        Args:
+            name: The base constraint name.
+
+        Returns:
+            The constraint, or None if not found.
+        """
+        if name not in self._constraints:
+            logger.log_warning(f"Constraint '{name}' not found.")
+            return None
+        return self._constraints[name]
+
+    def get_rigid_constraint_uid_list(self) -> List[str]:
+        """Get the list of registered constraint base names.
+
+        Returns:
+            List[str]: list of constraint names.
+        """
+        return list(self._constraints.keys())
 
     def add_rigid_object_group(self, cfg: RigidObjectGroupCfg) -> RigidObjectGroup:
         """Add a rigid object group to the scene.
@@ -2424,6 +2677,7 @@ class SimulationManager:
         _sever_wrapper_refs("_gizmos")
         _sever_wrapper_refs("_markers")
         _sever_wrapper_refs("_rigid_objects")
+        _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")
         _sever_wrapper_refs("_soft_objects")
         _sever_wrapper_refs("_cloth_objects")
@@ -2445,6 +2699,7 @@ class SimulationManager:
         self._arenas.clear()
         self._markers.clear()
         self._gizmos.clear()
+        self._constraints.clear()
 
         SimulationManager.reset(self.instance_id)
 
