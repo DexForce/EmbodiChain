@@ -42,6 +42,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalizati
     MESH_FRAME_NORMALIZATION_POLICY_VERSION,
     MeshFrameNormalizer,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking import (
+    BODY_SCALE_BAKE_POLICY_VERSION,
+    bake_body_scale_into_meshes,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
@@ -135,15 +139,15 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
     assert set(rigid_objects) == {"left_apple", "right_apple"}
-    assert rigid_objects["left_apple"]["body_scale"] == [0.6, 0.6, 0.6]
-    assert rigid_objects["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["left_apple"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["right_apple"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["left_apple"]["body_type"] == "dynamic"
     assert rigid_objects["right_apple"]["body_type"] == "dynamic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    _assert_normalized_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
-    _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
+    _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
+    _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["wicker_basket"]["shape"]["fpath"])
     table_top_z = action_agent_config_generation._mesh_config_world_zmax(
@@ -235,6 +239,9 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert "parallel handoff" in basic_background
     assert "parallel handoff" in atom_actions
     assert len(paths.summary["normalized_meshes"]) == 4
+    body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
+    assert body_scaled_meshes["left_apple"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert body_scaled_meshes["right_apple"]["body_scale"] == [0.6, 0.6, 0.6]
 
     handoff_edge = task_prompt.split("4. After the left gripper", maxsplit=1)[1].split(
         "\n5. Place the held right target object",
@@ -275,10 +282,10 @@ def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
     for obj_config in [
         background_objects["table"],
         background_objects["wicker_basket"],
-        rigid_objects["right_apple"],
-        rigid_objects["left_apple"],
     ]:
         _assert_normalized_obj_path(obj_config["shape"]["fpath"])
+    for obj_config in [rigid_objects["right_apple"], rigid_objects["left_apple"]]:
+        _assert_body_scaled_obj_path(obj_config["shape"]["fpath"])
 
     source_paths = {
         Path(entry["source_path"]).name for entry in paths.summary["normalized_meshes"]
@@ -412,6 +419,73 @@ def test_mesh_frame_normalizer_recreates_material_library_for_reused_obj(
     assert f"newmtl {reused_material_name}" in material_text
 
 
+def test_body_scale_bake_writes_scaled_obj_and_clears_runtime_scale(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "normalized"
+    source_dir.mkdir()
+    mesh_path = source_dir / "triangle.obj"
+    mesh_path.write_text(
+        "\n".join(
+            [
+                "mtllib material.mtl",
+                "usemtl material_test",
+                "v 1 2 3",
+                "v -1 0 2",
+                "v 0.5 1 0",
+                "f 1 2 3",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (source_dir / "material.mtl").write_text(
+        "newmtl material_test\nKd 1.0 1.0 1.0\n",
+        encoding="utf-8",
+    )
+    gym_config = {
+        "background": [],
+        "rigid_object": [
+            {
+                "uid": "scaled_triangle",
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": mesh_path.as_posix(),
+                },
+                "body_scale": [2.0, 0.5, 3.0],
+            }
+        ],
+    }
+
+    reports = bake_body_scale_into_meshes(
+        gym_config,
+        output_dir=tmp_path / "body_scaled",
+    )
+
+    obj_config = gym_config["rigid_object"][0]
+    scaled_path = Path(obj_config["shape"]["fpath"])
+    assert obj_config["body_scale"] == [1.0, 1.0, 1.0]
+    assert scaled_path.parent == tmp_path / "body_scaled"
+    assert reports == [
+        {
+            "uid": "scaled_triangle",
+            "section": "rigid_object",
+            "source_path": mesh_path.as_posix(),
+            "scaled_path": scaled_path.as_posix(),
+            "source_sha256": reports[0]["source_sha256"],
+            "body_scale": [2.0, 0.5, 3.0],
+            "status": "generated",
+            "policy_version": BODY_SCALE_BAKE_POLICY_VERSION,
+        }
+    ]
+    assert _rounded_vertex_set(_obj_vertices(scaled_path)) == {
+        (2.0, 1.0, 9.0),
+        (-2.0, 0.0, 6.0),
+        (1.0, 0.5, 0.0),
+    }
+    assert (scaled_path.parent / "material.mtl").is_file()
+
+
 def test_target_replacements_generate_meshes_and_replace_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -442,8 +516,8 @@ def test_target_replacements_generate_meshes_and_replace_paths(
     assert set(rigid_objects) == {"left_apple", "right_apple"}
     assert "wicker_basket" in background_objects
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    _assert_normalized_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
-    _assert_normalized_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
+    _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
+    _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     normalized_sources = {
         Path(entry["source_path"]).as_posix()
         for entry in paths.summary["normalized_meshes"]
@@ -484,8 +558,8 @@ def test_target_replacements_can_sync_runtime_names(
     assert set(rigid_objects) == {"left_apple", "right_orange"}
     assert "wicker_basket" in background_objects
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    _assert_normalized_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
-    _assert_normalized_obj_path(rigid_objects["right_orange"]["shape"]["fpath"])
+    _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
+    _assert_body_scaled_obj_path(rigid_objects["right_orange"]["shape"]["fpath"])
 
     success_terms = gym_config["env"]["extensions"]["agent_success"]["terms"]
     assert {term["object"] for term in success_terms} == {
@@ -569,10 +643,14 @@ def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
     assert "wicker_basket" in background_objects
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert rigid_objects["left_apple"]["body_scale"] == [0.8, 0.8, 0.8]
-    assert rigid_objects["right_apple"]["body_scale"] == [0.8, 0.8, 0.8]
-    assert rigid_objects["vase_0"]["body_scale"] == [1.2, 1.1, 0.9]
-    _assert_normalized_obj_path(rigid_objects["vase_0"]["shape"]["fpath"])
+    assert rigid_objects["left_apple"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["right_apple"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["vase_0"]["body_scale"] == [1.0, 1.0, 1.0]
+    _assert_body_scaled_obj_path(rigid_objects["vase_0"]["shape"]["fpath"])
+    body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
+    assert body_scaled_meshes["left_apple"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert body_scaled_meshes["right_apple"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert body_scaled_meshes["vase_0"]["body_scale"] == [1.2, 1.1, 0.9]
 
 
 def test_task_description_generates_relative_left_of_config(
@@ -621,7 +699,7 @@ def test_task_description_generates_relative_left_of_config(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
     assert set(rigid_objects) == {"apple_2"}
-    assert rigid_objects["apple_2"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert rigid_objects["apple_2"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["apple_2"]["body_type"] == "dynamic"
     assert background_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["apple_1"]["body_type"] == "kinematic"
@@ -629,6 +707,11 @@ def test_task_description_generates_relative_left_of_config(
     assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
+    assert _body_scaled_meshes_by_uid(paths.summary)["apple_2"]["body_scale"] == [
+        0.5,
+        0.5,
+        0.5,
+    ]
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
@@ -1088,11 +1171,15 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
     assert set(rigid_objects) == {"cup"}
     assert rigid_objects["cup"]["body_type"] == "dynamic"
-    assert rigid_objects["cup"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["pad"]["body_type"] == "kinematic"
-    assert background_objects["pad"]["body_scale"] == [1.2, 1.0, 0.4]
+    assert background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["fork"]["body_type"] == "kinematic"
-    assert background_objects["fork"]["body_scale"] == [0.7, 0.7, 0.7]
+    assert background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
+    body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
+    assert body_scaled_meshes["cup"]["body_scale"] == [0.8, 0.8, 0.8]
+    assert body_scaled_meshes["pad"]["body_scale"] == [1.2, 1.0, 0.4]
+    assert body_scaled_meshes["fork"]["body_scale"] == [0.7, 0.7, 0.7]
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["type"] == "object_on_object"
@@ -1158,14 +1245,19 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     rigid_objects = {obj["uid"]: obj for obj in generated["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in generated["background"]}
 
-    assert rigid_objects["cup"]["body_scale"] == [0.11, 0.12, 0.13]
-    assert background_objects["table"]["body_scale"] == [1.31, 1.32, 1.0]
-    assert background_objects["pad"]["body_scale"] == [0.21, 0.22, 0.23]
-    assert background_objects["fork"]["body_scale"] == [0.31, 0.32, 0.33]
+    assert rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".obj"
     assert Path(background_objects["pad"]["shape"]["fpath"]).suffix == ".obj"
-    assert "mesh_assets/normalized" in rigid_objects["cup"]["shape"]["fpath"]
-    assert "mesh_assets/normalized" in background_objects["pad"]["shape"]["fpath"]
+    assert "mesh_assets/body_scaled" in rigid_objects["cup"]["shape"]["fpath"]
+    assert "mesh_assets/body_scaled" in background_objects["pad"]["shape"]["fpath"]
+    body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
+    assert body_scaled_meshes["cup"]["body_scale"] == [0.11, 0.12, 0.13]
+    assert body_scaled_meshes["table"]["body_scale"] == [1.31, 1.32, 1.0]
+    assert body_scaled_meshes["pad"]["body_scale"] == [0.21, 0.22, 0.23]
+    assert body_scaled_meshes["fork"]["body_scale"] == [0.31, 0.32, 0.33]
     assert rigid_objects["cup"]["init_pos"][2] == source_cup_z
     assert background_objects["pad"]["init_pos"][2] == source_pad_z
     assert rigid_objects["cup"]["init_pos"] == pytest.approx(
@@ -1210,16 +1302,21 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     scaled_background_objects = {
         obj["uid"]: obj for obj in scaled_generated["background"]
     }
-    assert scaled_rigid_objects["cup"]["body_scale"] == pytest.approx(
+    assert scaled_rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert scaled_background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert scaled_background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert scaled_background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
+    scaled_body_meshes = _body_scaled_meshes_by_uid(scaled_paths.summary)
+    assert scaled_body_meshes["cup"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.11, 0.12, 0.13]]
     )
-    assert scaled_background_objects["table"]["body_scale"] == pytest.approx(
+    assert scaled_body_meshes["table"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [1.31, 1.32, 1.0]]
     )
-    assert scaled_background_objects["pad"]["body_scale"] == pytest.approx(
+    assert scaled_body_meshes["pad"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.21, 0.22, 0.23]]
     )
-    assert scaled_background_objects["fork"]["body_scale"] == pytest.approx(
+    assert scaled_body_meshes["fork"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.31, 0.32, 0.33]]
     )
 
@@ -1561,7 +1658,7 @@ def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
     assert summary["reference_object"] == "interact_cube_2"
     assert summary["orientation_goal"] == "axis_align"
     assert summary["orientation_axis"] == "x"
-    assert summary["orientation_align_to"] is None
+    assert summary.get("orientation_align_to") is None
 
 
 def test_relative_on_table_release_offset_uses_tabletop_surface(
@@ -1940,7 +2037,12 @@ def test_task_description_allows_single_rigid_with_background_reference(
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
     assert set(rigid_objects) == {"chip_bag"}
     assert rigid_objects["chip_bag"]["body_type"] == "dynamic"
-    assert rigid_objects["chip_bag"]["body_scale"] == [0.5, 0.5, 0.5]
+    assert rigid_objects["chip_bag"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert _body_scaled_meshes_by_uid(paths.summary)["chip_bag"]["body_scale"] == [
+        0.5,
+        0.5,
+        0.5,
+    ]
     assert background_objects["pad"]["body_type"] == "static"
 
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -2922,12 +3024,17 @@ def test_task_description_on_object_uses_object_on_object_success(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
     assert set(rigid_objects) == {"apple_2"}
-    assert rigid_objects["apple_2"]["body_scale"] == [0.6, 0.6, 0.6]
+    assert rigid_objects["apple_2"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["apple_2"]["body_type"] == "dynamic"
     assert background_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["apple_1"]["body_type"] == "kinematic"
     assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert _body_scaled_meshes_by_uid(paths.summary)["apple_2"]["body_scale"] == [
+        0.6,
+        0.6,
+        0.6,
+    ]
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["type"] == "object_on_object"
@@ -3499,11 +3606,25 @@ def _assert_normalized_obj_path(fpath: str) -> None:
     assert (path.parent / "material.mtl").is_file()
 
 
+def _assert_body_scaled_obj_path(fpath: str) -> None:
+    path = Path(fpath)
+    assert path.suffix == ".obj"
+    assert "mesh_assets/body_scaled" in path.as_posix()
+    assert BODY_SCALE_BAKE_POLICY_VERSION not in path.name
+    assert path.is_file()
+    assert (path.parent / "material.mtl").is_file()
+
+
+def _body_scaled_meshes_by_uid(summary: dict) -> dict[str, dict]:
+    entries = summary.get("body_scaled_meshes", [])
+    return {entry["uid"]: entry for entry in entries}
+
+
 def _stable_summary(summary: dict) -> dict:
     stable = {
         key: value
         for key, value in summary.items()
-        if key not in {"normalized_meshes", "coacd_cache"}
+        if key not in {"normalized_meshes", "body_scaled_meshes", "coacd_cache"}
     }
     if stable.get("orientation_goal") == "preserve":
         stable.pop("orientation_goal", None)

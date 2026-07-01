@@ -22,7 +22,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -90,6 +90,49 @@ def test_glb_io_is_shared_by_generation_modules() -> None:
 
     assert action_agent_config.read_glb is glb_io.read_glb
     assert mesh_frame_normalization.read_glb is glb_io.read_glb
+
+
+def test_coacd_cache_generation_uses_obj_suffixed_temp_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.generation import coacd_cache
+
+    captured = {}
+    open3d_module = ModuleType("open3d")
+    open3d_module.t = SimpleNamespace(
+        io=SimpleNamespace(read_triangle_mesh=lambda path: "mesh")
+    )
+    meshproc_module = ModuleType("dexsim.kit.meshproc")
+    meshproc_module.convex_decomposition_coacd = lambda mesh, max_convex_hull_num: (
+        True,
+        ["convex-part"],
+    )
+    utility_module = ModuleType("dexsim.kit.meshproc.utility")
+
+    def fake_mesh_list_to_file(path, mesh_list):
+        captured["temp_path"] = Path(path)
+        captured["mesh_list"] = mesh_list
+        Path(path).write_text("cache", encoding="utf-8")
+
+    utility_module.mesh_list_to_file = fake_mesh_list_to_file
+    monkeypatch.setitem(sys.modules, "open3d", open3d_module)
+    monkeypatch.setitem(sys.modules, "dexsim", ModuleType("dexsim"))
+    monkeypatch.setitem(sys.modules, "dexsim.kit", ModuleType("dexsim.kit"))
+    monkeypatch.setitem(sys.modules, "dexsim.kit.meshproc", meshproc_module)
+    monkeypatch.setitem(sys.modules, "dexsim.kit.meshproc.utility", utility_module)
+
+    mesh_path = tmp_path / "mesh.obj"
+    mesh_path.write_text("v 0 0 0\n", encoding="utf-8")
+    cache_path = tmp_path / "cache_16.obj"
+
+    coacd_cache._generate_coacd_cache(mesh_path, cache_path, 16)
+
+    assert captured["temp_path"].suffix == ".obj"
+    assert captured["temp_path"].name.startswith("cache_16.tmp.")
+    assert captured["mesh_list"] == ["convex-part"]
+    assert cache_path.read_text(encoding="utf-8") == "cache"
+    assert not captured["temp_path"].exists()
 
 
 def test_create_openai_client_uses_per_client_proxy(monkeypatch) -> None:

@@ -177,7 +177,9 @@ def _generate_coacd_cache(
         max_convex_hull_num=int(max_convex_hull_num),
     )
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}")
+    temp_path = cache_path.with_name(
+        f"{cache_path.stem}.tmp.{os.getpid()}{cache_path.suffix}"
+    )
     try:
         mesh_list_to_file(temp_path.as_posix(), out_mesh_list)
         os.replace(temp_path, cache_path)

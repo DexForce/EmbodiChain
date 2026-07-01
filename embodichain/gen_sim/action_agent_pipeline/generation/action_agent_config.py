@@ -45,6 +45,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
     MeshFrameNormalizer,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking import (
+    bake_body_scale_into_meshes,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_agent_config,
@@ -297,12 +300,11 @@ def generate_action_agent_config_from_project(
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             )
             _validate_stacking_bundle(bundle, spec)
-            _attach_mesh_normalization_summary(bundle, mesh_normalizer)
-            if prewarm_coacd_cache:
-                _attach_coacd_cache_summary(bundle)
-            return _write_config_bundle(
+            return _finalize_and_write_bundle(
+                bundle,
                 output_dir=output_dir_path,
-                bundle=bundle,
+                mesh_normalizer=mesh_normalizer,
+                prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
         if _is_arrangement_task_description(task_description):
@@ -329,12 +331,11 @@ def generate_action_agent_config_from_project(
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             )
             _validate_arrangement_bundle(bundle, spec)
-            _attach_mesh_normalization_summary(bundle, mesh_normalizer)
-            if prewarm_coacd_cache:
-                _attach_coacd_cache_summary(bundle)
-            return _write_config_bundle(
+            return _finalize_and_write_bundle(
+                bundle,
                 output_dir=output_dir_path,
-                bundle=bundle,
+                mesh_normalizer=mesh_normalizer,
+                prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
         spec = _build_object_manipulation_spec_with_llm(
@@ -364,12 +365,11 @@ def generate_action_agent_config_from_project(
             source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
         )
         _validate_relative_bundle(bundle, spec)
-        _attach_mesh_normalization_summary(bundle, mesh_normalizer)
-        if prewarm_coacd_cache:
-            _attach_coacd_cache_summary(bundle)
-        return _write_config_bundle(
+        return _finalize_and_write_bundle(
+            bundle,
             output_dir=output_dir_path,
-            bundle=bundle,
+            mesh_normalizer=mesh_normalizer,
+            prewarm_coacd_cache=prewarm_coacd_cache,
             overwrite=overwrite,
         )
 
@@ -411,12 +411,11 @@ def generate_action_agent_config_from_project(
         source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
     )
     _validate_bundle(bundle, roles)
-    _attach_mesh_normalization_summary(bundle, mesh_normalizer)
-    if prewarm_coacd_cache:
-        _attach_coacd_cache_summary(bundle)
-    return _write_config_bundle(
+    return _finalize_and_write_bundle(
+        bundle,
         output_dir=output_dir_path,
-        bundle=bundle,
+        mesh_normalizer=mesh_normalizer,
+        prewarm_coacd_cache=prewarm_coacd_cache,
         overwrite=overwrite,
     )
 
@@ -931,6 +930,25 @@ def _make_stacking_dataset_config(
     }
 
 
+def _finalize_and_write_bundle(
+    bundle: dict[str, Any],
+    *,
+    output_dir: Path,
+    mesh_normalizer: MeshFrameNormalizer | None,
+    prewarm_coacd_cache: bool,
+    overwrite: bool,
+) -> GeneratedActionAgentConfigPaths:
+    _attach_mesh_normalization_summary(bundle, mesh_normalizer)
+    _attach_body_scale_bake_summary(bundle, output_dir)
+    if prewarm_coacd_cache:
+        _attach_coacd_cache_summary(bundle)
+    return _write_config_bundle(
+        output_dir=output_dir,
+        bundle=bundle,
+        overwrite=overwrite,
+    )
+
+
 def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
     from embodichain.gen_sim.action_agent_pipeline.generation.coacd_cache import (
         prewarm_coacd_cache_for_gym_config,
@@ -939,6 +957,18 @@ def _attach_coacd_cache_summary(bundle: dict[str, Any]) -> None:
     bundle.setdefault("summary", {})["coacd_cache"] = (
         prewarm_coacd_cache_for_gym_config(bundle["gym_config"])
     )
+
+
+def _attach_body_scale_bake_summary(
+    bundle: dict[str, Any],
+    output_dir: Path,
+) -> None:
+    reports = bake_body_scale_into_meshes(
+        bundle["gym_config"],
+        output_dir=output_dir / "mesh_assets" / "body_scaled",
+    )
+    if reports:
+        bundle.setdefault("summary", {})["body_scaled_meshes"] = reports
 
 
 def _attach_mesh_normalization_summary(
