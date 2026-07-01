@@ -16,6 +16,7 @@ embodichain.lab.sim.atomic_actions
       NamedJointPositionTarget
       GraspTarget
       HeldObjectPoseTarget
+      CoordinatedPlacementTarget
       Target
       HeldObjectState
       WorldState
@@ -33,6 +34,10 @@ embodichain.lab.sim.atomic_actions
       MoveHeldObject
       PlaceCfg
       Place
+      PressCfg
+      Press
+      CoordinatedPlacementCfg
+      CoordinatedPlacement
       AtomicActionEngine
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
@@ -73,6 +78,10 @@ Core
     :show-inheritance:
 
 .. autoclass:: HeldObjectPoseTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPlacementTarget
     :members:
     :show-inheritance:
 
@@ -150,6 +159,24 @@ Actions
     :show-inheritance:
 
 .. autoclass:: Place
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PressCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: Press
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPlacementCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPlacement
     :members:
     :show-inheritance:
 

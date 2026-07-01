@@ -21,6 +21,7 @@ Usage examples::
     python -m scripts.benchmark rl --tasks push_cube --algorithms ppo --suite default
     python -m scripts.benchmark rl --rebuild-report-only
     python -m scripts.benchmark robotics-kinematic-solver -s pytorch
+    python -m scripts.benchmark atomic-action --smoke
     python -m scripts.benchmark planners-neural-planner --num-waypoints 1 3 5
 """
 
@@ -44,6 +45,13 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
     from scripts.benchmark.rl.run_benchmark import main as rl_main
 
     rl_main()
+
+
+def _run_atomic_action_cli(_: argparse.Namespace) -> None:
+    """Run atomic action benchmark CLI entrypoint."""
+    from scripts.benchmark.atomic_action.run_benchmark import main as atomic_main
+
+    atomic_main()
 
 
 def _run_neural_planner_cli(args: argparse.Namespace) -> None:
@@ -95,6 +103,16 @@ def main() -> None:
         help="Solvers to benchmark. Use one or more of: opw, pytorch, all.",
     )
     robotics_ks_parser.set_defaults(func=_run_robotics_kinematic_solver_cli)
+
+    # -- atomic-action -------------------------------------------------------
+    atomic_action_parser = subparsers.add_parser(
+        "atomic-action",
+        help="Benchmark atomic actions over object presets and positions.",
+    )
+    from scripts.benchmark.atomic_action.run_benchmark import add_benchmark_args
+
+    add_benchmark_args(atomic_action_parser)
+    atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
 
     # -- planners-neural-planner --------------------------------------------
     neural_planner_parser = subparsers.add_parser(
@@ -193,3 +211,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = ["main"]
