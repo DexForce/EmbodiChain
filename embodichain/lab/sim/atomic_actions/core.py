@@ -119,12 +119,33 @@ class HeldObjectPoseTarget:
     """(4, 4) or (n_envs, 4, 4) target pose for the held object."""
 
 
+@dataclass(frozen=True)
+class CoordinatedPickmentTarget:
+    """Object-centric target for picking and moving one object with two hands."""
+
+    object_target_pose: torch.Tensor
+    """Target pose for the shared object, shape (4, 4) or (n_envs, 4, 4)."""
+
+    object_semantics: ObjectSemantics
+    """Semantic description of the shared object."""
+
+    left_object_to_eef: torch.Tensor
+    """Transform from object frame to left end-effector frame."""
+
+    right_object_to_eef: torch.Tensor
+    """Transform from object frame to right end-effector frame."""
+
+    object_initial_pose: torch.Tensor | None = None
+    """Optional initial object pose. Defaults to ``object_semantics.entity`` pose."""
+
+
 Target = (
     EndEffectorPoseTarget
     | JointPositionTarget
     | NamedJointPositionTarget
     | GraspTarget
     | HeldObjectPoseTarget
+    | CoordinatedPickmentTarget
 )
 
 
@@ -148,6 +169,26 @@ class HeldObjectState:
 
 
 @dataclass
+class CoordinatedHeldObjectState:
+    """State of a single object jointly held by two robot hands."""
+
+    semantics: ObjectSemantics
+    """Semantic object currently held by the two grippers."""
+
+    left_object_to_eef: torch.Tensor
+    """Transform from object frame to left end-effector frame, shape [n_envs, 4, 4]."""
+
+    right_object_to_eef: torch.Tensor
+    """Transform from object frame to right end-effector frame, shape [n_envs, 4, 4]."""
+
+    left_grasp_xpos: torch.Tensor
+    """Left end-effector grasp pose for the shared object, shape [n_envs, 4, 4]."""
+
+    right_grasp_xpos: torch.Tensor
+    """Right end-effector grasp pose for the shared object, shape [n_envs, 4, 4]."""
+
+
+@dataclass
 class WorldState:
     """State the engine threads through a sequence of actions."""
 
@@ -156,6 +197,9 @@ class WorldState:
 
     held_object: HeldObjectState | None = None
     """Object currently held by the gripper, or None."""
+
+    coordinated_held_object: CoordinatedHeldObjectState | None = None
+    """Object currently held by two grippers, or None."""
 
 
 @dataclass
@@ -232,6 +276,8 @@ __all__ = [
     "ActionCfg",
     "ActionResult",
     "AtomicAction",
+    "CoordinatedHeldObjectState",
+    "CoordinatedPickmentTarget",
     "GraspTarget",
     "HeldObjectState",
     "HeldObjectPoseTarget",
