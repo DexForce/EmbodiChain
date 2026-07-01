@@ -430,6 +430,10 @@ def generate_image_scene_assets(
                     generated_object["aligned_geometry_path"] = aligned_object[
                         "aligned_geometry_path"
                     ]
+            if isinstance(generated_table, dict):
+                generated_table["complete_table_relative_scale_hint"] = (
+                    alignment_result.get("complete_table_relative_scale_hint")
+                )
         except Exception as exc:
             status = "failed"
             failure_reason = traceback.format_exc()
@@ -463,6 +467,7 @@ def generate_image_scene_assets(
         "simready_geometry_path",
         "aligned_geometry_path",
         "mesh_path",
+        "complete_table_relative_scale_hint",
     )
     object_fields = (
         "id",
@@ -491,7 +496,11 @@ def generate_image_scene_assets(
     workflow_alignment = (
         {
             key: alignment_result[key]
-            for key in ("status", "final_clutter_2d_aabb_cm")
+            for key in (
+                "status",
+                "final_clutter_2d_aabb_cm",
+                "complete_table_relative_scale_hint",
+            )
             if key in alignment_result
         }
         if alignment_result is not None

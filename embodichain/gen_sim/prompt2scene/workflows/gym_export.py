@@ -145,6 +145,23 @@ def _glb_scale_to_sim(scale: Sequence[float]) -> list[float]:
     return [values[0], values[2], values[1]]
 
 
+def _decompose_affine_matrix(matrix_value: Any) -> tuple[list[float], list[float], list[float]]:
+    matrix = np.asarray(matrix_value, dtype=np.float64)
+    if matrix.shape != (4, 4):
+        raise ValueError("Expected a 4x4 affine matrix.")
+    linear = matrix[:3, :3]
+    scale = np.linalg.norm(linear, axis=0)
+    rotation = np.eye(3, dtype=np.float64)
+    for index in range(3):
+        if scale[index] > 1.0e-12:
+            rotation[:, index] = linear[:, index] / scale[index]
+    return (
+        matrix[:3, 3].tolist(),
+        _matrix_to_euler_xyz_deg(rotation.tolist()),
+        scale.tolist(),
+    )
+
+
 def _glb_max_z(glb_path: Path) -> float:
     """Maximum height (Y in GLB, Z in simulation) of a mesh."""
     import trimesh
@@ -213,6 +230,248 @@ def _rotated_aabb_offsets(
         float(-0.5 * (b[0, 2] + b[1, 2])),  # -centre Z → sim Y
         float(b[0, 1]),                       # min Y → sim Z
     )
+
+
+def _sim_world_xy_aabb(
+    glb_path: Path,
+    rotation_matrix: list[list[float]] | None,
+    scale: float | Sequence[float],
+    init_pos: Sequence[float],
+) -> dict[str, Any]:
+    """Project a transformed simready GLB onto the simulation XY plane."""
+    import trimesh
+
+    scene = trimesh.load(glb_path, force="scene")
+    if isinstance(scene, trimesh.Trimesh):
+        mesh = scene
+    else:
+        dumped = scene.dump(concatenate=True)
+        mesh = (
+            dumped
+            if isinstance(dumped, trimesh.Trimesh)
+            else trimesh.util.concatenate(
+                [m for m in dumped if isinstance(m, trimesh.Trimesh)]
+            )
+        )
+    verts = np.asarray(mesh.vertices.copy(), dtype=np.float64)
+    if isinstance(scale, Sequence) and not isinstance(scale, (str, bytes)):
+        scale_array = np.asarray(list(scale), dtype=np.float64)
+        if scale_array.shape != (3,):
+            raise ValueError("scale must be a scalar or a 3-vector")
+        verts *= scale_array
+    else:
+        verts *= float(scale)
+    if rotation_matrix is not None:
+        rot = np.asarray(rotation_matrix, dtype=np.float64)
+        if rot.shape == (4, 4):
+            rot = rot[:3, :3]
+        verts = (rot @ verts.T).T
+
+    init = np.asarray(list(init_pos), dtype=np.float64)
+    if init.shape != (3,):
+        raise ValueError("init_pos must have three components")
+    sim_xy = np.column_stack((verts[:, 0] + init[0], -verts[:, 2] + init[1]))
+    min_xy = sim_xy.min(axis=0)
+    max_xy = sim_xy.max(axis=0)
+    center_xy = 0.5 * (min_xy + max_xy)
+    size_xy = np.maximum(max_xy - min_xy, 0.0)
+    return {
+        "unit": "m",
+        "center_xy": center_xy.tolist(),
+        "aabb_xy": [min_xy.tolist(), max_xy.tolist()],
+        "size_xy": size_xy.tolist(),
+    }
+
+
+def _support_region_2d(table_fit_manifest: dict[str, Any]) -> dict[str, Any]:
+    support = table_fit_manifest.get("final_support_quad_centered") or {}
+    corners = np.asarray(support.get("corners_xy", []), dtype=np.float64)
+    if corners.shape != (4, 2):
+        return {"unit": "m", "center_xy": [], "aabb_xy": [], "size_xy": [], "corners_xy": []}
+    min_xy = corners.min(axis=0)
+    max_xy = corners.max(axis=0)
+    center_xy = np.asarray(
+        support.get("center_xy") or (0.5 * (min_xy + max_xy)).tolist(),
+        dtype=np.float64,
+    )
+    size_xy = np.asarray(
+        support.get("size_xy") or (max_xy - min_xy).tolist(),
+        dtype=np.float64,
+    )
+    return {
+        "unit": "m",
+        "center_xy": center_xy.tolist(),
+        "aabb_xy": [min_xy.tolist(), max_xy.tolist()],
+        "size_xy": size_xy.tolist(),
+        "corners_xy": corners.tolist(),
+    }
+
+
+def _write_scene_state(
+    *,
+    export_dir: Path,
+    config_path: Path,
+    table_desc: str,
+    table_support_region_2d: dict[str, Any],
+    object_states: list[dict[str, Any]],
+    source_snapshots: dict[str, str],
+) -> Path:
+    scene_state_dir = export_dir / "scene_state"
+    scene_state_dir.mkdir(parents=True, exist_ok=True)
+    plot_path = scene_state_dir / "topdown_2d.png"
+    state_path = scene_state_dir / "result.json"
+    state = {
+        "version": 1,
+        "coordinate_frame": {
+            "unit": "m",
+            "plane": "simulation_xy",
+            "x_axis": "simulation +X",
+            "y_axis": "simulation +Y",
+            "note": "2D values are top-down projections onto the simulation XY plane.",
+        },
+        "gym_config_path": str(config_path.relative_to(export_dir)),
+        "topdown_2d_plot_path": str(plot_path.relative_to(export_dir)),
+        "source_snapshots": source_snapshots,
+        "table": {
+            "id": "table",
+            "role": "background",
+            "description": table_desc,
+            "support_region_2d": table_support_region_2d,
+        },
+        "objects": object_states,
+    }
+    state_path.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    _render_scene_state_topdown(
+        support_region=table_support_region_2d,
+        objects=object_states,
+        output_path=plot_path,
+    )
+    return state_path
+
+
+def _copy_scene_source_snapshots(
+    *,
+    paths: PipelinePaths,
+    export_dir: Path,
+    scene_state_dir: Path,
+) -> dict[str, str]:
+    scene_state_dir.mkdir(parents=True, exist_ok=True)
+    snapshots: dict[str, str] = {}
+    sources = {
+        "unified_scene": paths.unified_scene_result,
+        "unified_scene_gen": paths.step_result(UNIFIED_SCENE_GEN_STEP),
+    }
+    for name, source in sources.items():
+        if not source.is_file():
+            continue
+        destination = scene_state_dir / f"{name}.json"
+        shutil.copy2(source, destination)
+        snapshots[name] = str(destination.relative_to(export_dir))
+    return snapshots
+
+
+def _render_scene_state_topdown(
+    *,
+    support_region: dict[str, Any],
+    objects: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon, Rectangle
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(9, 9))
+
+    data_points: list[np.ndarray] = []
+    corners = np.asarray(support_region.get("corners_xy", []), dtype=np.float64)
+    if corners.shape == (4, 2):
+        ax.add_patch(
+            Polygon(
+                corners,
+                closed=True,
+                facecolor=(0.18, 0.62, 0.32, 0.14),
+                edgecolor=(0.05, 0.38, 0.16, 1.0),
+                linewidth=2.0,
+                label="table support region",
+            )
+        )
+        data_points.append(corners)
+
+    for obj in objects:
+        footprint = obj.get("footprint_2d") or {}
+        aabb = np.asarray(footprint.get("aabb_xy", []), dtype=np.float64)
+        center = np.asarray(footprint.get("center_xy", []), dtype=np.float64)
+        if aabb.shape != (2, 2) or center.shape != (2,):
+            continue
+        size = np.maximum(aabb[1] - aabb[0], 0.0)
+        ax.add_patch(
+            Rectangle(
+                aabb[0],
+                size[0],
+                size[1],
+                facecolor=(0.25, 0.48, 0.95, 0.22),
+                edgecolor=(0.08, 0.20, 0.65, 1.0),
+                linewidth=1.5,
+            )
+        )
+        ax.plot(center[0], center[1], "o", color="#102a7a", markersize=4)
+        label = str(obj.get("id", "")).replace("interact_", "")
+        ax.text(
+            center[0],
+            center[1],
+            f"{label}\n({center[0]:.3f}, {center[1]:.3f})",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="black",
+        )
+        data_points.append(aabb)
+
+    if data_points:
+        all_points = np.vstack(data_points)
+        data_min = all_points.min(axis=0)
+        data_max = all_points.max(axis=0)
+    else:
+        data_min = np.array([-0.5, -0.5], dtype=np.float64)
+        data_max = np.array([0.5, 0.5], dtype=np.float64)
+    span = np.maximum(data_max - data_min, 1.0e-3)
+    padding = max(float(span.max()) * 0.18, 0.05)
+    x_limits = (float(data_min[0] - padding), float(data_max[0] + padding))
+    y_limits = (float(data_min[1] - padding), float(data_max[1] + padding))
+
+    ax.axhline(0.0, color="#303030", linewidth=1.2, alpha=0.75)
+    ax.axvline(0.0, color="#303030", linewidth=1.2, alpha=0.75)
+    ax.annotate(
+        "+X",
+        xy=(x_limits[1], 0.0),
+        xytext=(x_limits[1] - 0.08 * (x_limits[1] - x_limits[0]), 0.02),
+        arrowprops={"arrowstyle": "->", "color": "#303030", "lw": 1.4},
+        color="#303030",
+    )
+    ax.annotate(
+        "+Y",
+        xy=(0.0, y_limits[1]),
+        xytext=(0.02, y_limits[1] - 0.08 * (y_limits[1] - y_limits[0])),
+        arrowprops={"arrowstyle": "->", "color": "#303030", "lw": 1.4},
+        color="#303030",
+    )
+    ax.set_xlim(*x_limits)
+    ax.set_ylim(*y_limits)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title("Prompt2Scene Gym Export Top-Down 2D State")
+    ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.45)
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, facecolor="white")
+    plt.close(fig)
 
 
 def _build_object_manifest(
@@ -336,62 +595,84 @@ def export_gym_config(
         )
     )
 
+    aligned_by_id: dict[str, dict[str, Any]] = {}
+    if paths.simready_to_aligned_manifest.is_file():
+        for item in _read_json(paths.simready_to_aligned_manifest).get("items", []) or []:
+            if isinstance(item, dict) and item.get("id"):
+                aligned_by_id[str(item["id"])] = item
+
+    object_manifest = _build_object_manifest(
+        output_root, step_result, table_fit_manifest, aligned_by_id
+    )
+
     table_info = step_result.get("table") or {}
     table_desc = str(
         table_info.get("complete_table_description")
         or table_info.get("description", "")
     ).strip()
-    object_desc_by_id = {
-        str(item.get("id", "")): str(
-            item.get("description") or item.get("name") or ""
-        ).strip()
-        for item in step_result.get("objects") or []
-        if isinstance(item, dict) and item.get("id")
-    }
 
     mesh_assets_dir = export_dir / "mesh_assets"
     mesh_assets_dir.mkdir(parents=True, exist_ok=True)
 
-    table_fit_output = _resolve_path(
-        table_fit_manifest.get("table_output_path", ""),
+    table_simready = _resolve_path(
+        table_info.get("simready_geometry_path")
+        or table_info.get("mesh_path", ""),
         output_root,
     )
-    if not table_fit_output.is_file():
-        raise FileNotFoundError(f"Table-fit GLB not found: {table_fit_output}")
+    if not table_simready.is_file():
+        raise FileNotFoundError(f"Table simready GLB not found: {table_simready}")
     table_dst = mesh_assets_dir / "table" / "table_0.glb"
     table_dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(table_fit_output, table_dst)
+    shutil.copy2(table_simready, table_dst)
+
+    table_fit_transform = table_fit_manifest.get("table_fit_transform")
+    if table_fit_transform:
+        table_init_pos, table_init_rot, table_body_scale = _decompose_affine_matrix(
+            table_fit_transform
+        )
+    else:
+        uniform_scale = 1.0
+        ts = table_fit_manifest.get("table_xy_scale")
+        if isinstance(ts, dict):
+            uniform_scale = float(ts.get("uniform_scale", 1.0))
+        table_init_pos = [0.0, 0.0, 0.0]
+        table_init_rot = [0.0, 0.0, 0.0]
+        table_body_scale = [uniform_scale, uniform_scale, 1.0]
 
     rigid_objects: list[dict[str, Any]] = []
+    object_states: list[dict[str, Any]] = []
 
-    fitted_objects = [
-        item
-        for item in table_fit_manifest.get("objects", []) or []
-        if isinstance(item, dict) and item.get("id") and item.get("path")
-    ]
-    total = len(fitted_objects)
-    for idx, item in enumerate(fitted_objects):
-        oid = str(item["id"])
+    total = len(object_manifest)
+    for idx, (oid, om) in enumerate(object_manifest.items()):
         safe_name = oid.replace("interact_", "").strip("_") or "object"
         obj_dir = mesh_assets_dir / safe_name / oid
         obj_dir.mkdir(parents=True, exist_ok=True)
         object_dst = obj_dir / f"{oid}.glb"
-        object_fit_path = _resolve_path(str(item["path"]), output_root)
-        if not object_fit_path.is_file():
-            raise FileNotFoundError(f"Table-fit object GLB not found: {object_fit_path}")
-        shutil.copy2(object_fit_path, object_dst)
+        shutil.copy2(om["simready_path"], object_dst)
 
-        # Table-fit GLBs already have the relative layout baked into vertices.
-        # Preview/export should not rebuild placement from simready transforms.
-        init_pos = [0.0, 0.0, 0.0]
-        init_rot = [0.0, 0.0, 0.0]
-        body_scale = [1.0, 1.0, 1.0]
-        description = object_desc_by_id.get(oid, oid)
+        sf = om["scale_factor"]
+        scale_glb = om.get("transform_scale") or [sf, sf, sf]
+        body_scale = _glb_scale_to_sim(scale_glb)
+
+        init_rot: list[float] = [0.0, 0.0, 0.0]
+        if om["rotation_matrix"] is not None:
+            init_rot = _matrix_to_euler_xyz_deg(
+                _glb_rotation_to_sim(om["rotation_matrix"])
+            )
+
+        ro = _rotated_aabb_offsets(
+            om["simready_path"], om["rotation_matrix"], scale_glb
+        )
+        wbc = om["world_aabb_bottom_center"]
+        if wbc is not None:
+            init_pos = [wbc[0] - ro[0], wbc[1] - ro[1], wbc[2] - ro[2]]
+        else:
+            raise ValueError(f"Missing table-fit world_aabb_bottom_center for {oid}")
 
         rigid_objects.append(
             {
                 "uid": oid,
-                "description": description,
+                "description": om["description"],
                 "shape": {
                     "shape_type": "Mesh",
                     "fpath": str(object_dst.relative_to(export_dir)),
@@ -405,9 +686,28 @@ def export_gym_config(
                 "max_convex_hull_num": _DEFAULT_MAX_CONVEX_HULL_NUM,
             }
         )
+        footprint_2d = _sim_world_xy_aabb(
+            om["simready_path"],
+            om["rotation_matrix"],
+            scale_glb,
+            init_pos,
+        )
+        object_states.append(
+            {
+                "id": oid,
+                "name": safe_name,
+                "role": "interact",
+                "description": om["description"],
+                "init_pos": init_pos,
+                "init_rot": init_rot,
+                "body_scale": body_scale,
+                "footprint_2d": footprint_2d,
+            }
+        )
+        wbc_flag = "wbc" if wbc is not None else "missing_wbc"
         print(
-            f"  [{idx+1}/{total}] [{oid}] {description}"
-            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src=table_fit_glb"
+            f"  [{idx+1}/{total}] [{oid}] {om['description']}"
+            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src={wbc_flag}"
         )
 
     config = {
@@ -428,10 +728,10 @@ def export_gym_config(
                     "compute_uv": False,
                 },
                 "attrs": dict(_DEFAULT_TABLE_ATTRS),
-                "body_scale": [1.0, 1.0, 1.0],
+                "body_scale": table_body_scale,
                 "body_type": "kinematic",
-                "init_pos": [0.0, 0.0, 0.0],
-                "init_rot": [0.0, 0.0, 0.0],
+                "init_pos": table_init_pos,
+                "init_rot": table_init_rot,
             }
         ],
         "rigid_object": rigid_objects,
@@ -442,5 +742,20 @@ def export_gym_config(
         json.dumps(config, indent=4, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    scene_state_dir = export_dir / "scene_state"
+    source_snapshots = _copy_scene_source_snapshots(
+        paths=paths,
+        export_dir=export_dir,
+        scene_state_dir=scene_state_dir,
+    )
+    scene_state_path = _write_scene_state(
+        export_dir=export_dir,
+        config_path=config_path,
+        table_desc=table_desc,
+        table_support_region_2d=_support_region_2d(table_fit_manifest),
+        object_states=object_states,
+        source_snapshots=source_snapshots,
+    )
+    print(f"  scene_state={scene_state_path.relative_to(export_dir)}")
 
     return config_path

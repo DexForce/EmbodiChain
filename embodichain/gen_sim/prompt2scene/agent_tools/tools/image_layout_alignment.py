@@ -173,6 +173,15 @@ def _export_support_aligned_layout_glbs(
     object_scenes = selected_candidate["object_scenes"]
     selected_extra_transform = selected_candidate["extra_transform"]
     apply_up_down_flip = selected_variant == "flipped"
+    complete_table_relative_scale_hint = _complete_table_relative_scale_hint(
+        table=table,
+        support_reference_scene=support_reference_scene,
+        object_scenes=object_scenes,
+        table_alignment_matrix=selected_extra_transform
+        @ center_transform
+        @ normal_alignment,
+        trimesh=trimesh,
+    )
 
     global_metric_scale = MetricScaleManager.compute_global_from_object_scenes(
         GlobalMetricScaleRequest(
@@ -227,6 +236,7 @@ def _export_support_aligned_layout_glbs(
         "pre_metric_scale_alignment_matrix": alignment_matrix.tolist(),
         "global_metric_scale": global_metric_scale,
         "final_clutter_2d_aabb_cm": final_clutter_aabb_2d_cm,
+        "complete_table_relative_scale_hint": complete_table_relative_scale_hint,
         "internal_up_axis": [0.0, 0.0, 1.0],
         "glb_output_up_axis": [0.0, 1.0, 0.0],
         "glb_output_axis_transform": output_axis_transform.tolist(),
@@ -254,6 +264,73 @@ def _export_support_aligned_layout_glbs(
         "up_down_flip_check": up_down_flip_check_result,
         "objects": object_outputs,
     }
+
+
+def _complete_table_relative_scale_hint(
+    *,
+    table: dict[str, Any],
+    support_reference_scene: Any,
+    object_scenes: list[tuple[str, Any]],
+    table_alignment_matrix: np.ndarray,
+    trimesh: Any,
+) -> dict[str, Any]:
+    if not table.get("is_complete_visible_table"):
+        return {
+            "status": "skipped",
+            "reason": "table_is_not_complete_visible",
+        }
+    if not object_scenes:
+        return {
+            "status": "skipped",
+            "reason": "missing_object_scenes",
+        }
+    try:
+        table_scene = GeometryManager.copy_scene_with_transform(
+            support_reference_scene,
+            table_alignment_matrix,
+        )
+        raw_clutter_bounds = GeometryManager.table_fit_scene_union_bounds(
+            [scene for _, scene in object_scenes],
+            trimesh=trimesh,
+        )
+        raw_clutter_size_xy = GeometryManager.xy_aabb_size(raw_clutter_bounds)
+        raw_table_mesh = GeometryManager.scene_to_mesh(table_scene, trimesh=trimesh)
+        raw_table_support = GeometryManager.detect_table_fit_support_quad(
+            raw_table_mesh,
+            target_aspect=float(
+                raw_clutter_size_xy[0] / max(float(raw_clutter_size_xy[1]), 1.0e-6)
+            ),
+        )
+        raw_table_support_size_xy = np.asarray(
+            raw_table_support["size_xy"],
+            dtype=np.float64,
+        )
+        ratio_xy = raw_table_support_size_xy / np.maximum(
+            raw_clutter_size_xy,
+            1.0e-6,
+        )
+        if not np.all(np.isfinite(ratio_xy)) or np.any(ratio_xy <= 0.0):
+            return {
+                "status": "skipped",
+                "reason": "invalid_raw_relative_size",
+            }
+        return {
+            "status": "ok",
+            "method": "complete_table_sam3d_raw_support_to_clutter_ratio",
+            "raw_table_support_size_xy": raw_table_support_size_xy.tolist(),
+            "raw_clutter_size_xy": raw_clutter_size_xy.tolist(),
+            "support_to_clutter_size_ratio_xy": ratio_xy.tolist(),
+            "raw_table_support_quad": raw_table_support,
+            "note": (
+                "Ratio is unitless and is computed before metric scaling; "
+                "table fit later applies one uniform XYZ scale to the simready table."
+            ),
+        }
+    except Exception:
+        return {
+            "status": "failed",
+            "reason": traceback.format_exc(),
+        }
 
 
 def _build_up_down_alignment_candidates(
@@ -429,6 +506,19 @@ def _resolve_generated_path(value: Any, output_root: Path) -> Path:
     return (output_root / path).resolve()
 
 
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    try:
+        import json
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def _run_aligned_up_down_flip_vlm_check(
     *,
     llm: Any | None,
@@ -446,6 +536,7 @@ def _run_aligned_up_down_flip_vlm_check(
     }
     if not normal_object_scenes or not flipped_object_scenes:
         result["reason"] = "missing_object_scenes"
+        _write_json_file(output_dir / "up_down_flip_selection.json", result)
         return result
 
     try:
@@ -473,9 +564,11 @@ def _run_aligned_up_down_flip_vlm_check(
         )
         if llm is None:
             result["reason"] = "missing_llm"
+            _write_json_file(output_dir / "up_down_flip_selection.json", result)
             return result
         if original_image_path is None or not original_image_path.is_file():
             result["reason"] = "missing_original_image"
+            _write_json_file(output_dir / "up_down_flip_selection.json", result)
             return result
 
         raw_model_output = call_structured_json_model_step(
@@ -486,21 +579,12 @@ def _run_aligned_up_down_flip_vlm_check(
                 comparison_image_path=comparison_image_path,
             ),
             context="Unified scene aligned up-down flip check",
-            step_name=UNIFIED_SCENE_STEP,
-            output_root=None,
             attempt_count=0,
+            raw_output_writer=lambda payload: _write_json_file(
+                output_dir / "vlm_flip_check_result.json",
+                payload,
+            ),
         )
-        # Persist VLM raw output alongside the comparison renders
-        try:
-            import json as _json
-
-            vlm_result_path = output_dir / "vlm_flip_check_result.json"
-            vlm_result_path.write_text(
-                _json.dumps(raw_model_output, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
         confidence = float(raw_model_output.get("confidence", 0.0))
         selected_number = int(raw_model_output.get("selected_number", 1))
         if selected_number not in {1, 2}:
@@ -524,6 +608,7 @@ def _run_aligned_up_down_flip_vlm_check(
                 "reason": str(raw_model_output.get("reason", "")),
             }
         )
+        _write_json_file(output_dir / "up_down_flip_selection.json", result)
         return result
     except Exception:
         result.update(
@@ -532,4 +617,5 @@ def _run_aligned_up_down_flip_vlm_check(
                 "reason": traceback.format_exc(),
             }
         )
+        _write_json_file(output_dir / "up_down_flip_selection.json", result)
         return result

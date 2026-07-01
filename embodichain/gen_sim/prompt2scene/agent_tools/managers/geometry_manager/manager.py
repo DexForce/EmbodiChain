@@ -222,6 +222,12 @@ class GeometryManager:
         return geometry_utils._table_fit_uniform_xy_scale_transform(**kwargs)
 
     @staticmethod
+    def table_fit_uniform_scale_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_uniform_scale_transform(**kwargs)
+
+    @staticmethod
     def table_fit_safe_positive_ratio(numerator: float, denominator: float) -> float:
         from . import utils as geometry_utils
 
@@ -335,6 +341,39 @@ class GeometryManager:
         if np.any(size <= 0.0):
             raise ValueError(f"Mesh AABB size must be positive, got {size.tolist()}.")
         return size
+
+    @staticmethod
+    def mesh_pca_bbox_size(mesh: Any) -> Any:
+        """Return bbox extents in the mesh PCA frame.
+
+        This is used for metric-scale estimation because it is less sensitive
+        to arbitrary object yaw/tilt than a world-axis AABB.
+        """
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        if vertices.ndim != 2 or vertices.shape[1] != 3 or len(vertices) < 3:
+            return GeometryManager.mesh_aabb_size(mesh)
+
+        centered = vertices - np.mean(vertices, axis=0)
+        cov = np.cov(centered, rowvar=False)
+        if cov.shape != (3, 3) or not np.all(np.isfinite(cov)):
+            return GeometryManager.mesh_aabb_size(mesh)
+
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        order = np.argsort(eigvals)[::-1]
+        axes = eigvecs[:, order]
+        if np.linalg.det(axes) < 0.0:
+            axes[:, -1] *= -1.0
+
+        projected = centered @ axes
+        size = projected.max(axis=0) - projected.min(axis=0)
+        if np.any(size <= 0.0) or not np.all(np.isfinite(size)):
+            return GeometryManager.mesh_aabb_size(mesh)
+        return size
+
+    @staticmethod
+    def mesh_metric_bbox_size(mesh: Any) -> Any:
+        """Return the bbox size used by metric-scale estimation."""
+        return GeometryManager.mesh_pca_bbox_size(mesh)
 
     @staticmethod
     def bbox_ratio(size: Any) -> Any:

@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.prompt2scene.agent_tools.tools.image_segment_filter import (
-    filter_group_segments_with_vlm,
     filter_segments_with_vlm,
 )
 from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
@@ -47,6 +46,7 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.utils import (
     asset_bbox_label,
     draw_labeled_bboxes,
     expand_asset_ids,
+    filter_group_segments_with_artifacts,
     merge_non_overlapping_segments,
     prompt_text,
     path_token,
@@ -56,6 +56,7 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.utils import (
     segments_from_response,
     select_largest_table_segment,
     table_segmentation_prompts,
+    verify_spatial_layout_output,
     write_table_candidate_debug_image,
 )
 from embodichain.gen_sim.prompt2scene.prompts.builders import (
@@ -82,6 +83,7 @@ __all__ = [
     "segment_table_node",
     "segment_by_name_node",
 ]
+
 
 def prepare_segmentation_input_node(state: ImageRelationsState) -> dict[str, object]:
     """Prepare scene-intake asset groups for class-level segmentation."""
@@ -167,6 +169,11 @@ def retry_missing_by_candidates_node(
         group = dict(group)
         segments = group["segments"]
         expected_count = group["expected_count"]
+        confirmed_segments = [
+            segment
+            for existing_group in state["segment_groups"]
+            for segment in existing_group.get("segments", [])
+        ]
         for candidate_name in group["class_candidate"][1:]:
             if len(segments) >= expected_count:
                 break
@@ -181,26 +188,21 @@ def retry_missing_by_candidates_node(
                 source_prompt=prompt,
             )
             stage_label = f"fallback_{path_token(prompt)}"
-            round_name_inner = artifact_writer.next_debug_round_name(
-                label=f"{stage_label}_{group['name']}"
-            )
-            round_dir_inner = artifact_writer.debug_round_dir(round_name_inner)
-            new_segments = filter_group_segments_with_vlm(
+            new_segments = filter_group_segments_with_artifacts(
                 llm=llm,
                 image_path=image_path,
-                step_name=IMAGE_SEGMENTS_STEP,
+                artifact_writer=artifact_writer,
                 group=group,
                 segments=new_segments,
                 stage=stage_label,
-                debug_round_name=round_name_inner,
-                debug_round_dir=round_dir_inner,
-                write_debug_json=artifact_writer.write_debug_round_json,
+                confirmed_segments=confirmed_segments,
             )
             segments = merge_non_overlapping_segments(
                 existing=segments,
                 incoming=new_segments,
                 limit=expected_count,
             )
+            confirmed_segments = confirmed_segments + new_segments
         if len(segments) < expected_count:
             description_prompt = str(group.get("description") or "").strip()
             if description_prompt and description_prompt not in group["tried_prompts"]:
@@ -217,19 +219,21 @@ def retry_missing_by_candidates_node(
                     response=response,
                     source_prompt=description_prompt,
                 )
-                new_segments = filter_group_segments_with_vlm(
+                new_segments = filter_group_segments_with_artifacts(
                     llm=llm,
                     image_path=image_path,
                     artifact_writer=artifact_writer,
                     group=group,
                     segments=new_segments,
                     stage="fallback_description",
+                    confirmed_segments=confirmed_segments,
                 )
                 segments = merge_non_overlapping_segments(
                     existing=segments,
                     incoming=new_segments,
                     limit=expected_count,
                 )
+                confirmed_segments = confirmed_segments + new_segments
         group["segments"] = segments
         segment_groups.append(group)
     return {"segment_groups": segment_groups}
@@ -453,11 +457,22 @@ def call_vlm_spatial_layout_node(
             
             
         )
+        verifier_output = verify_spatial_layout_output(
+            llm=llm,
+            bbox_name_image_path=Path(image_relations.bbox_name_image_path),
+            asset_ids=asset_ids,
+            raw_model_output=raw_model_output,
+            attempt_count=attempt_count,
+            artifact_writer=artifact_writer,
+        )
+        verified_model_output = verifier_output["corrected_layout"]
         updated_image_relations = apply_spatial_layout_output(
             image_relations=image_relations,
-            raw_model_output=raw_model_output,
+            raw_model_output=verified_model_output,
         )
-        artifact_writer.write_step_result(updated_image_relations.to_spatial_manifest())
+        spatial_manifest = updated_image_relations.to_spatial_manifest()
+        spatial_manifest["spatial_layout_verifier"] = verifier_output
+        artifact_writer.write_step_result(spatial_manifest)
     except Exception as exc:
         if is_model_output_error(exc) or isinstance(exc, ValueError):
             error = format_attempt_error(

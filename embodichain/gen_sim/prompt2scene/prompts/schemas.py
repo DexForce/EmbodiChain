@@ -29,6 +29,7 @@ __all__ = [
     "FILTER_EXTRA_INSTANCES_JSON_SCHEMA",
     "IMAGE_METRIC_SCALE_JSON_SCHEMA",
     "SCENE_INTAKE_JSON_SCHEMA",
+    "SPATIAL_LAYOUT_VERIFIER_JSON_SCHEMA",
     "SPATIAL_LAYOUT_JSON_SCHEMA",
     "TEXT_RELATIONS_JSON_SCHEMA",
     "UP_DOWN_FLIP_CHECK_JSON_SCHEMA",
@@ -247,6 +248,25 @@ SPATIAL_LAYOUT_JSON_SCHEMA: dict[str, Any] = {
         },
     },
     "required": ["anchor", "x_order", "y_order", "asset_states"],
+}
+
+SPATIAL_LAYOUT_VERIFIER_JSON_SCHEMA: dict[str, Any] = {
+    "title": "ImageSpatialLayoutVerifierOutput",
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "passed": {
+            "type": "boolean",
+            "description": "Whether the draft spatial layout is correct.",
+        },
+        "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Concise verification reason.",
+        },
+        "corrected_layout": SPATIAL_LAYOUT_JSON_SCHEMA,
+    },
+    "required": ["passed", "reason", "corrected_layout"],
 }
 
 

@@ -367,11 +367,12 @@ class SimreadyManager:
         payload = []
         for obj in objects:
             mesh = geom.load_mesh(LoadMeshRequest(mesh_path=obj.mesh_path)).mesh
-            normalized_bbox_size_m = GeometryManager.mesh_aabb_size(mesh)
+            normalized_bbox_size_m = GeometryManager.mesh_metric_bbox_size(mesh)
             payload.append({
                 "object_id": obj.object_id,
                 "object_name": obj.object_name,
                 "object_description": obj.object_description,
+                "normalized_bbox_method": "pca_bbox",
                 "normalized_bbox_size_m": normalized_bbox_size_m.tolist(),
                 "normalized_bbox_ratio": GeometryManager.bbox_ratio(
                     normalized_bbox_size_m
@@ -466,6 +467,7 @@ class SimreadyManager:
             "object_id": object_id,
             "object_name": object_name,
             "object_description": object_description,
+            "normalized_bbox_method": "pca_bbox",
             "normalized_bbox_size_m": normalized_bbox_size_m.tolist(),
             "normalized_bbox_size_cm": nbs_cm.tolist(),
             "normalized_bbox_ratio": GeometryManager.bbox_ratio(
@@ -579,10 +581,14 @@ class SimreadyManager:
             if srs.shape != (3,) or np.any(srs <= 0.0):
                 skipped.append({"id": object_id, "reason": "invalid_normalized_bbox_size_m"})
                 continue
-            cb = np.asarray(GeometryManager.scene_to_mesh(scene).bounds)
-            cs = cb[1] - cb[0]
+            cs = np.asarray(
+                GeometryManager.mesh_metric_bbox_size(
+                    GeometryManager.scene_to_mesh(scene)
+                ),
+                dtype=np.float64,
+            )
             if cs.shape != (3,) or np.any(cs <= 0.0):
-                skipped.append({"id": object_id, "reason": "invalid_current_scene_aabb"})
+                skipped.append({"id": object_id, "reason": "invalid_current_scene_bbox"})
                 continue
             geo_ratio = np.sort(cs) / np.sort(srs)
             geo_scale = float(np.median(geo_ratio))
@@ -641,4 +647,3 @@ class SimreadyManager:
                 f"clamped to [{request.min_scale:.2f}, {request.max_scale:.2f}]."
             ),
         }
-

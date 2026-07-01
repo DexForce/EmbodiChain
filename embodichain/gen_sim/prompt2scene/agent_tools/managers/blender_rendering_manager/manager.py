@@ -158,9 +158,9 @@ light_data = bpy.data.lights.new("front_oblique_area_light", "AREA")
 light = bpy.data.objects.new("front_oblique_area_light", light_data)
 bpy.context.collection.objects.link(light)
 light.location = camera.location
-light_data.energy = 600.0
+light_data.energy = 350.0
 light_data.size = max(span_x, span_y) * 2.0
-bpy.context.scene.world.color = (1.0, 1.0, 1.0)
+bpy.context.scene.world.color = (0.90, 0.90, 0.90)
 try:
     bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
 except Exception:
@@ -169,7 +169,7 @@ bpy.context.scene.render.resolution_x = 768
 bpy.context.scene.render.resolution_y = 768
 bpy.context.scene.render.film_transparent = False
 bpy.context.scene.view_settings.view_transform = "Standard"
-bpy.context.scene.view_settings.look = "Medium High Contrast"
+bpy.context.scene.view_settings.look = "Medium Contrast"
 bpy.context.scene.render.filepath = output_path
 bpy.ops.render.render(write_still=True)
 """

@@ -29,6 +29,7 @@ __all__ = [
     "build_scene_intake_messages",
     "build_scene_intake_verifier_messages",
     "build_spatial_layout_messages",
+    "build_spatial_layout_verifier_messages",
     "build_text_metric_scale_messages",
     "build_text_relation_messages",
     "build_up_down_flip_check_messages",
@@ -251,6 +252,46 @@ def build_spatial_layout_messages(
                             ),
                         },
                         prompt_key="spatial_layout_user",
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_to_data_url(bbox_name_image_path)},
+                },
+            ],
+        },
+    ]
+
+
+def build_spatial_layout_verifier_messages(
+    *,
+    bbox_name_image_path: Path,
+    asset_ids: list[str],
+    draft_spatial_layout_json: str,
+) -> list[dict[str, Any]]:
+    """Build messages for VLM spatial ordering verification."""
+    return [
+        {
+            "role": "system",
+            "content": render_prompt(
+                IMAGE_RELATIONS_PROMPT,
+                prompt_key="spatial_layout_verifier_system",
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": render_prompt(
+                        IMAGE_RELATIONS_PROMPT,
+                        {
+                            "asset_ids": "\n".join(
+                                f"- {asset_id}" for asset_id in asset_ids
+                            ),
+                            "draft_spatial_layout_json": draft_spatial_layout_json,
+                        },
+                        prompt_key="spatial_layout_verifier_user",
                     ),
                 },
                 {

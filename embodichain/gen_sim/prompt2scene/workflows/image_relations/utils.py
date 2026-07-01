@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +32,12 @@ from embodichain.gen_sim.prompt2scene.agent_tools.clients.image_segmentation_cli
     is_usable_segmentation_candidate,
     sort_segments_by_bbox,
 )
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.image_segment_filter import (
+    filter_group_segments_with_vlm,
+)
 from embodichain.gen_sim.prompt2scene.prompts.schemas import (
     SPATIAL_LAYOUT_JSON_SCHEMA,
+    SPATIAL_LAYOUT_VERIFIER_JSON_SCHEMA,
 )
 from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
     ImageAnchor,
@@ -53,6 +58,7 @@ from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
 )
 from embodichain.gen_sim.prompt2scene.prompts.builders import (
     build_spatial_layout_messages,
+    build_spatial_layout_verifier_messages,
 )
 from embodichain.gen_sim.prompt2scene.llms.llm_output import (
     call_structured_json_model_step,
@@ -66,6 +72,7 @@ __all__ = [
     "asset_bbox_label",
     "draw_labeled_bboxes",
     "expand_asset_ids",
+    "filter_group_segments_with_artifacts",
     "merge_non_overlapping_segments",
     "parse_anchor",
     "parse_asset_states",
@@ -79,6 +86,7 @@ __all__ = [
     "select_largest_table_segment",
     "sort_segments_by_bbox",
     "table_segmentation_prompts",
+    "verify_spatial_layout_output",
     "write_table_candidate_debug_image",
 ]
 
@@ -213,6 +221,54 @@ def apply_spatial_layout_output(
     )
 
 
+def verify_spatial_layout_output(
+    *,
+    llm: Any,
+    bbox_name_image_path: Path,
+    asset_ids: list[str],
+    raw_model_output: dict[str, Any],
+    attempt_count: int,
+    artifact_writer: WorkflowArtifactWriter,
+) -> dict[str, Any]:
+    """Verify and optionally rewrite spatial layout VLM output."""
+    messages = build_spatial_layout_verifier_messages(
+        bbox_name_image_path=bbox_name_image_path,
+        asset_ids=asset_ids,
+        draft_spatial_layout_json=json.dumps(
+            raw_model_output,
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    log_api_request_start(
+        step=IMAGE_SPATIAL_RELATIONS_STEP,
+        request="spatial_layout_verify",
+        attempt=attempt_count,
+    )
+    round_name = artifact_writer.next_debug_round_name("spatial_layout_verify")
+    verifier_output = call_structured_json_model_step(
+        llm=llm,
+        schema=SPATIAL_LAYOUT_VERIFIER_JSON_SCHEMA,
+        messages=messages,
+        context="Image spatial layout verifier",
+        attempt_count=attempt_count,
+        raw_output_writer=lambda payload: artifact_writer.write_debug_round_json(
+            round_name=round_name,
+            filename="raw_model_output.json",
+            payload=payload,
+        ),
+    )
+    artifact_writer.write_debug_round_json(
+        round_name=round_name,
+        filename="verifier_result.json",
+        payload=verifier_output,
+    )
+    corrected = verifier_output.get("corrected_layout")
+    if not isinstance(corrected, dict):
+        raise ValueError("spatial_layout_verifier.corrected_layout must be an object.")
+    return verifier_output
+
+
 def parse_anchor(raw_anchor: Any, *, asset_id_set: set[str]) -> ImageAnchor:
     """Parse and validate the anchor entry."""
     if not isinstance(raw_anchor, dict):
@@ -334,6 +390,34 @@ def write_table_candidate_debug_image(
     if str(debug_image_path) not in debug_images:
         debug_images.append(str(debug_image_path))
     group["debug_images"] = debug_images
+
+
+def filter_group_segments_with_artifacts(
+    *,
+    llm: Any,
+    image_path: Path,
+    artifact_writer: WorkflowArtifactWriter,
+    group: dict[str, Any],
+    segments: list[dict[str, Any]],
+    stage: str,
+    confirmed_segments: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Filter one group while keeping workflow artifact handling out of nodes."""
+    round_name = artifact_writer.next_debug_round_name(
+        label=f"{stage}_{group['name']}"
+    )
+    return filter_group_segments_with_vlm(
+        llm=llm,
+        image_path=image_path,
+        step_name=IMAGE_SEGMENTS_STEP,
+        group=group,
+        segments=segments,
+        stage=stage,
+        debug_round_name=round_name,
+        debug_round_dir=artifact_writer.debug_round_dir(round_name),
+        write_debug_json=artifact_writer.write_debug_round_json,
+        confirmed_segments=confirmed_segments,
+    )
 
 
 def select_largest_table_segment(

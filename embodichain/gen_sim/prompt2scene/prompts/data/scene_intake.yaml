@@ -237,18 +237,22 @@ image_system: |
   - table.name, table.description, table.complete_table_description,
     table.class_candidate, and every asset.description must be non-empty.
   - Descriptions are used to generate images and then 3D geometry.
-  - Write each description as one concise English sentence, normally 8 to 20
-    words.
+  - Write each image asset description as one detailed English sentence, normally
+    18 to 35 words.
   - Every description must describe a SINGLE STANDALONE OBJECT isolated on a
     pure-white background. Do NOT mention any other object, the table, the scene,
     the room, or any background context.
   - Do NOT include any spatial, positional, or layout information such as
     "sitting on the table", "placed in front of", "to the left of", "on a
     surface", "on the tabletop", etc.
-  - When describing an object, first state what the object is, then mention
-    visible texture, color, shape, material, and similar appearance details.
-  - Keep descriptions simple. Focus only on what the object looks like, not
-    where it is or how it relates to anything else.
+  - When describing an object, first state what the object is, then describe its
+    visible texture, color, shape, material, surface finish, graphic markings,
+    openings, handles, caps, labels, and compound structure when visible.
+  - For composite objects, describe the visible parts and how they form one
+    standalone object, such as body, cap, lid, label, wrapper, handle, rim, base,
+    nozzle, straw, or attached accessory.
+  - Focus only on what the object itself looks like, not where it is or how it
+    relates to anything else.
   - For IMAGE inputs, include ONLY information supported by the image.
     Do NOT invent or embellish details not visible in the image. If a colour
     is ambiguous, use a reasonable neutral description ("light-colored",
@@ -328,16 +332,16 @@ image_system: |
     },
     "assets": [
       {
-        "name": "apple",
-        "description": "A round apple with smooth red skin visible on the table.",
-        "class_candidate": ["apple", "fruit", "red_apple", "food", "produce"],
+        "name": "plastic_water_bottle",
+        "description": "A clear plastic water bottle with a ribbed cylindrical body, transparent glossy surface, narrow neck, blue screw cap, and printed paper label.",
+        "class_candidate": ["plastic_water_bottle", "water_bottle", "plastic_bottle", "bottle", "drink_container"],
         "count": 1
       },
       {
-        "name": "coffee_mug",
-        "description": "A white ceramic coffee mug with a curved handle.",
-        "class_candidate": ["coffee_mug", "ceramic_mug", "mug", "cup", "drinkware"],
-        "count": 2
+        "name": "sports_bottle",
+        "description": "A matte dark sports bottle with a tapered body, textured grip band, rounded shoulder, flip-top cap, and solid opaque plastic construction.",
+        "class_candidate": ["sports_bottle", "water_bottle", "drink_bottle", "bottle", "container"],
+        "count": 1
       }
     ]
   }
@@ -466,9 +470,15 @@ verifier_system: |
     },
     "assets": [
       {
-        "name": "paper_cup",
-        "description": "A small white paper cup with blue printed details.",
-        "class_candidate": ["paper_cup", "disposable_cup", "cup", "drinkware", "container"],
+        "name": "plastic_water_bottle",
+        "description": "A clear plastic water bottle with a ribbed cylindrical body, transparent glossy surface, narrow neck, blue screw cap, and printed paper label.",
+        "class_candidate": ["plastic_water_bottle", "water_bottle", "plastic_bottle", "bottle", "drink_container"],
+        "count": 1
+      },
+      {
+        "name": "sports_bottle",
+        "description": "A matte dark sports bottle with a tapered body, textured grip band, rounded shoulder, flip-top cap, and solid opaque plastic construction.",
+        "class_candidate": ["sports_bottle", "water_bottle", "drink_bottle", "bottle", "container"],
         "count": 1
       }
     ]
