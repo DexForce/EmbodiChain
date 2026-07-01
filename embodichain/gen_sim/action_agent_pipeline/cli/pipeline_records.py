@@ -190,6 +190,7 @@ def build_pipeline_record(
         ),
         "pipeline_history_path": _record_path(history_path, repo_root),
         "target_body_scale": args.target_body_scale,
+        "target_body_scale_mode": getattr(args, "target_body_scale_mode", None),
         "target_replacements": _target_replacement_records(
             args,
             target_replacements,

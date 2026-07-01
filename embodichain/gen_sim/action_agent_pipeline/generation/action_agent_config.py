@@ -155,6 +155,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
 )
 
 _call_relative_task_llm = _call_object_manipulation_task_llm
+_SOURCE_SCENE_BODY_SCALE_MODES = {"preserve", "multiply", "absolute"}
 
 __all__ = [
     "GeneratedActionAgentConfigPaths",
@@ -173,6 +174,8 @@ def generate_action_agent_config_from_project(
     llm_model: str | None = None,
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
     preserve_source_target_body_scale: bool = False,
+    source_target_body_scale_multiplier: float | None = None,
+    source_scene_body_scale_mode: str | None = None,
     preserve_source_scene_geometry: bool = False,
     source_scene_z_rotation_degrees: float = 0.0,
     source_mesh_x_rotation_degrees: float = 0.0,
@@ -206,6 +209,17 @@ def generate_action_agent_config_from_project(
         preserve_source_target_body_scale: If true, moved target objects keep
             their source ``body_scale`` instead of using ``target_body_scale``.
             This is intended for metric-scaled prompt2scene exports.
+        source_target_body_scale_multiplier: Optional multiplier applied to
+            moved target objects' source ``body_scale``. When set, it takes
+            precedence over ``preserve_source_target_body_scale`` and
+            ``target_body_scale`` for relative-placement targets.
+        source_scene_body_scale_mode: Optional source-scene scale policy for
+            prompt2scene-style metric exports. ``preserve`` keeps source
+            ``body_scale`` for every source-scene object, ``multiply`` applies
+            ``target_body_scale`` as a multiplier to every source-scene
+            ``body_scale``, and ``absolute`` sets every source-scene object to
+            ``target_body_scale``. When unset, legacy target-only scale
+            behavior is preserved.
         preserve_source_scene_geometry: If true, generated scene objects keep
             source z placement instead of re-snapping objects to the tabletop.
             GLB/GLTF meshes are still normalized to OBJ for consistent
@@ -244,6 +258,9 @@ def generate_action_agent_config_from_project(
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
+    source_scene_body_scale_mode = _validate_source_scene_body_scale_mode(
+        source_scene_body_scale_mode
+    )
     mesh_normalizer = MeshFrameNormalizer(
         output_dir=output_dir_path / "mesh_assets" / "normalized",
         local_x_correction_degrees=source_mesh_x_rotation_degrees,
@@ -271,9 +288,11 @@ def generate_action_agent_config_from_project(
                 spec=spec,
                 project_name=project_name,
                 task_name=task_name,
+                target_body_scale=target_body_scale,
                 max_episodes=max_episodes,
                 max_episode_steps=max_episode_steps,
                 mesh_normalizer=mesh_normalizer,
+                source_scene_body_scale_mode=source_scene_body_scale_mode,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             )
@@ -301,9 +320,11 @@ def generate_action_agent_config_from_project(
                 spec=spec,
                 project_name=project_name,
                 task_name=task_name,
+                target_body_scale=target_body_scale,
                 max_episodes=max_episodes,
                 max_episode_steps=max_episode_steps,
                 mesh_normalizer=mesh_normalizer,
+                source_scene_body_scale_mode=source_scene_body_scale_mode,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             )
@@ -334,6 +355,8 @@ def generate_action_agent_config_from_project(
             task_name=task_name,
             target_body_scale=target_body_scale,
             preserve_source_target_body_scale=preserve_source_target_body_scale,
+            source_target_body_scale_multiplier=source_target_body_scale_multiplier,
+            source_scene_body_scale_mode=source_scene_body_scale_mode,
             max_episodes=max_episodes,
             max_episode_steps=max_episode_steps,
             mesh_normalizer=mesh_normalizer,
@@ -379,6 +402,7 @@ def generate_action_agent_config_from_project(
         project_name=project_name,
         task_name=task_name,
         target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
         target_replacements=resolved_replacements,
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
@@ -405,6 +429,7 @@ def _build_ur5_basket_bundle(
     project_name: str,
     task_name: str,
     target_body_scale: float | list[float] | tuple[float, float, float],
+    source_scene_body_scale_mode: str | None,
     target_replacements: Sequence[_ResolvedTargetReplacement],
     max_episodes: int,
     max_episode_steps: int,
@@ -418,7 +443,12 @@ def _build_ur5_basket_bundle(
         replacement.source_uid: replacement for replacement in target_replacements
     }
     object_scale = _target_body_scale_vector(target_body_scale)
-    container_scale = _source_body_scale(by_uid[roles.container_source_uid])
+    container_obj = by_uid[roles.container_source_uid]
+    container_scale = _source_scene_body_scale_override(
+        container_obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    ) or _source_body_scale(container_obj)
     task_source_uids = {
         roles.container_source_uid,
         roles.left_target_source_uid,
@@ -434,10 +464,17 @@ def _build_ur5_basket_bundle(
         for obj in scene_objects
         if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
     ]
+    table_obj = by_uid[roles.table_source_uid]
     table_config = _make_background_config(
         scene_dir,
-        by_uid[roles.table_source_uid],
+        table_obj,
         mesh_normalizer,
+    )
+    _maybe_apply_source_scene_body_scale(
+        table_config,
+        table_obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
@@ -468,7 +505,16 @@ def _build_ur5_basket_bundle(
                 mesh_normalizer,
             ),
             *[
-                _make_extra_background_config(scene_dir, obj, mesh_normalizer)
+                _make_extra_background_config(
+                    scene_dir,
+                    obj,
+                    mesh_normalizer,
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
+                )
                 for obj in extra_background_objects
             ],
         ],
@@ -477,7 +523,12 @@ def _build_ur5_basket_bundle(
                 scene_dir,
                 by_uid[roles.right_target_source_uid],
                 roles.right_target_runtime_uid,
-                object_scale,
+                _source_scene_body_scale_override(
+                    by_uid[roles.right_target_source_uid],
+                    target_body_scale=target_body_scale,
+                    source_scene_body_scale_mode=source_scene_body_scale_mode,
+                )
+                or object_scale,
                 mesh_normalizer,
                 replacement_by_source_uid.get(roles.right_target_source_uid),
             ),
@@ -485,7 +536,12 @@ def _build_ur5_basket_bundle(
                 scene_dir,
                 by_uid[roles.left_target_source_uid],
                 roles.left_target_runtime_uid,
-                object_scale,
+                _source_scene_body_scale_override(
+                    by_uid[roles.left_target_source_uid],
+                    target_body_scale=target_body_scale,
+                    source_scene_body_scale_mode=source_scene_body_scale_mode,
+                )
+                or object_scale,
                 mesh_normalizer,
                 replacement_by_source_uid.get(roles.left_target_source_uid),
             ),
@@ -493,7 +549,12 @@ def _build_ur5_basket_bundle(
                 _make_extra_rigid_object_config(
                     scene_dir,
                     obj,
-                    _source_body_scale(obj),
+                    _source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    )
+                    or _source_body_scale(obj),
                     mesh_normalizer,
                 )
                 for obj in extra_rigid_objects
@@ -539,9 +600,11 @@ def _build_arrangement_line_bundle(
     spec: _ArrangementLineSpec,
     project_name: str,
     task_name: str,
+    target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
+    source_scene_body_scale_mode: str | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
@@ -565,10 +628,17 @@ def _build_arrangement_line_bundle(
     static_scene_objects = [
         obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
     ]
+    table_obj = by_uid[spec.table_source_uid]
     table_config = _make_background_config(
         scene_dir,
-        by_uid[spec.table_source_uid],
+        table_obj,
         mesh_normalizer,
+    )
+    _maybe_apply_source_scene_body_scale(
+        table_config,
+        table_obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
@@ -596,6 +666,11 @@ def _build_arrangement_line_bundle(
                     scene_dir,
                     obj,
                     runtime_uids[obj.source_uid],
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
                     max_convex_hull_num=1,
                     mesh_normalizer=mesh_normalizer,
                 )
@@ -606,6 +681,11 @@ def _build_arrangement_line_bundle(
                     scene_dir,
                     obj,
                     mesh_normalizer,
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
                     runtime_uid=runtime_uids[obj.source_uid],
                 )
                 for obj in background_objects
@@ -617,7 +697,14 @@ def _build_arrangement_line_bundle(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=_source_body_scale(obj),
+                body_scale=(
+                    _source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    )
+                    or _source_body_scale(obj)
+                ),
                 max_convex_hull_num=16,
                 mesh_normalizer=mesh_normalizer,
             )
@@ -683,9 +770,11 @@ def _build_stacking_bundle(
     spec: _StackingSpec,
     project_name: str,
     task_name: str,
+    target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
+    source_scene_body_scale_mode: str | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
@@ -709,10 +798,17 @@ def _build_stacking_bundle(
     static_scene_objects = [
         obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
     ]
+    table_obj = by_uid[spec.table_source_uid]
     table_config = _make_background_config(
         scene_dir,
-        by_uid[spec.table_source_uid],
+        table_obj,
         mesh_normalizer,
+    )
+    _maybe_apply_source_scene_body_scale(
+        table_config,
+        table_obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
@@ -740,6 +836,11 @@ def _build_stacking_bundle(
                     scene_dir,
                     obj,
                     runtime_uids[obj.source_uid],
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
                     max_convex_hull_num=1,
                     mesh_normalizer=mesh_normalizer,
                 )
@@ -750,6 +851,11 @@ def _build_stacking_bundle(
                     scene_dir,
                     obj,
                     mesh_normalizer,
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
                     runtime_uid=runtime_uids[obj.source_uid],
                 )
                 for obj in background_objects
@@ -761,7 +867,14 @@ def _build_stacking_bundle(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=_source_body_scale(obj),
+                body_scale=(
+                    _source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    )
+                    or _source_body_scale(obj)
+                ),
                 max_convex_hull_num=16,
                 mesh_normalizer=mesh_normalizer,
             )
@@ -915,6 +1028,90 @@ def _round_pose_value(value: float) -> float:
     return 0.0 if abs(rounded) < 1e-12 else rounded
 
 
+def _validate_source_scene_body_scale_mode(mode: str | None) -> str | None:
+    if mode is None:
+        return None
+    normalized = str(mode).strip().lower()
+    if normalized not in _SOURCE_SCENE_BODY_SCALE_MODES:
+        expected = ", ".join(sorted(_SOURCE_SCENE_BODY_SCALE_MODES))
+        raise ValueError(f"source_scene_body_scale_mode must be one of: {expected}")
+    return normalized
+
+
+def _source_scene_body_scale(
+    obj: _SceneObject,
+    *,
+    target_body_scale: float | list[float] | tuple[float, float, float],
+    mode: str,
+) -> list[float]:
+    if mode == "preserve":
+        return _source_body_scale(obj)
+    if mode == "multiply":
+        target_scale = _target_body_scale_vector(target_body_scale)
+        return [
+            _round_pose_value(source * multiplier)
+            for source, multiplier in zip(_source_body_scale(obj), target_scale)
+        ]
+    if mode == "absolute":
+        return _target_body_scale_vector(target_body_scale)
+    raise AssertionError(f"Unhandled source scene body_scale mode: {mode}")
+
+
+def _source_scene_body_scale_override(
+    obj: _SceneObject,
+    *,
+    target_body_scale: float | list[float] | tuple[float, float, float],
+    source_scene_body_scale_mode: str | None,
+) -> list[float] | None:
+    if source_scene_body_scale_mode is None:
+        return None
+    return _source_scene_body_scale(
+        obj,
+        target_body_scale=target_body_scale,
+        mode=source_scene_body_scale_mode,
+    )
+
+
+def _maybe_apply_source_scene_body_scale(
+    obj_config: dict[str, Any],
+    obj: _SceneObject,
+    *,
+    target_body_scale: float | list[float] | tuple[float, float, float],
+    source_scene_body_scale_mode: str | None,
+) -> None:
+    body_scale = _source_scene_body_scale_override(
+        obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
+    if body_scale is not None:
+        obj_config["body_scale"] = body_scale
+
+
+def _relative_target_body_scale(
+    obj: _SceneObject,
+    *,
+    target_body_scale: float | list[float] | tuple[float, float, float],
+    preserve_source_target_body_scale: bool,
+    source_target_body_scale_multiplier: float | None,
+    source_scene_body_scale_mode: str | None,
+) -> list[float]:
+    if source_scene_body_scale_mode is not None:
+        return _source_scene_body_scale(
+            obj,
+            target_body_scale=target_body_scale,
+            mode=source_scene_body_scale_mode,
+        )
+    if source_target_body_scale_multiplier is not None:
+        multiplier = float(source_target_body_scale_multiplier)
+        return [
+            _round_pose_value(value * multiplier) for value in _source_body_scale(obj)
+        ]
+    if preserve_source_target_body_scale:
+        return _source_body_scale(obj)
+    return _target_body_scale_vector(target_body_scale)
+
+
 def _build_relative_placement_bundle(
     *,
     scene_dir: Path,
@@ -924,6 +1121,8 @@ def _build_relative_placement_bundle(
     task_name: str,
     target_body_scale: float | list[float] | tuple[float, float, float],
     preserve_source_target_body_scale: bool,
+    source_target_body_scale_multiplier: float | None,
+    source_scene_body_scale_mode: str | None,
     max_episodes: int,
     max_episode_steps: int,
     mesh_normalizer: MeshFrameNormalizer | None,
@@ -955,10 +1154,17 @@ def _build_relative_placement_bundle(
     static_scene_objects = [
         obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
     ]
+    table_obj = by_uid[spec.table_source_uid]
     table_config = _make_background_config(
         scene_dir,
-        by_uid[spec.table_source_uid],
+        table_obj,
         mesh_normalizer,
+    )
+    _maybe_apply_source_scene_body_scale(
+        table_config,
+        table_obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
@@ -987,6 +1193,11 @@ def _build_relative_placement_bundle(
                     scene_dir,
                     obj,
                     runtime_uids[obj.source_uid],
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
                     max_convex_hull_num=_relative_static_background_max_convex_hull_num(
                         runtime_uids[obj.source_uid],
                         spec,
@@ -1000,6 +1211,11 @@ def _build_relative_placement_bundle(
                     scene_dir,
                     obj,
                     mesh_normalizer,
+                    body_scale=_source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    ),
                     runtime_uid=runtime_uids[obj.source_uid],
                 )
                 for obj in background_objects
@@ -1011,10 +1227,14 @@ def _build_relative_placement_bundle(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=(
-                    _source_body_scale(obj)
-                    if preserve_source_target_body_scale
-                    else _target_body_scale_vector(target_body_scale)
+                body_scale=_relative_target_body_scale(
+                    obj,
+                    target_body_scale=target_body_scale,
+                    preserve_source_target_body_scale=preserve_source_target_body_scale,
+                    source_target_body_scale_multiplier=(
+                        source_target_body_scale_multiplier
+                    ),
+                    source_scene_body_scale_mode=source_scene_body_scale_mode,
                 ),
                 max_convex_hull_num=_relative_rigid_object_max_convex_hull_num(
                     runtime_uids[obj.source_uid],

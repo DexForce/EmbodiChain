@@ -105,6 +105,20 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--source_scene_body_scale_mode",
+        "--source-scene-body-scale-mode",
+        "--target_body_scale_mode",
+        "--target-body-scale-mode",
+        choices=("preserve", "multiply", "absolute"),
+        default=None,
+        help=(
+            "Optional source-scene body_scale policy for prompt2scene-style "
+            "exports. preserve keeps source scales, multiply uses "
+            "source_scale * --target_body_scale, and absolute sets every "
+            "source-scene object to --target_body_scale."
+        ),
+    )
+    parser.add_argument(
         "--preserve_source_scene_geometry",
         "--preserve-source-scene-geometry",
         action="store_true",
@@ -219,6 +233,7 @@ def cli() -> None:
         llm_model=args.llm_model,
         target_body_scale=args.target_body_scale,
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
+        source_scene_body_scale_mode=args.source_scene_body_scale_mode,
         preserve_source_scene_geometry=args.preserve_source_scene_geometry,
         source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
         source_mesh_x_rotation_degrees=args.source_mesh_x_rotation_degrees,

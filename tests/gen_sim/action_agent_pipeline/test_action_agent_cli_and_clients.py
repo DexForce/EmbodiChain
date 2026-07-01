@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import sys
@@ -361,6 +362,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
             target_body_scale=0.8,
+            target_body_scale_mode="multiply",
             target_replacement1=None,
             target_replacement2=None,
             sync_replacement_names=False,
@@ -397,10 +399,30 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_text"] == "a tabletop scene with bread and a basket"
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
+    assert record["target_body_scale_mode"] == "multiply"
 
 
-def test_prompt2scene_pipeline_preserves_source_target_scale(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    (
+        "target_body_scale",
+        "target_body_scale_mode",
+        "expected_source_scene_body_scale_mode",
+        "expected_target_body_scale",
+    ),
+    [
+        (None, None, "preserve", 1.0),
+        (0.8, None, "multiply", 0.8),
+        (1.0, "absolute", "absolute", 1.0),
+        (0.5, "preserve", "preserve", 0.5),
+    ],
+)
+def test_prompt2scene_pipeline_handles_target_scale(
+    monkeypatch,
+    tmp_path,
+    target_body_scale,
+    target_body_scale_mode,
+    expected_source_scene_body_scale_mode,
+    expected_target_body_scale,
 ) -> None:
     from embodichain.gen_sim.action_agent_pipeline.cli import pipeline_runner
 
@@ -465,7 +487,8 @@ def test_prompt2scene_pipeline_preserves_source_target_scale(
             task_name="Demo",
             task_description="move cup",
             config_output_dir=str(tmp_path / "configs"),
-            target_body_scale=0.8,
+            target_body_scale=target_body_scale,
+            target_body_scale_mode=target_body_scale_mode,
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
             sync_replacement_names=False,
@@ -478,11 +501,88 @@ def test_prompt2scene_pipeline_preserves_source_target_scale(
     )
 
     assert result == 0
-    assert captured["preserve_source_target_body_scale"] is True
+    assert captured["source_scene_body_scale_mode"] == (
+        expected_source_scene_body_scale_mode
+    )
     assert captured["preserve_source_scene_geometry"] is True
     assert captured["source_scene_z_rotation_degrees"] == -90.0
     assert captured["source_mesh_x_rotation_degrees"] == 90.0
-    assert captured["target_body_scale"] == 0.8
+    assert captured["target_body_scale"] == expected_target_body_scale
+
+
+def test_batch_new_pipeline_command_preserves_prompt2scene_scale_by_default(
+    tmp_path: Path,
+) -> None:
+    module = _load_local_batch_run_action_agent_videos()
+
+    command = module._build_new_pipeline_command(
+        args=SimpleNamespace(
+            python="python",
+            new_target_body_scale=None,
+            new_target_body_scale_mode=None,
+            new_pipeline_input="image-name",
+            no_overwrite_config=False,
+            no_regenerate=False,
+        ),
+        task=module.TaskSpec(
+            number=13,
+            name="13_Move Can Pot",
+            description="用左臂把罐子放到锅左边",
+        ),
+        prompt2scene_output_root=tmp_path / "prompt2scene/demo13",
+        config_dir=tmp_path / "configs/demo13",
+    )
+
+    assert "--target_body_scale" not in command
+    assert "--target_body_scale_mode" not in command
+
+
+def test_batch_new_pipeline_command_passes_explicit_scale_mode(
+    tmp_path: Path,
+) -> None:
+    module = _load_local_batch_run_action_agent_videos()
+
+    command = module._build_new_pipeline_command(
+        args=SimpleNamespace(
+            python="python",
+            new_target_body_scale=0.8,
+            new_target_body_scale_mode="multiply",
+            new_pipeline_input="prompt-text",
+            no_overwrite_config=True,
+            no_regenerate=True,
+        ),
+        task=module.TaskSpec(
+            number=13,
+            name="13_Move Can Pot",
+            description="用左臂把罐子放到锅左边",
+        ),
+        prompt2scene_output_root=tmp_path / "prompt2scene/demo13",
+        config_dir=tmp_path / "configs/demo13",
+    )
+
+    assert command[command.index("--target_body_scale") + 1] == "0.8"
+    assert command[command.index("--target_body_scale_mode") + 1] == "multiply"
+    assert command[command.index("--prompt2scene-text") + 1] == "用左臂把罐子放到锅左边"
+
+
+def _load_local_batch_run_action_agent_videos():
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / "gym_project"
+        / "batch_run_action_agent_videos.py"
+    )
+    if not module_path.is_file():
+        pytest.skip("local ignored gym_project batch script is not available")
+    spec = importlib.util.spec_from_file_location(
+        "batch_run_action_agent_videos",
+        module_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_agentic_gen_sim_env_api_and_compat_alias() -> None:

@@ -307,10 +307,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-body-scale",
         dest="target_body_scale",
         type=float,
-        default=0.8,
+        default=None,
         help=(
-            "Uniform body_scale for generated target objects. Basket-like "
-            "containers keep their source body_scale. Defaults to 0.8."
+            "Uniform body_scale for generated target objects. In prompt2scene "
+            "mode, omit this option to preserve source body_scale by default. "
+            "Other modes default to 0.8."
+        ),
+    )
+    parser.add_argument(
+        "--target_body_scale_mode",
+        "--target-body-scale-mode",
+        dest="target_body_scale_mode",
+        choices=("preserve", "multiply", "absolute"),
+        default=None,
+        help=(
+            "Prompt2scene body_scale policy for source-scene objects. "
+            "preserve keeps source body_scale, multiply uses source_scale * "
+            "--target_body_scale, and absolute sets objects directly to "
+            "--target_body_scale. Defaults to preserve when --target_body_scale "
+            "is omitted and multiply when it is provided."
         ),
     )
     parser.add_argument(

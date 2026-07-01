@@ -1115,8 +1115,10 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     gym_config_path = project_dir / "gym_config.json"
     gym_config = json.loads(gym_config_path.read_text(encoding="utf-8"))
     gym_config["id"] = "Prompt2Scene-test-v0"
+    gym_config["background"][0]["body_scale"] = [1.31, 1.32, 1.0]
     gym_config["rigid_object"][0]["body_scale"] = [0.11, 0.12, 0.13]
     gym_config["rigid_object"][1]["body_scale"] = [0.21, 0.22, 0.23]
+    gym_config["rigid_object"][2]["body_scale"] = [0.31, 0.32, 0.33]
     source_cup_pos = list(gym_config["rigid_object"][0]["init_pos"])
     source_pad_pos = list(gym_config["rigid_object"][1]["init_pos"])
     source_cup_rot = list(gym_config["rigid_object"][0]["init_rot"])
@@ -1145,7 +1147,7 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         tmp_path / "generated_prompt2scene_relative_agent",
         task_description="用右臂把咖啡杯子放到垫子上",
         target_body_scale=0.8,
-        preserve_source_target_body_scale=True,
+        source_scene_body_scale_mode="preserve",
         preserve_source_scene_geometry=True,
         source_scene_z_rotation_degrees=-90.0,
         source_mesh_x_rotation_degrees=90.0,
@@ -1157,7 +1159,9 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     background_objects = {obj["uid"]: obj for obj in generated["background"]}
 
     assert rigid_objects["cup"]["body_scale"] == [0.11, 0.12, 0.13]
+    assert background_objects["table"]["body_scale"] == [1.31, 1.32, 1.0]
     assert background_objects["pad"]["body_scale"] == [0.21, 0.22, 0.23]
+    assert background_objects["fork"]["body_scale"] == [0.31, 0.32, 0.33]
     assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".obj"
     assert Path(background_objects["pad"]["shape"]["fpath"]).suffix == ".obj"
     assert "mesh_assets/normalized" in rigid_objects["cup"]["shape"]["fpath"]
@@ -1189,6 +1193,60 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
                 ]
             )
         )
+
+    scaled_paths = generate_action_agent_config_from_project(
+        gym_config_path,
+        tmp_path / "generated_prompt2scene_scaled_relative_agent",
+        task_description="用右臂把咖啡杯子放到垫子上",
+        target_body_scale=0.8,
+        source_scene_body_scale_mode="multiply",
+        preserve_source_scene_geometry=True,
+        source_scene_z_rotation_degrees=-90.0,
+        source_mesh_x_rotation_degrees=90.0,
+        prewarm_coacd_cache=False,
+    )
+    scaled_generated = json.loads(scaled_paths.gym_config.read_text(encoding="utf-8"))
+    scaled_rigid_objects = {obj["uid"]: obj for obj in scaled_generated["rigid_object"]}
+    scaled_background_objects = {
+        obj["uid"]: obj for obj in scaled_generated["background"]
+    }
+    assert scaled_rigid_objects["cup"]["body_scale"] == pytest.approx(
+        [value * 0.8 for value in [0.11, 0.12, 0.13]]
+    )
+    assert scaled_background_objects["table"]["body_scale"] == pytest.approx(
+        [value * 0.8 for value in [1.31, 1.32, 1.0]]
+    )
+    assert scaled_background_objects["pad"]["body_scale"] == pytest.approx(
+        [value * 0.8 for value in [0.21, 0.22, 0.23]]
+    )
+    assert scaled_background_objects["fork"]["body_scale"] == pytest.approx(
+        [value * 0.8 for value in [0.31, 0.32, 0.33]]
+    )
+
+    absolute_paths = generate_action_agent_config_from_project(
+        gym_config_path,
+        tmp_path / "generated_prompt2scene_absolute_relative_agent",
+        task_description="用右臂把咖啡杯子放到垫子上",
+        target_body_scale=1.0,
+        source_scene_body_scale_mode="absolute",
+        preserve_source_scene_geometry=True,
+        source_scene_z_rotation_degrees=-90.0,
+        source_mesh_x_rotation_degrees=90.0,
+        prewarm_coacd_cache=False,
+    )
+    absolute_generated = json.loads(
+        absolute_paths.gym_config.read_text(encoding="utf-8")
+    )
+    absolute_rigid_objects = {
+        obj["uid"]: obj for obj in absolute_generated["rigid_object"]
+    }
+    absolute_background_objects = {
+        obj["uid"]: obj for obj in absolute_generated["background"]
+    }
+    assert absolute_rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert absolute_background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert absolute_background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert absolute_background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
 
 
 def test_apply_scene_z_rotation_rotates_scene_object_poses() -> None:

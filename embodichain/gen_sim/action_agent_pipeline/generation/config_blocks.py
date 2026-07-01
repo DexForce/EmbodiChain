@@ -523,6 +523,7 @@ def _make_relative_background_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     *,
+    body_scale: Any | None = None,
     max_convex_hull_num: int,
     mesh_normalizer: MeshFrameNormalizer | None,
 ) -> dict[str, Any]:
@@ -530,7 +531,7 @@ def _make_relative_background_object_config(
         scene_dir,
         obj,
         runtime_uid,
-        _source_body_scale(obj),
+        _source_body_scale(obj) if body_scale is None else body_scale,
         max_convex_hull_num=max_convex_hull_num,
         mesh_normalizer=mesh_normalizer,
     )

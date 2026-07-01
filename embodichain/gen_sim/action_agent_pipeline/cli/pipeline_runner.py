@@ -62,14 +62,31 @@ def run_pipeline(args: argparse.Namespace) -> int:
     )
     task_description = resolve_task_description_for_generation(args)
     args.task_description = task_description or ""
+    target_body_scale = args.target_body_scale
+    target_body_scale_mode = getattr(args, "target_body_scale_mode", None)
+    if resolution.mode == "prompt2scene":
+        source_scene_body_scale_mode = (
+            target_body_scale_mode
+            if target_body_scale_mode is not None
+            else ("preserve" if target_body_scale is None else "multiply")
+        )
+        effective_target_body_scale = (
+            1.0 if target_body_scale is None else target_body_scale
+        )
+        args.target_body_scale_mode = source_scene_body_scale_mode
+    else:
+        source_scene_body_scale_mode = None
+        effective_target_body_scale = (
+            0.8 if target_body_scale is None else target_body_scale
+        )
 
     paths = generate_action_agent_config_from_project(
         gym_project=resolution.path,
         output_dir=args.config_output_dir,
         task_name=args.task_name,
         task_description=task_description,
-        target_body_scale=args.target_body_scale,
-        preserve_source_target_body_scale=resolution.mode == "prompt2scene",
+        target_body_scale=effective_target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
         preserve_source_scene_geometry=resolution.mode == "prompt2scene",
         source_scene_z_rotation_degrees=(
             args.prompt2scene_scene_z_rotation_degrees
