@@ -7,6 +7,10 @@
 
 The following actions are available out of the box:
 
+```{note}
+The built-in atomic actions currently support gripper-based manipulation only. Dexterous-hand manipulation is not supported yet.
+```
+
 | Action | Arm | Target type | Motion phases | Demo |
 |---|---|---|---|---|
 | `MoveEndEffector` | Single | `EndEffectorPoseTarget` — EEF pose | Move end-effector to pose | <img src="../../../_static/atomic_actions/move_end_effector.gif" alt="MoveEndEffector" width="480" style="max-width: 100%;" /> |

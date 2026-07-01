@@ -5,6 +5,10 @@
 
 Atomic actions are the building blocks for automated robot motion generation. Each action encapsulates a complete, self-contained motion primitive — such as picking up an object or moving to a pose — that can be chained together to form complex manipulation workflows.
 
+```{note}
+Atomic actions currently support gripper-based manipulation only. Dexterous-hand manipulation is not supported yet.
+```
+
 ## Design Overview
 
 The module is organized into three layers:
