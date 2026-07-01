@@ -14,34 +14,23 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility re-exports for built-in atomic actions.
-
-Concrete action implementations live in ``atomic_actions.primitives``. Importing
-from ``atomic_actions.actions`` remains supported for existing callers.
-"""
+"""Built-in atomic action primitive implementations."""
 
 from __future__ import annotations
 
-from .primitives import (
-    MoveEndEffector,
-    MoveEndEffectorCfg,
-    MoveHeldObject,
-    MoveHeldObjectCfg,
-    MoveJoints,
-    MoveJointsCfg,
-    PickUp,
-    PickUpCfg,
-    Place,
-    PlaceCfg,
-)
+from .move_end_effector import MoveEndEffector, MoveEndEffectorCfg
+from .move_held_object import MoveHeldObject, MoveHeldObjectCfg
+from .move_joints import MoveJoints, MoveJointsCfg
+from .pick_up import PickUp, PickUpCfg
+from .place import Place, PlaceCfg
 
 __all__ = [
     "MoveEndEffector",
     "MoveEndEffectorCfg",
-    "MoveJoints",
-    "MoveJointsCfg",
     "MoveHeldObject",
     "MoveHeldObjectCfg",
+    "MoveJoints",
+    "MoveJointsCfg",
     "PickUp",
     "PickUpCfg",
     "Place",

@@ -203,6 +203,10 @@ is_success, traj, final_state = engine.run(
 
 You can add any motion primitive by subclassing `AtomicAction`, composing a
 `TrajectoryBuilder` for the shared planning math, and registering an instance with the engine.
+Built-in primitives live one action per module under
+`embodichain/lab/sim/atomic_actions/primitives/`. The top-level
+`embodichain.lab.sim.atomic_actions` package is the public import surface, while
+`embodichain.lab.sim.atomic_actions.actions` remains a compatibility re-export.
 
 ### Step 1 — Define the config
 
