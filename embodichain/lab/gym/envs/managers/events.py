@@ -20,6 +20,8 @@ import torch
 import os
 import random
 
+import numpy as np
+
 from copy import deepcopy
 from typing import TYPE_CHECKING, List, Tuple, Dict
 
@@ -30,7 +32,7 @@ from embodichain.lab.sim.objects import (
     Articulation,
     Robot,
 )
-from embodichain.lab.sim.cfg import RigidObjectCfg, ArticulationCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg, ArticulationCfg, RigidConstraintCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
@@ -619,3 +621,70 @@ def set_detached_uids_for_env_reset(
     """
 
     env.add_detached_uids_for_reset(uids=uids)
+
+
+def create_rigid_constraint(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    obj_a_cfg: SceneEntityCfg,
+    obj_b_cfg: SceneEntityCfg,
+    name: str,
+    local_frame_a: np.ndarray | None = None,
+    local_frame_b: np.ndarray | None = None,
+) -> None:
+    """Attach two rigid objects via a fixed constraint for the given env_ids.
+
+    Registered under a custom event mode (e.g. ``"attach"``); the task triggers it
+    with ``env.event_manager.apply(mode="attach", env_ids=...)``. Delegates to
+    :meth:`SimulationManager.create_rigid_constraint`.
+
+    Args:
+        env: The environment instance.
+        env_ids: Target environment indices. None -> all envs.
+        obj_a_cfg: SceneEntityCfg pointing at the first RigidObject.
+        obj_b_cfg: SceneEntityCfg pointing at the second RigidObject.
+        name: Base constraint name; per-arena names derived by the sim layer.
+        local_frame_a: Local joint frame on object A. None -> identity (object
+            A's origin). Accepts (4,4) or (N,4,4).
+        local_frame_b: Local joint frame on object B. None -> computed per env as
+            ``inv(pose_B) @ pose_A`` so the constraint welds the objects at their
+            current relative pose. Accepts (4,4) or (N,4,4).
+
+    Raises:
+        RuntimeError: If either entity is not a RigidObject.
+    """
+    obj_a = env.sim.get_asset(obj_a_cfg.uid)
+    obj_b = env.sim.get_asset(obj_b_cfg.uid)
+    if not isinstance(obj_a, RigidObject) or not isinstance(obj_b, RigidObject):
+        logger.log_error(
+            f"Constraint '{name}' requires two RigidObjects, but got "
+            f"{type(obj_a).__name__} and {type(obj_b).__name__}."
+        )
+    env.sim.create_rigid_constraint(
+        cfg=RigidConstraintCfg(
+            name=name,
+            rigid_object_a_uid=obj_a_cfg.uid,
+            rigid_object_b_uid=obj_b_cfg.uid,
+            local_frame_a=local_frame_a,
+            local_frame_b=local_frame_b,
+        ),
+        env_ids=env_ids,
+    )
+
+
+def remove_rigid_constraint(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    name: str,
+) -> None:
+    """Remove the named constraint for the given env_ids.
+
+    Delegates to :meth:`SimulationManager.remove_rigid_constraint`. Idempotent:
+    warns (via the sim layer) if the constraint is not found.
+
+    Args:
+        env: The environment instance.
+        env_ids: Target environment indices. None -> all envs.
+        name: Base constraint name to remove.
+    """
+    env.sim.remove_rigid_constraint(name, env_ids=env_ids)
