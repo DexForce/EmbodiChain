@@ -55,6 +55,18 @@ keyboard prompts, and combine it with ``--headless --device cpu`` to record an M
    python scripts/tutorials/atomic_action/move_held_object.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/place.py --headless --auto_play --device cpu
 
+The concrete implementations are organized one primitive per module under
+``embodichain/lab/sim/atomic_actions/primitives``: ``move_end_effector.py``,
+``move_joints.py``, ``pick_up.py``, ``move_held_object.py``, and ``place.py``.
+Public imports from ``embodichain.lab.sim.atomic_actions`` remain the recommended
+API, and ``embodichain.lab.sim.atomic_actions.actions`` is kept as a compatibility
+re-export.
+
+When adding a new built-in primitive, place its implementation in
+``embodichain/lab/sim/atomic_actions/primitives/<action_name>.py``, export it from
+``primitives/__init__.py`` and ``atomic_actions/__init__.py``, and update the API
+reference plus supported-actions docs.
+
 Typical Usage
 -------------
 

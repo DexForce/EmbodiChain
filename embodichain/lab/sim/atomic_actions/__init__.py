@@ -22,6 +22,8 @@ This module provides a unified interface for the atomic motion primitives
 actions, and extensible custom action registration.
 """
 
+from __future__ import annotations
+
 from .affordance import (
     Affordance,
     AntipodalAffordance,
@@ -41,23 +43,23 @@ from .core import (
     Target,
     WorldState,
 )
-from .actions import (
-    MoveEndEffector,
-    MoveJoints,
-    MoveHeldObject,
-    PickUp,
-    Place,
-    MoveEndEffectorCfg,
-    MoveJointsCfg,
-    MoveHeldObjectCfg,
-    PickUpCfg,
-    PlaceCfg,
-)
 from .engine import (
     AtomicActionEngine,
     register_action,
     unregister_action,
     get_registered_actions,
+)
+from .primitives import (
+    MoveEndEffector,
+    MoveEndEffectorCfg,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
+    MoveJoints,
+    MoveJointsCfg,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
 )
 from .trajectory import TrajectoryBuilder
 
