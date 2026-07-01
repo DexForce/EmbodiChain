@@ -2,6 +2,10 @@
   "uid": "DualUR5",
   "urdf_cfg": {
     "fname": "dual_ur5_dh_pgi_basket",
+    "name_case": {
+      "joint": "upper",
+      "link": "lower"
+    },
     "components": [
       {
         "component_type": "left_arm",
