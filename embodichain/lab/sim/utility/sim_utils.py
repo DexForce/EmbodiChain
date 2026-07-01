@@ -308,7 +308,7 @@ def load_mesh_objects_from_cfg(
 
         for i, env in enumerate(env_list):
             if max_convex_hull_num > 1:
-                obj = env.load_actor_with_coacd(
+                obj = env.load_actor_with_acd(
                     fpath,
                     duplicate=True,
                     attach_scene=True,
