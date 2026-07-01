@@ -18,7 +18,7 @@
 
 This module provides a unified interface for the atomic motion primitives
 (``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``), with typed targets, a ``WorldState`` threaded across sequenced
+``place``, ``press``), with typed targets, a ``WorldState`` threaded across sequenced
 actions, and extensible custom action registration.
 """
 
@@ -47,11 +47,13 @@ from .actions import (
     MoveHeldObject,
     PickUp,
     Place,
+    Press,
     MoveEndEffectorCfg,
     MoveJointsCfg,
     MoveHeldObjectCfg,
     PickUpCfg,
     PlaceCfg,
+    PressCfg,
 )
 from .engine import (
     AtomicActionEngine,
@@ -84,11 +86,13 @@ __all__ = [
     "MoveHeldObject",
     "PickUp",
     "Place",
+    "Press",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",
     "PickUpCfg",
     "PlaceCfg",
+    "PressCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",
