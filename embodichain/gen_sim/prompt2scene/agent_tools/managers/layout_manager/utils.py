@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.optimize import minimize
 
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager import (
     SimulationManager,
@@ -32,6 +33,18 @@ __all__ = [
     "_xy_union_area",
     "_xy_union_bounds",
 ]
+
+_WEIGHTS: dict[str, float] = {
+    "seed": 1.0,
+    "overlap": 200.0,
+    "grid": 3.0,
+}
+
+_SLSQP_OPTIONS: dict[str, Any] = {
+    "maxiter": 300,
+    "ftol": 1.0e-6,
+    "disp": False,
+}
 
 def _object_scenes_xy_aabb_manifest(
     *,

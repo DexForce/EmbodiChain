@@ -27,6 +27,7 @@ __all__ = [
     "IMAGE_SPATIAL_RELATIONS_STEP",
     "RAW_MODEL_OUTPUT_FILENAME",
     "SCENE_INTAKE_STEP",
+    "SCENE_EDIT_STEP",
     "STEP_RESULT_FILENAME",
     "TEXT_RELATIONS_STEP",
     "UNIFIED_SCENE_GEN_STEP",
@@ -46,6 +47,7 @@ DEBUG_DIRNAME = "debug"
 RAW_MODEL_OUTPUT_FILENAME = "raw_model_output.json"
 
 SCENE_INTAKE_STEP = "scene_intake"
+SCENE_EDIT_STEP = "scene_edit"
 IMAGE_SEGMENTS_STEP = "image_segments"
 IMAGE_SPATIAL_RELATIONS_STEP = "image_spatial_relations"
 TEXT_RELATIONS_STEP = "text_relations"
@@ -131,6 +133,10 @@ class PipelinePaths:
     @property
     def scene_intake_dir(self) -> Path:
         return self.output_root / SCENE_INTAKE_STEP
+
+    @property
+    def scene_edit_dir(self) -> Path:
+        return self.output_root / SCENE_EDIT_STEP
 
     @property
     def image_segments_dir(self) -> Path:

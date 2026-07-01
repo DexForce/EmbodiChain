@@ -28,6 +28,7 @@ __all__ = [
     "build_image_metric_scale_messages",
     "build_scene_intake_messages",
     "build_scene_intake_verifier_messages",
+    "build_scene_edit_intent_messages",
     "build_spatial_layout_messages",
     "build_spatial_layout_verifier_messages",
     "build_text_metric_scale_messages",
@@ -37,6 +38,7 @@ __all__ = [
 
 
 SCENE_INTAKE_PROMPT = "scene_intake.yaml"
+SCENE_EDIT_PROMPT = "scene_edit.yaml"
 IMAGE_RELATIONS_PROMPT = "image_relations.yaml"
 TEXT_RELATIONS_PROMPT = "text_relations.yaml"
 UNIFIED_SCENE_GEN_PROMPT = "unified_scene_gen.yaml"
@@ -299,6 +301,37 @@ def build_spatial_layout_verifier_messages(
                     "image_url": {"url": image_to_data_url(bbox_name_image_path)},
                 },
             ],
+        },
+    ]
+
+
+def build_scene_edit_intent_messages(
+    *,
+    prompt: str,
+    scene_objects: list[dict[str, Any]],
+    current_relations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build messages for editing an existing scene from a user prompt."""
+    return [
+        {
+            "role": "system",
+            "content": render_prompt(
+                SCENE_EDIT_PROMPT,
+                prompt_key="intent_system",
+            ),
+        },
+        {
+            "role": "user",
+            "content": render_prompt(
+                SCENE_EDIT_PROMPT,
+                {
+                    "prompt": prompt,
+                    "scene_objects_json": json.dumps(
+                        scene_objects, ensure_ascii=False, indent=2
+                    ),
+                },
+                prompt_key="intent_user",
+            ),
         },
     ]
 

@@ -16,28 +16,8 @@
 
 from __future__ import annotations
 
-from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
-    DEBUG_DIRNAME,
-    IMAGE_SEGMENTS_STEP,
-    IMAGE_SPATIAL_RELATIONS_STEP,
-    RAW_MODEL_OUTPUT_FILENAME,
-    SCENE_EDIT_STEP,
-    SCENE_INTAKE_STEP,
-    STEP_RESULT_FILENAME,
-    TEXT_RELATIONS_STEP,
-    UNIFIED_SCENE_STEP,
-    WorkflowArtifactWriter,
+from embodichain.gen_sim.prompt2scene.workflows.scene_edit.graph import (
+    run_scene_edit,
 )
 
-__all__ = [
-    "DEBUG_DIRNAME",
-    "IMAGE_SEGMENTS_STEP",
-    "IMAGE_SPATIAL_RELATIONS_STEP",
-    "RAW_MODEL_OUTPUT_FILENAME",
-    "SCENE_EDIT_STEP",
-    "SCENE_INTAKE_STEP",
-    "STEP_RESULT_FILENAME",
-    "TEXT_RELATIONS_STEP",
-    "UNIFIED_SCENE_STEP",
-    "WorkflowArtifactWriter",
-]
+__all__ = ["run_scene_edit"]
