@@ -80,7 +80,9 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
 
     assert second_robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.84])
     assert first_robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.42])
-    assert second_robot["control_parts"]["left_arm"] == ["LEFT_JOINT[1-6]"]
+    assert second_robot["control_parts"]["left_arm"] == [
+        f"left_joint{i}" for i in range(1, 7)
+    ]
     assert second_sensors[0]["uid"] == "cam_high"
     assert second_lights["direct"][0]["uid"] == "main_light"
     assert len(second_lights["direct"]) == 1
@@ -179,16 +181,28 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         [-2.0, 0.0, expected_robot_init_z]
     )
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
-    for solver in gym_config["robot"]["solver_cfg"].values():
+    for arm_name, root_link_name, end_link_name in (
+        ("left_arm", "left_base_link", "left_ee_link"),
+        ("right_arm", "right_base_link", "right_ee_link"),
+    ):
+        solver = gym_config["robot"]["solver_cfg"][arm_name]
         assert solver["class_type"] == "URSolver"
         assert solver["ur_type"] == "ur5"
         assert solver["urdf_path"] is None
+        assert solver["root_link_name"] == root_link_name
+        assert solver["end_link_name"] == end_link_name
 
     robot_cfg = RobotCfg.from_dict(gym_config["robot"])
-    for solver_cfg in robot_cfg.solver_cfg.values():
+    for arm_name, root_link_name, end_link_name in (
+        ("left_arm", "left_base_link", "left_ee_link"),
+        ("right_arm", "right_base_link", "right_ee_link"),
+    ):
+        solver_cfg = robot_cfg.solver_cfg[arm_name]
         assert isinstance(solver_cfg, URSolverCfg)
         assert solver_cfg.ur_type == "ur5"
         assert solver_cfg.urdf_path is None
+        assert solver_cfg.root_link_name == root_link_name
+        assert solver_cfg.end_link_name == end_link_name
         assert solver_cfg.d1 == pytest.approx(0.089159)
         assert solver_cfg.a2 == pytest.approx(-0.425)
         assert solver_cfg.a3 == pytest.approx(-0.39225)
