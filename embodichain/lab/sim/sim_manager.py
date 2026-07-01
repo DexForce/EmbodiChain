@@ -1164,21 +1164,33 @@ class SimulationManager:
 
         # pre-size handles list with None, fill target envs
         handles: list = [None] * num_envs
-        for idx, env_id in enumerate(target_env_ids):
-            arena = self.get_env(env_id)
-            name_i = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
-            handle = arena.create_fixed_constraint(
-                name_i,
-                rigid_object_a._entities[env_id],
-                rigid_object_b._entities[env_id],
-                frames_a[idx],
-                frames_b[idx],
-            )
-            if handle is None:
-                logger.log_error(
-                    f"Failed to create constraint '{name_i}' in arena {env_id}."
+        try:
+            for idx, env_id in enumerate(target_env_ids):
+                arena = self.get_env(env_id)
+                name_i = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
+                handle = arena.create_fixed_constraint(
+                    name_i,
+                    rigid_object_a._entities[env_id],
+                    rigid_object_b._entities[env_id],
+                    frames_a[idx],
+                    frames_b[idx],
                 )
-            handles[env_id] = handle
+                if handle is None:
+                    logger.log_error(
+                        f"Failed to create constraint '{name_i}' in arena {env_id}."
+                    )
+                handles[env_id] = handle
+        except Exception:
+            # Ensure partially created per-arena constraints are removed if a later
+            # arena fails, so create/remove semantics stay consistent.
+            RigidConstraint(
+                cfg=cfg,
+                constraint_handles=handles,
+                rigid_object_a=rigid_object_a,
+                rigid_object_b=rigid_object_b,
+                device=self.device,
+            ).destroy(env_ids=target_env_ids, arena_resolver=self.get_env)
+            raise
 
         constraint = RigidConstraint(
             cfg=cfg,
