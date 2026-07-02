@@ -350,11 +350,21 @@ class NeuralPlanner(BasePlanner):
                     last_action,
                 )
                 action = self._actor(self._normalizer.normalize(obs)).clamp(-1.0, 1.0)
+                # Hold converged envs: zero their action so qpos does not drift.
+                # `converged` reflects state up to the end of the previous step, so
+                # once an env converged at the end of step N its action is masked
+                # from step N+1 onward.
+                not_converged = ~converged
+                action = torch.where(
+                    not_converged.unsqueeze(-1), action, torch.zeros_like(action)
+                )
                 qpos[:, : self._action_dim] += action * float(self.cfg.action_scale)
                 qpos[:, : self._action_dim] = torch.clamp(
                     qpos[:, : self._action_dim], lower, upper
                 )
-                last_action = action
+                last_action = torch.where(
+                    not_converged.unsqueeze(-1), action, last_action
+                )
                 positions.append(qpos.clone())
                 xpos_list.append(self._fk_matrix(qpos, control_part))
 
