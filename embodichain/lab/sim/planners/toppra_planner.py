@@ -154,6 +154,10 @@ __all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
 class ToppraPlannerCfg(BasePlannerCfg):
 
     planner_type: str = "toppra"
+    max_workers: int | None = None
+    """Worker process count for the batched fan-out. None => min(cpu_count()//2, B)."""
+    mp_context: str = "fork"
+    """Multiprocessing start method. 'fork' (default, TOPPRA is pure-CPU) or 'spawn'."""
 
 
 @configclass
@@ -163,21 +167,21 @@ class ToppraPlanOptions(PlanOptions):
         "velocity": 0.2,
         "acceleration": 0.5,
     }
-    """Constraints for the planner, including velocity and acceleration limits. 
+    """Constraints for the planner, including velocity and acceleration limits.
 
     Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
     """
 
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
-    """Method for sampling the trajectory. 
-    
+    """Method for sampling the trajectory.
+
     Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
     """
 
     sample_interval: float | int = 0.01
-    """Interval for sampling the trajectory. 
-    
-    If sample_method is 'time', this is the time interval in seconds. 
+    """Interval for sampling the trajectory.
+
+    If sample_method is 'time', this is the time interval in seconds.
     If sample_method is 'quantity', this is the total number of samples.
     """
 
@@ -194,11 +198,36 @@ class ToppraPlanner(BasePlanner):
         """
         super().__init__(cfg)
 
-        if self.robot.num_instances > 1:
-            logger.log_error(
-                "ToppraPlanner does not support multiple robot instances",
-                NotImplementedError,
-            )
+        self._pool = None
+        import atexit
+
+        atexit.register(self.close)
+
+    def _get_pool(self, b: int):
+        if self._pool is not None:
+            return self._pool
+        import os
+        import multiprocessing as mp
+
+        max_workers = self.cfg.max_workers
+        if max_workers is None:
+            max_workers = max(1, min((os.cpu_count() or 2) // 2, b))
+        ctx = mp.get_context(self.cfg.mp_context)
+        from concurrent.futures import ProcessPoolExecutor
+
+        self._pool = ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+        return self._pool
+
+    def close(self):
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @validate_plan_options(options_cls=ToppraPlanOptions)
     def plan(

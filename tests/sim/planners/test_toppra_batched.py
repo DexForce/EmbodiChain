@@ -82,3 +82,12 @@ class TestToppraWorker:
         assert out["success"] is True
         assert out["n"] == 2
         assert out["duration"] == 0.0
+
+
+class TestToppraCfgFields:
+    def test_cfg_defaults(self):
+        from embodichain.lab.sim.planners.toppra_planner import ToppraPlannerCfg
+
+        cfg = ToppraPlannerCfg(robot_uid="x")
+        assert cfg.max_workers is None
+        assert cfg.mp_context == "fork"
