@@ -229,18 +229,17 @@ class MoveEndEffector(AtomicAction):
             control_part=self.cfg.control_part,
         )
         target_states_list = self._build_target_states(move_xpos)
-        ok, arm_traj = self.builder.plan_arm_traj(
+        success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_qpos,
             self.cfg.sample_interval,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
         full = self._embed(arm_traj, state.last_qpos)
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(), held_object=state.held_object
@@ -344,7 +343,7 @@ class MoveJoints(AtomicAction):
         )
         full = self._embed(joint_traj, state.last_qpos)
         return ActionResult(
-            success=True,
+            success=torch.ones(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(), held_object=state.held_object
@@ -465,7 +464,7 @@ class PickUp(AtomicAction):
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
-        if not ok:
+        if not ok.all().item():
             logger.log_warning("PickUp failed to plan the approach trajectory.")
             return self._fail(state)
 
@@ -486,7 +485,7 @@ class PickUp(AtomicAction):
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
-        if not ok:
+        if not ok.all().item():
             logger.log_warning("PickUp failed to plan the lift trajectory.")
             return self._fail(state)
 
@@ -637,7 +636,7 @@ class MoveHeldObject(AtomicAction):
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
-        if not ok:
+        if not ok.all().item():
             logger.log_warning("MoveHeldObject failed to plan trajectory.")
             return self._fail(state)
 
@@ -755,7 +754,7 @@ class Place(AtomicAction):
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
-        if not ok:
+        if not ok.all().item():
             return self._fail(state)
         reach_arm_qpos = down_arm[:, -1, :]
 
@@ -771,7 +770,7 @@ class Place(AtomicAction):
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
-        if not ok:
+        if not ok.all().item():
             return self._fail(state)
 
         # Phase 2: hand open (arm held at reach qpos)
@@ -877,7 +876,7 @@ class Press(AtomicAction):
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
-        if not ok:
+        if not ok.all().item():
             logger.log_warning("Press failed to plan the down trajectory.")
             return self._fail(state)
 

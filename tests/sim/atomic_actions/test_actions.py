@@ -145,7 +145,8 @@ class TestMoveEndEffectorAction:
             state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
             result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
         assert isinstance(result, ActionResult)
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         # MoveEndEffector preserves held_object.
         assert result.next_state.held_object is None
@@ -182,7 +183,8 @@ class TestMoveEndEffectorAction:
                 WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         # Two waypoints -> two IK calls, in order.
         assert len(seen_poses) == 2
@@ -234,7 +236,8 @@ class TestMoveJointsAction:
                 WorldState(last_qpos=last_qpos, held_object=held),
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         assert torch.allclose(result.trajectory[:, -1, :ARM_DOF], target_qpos)
         assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], hand_qpos)
@@ -258,7 +261,8 @@ class TestMoveJointsAction:
                 NamedJointPositionTarget(name="home"),
                 WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
             )
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert torch.allclose(
             result.next_state.last_qpos[:, :ARM_DOF],
             torch.full((NUM_ENVS, ARM_DOF), 0.2),
@@ -295,7 +299,8 @@ class TestMoveJointsAction:
                 WorldState(last_qpos=last_qpos),
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         # start prepended to the two waypoints -> 3 keyframes
         keyframes = captured["keyframes"]
