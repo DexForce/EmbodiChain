@@ -90,7 +90,7 @@ class AtomicActionEngine:
         self,
         steps: Iterable[tuple[str, Target]],
         state: WorldState | None = None,
-    ) -> tuple[bool, torch.Tensor, WorldState]:
+    ) -> tuple[torch.Tensor, torch.Tensor, WorldState]:
         """Run a sequence of named actions, threading WorldState through.
 
         Args:
@@ -100,10 +100,10 @@ class AtomicActionEngine:
         Returns:
             ``(success, concatenated_full_dof_trajectory, final_state)``.
 
-            On failure ``success`` is False and the trajectory is the
-            concatenation of steps that completed before the failure; the
-            failing step contributes no waypoints. ``final_state`` is the
-            state going into the failed step.
+            ``success`` is a ``(B,)`` boolean tensor indicating which
+            environments completed every step. Failed environments hold their
+            last successful joint position in both ``full_traj`` and
+            ``final_state.last_qpos`` for the remainder of the sequence.
 
             An empty ``steps`` iterable is a successful no-op returning an
             empty trajectory and the seed state.
@@ -111,11 +111,13 @@ class AtomicActionEngine:
         if state is None:
             state = WorldState(last_qpos=self.robot.get_qpos().clone())
 
+        b = state.last_qpos.shape[0]
         full_traj = torch.empty(
-            (state.last_qpos.shape[0], 0, self.robot.dof),
+            (b, 0, self.robot.dof),
             dtype=torch.float32,
             device=self.device,
         )
+        alive = torch.ones(b, dtype=torch.bool, device=self.device)
 
         for name, target in steps:
             if name not in self._actions:
@@ -127,13 +129,31 @@ class AtomicActionEngine:
                     f"{_target_type_name(action.TargetType)}, got {type(target).__name__}",
                     TypeError,
                 )
+            if not alive.any():
+                # All envs dead: fill held rows for this step.
+                held = state.last_qpos.unsqueeze(1).repeat(1, 1, 1)
+                full_traj = torch.cat([full_traj, held], dim=1)
+                continue
+            prev_last_qpos = state.last_qpos.clone()
             result: ActionResult = action.execute(target, state)
-            if not result.success:
-                return False, full_traj, state
-            full_traj = torch.cat([full_traj, result.trajectory], dim=1)
+            step_success = (
+                result.success
+                if isinstance(result.success, torch.Tensor)
+                else torch.tensor(bool(result.success), device=self.device)
+            )
+            step_success = step_success.to(self.device)
+            alive = alive & step_success
+            # Failed envs freeze at their last successful qpos for this step's trajectory.
+            traj = result.trajectory
+            held_rows = prev_last_qpos.unsqueeze(1).repeat(1, traj.shape[1], 1)
+            traj = torch.where(alive[:, None, None], traj, held_rows)
+            full_traj = torch.cat([full_traj, traj], dim=1)
             state = result.next_state
+            state.last_qpos = torch.where(
+                alive[:, None], state.last_qpos, prev_last_qpos
+            )
 
-        return True, full_traj, state
+        return alive, full_traj, state
 
 
 __all__ = [

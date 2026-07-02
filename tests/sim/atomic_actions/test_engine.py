@@ -148,13 +148,13 @@ class TestEngineRun:
         b = _fake_action("b", EndEffectorPoseTarget)
         self.engine.register(a, name="a")
         self.engine.register(b, name="b")
-        ok, traj, _ = self.engine.run(
+        success, traj, _ = self.engine.run(
             [
                 ("a", EndEffectorPoseTarget(torch.eye(4))),
                 ("b", EndEffectorPoseTarget(torch.eye(4))),
             ]
         )
-        assert ok is True
+        assert success.all().item()
         assert traj.shape == (NUM_ENVS, 10, TOTAL_DOF)
 
     def test_run_threads_world_state(self):
@@ -165,14 +165,14 @@ class TestEngineRun:
         self.engine.register(move, name="move")
         self.engine.register(place, name="place")
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="x")
-        ok, _, final_state = self.engine.run(
+        success, _, final_state = self.engine.run(
             [
                 ("pick", GraspTarget(sem)),
                 ("move", HeldObjectPoseTarget(torch.eye(4))),
                 ("place", EndEffectorPoseTarget(torch.eye(4))),
             ]
         )
-        assert ok is True
+        assert success.all().item()
         # The move action saw a non-None held_object (set by pick).
         move_state_arg = move.execute.call_args_list[0].args[1]
         assert move_state_arg.held_object is not None
@@ -186,18 +186,18 @@ class TestEngineRun:
         self.engine.register(a, name="a")
         self.engine.register(b, name="b")
         self.engine.register(c, name="c")
-        ok, traj, _ = self.engine.run(
+        success, traj, _ = self.engine.run(
             [
                 ("a", EndEffectorPoseTarget(torch.eye(4))),
                 ("b", EndEffectorPoseTarget(torch.eye(4))),
                 ("c", EndEffectorPoseTarget(torch.eye(4))),
             ]
         )
-        assert ok is False
+        assert not success.any().item()
         # `c` should not have been called.
         c.execute.assert_not_called()
-        # We still get back the partial trajectory accumulated from `a`.
-        assert traj.shape == (NUM_ENVS, 5, TOTAL_DOF)
+        # We get the partial trajectory from `a` plus one held row per remaining step.
+        assert traj.shape == (NUM_ENVS, 6, TOTAL_DOF)
 
     def test_run_raises_on_unknown_action_name(self):
         with pytest.raises(KeyError, match="ghost"):
