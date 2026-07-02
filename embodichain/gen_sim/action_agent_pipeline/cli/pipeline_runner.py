@@ -30,6 +30,10 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_records import (
     write_pipeline_manifests,
 )
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_timing import (
+    configure_pipeline_timing,
+    write_pipeline_timing_summary,
+)
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_usage import (
     configure_llm_usage_tracking,
     write_llm_usage_summary,
@@ -65,19 +69,45 @@ PIPELINE_RUNNER_REQUIRED_ARGS = (
 def run_pipeline(args: argparse.Namespace) -> int:
     """Run image/project resolution, config generation, and optional task execution."""
     _ensure_repo_on_pythonpath()
+    from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
     from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
         TargetReplacementSpec,
+    )
+
+    timing_paths = configure_pipeline_timing(args)
+    try:
+        with timing_scope(
+            "pipeline.total",
+            metadata={"task_name": args.task_name},
+        ):
+            return _run_pipeline(args, TargetReplacementSpec)
+    finally:
+        write_pipeline_timing_summary(timing_paths)
+
+
+def _run_pipeline(
+    args: argparse.Namespace,
+    TargetReplacementSpec,
+) -> int:
+    from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
         generate_action_agent_config_from_project,
     )
 
-    resolution = resolve_gym_project(args)
+    with timing_scope("pipeline.resolve_gym_project"):
+        resolution = resolve_gym_project(args)
     usage_paths = configure_llm_usage_tracking(args)
-    target_replacements = resolve_target_replacements(
-        args,
-        TargetReplacementSpec,
-        resolution.path,
-    )
-    task_description = resolve_task_description_for_generation(args)
+    with timing_scope(
+        "pipeline.resolve_target_replacements",
+        metadata={"source_mode": resolution.mode},
+    ):
+        target_replacements = resolve_target_replacements(
+            args,
+            TargetReplacementSpec,
+            resolution.path,
+        )
+    with timing_scope("pipeline.resolve_task_description"):
+        task_description = resolve_task_description_for_generation(args)
     args.task_description = task_description or ""
     target_body_scale = args.target_body_scale
     target_body_scale_mode = getattr(args, "target_body_scale_mode", None)
@@ -97,40 +127,45 @@ def run_pipeline(args: argparse.Namespace) -> int:
             0.8 if target_body_scale is None else target_body_scale
         )
 
-    paths = generate_action_agent_config_from_project(
-        gym_project=resolution.path,
-        output_dir=args.config_output_dir,
-        task_name=args.task_name,
-        task_description=task_description,
-        target_body_scale=effective_target_body_scale,
-        source_scene_body_scale_mode=source_scene_body_scale_mode,
-        preserve_source_scene_geometry=resolution.mode == "prompt2scene",
-        source_scene_z_rotation_degrees=(
-            args.prompt2scene_scene_z_rotation_degrees
-            if resolution.mode == "prompt2scene"
-            else 0.0
-        ),
-        source_mesh_x_rotation_degrees=(
-            args.prompt2scene_mesh_x_rotation_degrees
-            if resolution.mode == "prompt2scene"
-            else 0.0
-        ),
-        target_replacements=target_replacements,
-        sync_replacement_names=args.sync_replacement_names,
-        reuse_target_replacements=args.reuse_target_replacements,
-        convex_decomposition_method=args.convex_decomposition_method,
-        prewarm_coacd_cache=args.prewarm_coacd_cache,
-        overwrite=args.overwrite_config,
-    )
-    write_pipeline_manifests(
-        args=args,
-        resolution=resolution,
-        generated_paths=paths,
-        target_replacements=target_replacements,
-        repo_root=REPO_ROOT,
-        schema_version=PIPELINE_HISTORY_SCHEMA_VERSION,
-        manifest_filename=PIPELINE_MANIFEST_FILENAME,
-    )
+    with timing_scope(
+        "pipeline.generate_action_agent_config",
+        metadata={"source_mode": resolution.mode},
+    ):
+        paths = generate_action_agent_config_from_project(
+            gym_project=resolution.path,
+            output_dir=args.config_output_dir,
+            task_name=args.task_name,
+            task_description=task_description,
+            target_body_scale=effective_target_body_scale,
+            source_scene_body_scale_mode=source_scene_body_scale_mode,
+            preserve_source_scene_geometry=resolution.mode == "prompt2scene",
+            source_scene_z_rotation_degrees=(
+                args.prompt2scene_scene_z_rotation_degrees
+                if resolution.mode == "prompt2scene"
+                else 0.0
+            ),
+            source_mesh_x_rotation_degrees=(
+                args.prompt2scene_mesh_x_rotation_degrees
+                if resolution.mode == "prompt2scene"
+                else 0.0
+            ),
+            target_replacements=target_replacements,
+            sync_replacement_names=args.sync_replacement_names,
+            reuse_target_replacements=args.reuse_target_replacements,
+            convex_decomposition_method=args.convex_decomposition_method,
+            prewarm_coacd_cache=args.prewarm_coacd_cache,
+            overwrite=args.overwrite_config,
+        )
+    with timing_scope("pipeline.write_manifests"):
+        write_pipeline_manifests(
+            args=args,
+            resolution=resolution,
+            generated_paths=paths,
+            target_replacements=target_replacements,
+            repo_root=REPO_ROOT,
+            schema_version=PIPELINE_HISTORY_SCHEMA_VERSION,
+            manifest_filename=PIPELINE_MANIFEST_FILENAME,
+        )
 
     print(f"Using gym project/config: {resolution.path}", flush=True)
     print(f"Generated gym config: {paths.gym_config}", flush=True)
@@ -139,12 +174,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
         write_llm_usage_summary(usage_paths)
         return 0
 
-    return_code = run_agent_command(
-        task_name=args.task_name,
-        gym_config=paths.gym_config,
-        agent_config=paths.agent_config,
-        regenerate=args.regenerate,
-    )
+    with timing_scope("pipeline.run_agent_subprocess"):
+        return_code = run_agent_command(
+            task_name=args.task_name,
+            gym_config=paths.gym_config,
+            agent_config=paths.agent_config,
+            regenerate=args.regenerate,
+        )
     write_llm_usage_summary(usage_paths)
     return return_code
 

@@ -22,6 +22,8 @@ import shlex
 import subprocess
 import sys
 
+from embodichain.gen_sim.action_agent_pipeline.utils.timing import TIMING_PATH_ENV
+
 __all__ = ["run_agent_command"]
 
 
@@ -49,6 +51,8 @@ def run_agent_command(
     env = os.environ.copy()
     if env.get("EMBODICHAIN_LLM_USAGE_PATH"):
         env["EMBODICHAIN_LLM_USAGE_PROCESS"] = "run_agent"
+    if env.get(TIMING_PATH_ENV):
+        env["EMBODICHAIN_TIMING_PROCESS"] = "run_agent"
 
     print("Running task:")
     print(shlex.join(command), flush=True)

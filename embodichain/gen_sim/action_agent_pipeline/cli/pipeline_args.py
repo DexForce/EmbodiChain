@@ -481,4 +481,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Disable local LLM token usage recording for this pipeline run.",
     )
+    parser.add_argument(
+        "--timing-output",
+        default=None,
+        help=(
+            "JSONL path for local stage timing records. Defaults to "
+            "<config-output-dir>/timing.jsonl."
+        ),
+    )
+    parser.add_argument(
+        "--timing-summary-output",
+        default=None,
+        help=(
+            "JSON path for the aggregated local timing summary. Defaults to "
+            "<config-output-dir>/timing_summary.json."
+        ),
+    )
+    parser.add_argument(
+        "--no-timing",
+        dest="timing",
+        action="store_false",
+        default=True,
+        help="Disable local stage timing records for this pipeline run.",
+    )
     return parser

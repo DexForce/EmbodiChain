@@ -23,6 +23,7 @@ import numpy as np
 import torch
 import tqdm
 
+from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (  # noqa: F401
     AgenticGenSimEnv,
 )
@@ -70,18 +71,24 @@ def cli() -> None:
     env_cfg, gym_config, _ = build_env_cfg_from_args(args)
     agent_config = load_config(args.agent_config)
 
-    env = gymnasium.make(
-        id=gym_config["id"],
-        cfg=env_cfg,
-        agent_config=agent_config,
-        agent_config_path=args.agent_config,
-        task_name=args.task_name,
-    )
+    with timing_scope(
+        "run_agent.make_env",
+        metadata={"task_name": args.task_name, "gym_id": gym_config["id"]},
+    ):
+        env = gymnasium.make(
+            id=gym_config["id"],
+            cfg=env_cfg,
+            agent_config=agent_config,
+            agent_config_path=args.agent_config,
+            task_name=args.task_name,
+        )
 
-    _run_action_agent(args, env, gym_config)
+    with timing_scope("run_agent.total", metadata={"task_name": args.task_name}):
+        _run_action_agent(args, env, gym_config)
 
     if args.headless:
-        env.reset(options={"final": True})
+        with timing_scope("run_agent.final_reset"):
+            env.reset(options={"final": True})
 
 
 def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: dict):
@@ -104,30 +111,50 @@ def _generate_action_agent_trajectory(
     env: gymnasium.Env,
     trajectory_idx: int,
 ) -> bool:
-    _, _ = env.reset()
-    action_list = env.get_wrapper_attr("create_demo_action_list")(
-        action_sentence=str(trajectory_idx),
-        save_path=getattr(args, "save_path", ""),
-        save_video=getattr(args, "save_video", False),
-        debug_mode=getattr(args, "debug_mode", False),
-        regenerate=getattr(args, "regenerate", False),
-    )
+    with timing_scope(
+        "run_agent.trajectory_reset",
+        metadata={"trajectory_idx": trajectory_idx},
+    ):
+        _, _ = env.reset()
+    with timing_scope(
+        "run_agent.create_demo_action_list",
+        metadata={"trajectory_idx": trajectory_idx},
+    ):
+        action_list = env.get_wrapper_attr("create_demo_action_list")(
+            action_sentence=str(trajectory_idx),
+            save_path=getattr(args, "save_path", ""),
+            save_video=getattr(args, "save_video", False),
+            debug_mode=getattr(args, "debug_mode", False),
+            regenerate=getattr(args, "regenerate", False),
+        )
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
         return False
 
     if getattr(action_list, "already_executed", False):
         log_info("Action list was already executed by the action-agent runtime.")
-        _log_task_success(env)
+        with timing_scope(
+            "run_agent.evaluate_success",
+            metadata={"trajectory_idx": trajectory_idx},
+        ):
+            _log_task_success(env)
         return True
 
-    for action in tqdm.tqdm(
-        action_list,
-        desc=f"Executing action list #{trajectory_idx}",
-        unit="step",
+    with timing_scope(
+        "run_agent.execute_action_list",
+        metadata={"trajectory_idx": trajectory_idx, "actions": len(action_list)},
     ):
-        env.step(action)
-    _log_task_success(env)
+        for action in tqdm.tqdm(
+            action_list,
+            desc=f"Executing action list #{trajectory_idx}",
+            unit="step",
+        ):
+            env.step(action)
+    with timing_scope(
+        "run_agent.evaluate_success",
+        metadata={"trajectory_idx": trajectory_idx},
+    ):
+        _log_task_success(env)
     return True
 
 

@@ -25,6 +25,7 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
+from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import logger
@@ -400,9 +401,13 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     # -------------------- get action list --------------------
     def create_demo_action_list(self, regenerate=False, *args, **kwargs):
-        graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
-            regenerate=regenerate
-        )
+        with timing_scope(
+            "action_agent.generate_graph_for_actions",
+            metadata={"regenerate": bool(regenerate)},
+        ):
+            graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
+                regenerate=regenerate
+            )
         atomic_action_kwargs = {
             "allow_grasp_annotation": True,
             "force_grasp_reannotate": False,
@@ -412,7 +417,21 @@ class AgenticGenSimEnv(EmbodiedEnv):
             if key in kwargs:
                 atomic_action_kwargs[key] = kwargs[key]
         compile_kwargs.update(atomic_action_kwargs)
-        action_list = self.compile_agent.act(graph_file_path, **compile_kwargs)
+        with timing_scope(
+            "action_agent.execute_compiled_graph",
+            metadata={
+                "allow_grasp_annotation": bool(
+                    atomic_action_kwargs["allow_grasp_annotation"]
+                ),
+                "force_grasp_reannotate": bool(
+                    atomic_action_kwargs["force_grasp_reannotate"]
+                ),
+                "grasp_convex_decomposition_method": atomic_action_kwargs[
+                    "grasp_convex_decomposition_method"
+                ],
+            },
+        ):
+            action_list = self.compile_agent.act(graph_file_path, **compile_kwargs)
         return action_list
 
 
