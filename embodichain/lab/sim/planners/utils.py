@@ -189,6 +189,7 @@ class PlanState:
         move_part: MovePart = MovePart.LEFT,
         **kwargs,
     ) -> "PlanState":
+        """Create a PlanState from batched joint positions ``(B, DOF)``."""
         return cls(move_type=move_type, move_part=move_part, qpos=qpos, **kwargs)
 
     @classmethod
@@ -200,6 +201,7 @@ class PlanState:
         move_part: MovePart = MovePart.LEFT,
         **kwargs,
     ) -> "PlanState":
+        """Create a PlanState from batched end-effector poses ``(B, 4, 4)``."""
         return cls(move_type=move_type, move_part=move_part, xpos=xpos, **kwargs)
 
     @classmethod
@@ -212,7 +214,11 @@ class PlanState:
         move_part: MovePart = MovePart.LEFT,
         **kwargs,
     ) -> "PlanState":
-        """B=1 convenience constructor: unsqueezes a single-env qpos/xpos."""
+        """B=1 convenience constructor: unsqueezes a single-env qpos/xpos.
+
+        Already-batched tensors (2D qpos / 3D xpos) pass through unchanged
+        (idempotent).
+        """
         if qpos is not None and qpos.dim() == 1:
             qpos = qpos.unsqueeze(0)
         if xpos is not None and xpos.dim() == 2:

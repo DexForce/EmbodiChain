@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import torch
-import pytest
 
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType, MovePart
 
