@@ -162,14 +162,32 @@ class WorldState:
 class ActionResult:
     """Return value of every AtomicAction.execute call."""
 
-    success: bool
-    """Whether the action produced a valid full-DoF trajectory."""
+    success: bool | torch.Tensor
+    """Whether the action produced a valid full-DoF trajectory.
+    Can be a bool or a per-environment boolean tensor of shape (n_envs,)."""
 
     trajectory: torch.Tensor
     """Full-robot trajectory, shape (n_envs, n_waypoints, robot.dof)."""
 
     next_state: WorldState
     """World state to feed into the next action."""
+
+    @property
+    def success_all(self) -> bool:
+        """True only if all environments succeeded."""
+        if isinstance(self.success, torch.Tensor):
+            return bool(torch.all(self.success).item())
+        return bool(self.success)
+
+    def __bool__(self) -> bool:
+        import warnings as _w
+
+        _w.warn(
+            "ActionResult bool() is deprecated; use .success_all",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.success_all
 
 
 # =============================================================================
@@ -186,6 +204,12 @@ class ActionCfg:
     interpolation_type: str = "linear"
     velocity_limit: float | None = None
     acceleration_limit: float | None = None
+    motion_source: str = "ik_interp"
+    """Trajectory source: 'ik_interp' (default, batched IK + linear interp)
+    or 'motion_gen' (batched MotionGenerator)."""
+    planner_type: str | None = None
+    """Planner type for motion_source='motion_gen': 'toppra' | 'neural'.
+    Required when motion_source='motion_gen'."""
 
 
 # =============================================================================
