@@ -426,7 +426,8 @@ def _make_waypoints(start_pose: torch.Tensor, num_waypoints: int) -> torch.Tenso
 
 def _make_target_states(waypoints: torch.Tensor) -> list[PlanState]:
     return [
-        PlanState.single(move_type=MoveType.EEF_MOVE, xpos=waypoint) for waypoint in waypoints
+        PlanState.single(move_type=MoveType.EEF_MOVE, xpos=waypoint)
+        for waypoint in waypoints
     ]
 
 
@@ -559,7 +560,11 @@ def plan_ik_interpolate(
             joint_seed=qpos_seed,
         )
         if not _all_success(success):
-            return PlanResult(success=torch.tensor([False]), positions=None, duration=torch.tensor([0.0]))
+            return PlanResult(
+                success=torch.tensor([False]),
+                positions=None,
+                duration=torch.tensor([0.0]),
+            )
         qpos_seed = qpos
         joint_targets.append(qpos.squeeze(0))
 
