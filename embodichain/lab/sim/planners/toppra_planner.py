@@ -38,6 +38,115 @@ except ImportError:
 ta.setup_logging(level="WARN")
 
 
+def _build_constraint_arrays(value, acc, dofs: int) -> tuple[np.ndarray, np.ndarray]:
+    """Expand scalar limits to (dofs, 2) arrays; pass through arrays as-is."""
+    if isinstance(value, (float, int)):
+        vlims = np.array([[-value, value] for _ in range(dofs)])
+    else:
+        vlims = np.array(value)
+    if isinstance(acc, (float, int)):
+        alims = np.array([[-acc, acc] for _ in range(dofs)])
+    else:
+        alims = np.array(acc)
+    return vlims, alims
+
+
+def _toppra_solve_one_env(
+    waypoints: np.ndarray,
+    vel_constraint,
+    acc_constraint,
+    sample_method: "TrajectorySampleMethod",
+    sample_interval: float | int,
+) -> dict:
+    """Solve a single-env TOPPRA trajectory. Pure numpy/scipy — picklable, no torch/robot.
+
+    Args:
+        waypoints: ``(N, DOF)`` numpy array of joint waypoints.
+        vel_constraint / acc_constraint: scalar or per-DoF array limits.
+        sample_method: TIME or QUANTITY.
+        sample_interval: seconds (TIME) or sample count (QUANTITY).
+
+    Returns:
+        dict with ``positions`` ``(N_b, DOF)``, ``velocities``, ``accelerations``,
+        ``dt`` ``(N_b,)``, ``success`` bool, ``n`` int, ``duration`` float.
+    """
+    dofs = waypoints.shape[1]
+    vlims, alims = _build_constraint_arrays(vel_constraint, acc_constraint, dofs)
+
+    if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
+        return _empty_failure(dofs)
+    if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
+        return _empty_failure(dofs)
+
+    # Trivial same-waypoint shortcut
+    if len(waypoints) == 2 and np.sum(np.abs(waypoints[1] - waypoints[0])) < 1e-3:
+        pos = np.stack([waypoints[0], waypoints[1]])
+        return {
+            "positions": pos,
+            "velocities": np.zeros_like(pos),
+            "accelerations": np.zeros_like(pos),
+            "dt": np.array([0.0, 0.0], dtype=np.float32),
+            "success": True,
+            "n": 2,
+            "duration": 0.0,
+        }
+
+    ss = np.linspace(0.0, 1.0, len(waypoints))
+    try:
+        path = ta.SplineInterpolator(ss, waypoints)
+        pc_vel = constraint.JointVelocityConstraint(vlims)
+        pc_acc = constraint.JointAccelerationConstraint(alims)
+        instance = ta.algorithm.TOPPRA(
+            [pc_vel, pc_acc],
+            path,
+            parametrizer="ParametrizeConstAccel",
+            gridpt_min_nb_points=max(100, 10 * len(waypoints)),
+        )
+        jnt_traj = instance.compute_trajectory()
+    except Exception:
+        return _empty_failure(dofs)
+
+    if jnt_traj is None:
+        return _empty_failure(dofs)
+
+    duration = float(jnt_traj.duration)
+    if duration <= 0:
+        return _empty_failure(dofs)
+
+    if sample_method == TrajectorySampleMethod.TIME:
+        n_points = max(2, int(np.ceil(duration / sample_interval)) + 1)
+        ts = np.linspace(0.0, duration, n_points)
+    else:
+        ts = np.linspace(0.0, duration, num=int(sample_interval))
+
+    positions = np.array([jnt_traj.eval(t) for t in ts])
+    velocities = np.array([jnt_traj.evald(t) for t in ts])
+    accelerations = np.array([jnt_traj.evaldd(t) for t in ts])
+    dt = np.diff(ts, prepend=0.0).astype(np.float32)
+    return {
+        "positions": positions,
+        "velocities": velocities,
+        "accelerations": accelerations,
+        "dt": dt,
+        "success": True,
+        "n": len(ts),
+        "duration": duration,
+    }
+
+
+def _empty_failure(dofs: int) -> dict:
+    z = np.zeros((2, dofs), dtype=np.float32)
+    return {
+        "positions": z,
+        "velocities": np.zeros_like(z),
+        "accelerations": np.zeros_like(z),
+        "dt": np.array([0.0, 0.0], dtype=np.float32),
+        "success": False,
+        "n": 2,
+        "duration": 0.0,
+    }
+
+
 __all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
 
 
