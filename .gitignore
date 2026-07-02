@@ -184,6 +184,7 @@ embodichain/database/train/*
 
 3rdparty/
 Log/
+gym_project/
 
 # tensorboard logs
 embodichain/agents/policy/runs/*
