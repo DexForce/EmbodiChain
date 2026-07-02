@@ -201,7 +201,7 @@ def plan_trajectory(
     )
 
     plan_state = [
-        PlanState(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
+        PlanState.single(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
         for qpos in qpos_list
     ]
 
@@ -215,8 +215,8 @@ def plan_trajectory(
         ),
     )
 
-    select_qpos_traj.extend(ret.positions.numpy())
-    ee_state_list_select.extend([select_arm_current_gripper_state] * len(ret.positions))
+    select_qpos_traj.extend(ret.positions[0].numpy())
+    ee_state_list_select.extend([select_arm_current_gripper_state] * ret.positions.shape[1])
 
 
 def plan_gripper_trajectory(
