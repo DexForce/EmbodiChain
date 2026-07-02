@@ -114,33 +114,44 @@ class MoveType(Enum):
 
 @dataclass
 class PlanResult:
-    r"""Data class representing the result of a motion plan."""
+    r"""Data class representing the result of a motion plan (env-batched)."""
 
     success: bool | torch.Tensor = False
-    """Whether planning succeeded."""
+    """Per-env success, shape ``(B,)`` bool tensor (or scalar bool)."""
 
     xpos_list: torch.Tensor | None = None
-    """End-effector poses along trajectory with shape `(N, 4, 4)`."""
+    """End-effector poses, shape ``(B, N, 4, 4)``."""
 
     positions: torch.Tensor | None = None
-    """Joint positions along trajectory with shape `(N, DOF)`."""
+    """Joint positions, shape ``(B, N, DOF)``."""
 
     velocities: torch.Tensor | None = None
-    """Joint velocities along trajectory with shape `(N, DOF)`."""
+    """Joint velocities, shape ``(B, N, DOF)``."""
 
     accelerations: torch.Tensor | None = None
-    """Joint accelerations along trajectory with shape `(N, DOF)`."""
+    """Joint accelerations, shape ``(B, N, DOF)``."""
 
     dt: torch.Tensor | None = None
-    """Time duration between each point with shape `(N,)`."""
+    """Per-env time deltas, shape ``(B, N)``."""
 
     duration: float | torch.Tensor = 0.0
-    """Total trajectory duration in seconds."""
+    """Per-env total duration, shape ``(B,)``."""
+
+    def is_all_success(self) -> bool:
+        """Return True only when every env succeeded."""
+        if isinstance(self.success, torch.Tensor):
+            return bool(torch.all(self.success).item())
+        return bool(self.success)
 
 
 @dataclass
 class PlanState:
-    r"""Data class representing the state for a motion plan."""
+    r"""Data class representing the state for a motion plan (env-batched).
+
+    Tensor fields carry a leading batch dim ``B``: ``qpos:(B, DOF)``,
+    ``xpos:(B, 4, 4)``. Enum/scalar fields are shared across ``B`` (vectorized
+    envs share the same task skeleton).
+    """
 
     move_type: MoveType = MoveType.JOINT_MOVE
     """Type of movement used by the plan."""
@@ -149,25 +160,66 @@ class PlanState:
     """Robot part that should move."""
 
     xpos: torch.Tensor | None = None
-    """Target TCP pose (4x4 matrix) for `MoveType.EEF_MOVE`."""
+    """Target TCP pose (Bx4x4) for ``MoveType.EEF_MOVE``."""
 
     qpos: torch.Tensor | None = None
-    """Target joint angles for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+    """Target joint angles for ``MoveType.JOINT_MOVE`` with shape ``(B, DOF)``."""
 
     qvel: torch.Tensor | None = None
-    """Target joint velocities for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+    """Target joint velocities for ``MoveType.JOINT_MOVE`` with shape ``(B, DOF)``."""
 
     qacc: torch.Tensor | None = None
-    """Target joint accelerations for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+    """Target joint accelerations for ``MoveType.JOINT_MOVE`` with shape ``(B, DOF)``."""
 
     is_open: bool = True
-    """For `MoveType.TOOL`, indicates whether to open (`True`) or close (`False`) the tool."""
+    """For ``MoveType.TOOL``, indicates whether to open (``True``) or close (``False``) the tool."""
 
     is_world_coordinate: bool = True
-    """`True` if the target pose is in world coordinates, `False` if relative to the current pose."""
+    """``True`` if the target pose is in world coordinates, ``False`` if relative to the current pose."""
 
     pause_seconds: float = 0.0
-    """Duration of a pause when `move_type` is `MoveType.PAUSE`."""
+    """Duration of a pause when ``move_type`` is ``MoveType.PAUSE``."""
+
+    @classmethod
+    def from_qpos(
+        cls,
+        qpos: torch.Tensor,
+        *,
+        move_type: MoveType = MoveType.JOINT_MOVE,
+        move_part: MovePart = MovePart.LEFT,
+        **kwargs,
+    ) -> "PlanState":
+        return cls(move_type=move_type, move_part=move_part, qpos=qpos, **kwargs)
+
+    @classmethod
+    def from_xpos(
+        cls,
+        xpos: torch.Tensor,
+        *,
+        move_type: MoveType = MoveType.EEF_MOVE,
+        move_part: MovePart = MovePart.LEFT,
+        **kwargs,
+    ) -> "PlanState":
+        return cls(move_type=move_type, move_part=move_part, xpos=xpos, **kwargs)
+
+    @classmethod
+    def single(
+        cls,
+        *,
+        qpos: torch.Tensor | None = None,
+        xpos: torch.Tensor | None = None,
+        move_type: MoveType = MoveType.JOINT_MOVE,
+        move_part: MovePart = MovePart.LEFT,
+        **kwargs,
+    ) -> "PlanState":
+        """B=1 convenience constructor: unsqueezes a single-env qpos/xpos."""
+        if qpos is not None and qpos.dim() == 1:
+            qpos = qpos.unsqueeze(0)
+        if xpos is not None and xpos.dim() == 2:
+            xpos = xpos.unsqueeze(0)
+        return cls(
+            move_type=move_type, move_part=move_part, qpos=qpos, xpos=xpos, **kwargs
+        )
 
 
 def interpolate_xpos(
