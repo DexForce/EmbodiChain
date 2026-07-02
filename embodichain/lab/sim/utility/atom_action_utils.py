@@ -216,7 +216,9 @@ def plan_trajectory(
     )
 
     select_qpos_traj.extend(ret.positions[0].numpy())
-    ee_state_list_select.extend([select_arm_current_gripper_state] * ret.positions.shape[1])
+    ee_state_list_select.extend(
+        [select_arm_current_gripper_state] * ret.positions.shape[1]
+    )
 
 
 def plan_gripper_trajectory(
