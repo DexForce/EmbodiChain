@@ -373,7 +373,8 @@ class TestPickUpAction:
         ):
             state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
             result = action.execute(GraspTarget(semantics=sem), state)
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape[0] == NUM_ENVS
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert isinstance(result.next_state.held_object, HeldObjectState)
@@ -470,7 +471,8 @@ class TestPlaceAction:
             ),
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None
 
@@ -522,7 +524,8 @@ class TestPlaceAction:
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=multi_xpos), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None
         # IK order: down phase (approach, pose0, pose1) then back phase (retract).

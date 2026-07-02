@@ -457,16 +457,14 @@ class PickUp(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        ok, approach_arm = self.builder.plan_arm_traj(
+        approach_success, approach_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_approach,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok.all().item():
-            logger.log_warning("PickUp failed to plan the approach trajectory.")
-            return self._fail(state)
 
         # Phase 3: lift (planned from grasp qpos)
         grasp_arm_qpos = approach_arm[:, -1, :]
@@ -478,16 +476,15 @@ class PickUp(AtomicAction):
             [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, lift_arm = self.builder.plan_arm_traj(
+        lift_success, lift_arm = self.builder.plan_arm_traj(
             target_states_list,
             grasp_arm_qpos,
             n_lift,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok.all().item():
-            logger.log_warning("PickUp failed to plan the lift trajectory.")
-            return self._fail(state)
+        success = approach_success & lift_success
 
         # Phase 2: hand close (arm held at grasp qpos)
         hand_close_path = self.builder.interpolate_hand_qpos(
@@ -517,7 +514,7 @@ class PickUp(AtomicAction):
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(last_qpos=full[:, -1, :].clone(), held_object=held),
         )
@@ -747,15 +744,14 @@ class Place(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        ok, down_arm = self.builder.plan_arm_traj(
+        down_success, down_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_down,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok.all().item():
-            return self._fail(state)
         reach_arm_qpos = down_arm[:, -1, :]
 
         # Phase 3: back (retract to above the last waypoint)
@@ -763,15 +759,15 @@ class Place(AtomicAction):
             [PlanState(xpos=retract_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, back_arm = self.builder.plan_arm_traj(
+        back_success, back_arm = self.builder.plan_arm_traj(
             target_states_list,
             reach_arm_qpos,
             n_back,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok.all().item():
-            return self._fail(state)
+        success = down_success & back_success
 
         # Phase 2: hand open (arm held at reach qpos)
         hand_open_path = self.builder.interpolate_hand_qpos(
@@ -794,7 +790,7 @@ class Place(AtomicAction):
         full[:, n_down + n_open :, self.hand_joint_ids] = self.hand_open_qpos
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(last_qpos=full[:, -1, :].clone(), held_object=None),
         )
