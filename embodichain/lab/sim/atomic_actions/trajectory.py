@@ -287,27 +287,6 @@ class TrajectoryBuilder:
         return first, second, third
 
     # ------------------------------------------------------------------
-    # MotionGen options
-    # ------------------------------------------------------------------
-
-    def build_motion_gen_options(
-        self,
-        start_qpos: torch.Tensor,
-        *,
-        sample_interval: int,
-        control_part: str,
-    ) -> MotionGenOptions:
-        """Build planner options. Reads ``start_qpos[0]`` because the planner shares options across envs; pass the full batched tensor for type uniformity with other helpers."""
-        return MotionGenOptions(
-            start_qpos=start_qpos[0],
-            control_part=control_part,
-            is_interpolate=True,
-            is_linear=False,
-            interpolate_position_step=0.001,
-            plan_opts=ToppraPlanOptions(sample_interval=sample_interval),
-        )
-
-    # ------------------------------------------------------------------
     # Arm trajectory planning
     # ------------------------------------------------------------------
 
@@ -410,13 +389,15 @@ class TrajectoryBuilder:
         n_envs = start_qpos.shape[0]
         plan_states = self._to_batched_plan_states(target_states_list, n_envs)
         plan_opts = self._build_plan_opts(cfg, n_waypoints)
+        planner_type = getattr(cfg, "planner_type", None)
+        is_interpolate = planner_type != "neural"
         result: PlanResult = self.motion_generator.generate(
             plan_states,
             MotionGenOptions(
                 start_qpos=start_qpos,
                 control_part=control_part,
                 plan_opts=plan_opts,
-                is_interpolate=True,
+                is_interpolate=is_interpolate,
             ),
         )
         success = (

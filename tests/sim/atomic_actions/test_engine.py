@@ -196,8 +196,8 @@ class TestEngineRun:
         assert not success.any().item()
         # `c` should not have been called.
         c.execute.assert_not_called()
-        # We get the partial trajectory from `a` plus one held row per remaining step.
-        assert traj.shape == (NUM_ENVS, 6, TOTAL_DOF)
+        # We get only the trajectory from executed steps (all-dead breaks the loop).
+        assert traj.shape == (NUM_ENVS, 5, TOTAL_DOF)
 
     def test_run_raises_on_unknown_action_name(self):
         with pytest.raises(KeyError, match="ghost"):

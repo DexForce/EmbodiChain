@@ -130,10 +130,8 @@ class AtomicActionEngine:
                     TypeError,
                 )
             if not alive.any():
-                # All envs dead: fill held rows for this step.
-                held = state.last_qpos.unsqueeze(1).repeat(1, 1, 1)
-                full_traj = torch.cat([full_traj, held], dim=1)
-                continue
+                # All envs dead: no further motion to plan.
+                break
             prev_last_qpos = state.last_qpos.clone()
             result: ActionResult = action.execute(target, state)
             step_success = (

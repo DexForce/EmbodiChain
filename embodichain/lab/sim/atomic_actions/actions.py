@@ -278,7 +278,7 @@ class MoveEndEffector(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
@@ -521,7 +521,7 @@ class PickUp(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
@@ -655,7 +655,7 @@ class MoveHeldObject(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
@@ -795,7 +795,7 @@ class Place(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
@@ -923,7 +923,7 @@ class Press(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
