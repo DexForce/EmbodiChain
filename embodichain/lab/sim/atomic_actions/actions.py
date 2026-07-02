@@ -626,16 +626,14 @@ class MoveHeldObject(AtomicAction):
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, arm_traj = self.builder.plan_arm_traj(
+        success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             self.cfg.sample_interval,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok.all().item():
-            logger.log_warning("MoveHeldObject failed to plan trajectory.")
-            return self._fail(state)
 
         full = torch.empty(
             (self.n_envs, arm_traj.shape[1], self.robot_dof),
@@ -647,7 +645,7 @@ class MoveHeldObject(AtomicAction):
         full[:, :, self.hand_joint_ids] = self.hand_close_qpos
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -865,20 +863,19 @@ class Press(AtomicAction):
             [PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, down_arm = self.builder.plan_arm_traj(
+        down_success, down_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_down,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok.all().item():
-            logger.log_warning("Press failed to plan the down trajectory.")
-            return self._fail(state)
 
         # Phase 3: return to the arm pose from before pressing.
         press_arm_qpos = down_arm[:, -1, :]
         back_arm = self.builder.plan_joint_traj(press_arm_qpos, start_arm_qpos, n_back)
+        success = down_success
 
         full = torch.empty(
             (self.n_envs, n_close + n_down + n_back, self.robot_dof),
@@ -898,7 +895,7 @@ class Press(AtomicAction):
         )
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),

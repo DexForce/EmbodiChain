@@ -430,7 +430,8 @@ class TestMoveHeldObjectAction:
             result = action.execute(
                 HeldObjectPoseTarget(object_target_pose=torch.eye(4)), state
             )
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         assert result.next_state.held_object is held
 
@@ -590,7 +591,8 @@ class TestPressAction:
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 12, TOTAL_DOF)
         expected_hand_qpos = _hand_close().unsqueeze(0).repeat(NUM_ENVS, 1)
         assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], expected_hand_qpos)
