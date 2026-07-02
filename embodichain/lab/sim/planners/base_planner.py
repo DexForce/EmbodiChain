@@ -42,6 +42,48 @@ class PlanOptions:
     pass
 
 
+def _infer_batch_size(target_states: list[PlanState]) -> int | None:
+    for s in target_states:
+        for t in (s.qpos, s.xpos, s.qvel, s.qacc):
+            if isinstance(t, torch.Tensor) and t.dim() >= 1:
+                return int(t.shape[0])
+    return None
+
+
+def _check_batch_consistency(
+    target_states: list[PlanState],
+    expected_b: int | None,
+    robot_num_instances: int,
+) -> int:
+    """Validate that all PlanState tensors share the same leading B and match the robot."""
+    if len(target_states) < 2:
+        logger.log_error(
+            "target_states must contain at least 2 waypoints", ValueError
+        )
+    bs = set()
+    for i, s in enumerate(target_states):
+        b = _infer_batch_size([s])
+        if b is not None:
+            bs.add(b)
+    if len(bs) > 1:
+        logger.log_error(
+            f"All PlanState entries must share the same batch dim B, got {sorted(bs)}",
+            ValueError,
+        )
+    b = bs.pop() if bs else 1
+    if expected_b is not None and b != expected_b:
+        logger.log_error(
+            f"Batch dim B={b} does not match robot.num_instances={expected_b}",
+            ValueError,
+        )
+    if robot_num_instances is not None and b not in (1, robot_num_instances):
+        logger.log_error(
+            f"Batch dim B={b} must be 1 or robot.num_instances={robot_num_instances}",
+            ValueError,
+        )
+    return b
+
+
 def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
     """Decorator (factory) that validates the ``options`` argument is a ``PlanOptions`` instance.
 
@@ -77,6 +119,10 @@ def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
                     f"(or a subclass), but got {type(options).__name__}.",
                     TypeError,
                 )
+            target_states = kwargs.get("target_states", args[0] if args else None)
+            if target_states is not None and hasattr(self, "robot"):
+                robot_num = getattr(self.robot, "num_instances", None)
+                _check_batch_consistency(target_states, expected_b=robot_num, robot_num_instances=robot_num)
             return func(self, *args, **kwargs)
 
         return wrapper

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType, MovePart
@@ -59,3 +60,25 @@ class TestPlanResultBatched:
         assert r.positions.shape == (2, 10, 7)
         assert r.dt.shape == (2, 10)
         assert r.duration.shape == (2,)
+
+
+class TestValidateBatchConsistency:
+    def test_rejects_inconsistent_B(self, monkeypatch):
+        from embodichain.lab.sim.planners.base_planner import validate_plan_options, BasePlanner, PlanOptions
+        from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
+
+        class Dummy(BasePlanner):
+            @validate_plan_options
+            def plan(self, target_states, options=PlanOptions()):
+                return PlanResult(success=True)
+
+        # B=2 then B=3 -> inconsistent
+        states = [
+            PlanState.from_qpos(torch.zeros(2, 7)),
+            PlanState.from_qpos(torch.zeros(3, 7)),
+        ]
+        # BasePlanner.__init__ needs a robot; bypass by stubbing the decorator path.
+        # We test the validation helper directly instead:
+        from embodichain.lab.sim.planners import base_planner as bp
+        with pytest.raises(ValueError):
+            bp._check_batch_consistency(states, expected_b=None, robot_num_instances=2)
