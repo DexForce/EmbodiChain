@@ -43,6 +43,7 @@ class PlanOptions:
 
 
 def _infer_batch_size(target_states: list[PlanState]) -> int | None:
+    """Return the leading batch dim B of the first tensor found in target_states, or None if none."""
     for s in target_states:
         for t in (s.qpos, s.xpos, s.qvel, s.qacc):
             if isinstance(t, torch.Tensor) and t.dim() >= 1:
@@ -53,7 +54,7 @@ def _infer_batch_size(target_states: list[PlanState]) -> int | None:
 def _check_batch_consistency(
     target_states: list[PlanState],
     expected_b: int | None,
-    robot_num_instances: int,
+    robot_num_instances: int | None,
 ) -> int:
     """Validate that all PlanState tensors share the same leading B and match the robot."""
     if len(target_states) < 2:
@@ -61,7 +62,7 @@ def _check_batch_consistency(
             "target_states must contain at least 2 waypoints", ValueError
         )
     bs = set()
-    for i, s in enumerate(target_states):
+    for s in target_states:
         b = _infer_batch_size([s])
         if b is not None:
             bs.add(b)
