@@ -26,6 +26,7 @@ from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
     PlanOptions,
+    _infer_batch_size,
     validate_plan_options,
 )
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
@@ -205,12 +206,6 @@ class NeuralPlanOptions(PlanOptions):
 class NeuralPlanner(BasePlanner):
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)
-
-        if self.robot.num_instances > 1:
-            logger.log_error(
-                "NeuralPlanner currently supports one robot instance",
-                NotImplementedError,
-            )
 
         self.cfg: NeuralPlannerCfg = cfg
         if cfg.checkpoint_path is MISSING or not str(cfg.checkpoint_path):
@@ -393,11 +388,10 @@ class NeuralPlanner(BasePlanner):
                 f"at most {self._num_waypoints}.",
                 ValueError,
             )
-
-        waypoint_pos = torch.zeros(1, self._num_waypoints, 3, device=self.device)
-        waypoint_quat = torch.zeros(1, self._num_waypoints, 4, device=self.device)
-        valid_mask = torch.zeros(1, self._num_waypoints, device=self.device)
-
+        b = _infer_batch_size(target_states) or 1
+        waypoint_pos = torch.zeros(b, self._num_waypoints, 3, device=self.device)
+        waypoint_quat = torch.zeros(b, self._num_waypoints, 4, device=self.device)
+        valid_mask = torch.zeros(b, self._num_waypoints, device=self.device)
         for idx, target in enumerate(target_states):
             if target.move_type != MoveType.EEF_MOVE or target.xpos is None:
                 logger.log_error(
@@ -405,19 +399,20 @@ class NeuralPlanner(BasePlanner):
                     ValueError,
                 )
             xpos = torch.as_tensor(target.xpos, dtype=torch.float32, device=self.device)
-            waypoint_pos[0, idx] = xpos[:3, 3]
-            waypoint_quat[0, idx] = convert_quat(
-                quat_from_matrix(xpos[:3, :3].unsqueeze(0)), to="xyzw"
-            )[0]
-            valid_mask[0, idx] = 1.0
-
+            if xpos.dim() == 2:
+                xpos = xpos.unsqueeze(0)
+            waypoint_pos[:, idx] = xpos[:, :3, 3]
+            waypoint_quat[:, idx] = convert_quat(
+                quat_from_matrix(xpos[:, :3, :3]), to="xyzw"
+            )
+            valid_mask[:, idx] = 1.0
         return waypoint_pos, waypoint_quat, valid_mask, len(target_states)
 
     def _initial_qpos(
         self, control_part: str, start_qpos: torch.Tensor | None
     ) -> torch.Tensor:
         if start_qpos is None:
-            qpos = self.robot.get_qpos(name=control_part)[0]
+            qpos = self.robot.get_qpos(name=control_part)
         else:
             qpos = torch.as_tensor(start_qpos, dtype=torch.float32, device=self.device)
         if qpos.dim() == 1:
