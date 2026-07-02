@@ -27,6 +27,9 @@ from embodichain.lab.sim.atomic_actions.affordance import (
 )
 from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
+    AtomicAction,
+    CoordinatedHeldObjectState,
+    CoordinatedPickmentTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -37,6 +40,8 @@ from embodichain.lab.sim.atomic_actions.core import (
     WorldState,
 )
 from embodichain.lab.sim.atomic_actions.actions import (
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
     MoveEndEffector,
     MoveEndEffectorCfg,
     MoveJoints,
@@ -55,6 +60,8 @@ NUM_ENVS = 2
 ARM_DOF = 6
 HAND_DOF = 2
 TOTAL_DOF = ARM_DOF + HAND_DOF
+DUAL_ARM_DOF = 12
+DUAL_TOTAL_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 
 
 def _make_mock_robot():
@@ -109,6 +116,57 @@ def _make_mock_robot():
 def _make_mock_motion_generator():
     mg = Mock()
     mg.robot = _make_mock_robot()
+    mg.device = torch.device("cpu")
+    return mg
+
+
+def _make_dual_arm_mock_robot():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = DUAL_TOTAL_DOF
+
+    def get_qpos(name=None):
+        if name == "left_arm":
+            return torch.zeros(NUM_ENVS, ARM_DOF)
+        if name == "right_arm":
+            return torch.zeros(NUM_ENVS, ARM_DOF)
+        if name == "dual_arm":
+            return torch.zeros(NUM_ENVS, DUAL_ARM_DOF)
+        if name in ("left_hand", "right_hand"):
+            return torch.zeros(NUM_ENVS, HAND_DOF)
+        return torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF)
+
+    robot.get_qpos = get_qpos
+
+    def get_joint_ids(name=None):
+        if name == "left_arm":
+            return list(range(0, ARM_DOF))
+        if name == "right_arm":
+            return list(range(ARM_DOF, DUAL_ARM_DOF))
+        if name == "dual_arm":
+            return list(range(DUAL_ARM_DOF))
+        if name == "left_hand":
+            return list(range(DUAL_ARM_DOF, DUAL_ARM_DOF + HAND_DOF))
+        if name == "right_hand":
+            return list(range(DUAL_ARM_DOF + HAND_DOF, DUAL_TOTAL_DOF))
+        return list(range(DUAL_TOTAL_DOF))
+
+    robot.get_joint_ids = get_joint_ids
+
+    def compute_ik(pose=None, name=None, joint_seed=None, qpos_seed=None):
+        seed = joint_seed if joint_seed is not None else qpos_seed
+        if seed is None:
+            seed = torch.zeros(NUM_ENVS, ARM_DOF)
+        offset = 0.1 if name == "left_arm" else 0.2
+        return torch.ones(seed.shape[0], dtype=torch.bool), seed + offset
+
+    robot.compute_ik = compute_ik
+    return robot
+
+
+def _make_dual_arm_mock_motion_generator():
+    mg = Mock()
+    mg.robot = _make_dual_arm_mock_robot()
     mg.device = torch.device("cpu")
     return mg
 
@@ -591,3 +649,59 @@ class TestPressAction:
             last_qpos[:, :ARM_DOF],
         )
         assert result.next_state.held_object is held
+
+
+# ---------------------------------------------------------------------------
+# CoordinatedPickment
+# ---------------------------------------------------------------------------
+
+
+class TestCoordinatedPickmentAction:
+    def setup_method(self):
+        self.mg = _make_dual_arm_mock_motion_generator()
+
+    def test_target_type_is_coordinated_pickment_target(self):
+        assert CoordinatedPickment.TargetType is CoordinatedPickmentTarget
+        assert CoordinatedPickment.__bases__ == (AtomicAction,)
+
+    def test_execute_returns_full_dof_trajectory_and_dual_held_state(self):
+        cfg = CoordinatedPickmentCfg(
+            left_hand_open_qpos=_hand_open(),
+            left_hand_close_qpos=_hand_close(),
+            right_hand_open_qpos=_hand_open(),
+            right_hand_close_qpos=_hand_close(),
+            sample_interval=30,
+            hand_interp_steps=4,
+            hold_steps=2,
+            object_motion_keyframes=3,
+        )
+        action = CoordinatedPickment(self.mg, cfg)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="pencil"
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF))
+        result = action.execute(
+            CoordinatedPickmentTarget(
+                object_target_pose=torch.eye(4),
+                object_semantics=sem,
+                left_object_to_eef=torch.eye(4),
+                right_object_to_eef=torch.eye(4),
+                object_initial_pose=torch.eye(4),
+            ),
+            state,
+        )
+        assert result.success is True
+        assert result.trajectory.shape == (NUM_ENVS, 30, DUAL_TOTAL_DOF)
+        assert torch.allclose(
+            result.trajectory[:, -1, action.left_hand_joint_ids],
+            _hand_close().unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
+        assert torch.allclose(
+            result.trajectory[:, -1, action.right_hand_joint_ids],
+            _hand_close().unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
+        assert isinstance(
+            result.next_state.coordinated_held_object,
+            CoordinatedHeldObjectState,
+        )
+        assert result.next_state.held_object is None

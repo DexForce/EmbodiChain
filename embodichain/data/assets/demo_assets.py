@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import open3d as o3d
 import os
 
@@ -45,6 +47,23 @@ class MultiW1Data(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, demo_assets, "multi_w1_demo.zip"),
             "984e8fa3aa05cb36a1fd973a475183ed",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(prefix, data_descriptor, path)
+
+
+class CoordinatedPlacementAndPickment(EmbodiChainDataset):
+    """Dataset class for coordinated placement and pickment tutorial meshes."""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(
+                EMBODICHAIN_DOWNLOAD_PREFIX,
+                demo_assets,
+                "coordinated_placement_and_pickment.zip",
+            ),
+            "297c10b386a4d7a8ccb68926d69425e9",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

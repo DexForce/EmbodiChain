@@ -27,6 +27,8 @@ from embodichain.lab.sim.atomic_actions.affordance import Affordance
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
     ActionResult,
+    CoordinatedHeldObjectState,
+    CoordinatedPickmentTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -86,6 +88,17 @@ class TestTypedTargets:
         with pytest.raises(dataclasses.FrozenInstanceError):
             t.object_target_pose = torch.zeros(4, 4)  # type: ignore[misc]
 
+    def test_coordinated_pickment_target_holds_object_offsets(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="pencil")
+        target = CoordinatedPickmentTarget(
+            object_target_pose=torch.eye(4),
+            object_semantics=sem,
+            left_object_to_eef=torch.eye(4),
+            right_object_to_eef=torch.eye(4),
+        )
+        assert target.object_semantics is sem
+        assert target.left_object_to_eef.shape == (4, 4)
+
 
 class TestObjectSemantics:
     def test_does_not_mutate_affordance_geometry(self):
@@ -122,6 +135,21 @@ class TestHeldObjectState:
         assert s.grasp_xpos.shape == (1, 4, 4)
 
 
+class TestCoordinatedHeldObjectState:
+    def test_required_fields(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
+        s = CoordinatedHeldObjectState(
+            semantics=sem,
+            left_object_to_eef=torch.eye(4).unsqueeze(0),
+            right_object_to_eef=torch.eye(4).unsqueeze(0),
+            left_grasp_xpos=torch.eye(4).unsqueeze(0),
+            right_grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        assert s.semantics is sem
+        assert s.left_object_to_eef.shape == (1, 4, 4)
+        assert s.right_grasp_xpos.shape == (1, 4, 4)
+
+
 class TestWorldState:
     def test_constructs_with_last_qpos_only(self):
         qpos = torch.zeros(2, 6)
@@ -138,6 +166,21 @@ class TestWorldState:
         )
         ws = WorldState(last_qpos=torch.zeros(1, 6), held_object=held)
         assert ws.held_object is held
+
+    def test_carries_coordinated_held_object(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
+        held = CoordinatedHeldObjectState(
+            semantics=sem,
+            left_object_to_eef=torch.eye(4).unsqueeze(0),
+            right_object_to_eef=torch.eye(4).unsqueeze(0),
+            left_grasp_xpos=torch.eye(4).unsqueeze(0),
+            right_grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        ws = WorldState(
+            last_qpos=torch.zeros(1, 14),
+            coordinated_held_object=held,
+        )
+        assert ws.coordinated_held_object is held
 
 
 class TestActionResult:
