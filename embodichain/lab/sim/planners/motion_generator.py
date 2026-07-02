@@ -53,7 +53,7 @@ class MotionGenCfg:
 class MotionGenOptions:
 
     start_qpos: torch.Tensor | None = None
-    """Optional starting joint configuration for the trajectory. If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
+    """Optional starting joint configuration for the trajectory, shape (B, DOF). If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
 
     control_part: str | None = None
     """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
@@ -152,47 +152,43 @@ class MotionGenerator:
             PlanResult containing the planned trajectory details.
         """
         if options.is_interpolate:
-            # interpolate trajectory to generate more waypoints for smoother motion and better constraint handling
-            if target_states[0].move_type == MoveType.EEF_MOVE:
-                xpos_list = []
-                for state in target_states:
-                    if state.move_type != MoveType.EEF_MOVE:
+            move_type = target_states[0].move_type
+            if move_type == MoveType.EEF_MOVE:
+                for s in target_states:
+                    if s.move_type != move_type:
                         logger.log_error(
-                            f"All states must be the same. First state is {target_states[0].move_type}, but got {state.move_type}"
+                            f"All states must share move_type; got {s.move_type}",
+                            ValueError,
                         )
-                    xpos_list.append(state.xpos)
-                    qpos_list = None
-            elif target_states[0].move_type == MoveType.JOINT_MOVE:
-                qpos_list = []
-                for state in target_states:
-                    if state.move_type != MoveType.JOINT_MOVE:
+                xpos_list = torch.stack([s.xpos for s in target_states])  # (B, N, 4, 4)
+                qpos_list = None
+            elif move_type == MoveType.JOINT_MOVE:
+                for s in target_states:
+                    if s.move_type != move_type:
                         logger.log_error(
-                            f"All states must be the same. First state is {target_states[0].move_type}, but got {state.move_type}"
+                            f"All states must share move_type; got {s.move_type}",
+                            ValueError,
                         )
-                    qpos_list.append(state.qpos)
-                    xpos_list = None
+                qpos_list = torch.stack([s.qpos for s in target_states])  # (B, N, DOF)
+                xpos_list = None
             else:
                 logger.log_error(
-                    f"Unsupported move type for pre-interpolation: {target_states[0].move_type}"
+                    f"Unsupported move type for pre-interpolation: {move_type}"
                 )
 
-            if qpos_list is not None:
-                qpos_list = torch.stack(qpos_list)
-            if xpos_list is not None:
-                xpos_list = torch.stack(xpos_list)
-
             if options.start_qpos is not None:
+                start = options.start_qpos
+                if start.dim() == 1:
+                    start = start.unsqueeze(0)
                 if qpos_list is not None:
-                    qpos_list = torch.cat(
-                        [options.start_qpos.unsqueeze(0), qpos_list], dim=0
-                    )
+                    qpos_list = torch.cat([start.unsqueeze(1), qpos_list], dim=1)
                 if xpos_list is not None:
                     start_xpos = self.robot.compute_fk(
-                        qpos=options.start_qpos.unsqueeze(0),
-                        name=options.control_part,
-                        to_matrix=True,
+                        qpos=start, name=options.control_part, to_matrix=True
                     )
-                    xpos_list = torch.cat([start_xpos, xpos_list], dim=0)
+                    if start_xpos.dim() == 3:
+                        start_xpos = start_xpos.unsqueeze(1)
+                    xpos_list = torch.cat([start_xpos, xpos_list], dim=1)
 
             qpos_interpolated, xpos_interpolated = self.interpolate_trajectory(
                 control_part=options.control_part,
@@ -200,23 +196,17 @@ class MotionGenerator:
                 qpos_list=qpos_list,
                 options=options,
             )
-
             if not options.plan_opts:
-                # Directly return the interpolated trajectory if no further planning is needed
                 return PlanResult(
                     success=True,
                     positions=qpos_interpolated,
                     xpos_list=xpos_interpolated,
                 )
 
-            target_plan_states = []
-            for qpos in qpos_interpolated:
-                target_plan_states.append(
-                    PlanState(
-                        move_type=MoveType.JOINT_MOVE,
-                        qpos=qpos,
-                    )
-                )
+            target_plan_states = [
+                PlanState(move_type=MoveType.JOINT_MOVE, qpos=qpos_interpolated[:, j])
+                for j in range(qpos_interpolated.shape[1])
+            ]
         else:
             target_plan_states = target_states
 
@@ -225,12 +215,9 @@ class MotionGenerator:
                 options.plan_opts = self.planner.default_plan_options()
             else:
                 options.plan_opts = PlanOptions()
-        # Planner-specific options (e.g. NeuralPlanOptions) must be set on
-        # plan_opts explicitly, same as ToppraPlanOptions.
-        result = self.planner.plan(
+        return self.planner.plan(
             target_states=target_plan_states, options=options.plan_opts
         )
-        return result
 
     def estimate_trajectory_sample_count(
         self,
