@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 import torch
@@ -164,9 +166,69 @@ class TestToppraPlanBatched:
             r = planner.plan(states, opts)
             assert r.success.shape == (B,)
             assert r.positions.shape[0] == B
-            # padded rows equal the last real waypoint (held pose)
-            last_real = r.positions[:, r.duration.argmax().int().item(), :]
             assert r.duration.shape == (B,)
+
+            # The env with the SHORTEST duration got tail-padded; its trailing
+            # padded rows must equal its last real waypoint (held pose) and the
+            # padded tail must be constant.
+            shortest_env = int(r.duration.argmin().item())
+            longest_env = int(r.duration.argmax().item())
+            tail = r.positions[shortest_env]  # (max_n, DOF)
+            max_n = tail.shape[0]
+            # Reconstruct n_real for the shortest env the same way the worker does.
+            n_real = max(2, int(math.ceil(r.duration[shortest_env].item() / 0.05)) + 1)
+            # The longest env should not be padded (its n_real == max_n).
+            assert r.positions[longest_env].shape[0] == max_n
+            # Shortest env must actually have been padded (otherwise the test
+            # isn't exercising the tail-pad branch).
+            assert n_real < max_n, "expected shortest env to be tail-padded"
+            held = tail[n_real - 1]  # last real waypoint
+            padded = tail[n_real:]  # all padded rows
+            assert torch.allclose(padded, held.expand(padded.shape))
+        finally:
+            planner.close()
+            sim.destroy()
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()
+
+    def test_plan_batched_pool_path(self):
+        # Exercise the real ProcessPoolExecutor branch (max_workers=2, B=3).
+        from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
+        from embodichain.lab.sim.planners.toppra_planner import (
+            ToppraPlanner,
+            ToppraPlannerCfg,
+            ToppraPlanOptions,
+        )
+        from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+        from embodichain.lab.sim.robots import CobotMagicCfg
+
+        sim = SimulationManager(
+            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+        )
+        sim.add_robot(
+            cfg=CobotMagicCfg.from_dict(
+                {"uid": "p", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
+            )
+        )
+        planner = ToppraPlanner(ToppraPlannerCfg(robot_uid="p", max_workers=2))
+        try:
+            B, dofs = 3, 6
+            wp = torch.zeros(B, dofs)
+            wp[:, 0] = torch.linspace(0.1, 0.5, B)
+            states = [
+                PlanState.from_qpos(torch.zeros(B, dofs)),
+                PlanState.from_qpos(wp),
+            ]
+            opts = ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=12,
+                constraints={"velocity": 1.0, "acceleration": 2.0},
+            )
+            r = planner.plan(states, opts)
+            assert r.success.shape == (B,)
+            assert r.success.all().item()
+            assert r.positions.shape == (B, 12, dofs)
         finally:
             planner.close()
             sim.destroy()

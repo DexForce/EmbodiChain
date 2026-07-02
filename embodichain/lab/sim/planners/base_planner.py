@@ -58,9 +58,7 @@ def _check_batch_consistency(
 ) -> int:
     """Validate that all PlanState tensors share the same leading B and match the robot."""
     if len(target_states) < 2:
-        logger.log_error(
-            "target_states must contain at least 2 waypoints", ValueError
-        )
+        logger.log_error("target_states must contain at least 2 waypoints", ValueError)
     bs = set()
     for s in target_states:
         b = _infer_batch_size([s])
@@ -123,7 +121,9 @@ def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
             target_states = kwargs.get("target_states", args[0] if args else None)
             if target_states is not None and hasattr(self, "robot"):
                 robot_num = getattr(self.robot, "num_instances", None)
-                _check_batch_consistency(target_states, expected_b=robot_num, robot_num_instances=robot_num)
+                _check_batch_consistency(
+                    target_states, expected_b=robot_num, robot_num_instances=robot_num
+                )
             return func(self, *args, **kwargs)
 
         return wrapper
@@ -170,17 +170,17 @@ class BasePlanner(ABC):
         planning algorithm.
 
         Args:
-            target_states: List of dictionaries containing target states
+            target_states: list of :class:`PlanState` waypoints. Tensor fields
+                carry a leading batch dim ``B`` (e.g. ``qpos`` is ``(B, DOF)``).
 
         Returns:
-            PlanResult: An object containing:
-                - success: bool, whether planning succeeded
-                - positions: torch.Tensor (N, DOF), joint positions along trajectory
-                - velocities: torch.Tensor (N, DOF), joint velocities along trajectory
-                - accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory
-                - times: torch.Tensor (N,), time stamps for each point
-                - duration: float, total trajectory duration
-                - error_msg: Optional error message if planning failed
+            PlanResult: An env-batched object containing:
+                - success: torch.Tensor ``(B,)`` bool, per-env success
+                - positions: torch.Tensor ``(B, N, DOF)``, joint positions
+                - velocities: torch.Tensor ``(B, N, DOF)``, joint velocities
+                - accelerations: torch.Tensor ``(B, N, DOF)``, joint accelerations
+                - dt: torch.Tensor ``(B, N)``, per-point time deltas
+                - duration: torch.Tensor ``(B,)``, total trajectory duration per env
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 

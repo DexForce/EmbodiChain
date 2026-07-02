@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+import os
+
 import torch
 import numpy as np
 from concurrent.futures.process import BrokenProcessPool
@@ -208,7 +210,6 @@ class ToppraPlanner(BasePlanner):
     def _get_pool(self, batch_size: int):
         if self._pool is not None:
             return self._pool
-        import os
         import multiprocessing as mp
 
         max_workers = self.cfg.max_workers
@@ -240,11 +241,15 @@ class ToppraPlanner(BasePlanner):
         r"""Execute trajectory planning.
 
         Args:
-            target_states: List of dictionaries containing target states
-            cfg: ToppraPlanOptions
+            target_states: list of :class:`PlanState` waypoints. Tensor fields
+                carry a leading batch dim ``B``: ``qpos`` is ``(B, DOF)``.
+            options: :class:`ToppraPlanOptions` with constraints and sampling.
 
         Returns:
-            PlanResult containing the planned trajectory details.
+            PlanResult containing the planned trajectory details. All tensor
+            fields are env-batched with leading dim ``B``: ``success`` ``(B,)``,
+            ``positions``/``velocities``/``accelerations`` ``(B, N, DOF)``,
+            ``dt`` ``(B, N)``, ``duration`` ``(B,)``.
         """
         for i, t in enumerate(target_states):
             if t.qpos is None:
@@ -266,8 +271,6 @@ class ToppraPlanner(BasePlanner):
         ]
 
         # Inline fallback for B==1 or max_workers==1
-        import os
-
         max_workers = self.cfg.max_workers
         use_inline = (
             (b == 1)
@@ -278,22 +281,55 @@ class ToppraPlanner(BasePlanner):
             results = [_toppra_solve_one_env(*a) for a in args_per_env]
         else:
             pool = self._get_pool(b)
+            results = [None] * b
             try:
                 futures = [pool.submit(_toppra_solve_one_env, *a) for a in args_per_env]
-                results = []
-                for fut in futures:
+                broken = False
+                for i, fut in enumerate(futures):
                     try:
-                        results.append(fut.result())
+                        results[i] = fut.result()
+                    except BrokenProcessPool:
+                        logger.log_warning(
+                            "TOPPRA process pool broke; returning failure."
+                        )
+                        self.close()
+                        broken = True
+                        break
                     except Exception:
-                        results.append(_empty_failure(dofs))
+                        results[i] = _empty_failure(dofs)
+                if broken:
+                    for i in range(b):
+                        if results[i] is None:
+                            results[i] = _empty_failure(dofs)
             except BrokenProcessPool:
+                # pool was already broken at submit time
                 logger.log_warning("TOPPRA process pool broke; returning failure.")
                 self.close()
-                results = [_empty_failure(dofs) for _ in range(b)]
+                for i in range(b):
+                    if results[i] is None:
+                        results[i] = _empty_failure(dofs)
 
         return self._assemble_batched_result(results, dofs)
 
     def _assemble_batched_result(self, results: list[dict], dofs: int) -> PlanResult:
+        """Stack per-env TOPPRA results into a batched :class:`PlanResult`.
+
+        Each entry of ``results`` is the dict returned by
+        :func:`_toppra_solve_one_env`. Env trajectories may have different
+        lengths (``n``); this method pads shorter trajectories out to the
+        longest by repeating their final waypoint (held pose) with zero
+        velocity and acceleration, so every output tensor shares the same
+        ``(B, N, DOF)`` / ``(B, N)`` shape.
+
+        Args:
+            results: list of per-env result dicts (length ``B``).
+            dofs: per-env degrees of freedom.
+
+        Returns:
+            PlanResult with env-batched tensors (``success`` ``(B,)``,
+            ``positions``/``velocities``/``accelerations`` ``(B, N, DOF)``,
+            ``dt`` ``(B, N)``, ``duration`` ``(B,)``).
+        """
         b = len(results)
         max_n = max(r["n"] for r in results)
         positions = np.zeros((b, max_n, dofs), dtype=np.float32)
