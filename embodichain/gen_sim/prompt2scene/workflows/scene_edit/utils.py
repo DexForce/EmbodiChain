@@ -547,6 +547,7 @@ def build_scene_edit_layout(
     resolved_intent: dict[str, Any],
     generated_assets: list[dict[str, Any]],
     output_root: Path,
+    optimize_new_objects_only: bool = False,
 ) -> dict[str, Any]:
     """Build an edited 2D layout on top of the previous scene state."""
     support_region = extract_scene_edit_support_region(scene_state)
@@ -586,6 +587,7 @@ def build_scene_edit_layout(
     placement_by_new_id: dict[str, dict[str, Any]] = {}
     added_ids: list[str] = []
     replaced_ids: list[str] = []
+    explicit_reposition_replace_ids: set[str] = set()
     for operation in operations:
         op_type = str(operation.get("type", "")).strip()
         new_id = str(operation.get("new_object_temp_id", "")).strip()
@@ -599,6 +601,13 @@ def build_scene_edit_layout(
             if target_id:
                 replacement_target_by_new_id[new_id] = target_id
                 replaced_ids.append(new_id)
+                placement_type = (
+                    str(placement.get("type", "")).strip()
+                    if isinstance(placement, dict)
+                    else ""
+                )
+                if placement_type not in {"", "preserve_target"}:
+                    explicit_reposition_replace_ids.add(new_id)
         elif op_type == "add":
             added_ids.append(new_id)
 
@@ -732,6 +741,14 @@ def build_scene_edit_layout(
             for object_id in all_object_ids
             if object_id in updated_grids and object_id in initial_centers_all
         }
+        fixed_object_ids: list[str] = []
+        if optimize_new_objects_only:
+            movable_ids = set(added_ids) | explicit_reposition_replace_ids
+            fixed_object_ids = [
+                object_id
+                for object_id in all_object_ids
+                if object_id not in movable_ids
+            ]
         optimized_layout = LayoutManager.optimize_text_layout_slp(
             object_ids=all_object_ids,
             xy_sizes={object_id: np.asarray(final_items[object_id]["size_xy"], dtype=np.float64) for object_id in all_object_ids},
@@ -740,33 +757,35 @@ def build_scene_edit_layout(
             front_of_edges=front_of_edges,
             grid_spring_targets=grid_spring_targets,
             padding_ratio=0.08,
+            fixed_object_ids=fixed_object_ids,
         )
         all_optimized = {
             object_id: np.asarray(center, dtype=np.float64)
             for object_id, center in optimized_layout.get("centers", {}).items()
         }
-        anchor_ids = [
-            object_id
-            for object_id in all_object_ids
-            if object_id not in added_ids and object_id in all_optimized
-        ]
-        if not anchor_ids:
+        translation = np.zeros(2, dtype=np.float64)
+        if not optimize_new_objects_only:
             anchor_ids = [
                 object_id
                 for object_id in all_object_ids
-                if object_id in all_optimized
+                if object_id not in added_ids and object_id in all_optimized
             ]
-        translation = np.zeros(2, dtype=np.float64)
-        if anchor_ids:
-            translation = np.mean(
-                np.vstack(
-                    [
-                        initial_centers_all[object_id] - all_optimized[object_id]
-                        for object_id in anchor_ids
-                    ]
-                ),
-                axis=0,
-            )
+            if not anchor_ids:
+                anchor_ids = [
+                    object_id
+                    for object_id in all_object_ids
+                    if object_id in all_optimized
+                ]
+            if anchor_ids:
+                translation = np.mean(
+                    np.vstack(
+                        [
+                            initial_centers_all[object_id] - all_optimized[object_id]
+                            for object_id in anchor_ids
+                        ]
+                    ),
+                    axis=0,
+                )
         for object_id, center in all_optimized.items():
             optimized_centers[object_id] = np.asarray(
                 clamp_center_to_support_region(
@@ -797,6 +816,7 @@ def build_scene_edit_layout(
             "added_object_count": len(initialized_added_centers),
             "initialized_added_object_count": len(initialized_added_centers),
             "optimized_object_count": len(all_object_ids),
+            "optimize_new_objects_only": optimize_new_objects_only,
             "added_layout_optimization": optimization_metadata,
         },
     }

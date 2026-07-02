@@ -250,6 +250,7 @@ def generate_edit_assets_node(
 
 def optimize_edit_layout_node(
     *,
+    request: SceneEditRequest,
     intent_analysis: dict[str, Any],
     generated_assets: dict[str, Any],
     output_dir: Path,
@@ -268,6 +269,7 @@ def optimize_edit_layout_node(
         resolved_intent=resolved_intent,
         generated_assets=generated_asset_items,
         output_root=output_dir.parent,
+        optimize_new_objects_only=request.optimize_new_objects_only,
     )
     return {
         "status": layout.get("status", "ok"),

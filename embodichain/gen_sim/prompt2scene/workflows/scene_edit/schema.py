@@ -30,6 +30,7 @@ class SceneEditRequest:
     output_root: Path
     prompt: str
     cleanup_scene_edit_dir: bool = True
+    optimize_new_objects_only: bool = False
 
 
 @dataclass(frozen=True)
