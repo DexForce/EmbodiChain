@@ -182,6 +182,7 @@ def generate_action_agent_config_from_project(
     preserve_source_scene_geometry: bool = False,
     source_scene_z_rotation_degrees: float = 0.0,
     source_mesh_x_rotation_degrees: float = 0.0,
+    inside_container_slot_distance_scale: float = 1.0,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
@@ -235,6 +236,10 @@ def generate_action_agent_config_from_project(
             normalized GLB/GLTF meshes. Keep this at ``0`` for the legacy
             image2scene path; prompt2scene uses ``90`` to match the action-agent
             runtime mesh frame.
+        inside_container_slot_distance_scale: Multiplier for automatically
+            generated inside-container slot offsets when multiple moved objects
+            share one container. Values below ``1`` place release points closer
+            to the container center.
         target_replacements: Optional prompt-generated GLB replacements for
             selected default basket target objects. Each replacement writes to
             ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
@@ -307,6 +312,9 @@ def generate_action_agent_config_from_project(
                 source_scene_body_scale_mode=source_scene_body_scale_mode,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+                inside_container_slot_distance_scale=(
+                    inside_container_slot_distance_scale
+                ),
             )
             _validate_stacking_bundle(bundle, spec)
             return _finalize_and_write_bundle(
@@ -376,6 +384,7 @@ def generate_action_agent_config_from_project(
             mesh_normalizer=mesh_normalizer,
             preserve_source_scene_geometry=preserve_source_scene_geometry,
             source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+            inside_container_slot_distance_scale=inside_container_slot_distance_scale,
         )
         _validate_relative_bundle(bundle, spec)
         return _finalize_and_write_bundle(
@@ -1272,6 +1281,7 @@ def _build_relative_placement_bundle(
     mesh_normalizer: MeshFrameNormalizer | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
+    inside_container_slot_distance_scale: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     background_objects = [
@@ -1398,7 +1408,11 @@ def _build_relative_placement_bundle(
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     if spec.intent == "place_relative":
         spec = _with_self_relative_absolute_targets(spec, gym_config)
-        spec = _with_inside_container_slot_offsets(spec, gym_config)
+        spec = _with_inside_container_slot_offsets(
+            spec,
+            gym_config,
+            slot_distance_scale=inside_container_slot_distance_scale,
+        )
         spec = _with_on_surface_release_offsets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,

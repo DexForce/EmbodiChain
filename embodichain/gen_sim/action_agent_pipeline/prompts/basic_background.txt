@@ -9,8 +9,8 @@ All directions below are defined strictly in the robot base frame:
 
 * Moving forward decreases x
 * Moving backward increases x
-* Moving left decreases y
-* Moving right increases y
+* Moving left increases y
+* Moving right decreases y
 * Moving up increases z
 * Moving down decreases z
 

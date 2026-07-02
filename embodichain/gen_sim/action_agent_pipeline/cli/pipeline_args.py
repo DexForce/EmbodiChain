@@ -329,6 +329,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--inside-container-slot-distance-scale",
+        "--inside_container_slot_distance_scale",
+        dest="inside_container_slot_distance_scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale factor for generated inside-container release slot offsets "
+            "when multiple objects are placed into one container. Values below "
+            "1.0 move release points closer to the container center. Defaults "
+            "to 1.0."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement",
         "--target-replacement",
         dest="target_replacement",

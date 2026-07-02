@@ -67,7 +67,7 @@ _ON_RELEASE_Z_OFFSET = 0.2
 _ON_SURFACE_RELEASE_CLEARANCE = 0.003
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
-_DEFAULT_ARM_SLOT_SIDE_ORDER = {"left": 0, "right": 1}
+_DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER = {"right": 0, "left": 1}
 
 
 def _relative_release_offset(relation: str) -> list[float]:
@@ -188,6 +188,8 @@ def _with_self_relative_absolute_target(
 def _with_inside_container_slot_offsets(
     spec: _RelativePlacementSpec,
     gym_config: Mapping[str, Any],
+    *,
+    slot_distance_scale: float = 1.0,
 ) -> _RelativePlacementSpec:
     inside_groups: dict[str, list[int]] = {}
     for index, placement in enumerate(spec.placements):
@@ -211,7 +213,10 @@ def _with_inside_container_slot_offsets(
     slot_offsets_by_index: dict[int, list[float]] = {}
     for reference_uid, indices in inside_groups.items():
         container_config = object_configs.get(reference_uid)
-        axis, slot_distance = _inside_container_slot_axis_and_distance(container_config)
+        axis, slot_distance = _inside_container_slot_axis_and_distance(
+            container_config,
+            slot_distance_scale=slot_distance_scale,
+        )
         ordered_indices = _order_inside_container_slot_indices(
             indices,
             placements=spec.placements,
@@ -605,7 +610,10 @@ def _lay_flat_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
 
 def _inside_container_slot_axis_and_distance(
     container_config: Mapping[str, Any] | None,
+    *,
+    slot_distance_scale: float = 1.0,
 ) -> tuple[str, float]:
+    slot_distance_scale = _validate_slot_distance_scale(slot_distance_scale)
     extents = (
         _mesh_config_world_xy_extents(container_config)
         if container_config is not None
@@ -625,7 +633,21 @@ def _inside_container_slot_axis_and_distance(
         axis_extent * _CONTAINER_SLOT_MAX_FRACTION,
         _CONTAINER_SLOT_MAX_OFFSET,
     )
-    return axis, round(float(slot_distance), 6)
+    return axis, round(float(slot_distance) * slot_distance_scale, 6)
+
+
+def _validate_slot_distance_scale(slot_distance_scale: float) -> float:
+    try:
+        scale = float(slot_distance_scale)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "inside_container_slot_distance_scale must be a positive number."
+        ) from exc
+    if scale <= 0.0:
+        raise ValueError(
+            "inside_container_slot_distance_scale must be a positive number."
+        )
+    return scale
 
 
 def _inside_container_slot_axis(x_extent: float, y_extent: float) -> str:
@@ -649,7 +671,7 @@ def _order_inside_container_slot_indices(
     side_order: Mapping[str, int] | None = None,
 ) -> list[int]:
     if axis == "y":
-        resolved_side_order = dict(side_order or _DEFAULT_ARM_SLOT_SIDE_ORDER)
+        resolved_side_order = dict(side_order or _DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER)
         return sorted(
             indices,
             key=lambda index: (
@@ -741,8 +763,7 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
     return {
         "mode": "dual_arm_object_manipulation",
         "manipulations": [
-            _relative_placement_summary(placement)
-            for placement in spec.placements
+            _relative_placement_summary(placement) for placement in spec.placements
         ],
     }
 

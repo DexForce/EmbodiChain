@@ -152,6 +152,17 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--inside_container_slot_distance_scale",
+        "--inside-container-slot-distance-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale factor for generated inside-container release slot offsets "
+            "when multiple objects are placed into one container. Values below "
+            "1.0 move release points closer to the container center."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement",
         "--target-replacement",
         dest="target_replacement",
@@ -267,6 +278,7 @@ def cli() -> None:
         preserve_source_scene_geometry=args.preserve_source_scene_geometry,
         source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
         source_mesh_x_rotation_degrees=args.source_mesh_x_rotation_degrees,
+        inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,

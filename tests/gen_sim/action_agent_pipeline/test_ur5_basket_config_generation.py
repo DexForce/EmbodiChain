@@ -3011,6 +3011,82 @@ def test_dual_inside_same_container_uses_container_long_axis_slots(
     assert "container XY long axis" in task_prompt
 
 
+def test_dual_inside_y_axis_slots_keep_each_arm_on_its_container_side(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_y_axis_container_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_left",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "left",
+                },
+                {
+                    "moved_object": "apple_right",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "right",
+                },
+            ],
+            "task_prompt_summary": "Use both arms to put both apples into basket_3.",
+            "basic_background_notes": "Both apples share the same target container.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_y_axis_dual_inside_agent",
+        task_description="左臂把左边苹果放进篮子，右臂把右边苹果放进篮子",
+        inside_container_slot_distance_scale=0.5,
+        prewarm_coacd_cache=False,
+    )
+
+    assert _stable_summary(paths.summary) == {
+        "mode": "dual_arm_object_manipulation",
+        "manipulations": [
+            {
+                "moved_object": "apple_left",
+                "reference_object": "wicker_basket",
+                "relation": "inside",
+                "active_arm": "left_arm",
+                "release_offset": [0.0, 0.02, 0.12],
+            },
+            {
+                "moved_object": "apple_right",
+                "reference_object": "wicker_basket",
+                "relation": "inside",
+                "active_arm": "right_arm",
+                "release_offset": [0.0, -0.02, 0.12],
+            },
+        ],
+    }
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    for text in (task_prompt, atom_actions):
+        assert (
+            '"robot_name":"left_arm","control":"arm","target_pose":'
+            '{"reference":"object","obj_name":"wicker_basket",'
+            '"offset":[0.0,0.02,0.12]}' in text
+        )
+        assert (
+            '"robot_name":"right_arm","control":"arm","target_pose":'
+            '{"reference":"object","obj_name":"wicker_basket",'
+            '"offset":[0.0,-0.02,0.12]}' in text
+        )
+
+
 def test_task_description_rejects_dual_relative_same_arm(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3392,6 +3468,57 @@ def _write_project(project_dir: Path) -> None:
                 "mesh_assets/apple/apple_2/apple_2.glb",
                 [-0.39, -0.12, 0.76],
                 [0.0, 0.0, 160.0],
+            ),
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_y_axis_container_project(project_dir: Path) -> None:
+    mesh_specs = {
+        "mesh_assets/table/table_0.glb": _default_mesh_vertices(),
+        "mesh_assets/basket/basket_3/basket_3.glb": [
+            (-0.03, -0.08, 0.0),
+            (0.03, -0.08, 0.0),
+            (0.0, 0.08, 0.0),
+        ],
+        "mesh_assets/apple/apple_left/apple_left.glb": _default_mesh_vertices(),
+        "mesh_assets/apple/apple_right/apple_right.glb": _default_mesh_vertices(),
+    }
+    for rel_path, vertices in mesh_specs.items():
+        _write_minimal_glb(project_dir / rel_path, vertices)
+
+    gym_config = {
+        "id": "Image2Tabletop-y-axis-container-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "basket_3",
+                "mesh_assets/basket/basket_3/basket_3.glb",
+                [0.0, 0.0, 0.75],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "apple_left",
+                "mesh_assets/apple/apple_left/apple_left.glb",
+                [0.0, 0.24, 0.76],
+                [0.0, 0.0, 0.0],
+            ),
+            _mesh_object(
+                "apple_right",
+                "mesh_assets/apple/apple_right/apple_right.glb",
+                [0.0, -0.24, 0.76],
+                [0.0, 0.0, 0.0],
             ),
         ],
     }
