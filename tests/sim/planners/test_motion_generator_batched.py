@@ -60,3 +60,21 @@ class TestGenerateBatched:
         assert (
             kwargs["target_states"] is states or planner.plan.call_args[0][0] is states
         )
+
+
+class TestInterpolateBatched:
+    def test_interpolate_joint_space_batched(self):
+        planner = _mock_planner(b=3, n=10, dofs=6)
+        mg = MotionGenerator.__new__(MotionGenerator)
+        mg.planner = planner
+        mg.robot = planner.robot
+        mg.device = torch.device("cpu")
+        B, N, D = 3, 4, 6
+        qpos_list = torch.zeros(B, N, D)
+        qpos_interpolated, _ = mg.interpolate_trajectory(
+            control_part="arm",
+            xpos_list=None,
+            qpos_list=qpos_list,
+            options=MotionGenOptions(is_linear=False, interpolate_nums=10),
+        )
+        assert qpos_interpolated.shape[0] == B

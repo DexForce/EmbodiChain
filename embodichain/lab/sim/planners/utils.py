@@ -31,6 +31,7 @@ __all__ = [
     "PlanResult",
     "calculate_point_allocations",
     "interpolate_xpos",
+    "interpolate_xpos_batched",
 ]
 
 
@@ -248,6 +249,38 @@ def interpolate_xpos(
     interp_poses[:, :3, :3] = interp_rots
     interp_poses[:, :3, 3] = interp_trans
     return interp_poses
+
+
+def interpolate_xpos_batched(
+    start_xpos: torch.Tensor, end_xpos: torch.Tensor, num_samples: int
+) -> torch.Tensor:
+    """Batched pose interpolation.
+
+    Args:
+        start_xpos: Start poses, shape ``(B, 4, 4)``.
+        end_xpos: End poses, shape ``(B, 4, 4)``.
+        num_samples: Number of samples to generate (clamped to at least 2).
+
+    Returns:
+        Interpolated poses, shape ``(B, num_samples, 4, 4)``.
+    """
+    num_samples = max(2, int(num_samples))
+    B = start_xpos.shape[0]
+    out = torch.eye(4, dtype=start_xpos.dtype, device=start_xpos.device).repeat(
+        B, num_samples, 1, 1
+    )
+    # ``scipy.spatial.transform.Slerp`` interpolates a single path, so we loop
+    # over envs. B is typically small (number of parallel envs), so this is fine.
+    for b in range(B):
+        poses = interpolate_xpos(
+            start_xpos[b].detach().cpu().numpy(),
+            end_xpos[b].detach().cpu().numpy(),
+            num_samples,
+        )
+        out[b] = torch.as_tensor(
+            poses, dtype=start_xpos.dtype, device=start_xpos.device
+        )
+    return out
 
 
 def calculate_point_allocations(
