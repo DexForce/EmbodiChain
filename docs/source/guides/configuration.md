@@ -146,7 +146,7 @@ When a training config references a gym config (via `trainer.gym_config`), the n
     "env": {
         "num_envs": 4,
         "sim_cfg": {
-            "sim_device": "cuda:0",
+            "device": "cuda:0",
             "headless": true
         },
         "robot": {

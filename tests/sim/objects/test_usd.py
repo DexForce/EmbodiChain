@@ -32,21 +32,21 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 
-NUM_ARENAS = 1
+NUM_ARENAS = 2
 
 
 class BaseUsdTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device):
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=device,
             num_envs=NUM_ARENAS,
         )
         self.sim = SimulationManager(config)
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
+        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
             self.sim.init_gpu_physics()
 
     def test_import_rigid(self):
@@ -73,6 +73,9 @@ class BaseUsdTest:
             default_attr.min_position_iters,
             default_attr.min_velocity_iters,
         )
+        assert len(sugar_box._entities) == NUM_ARENAS
+        handles = {entity.get_native_handle() for entity in sugar_box._entities}
+        assert len(handles) == NUM_ARENAS
 
     def test_import_articulation(self):
         default_drive = JointDrivePropertiesCfg()
@@ -178,13 +181,13 @@ class BaseUsdTest:
         gc.collect()
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+# @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestUsdCPU(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+# @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestUsdCUDA(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cuda")

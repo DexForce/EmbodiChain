@@ -91,7 +91,7 @@ python -m embodichain preview-asset \
 | ``--body_type`` | ``kinematic`` | Body type for rigid objects: ``dynamic``, ``kinematic``, or ``static`` |
 | ``--use_usd_properties`` | ``False`` | Use physical properties from the USD file |
 | ``--fix_base`` | ``True`` | Fix the base of articulations |
-| ``--sim_device`` | ``cpu`` | Simulation device |
+| ``--device`` | ``cpu`` | Simulation device |
 | ``--headless`` | ``False`` | Run without rendering window |
 | ``--renderer`` | ``hybrid`` | Renderer backend: ``legacy``, ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |

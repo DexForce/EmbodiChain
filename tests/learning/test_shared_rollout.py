@@ -186,7 +186,7 @@ def test_embodied_env_writes_next_fields_into_external_rollout():
     env_cfg.num_envs = 2
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=True,
-        sim_device=torch.device("cpu"),
+        device=torch.device("cpu"),
         render_cfg=RenderCfg(renderer="hybrid"),
         gpu_id=0,
     )

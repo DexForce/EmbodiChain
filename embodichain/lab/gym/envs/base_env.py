@@ -129,15 +129,16 @@ class BaseEnv(gym.Env):
 
         self._setup_scene(**kwargs)
 
-        # TODO: To be removed.
-        if self.device.type == "cuda":
+        if self.sim.is_default_backend and self.sim.is_use_gpu_physics:
             self.sim.init_gpu_physics()
+        elif self.sim.is_newton_backend:
+            self.sim.finalize_newton_physics()
 
         if not self.sim_cfg.headless:
             self.sim.open_window()
 
         self._elapsed_steps = torch.zeros(
-            self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
+            self._num_envs, dtype=torch.int32, device=self.sim_cfg.device
         )
 
         # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
@@ -250,7 +251,7 @@ class BaseEnv(gym.Env):
         self.sim_cfg.headless = headless
 
         logger.log_info(
-            f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
+            f"Initializing {self.num_envs} environments on {self.sim_cfg.device}."
         )
 
         self.robot = self._setup_robot(**kwargs)

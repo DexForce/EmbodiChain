@@ -25,7 +25,11 @@ import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    RigidBodyAttributesCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -52,10 +56,11 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=1,
         arena_space=3.0,
     )

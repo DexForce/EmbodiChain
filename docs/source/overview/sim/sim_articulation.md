@@ -77,7 +77,7 @@ from embodichain.lab.sim.objects import Articulation, ArticulationCfg
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_config=sim_cfg)
 
 # 2. Configure Articulation

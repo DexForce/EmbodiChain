@@ -15,13 +15,16 @@ The simulation is configured using the {class}`SimulationManagerCfg` class.
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
 sim_config = SimulationManagerCfg(
     width=1920,               # Window width
     height=1080,              # Window height
     num_envs=10,              # Number of parallel environments
-    physics_dt=0.01,          # Physics time step
-    sim_device="cpu",         # Simulation device ("cpu" or "cuda:0", etc.)
+    device="cpu",             # Simulation device ("cpu" or "cuda:0", etc.)
+    physics_cfg=DefaultPhysicsCfg(
+        physics_dt=0.01,      # Physics time step
+    ),
     arena_space=5.0           # Spacing between environments
 )
 ```
@@ -39,14 +42,20 @@ sim_config = SimulationManagerCfg(
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
-| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
-| `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
-| `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
-| `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
+| `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 
 ### Physics Configuration
 
-The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parameters.
+Use {class}`~cfg.DefaultPhysicsCfg` for the default PhysX backend or {class}`~cfg.NewtonPhysicsCfg` for Newton. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
+
+All physics backends inherit these base parameters from {class}`~cfg.PhysicsCfg`:
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
+
+The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend physics simulation parameters.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -190,7 +199,7 @@ while True:
 
 In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
 
-> When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
+> When in automatic update mode, user are recommanded to use CPU `device` for simulation.
 
 
 ## Mainly used methods
@@ -208,6 +217,34 @@ In this mode, the physics simulation stepping is automatically handling by the p
 - To get specific instance: `SimulationManager.get_instance(instance_id)`.
 
 > Currently, multiple instances are not supported for ray tracing rendering backend. Good news is that we are working on adding this feature in future releases.
+
+
+## Newton Physics Backend
+
+EmbodiChain supports the DexSim Newton physics backend as an alternative to the default PhysX backend. Select the Newton backend by passing a `NewtonPhysicsCfg` to `physics_cfg`:
+
+```python
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+sim_config = SimulationManagerCfg(
+    physics_cfg=NewtonPhysicsCfg(),
+)
+```
+
+### Supported Runtime Operations
+
+The Newton backend supports runtime mutation of the following physical properties on rigid objects:
+
+| Property | `get_*` | `set_*` | Notes |
+| :--- | :---: | :---: | :--- |
+| Mass | ✅ | ✅ | Per-body mass via batch GPU API |
+| Friction | ✅ | ✅ | Dynamic friction coefficient |
+| Inertia | ✅ | ✅ | Diagonal inertia tensor (3-vector) |
+| Restitution | ✅ | ✅ | Bounce coefficient |
+| Damping | ✅ | ❌ | Read from initial metadata only |
+| Body Type | ✅ | ❌ | Cannot change dynamic ↔ kinematic at runtime |
+| Bulk `set_attrs` | — | ❌ | Use individual setters instead |
 
 
 For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
