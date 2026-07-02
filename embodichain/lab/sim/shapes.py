@@ -80,6 +80,8 @@ class ShapeCfg:
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
                 if key == "visual_material" and isinstance(value, dict):
+                    from embodichain.lab.sim.material import VisualMaterialCfg
+
                     setattr(
                         cfg,
                         key,
