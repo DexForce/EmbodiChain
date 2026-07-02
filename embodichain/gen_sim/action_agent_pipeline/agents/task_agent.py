@@ -25,6 +25,7 @@ from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBas
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
     normalize_json_content,
 )
+from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.gen_sim.action_agent_pipeline.prompts import TaskPrompt
 from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.logger import log_info
@@ -58,34 +59,51 @@ class TaskAgent(AgentBase):
         )
         file_path = Path(log_dir) / "agent_task_graph.json"
         metadata_path = file_path.with_suffix(".metadata.json")
-        prompt = getattr(TaskPrompt, self.prompt_name)(**kwargs)
-        prompt_hash = _stable_text_hash(prompt)
+        with timing_scope(
+            "action_agent.task_graph.prompt_build",
+            metadata={"prompt_name": self.prompt_name},
+        ):
+            prompt = getattr(TaskPrompt, self.prompt_name)(**kwargs)
+            prompt_hash = _stable_text_hash(prompt)
 
-        if (
-            not kwargs.get("regenerate", False)
-            and file_path.exists()
-            and _metadata_matches(
+        with timing_scope(
+            "action_agent.task_graph.cache_lookup",
+            metadata={"regenerate": bool(kwargs.get("regenerate", False))},
+        ):
+            cache_hit = (
+                not kwargs.get("regenerate", False)
+                and file_path.exists()
+                and _metadata_matches(
+                    metadata_path,
+                    prompt_hash=prompt_hash,
+                    prompt_name=self.prompt_name,
+                    task_name=self.task_name,
+                )
+            )
+
+        if cache_hit:
+            log_info(f"Task graph already exists at {file_path}.")
+            with timing_scope("action_agent.task_graph.cache_read"):
+                return load_txt(file_path)
+
+        with timing_scope(
+            "action_agent.task_graph.llm_invoke",
+            metadata={"prompt_name": self.prompt_name},
+        ):
+            response = self.llm.invoke(prompt)
+        log_info(f"Task agent output:\n{response.content}", color="green")
+
+        with timing_scope("action_agent.task_graph.output_parse"):
+            content = normalize_json_content(response.content)
+        with timing_scope("action_agent.task_graph.cache_write"):
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            _write_metadata(
                 metadata_path,
                 prompt_hash=prompt_hash,
                 prompt_name=self.prompt_name,
                 task_name=self.task_name,
             )
-        ):
-            log_info(f"Task graph already exists at {file_path}.")
-            return load_txt(file_path)
-
-        response = self.llm.invoke(prompt)
-        log_info(f"Task agent output:\n{response.content}", color="green")
-
-        content = normalize_json_content(response.content)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
-        _write_metadata(
-            metadata_path,
-            prompt_hash=prompt_hash,
-            prompt_name=self.prompt_name,
-            task_name=self.task_name,
-        )
         log_info(f"Generated task graph saved to {file_path}")
 
         return content

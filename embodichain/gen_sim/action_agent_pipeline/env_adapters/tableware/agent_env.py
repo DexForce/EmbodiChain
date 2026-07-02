@@ -378,13 +378,20 @@ class AgenticGenSimEnv(EmbodiedEnv):
         )
 
         logger.log_info("Start task graph generation.", color="green")
-        task_agent_input = self.task_agent.get_composed_observations(
-            env=self,
-            regenerate=regenerate,
-            observations=self.get_obs_for_agent(),
-            **kwargs,
-        )
-        task_graph = self.task_agent.generate(**task_agent_input)
+        with timing_scope(
+            "action_agent.task_graph.total",
+            metadata={"regenerate": bool(regenerate)},
+        ):
+            with timing_scope("action_agent.task_graph.observe"):
+                observations = self.get_obs_for_agent()
+            with timing_scope("action_agent.task_graph.compose_input"):
+                task_agent_input = self.task_agent.get_composed_observations(
+                    env=self,
+                    regenerate=regenerate,
+                    observations=observations,
+                    **kwargs,
+                )
+            task_graph = self.task_agent.generate(**task_agent_input)
 
         logger.log_info("Start graph compilation.", color="blue")
         compile_agent_input = self.compile_agent.get_composed_observations(

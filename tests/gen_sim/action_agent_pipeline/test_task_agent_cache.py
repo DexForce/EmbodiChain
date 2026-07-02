@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +27,10 @@ from embodichain.gen_sim.action_agent_pipeline.agents import (
 from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
 from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import CompileAgent
 from embodichain.gen_sim.action_agent_pipeline.agents.task_agent import TaskAgent
+from embodichain.gen_sim.action_agent_pipeline.utils.timing import (
+    configure_timing_tracking,
+    disable_timing_tracking,
+)
 
 
 class _FakeLLM:
@@ -91,6 +96,48 @@ def test_task_agent_cache_hashes_prompt_value_objects(tmp_path, monkeypatch) -> 
     agent.generate(log_dir=tmp_path, task="a")
     agent.generate(log_dir=tmp_path, task="a")
 
+    assert llm.calls == 1
+
+
+def test_task_agent_records_generation_timing(tmp_path, monkeypatch) -> None:
+    disable_timing_tracking()
+    timing_path = tmp_path / "timing.jsonl"
+    configure_timing_tracking(
+        timing_path=timing_path,
+        run_id="test-run",
+        process_name="pytest",
+        reset=True,
+    )
+    monkeypatch.setattr(
+        task_agent_module.TaskPrompt,
+        "timed_prompt",
+        staticmethod(lambda **kwargs: f"task={kwargs['task']}"),
+        raising=False,
+    )
+    llm = _FakeLLM()
+    agent = TaskAgent(
+        llm,
+        prompt_name="timed_prompt",
+        prompt_kwargs={},
+        task_name="TimedTask",
+    )
+
+    try:
+        agent.generate(log_dir=tmp_path, task="a")
+        agent.generate(log_dir=tmp_path, task="a")
+    finally:
+        disable_timing_tracking()
+
+    stages = [
+        json.loads(line)["stage"]
+        for line in timing_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert stages.count("action_agent.task_graph.prompt_build") == 2
+    assert stages.count("action_agent.task_graph.cache_lookup") == 2
+    assert stages.count("action_agent.task_graph.llm_invoke") == 1
+    assert stages.count("action_agent.task_graph.output_parse") == 1
+    assert stages.count("action_agent.task_graph.cache_write") == 1
+    assert stages.count("action_agent.task_graph.cache_read") == 1
     assert llm.calls == 1
 
 
