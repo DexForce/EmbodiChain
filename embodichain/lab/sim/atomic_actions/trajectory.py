@@ -23,9 +23,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from embodichain.lab.sim.planners import PlanState
+from embodichain.lab.sim.planners import PlanState, PlanResult, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.utils import logger
 
@@ -318,8 +319,43 @@ class TrajectoryBuilder:
         *,
         control_part: str,
         arm_dof: int,
-    ) -> tuple[bool, torch.Tensor]:
-        """Plan batched arm trajectories for all environments."""
+        cfg: "ActionCfg | None" = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Plan batched arm trajectories for all environments.
+
+        Returns ``(success:(B,), trajectory:(B, n_waypoints, arm_dof))``.
+        ``cfg.motion_source`` selects 'ik_interp' (default) or 'motion_gen'.
+        """
+        motion_source = (
+            getattr(cfg, "motion_source", "ik_interp") if cfg else "ik_interp"
+        )
+        if motion_source == "motion_gen":
+            return self._plan_motion_gen(
+                target_states_list,
+                start_qpos,
+                n_waypoints,
+                control_part=control_part,
+                arm_dof=arm_dof,
+                cfg=cfg,
+            )
+        return self._plan_ik_interp(
+            target_states_list,
+            start_qpos,
+            n_waypoints,
+            control_part=control_part,
+            arm_dof=arm_dof,
+        )
+
+    def _plan_ik_interp(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Batched IK + interpolation fallback trajectory source."""
         n_envs = start_qpos.shape[0]
         n_state = len(target_states_list[0])
         xpos_traj = torch.zeros(
@@ -332,6 +368,7 @@ class TrajectoryBuilder:
         trajectory = torch.zeros(
             (n_envs, n_state, arm_dof), dtype=torch.float32, device=self.device
         )
+        success = torch.ones(n_envs, dtype=torch.bool, device=self.device)
         qpos_seed = start_qpos
         for j in range(n_state):
             is_success, qpos = self.robot.compute_ik(
@@ -341,14 +378,118 @@ class TrajectoryBuilder:
                 logger.log_warning(
                     f"Failed to compute IK for target state {j} in some environments."
                 )
-                return False, trajectory
+                success = success & is_success
             trajectory[:, j] = qpos
             qpos_seed = qpos
         trajectory = torch.concatenate([start_qpos.unsqueeze(1), trajectory], dim=1)
+        # Failed envs: hold start qpos across all waypoints
+        if not success.all():
+            held = start_qpos.unsqueeze(1).repeat(1, trajectory.shape[1], 1)
+            trajectory = torch.where(success[:, None, None], trajectory, held)
         interp = interpolate_with_distance(
             trajectory=trajectory, interp_num=n_waypoints, device=self.device
         )
-        return True, interp
+        return success, interp
+
+    def _plan_motion_gen(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+        cfg: "ActionCfg | None",
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Motion-generator trajectory source."""
+        if self.motion_generator is None:
+            logger.log_error(
+                "motion_source='motion_gen' requires a MotionGenerator on the engine",
+                ValueError,
+            )
+        n_envs = start_qpos.shape[0]
+        plan_states = self._to_batched_plan_states(target_states_list, n_envs)
+        plan_opts = self._build_plan_opts(cfg, n_waypoints)
+        result: PlanResult = self.motion_generator.generate(
+            plan_states,
+            MotionGenOptions(
+                start_qpos=start_qpos,
+                control_part=control_part,
+                plan_opts=plan_opts,
+                is_interpolate=True,
+            ),
+        )
+        success = (
+            result.success
+            if isinstance(result.success, torch.Tensor)
+            else torch.tensor(result.success, device=self.device)
+        )
+        positions = result.positions
+        # Resample to n_waypoints if the planner returned a different count
+        if positions.shape[1] != n_waypoints:
+            positions = interpolate_with_distance(
+                trajectory=positions, interp_num=n_waypoints, device=self.device
+            )
+        # Failed envs hold start qpos
+        if not success.all():
+            held = start_qpos.unsqueeze(1).repeat(1, positions.shape[1], 1)
+            positions = torch.where(success[:, None, None], positions, held)
+        return success, positions
+
+    def _to_batched_plan_states(
+        self, target_states_list: list[list[PlanState]], n_envs: int
+    ) -> list[PlanState]:
+        """Convert per-env PlanState lists into a batched list[PlanState].
+
+        Each output PlanState carries a leading batch dim ``B`` so it matches
+        the planner contract.
+        """
+        n_state = len(target_states_list[0])
+        batched: list[PlanState] = []
+        for j in range(n_state):
+            sample = target_states_list[0][j]
+            if sample.xpos is not None:
+                xpos = torch.stack(
+                    [target_states_list[i][j].xpos for i in range(n_envs)]
+                )  # (B, 4, 4)
+                batched.append(
+                    PlanState(
+                        xpos=xpos,
+                        move_type=MoveType.EEF_MOVE,
+                        move_part=sample.move_part,
+                    )
+                )
+            else:
+                qpos = torch.stack(
+                    [target_states_list[i][j].qpos for i in range(n_envs)]
+                )  # (B, DOF)
+                batched.append(
+                    PlanState(
+                        qpos=qpos,
+                        move_type=MoveType.JOINT_MOVE,
+                        move_part=sample.move_part,
+                    )
+                )
+        return batched
+
+    def _build_plan_opts(self, cfg: "ActionCfg | None", n_waypoints: int):
+        """Build planner options from action configuration."""
+        planner_type = getattr(cfg, "planner_type", None)
+        if planner_type in (None, "toppra"):
+            constraints = {}
+            vl = getattr(cfg, "velocity_limit", None)
+            al = getattr(cfg, "acceleration_limit", None)
+            constraints["velocity"] = vl if vl is not None else 0.2
+            constraints["acceleration"] = al if al is not None else 0.5
+            return ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=n_waypoints,
+                constraints=constraints,
+            )
+        # neural: planner reads its own cfg; pass minimal options
+        from embodichain.lab.sim.planners.neural_planner import NeuralPlanOptions
+
+        return NeuralPlanOptions()
 
     def plan_joint_traj(
         self,
