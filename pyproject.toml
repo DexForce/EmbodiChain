@@ -72,3 +72,8 @@ where = ["."]
 exclude = ["docs"]
 
 [tool.black]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]

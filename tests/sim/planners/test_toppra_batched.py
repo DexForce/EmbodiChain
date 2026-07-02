@@ -235,3 +235,59 @@ class TestToppraPlanBatched:
             import embodichain.lab.sim as om
 
             om.SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.slow
+class TestToppraNumericalRegression:
+    def test_batched_equals_inline_single(self):
+        from embodichain.lab.sim.planners.toppra_planner import (
+            _toppra_solve_one_env,
+            ToppraPlanner,
+            ToppraPlannerCfg,
+            ToppraPlanOptions,
+        )
+        from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
+        from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+        from embodichain.lab.sim.robots import CobotMagicCfg
+
+        sim = SimulationManager(
+            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+        )
+        sim.add_robot(
+            cfg=CobotMagicCfg.from_dict(
+                {"uid": "r", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
+            )
+        )
+        planner = ToppraPlanner(ToppraPlannerCfg(robot_uid="r", max_workers=1))
+        try:
+            B, dofs = 4, 6
+            wp = torch.zeros(B, dofs)
+            wp[:, 0] = torch.linspace(0.1, 0.6, B)
+            states = [
+                PlanState.from_qpos(torch.zeros(B, dofs)),
+                PlanState.from_qpos(wp),
+            ]
+            opts = ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=20,
+                constraints={"velocity": 1.0, "acceleration": 2.0},
+            )
+            r = planner.plan(states, opts)
+            # Compare each env to the inline single-env solve
+            for b in range(B):
+                single = _toppra_solve_one_env(
+                    np.stack([np.zeros(dofs), wp[b].numpy()]),
+                    1.0,
+                    2.0,
+                    TrajectorySampleMethod.QUANTITY,
+                    20,
+                )
+                assert np.allclose(
+                    r.positions[b].cpu().numpy(), single["positions"], atol=1e-5
+                )
+        finally:
+            planner.close()
+            sim.destroy()
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()
