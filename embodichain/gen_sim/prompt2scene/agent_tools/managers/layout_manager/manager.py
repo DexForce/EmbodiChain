@@ -18,16 +18,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from .utils import (
-    _center_xy_aabb_layout,
-    _footprint_layout_diagnostics,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.scene_edit_sa import (
+    optimize_scene_edit_layout_with_sa_node3_5,
+)
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.scene_edit_support import (
+    build_xy_footprint,
+    clamp_center_to_support_region,
+    compute_simready_glb_xy_size,
+    support_region_default_center,
+    support_region_grid_center,
+)
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.utils import (
     _layout_text_objects_grid,
     _object_scenes_xy_aabb_manifest,
     _optimize_text_layout_slp,
     _settle_and_pack_object_footprints,
-    _xy_aabb_overlap,
-    _xy_union_area,
-    _xy_union_bounds,
 )
 
 
@@ -38,14 +43,6 @@ class LayoutManager:
     ``layout_manager.utils`` directly.  The utils module remains an internal
     implementation detail for shared math and optimization routines.
     """
-
-    @staticmethod
-    def center_xy_aabb_layout(**kwargs: Any) -> Any:
-        return _center_xy_aabb_layout(**kwargs)
-
-    @staticmethod
-    def footprint_layout_diagnostics(**kwargs: Any) -> Any:
-        return _footprint_layout_diagnostics(**kwargs)
 
     @staticmethod
     def layout_text_objects_grid(**kwargs: Any) -> Any:
@@ -64,13 +61,25 @@ class LayoutManager:
         return _settle_and_pack_object_footprints(**kwargs)
 
     @staticmethod
-    def xy_aabb_overlap(**kwargs: Any) -> Any:
-        return _xy_aabb_overlap(**kwargs)
+    def optimize_scene_edit_layout_with_sa_node3_5(**kwargs: Any) -> Any:
+        return optimize_scene_edit_layout_with_sa_node3_5(**kwargs)
 
     @staticmethod
-    def xy_union_area(bounds: Any) -> float:
-        return _xy_union_area(bounds)
+    def compute_simready_glb_xy_size(**kwargs: Any) -> Any:
+        return compute_simready_glb_xy_size(**kwargs)
 
     @staticmethod
-    def xy_union_bounds(**kwargs: Any) -> Any:
-        return _xy_union_bounds(**kwargs)
+    def build_xy_footprint(**kwargs: Any) -> Any:
+        return build_xy_footprint(**kwargs)
+
+    @staticmethod
+    def clamp_center_to_support_region(**kwargs: Any) -> Any:
+        return clamp_center_to_support_region(**kwargs)
+
+    @staticmethod
+    def support_region_default_center(**kwargs: Any) -> Any:
+        return support_region_default_center(**kwargs)
+
+    @staticmethod
+    def support_region_grid_center(**kwargs: Any) -> Any:
+        return support_region_grid_center(**kwargs)

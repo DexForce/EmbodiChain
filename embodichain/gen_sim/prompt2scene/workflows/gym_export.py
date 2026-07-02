@@ -50,7 +50,8 @@ _DEFAULT_TABLE_ATTRS: dict[str, Any] = {
     "restitution": 0.01,
 }
 
-_DEFAULT_MAX_CONVEX_HULL_NUM = 32
+_DEFAULT_OBJECT_MAX_CONVEX_HULL_NUM = 16
+_DEFAULT_TABLE_MAX_CONVEX_HULL_NUM = 8
 
 
 def _resolve_path(value: str, output_root: Path) -> Path:
@@ -683,7 +684,7 @@ def export_gym_config(
                 "init_pos": init_pos,
                 "init_rot": init_rot,
                 "body_scale": body_scale,
-                "max_convex_hull_num": _DEFAULT_MAX_CONVEX_HULL_NUM,
+                "max_convex_hull_num": _DEFAULT_OBJECT_MAX_CONVEX_HULL_NUM,
             }
         )
         footprint_2d = _sim_world_xy_aabb(

@@ -24,7 +24,6 @@ from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
     SCENE_EDIT_STEP,
     SCENE_INTAKE_STEP,
     STEP_RESULT_FILENAME,
-    TEXT_RELATIONS_STEP,
     UNIFIED_SCENE_STEP,
     WorkflowArtifactWriter,
 )
@@ -37,7 +36,6 @@ __all__ = [
     "SCENE_EDIT_STEP",
     "SCENE_INTAKE_STEP",
     "STEP_RESULT_FILENAME",
-    "TEXT_RELATIONS_STEP",
     "UNIFIED_SCENE_STEP",
     "WorkflowArtifactWriter",
 ]

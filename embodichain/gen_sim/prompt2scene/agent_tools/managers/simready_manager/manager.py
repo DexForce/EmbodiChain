@@ -137,7 +137,7 @@ class SimreadyManager:
         )
         try:
             gravity_result = sim.run_gravity_simulation(
-                GravityDropRequest(glb_path=pre_gravity_path, max_convex_hull_num=32)
+                GravityDropRequest(glb_path=pre_gravity_path, max_convex_hull_num=16)
             )
 
             gravity_transform = _as_transform(gravity_result.final_pose)
@@ -250,7 +250,7 @@ class SimreadyManager:
         )
         try:
             gravity_result = sim.run_gravity_simulation(
-                GravityDropRequest(glb_path=pre_gravity_path, max_convex_hull_num=16)
+                GravityDropRequest(glb_path=pre_gravity_path, max_convex_hull_num=8)
             )
 
             gravity_transform = _as_transform(gravity_result.final_pose)

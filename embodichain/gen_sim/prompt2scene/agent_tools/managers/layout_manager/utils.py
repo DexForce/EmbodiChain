@@ -130,7 +130,7 @@ def _settle_and_pack_object_footprints(
                 gravity_result = sim.run_gravity_simulation(
                     GravityDropRequest(
                         glb_path=pre_gravity_path,
-                        max_convex_hull_num=32,
+                        max_convex_hull_num=16,
                         initial_height=gravity_initial_height,
                     )
                 )

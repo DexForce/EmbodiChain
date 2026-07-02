@@ -32,7 +32,6 @@ __all__ = [
     "build_spatial_layout_messages",
     "build_spatial_layout_verifier_messages",
     "build_text_metric_scale_messages",
-    "build_text_relation_messages",
     "build_up_down_flip_check_messages",
 ]
 
@@ -40,33 +39,12 @@ __all__ = [
 SCENE_INTAKE_PROMPT = "scene_intake.yaml"
 SCENE_EDIT_PROMPT = "scene_edit.yaml"
 IMAGE_RELATIONS_PROMPT = "image_relations.yaml"
-TEXT_RELATIONS_PROMPT = "text_relations.yaml"
 UNIFIED_SCENE_GEN_PROMPT = "unified_scene_gen.yaml"
 
 
 
 def build_scene_intake_messages(request: Prompt2SceneInput) -> list[dict[str, Any]]:
     """Build LangChain-compatible messages for scene intake."""
-
-    from embodichain.gen_sim.prompt2scene.workflows.request import InputKind
-
-    if request.input_kind == InputKind.TEXT:
-        return [
-            {
-                "role": "system",
-                "content": render_prompt(
-                    SCENE_INTAKE_PROMPT, prompt_key="text_system"
-                ),
-            },
-            {
-                "role": "user",
-                "content": render_prompt(
-                    SCENE_INTAKE_PROMPT,
-                    {"text": request.text or ""},
-                    prompt_key="text_user",
-                ),
-            },
-        ]
     return [
         {
             "role": "system",
@@ -99,8 +77,6 @@ def build_scene_intake_verifier_messages(
 ) -> list[dict[str, Any]]:
     """Build messages for scene-intake group and count verification."""
 
-    from embodichain.gen_sim.prompt2scene.workflows.request import InputKind
-
     table_draft: dict[str, object] = {
         "name": scene_intake.table.name,
         "description": scene_intake.table.description,
@@ -130,27 +106,6 @@ def build_scene_intake_verifier_messages(
         ensure_ascii=False,
         indent=2,
     )
-
-    if request.input_kind == InputKind.TEXT:
-        return [
-            {
-                "role": "system",
-                "content": render_prompt(
-                    SCENE_INTAKE_PROMPT, prompt_key="verifier_system"
-                ),
-            },
-            {
-                "role": "user",
-                "content": render_prompt(
-                    SCENE_INTAKE_PROMPT,
-                    {
-                        "text": request.text or "",
-                        "scene_intake_json": scene_intake_json,
-                    },
-                    prompt_key="verifier_text_user",
-                ),
-            },
-        ]
 
     image_path = request.image_path
     if image_path is None:
@@ -334,37 +289,6 @@ def build_scene_edit_intent_messages(
             ),
         },
     ]
-
-
-
-
-def build_text_relation_messages(
-    *,
-    request: Prompt2SceneInput,
-    scene_intake: SceneIntakeSpec,
-) -> list[dict[str, Any]]:
-    """Build messages for explicit text spatial-relation extraction."""
-    asset_names = "\n".join(f"- {asset.name}" for asset in scene_intake.assets)
-    return [
-        {
-            "role": "system",
-            "content": render_prompt(TEXT_RELATIONS_PROMPT, prompt_key="system"),
-        },
-        {
-            "role": "user",
-            "content": render_prompt(
-                TEXT_RELATIONS_PROMPT,
-                {
-                    "asset_names": asset_names,
-                    "text": request.text or "",
-                },
-                prompt_key="user",
-            ),
-        },
-    ]
-
-
-
 
 def build_image_metric_scale_messages(
     *,

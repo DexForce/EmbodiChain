@@ -45,7 +45,7 @@ class SceneIntakeInputRecord:
         """Create an input record from a prompt2scene request."""
         return cls(
             input_kind=request.input_kind,
-            text=request.text,
+            text=None,
             image_path=str(request.image_path) if request.image_path else None,
         )
 

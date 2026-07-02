@@ -28,7 +28,6 @@ __all__ = ["cli_prompt2scene", "main"]
 
 def cli_prompt2scene(
     image_path: str | None,
-    text: str | None,
     prompt: str | None,
     output_root: str,
     llm_config_path: str | None = None,
@@ -37,14 +36,12 @@ def cli_prompt2scene(
 
     Args:
         image_path: Path to an input image, if image mode is used.
-        text: Text prompt, if text mode is used.
         prompt: Optional edit prompt.
         output_root: Directory where prompt2scene outputs are written.
         llm_config_path: Optional path to the LLM config JSON file.
     """
     request = Prompt2SceneInput.from_cli_args(
         image_path=Path(image_path) if image_path is not None else None,
-        text=text,
         prompt=prompt,
         output_root=Path(output_root),
     )
@@ -66,17 +63,12 @@ def main() -> None:
         type=str,
         help="Path to the input image file (.jpg, .jpeg, or .png)",
     )
-    input_group.add_argument(
-        "--text",
-        type=str,
-        help="Text prompt describing the target scene",
-    )
     parser.add_argument(
         "--prompt",
         type=str,
         default=None,
         help=(
-            "Optional edit instruction. Use with --image/--text to edit after "
+            "Optional edit instruction. Use with --image to edit after "
             "generation, or with only --output_root to edit an existing scene."
         ),
     )
@@ -97,7 +89,6 @@ def main() -> None:
 
     cli_prompt2scene(
         args.image,
-        args.text,
         args.prompt,
         args.output_root,
         args.llm_config,

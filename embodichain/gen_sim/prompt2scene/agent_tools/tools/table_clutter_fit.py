@@ -59,7 +59,7 @@ def _gravity_settle_table_fit_internal_z_scene(
         result = sim.run_gravity_simulation(
             GravityDropRequest(
                 glb_path=pre_gravity,
-                max_convex_hull_num=16,
+                max_convex_hull_num=8,
                 initial_height=0.05,
             )
         )

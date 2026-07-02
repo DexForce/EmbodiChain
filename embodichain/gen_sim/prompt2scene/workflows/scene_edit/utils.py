@@ -44,9 +44,6 @@ from embodichain.gen_sim.prompt2scene.utils.log import log_info
 
 __all__ = [
     "build_scene_edit_layout",
-    "build_xy_footprint",
-    "clamp_center_to_support_region",
-    "compute_simready_glb_xy_size",
     "extract_current_grids",
     "extract_current_relations",
     "extract_scene_edit_support_region",
@@ -240,6 +237,10 @@ def resolve_scene_edit_intent(
     current_grids: dict[str, str],
 ) -> dict[str, Any]:
     """Resolve LLM edit operations into program-computed relations and grids."""
+    intent = _normalize_scene_edit_intent_ids(
+        intent=intent,
+        scene_objects=scene_objects,
+    )
     validate_scene_edit_intent(intent=intent, scene_objects=scene_objects)
 
     operations = [op for op in intent.get("operations", []) if isinstance(op, dict)]
@@ -448,99 +449,6 @@ def generate_scene_edit_object_assets(
         "generated_assets": normalized_results,
     }
 
-
-def compute_simready_glb_xy_size(
-    glb_path: Path,
-    *,
-    metric_scale: dict[str, Any] | None = None,
-) -> list[float]:
-    """Compute the sim-plane XY footprint size from a Y-up GLB."""
-    try:
-        import trimesh
-    except ImportError as exc:
-        raise RuntimeError("Scene edit layout requires trimesh.") from exc
-
-    scene = trimesh.load(glb_path, force="scene")
-    if isinstance(scene, trimesh.Trimesh):
-        mesh = scene
-    else:
-        dumped = scene.dump(concatenate=True)
-        mesh = (
-            dumped
-            if isinstance(dumped, trimesh.Trimesh)
-            else trimesh.util.concatenate(
-                [item for item in dumped if isinstance(item, trimesh.Trimesh)]
-            )
-        )
-    bounds = np.asarray(mesh.bounds, dtype=np.float64)
-    if bounds.shape != (2, 3):
-        raise ValueError(f"Invalid GLB bounds shape: {bounds.shape}")
-    size_x = float(bounds[1, 0] - bounds[0, 0])
-    size_y = float(bounds[1, 2] - bounds[0, 2])
-    scale_factor = 1.0
-    if isinstance(metric_scale, dict):
-        try:
-            scale_factor = float(metric_scale.get("scale_factor", 1.0))
-        except (TypeError, ValueError):
-            scale_factor = 1.0
-    if not np.isfinite(scale_factor) or scale_factor <= 0.0:
-        scale_factor = 1.0
-    return [
-        max(size_x * scale_factor, 1.0e-4),
-        max(size_y * scale_factor, 1.0e-4),
-    ]
-
-
-def build_xy_footprint(
-    *,
-    center_xy: list[float],
-    size_xy: list[float],
-) -> dict[str, Any]:
-    """Build a footprint_2d record from center and size."""
-    cx, cy = float(center_xy[0]), float(center_xy[1])
-    sx, sy = max(float(size_xy[0]), 0.0), max(float(size_xy[1]), 0.0)
-    half_x = 0.5 * sx
-    half_y = 0.5 * sy
-    return {
-        "unit": "m",
-        "center_xy": [cx, cy],
-        "aabb_xy": [
-            [cx - half_x, cy - half_y],
-            [cx + half_x, cy + half_y],
-        ],
-        "size_xy": [sx, sy],
-    }
-
-
-def clamp_center_to_support_region(
-    *,
-    center_xy: list[float],
-    size_xy: list[float],
-    support_region: dict[str, Any],
-) -> list[float]:
-    """Clamp an object centre so its AABB stays inside the support-region AABB."""
-    aabb_xy = support_region.get("aabb_xy")
-    if not (
-        isinstance(aabb_xy, list)
-        and len(aabb_xy) == 2
-        and all(isinstance(item, list) and len(item) == 2 for item in aabb_xy)
-    ):
-        return [float(center_xy[0]), float(center_xy[1])]
-    min_xy = np.asarray(aabb_xy[0], dtype=np.float64)
-    max_xy = np.asarray(aabb_xy[1], dtype=np.float64)
-    half = 0.5 * np.asarray(size_xy, dtype=np.float64)
-    center = np.asarray(center_xy, dtype=np.float64)
-    lower = min_xy + half
-    upper = max_xy - half
-    clamped = center.copy()
-    for axis in range(2):
-        if lower[axis] <= upper[axis]:
-            clamped[axis] = min(max(center[axis], lower[axis]), upper[axis])
-        else:
-            clamped[axis] = float(0.5 * (min_xy[axis] + max_xy[axis]))
-    return clamped.tolist()
-
-
 def build_scene_edit_layout(
     *,
     scene_state: dict[str, Any],
@@ -644,8 +552,8 @@ def build_scene_edit_layout(
 
     xy_sizes = {
         object_id: np.asarray(
-            compute_simready_glb_xy_size(
-                _resolve_generated_asset_path(
+            LayoutManager.compute_simready_glb_xy_size(
+                glb_path=_resolve_generated_asset_path(
                     generated_asset_by_id[object_id],
                     output_root=output_root,
                 ),
@@ -665,7 +573,7 @@ def build_scene_edit_layout(
         if target_footprint is None:
             continue
         asset = generated_asset_by_id[object_id]
-        center_xy = clamp_center_to_support_region(
+        center_xy = LayoutManager.clamp_center_to_support_region(
             center_xy=list(target_footprint["center_xy"]),
             size_xy=xy_sizes[object_id].tolist(),
             support_region=support_region,
@@ -678,7 +586,7 @@ def build_scene_edit_layout(
             "replaces": target_id,
             "center_xy": center_xy,
             "size_xy": xy_sizes[object_id].tolist(),
-            "footprint_2d": build_xy_footprint(
+            "footprint_2d": LayoutManager.build_xy_footprint(
                 center_xy=center_xy,
                 size_xy=xy_sizes[object_id].tolist(),
             ),
@@ -710,7 +618,7 @@ def build_scene_edit_layout(
             "replaces": "",
             "center_xy": center_xy,
             "size_xy": size_xy,
-            "footprint_2d": build_xy_footprint(center_xy=center_xy, size_xy=size_xy),
+            "footprint_2d": LayoutManager.build_xy_footprint(center_xy=center_xy, size_xy=size_xy),
             "source": "generated_asset",
             "simready_geometry_path": asset.get("simready_geometry_path")
             or asset.get("mesh_path"),
@@ -724,23 +632,6 @@ def build_scene_edit_layout(
     optimization_metadata: dict[str, Any] | None = None
     all_object_ids = sorted(final_items)
     if all_object_ids:
-        left_of_edges: list[tuple[str, str]] = []
-        front_of_edges: list[tuple[str, str]] = []
-        for relation in updated_relations:
-            subject = str(relation.get("subject", "")).strip()
-            object_id = str(relation.get("object", "")).strip()
-            relation_name = str(relation.get("relation", "")).strip()
-            if subject not in final_items or object_id not in final_items:
-                continue
-            if relation_name == "left_of":
-                left_of_edges.append((subject, object_id))
-            elif relation_name == "front_of":
-                front_of_edges.append((subject, object_id))
-        grid_spring_targets = {
-            object_id: initial_centers_all[object_id].copy()
-            for object_id in all_object_ids
-            if object_id in updated_grids and object_id in initial_centers_all
-        }
         fixed_object_ids: list[str] = []
         if optimize_new_objects_only:
             movable_ids = set(added_ids) | explicit_reposition_replace_ids
@@ -749,47 +640,35 @@ def build_scene_edit_layout(
                 for object_id in all_object_ids
                 if object_id not in movable_ids
             ]
-        optimized_layout = LayoutManager.optimize_text_layout_slp(
-            object_ids=all_object_ids,
-            xy_sizes={object_id: np.asarray(final_items[object_id]["size_xy"], dtype=np.float64) for object_id in all_object_ids},
-            initial_centers={object_id: initial_centers_all[object_id] for object_id in all_object_ids},
-            left_of_edges=left_of_edges,
-            front_of_edges=front_of_edges,
-            grid_spring_targets=grid_spring_targets,
-            padding_ratio=0.08,
+        gym_config = load_json_object(PipelinePaths(output_root).gym_config)
+        rigid_objects = gym_config.get("rigid_object")
+        if not isinstance(rigid_objects, list):
+            raise ValueError("gym_config rigid_object must be a list.")
+        rigid_by_id = {
+            str(item.get("uid", "")).strip(): item
+            for item in rigid_objects
+            if isinstance(item, dict) and str(item.get("uid", "")).strip()
+        }
+        sa_runtime_root = output_root / "scene_edit" / "sa_node3_5_runtime"
+        optimized_layout = LayoutManager.optimize_scene_edit_layout_with_sa_node3_5(
+            output_root=output_root,
+            support_region=support_region,
+            layout_items=final_items,
+            updated_relations=updated_relations,
+            updated_grids=updated_grids,
             fixed_object_ids=fixed_object_ids,
+            rigid_by_id=rigid_by_id,
+            generated_asset_by_id=generated_asset_by_id,
+            runtime_root=sa_runtime_root,
         )
         all_optimized = {
             object_id: np.asarray(center, dtype=np.float64)
             for object_id, center in optimized_layout.get("centers", {}).items()
         }
-        translation = np.zeros(2, dtype=np.float64)
-        if not optimize_new_objects_only:
-            anchor_ids = [
-                object_id
-                for object_id in all_object_ids
-                if object_id not in added_ids and object_id in all_optimized
-            ]
-            if not anchor_ids:
-                anchor_ids = [
-                    object_id
-                    for object_id in all_object_ids
-                    if object_id in all_optimized
-                ]
-            if anchor_ids:
-                translation = np.mean(
-                    np.vstack(
-                        [
-                            initial_centers_all[object_id] - all_optimized[object_id]
-                            for object_id in anchor_ids
-                        ]
-                    ),
-                    axis=0,
-                )
         for object_id, center in all_optimized.items():
             optimized_centers[object_id] = np.asarray(
-                clamp_center_to_support_region(
-                    center_xy=(center + translation).tolist(),
+                LayoutManager.clamp_center_to_support_region(
+                    center_xy=center.tolist(),
                     size_xy=final_items[object_id]["size_xy"],
                     support_region=support_region,
                 ),
@@ -801,7 +680,7 @@ def build_scene_edit_layout(
         center_xy = optimized_centers[object_id].tolist()
         size_xy = item["size_xy"]
         item["center_xy"] = center_xy
-        item["footprint_2d"] = build_xy_footprint(center_xy=center_xy, size_xy=size_xy)
+        item["footprint_2d"] = LayoutManager.build_xy_footprint(center_xy=center_xy, size_xy=size_xy)
 
     return {
         "status": "ok",
@@ -870,9 +749,10 @@ def export_scene_edit_gym_state(
     scene_state_dir.mkdir(parents=True, exist_ok=True)
     mesh_assets_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_table_height = _infer_scene_edit_table_height(
-        rigid_by_id=rigid_by_id,
-        layout_by_id=layout_by_id,
+    gym_config = load_json_object(PipelinePaths(output_root).gym_config)
+    table_surface_height = _infer_scene_edit_table_surface_height(
+        output_root=output_root,
+        gym_config=gym_config,
     )
 
     updated_rigid_objects: list[dict[str, Any]] = []
@@ -912,7 +792,7 @@ def export_scene_edit_gym_state(
                 generated_asset=generated_asset,
                 output_root=output_root,
                 mesh_assets_dir=mesh_assets_dir,
-                table_height=existing_table_height,
+                table_height=table_surface_height + 0.01,
             )
             shape = updated_rigid.get("shape")
             if isinstance(shape, dict):
@@ -1121,6 +1001,103 @@ def _normalize_generated_objects(
     return normalized
 
 
+def _normalize_scene_edit_intent_ids(
+    *,
+    intent: dict[str, Any],
+    scene_objects: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Make generated temp ids internally consistent and unique for this scene."""
+    normalized = json.loads(json.dumps(intent))
+    existing_ids = {
+        str(obj.get("id", "")).strip()
+        for obj in scene_objects
+        if str(obj.get("id", "")).strip()
+    }
+    generated_objects = [
+        obj
+        for obj in normalized.get("generated_objects", [])
+        if isinstance(obj, dict)
+    ]
+    operations = [
+        op
+        for op in normalized.get("operations", [])
+        if isinstance(op, dict)
+    ]
+
+    generated_ids = {
+        str(obj.get("temp_id", "")).strip()
+        for obj in generated_objects
+        if str(obj.get("temp_id", "")).strip()
+    }
+    referenced_ids = {
+        str(op.get("new_object_temp_id", "")).strip()
+        for op in operations
+        if str(op.get("type", "")).strip() in {"add", "replace"}
+        and str(op.get("new_object_temp_id", "")).strip()
+    }
+
+    unused_generated_ids = [
+        str(obj.get("temp_id", "")).strip()
+        for obj in generated_objects
+        if str(obj.get("temp_id", "")).strip()
+        and str(obj.get("temp_id", "")).strip() not in referenced_ids
+    ]
+    for operation in operations:
+        op_type = str(operation.get("type", "")).strip()
+        if op_type not in {"add", "replace"}:
+            continue
+        new_temp_id = str(operation.get("new_object_temp_id", "")).strip()
+        if not new_temp_id or new_temp_id in generated_ids:
+            continue
+        if len(unused_generated_ids) == 1:
+            operation["new_object_temp_id"] = unused_generated_ids[0]
+        elif len(generated_objects) == 1:
+            operation["new_object_temp_id"] = str(
+                generated_objects[0].get("temp_id", "")
+            ).strip()
+
+    reserved = set(existing_ids)
+    seen_generated: set[str] = set()
+    rename_by_old_id: dict[str, str] = {}
+    for generated in generated_objects:
+        old_id = str(generated.get("temp_id", "")).strip()
+        if not old_id:
+            continue
+        new_id = old_id
+        if new_id in reserved or new_id in seen_generated:
+            new_id = _unique_scene_edit_generated_id(
+                base_id=old_id,
+                reserved_ids=reserved | seen_generated,
+            )
+            generated["temp_id"] = new_id
+        seen_generated.add(new_id)
+        reserved.add(new_id)
+        if new_id != old_id:
+            rename_by_old_id[old_id] = new_id
+
+    if rename_by_old_id:
+        for operation in operations:
+            new_temp_id = str(operation.get("new_object_temp_id", "")).strip()
+            if new_temp_id in rename_by_old_id:
+                operation["new_object_temp_id"] = rename_by_old_id[new_temp_id]
+
+    return normalized
+
+
+def _unique_scene_edit_generated_id(
+    *,
+    base_id: str,
+    reserved_ids: set[str],
+) -> str:
+    base = re.sub(r"_\d+$", "", base_id.strip()) or "new_object"
+    index = 0
+    while True:
+        candidate = f"{base}_{index}"
+        if candidate not in reserved_ids:
+            return candidate
+        index += 1
+
+
 def _map_reference_endpoint(
     *,
     object_id: str,
@@ -1222,26 +1199,72 @@ def _resolve_generated_asset_path(asset: dict[str, Any], *, output_root: Path) -
     return (output_root / path).resolve()
 
 
-def _infer_scene_edit_table_height(
+def _infer_scene_edit_table_surface_height(
     *,
-    rigid_by_id: dict[str, dict[str, Any]],
-    layout_by_id: dict[str, dict[str, Any]],
+    output_root: Path,
+    gym_config: dict[str, Any],
 ) -> float:
-    heights: list[float] = []
-    for object_id, rigid_object in rigid_by_id.items():
-        layout_item = layout_by_id.get(object_id)
-        if layout_item is None:
-            continue
-        init_pos = rigid_object.get("init_pos")
-        if not isinstance(init_pos, list) or len(init_pos) != 3:
-            continue
-        try:
-            heights.append(float(init_pos[2]))
-        except (TypeError, ValueError):
-            continue
-    if heights:
-        return float(np.median(np.asarray(heights, dtype=np.float64)))
-    return 0.0
+    try:
+        import trimesh
+        import trimesh.transformations as tt
+    except ImportError:
+        return 0.0
+
+    background = gym_config.get("background")
+    if not isinstance(background, list) or not background:
+        return 0.0
+    table = background[0]
+    if not isinstance(table, dict):
+        return 0.0
+
+    shape = table.get("shape")
+    if not isinstance(shape, dict):
+        return 0.0
+    fpath = str(shape.get("fpath", "") or "").strip()
+    if not fpath:
+        return 0.0
+    table_mesh_path = (output_root / "gym_export" / fpath).resolve()
+    if not table_mesh_path.is_file():
+        return 0.0
+
+    scene = trimesh.load(table_mesh_path, force="scene")
+    if isinstance(scene, trimesh.Trimesh):
+        mesh = scene
+    else:
+        dumped = scene.dump(concatenate=True)
+        if isinstance(dumped, trimesh.Trimesh):
+            mesh = dumped
+        else:
+            meshes = [item for item in dumped if isinstance(item, trimesh.Trimesh)]
+            if not meshes:
+                return 0.0
+            mesh = trimesh.util.concatenate(meshes)
+
+    verts = np.asarray(mesh.vertices, dtype=np.float64)
+    if verts.size == 0:
+        return 0.0
+
+    body_scale = np.asarray(table.get("body_scale") or [1.0, 1.0, 1.0], dtype=np.float64)
+    if body_scale.shape != (3,) or not np.all(np.isfinite(body_scale)):
+        body_scale = np.ones(3, dtype=np.float64)
+    glb_scale = np.asarray([body_scale[0], body_scale[2], body_scale[1]], dtype=np.float64)
+    verts = verts * glb_scale.reshape(1, 3)
+
+    init_rot = np.asarray(table.get("init_rot") or [0.0, 0.0, 0.0], dtype=np.float64)
+    if init_rot.shape == (3,) and np.any(np.abs(init_rot) > 1.0e-8):
+        rot = tt.euler_matrix(
+            float(np.deg2rad(init_rot[0])),
+            float(np.deg2rad(init_rot[1])),
+            float(np.deg2rad(init_rot[2])),
+            axes="sxyz",
+        )
+        verts = (rot[:3, :3] @ verts.T).T
+
+    init_pos = np.asarray(table.get("init_pos") or [0.0, 0.0, 0.0], dtype=np.float64)
+    if init_pos.shape != (3,) or not np.all(np.isfinite(init_pos)):
+        init_pos = np.zeros(3, dtype=np.float64)
+
+    return float(init_pos[2] + np.max(verts[:, 1]))
 
 
 def _update_existing_rigid_object(
@@ -1326,7 +1349,7 @@ def _build_generated_rigid_object(
         "init_pos": init_pos,
         "init_rot": init_rot,
         "body_scale": body_scale,
-        "max_convex_hull_num": 32,
+        "max_convex_hull_num": 16,
     }
 
 
@@ -1340,7 +1363,7 @@ def _build_scene_state_object(
     init_rot = [float(value) for value in rigid_object.get("init_rot") or [0.0, 0.0, 0.0]]
     body_scale = [float(value) for value in rigid_object.get("body_scale") or [1.0, 1.0, 1.0]]
     init_pos = [float(value) for value in rigid_object.get("init_pos") or [0.0, 0.0, 0.0]]
-    footprint_2d = layout_item.get("footprint_2d") or build_xy_footprint(
+    footprint_2d = layout_item.get("footprint_2d") or LayoutManager.build_xy_footprint(
         center_xy=list(layout_item.get("center_xy", [0.0, 0.0])),
         size_xy=list(layout_item.get("size_xy", [0.0, 0.0])),
     )
@@ -1427,7 +1450,7 @@ def _compute_anchor_targets(
 
             grid_name = updated_grids.get(object_id)
             if grid_name:
-                targets[object_id] = _support_region_grid_center(
+                targets[object_id] = LayoutManager.support_region_grid_center(
                     support_region=support_region,
                     grid_name=grid_name,
                 )
@@ -1451,104 +1474,38 @@ def _initialize_added_object_centers(
 ) -> dict[str, np.ndarray]:
     if not added_ids:
         return {}
-    stable_footprints = {
-        object_id: {
-            "center_xy": item["center_xy"],
-            "size_xy": item["size_xy"],
-        }
-        for object_id, item in stable_items.items()
-    }
-    anchor_targets = _compute_anchor_targets(
-        generated_ids=added_ids,
-        replacement_target_by_new_id={},
-        placement_by_new_id=placement_by_new_id,
-        updated_grids=updated_grids,
-        old_footprints=stable_footprints,
-        support_region=support_region,
-        xy_sizes=xy_sizes,
-    )
-    active_relations = [
-        relation
-        for relation in updated_relations
-        if str(relation.get("subject", "")).strip() in added_ids
-        and str(relation.get("object", "")).strip() in added_ids
-    ]
-    table_constraints = [
-        {"asset": object_id, "grid": updated_grids[object_id]}
-        for object_id in added_ids
-        if object_id in updated_grids
-    ]
-    layout_seed = LayoutManager.layout_text_objects_grid(
-        object_ids=added_ids,
-        xy_sizes={object_id: xy_sizes[object_id] for object_id in added_ids},
-        spatial_relations=active_relations,
-        table_constraints=table_constraints,
-    )
-    relative_centers = {
-        object_id: np.asarray(layout_seed["centers"][object_id], dtype=np.float64)
-        for object_id in added_ids
-    }
-    translation = np.zeros(2, dtype=np.float64)
-    if anchor_targets:
-        translation = np.mean(
-            np.vstack(
-                [
-                    anchor_targets[object_id] - relative_centers[object_id]
-                    for object_id in added_ids
-                    if object_id in anchor_targets
-                ]
-            ),
-            axis=0,
-        )
-    return {
-        object_id: np.asarray(
-            clamp_center_to_support_region(
-                center_xy=(relative_centers[object_id] + translation).tolist(),
+    support_center = LayoutManager.support_region_default_center(support_region=support_region)
+    results: dict[str, np.ndarray] = {}
+    for object_id in added_ids:
+        seed_center = support_center.copy()
+        grid_name = updated_grids.get(object_id)
+        if grid_name:
+            seed_center = LayoutManager.support_region_grid_center(
+                support_region=support_region,
+                grid_name=grid_name,
+            )
+        else:
+            placement = placement_by_new_id.get(object_id, {})
+            placement_type = str(placement.get("type", "")).strip()
+            if placement_type == "relative_to_object":
+                reference_id = str(placement.get("reference_object_id", "")).strip()
+                stable_item = stable_items.get(reference_id)
+                if stable_item is not None:
+                    reference_center = np.asarray(
+                        stable_item.get("center_xy", support_center.tolist()),
+                        dtype=np.float64,
+                    )
+                    if reference_center.shape == (2,):
+                        seed_center = reference_center
+        results[object_id] = np.asarray(
+            LayoutManager.clamp_center_to_support_region(
+                center_xy=seed_center.tolist(),
                 size_xy=xy_sizes[object_id].tolist(),
                 support_region=support_region,
             ),
             dtype=np.float64,
         )
-        for object_id in added_ids
-    }
-
-
-def _support_region_grid_center(
-    *,
-    support_region: dict[str, Any],
-    grid_name: str,
-) -> np.ndarray:
-    aabb_xy = support_region.get("aabb_xy")
-    if not (
-        isinstance(aabb_xy, list)
-        and len(aabb_xy) == 2
-        and all(isinstance(item, list) and len(item) == 2 for item in aabb_xy)
-    ):
-        return np.zeros(2, dtype=np.float64)
-    min_xy = np.asarray(aabb_xy[0], dtype=np.float64)
-    max_xy = np.asarray(aabb_xy[1], dtype=np.float64)
-    size = max_xy - min_xy
-    cell = size / 3.0
-    grid_to_rc = {
-        "left_front": (0, 0),
-        "center_front": (1, 0),
-        "right_front": (2, 0),
-        "left_center": (0, 1),
-        "center": (1, 1),
-        "right_center": (2, 1),
-        "left_back": (0, 2),
-        "center_back": (1, 2),
-        "right_back": (2, 2),
-        "front": (1, 0),
-        "back": (1, 2),
-        "left": (0, 1),
-        "right": (2, 1),
-    }
-    col, row = grid_to_rc.get(grid_name, (1, 1))
-    center_x = min_xy[0] + (col + 0.5) * cell[0]
-    center_y = max_xy[1] - (row + 0.5) * cell[1]
-    return np.asarray([center_x, center_y], dtype=np.float64)
-
+    return results
 
 def _offset_center_by_relation(
     *,

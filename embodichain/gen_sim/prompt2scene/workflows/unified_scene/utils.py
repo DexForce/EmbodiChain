@@ -40,24 +40,16 @@ from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
     SceneIntakeAsset,
     SceneIntakeSpec,
 )
-from embodichain.gen_sim.prompt2scene.workflows.text_relations.schema import (
-    TextObjectLayout,
-    TextRelationSpec,
-)
 
 __all__ = [
     "build_unified_object",
     "build_unified_object_specs",
     "build_unified_scene_from_image_relations",
-    "build_unified_scene_from_text_relations",
     "build_unified_spatial_anchor",
     "build_unified_table",
     "grid_cells_from_objects",
     "object_ids_by_name",
-    "relations_by_object_id",
     "resolve_image_layout",
-    "resolve_text_layout",
-    "text_grids_by_object_id",
 ]
 
 
@@ -156,30 +148,6 @@ def resolve_image_layout(
     return bool(layout.is_arbitrary_layout), str(layout.reason)
 
 
-def resolve_text_layout(
-    name: str,
-    layout_by_name: dict[str, TextObjectLayout],
-) -> tuple[bool, str]:
-    """Resolve a text asset's layout state."""
-    layout = layout_by_name.get(name)
-    if layout is None:
-        return False, ""
-    return bool(layout.is_arbitrary_layout), str(layout.reason)
-
-
-def text_grids_by_object_id(
-    *,
-    text_relations: TextRelationSpec,
-    ids_by_name: dict[str, list[str]],
-) -> dict[str, str | None]:
-    """Assign explicit text table constraints to object ids."""
-    grids: dict[str, str | None] = {object_id: None for ids in ids_by_name.values() for object_id in ids}
-    for constraint in text_relations.table_constraints:
-        for object_id in ids_by_name.get(constraint.asset, []):
-            grids[object_id] = constraint.grid
-    return grids
-
-
 def grid_cells_from_objects(objects: list[dict[str, Any]]) -> dict[str, list[str]] | None:
     """Build table grid cell membership from unified objects."""
     grid_cells: dict[str, list[str]] = {
@@ -201,31 +169,6 @@ def grid_cells_from_objects(objects: list[dict[str, Any]]) -> dict[str, list[str
         any_grid = True
         grid_cells.setdefault(str(grid), []).append(str(obj["id"]))
     return grid_cells if any_grid else None
-
-
-def relations_by_object_id(
-    *,
-    text_relations: TextRelationSpec,
-    ids_by_name: dict[str, list[str]],
-) -> list[dict[str, str]]:
-    """Expand text relations to object-id relations."""
-    relations: list[dict[str, str]] = []
-    for relation in text_relations.object_relations:
-        subjects = ids_by_name.get(relation.subject, [])
-        objects = ids_by_name.get(relation.object, [])
-        for subject in subjects:
-            for object_id in objects:
-                if subject == object_id:
-                    continue
-                relations.append(
-                    {
-                        "subject": subject,
-                        "relation": relation.relation,
-                        "object": object_id,
-                        "source": "input",
-                    }
-                )
-    return relations
 
 
 def build_unified_scene_from_image_relations(
@@ -279,59 +222,4 @@ def build_unified_scene_from_image_relations(
             anchor=UnifiedSpatialAnchor(**anchor),
             relations=relations,
         ),
-    )
-
-
-def build_unified_scene_from_text_relations(
-    *,
-    scene_intake: SceneIntakeSpec,
-    text_relations: TextRelationSpec,
-) -> UnifiedSceneSpec:
-    """Build a unified scene from text relation outputs."""
-    object_specs = build_unified_object_specs(scene_intake.assets)
-    ids_by_name = object_ids_by_name(object_specs)
-    grid_by_id = text_grids_by_object_id(
-        text_relations=text_relations,
-        ids_by_name=ids_by_name,
-    )
-    layout_by_name = {
-        layout.asset: layout for layout in text_relations.object_layouts
-    }
-    objects = []
-    for spec in object_specs:
-        is_arbitrary_layout, layout_reason = resolve_text_layout(
-            spec["name"],
-            layout_by_name,
-        )
-        objects.append(
-            UnifiedObject(
-                **build_unified_object(
-                    spec=spec,
-                    grid=grid_by_id.get(spec["id"]),
-                    is_arbitrary_layout=is_arbitrary_layout,
-                    layout_reason=layout_reason,
-                )
-            )
-        )
-    relations = [
-        UnifiedSpatialRelation(**relation)
-        for relation in transitive_relation_closure(
-            relations_by_object_id(
-                text_relations=text_relations,
-                ids_by_name=ids_by_name,
-            )
-        )
-    ]
-    return UnifiedSceneSpec(
-        input=scene_intake.input.to_manifest(),
-        table=UnifiedTable(
-            **build_unified_table(
-                scene_intake,
-                grid_cells=grid_cells_from_objects(
-                    [object_.to_manifest() for object_ in objects]
-                ),
-            )
-        ),
-        objects=objects,
-        spatial=UnifiedSpatial(anchor=None, relations=relations),
     )

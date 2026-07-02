@@ -25,10 +25,7 @@ from embodichain.gen_sim.prompt2scene.llms import build_chat_model
 from embodichain.gen_sim.prompt2scene.llms.config import OpenAICompatibleLLMCfg
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.nodes import (
     fit_image_table_to_clutter_node,
-    fit_text_table_to_clutter_node,
     generate_image_assets_node,
-    generate_text_assets_node,
-    generate_text_clutter_layout_node,
     load_unified_scene_input_kind_node,
 )
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.state import (
@@ -36,43 +33,19 @@ from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.state import (
 )
 __all__ = [
     "build_unified_scene_gen_graph",
-    "route_after_load_input_kind",
     "run_unified_scene_gen",
 ]
-
-
-def route_after_load_input_kind(state: UnifiedSceneGenState) -> str:
-    """Route unified-scene generation by the original input kind."""
-    input_kind = state["input_kind"]
-    if input_kind == "text":
-        return "generate_text_assets"
-    if input_kind == "image":
-        return "generate_image_assets"
-    raise ValueError(f"Unsupported unified-scene input_kind: {input_kind!r}.")
 
 
 def build_unified_scene_gen_graph() -> Any:
     """Build the unified-scene generation graph."""
     graph = StateGraph(UnifiedSceneGenState)
     graph.add_node("load_unified_scene_input_kind", load_unified_scene_input_kind_node)
-    graph.add_node("generate_text_assets", generate_text_assets_node)
-    graph.add_node("generate_text_clutter_layout", generate_text_clutter_layout_node)
-    graph.add_node("fit_text_table_to_clutter", fit_text_table_to_clutter_node)
     graph.add_node("generate_image_assets", generate_image_assets_node)
     graph.add_node("fit_image_table_to_clutter", fit_image_table_to_clutter_node)
 
     graph.set_entry_point("load_unified_scene_input_kind")
-    graph.add_conditional_edges(
-        "load_unified_scene_input_kind",
-        route_after_load_input_kind,
-        {
-            "generate_text_assets": "generate_text_assets",
-            "generate_image_assets": "generate_image_assets",
-        },
-    )
-    graph.add_edge("generate_text_assets", "generate_text_clutter_layout")
-    graph.add_edge("generate_text_clutter_layout", "fit_text_table_to_clutter")
-    graph.add_edge("fit_text_table_to_clutter", END)
+    graph.add_edge("load_unified_scene_input_kind", "generate_image_assets")
     graph.add_edge("generate_image_assets", "fit_image_table_to_clutter")
     graph.add_edge("fit_image_table_to_clutter", END)
     return graph.compile()
@@ -93,8 +66,7 @@ def run_unified_scene_gen(
         "unified_scene": None,
         "input_kind": None,
         "table_result": None,
-        "text_object_results": [],
-        "text_clutter_settle_result": None,
+        "image_object_results": [],
         "image_objects_layout_result": None,
         "table_fit_result": None,
         "generation_status": None,

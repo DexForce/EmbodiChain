@@ -29,7 +29,6 @@ from embodichain.gen_sim.prompt2scene.workflows.paths import (
     IMAGE_SPATIAL_RELATIONS_STEP,
     SCENE_EDIT_STEP,
     SCENE_INTAKE_STEP,
-    TEXT_RELATIONS_STEP,
     UNIFIED_SCENE_STEP,
     PipelinePaths,
 )
@@ -55,9 +54,6 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations import (
     run_image_relations,
 )
 from embodichain.gen_sim.prompt2scene.workflows.scene_intake import run_scene_intake
-from embodichain.gen_sim.prompt2scene.workflows.text_relations import (
-    run_text_relations,
-)
 
 __all__ = [
     "IMAGE_SEGMENTS_DIRNAME",
@@ -66,7 +62,6 @@ __all__ = [
     "SCENE_EDIT_DIRNAME",
     "SCENE_INTAKE_DIRNAME",
     "STEP_RESULT_FILENAME",
-    "TEXT_RELATIONS_DIRNAME",
     "UNIFIED_SCENE_DIRNAME",
     "Prompt2SceneRunResult",
     "run_prompt2scene",
@@ -77,7 +72,6 @@ SCENE_INTAKE_DIRNAME = SCENE_INTAKE_STEP
 SCENE_EDIT_DIRNAME = SCENE_EDIT_STEP
 IMAGE_SEGMENTS_DIRNAME = IMAGE_SEGMENTS_STEP
 IMAGE_SPATIAL_RELATIONS_DIRNAME = IMAGE_SPATIAL_RELATIONS_STEP
-TEXT_RELATIONS_DIRNAME = TEXT_RELATIONS_STEP
 UNIFIED_SCENE_DIRNAME = UNIFIED_SCENE_STEP
 
 
@@ -91,7 +85,6 @@ class Prompt2SceneRunResult:
         scene_intake_path: Path to the serialized scene intake output.
         image_segments_path: Path to serialized image segment alignment output.
         image_spatial_relations_path: Path to serialized image spatial relations.
-        text_relations_path: Path to serialized text spatial relations.
         unified_scene_path: Path to serialized unified scene output.
         gym_config_path: Path to the exported gym config.
         scene_edit_path: Path to serialized scene edit output.
@@ -102,7 +95,6 @@ class Prompt2SceneRunResult:
     scene_intake_path: Path | None = None
     image_segments_path: Path | None = None
     image_spatial_relations_path: Path | None = None
-    text_relations_path: Path | None = None
     unified_scene_path: Path | None = None
     gym_config_path: Path | None = None
     scene_edit_path: Path | None = None
@@ -139,7 +131,6 @@ def run_prompt2scene(
     scene_intake_path = None
     image_segments_path = None
     image_spatial_relations_path = None
-    text_relations_path = None
     unified_scene_path = None
     gym_config_path = None
     scene_edit_path = None
@@ -167,70 +158,49 @@ def run_prompt2scene(
         log.log_info(
             f"step end scene_intake status=ok output={scene_intake_path}"
         )
-        if request.input_kind == InputKind.IMAGE:
-            log.log_info("step start image_relations")
-            image_relations = run_image_relations(
-                request,
-                scene_intake=scene_intake,
-                llm_cfg=llm_cfg,
-                output_root=request.output_root,
+        if request.input_kind != InputKind.IMAGE:
+            raise ValueError(
+                f"Unsupported prompt2scene input_kind: {request.input_kind.value!r}."
             )
-            image_segments_path = paths.step_result(
+        log.log_info("step start image_relations")
+        image_relations = run_image_relations(
+            request,
+            scene_intake=scene_intake,
+            llm_cfg=llm_cfg,
+            output_root=request.output_root,
+        )
+        image_segments_path = paths.step_result(
+            IMAGE_SEGMENTS_STEP,
+        )
+        if not image_segments_path.is_file():
+            write_step_result(
+                request.output_root,
                 IMAGE_SEGMENTS_STEP,
+                image_relations.to_segmentation_manifest(),
             )
-            if not image_segments_path.is_file():
-                write_step_result(
-                    request.output_root,
-                    IMAGE_SEGMENTS_STEP,
-                    image_relations.to_segmentation_manifest(),
-                )
-            image_spatial_relations_path = paths.step_result(
+        image_spatial_relations_path = paths.step_result(
+            IMAGE_SPATIAL_RELATIONS_STEP,
+        )
+        if not image_spatial_relations_path.is_file():
+            write_step_result(
+                request.output_root,
                 IMAGE_SPATIAL_RELATIONS_STEP,
+                image_relations.to_spatial_manifest(),
             )
-            if not image_spatial_relations_path.is_file():
-                write_step_result(
-                    request.output_root,
-                    IMAGE_SPATIAL_RELATIONS_STEP,
-                    image_relations.to_spatial_manifest(),
-                )
-            log.log_info(
-                "step end image_relations "
-                f"status=ok output={image_spatial_relations_path}"
-            )
-            log.log_info("step start unified_scene")
-            unified_scene = run_unified_scene(
-                request,
-                scene_intake=scene_intake,
-                image_relations=image_relations,
-                output_root=request.output_root,
-            )
-            unified_scene_path = paths.step_result(
-                UNIFIED_SCENE_STEP,
-            )
-        else:
-            log.log_info("step start text_relations")
-            text_relations = run_text_relations(
-                request,
-                scene_intake=scene_intake,
-                llm_cfg=llm_cfg,
-                output_root=request.output_root,
-            )
-            text_relations_path = paths.step_result(
-                TEXT_RELATIONS_STEP,
-            )
-            log.log_info(
-                f"step end text_relations status=ok output={text_relations_path}"
-            )
-            log.log_info("step start unified_scene")
-            unified_scene = run_unified_scene(
-                request,
-                scene_intake=scene_intake,
-                text_relations=text_relations,
-                output_root=request.output_root,
-            )
-            unified_scene_path = paths.step_result(
-                UNIFIED_SCENE_STEP,
-            )
+        log.log_info(
+            "step end image_relations "
+            f"status=ok output={image_spatial_relations_path}"
+        )
+        log.log_info("step start unified_scene")
+        unified_scene = run_unified_scene(
+            request,
+            scene_intake=scene_intake,
+            image_relations=image_relations,
+            output_root=request.output_root,
+        )
+        unified_scene_path = paths.step_result(
+            UNIFIED_SCENE_STEP,
+        )
         log.log_info(
             f"step end unified_scene status=ok output={unified_scene_path}"
         )
@@ -267,7 +237,6 @@ def run_prompt2scene(
         scene_intake_path=scene_intake_path,
         image_segments_path=image_segments_path,
         image_spatial_relations_path=image_spatial_relations_path,
-        text_relations_path=text_relations_path,
         unified_scene_path=unified_scene_path,
         gym_config_path=gym_config_path,
         scene_edit_path=scene_edit_path,

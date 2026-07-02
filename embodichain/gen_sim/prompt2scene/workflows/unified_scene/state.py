@@ -25,9 +25,6 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
 from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
     SceneIntakeSpec,
 )
-from embodichain.gen_sim.prompt2scene.workflows.text_relations.schema import (
-    TextRelationSpec,
-)
 from embodichain.gen_sim.prompt2scene.workflows.attempt_state import AttemptState
 from embodichain.gen_sim.prompt2scene.workflows.request import Prompt2SceneInput
 
@@ -41,5 +38,4 @@ class UnifiedSceneState(AttemptState):
     scene_intake: SceneIntakeSpec
     output_root: Path
     image_relations: ImageRelationSpec | None
-    text_relations: TextRelationSpec | None
     unified_scene: Any | None
