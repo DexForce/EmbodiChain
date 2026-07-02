@@ -30,22 +30,20 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    JointDrivePropertiesCfg,
-    RobotCfg,
-    URDFCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
     ArticulationCfg,
     RigidObjectGroupCfg,
+    JointDrivePropertiesCfg,
     LightCfg,
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim.robots import URRobotCfg
 
 
 def initialize_simulation(args):
@@ -112,8 +110,6 @@ def create_robot(sim):
     Returns:
         Robot: The configured robot instance added to the simulation.
     """
-    # Retrieve URDF paths for the robot arm and hand
-    ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
     hand_urdf_path = get_data_path(
         "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
     )
@@ -122,61 +118,55 @@ def create_robot(sim):
     hand_attach_xpos = np.eye(4)
     hand_attach_xpos[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
 
-    # Configure the robot with its components and control properties
-    cfg = RobotCfg(
-        uid="ur10_with_brainco",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur10_urdf_path},
-                {
-                    "component_type": "hand",
-                    "urdf_path": hand_urdf_path,
-                    "transform": hand_attach_xpos,
-                },
-            ]
-        ),
-        control_parts={
-            "arm": ["JOINT[0-9]"],
-            "hand": [
-                "LEFT_HAND_THUMB1",
-                "LEFT_HAND_THUMB2",
-                "LEFT_HAND_INDEX",
-                "LEFT_HAND_MIDDLE",
-                "LEFT_HAND_RING",
-                "LEFT_HAND_PINKY",
+    cfg = URRobotCfg.from_dict(
+        {
+            "robot_type": "ur10",
+            "uid": "ur10_with_brainco",
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "hand",
+                        "urdf_path": hand_urdf_path,
+                        "transform": hand_attach_xpos,
+                    },
+                ]
+            },
+            "control_parts": {
+                "hand": [
+                    "LEFT_HAND_THUMB1",
+                    "LEFT_HAND_THUMB2",
+                    "LEFT_HAND_INDEX",
+                    "LEFT_HAND_MIDDLE",
+                    "LEFT_HAND_RING",
+                    "LEFT_HAND_PINKY",
+                ],
+            },
+            "drive_pros": {
+                "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
+                "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
+                "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},
+                "drive_type": "force",
+            },
+            "solver_cfg": {"arm": {"tcp": np.eye(4)}},
+            "init_qpos": [
+                0.0,
+                -np.pi / 2,
+                -np.pi / 2,
+                2.5,
+                -np.pi / 2,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.5,
+                -0.00016,
+                -0.00010,
+                -0.00013,
+                -0.00009,
+                0.0,
             ],
-        },
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, "LEFT_[A-Z|_]+[0-9]?": 1e2},
-            damping={"JOINT[0-9]": 1e3, "LEFT_[A-Z|_]+[0-9]?": 1e1},
-            max_effort={"JOINT[0-9]": 1e5, "LEFT_[A-Z|_]+[0-9]?": 1e3},
-            drive_type="force",
-        ),
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=np.eye(4),
-            )
-        },
-        init_qpos=[
-            0.0,
-            -np.pi / 2,
-            -np.pi / 2,
-            2.5,
-            -np.pi / 2,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.5,
-            -0.00016,
-            -0.00010,
-            -0.00013,
-            -0.00009,
-            0.0,
-        ],
+        }
     )
 
     return sim.add_robot(cfg=cfg)
