@@ -51,6 +51,7 @@ def grasp_collision_cache_path(
     mesh_triangles: torch.Tensor | np.ndarray,
     max_decomposition_hulls: int,
     *,
+    convex_decomposition_method: str = "coacd",
     cache_dir: str | Path | None = None,
 ) -> Path:
     """Return the grasp collision checker cache path for a scaled mesh."""
@@ -58,8 +59,9 @@ def grasp_collision_cache_path(
     vertices = _as_numpy(mesh_vertices)
     triangles = _as_numpy(mesh_triangles)
     mesh_hash = hashlib.sha256(vertices.tobytes() + triangles.tobytes()).hexdigest()
+    method = _normalize_convex_decomposition_method(convex_decomposition_method)
     return _resolve_cache_dir(cache_dir) / (
-        f"{mesh_hash}_{int(max_decomposition_hulls)}.pkl"
+        f"{mesh_hash}_{int(max_decomposition_hulls)}_{method}.pkl"
     )
 
 
@@ -83,6 +85,7 @@ def ensure_grasp_collision_cache_from_env_coacd(
         mesh_vertices,
         mesh_triangles,
         max_decomposition_hulls,
+        convex_decomposition_method="coacd",
         cache_dir=cache_dir,
     )
     if grasp_cache_path.is_file():
@@ -250,3 +253,14 @@ def _body_scale(body_scale: Any) -> np.ndarray:
     if scale.size != 3 or not np.all(np.isfinite(scale)):
         raise ValueError(f"Invalid body scale: {body_scale!r}.")
     return scale.reshape(1, 3)
+
+
+def _normalize_convex_decomposition_method(method: str) -> str:
+    method = str(method).lower()
+    if method == "visacd":
+        return "vhacd"
+    if method in {"vhacd", "coacd"}:
+        return method
+    raise ValueError(
+        "convex_decomposition_method must be one of: 'vhacd', 'visacd', 'coacd'"
+    )

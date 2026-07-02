@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
 import torch
 from embodichain.data import get_data_path
 import trimesh
@@ -77,3 +80,84 @@ def test_batch_convex_collision_cpu():
 def test_batch_convex_collision_gpu():
     wp.init()
     batch_convex_collision_query(torch.device("cuda"))
+
+
+def test_convex_collision_checker_defaults_to_vhacd(monkeypatch, tmp_path):
+    calls = []
+
+    class _FakeTensor:
+        def __init__(self, value):
+            self._value = value
+
+        def numpy(self):
+            return self._value
+
+    class _FakeMesh:
+        vertex = type("Vertex", (), {})()
+        triangle = type("Triangle", (), {})()
+
+        def __init__(self):
+            self.vertex.positions = _FakeTensor(
+                torch.tensor(
+                    [
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                        [0.0, 0.0, 1.0],
+                    ],
+                    dtype=torch.float32,
+                ).numpy()
+            )
+            self.triangle.indices = _FakeTensor(
+                torch.tensor(
+                    [
+                        [0, 2, 1],
+                        [0, 1, 3],
+                        [1, 2, 3],
+                        [2, 0, 3],
+                    ],
+                    dtype=torch.int32,
+                ).numpy()
+            )
+
+    def fake_vhacd(mesh, max_convex_hull_num):
+        calls.append(("vhacd", max_convex_hull_num))
+        return True, [_FakeMesh()]
+
+    def fake_coacd(mesh, max_convex_hull_num):
+        calls.append(("coacd", max_convex_hull_num))
+        return True, [_FakeMesh()]
+
+    monkeypatch.setattr(
+        "dexsim.kit.meshproc.convex_decomposition_vhacd",
+        fake_vhacd,
+    )
+    monkeypatch.setattr(
+        "dexsim.kit.meshproc.convex_decomposition_coacd",
+        fake_coacd,
+    )
+    monkeypatch.setattr("embodichain.lab.sim.CONVEX_DECOMP_DIR", tmp_path)
+
+    verts = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+    faces = torch.tensor(
+        [
+            [0, 2, 1],
+            [0, 1, 3],
+            [1, 2, 3],
+            [2, 0, 3],
+        ],
+        dtype=torch.int64,
+    )
+
+    checker = ConvexCollisionChecker(verts, faces, max_decomposition_hulls=16)
+
+    assert calls == [("vhacd", 16)]
+    assert checker.cache_path.endswith("_16_vhacd.pkl")

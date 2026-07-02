@@ -406,6 +406,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
         atomic_action_kwargs = {
             "allow_grasp_annotation": True,
             "force_grasp_reannotate": False,
+            "grasp_convex_decomposition_method": "vhacd",
         }
         for key in atomic_action_kwargs:
             if key in kwargs:

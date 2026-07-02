@@ -1540,6 +1540,9 @@ def _build_object_semantics(
         )
     )
     max_decomposition_hulls = _max_decomposition_hulls(target_obj, runtime_kwargs)
+    convex_decomposition_method = _grasp_convex_decomposition_method(
+        target_obj, runtime_kwargs
+    )
     source_mesh_path = _rigid_object_mesh_path(target_obj)
     body_scale = _rigid_object_body_scale(target_obj)
     _prepare_grasp_collision_cache_from_env_coacd(
@@ -1548,6 +1551,7 @@ def _build_object_semantics(
         mesh_triangles=mesh_triangles,
         source_mesh_path=source_mesh_path,
         max_decomposition_hulls=max_decomposition_hulls,
+        convex_decomposition_method=convex_decomposition_method,
         body_scale=body_scale,
         runtime_kwargs=runtime_kwargs,
     )
@@ -1569,6 +1573,7 @@ def _build_object_semantics(
                     _GRASP_RUNTIME_DEFAULTS.point_sample_dense,
                 ),
                 "max_decomposition_hulls": max_decomposition_hulls,
+                "convex_decomposition_method": convex_decomposition_method,
                 "env_coacd_source_mesh_path": source_mesh_path,
                 "env_coacd_body_scale": body_scale,
             },
@@ -1605,9 +1610,12 @@ def _prepare_grasp_collision_cache_from_env_coacd(
     mesh_triangles: torch.Tensor,
     source_mesh_path: str | None,
     max_decomposition_hulls: int,
+    convex_decomposition_method: str,
     body_scale: list[float] | None,
     runtime_kwargs: Mapping[str, Any],
 ) -> None:
+    if convex_decomposition_method != "coacd":
+        return
     if not bool(runtime_kwargs.get("reuse_env_coacd_for_grasp", True)):
         return
 
@@ -1836,6 +1844,33 @@ def _max_decomposition_hulls(target_obj, runtime_kwargs: Mapping[str, Any]) -> i
     if max_convex_hull_num is not None and int(max_convex_hull_num) > 1:
         return int(max_convex_hull_num)
     return 8
+
+
+def _grasp_convex_decomposition_method(
+    target_obj, runtime_kwargs: Mapping[str, Any]
+) -> str:
+    if "grasp_convex_decomposition_method" in runtime_kwargs:
+        return _normalize_convex_decomposition_method(
+            runtime_kwargs["grasp_convex_decomposition_method"]
+        )
+
+    method = getattr(
+        getattr(target_obj, "cfg", None),
+        "convex_decomposition_method",
+        "vhacd",
+    )
+    return _normalize_convex_decomposition_method(method)
+
+
+def _normalize_convex_decomposition_method(method: Any) -> str:
+    method = str(method).lower()
+    if method == "visacd":
+        return "vhacd"
+    if method in {"vhacd", "coacd"}:
+        return method
+    raise ValueError(
+        "convex_decomposition_method must be one of: 'vhacd', 'visacd', 'coacd'"
+    )
 
 
 def _xyz(value, field_name: str) -> list[float]:

@@ -1160,6 +1160,7 @@ def test_grasp_collision_cache_bridge_error_falls_back(monkeypatch) -> None:
         mesh_triangles=torch.zeros(1, 3, dtype=torch.int64),
         source_mesh_path="/tmp/fake.obj",
         max_decomposition_hulls=4,
+        convex_decomposition_method="coacd",
         body_scale=None,
         runtime_kwargs={},
     )
@@ -1186,6 +1187,39 @@ def test_grasp_collision_cache_unexpected_error_propagates(monkeypatch) -> None:
             mesh_triangles=torch.zeros(1, 3, dtype=torch.int64),
             source_mesh_path="/tmp/fake.obj",
             max_decomposition_hulls=4,
+            convex_decomposition_method="coacd",
             body_scale=None,
             runtime_kwargs={},
         )
+
+
+def test_vhacd_grasp_collision_path_skips_env_coacd_bridge(monkeypatch) -> None:
+    def fail_if_called(**kwargs):
+        raise AssertionError("env CoACD bridge should not run for VHACD")
+
+    monkeypatch.setattr(
+        atom_actions,
+        "ensure_grasp_collision_cache_from_env_coacd",
+        fail_if_called,
+    )
+
+    atom_actions._prepare_grasp_collision_cache_from_env_coacd(
+        obj_name="apple",
+        mesh_vertices=torch.zeros(1, 3),
+        mesh_triangles=torch.zeros(1, 3, dtype=torch.int64),
+        source_mesh_path="/tmp/fake.obj",
+        max_decomposition_hulls=4,
+        convex_decomposition_method="vhacd",
+        body_scale=None,
+        runtime_kwargs={},
+    )
+
+
+def test_grasp_convex_decomposition_method_uses_vhacd_alias() -> None:
+    target_obj = SimpleNamespace(
+        cfg=SimpleNamespace(convex_decomposition_method="visacd")
+    )
+
+    method = atom_actions._grasp_convex_decomposition_method(target_obj, {})
+
+    assert method == "vhacd"
