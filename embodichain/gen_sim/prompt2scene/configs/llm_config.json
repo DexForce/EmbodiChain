@@ -1,9 +1,9 @@
 {
   "llm": {
     "openai_compatible": {
-      "api_key": "tp-cigd9h4eh33v79adk5wz77y9o9rngsvcrw527wxiic5jdeqq",
-      "model": "mimo-v2.5",
-      "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+      "api_key": "",
+      "model": "",
+      "base_url": "",
       "default_query": {},
       "max_attempts": 5
     }
