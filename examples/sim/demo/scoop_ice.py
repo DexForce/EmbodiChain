@@ -34,6 +34,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
     ArticulationCfg,
     RigidObjectGroupCfg,
+    JointDrivePropertiesCfg,
     LightCfg,
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
