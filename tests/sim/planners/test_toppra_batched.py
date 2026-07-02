@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim.planners.toppra_planner import _toppra_solve_one_env
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
@@ -91,3 +92,84 @@ class TestToppraCfgFields:
         cfg = ToppraPlannerCfg(robot_uid="x")
         assert cfg.max_workers is None
         assert cfg.mp_context == "fork"
+
+
+class TestToppraPlanBatched:
+    def _make_planner(self):
+        from embodichain.lab.sim.planners.toppra_planner import (
+            ToppraPlanner,
+            ToppraPlannerCfg,
+        )
+        from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+        from embodichain.lab.sim.robots import CobotMagicCfg
+
+        sim = SimulationManager(
+            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+        )
+        robot = sim.add_robot(
+            cfg=CobotMagicCfg.from_dict(
+                {"uid": "t", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
+            )
+        )
+        planner = ToppraPlanner(ToppraPlannerCfg(robot_uid="t", max_workers=1))
+        return planner, sim
+
+    def test_plan_batched_quantity_uniform_N(self):
+        from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
+        from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+
+        planner, sim = self._make_planner()
+        try:
+            B, dofs = 3, 6
+            wp = torch.zeros(B, dofs)
+            wp[:, 0] = torch.linspace(0.0, 0.4, B)
+            states = [
+                PlanState.from_qpos(torch.zeros(B, dofs)),
+                PlanState.from_qpos(wp),
+            ]
+            opts = ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=15,
+                constraints={"velocity": 1.0, "acceleration": 2.0},
+            )
+            r = planner.plan(states, opts)
+            assert r.success.shape == (B,)
+            assert r.success.all().item()
+            assert r.positions.shape == (B, 15, dofs)
+        finally:
+            planner.close()
+            sim.destroy()
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()
+
+    def test_plan_batched_time_tailpads(self):
+        from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
+        from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+
+        planner, sim = self._make_planner()
+        try:
+            B, dofs = 3, 6
+            wp = torch.zeros(B, dofs)
+            wp[:, 0] = torch.tensor([0.1, 0.4, 0.9])  # different durations
+            states = [
+                PlanState.from_qpos(torch.zeros(B, dofs)),
+                PlanState.from_qpos(wp),
+            ]
+            opts = ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.TIME,
+                sample_interval=0.05,
+                constraints={"velocity": 1.0, "acceleration": 2.0},
+            )
+            r = planner.plan(states, opts)
+            assert r.success.shape == (B,)
+            assert r.positions.shape[0] == B
+            # padded rows equal the last real waypoint (held pose)
+            last_real = r.positions[:, r.duration.argmax().int().item(), :]
+            assert r.duration.shape == (B,)
+        finally:
+            planner.close()
+            sim.destroy()
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()

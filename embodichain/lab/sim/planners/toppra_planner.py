@@ -16,6 +16,7 @@
 
 import torch
 import numpy as np
+from concurrent.futures.process import BrokenProcessPool
 
 from embodichain.utils import logger, configclass
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
@@ -24,6 +25,7 @@ from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
     PlanOptions,
+    _infer_batch_size,
 )
 from .utils import PlanState, PlanResult
 
@@ -203,7 +205,7 @@ class ToppraPlanner(BasePlanner):
 
         atexit.register(self.close)
 
-    def _get_pool(self, b: int):
+    def _get_pool(self, batch_size: int):
         if self._pool is not None:
             return self._pool
         import os
@@ -211,7 +213,7 @@ class ToppraPlanner(BasePlanner):
 
         max_workers = self.cfg.max_workers
         if max_workers is None:
-            max_workers = max(1, min((os.cpu_count() or 2) // 2, b))
+            max_workers = max(1, min((os.cpu_count() or 2) // 2, batch_size))
         ctx = mp.get_context(self.cfg.mp_context)
         from concurrent.futures import ProcessPoolExecutor
 
@@ -244,161 +246,80 @@ class ToppraPlanner(BasePlanner):
         Returns:
             PlanResult containing the planned trajectory details.
         """
+        for i, t in enumerate(target_states):
+            if t.qpos is None:
+                logger.log_error(f"Target state at index {i} missing qpos", ValueError)
 
-        for i, target in enumerate(target_states):
-            if target.qpos is None:
-                logger.log_error(f"Target state at index {i} missing qpos")
+        b = _infer_batch_size(target_states) or 1
+        dofs = target_states[0].qpos.shape[-1]
 
-        dofs = len(target_states[0].qpos)
+        # Build (B, N, DOF) numpy waypoints
+        waypoints = np.stack(
+            [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
+        )  # (B, N, DOF)
 
-        # set constraints
-        if isinstance(options.constraints["velocity"], float):
-            vlims = np.array(
-                [
-                    [
-                        -options.constraints["velocity"],
-                        options.constraints["velocity"],
-                    ]
-                    for _ in range(dofs)
-                ]
-            )
-        else:
-            vlims = np.array(options.constraints["velocity"])
+        vc = options.constraints["velocity"]
+        ac = options.constraints["acceleration"]
+        args_per_env = [
+            (waypoints[i], vc, ac, options.sample_method, options.sample_interval)
+            for i in range(b)
+        ]
 
-        if isinstance(options.constraints["acceleration"], float):
-            alims = np.array(
-                [
-                    [
-                        -options.constraints["acceleration"],
-                        options.constraints["acceleration"],
-                    ]
-                    for _ in range(dofs)
-                ]
-            )
-        else:
-            alims = np.array(options.constraints["acceleration"])
+        # Inline fallback for B==1 or max_workers==1
+        import os
 
-        sample_method = options.sample_method
-        sample_interval = options.sample_interval
-        if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
-            logger.log_error("Time interval must be positive", ValueError)
-        if sample_method == TrajectorySampleMethod.TIME and isinstance(
-            sample_interval, int
-        ):
-            logger.log_error(
-                "Time interval must be a float when sample_method is TIME", TypeError
-            )
-        if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
-            logger.log_error("At least 2 sample points required", ValueError)
-        if sample_method == TrajectorySampleMethod.QUANTITY and isinstance(
-            sample_interval, float
-        ):
-            logger.log_error(
-                "Number of samples must be an integer when sample_method is QUANTITY",
-                TypeError,
-            )
-
-        # Check waypoints
-        for i, target in enumerate(target_states):
-            if target.qpos is None:
-                logger.log_error(f"Target state at index {i} missing qpos")
-            if len(target.qpos) != dofs:
-                logger.log_error(f"Target waypoints do not align at index {i}")
-
-        if (
-            len(target_states) == 2
-            and torch.sum(torch.abs(target_states[1].qpos - target_states[0].qpos))
-            < 1e-3
-        ):
-            logger.log_warning("Only two same waypoints, returning trivial trajectory.")
-            return PlanResult(
-                success=True,
-                positions=torch.as_tensor(
-                    np.stack([target_states[0].qpos, target_states[1].qpos]),
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                velocities=torch.zeros(
-                    (2, dofs), dtype=torch.float32, device=self.device
-                ),
-                accelerations=torch.zeros(
-                    (2, dofs), dtype=torch.float32, device=self.device
-                ),
-                dt=torch.tensor([0.0, 0.0], dtype=torch.float32, device=self.device),
-                duration=0.0,
-            )
-
-        # Build waypoints
-        waypoints = np.array(
-            [target.qpos.to("cpu").numpy() for target in target_states]
+        max_workers = self.cfg.max_workers
+        use_inline = (
+            (b == 1)
+            or (max_workers == 1)
+            or (max_workers is None and ((os.cpu_count() or 2) // 2) <= 1)
         )
-        # Create spline interpolation
-        # NOTE: Suitable for dense waypoints
-        ss = np.linspace(0, 1, len(waypoints))
-
-        # NOTE: Suitable for sparse waypoints; for dense waypoints, CubicSpline may fail strict monotonicity requirement
-        # len_total = 0
-        # len_from_start = [0]
-        # for i in range(len(waypoints)-1):
-        #     len_total += np.sum(np.abs(waypoints[i+1] - waypoints[i]))
-        #     len_from_start.append(len_total)
-        # ss = np.array([cur/len_total for cur in len_from_start])
-
-        path = ta.SplineInterpolator(ss, waypoints)
-
-        # Set constraints
-        pc_vel = constraint.JointVelocityConstraint(vlims)
-        pc_acc = constraint.JointAccelerationConstraint(alims)
-
-        # Create TOPPRA instance
-        instance = ta.algorithm.TOPPRA(
-            [pc_vel, pc_acc],
-            path,
-            parametrizer="ParametrizeConstAccel",
-            gridpt_min_nb_points=max(100, 10 * len(waypoints)),
-        )
-        # NOTES: Important to set a large number of grid points for better performance in dense waypoint scenarios.
-
-        # Compute parameterized trajectory
-        jnt_traj = instance.compute_trajectory()
-        if jnt_traj is None:
-            # raise RuntimeError("Unable to find feasible trajectory")
-            logger.log_warning("Unable to find feasible trajectory")
-            return PlanResult(success=False)
-
-        duration = jnt_traj.duration
-        # Sample trajectory points
-        if duration <= 0:
-            logger.log_error(f"Duration must be positive, got {duration}", ValueError)
-        if sample_method == TrajectorySampleMethod.TIME:
-            n_points = max(2, int(np.ceil(duration / sample_interval)) + 1)
-            ts = np.linspace(0, duration, n_points)
+        if use_inline:
+            results = [_toppra_solve_one_env(*a) for a in args_per_env]
         else:
-            ts = np.linspace(0, duration, num=int(sample_interval))
+            pool = self._get_pool(b)
+            try:
+                futures = [pool.submit(_toppra_solve_one_env, *a) for a in args_per_env]
+                results = []
+                for fut in futures:
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        results.append(_empty_failure(dofs))
+            except BrokenProcessPool:
+                logger.log_warning("TOPPRA process pool broke; returning failure.")
+                self.close()
+                results = [_empty_failure(dofs) for _ in range(b)]
 
-        positions = []
-        velocities = []
-        accelerations = []
+        return self._assemble_batched_result(results, dofs)
 
-        for t in ts:
-            positions.append(jnt_traj.eval(t))
-            velocities.append(jnt_traj.evald(t))
-            accelerations.append(jnt_traj.evaldd(t))
-
-        dt = torch.as_tensor(ts, dtype=torch.float32, device=self.device)
-        dt = torch.diff(dt, prepend=torch.tensor([0.0], device=self.device))
-
+    def _assemble_batched_result(self, results: list[dict], dofs: int) -> PlanResult:
+        b = len(results)
+        max_n = max(r["n"] for r in results)
+        positions = np.zeros((b, max_n, dofs), dtype=np.float32)
+        velocities = np.zeros((b, max_n, dofs), dtype=np.float32)
+        accelerations = np.zeros((b, max_n, dofs), dtype=np.float32)
+        dt = np.zeros((b, max_n), dtype=np.float32)
+        duration = np.zeros((b,), dtype=np.float32)
+        success = np.zeros((b,), dtype=bool)
+        for i, r in enumerate(results):
+            n = r["n"]
+            positions[i, :n] = r["positions"]
+            velocities[i, :n] = r["velocities"]
+            accelerations[i, :n] = r["accelerations"]
+            dt[i, :n] = r["dt"]
+            duration[i] = r["duration"]
+            success[i] = r["success"]
+            # tail-pad: repeat final waypoint for held-pose rows
+            if n < max_n:
+                positions[i, n:] = r["positions"][-1]
+                velocities[i, n:] = 0.0
+                accelerations[i, n:] = 0.0
         return PlanResult(
-            success=True,
-            positions=torch.as_tensor(
-                np.array(positions), dtype=torch.float32, device=self.device
-            ),
-            velocities=torch.as_tensor(
-                np.array(velocities), dtype=torch.float32, device=self.device
-            ),
-            accelerations=torch.as_tensor(
-                np.array(accelerations), dtype=torch.float32, device=self.device
-            ),
-            dt=dt,
-            duration=duration,
+            success=torch.as_tensor(success, device=self.device),
+            positions=torch.as_tensor(positions, device=self.device),
+            velocities=torch.as_tensor(velocities, device=self.device),
+            accelerations=torch.as_tensor(accelerations, device=self.device),
+            dt=torch.as_tensor(dt, device=self.device),
+            duration=torch.as_tensor(duration, device=self.device),
         )
