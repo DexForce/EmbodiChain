@@ -309,7 +309,10 @@ class NeuralPlanner(BasePlanner):
         options: NeuralPlanOptions = NeuralPlanOptions(),
     ) -> PlanResult:
         if not target_states:
-            return PlanResult(success=False, positions=None)
+            return PlanResult(
+                success=torch.zeros(0, dtype=torch.bool, device=self.device),
+                positions=None,
+            )
 
         control_part = options.control_part or self.cfg.control_part
         if control_part is None:
@@ -322,14 +325,16 @@ class NeuralPlanner(BasePlanner):
             target_states
         )
         qpos = self._initial_qpos(control_part, options.start_qpos)
+        b = qpos.shape[0]
         limits = self.robot.get_qpos_limits(name=control_part)[0].to(self.device)
         lower = limits[: self._action_dim, 0]
         upper = limits[: self._action_dim, 1]
 
-        last_action = torch.zeros(1, self._action_dim, device=self.device)
-        active_idx = 0
-        positions = [qpos.squeeze(0).clone()]
-        xpos_list = [self._fk_matrix(qpos, control_part).squeeze(0)]
+        last_action = torch.zeros(b, self._action_dim, device=self.device)
+        active_idx = torch.zeros(b, dtype=torch.long, device=self.device)
+        positions = [qpos.clone()]
+        xpos_list = [self._fk_matrix(qpos, control_part)]
+        converged = torch.zeros(b, dtype=torch.bool, device=self.device)
         max_steps = int(options.max_steps or self._max_steps)
 
         with torch.no_grad():
@@ -350,33 +355,40 @@ class NeuralPlanner(BasePlanner):
                     qpos[:, : self._action_dim], lower, upper
                 )
                 last_action = action
-
-                positions.append(qpos.squeeze(0).clone())
-                xpos_list.append(self._fk_matrix(qpos, control_part).squeeze(0))
+                positions.append(qpos.clone())
+                xpos_list.append(self._fk_matrix(qpos, control_part))
 
                 ee_pose = self._fk_pose_xyzw(qpos, control_part)
-                if self._is_active_reached(
+                reached = self._is_active_reached(
                     ee_pose, waypoints_pos, waypoints_quat, active_idx, episode_k
-                ):
-                    active_idx += 1
-                    if active_idx >= episode_k:
-                        break
+                )
+                active_idx = torch.where(reached, active_idx + 1, active_idx)
+                converged = converged | (active_idx >= episode_k)
+                if converged.all():
+                    break
 
         positions_t = torch.stack(positions)
         xpos_t = torch.stack(xpos_list)
-        success = active_idx >= episode_k
         dt = torch.full(
             (positions_t.shape[0],),
             float(self.cfg.dt),
             dtype=torch.float32,
             device=self.device,
         )
+        dt = dt.unsqueeze(0).expand(b, -1)
+        positions_t = positions_t.permute(1, 0, 2)
+        xpos_t = xpos_t.permute(1, 0, 2, 3)
+        success = active_idx >= episode_k
         return PlanResult(
             success=success,
             positions=positions_t,
             xpos_list=xpos_t,
             dt=dt,
-            duration=float(max(positions_t.shape[0] - 1, 0) * self.cfg.dt),
+            duration=torch.full(
+                (b,),
+                float(max(positions_t.shape[1] - 1, 0) * self.cfg.dt),
+                device=self.device,
+            ),
         )
 
     def _parse_waypoints(
@@ -441,24 +453,26 @@ class NeuralPlanner(BasePlanner):
         waypoint_pos: torch.Tensor,
         waypoint_quat: torch.Tensor,
         valid_mask: torch.Tensor,
-        active_idx: int,
+        active_idx: torch.Tensor,
         last_action: torch.Tensor,
     ) -> torch.Tensor:
-        active_idx_clamped = min(active_idx, self._num_waypoints - 1)
-        active_onehot = torch.zeros(1, self._num_waypoints, device=self.device)
-        active_onehot[0, active_idx_clamped] = 1.0
+        b = joint_pos.shape[0]
+        active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
+        active_onehot = torch.zeros(b, self._num_waypoints, device=self.device)
+        active_onehot.scatter_(1, active_idx_clamped.unsqueeze(1), 1.0)
         obs_parts = [
             joint_pos,
             ee_pose,
-            waypoint_pos.reshape(1, self._num_waypoints * 3),
-            waypoint_quat.reshape(1, self._num_waypoints * 4),
+            waypoint_pos.reshape(b, self._num_waypoints * 3),
+            waypoint_quat.reshape(b, self._num_waypoints * 4),
             active_onehot,
             valid_mask,
             last_action,
         ]
         if self._use_relative_obs:
-            active_pos = waypoint_pos[:, active_idx_clamped]
-            active_quat = waypoint_quat[:, active_idx_clamped]
+            idx = torch.arange(b, device=self.device)
+            active_pos = waypoint_pos[idx, active_idx_clamped]
+            active_quat = waypoint_quat[idx, active_idx_clamped]
             obs_parts.append(
                 torch.cat([active_pos - ee_pose[:, :3], active_quat], dim=-1)
             )
@@ -474,22 +488,25 @@ class NeuralPlanner(BasePlanner):
         ee_pose: torch.Tensor,
         waypoint_pos: torch.Tensor,
         waypoint_quat: torch.Tensor,
-        active_idx: int,
+        active_idx: torch.Tensor,
         episode_k: int,
-    ) -> bool:
-        active_pos = waypoint_pos[:, active_idx]
-        active_quat_xyzw = waypoint_quat[:, active_idx]
+    ) -> torch.Tensor:
+        b = ee_pose.shape[0]
+        idx = torch.arange(b, device=self.device)
+        active_idx_clamped = torch.clamp(active_idx, max=self._num_waypoints - 1)
+        active_pos = waypoint_pos[idx, active_idx_clamped]
+        active_quat_xyzw = waypoint_quat[idx, active_idx_clamped]
         pos_dist = (ee_pose[:, :3] - active_pos).norm(dim=-1)
         ee_quat_wxyz = convert_quat(ee_pose[:, 3:7], to="wxyz")
         active_quat_wxyz = convert_quat(active_quat_xyzw, to="wxyz")
         rot_dist = quat_error_magnitude(ee_quat_wxyz, active_quat_wxyz)
-        orientation_required = (
-            self._intermediate_orientation or active_idx >= episode_k - 1
+        orientation_required = self._intermediate_orientation | (
+            active_idx >= episode_k - 1
         )
-        rot_ok = (
-            (rot_dist < self._rot_eps)
-            if orientation_required
-            else torch.ones_like(rot_dist, dtype=torch.bool)
+        rot_ok = torch.where(
+            orientation_required,
+            rot_dist < self._rot_eps,
+            torch.ones_like(rot_dist, dtype=torch.bool),
         )
         reached = (pos_dist < self._pos_eps) & rot_ok
-        return bool(reached.item())
+        return reached

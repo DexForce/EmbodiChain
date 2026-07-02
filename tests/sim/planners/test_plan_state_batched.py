@@ -25,7 +25,9 @@ from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType, 
 class TestPlanStateBatched:
     def test_from_qpos_batched(self):
         qpos = torch.zeros(4, 7)
-        ps = PlanState.from_qpos(qpos, move_type=MoveType.JOINT_MOVE, move_part=MovePart.LEFT)
+        ps = PlanState.from_qpos(
+            qpos, move_type=MoveType.JOINT_MOVE, move_part=MovePart.LEFT
+        )
         assert ps.qpos.shape == (4, 7)
         assert ps.move_type == MoveType.JOINT_MOVE
 
@@ -70,17 +72,16 @@ class TestValidateBatchConsistency:
             PlanState.from_qpos(torch.zeros(3, 7)),
         ]
         from embodichain.lab.sim.planners import base_planner as bp
-        with pytest.raises(ValueError):
-            bp._check_batch_consistency(states, expected_b=None, robot_num_instances=2)
 
-    def test_rejects_too_few_waypoints(self):
-        from embodichain.lab.sim.planners import base_planner as bp
-        states = [PlanState.from_qpos(torch.zeros(2, 7))]
         with pytest.raises(ValueError):
             bp._check_batch_consistency(states, expected_b=None, robot_num_instances=2)
 
     def test_rejects_expected_b_mismatch(self):
         from embodichain.lab.sim.planners import base_planner as bp
-        states = [PlanState.from_qpos(torch.zeros(2, 7)), PlanState.from_qpos(torch.zeros(2, 7))]
+
+        states = [
+            PlanState.from_qpos(torch.zeros(2, 7)),
+            PlanState.from_qpos(torch.zeros(2, 7)),
+        ]
         with pytest.raises(ValueError):
             bp._check_batch_consistency(states, expected_b=4, robot_num_instances=4)

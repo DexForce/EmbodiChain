@@ -132,7 +132,7 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
         )
     )
 
-    target_state = PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+    target_state = PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
     result = motion_generator.generate(
         target_states=[target_state],
         options=MotionGenOptions(
@@ -143,7 +143,7 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
         ),
     )
 
-    assert result.success is True
+    assert result.success.all().item()
     assert result.positions is not None
     assert result.positions.shape[-1] == NUM_ARM_JOINTS
     assert torch.isfinite(result.positions).all()
@@ -169,7 +169,9 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
     )
     custom_qpos = torch.ones(NUM_ARM_JOINTS)
     result = motion_generator.generate(
-        target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
         options=MotionGenOptions(
             plan_opts=NeuralPlanOptions(
                 control_part="main_arm",
@@ -178,8 +180,8 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
         ),
     )
 
-    assert result.success is True
-    assert torch.allclose(result.positions[0], custom_qpos)
+    assert result.success.all().item()
+    assert torch.allclose(result.positions[0, 0], custom_qpos)
 
 
 def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
@@ -201,7 +203,9 @@ def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="policy expects"):
         motion_generator.generate(
-            target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            target_states=[
+                PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+            ],
             options=MotionGenOptions(
                 plan_opts=NeuralPlanOptions(
                     control_part="main_arm",

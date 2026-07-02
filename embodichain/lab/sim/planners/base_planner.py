@@ -57,8 +57,6 @@ def _check_batch_consistency(
     robot_num_instances: int | None,
 ) -> int:
     """Validate that all PlanState tensors share the same leading B and match the robot."""
-    if len(target_states) < 2:
-        logger.log_error("target_states must contain at least 2 waypoints", ValueError)
     bs = set()
     for s in target_states:
         b = _infer_batch_size([s])
