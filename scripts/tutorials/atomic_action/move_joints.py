@@ -178,7 +178,7 @@ def main() -> None:
             ("move_joints", JointPositionTarget(qpos=multi_waypoint_qpos)),
         ]
     )
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan MoveJoints demo trajectory.")
         return
 

@@ -129,7 +129,7 @@ def main():
     target_states = []
     for qpos in qpos_list:
         target_states.append(
-            PlanState(
+            PlanState.single(
                 move_type=MoveType.JOINT_MOVE,
                 move_part=MovePart.LEFT,
                 qpos=qpos,
@@ -138,7 +138,7 @@ def main():
     plan_result = motion_generator.generate(
         target_states=target_states, options=options
     )
-    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions[0])
 
     # Cartesian space trajectory
     options.is_linear = True
@@ -146,7 +146,7 @@ def main():
     target_states = []
     for xpos in xpos_list:
         target_states.append(
-            PlanState(
+            PlanState.single(
                 move_type=MoveType.EEF_MOVE,
                 move_part=MovePart.LEFT,
                 xpos=xpos,
@@ -156,7 +156,7 @@ def main():
         target_states=target_states, options=options
     )
     sim.reset()
-    move_robot_along_trajectory(robot, arm_name, plan_result.positions)
+    move_robot_along_trajectory(robot, arm_name, plan_result.positions[0])
 
 
 if __name__ == "__main__":

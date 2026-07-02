@@ -379,7 +379,7 @@ def run_press_demo(args: argparse.Namespace) -> None:
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan Press demo trajectory.")
         return
 

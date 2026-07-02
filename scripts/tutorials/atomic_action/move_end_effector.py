@@ -203,7 +203,7 @@ def main() -> None:
             )
         ]
     )
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")
         return
 

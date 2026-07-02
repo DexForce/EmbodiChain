@@ -383,7 +383,7 @@ def main() -> None:
             ("place", place_target),
         ]
     )
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 

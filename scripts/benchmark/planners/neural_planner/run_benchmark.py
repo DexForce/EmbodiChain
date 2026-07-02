@@ -426,7 +426,7 @@ def _make_waypoints(start_pose: torch.Tensor, num_waypoints: int) -> torch.Tenso
 
 def _make_target_states(waypoints: torch.Tensor) -> list[PlanState]:
     return [
-        PlanState(move_type=MoveType.EEF_MOVE, xpos=waypoint) for waypoint in waypoints
+        PlanState.single(move_type=MoveType.EEF_MOVE, xpos=waypoint) for waypoint in waypoints
     ]
 
 
@@ -559,7 +559,7 @@ def plan_ik_interpolate(
             joint_seed=qpos_seed,
         )
         if not _all_success(success):
-            return PlanResult(success=False, positions=None)
+            return PlanResult(success=torch.tensor([False]), positions=None, duration=torch.tensor([0.0]))
         qpos_seed = qpos
         joint_targets.append(qpos.squeeze(0))
 
@@ -568,21 +568,21 @@ def plan_ik_interpolate(
         trajectory=trajectory,
         interp_num=sample_interval,
         device=robot.device,
-    ).squeeze(0)
+    )
     return PlanResult(
-        success=True,
+        success=torch.tensor([True]),
         positions=positions,
-        duration=0.0,
+        duration=torch.tensor([0.0]),
     )
 
 
 def _trajectory_fk_poses(result: PlanResult, robot: Robot) -> list[torch.Tensor]:
     """Return TCP poses sampled along the planned trajectory."""
     if result.xpos_list is not None and result.xpos_list.shape[0] > 0:
-        return [pose for pose in result.xpos_list]
-    if result.positions is None or result.positions.shape[0] == 0:
+        return [pose for pose in result.xpos_list[0]]
+    if result.positions is None or result.positions.shape[1] == 0:
         return []
-    qpos = result.positions
+    qpos = result.positions[0]
     if qpos.dim() == 1:
         qpos = qpos.unsqueeze(0)
     fk = robot.compute_batch_fk(
@@ -638,10 +638,10 @@ def _final_eef_pose(
     robot: Robot,
 ) -> torch.Tensor | None:
     if result.xpos_list is not None and result.xpos_list.shape[0] > 0:
-        return result.xpos_list[-1]
-    if result.positions is None or result.positions.shape[0] == 0:
+        return result.xpos_list[0][-1]
+    if result.positions is None or result.positions.shape[1] == 0:
         return None
-    qpos = result.positions[-1]
+    qpos = result.positions[0][-1]
     if qpos.dim() == 1:
         qpos = qpos.unsqueeze(0)
     return robot.compute_fk(qpos=qpos, name=ARM_NAME, to_matrix=True)[0]
@@ -652,15 +652,11 @@ def _compute_result_metrics(
     waypoints: torch.Tensor,
     robot: Robot,
 ) -> dict[str, object]:
-    success = bool(
-        result.success.item() if torch.is_tensor(result.success) else result.success
-    )
+    success = bool(result.success.all().item())
     rollout_steps = (
-        int(result.positions.shape[0]) if result.positions is not None else 0
+        int(result.positions.shape[1]) if result.positions is not None else 0
     )
-    duration_s = float(
-        result.duration.item() if torch.is_tensor(result.duration) else result.duration
-    )
+    duration_s = float(result.duration[0].item())
 
     trajectory_poses = _trajectory_fk_poses(result, robot)
     waypoint_errors = compute_waypoint_errors(trajectory_poses, waypoints)

@@ -352,7 +352,7 @@ def main() -> None:
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan move_held_object demo trajectory.")
         return
 
