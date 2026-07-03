@@ -202,7 +202,6 @@ def _export_support_aligned_layout_glbs(
         output_dir=output_dir / "footprint_layout",
         output_root=output_root,
         trimesh=trimesh,
-        gravity_settle_mode=gravity_settle_mode,
     )
     object_scenes = footprint_result["object_scenes"]
 

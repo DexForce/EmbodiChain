@@ -95,7 +95,7 @@ def _settle_and_pack_object_footprints(
     output_dir: Path,
     output_root: Path,
     trimesh: Any,
-    gravity_settle_mode: str = "geometry",
+    gravity_settle_mode: str = "physics",
 ) -> dict[str, Any]:
     sim = SimulationManager(headless=True, sim_device="cpu")
     footprint_items: list[dict[str, Any]] = []
