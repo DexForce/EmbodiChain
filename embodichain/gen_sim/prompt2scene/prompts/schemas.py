@@ -557,3 +557,89 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
         "reason",
     ],
 }
+
+SCENE_PROMPT_ROUTE_JSON_SCHEMA: dict[str, Any] = {
+    "title": "ScenePromptRouteOutput",
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "route": {
+            "type": "string",
+            "enum": ["scene_edit", "scene_randomization"],
+            "description": (
+                "Workflow route. Use scene_edit for adding, deleting, replacing, "
+                "or generating objects. Use scene_randomization for moving "
+                "existing objects toward left/right/front/back directions."
+            ),
+        },
+        "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Concise reason for selecting this route.",
+        },
+        "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Routing confidence from 0.0 to 1.0.",
+        },
+    },
+    "required": ["route", "reason", "confidence"],
+}
+
+SCENE_RANDOMIZATION_INTENT_JSON_SCHEMA: dict[str, Any] = {
+    "title": "SceneRandomizationIntentOutput",
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "operations": {
+            "type": "array",
+            "description": "Existing-object directional movement operations.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "target_object_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Exact id of the existing object to move.",
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["left", "right", "front", "back"],
+                    },
+                    "reason": {"type": "string", "minLength": 1},
+                    "confidence": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                    },
+                },
+                "required": [
+                    "target_object_id",
+                    "direction",
+                    "reason",
+                    "confidence",
+                ],
+            },
+        },
+        "unresolved": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "query": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "minLength": 1},
+                    "candidate_object_ids": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                },
+                "required": ["query", "reason", "candidate_object_ids"],
+            },
+        },
+        "reason": {"type": "string", "minLength": 1},
+    },
+    "required": ["operations", "unresolved", "reason"],
+}

@@ -19,7 +19,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from embodichain.gen_sim.prompt2scene.llms import build_chat_model
+from embodichain.gen_sim.prompt2scene.llms.llm_output import (
+    call_structured_json_model_step,
+)
 from embodichain.gen_sim.prompt2scene.llms import OpenAICompatibleLLMCfg
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
+    build_scene_prompt_route_messages,
+)
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
+    SCENE_PROMPT_ROUTE_JSON_SCHEMA,
+)
 from embodichain.gen_sim.prompt2scene.workflows.request import (
     InputKind,
     Prompt2SceneInput,
@@ -28,11 +38,14 @@ from embodichain.gen_sim.prompt2scene.workflows.paths import (
     IMAGE_SEGMENTS_STEP,
     IMAGE_SPATIAL_RELATIONS_STEP,
     SCENE_EDIT_STEP,
+    SCENE_PROMPT_ROUTE_STEP,
+    SCENE_RANDOMIZATION_STEP,
     SCENE_INTAKE_STEP,
     UNIFIED_SCENE_STEP,
     PipelinePaths,
 )
 from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
+    WorkflowArtifactWriter,
     write_step_result,
 )
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene.graph import (
@@ -48,6 +61,10 @@ from embodichain.gen_sim.prompt2scene.workflows.scene_edit import run_scene_edit
 from embodichain.gen_sim.prompt2scene.workflows.scene_edit.schema import (
     SceneEditRequest,
 )
+from embodichain.gen_sim.prompt2scene.workflows.scene_edit.utils import scene_state_path
+from embodichain.gen_sim.prompt2scene.workflows.scene_randomization import (
+    run_scene_randomization,
+)
 from embodichain.gen_sim.prompt2scene.utils.io import write_json
 from embodichain.gen_sim.prompt2scene.utils import log
 from embodichain.gen_sim.prompt2scene.workflows.image_relations import (
@@ -61,6 +78,8 @@ __all__ = [
     "INPUT_MANIFEST_FILENAME",
     "SCENE_EDIT_DIRNAME",
     "SCENE_INTAKE_DIRNAME",
+    "SCENE_PROMPT_ROUTE_DIRNAME",
+    "SCENE_RANDOMIZATION_DIRNAME",
     "STEP_RESULT_FILENAME",
     "UNIFIED_SCENE_DIRNAME",
     "Prompt2SceneRunResult",
@@ -70,6 +89,8 @@ __all__ = [
 INPUT_MANIFEST_FILENAME = "input_manifest.json"
 SCENE_INTAKE_DIRNAME = SCENE_INTAKE_STEP
 SCENE_EDIT_DIRNAME = SCENE_EDIT_STEP
+SCENE_PROMPT_ROUTE_DIRNAME = SCENE_PROMPT_ROUTE_STEP
+SCENE_RANDOMIZATION_DIRNAME = SCENE_RANDOMIZATION_STEP
 IMAGE_SEGMENTS_DIRNAME = IMAGE_SEGMENTS_STEP
 IMAGE_SPATIAL_RELATIONS_DIRNAME = IMAGE_SPATIAL_RELATIONS_STEP
 UNIFIED_SCENE_DIRNAME = UNIFIED_SCENE_STEP
@@ -87,7 +108,9 @@ class Prompt2SceneRunResult:
         image_spatial_relations_path: Path to serialized image spatial relations.
         unified_scene_path: Path to serialized unified scene output.
         gym_config_path: Path to the exported gym config.
+        scene_prompt_route_path: Path to serialized prompt route output.
         scene_edit_path: Path to serialized scene edit output.
+        scene_randomization_path: Path to serialized scene randomization output.
     """
 
     output_root: Path
@@ -97,7 +120,9 @@ class Prompt2SceneRunResult:
     image_spatial_relations_path: Path | None = None
     unified_scene_path: Path | None = None
     gym_config_path: Path | None = None
+    scene_prompt_route_path: Path | None = None
     scene_edit_path: Path | None = None
+    scene_randomization_path: Path | None = None
 
 
 def run_prompt2scene(
@@ -133,21 +158,24 @@ def run_prompt2scene(
     image_spatial_relations_path = None
     unified_scene_path = None
     gym_config_path = None
+    scene_prompt_route_path = None
     scene_edit_path = None
+    scene_randomization_path = None
     if request.input_kind == InputKind.EDIT:
-        log.log_info("step start scene_edit")
-        run_scene_edit(
-            SceneEditRequest(
-                output_root=request.output_root,
-                prompt=request.prompt or "",
-                gravity_settle_mode=request.gravity_settle_mode,
-            ),
+        route_result = _route_existing_scene_prompt(
+            request=request,
             llm_cfg=llm_cfg,
         )
-        scene_edit_path = paths.step_result(SCENE_EDIT_STEP)
-        log.log_info(
-            f"step end scene_edit status=pending_implementation output={scene_edit_path}"
+        scene_prompt_route_path = paths.step_result(SCENE_PROMPT_ROUTE_STEP)
+        routed_path = _run_routed_existing_scene_workflow(
+            request=request,
+            route_result=route_result,
+            llm_cfg=llm_cfg,
         )
+        if _route_name(route_result) == "scene_edit":
+            scene_edit_path = routed_path
+        elif _route_name(route_result) == "scene_randomization":
+            scene_randomization_path = routed_path
     elif llm_cfg is not None:
         log.log_info("step start scene_intake")
         scene_intake = run_scene_intake(request, llm_cfg=llm_cfg)
@@ -214,19 +242,20 @@ def run_prompt2scene(
         gym_config_path = export_gym_config(request.output_root)
         log.log_info(f"step end gym_export status=ok output={gym_config_path}")
         if request.prompt:
-            log.log_info("step start scene_edit")
-            run_scene_edit(
-                SceneEditRequest(
-                    output_root=request.output_root,
-                    prompt=request.prompt,
-                    gravity_settle_mode=request.gravity_settle_mode,
-                ),
+            route_result = _route_existing_scene_prompt(
+                request=request,
                 llm_cfg=llm_cfg,
             )
-            scene_edit_path = paths.step_result(SCENE_EDIT_STEP)
-            log.log_info(
-                f"step end scene_edit status=pending_implementation output={scene_edit_path}"
+            scene_prompt_route_path = paths.step_result(SCENE_PROMPT_ROUTE_STEP)
+            routed_path = _run_routed_existing_scene_workflow(
+                request=request,
+                route_result=route_result,
+                llm_cfg=llm_cfg,
             )
+            if _route_name(route_result) == "scene_edit":
+                scene_edit_path = routed_path
+            elif _route_name(route_result) == "scene_randomization":
+                scene_randomization_path = routed_path
 
     log.log_info(f"run end output_root={request.output_root}")
 
@@ -238,5 +267,112 @@ def run_prompt2scene(
         image_spatial_relations_path=image_spatial_relations_path,
         unified_scene_path=unified_scene_path,
         gym_config_path=gym_config_path,
+        scene_prompt_route_path=scene_prompt_route_path,
         scene_edit_path=scene_edit_path,
+        scene_randomization_path=scene_randomization_path,
     )
+
+
+def _route_existing_scene_prompt(
+    *,
+    request: Prompt2SceneInput,
+    llm_cfg: OpenAICompatibleLLMCfg | None,
+) -> dict[str, object]:
+    if llm_cfg is None:
+        raise ValueError("Existing-scene prompt routing requires an LLM config.")
+    paths = PipelinePaths(request.output_root)
+    log.log_info("step start scene_prompt_route")
+    route_result = run_scene_prompt_route(
+        output_root=request.output_root,
+        prompt=request.prompt or "",
+        llm_cfg=llm_cfg,
+    )
+    log.log_info(
+        "step end scene_prompt_route "
+        f"route={_route_name(route_result)} "
+        f"output={paths.step_result(SCENE_PROMPT_ROUTE_STEP)}"
+    )
+    return route_result
+
+
+def run_scene_prompt_route(
+    *,
+    output_root: Path,
+    prompt: str,
+    llm_cfg: OpenAICompatibleLLMCfg,
+) -> dict[str, object]:
+    """Route an existing-scene prompt to edit or randomization."""
+    output_root = output_root.expanduser().resolve()
+    state_path = scene_state_path(output_root)
+    if not state_path.is_file():
+        raise FileNotFoundError(f"Scene state not found: {state_path}")
+
+    writer = WorkflowArtifactWriter(output_root, SCENE_PROMPT_ROUTE_STEP)
+    round_name = writer.next_debug_round_name("route")
+    llm = build_chat_model(llm_cfg)
+    route = call_structured_json_model_step(
+        llm=llm,
+        schema=SCENE_PROMPT_ROUTE_JSON_SCHEMA,
+        messages=build_scene_prompt_route_messages(prompt=prompt),
+        context="scene_prompt_route",
+        attempt_count=1,
+        raw_output_writer=lambda payload: writer.write_raw_model_output(
+            round_name=round_name,
+            payload=payload,
+        ),
+    )
+    result = {
+        "status": "ok",
+        "prompt": prompt,
+        "scene_state_path": str(state_path),
+        "route": route,
+    }
+    writer.write_step_result(result)
+    return result
+
+
+def _run_routed_existing_scene_workflow(
+    *,
+    request: Prompt2SceneInput,
+    route_result: dict[str, object],
+    llm_cfg: OpenAICompatibleLLMCfg | None,
+) -> Path | None:
+    route = _route_name(route_result)
+    paths = PipelinePaths(request.output_root)
+    if route == "scene_edit":
+        log.log_info("step start scene_edit")
+        run_scene_edit(
+            SceneEditRequest(
+                output_root=request.output_root,
+                prompt=request.prompt or "",
+                gravity_settle_mode=request.gravity_settle_mode,
+            ),
+            llm_cfg=llm_cfg,
+        )
+        scene_edit_path = paths.step_result(SCENE_EDIT_STEP)
+        log.log_info(f"step end scene_edit status=ok output={scene_edit_path}")
+        return scene_edit_path
+    if route == "scene_randomization":
+        log.log_info("step start scene_randomization")
+        route_payload = route_result.get("route")
+        run_scene_randomization(
+            output_root=request.output_root,
+            prompt=request.prompt or "",
+            llm_cfg=llm_cfg,
+            route=route_payload if isinstance(route_payload, dict) else {},
+        )
+        scene_randomization_path = paths.step_result(SCENE_RANDOMIZATION_STEP)
+        log.log_info(
+            "step end scene_randomization "
+            f"status=ok output={scene_randomization_path}"
+        )
+        return scene_randomization_path
+    log.log_info("existing-scene prompt route unresolved; no workflow executed")
+    return None
+
+
+def _route_name(route_result: dict[str, object]) -> str:
+    route = route_result.get("route")
+    if isinstance(route, dict):
+        return str(route.get("route", "")).strip()
+    return ""

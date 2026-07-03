@@ -28,6 +28,8 @@ __all__ = [
     "RAW_MODEL_OUTPUT_FILENAME",
     "SCENE_INTAKE_STEP",
     "SCENE_EDIT_STEP",
+    "SCENE_PROMPT_ROUTE_STEP",
+    "SCENE_RANDOMIZATION_STEP",
     "STEP_RESULT_FILENAME",
     "UNIFIED_SCENE_GEN_STEP",
     "UNIFIED_SCENE_STEP",
@@ -47,6 +49,8 @@ RAW_MODEL_OUTPUT_FILENAME = "raw_model_output.json"
 
 SCENE_INTAKE_STEP = "scene_intake"
 SCENE_EDIT_STEP = "scene_edit"
+SCENE_PROMPT_ROUTE_STEP = "scene_prompt_route"
+SCENE_RANDOMIZATION_STEP = "scene_randomization"
 IMAGE_SEGMENTS_STEP = "image_segments"
 IMAGE_SPATIAL_RELATIONS_STEP = "image_spatial_relations"
 UNIFIED_SCENE_STEP = "unified_scene"
