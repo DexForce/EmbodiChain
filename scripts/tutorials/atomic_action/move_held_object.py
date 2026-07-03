@@ -246,9 +246,9 @@ def make_object_target_pose(device: torch.device) -> torch.Tensor:
     pose = torch.eye(4, dtype=torch.float32, device=device)
     pose[:3, :3] = torch.tensor(
         [
-            [0.0, 0.0, -1.0],
-            [0.0, 1.0, 0.0],
             [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, -1.0, 0.0],
         ],
         dtype=torch.float32,
         device=device,
@@ -301,9 +301,13 @@ def main() -> None:
             OBJECT_APPROACH_DIRECTION, dtype=torch.float32, device=sim.device
         ),
         pre_grasp_distance=0.15,
-        lift_height=0.16,
+        lift_height=0.08,
         sample_interval=PICK_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
+        obj_upright_direction=torch.tensor(
+            [1, 0, 0], dtype=torch.float32, device=sim.device
+        ),
+        rotate_upright=torch.pi / 4,
     )
     move_held_object_cfg = MoveHeldObjectCfg(
         control_part="arm",
