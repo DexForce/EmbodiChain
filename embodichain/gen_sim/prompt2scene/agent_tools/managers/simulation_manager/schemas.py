@@ -34,6 +34,7 @@ class GravityDropRequest:
     max_convex_hull_num: int = 32
     convex_decomposition_method: str = "vhacd"
     initial_height: float | None = None
+    gravity_settle_mode: str = "geometry"
 
 
 @dataclass(frozen=True)

@@ -68,6 +68,14 @@ class SimulationManager:
         glb_path = request.glb_path.expanduser().resolve()
         if not glb_path.is_file():
             raise FileNotFoundError(f"GLB file not found: {glb_path}")
+        settle_mode = str(request.gravity_settle_mode or "geometry").strip().lower()
+        if settle_mode == "geometry":
+            return GravityDropResult(final_pose=self._aabb_bottom_center_pose(glb_path))
+        if settle_mode != "physics":
+            raise ValueError(
+                "gravity_settle_mode must be 'geometry' or 'physics', "
+                f"got {request.gravity_settle_mode!r}."
+            )
 
         initial_height = (
             float(request.initial_height)
@@ -99,6 +107,34 @@ class SimulationManager:
         return GravityDropResult(
             final_pose=np.asarray(final_pose.numpy(), dtype=float),
         )
+
+    @staticmethod
+    def _aabb_bottom_center_pose(glb_path: Path) -> np.ndarray:
+        """Return a pose that moves the sim-frame AABB bottom center to origin."""
+        mesh = trimesh.load(str(glb_path), force="mesh")
+        # Gravity inputs are GLB Y-up, but callers apply the returned pose in
+        # the internal/simulation Z-up frame. Convert vertices before measuring.
+        glb_y_up_to_sim_z_up = np.array(
+            [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+            dtype=np.float64,
+        )
+        mesh = mesh.copy()
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        mesh.vertices = vertices @ glb_y_up_to_sim_z_up.T
+        bounds = np.asarray(mesh.bounds, dtype=np.float64)
+        if bounds.shape != (2, 3) or not np.all(np.isfinite(bounds)):
+            raise ValueError(f"Cannot compute AABB for GLB: {glb_path}")
+        bottom_center = np.array(
+            [
+                0.5 * (bounds[0, 0] + bounds[1, 0]),
+                0.5 * (bounds[0, 1] + bounds[1, 1]),
+                bounds[0, 2],
+            ],
+            dtype=np.float64,
+        )
+        pose = np.eye(4, dtype=np.float64)
+        pose[:3, 3] = -bottom_center
+        return pose
 
     def _compute_adaptive_drop_height(
         self,

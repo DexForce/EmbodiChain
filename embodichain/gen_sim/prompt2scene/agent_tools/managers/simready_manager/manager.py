@@ -71,6 +71,8 @@ from .utils import (
     _translation_transform,
 )
 
+__all__ = ["METRIC_SCALE_ENABLED", "SimreadyManager"]
+
 
 class SimreadyManager:
     """Prepare generated GLB assets for simulation placement."""
@@ -137,7 +139,11 @@ class SimreadyManager:
         )
         try:
             gravity_result = sim.run_gravity_simulation(
-                GravityDropRequest(glb_path=pre_gravity_path, max_convex_hull_num=32)
+                GravityDropRequest(
+                    glb_path=pre_gravity_path,
+                    max_convex_hull_num=16,
+                    gravity_settle_mode=request.gravity_settle_mode,
+                )
             )
 
             gravity_transform = _as_transform(gravity_result.final_pose)
@@ -256,7 +262,11 @@ class SimreadyManager:
         )
         try:
             gravity_result = sim.run_gravity_simulation(
-                GravityDropRequest(glb_path=pre_gravity_path, max_convex_hull_num=16)
+                GravityDropRequest(
+                    glb_path=pre_gravity_path,
+                    max_convex_hull_num=8,
+                    gravity_settle_mode=request.gravity_settle_mode,
+                )
             )
 
             gravity_transform = _as_transform(gravity_result.final_pose)

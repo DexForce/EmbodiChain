@@ -31,9 +31,6 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
 from embodichain.gen_sim.prompt2scene.workflows.scene_intake.schema import (
     SceneIntakeSpec,
 )
-from embodichain.gen_sim.prompt2scene.workflows.text_relations.schema import (
-    TextRelationSpec,
-)
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene.schema import (
     UnifiedSceneSpec,
 )
@@ -62,7 +59,6 @@ def run_unified_scene(
     *,
     scene_intake: SceneIntakeSpec,
     image_relations: ImageRelationSpec | None = None,
-    text_relations: TextRelationSpec | None = None,
     output_root: Path,
 ) -> UnifiedSceneSpec:
     """Run final unified-scene assembly for one prompt2scene request."""
@@ -73,7 +69,6 @@ def run_unified_scene(
             "scene_intake": scene_intake,
             "output_root": output_root,
             "image_relations": image_relations,
-            "text_relations": text_relations,
             "unified_scene": None,
             "attempt_count": 0,
             "max_attempts": 1,

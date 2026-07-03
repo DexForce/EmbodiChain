@@ -29,7 +29,6 @@ __all__ = [
     "SCENE_INTAKE_STEP",
     "SCENE_EDIT_STEP",
     "STEP_RESULT_FILENAME",
-    "TEXT_RELATIONS_STEP",
     "UNIFIED_SCENE_GEN_STEP",
     "UNIFIED_SCENE_STEP",
     "PipelinePaths",
@@ -50,7 +49,6 @@ SCENE_INTAKE_STEP = "scene_intake"
 SCENE_EDIT_STEP = "scene_edit"
 IMAGE_SEGMENTS_STEP = "image_segments"
 IMAGE_SPATIAL_RELATIONS_STEP = "image_spatial_relations"
-TEXT_RELATIONS_STEP = "text_relations"
 UNIFIED_SCENE_STEP = "unified_scene"
 UNIFIED_SCENE_GEN_STEP = "unified_scene_gen"
 
@@ -147,10 +145,6 @@ class PipelinePaths:
         return self.output_root / IMAGE_SPATIAL_RELATIONS_STEP
 
     @property
-    def text_relations_dir(self) -> Path:
-        return self.output_root / TEXT_RELATIONS_STEP
-
-    @property
     def unified_scene_dir(self) -> Path:
         return self.output_root / UNIFIED_SCENE_STEP
 
@@ -193,10 +187,6 @@ class PipelinePaths:
     @property
     def gen_debug_dir(self) -> Path:
         return self.unified_scene_gen_dir / "debug"
-
-    @property
-    def text_clutter_dir(self) -> Path:
-        return self.gen_glb_dir / "text_clutter_settled"
 
     @property
     def table_fit_dir(self) -> Path:

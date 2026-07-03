@@ -108,25 +108,28 @@ def _parse_table(raw_table: dict[str, Any]) -> SceneIntakeTable:
     )
 
     object_coverage_percent: int | None = None
-    raw_percent = raw_table.get("object_coverage_percent")
-    if raw_percent is not None:
-        if isinstance(raw_percent, bool):
-            raise ValueError(
-                "Scene intake table.object_coverage_percent must be an integer, "
-                "not a boolean."
-            )
-        try:
-            object_coverage_percent = int(raw_percent)
-        except (TypeError, ValueError):
-            raise ValueError(
-                "Scene intake table.object_coverage_percent must be an integer "
-                f"between 1 and 100, got {raw_percent!r}."
-            )
-        if object_coverage_percent not in (10, 30, 50, 70):
-            raise ValueError(
-                "Scene intake table.object_coverage_percent must be one of "
-                f"10, 30, 50, 70, got {object_coverage_percent}."
-            )
+    if is_complete_visible_table:
+        object_coverage_percent = 60
+    else:
+        raw_percent = raw_table.get("object_coverage_percent")
+        if raw_percent is not None:
+            if isinstance(raw_percent, bool):
+                raise ValueError(
+                    "Scene intake table.object_coverage_percent must be an integer, "
+                    "not a boolean."
+                )
+            try:
+                object_coverage_percent = int(raw_percent)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Scene intake table.object_coverage_percent must be an integer "
+                    f"between 1 and 100, got {raw_percent!r}."
+                )
+            if object_coverage_percent not in (10, 30, 50, 70):
+                raise ValueError(
+                    "Scene intake table.object_coverage_percent must be one of "
+                    f"10, 30, 50, 70, got {object_coverage_percent}."
+                )
 
     return SceneIntakeTable(
         name=name,

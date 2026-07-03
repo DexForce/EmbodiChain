@@ -29,7 +29,9 @@ class SceneEditRequest:
 
     output_root: Path
     prompt: str
-    cleanup_scene_edit_dir: bool = True
+    cleanup_scene_edit_dir: bool = False
+    optimize_new_objects_only: bool = True
+    gravity_settle_mode: str = "geometry"
 
 
 @dataclass(frozen=True)

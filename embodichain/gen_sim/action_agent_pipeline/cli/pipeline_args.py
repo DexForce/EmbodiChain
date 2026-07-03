@@ -191,8 +191,19 @@ def build_parser() -> argparse.ArgumentParser:
         dest="prompt2scene_text",
         default=None,
         help=(
-            "Text prompt passed to prompt2scene. If omitted, prompt2scene uses "
-            "--image or --image-name."
+            "Deprecated. Text-only prompt2scene input was removed upstream and "
+            "is rejected; use --image or --image-name."
+        ),
+    )
+    parser.add_argument(
+        "--prompt2scene-gravity-settle-mode",
+        "--prompt2scene_gravity_settle_mode",
+        dest="prompt2scene_gravity_settle_mode",
+        choices=("geometry", "physics"),
+        default="geometry",
+        help=(
+            "Gravity settle mode passed to prompt2scene. 'geometry' translates "
+            "each GLB by AABB; 'physics' runs simulation. Defaults to geometry."
         ),
     )
     parser.add_argument(

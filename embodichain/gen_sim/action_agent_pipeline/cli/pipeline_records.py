@@ -317,8 +317,14 @@ def _source_request_record(
                 ),
             }
         )
-        if args.prompt2scene_text:
-            record["prompt2scene_text"] = args.prompt2scene_text
+        prompt2scene_text = getattr(args, "prompt2scene_text", None)
+        if prompt2scene_text:
+            record["prompt2scene_text"] = prompt2scene_text
+        record["prompt2scene_gravity_settle_mode"] = getattr(
+            args,
+            "prompt2scene_gravity_settle_mode",
+            "geometry",
+        )
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees
         )

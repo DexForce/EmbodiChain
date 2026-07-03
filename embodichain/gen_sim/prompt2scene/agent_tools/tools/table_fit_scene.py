@@ -49,6 +49,7 @@ def fit_text_scene_table(
     clutter_layout_result: dict[str, Any],
     output_root: Path,
     output_dir: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Fit the text-scene table and convert failures to result data."""
     try:
@@ -69,6 +70,7 @@ def fit_text_scene_table(
             table_output_path=table_output_path,
             object_output_paths=object_output_paths,
             object_coverage_percent=table_result.get("object_coverage_percent"),
+            gravity_settle_mode=gravity_settle_mode,
         )
         manifest_path = output_dir / "table_fit_to_clutter_manifest.json"
         write_json(manifest_path, manifest)
@@ -92,6 +94,7 @@ def fit_image_scene_table(
     fallback_table_result: dict[str, Any] | None,
     output_root: Path,
     output_dir: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Fit the image-scene table or return a structured skipped result."""
     generated_table = layout_result.get("table") or fallback_table_result
@@ -139,6 +142,7 @@ def fit_image_scene_table(
             table_output_path=table_output_path,
             object_output_paths=object_output_paths,
             object_coverage_percent=generated_table.get("object_coverage_percent"),
+            gravity_settle_mode=gravity_settle_mode,
         )
         manifest_path = output_dir / "table_fit_to_clutter_manifest.json"
         write_json(manifest_path, manifest)

@@ -77,7 +77,9 @@ def test_prompt2scene_gravity_manager_passes_vhacd_to_rigid_object_cfg(
     )
 
     manager = simulation_manager_module.SimulationManager()
-    manager.run_gravity_simulation(GravityDropRequest(glb_path=glb_path))
+    manager.run_gravity_simulation(
+        GravityDropRequest(glb_path=glb_path, gravity_settle_mode="physics")
+    )
 
     cfg = captured["rigid_object_cfg"]
     assert cfg.max_convex_hull_num == 32

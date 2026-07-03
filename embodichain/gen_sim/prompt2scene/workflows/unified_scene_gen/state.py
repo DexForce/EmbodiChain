@@ -29,12 +29,12 @@ class UnifiedSceneGenState(AttemptState):
 
     output_root: Path
     unified_scene_result_path: Path | None
+    gravity_settle_mode: str
     llm: Any | None
     unified_scene: dict[str, Any] | None
     input_kind: str | None
     table_result: dict[str, Any] | None
-    text_object_results: list[dict[str, Any]]
-    text_clutter_settle_result: dict[str, Any] | None
+    image_object_results: list[dict[str, Any]]
     image_objects_layout_result: dict[str, Any] | None
     table_fit_result: dict[str, Any] | None
     generation_status: str | None

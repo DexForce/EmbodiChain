@@ -453,7 +453,9 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
 
     output_root = tmp_path / "prompt2scene"
     llm_config = tmp_path / "llm_config.json"
+    image_path = tmp_path / "scene.jpg"
     llm_config.write_text("{}", encoding="utf-8")
+    image_path.write_bytes(b"fake image")
     gym_config = output_root / "gym_export/gym_config.json"
     captured = {}
 
@@ -470,11 +472,11 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
 
     class FakePrompt2SceneInput:
         @classmethod
-        def from_cli_args(cls, *, image_path, text, prompt, output_root):
+        def from_cli_args(cls, *, image_path, prompt, output_root, gravity_settle_mode):
             return SimpleNamespace(
                 image_path=image_path,
-                text=text,
                 prompt=prompt,
+                gravity_settle_mode=gravity_settle_mode,
                 output_root=output_root.expanduser().resolve(),
             )
 
@@ -486,10 +488,11 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
 
     result = prompt2scene_stage.run_prompt2scene_stage(
         SimpleNamespace(
-            prompt2scene_text="a tabletop scene with bread and a basket",
+            prompt2scene_text=None,
             prompt2scene_output_root=str(output_root),
             prompt2scene_llm_config=str(llm_config),
-            image=None,
+            prompt2scene_gravity_settle_mode="physics",
+            image=str(image_path),
             image_name=None,
         )
     )
@@ -497,9 +500,26 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     assert result == gym_config
     assert captured["llm_config_path"] == llm_config
     assert captured["llm_cfg"] == "llm-cfg"
-    assert captured["request"].text == "a tabletop scene with bread and a basket"
+    assert captured["request"].image_path == image_path.resolve()
     assert captured["request"].prompt is None
+    assert captured["request"].gravity_settle_mode == "physics"
     assert captured["request"].output_root == output_root.resolve()
+
+
+def test_prompt2scene_stage_rejects_text_input(tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import prompt2scene_stage
+
+    with pytest.raises(ValueError, match="no longer supported"):
+        prompt2scene_stage.run_prompt2scene_stage(
+            SimpleNamespace(
+                prompt2scene_text="a tabletop scene with bread and a basket",
+                prompt2scene_output_root=str(tmp_path / "prompt2scene"),
+                prompt2scene_llm_config=None,
+                prompt2scene_gravity_settle_mode="geometry",
+                image=None,
+                image_name=None,
+            )
+        )
 
 
 def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
@@ -539,11 +559,13 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             prompt2scene_llm_config=str(
                 repo_root / "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
             ),
-            prompt2scene_text="a tabletop scene with bread and a basket",
+            prompt2scene_text=None,
+            prompt2scene_gravity_settle_mode="physics",
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
             target_body_scale=0.8,
             target_body_scale_mode="multiply",
+            inside_container_slot_distance_scale=1.0,
             target_replacement1=None,
             target_replacement2=None,
             sync_replacement_names=False,
@@ -578,7 +600,8 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_llm_config"] == (
         "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
     )
-    assert record["prompt2scene_text"] == "a tabletop scene with bread and a basket"
+    assert "prompt2scene_text" not in record
+    assert record["prompt2scene_gravity_settle_mode"] == "physics"
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
     assert record["target_body_scale_mode"] == "multiply"
@@ -672,6 +695,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
             config_output_dir=str(tmp_path / "configs"),
             target_body_scale=target_body_scale,
             target_body_scale_mode=target_body_scale_mode,
+            inside_container_slot_distance_scale=1.0,
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
             sync_replacement_names=False,

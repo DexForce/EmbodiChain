@@ -95,6 +95,7 @@ def _settle_and_pack_object_footprints(
     output_dir: Path,
     output_root: Path,
     trimesh: Any,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     sim = SimulationManager(headless=True, sim_device="cpu")
     footprint_items: list[dict[str, Any]] = []
@@ -130,8 +131,9 @@ def _settle_and_pack_object_footprints(
                 gravity_result = sim.run_gravity_simulation(
                     GravityDropRequest(
                         glb_path=pre_gravity_path,
-                        max_convex_hull_num=32,
+                        max_convex_hull_num=16,
                         initial_height=gravity_initial_height,
+                        gravity_settle_mode=gravity_settle_mode,
                     )
                 )
                 gravity_transform = GeometryManager.matrix_from_json(
@@ -160,6 +162,7 @@ def _settle_and_pack_object_footprints(
                     "bottom_to_xy_plane_transform": bottom_to_xy_plane_transform,
                     "mesh_z_height": mesh_z_height,
                     "gravity_initial_height": gravity_initial_height,
+                    "gravity_settle_mode": gravity_settle_mode,
                     "gravity_transform": gravity_transform,
                     "settled_bounds": settled_bounds,
                     "settled_xy_center": settled_xy_center,
@@ -225,6 +228,7 @@ def _settle_and_pack_object_footprints(
                 ].tolist(),
                 "mesh_z_height": entry["mesh_z_height"],
                 "gravity_initial_height": entry["gravity_initial_height"],
+                "gravity_settle_mode": entry["gravity_settle_mode"],
                 "gravity_transform": entry["gravity_transform"].tolist(),
                 "placement_transform": placement_transform.tolist(),
                 "object_layout_transform": object_transform.tolist(),
@@ -240,6 +244,7 @@ def _settle_and_pack_object_footprints(
         "output_dir": relative_path(str(output_dir), output_root),
         "internal_up_axis": [0.0, 0.0, 1.0],
         "gravity_glb_up_axis": [0.0, 1.0, 0.0],
+        "gravity_settle_mode": gravity_settle_mode,
         "internal_to_gravity_glb_transform": output_axis_transform.tolist(),
         "gravity_glb_to_internal_transform": output_to_internal_transform.tolist(),
         "layout_optimization": layout_result["metadata"],
@@ -1001,6 +1006,7 @@ def _optimize_text_layout_slp(
     front_of_edges: list[tuple[str, str]],
     grid_spring_targets: dict[str, np.ndarray],
     padding_ratio: float,
+    fixed_object_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Optimize 2D centres with scipy SLSQP, then remove mesh AABB overlap.
 
@@ -1029,6 +1035,7 @@ def _optimize_text_layout_slp(
         oid: np.asarray(initial_centers[oid], dtype=np.float64).copy()
         for oid in object_ids
     }
+    fixed_ids = {oid for oid in (fixed_object_ids or []) if oid in initial_centers}
     initial_union_bounds = _xy_union_bounds(
         centers=initial_centers,
         xy_sizes=xy_sizes,
@@ -1054,6 +1061,20 @@ def _optimize_text_layout_slp(
     margin = init_size * 0.5  # 50 % each side → 2× total
     bounds = []
     for oid in object_ids:
+        if oid in fixed_ids:
+            bounds.append(
+                (
+                    float(initial_centers[oid][0]),
+                    float(initial_centers[oid][0]),
+                )
+            )
+            bounds.append(
+                (
+                    float(initial_centers[oid][1]),
+                    float(initial_centers[oid][1]),
+                )
+            )
+            continue
         bounds.append(
             (
                 float(initial_union_bounds[0, 0] - margin[0]),
@@ -1137,6 +1158,7 @@ def _optimize_text_layout_slp(
         left_of_edges=left_of_edges,
         front_of_edges=front_of_edges,
         padding=padding,
+        fixed_object_ids=fixed_ids,
     )
     centers = _center_xy_aabb_layout(centers=centers, xy_sizes=xy_sizes)
 
@@ -1155,6 +1177,7 @@ def _optimize_text_layout_slp(
         "padding": float(padding),
         "padding_ratio": float(padding_ratio),
         "weights": dict(_WEIGHTS),
+        "fixed_object_ids": sorted(fixed_ids),
         "slsqp": slsqp_result,
         "bounds_expansion": 2.0,
         "initial_union_size": init_size.tolist(),
@@ -1229,9 +1252,11 @@ def _remove_mesh_aabb_collisions(
     left_of_edges: list[tuple[str, str]],
     front_of_edges: list[tuple[str, str]],
     padding: float,
+    fixed_object_ids: set[str] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     relation_pairs = set(left_of_edges + front_of_edges)
     relation_pairs.update((b, a) for a, b in left_of_edges + front_of_edges)
+    fixed_ids = set(fixed_object_ids or set())
     current = {
         oid: np.asarray(center, dtype=np.float64).copy()
         for oid, center in centers.items()
@@ -1261,9 +1286,22 @@ def _remove_mesh_aabb_collisions(
             axis = int(item["axis"])
             sign = -1.0 if current[object_a][axis] <= current[object_b][axis] else 1.0
             amount = 0.5 * (float(item["overlap"]) + 1.0e-6)
+            a_fixed = object_a in fixed_ids
+            b_fixed = object_b in fixed_ids
+            if a_fixed and b_fixed:
+                continue
             if (object_a, object_b) in relation_pairs:
-                current[object_a][axis] += sign * amount
-                current[object_b][axis] -= sign * amount
+                if a_fixed:
+                    current[object_b][axis] -= sign * amount * 2.0
+                elif b_fixed:
+                    current[object_a][axis] += sign * amount * 2.0
+                else:
+                    current[object_a][axis] += sign * amount
+                    current[object_b][axis] -= sign * amount
+            elif a_fixed:
+                current[object_b][axis] -= sign * amount * 2.0
+            elif b_fixed:
+                current[object_a][axis] += sign * amount * 2.0
             else:
                 drift_a = np.linalg.norm(current[object_a] - initial_centers[object_a])
                 drift_b = np.linalg.norm(current[object_b] - initial_centers[object_b])

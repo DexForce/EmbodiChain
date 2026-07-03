@@ -50,6 +50,7 @@ def _gravity_settle_table_fit_internal_z_scene(
     *,
     z_to_y: np.ndarray,
     sim_device: str,
+    gravity_settle_mode: str,
 ) -> tuple[Any, np.ndarray]:
     sim = SimulationManager(headless=True, sim_device=sim_device)
     with tempfile.TemporaryDirectory(prefix="p2s_table_fit_gravity_") as tmp:
@@ -59,8 +60,9 @@ def _gravity_settle_table_fit_internal_z_scene(
         result = sim.run_gravity_simulation(
             GravityDropRequest(
                 glb_path=pre_gravity,
-                max_convex_hull_num=16,
+                max_convex_hull_num=8,
                 initial_height=0.05,
+                gravity_settle_mode=gravity_settle_mode,
             )
         )
     gravity_transform = np.asarray(result.final_pose, dtype=np.float64)
@@ -81,6 +83,7 @@ def fit_table_to_clutter(
     support_occupancy_ratio: float = 0.80,
     object_coverage_percent: int | None = None,
     gravity_settle_table: bool = True,
+    gravity_settle_mode: str = "geometry",
     sim_device: str = "cpu",
 ) -> dict[str, Any]:
     """Fit a table mesh to an already laid-out clutter result.
@@ -226,6 +229,7 @@ def fit_table_to_clutter(
             table_scene,
             z_to_y=z_to_y,
             sim_device=sim_device,
+            gravity_settle_mode=gravity_settle_mode,
         )
         table_fit_transform = gravity_transform @ table_fit_transform
 
@@ -335,6 +339,7 @@ def fit_table_to_clutter(
         "margin_cm": margin_cm,
         "support_occupancy_ratio": occupancy,
         "gravity_settle_table": gravity_settle_table,
+        "gravity_settle_mode": gravity_settle_mode,
         "table_bottom_z_after_shift": 0.0,
         "support_z_after_shift": support_z_after,
         "table_fit_transform": table_fit_transform.tolist(),
