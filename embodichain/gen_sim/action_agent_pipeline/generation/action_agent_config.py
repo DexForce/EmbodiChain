@@ -67,13 +67,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _build_arrangement_line_spec_with_llm,
     _call_arrangement_task_llm,
-    _is_arrangement_task_description,
     _with_arrangement_generated_z_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _build_stacking_spec_with_llm,
     _call_stacking_task_llm,
-    _is_stacking_task_description,
     _make_stacking_summary,
     _with_stacking_generated_targets,
 )
@@ -144,6 +142,15 @@ from embodichain.gen_sim.action_agent_pipeline.generation.replacement_generation
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.role_refinement import (
     _refine_roles_with_llm,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
+    _TASK_ROUTE_ARRANGEMENT_LINE,
+    _TASK_ROUTE_OBJECT_MANIPULATION,
+    _TASK_ROUTE_STACKING,
+    _TASK_ROUTE_UNSUPPORTED,
+    _TaskRouteSpec,
+    _call_task_router_llm,
+    _route_task_with_llm,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
     _make_arrangement_extensions_config,
@@ -290,7 +297,14 @@ def generate_action_agent_config_from_project(
                 "target_replacements are only supported by the default basket "
                 "template. Do not combine them with task_description."
             )
-        if _is_stacking_task_description(task_description):
+        task_route = _route_task_with_llm(
+            scene_objects=scene_objects,
+            project_name=project_name,
+            task_description=task_description,
+            model=llm_model,
+            task_router_llm_caller=_call_task_router_llm,
+        )
+        if task_route.route == _TASK_ROUTE_STACKING:
             spec = _build_stacking_spec_with_llm(
                 scene_objects=scene_objects,
                 project_name=project_name,
@@ -312,13 +326,10 @@ def generate_action_agent_config_from_project(
                 source_scene_body_scale_mode=source_scene_body_scale_mode,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
-                inside_container_slot_distance_scale=(
-                    inside_container_slot_distance_scale
-                ),
             )
             _validate_stacking_bundle(bundle, spec)
             return _finalize_and_write_bundle(
-                bundle,
+                _with_task_route_summary(bundle, task_route),
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
                 repo_root=repo_root,
@@ -326,7 +337,7 @@ def generate_action_agent_config_from_project(
                 prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
-        if _is_arrangement_task_description(task_description):
+        if task_route.route == _TASK_ROUTE_ARRANGEMENT_LINE:
             spec = _build_arrangement_line_spec_with_llm(
                 scene_objects=scene_objects,
                 project_name=project_name,
@@ -351,7 +362,7 @@ def generate_action_agent_config_from_project(
             )
             _validate_arrangement_bundle(bundle, spec)
             return _finalize_and_write_bundle(
-                bundle,
+                _with_task_route_summary(bundle, task_route),
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
                 repo_root=repo_root,
@@ -359,6 +370,13 @@ def generate_action_agent_config_from_project(
                 prewarm_coacd_cache=prewarm_coacd_cache,
                 overwrite=overwrite,
             )
+        if task_route.route == _TASK_ROUTE_UNSUPPORTED:
+            raise ValueError(
+                "Task router classified the task as unsupported: "
+                f"{task_route.reason}"
+            )
+        if task_route.route != _TASK_ROUTE_OBJECT_MANIPULATION:
+            raise ValueError(f"Unsupported task route: {task_route.route!r}.")
         spec = _build_object_manipulation_spec_with_llm(
             scene_objects=scene_objects,
             project_name=project_name,
@@ -388,7 +406,7 @@ def generate_action_agent_config_from_project(
         )
         _validate_relative_bundle(bundle, spec)
         return _finalize_and_write_bundle(
-            bundle,
+            _with_task_route_summary(bundle, task_route),
             output_dir=output_dir_path,
             mesh_normalizer=mesh_normalizer,
             repo_root=repo_root,
@@ -788,6 +806,17 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
             for step in spec.steps
         ],
     }
+
+
+def _with_task_route_summary(
+    bundle: Mapping[str, Any],
+    route: _TaskRouteSpec,
+) -> dict[str, Any]:
+    routed_bundle = dict(bundle)
+    routed_summary = dict(routed_bundle.get("summary", {}))
+    routed_summary["task_route"] = route.to_summary()
+    routed_bundle["summary"] = routed_summary
+    return routed_bundle
 
 
 def _build_stacking_bundle(

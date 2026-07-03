@@ -66,6 +66,43 @@ from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success im
 )
 
 
+@pytest.fixture(autouse=True)
+def _patch_task_router_for_config_generation_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_call_task_router_llm(**kwargs):
+        task_description = str(kwargs["task_description"])
+        route = "object_manipulation"
+        if any(keyword in task_description for keyword in ("叠", "堆叠", "摞")):
+            route = "stacking"
+        elif any(
+            keyword in task_description
+            for keyword in (
+                "排成",
+                "摆成一排",
+                "排列",
+                "排序",
+                "从左到右",
+                "由大到小",
+                "由小到大",
+            )
+        ):
+            route = "arrangement_line"
+        return {
+            "route": route,
+            "confidence": 1.0,
+            "reason": "Unit-test router stub.",
+            "candidate_objects": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_task_router_llm",
+        fake_call_task_router_llm,
+    )
+
+
 def test_action_agent_templates_load_fresh_json_copies() -> None:
     first_robot = make_dual_ur5_robot_config(robot_init_z=0.42)
     second_robot = make_dual_ur5_robot_config(robot_init_z=0.84)
@@ -1832,7 +1869,7 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     extensions = gym_config["env"]["extensions"]
     assert (
-        extensions["agent_grasp_pose_overrides"]["interact_bottle_1"]["mode"]
+        extensions["agent_grasp_pose_overrides"][summary["moved_object"]]["mode"]
         == "upright_bottle_side_grasp"
     )
     success = extensions["agent_success"]
@@ -2484,6 +2521,81 @@ def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
         [0.10, -0.20],
         [0.10, -0.12],
     ]
+
+
+def test_task_router_routes_chinese_row_task_to_arrangement_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_arrangement_project(project_dir)
+    router_calls = []
+
+    def fake_call_task_router_llm(**kwargs):
+        router_calls.append(kwargs)
+        assert kwargs["task_description"] == "将三个方块摆成一排"
+        return {
+            "route": "arrangement_line",
+            "confidence": 0.96,
+            "reason": "The task asks for a global row arrangement.",
+            "candidate_objects": ["cube_1", "cube_2", "cube_3"],
+        }
+
+    def fail_relative_task_llm(**kwargs):
+        raise AssertionError("row arrangement task must not use relative routing")
+
+    def fake_call_arrangement_task_llm(**kwargs):
+        assert kwargs["task_description"] == "将三个方块摆成一排"
+        return {
+            "objects": ["cube_1", "cube_2", "cube_3"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "left_to_right",
+            "task_prompt_summary": "Arrange three cubes in one row.",
+            "basic_background_notes": "All three cubes are line-arrangement targets.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_task_router_llm",
+        fake_call_task_router_llm,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fail_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_arrangement_task_llm",
+        fake_call_arrangement_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_arrangement_agent",
+        task_name="BlocksRow",
+        task_description="将三个方块摆成一排",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    assert {obj["uid"] for obj in gym_config["rigid_object"]} == {
+        "cube_1",
+        "cube_2",
+        "cube_3",
+    }
+    assert paths.summary["mode"] == "arrangement_line"
+    assert paths.summary["task_route"] == {
+        "route": "arrangement_line",
+        "confidence": 0.96,
+        "reason": "The task asks for a global row arrangement.",
+        "candidate_objects": ["cube_1", "cube_2", "cube_3"],
+        "warnings": [],
+    }
+    assert len(router_calls) == 1
+    assert "Arrangement plan:" in paths.task_prompt.read_text(encoding="utf-8")
 
 
 def test_task_description_generates_size_order_arrangement_config(
@@ -3872,6 +3984,7 @@ def _stable_summary(summary: dict) -> dict:
             "body_scaled_meshes",
             "coacd_cache",
             "convex_decomposition_method",
+            "task_route",
         }
     }
     if stable.get("orientation_goal") == "preserve":
