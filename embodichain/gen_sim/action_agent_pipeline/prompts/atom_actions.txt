@@ -4,21 +4,35 @@ Each non-null graph edge action must be a JSON object with these common fields
 and exactly one target field:
 
 {
-  "atomic_action_class": "PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
-  "robot_name": "left_arm|right_arm",
+  "atomic_action_class": "CoordinatedPickment|PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
+  "robot_name": "dual_arm|left_arm|right_arm",
   "control": "arm|hand",
   "cfg": {}
 }
 
 Use only these native atomic action classes:
 
-1. `PickUp`
+1. `CoordinatedPickment`
+   - Use when both arms must pick and move one shared object, such as a pot,
+     tray, roller, or other large object. This action controls both arms; put
+     the JSON spec in exactly one arm-action slot and set the other slot to
+     `null`.
+   - Required target_object:
+     {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
+   - Required target_object_pose:
+     {"reference": "object", "obj_name": "<reference object>", "offset": [x, y, z], "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
+     {"reference": "absolute", "position": [x, y, z], "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
+     {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef", "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
+   - Typical cfg:
+     {"pre_grasp_distance": 0.10, "sample_interval": 120, "hand_interp_steps": 10}
+
+2. `PickUp`
    - Required target_object:
      {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
    - Typical cfg:
      {"pre_grasp_distance": 0.08, "sample_interval": 45}
 
-2. `MoveHeldObject`
+3. `MoveHeldObject`
    - Use only after the same arm has successfully executed `PickUp`.
    - Moves the already-held object in the air without releasing it.
    - For pose-sensitive placement, first move the held object to a safe high
@@ -34,7 +48,7 @@ Use only these native atomic action classes:
    - Typical cfg:
      {"sample_interval": 45}
 
-3. `Place`
+4. `Place`
    - For ordinary placement, prefer this because one action lowers, opens the
      gripper, and retreats upward.
    - For pose-sensitive placement after `MoveHeldObject` has already reached the
@@ -49,7 +63,7 @@ Use only these native atomic action classes:
    - Typical cfg:
      {"sample_interval": 80, "lift_height": 0.1}
 
-4. `MoveJoints`
+5. `MoveJoints`
    - Use `control: "arm"` for arm joint targets.
    - Use `control: "hand"` for gripper targets.
    - Supported target_qpos objects:
@@ -59,7 +73,7 @@ Use only these native atomic action classes:
    - Typical cfg:
      {"sample_interval": 30}
 
-5. `MoveEndEffector`
+6. `MoveEndEffector`
    - Use for moving an empty end-effector to a pose.
    - Do not use it to move a held object; use `MoveHeldObject` instead.
    - Required target_pose. Supported pose targets are the same as `Place`.
@@ -72,8 +86,10 @@ Rules:
 - Do not output old action names `PickUpAction`, `MoveAction`, or `PlaceAction`.
 - Use `null` for an idle arm.
 - Keep all values JSON primitives.
-- Each non-null action must contain exactly one of `target_object`, `target_pose`,
-  `target_qpos`, or `target_object_pose`.
+- Each non-null ordinary action must contain exactly one of `target_object`,
+  `target_pose`, `target_qpos`, or `target_object_pose`.
+- `CoordinatedPickment` is the only exception: it must contain both
+  `target_object` and `target_object_pose`.
 - To keep a holding arm closed while the other arm moves, use:
   {
     "atomic_action_class": "MoveJoints",

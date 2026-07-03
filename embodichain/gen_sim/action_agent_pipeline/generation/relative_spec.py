@@ -65,7 +65,18 @@ _RELATIVE_RELATIONS = {
 }
 
 _SIDE_RELATIONS = _RELATIVE_RELATIONS - {"inside", "on"}
-_SUPPORTED_MANIPULATION_INTENTS = {"place_relative", "hold_hover"}
+_SUPPORTED_MANIPULATION_INTENTS = {
+    "place_relative",
+    "hold_hover",
+    "coordinated_pickment",
+}
+_COORDINATED_DUAL_ARM_KEYWORDS = (
+    "双臂",
+    "两臂",
+    "双手",
+    "both arms",
+    "two arms",
+)
 _CUBE_LIKE_KEYWORDS = (
     "cube",
     "block",
@@ -412,7 +423,7 @@ def _call_object_manipulation_task_llm(
         "{\n"
         '  "manipulations": [\n'
         "    {\n"
-        '      "intent": "place_relative|hold_hover",\n'
+        '      "intent": "place_relative|hold_hover|coordinated_pickment",\n'
         '      "moved_object": "<source_uid from rigid_object>",\n'
         '      "arm": "left|right|auto",\n'
         '      "reference_object": "<source_uid from scene objects, or moved_object/self for initial-position moves>",\n'
@@ -429,7 +440,12 @@ def _call_object_manipulation_task_llm(
         "}\n\n"
         "Rules:\n"
         "- Use only source_uid values from the scene objects listed below.\n"
-        "- Use intent='hold_hover' when the task asks to pick up, lift, hold, "
+        "- Use intent='coordinated_pickment' when the task asks both arms to "
+        "pick, lift, carry, or move one shared object such as a pot, tray, "
+        "roller, or other large object. Return exactly one manipulation for "
+        "this case.\n"
+        "- Use intent='hold_hover' when the task asks one arm, or each arm for "
+        "its own object, to pick up, lift, hold, "
         "or suspend an object in the air without placing or releasing it. For "
         "hold_hover, omit reference_object and goal_relation, use "
         "orientation_goal='preserve', orientation_reference='none', "
@@ -438,14 +454,17 @@ def _call_object_manipulation_task_llm(
         "- Use intent='place_relative' for tasks that ask to place, put, stack "
         "onto, move beside, move into, or release an object at a spatial target. "
         "For place_relative, include reference_object and goal_relation.\n"
-        "- Return exactly two manipulations for a dual-arm task. Treat the task "
-        "as dual-arm when it explicitly says 双臂, 两臂, both arms, two arms, "
-        "一只机械臂...另一只机械臂, or separate work for left and right arms.\n"
-        "- Do not mix hold_hover and place_relative in one response; v1 only "
-        "supports homogeneous manipulation intents.\n"
-        "- For dual-arm tasks, use two different moved_object values and one "
-        "left arm plus one right arm. Use arm='auto' only when the user did not "
-        "specify which arm handles that manipulation.\n"
+        "- Return exactly two manipulations for a dual-arm task that moves two "
+        "different objects. Treat the task as dual-arm when it explicitly says "
+        "双臂, 两臂, both arms, two arms, 一只机械臂...另一只机械臂, or separate "
+        "work for left and right arms. If the dual-arm task moves one shared "
+        "object, use exactly one coordinated_pickment manipulation instead.\n"
+        "- Do not mix hold_hover, place_relative, and coordinated_pickment in "
+        "one response; v1 only supports homogeneous manipulation intents.\n"
+        "- For dual-arm tasks with two objects, use two different moved_object "
+        "values and one left arm plus one right arm. Use arm='auto' only when "
+        "the user did not specify which arm handles that manipulation. For "
+        "coordinated_pickment, set arm='auto'.\n"
         "- For place_relative, reference_object may be a rigid_object or a "
         "background object such as a pad, tray, basket, or container. For "
         "single-object directional tasks from the object's initial position, "
@@ -504,6 +523,10 @@ def _apply_relative_task_response(
     )
 
     placement_entries = _relative_placement_entries(response)
+    placement_entries = _with_coordinated_pickment_intent(
+        placement_entries,
+        task_description=task_description,
+    )
     if len(placement_entries) > 2:
         raise ValueError("Object manipulation supports at most two arm actions.")
 
@@ -579,6 +602,29 @@ def _relative_placement_entries(response: Mapping[str, Any]) -> list[Mapping[str
             raise ValueError(f"Placement {index} must be a JSON object.")
         entries.append(placement)
     return entries
+
+
+def _with_coordinated_pickment_intent(
+    placement_entries: list[Mapping[str, Any]],
+    *,
+    task_description: str,
+) -> list[Mapping[str, Any]]:
+    if len(placement_entries) != 1:
+        return placement_entries
+    if not _is_dual_arm_task_text(task_description):
+        return placement_entries
+    entry = dict(placement_entries[0])
+    intent = _normalize_manipulation_intent(entry.get("intent"))
+    if intent == "hold_hover":
+        return placement_entries
+    entry["intent"] = "coordinated_pickment"
+    entry["arm"] = "auto"
+    return [entry]
+
+
+def _is_dual_arm_task_text(task_description: str) -> bool:
+    text = task_description.strip().lower()
+    return any(keyword in text for keyword in _COORDINATED_DUAL_ARM_KEYWORDS)
 
 
 def _relative_forced_arm_sides(
@@ -740,15 +786,18 @@ def _build_relative_placement_step(
         by_uid[moved_source_uid].config.get("init_pos", [0, 0, 0])
     )
     requested_side = _normalize_relative_arm(entry.get("arm"))
-    active_side = (
-        forced_side
-        if forced_side is not None
-        else (
-            _arm_side_for_position(moved_position)
-            if requested_side == "auto"
-            else requested_side
+    if intent == "coordinated_pickment":
+        active_side = "left"
+    else:
+        active_side = (
+            forced_side
+            if forced_side is not None
+            else (
+                _arm_side_for_position(moved_position)
+                if requested_side == "auto"
+                else requested_side
+            )
         )
-    )
 
     return _RelativePlacementStepSpec(
         intent=intent,
@@ -780,6 +829,8 @@ def _validate_relative_placements(
     intents = {placement.intent for placement in placements}
     if len(intents) > 1:
         raise ValueError("Mixed manipulation intents are not supported in v1.")
+    if "coordinated_pickment" in intents and len(placements) != 1:
+        raise ValueError("CoordinatedPickment supports exactly one shared object.")
     if len(placements) == 2:
         active_sides = {placement.active_side for placement in placements}
         if active_sides != {"left", "right"}:
@@ -818,9 +869,7 @@ def _is_bottle_like_object(obj: _SceneObject) -> bool:
     mesh_path = str(shape.get("fpath", "")) if isinstance(shape, Mapping) else ""
     mesh_parts = Path(mesh_path.replace("\\", "/")).parts[-4:] if mesh_path else ()
     description = str(obj.config.get("description", ""))
-    text = " ".join(
-        [obj.source_uid, _base_name(obj), description, *mesh_parts]
-    ).lower()
+    text = " ".join([obj.source_uid, _base_name(obj), description, *mesh_parts]).lower()
     return _has_bottle_like_keyword(text)
 
 
@@ -878,6 +927,11 @@ def _normalize_manipulation_intent(value: Any) -> str:
         "lift": "hold_hover",
         "悬空": "hold_hover",
         "拿起悬空": "hold_hover",
+        "coordinated": "coordinated_pickment",
+        "coordinated_pick": "coordinated_pickment",
+        "dual_arm_pick": "coordinated_pickment",
+        "dual_arm_move": "coordinated_pickment",
+        "双臂抓取": "coordinated_pickment",
     }
     text = aliases.get(text, text)
     if text not in _SUPPORTED_MANIPULATION_INTENTS:

@@ -743,6 +743,20 @@ def _offset_position(
 
 
 def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
+    if spec.intent == "coordinated_pickment":
+        return {
+            "mode": "coordinated_pickment",
+            "intent": spec.intent,
+            "moved_object": spec.moved_runtime_uid,
+            "reference_object": spec.reference_runtime_uid,
+            "relation": spec.relation,
+            "active_arm": "dual_arm",
+            "release_offset": spec.release_offset,
+            "target_position": spec.release_position,
+            "orientation_goal": spec.orientation_goal,
+            "orientation_axis": spec.orientation_axis,
+            "orientation_align_to": spec.orientation_align_to_runtime_uid,
+        }
     if len(spec.placements) == 1:
         summary = {
             "mode": "object_manipulation",

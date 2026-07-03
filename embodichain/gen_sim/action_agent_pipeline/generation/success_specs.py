@@ -435,7 +435,7 @@ def _validate_relative_bundle(
     reference_required = {
         placement.reference_runtime_uid
         for placement in spec.placements
-        if placement.intent == "place_relative"
+        if placement.intent in {"place_relative", "coordinated_pickment"}
     }
     missing_reference = reference_required - scene_uids
     if missing_reference:

@@ -47,8 +47,8 @@ class TaskPrompt:
       "source": "v0_start",
       "target": "v1_<state>",
       "left_arm_action": {
-        "atomic_action_class": "PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
-        "robot_name": "left_arm|right_arm",
+        "atomic_action_class": "CoordinatedPickment|PickUp|MoveEndEffector|MoveJoints|MoveHeldObject|Place",
+        "robot_name": "dual_arm|left_arm|right_arm",
         "control": "arm|hand",
         "target_object": {"obj_name": "<object>", "affordance": "antipodal"},
         "cfg": {}
@@ -105,7 +105,8 @@ class TaskPrompt:
                                 "- Each edge is one semantic task step from source node to target node.\n"
                                 "- Every edge must define at least one non-null arm action.\n"
                                 "- Use `null` for an idle arm action.\n"
-                                "- Each non-null arm action must use the atomic action class JSON spec with `atomic_action_class`, `robot_name`, `control`, `cfg`, and exactly one of `target_object`, `target_pose`, or `target_qpos`.\n"
+                                "- Each non-null arm action must use the atomic action class JSON spec with `atomic_action_class`, `robot_name`, `control`, `cfg`, and the target fields required by that action.\n"
+                                "- `CoordinatedPickment` controls both arms in one action; put it in exactly one arm-action slot and set the other slot to `null`.\n"
                                 "- Do not output legacy function calls, `action`-based specs, or `fn`/`kwargs` action objects.\n"
                                 "- Put only JSON primitives inside action specs: strings, numbers, booleans, null, arrays, or objects.\n"
                                 "- Do not include `env`, tensors, comments, validation conditions, monitors, errors, or recovery fields.\n"

@@ -897,6 +897,72 @@ def test_task_description_generates_relative_front_of_config(
     }
 
 
+def test_task_description_generates_coordinated_pickment_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == "用双臂将 apple_1 往前移动"
+        return {
+            "manipulations": [
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_1",
+                    "reference_object": "apple_1",
+                    "goal_relation": "front_of",
+                    "arm": "auto",
+                }
+            ],
+            "task_prompt_summary": "Use both arms to move apple_1 forward.",
+            "basic_background_notes": "One shared object requires both arms.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_coordinated_pickment_agent",
+        task_name="MoveAppleForwardWithBothArms",
+        task_description="用双臂将 apple_1 往前移动",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    assert "left_arm" in gym_config["robot"]["control_parts"]
+    assert "right_arm" in gym_config["robot"]["control_parts"]
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    for text in (task_prompt, atom_actions):
+        assert '"atomic_action_class":"CoordinatedPickment"' in text
+        assert '"robot_name":"dual_arm"' in text
+        assert '"target_object":{"obj_name":"apple_1","affordance":"antipodal"}' in text
+        assert '"atomic_action_class":"PickUp"' not in text
+    assert '"position":[0.54,0.11' in task_prompt
+
+    assert _stable_summary(paths.summary) == {
+        "mode": "coordinated_pickment",
+        "intent": "coordinated_pickment",
+        "moved_object": "apple_1",
+        "reference_object": "apple_1",
+        "relation": "front_of",
+        "active_arm": "dual_arm",
+        "release_offset": [0.16, 0.0, 0.12],
+        "target_position": paths.summary["target_position"],
+    }
+
+
 def test_task_description_generates_self_relative_front_left_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

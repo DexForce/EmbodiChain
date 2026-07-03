@@ -596,6 +596,8 @@ def make_relative_task_prompt(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "coordinated_pickment":
+        return _make_coordinated_pickment_task_prompt(task_name, project_name, spec)
     if spec.intent == "hold_hover":
         return _make_hold_hover_task_prompt(task_name, project_name, spec)
     if len(spec.placements) > 1:
@@ -768,6 +770,51 @@ must remain null in every edge.
 
 Final state: `{spec.moved_runtime_uid}` must be
 {_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}`.
+{final_planning_rule}
+"""
+
+
+def _make_coordinated_pickment_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    action_sketch = _format_action_sketch(spec.action_sketch)
+    action_spec = _format_coordinated_pickment_spec(spec)
+    final_planning_rule = _relative_final_planning_rule(project_name, spec)
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from a simple task description by the config-stage
+LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Config-stage LLM interpretation:
+{action_sketch}
+
+Coordinated shared-object mapping:
+- Use both arms together to pick and move `{spec.moved_runtime_uid}`.
+- Source object: `{spec.moved_source_uid}`.
+- Target relation: `{spec.relation}` ({_relative_relation_phrase(spec.relation)})
+  relative to `{spec.reference_runtime_uid}`.
+
+{_RELATIVE_COORDINATE_CONVENTION}
+
+Generate one deterministic nominal graph with exactly 1 nominal edge. Use only
+the `CoordinatedPickment` JSON spec shown below. It controls both arms in one
+atomic action, so put it in `left_arm_action` and keep `right_arm_action` null.
+Do not add separate `PickUp`, `MoveHeldObject`, `Place`, return-to-initial, or
+gripper actions.
+
+1. Coordinated pick and move `{spec.moved_runtime_uid}`:
+   - left_arm_action: {action_spec}
+   - right_arm_action: null
+
+Final state: `{spec.moved_runtime_uid}` must be
+{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}` and
+may remain held by both grippers.
 {final_planning_rule}
 """
 
@@ -1172,6 +1219,8 @@ def make_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "coordinated_pickment":
+        return _make_coordinated_pickment_basic_background(project_name, spec)
     if spec.intent == "hold_hover":
         return _make_hold_hover_basic_background(project_name, spec)
     if len(spec.placements) > 1:
@@ -1210,6 +1259,40 @@ pose-sensitive placements must use a final `MoveHeldObject` object-pose move
 followed by release-only `Place`. Pose-sensitive placements must additionally
 use a safe high `MoveHeldObject` lift with orientation preserved before
 high-pose orientation adjustment.
+"""
+
+
+def _make_coordinated_pickment_basic_background(
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 coordinated shared-object task
+generated from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
+
+Both arms must act through one `CoordinatedPickment` action. The graph should
+place that action in `left_arm_action` and keep `right_arm_action` null.
+
+Interactive task object:
+- {spec.moved_runtime_uid}: shared moved object from source `{spec.moved_source_uid}`.
+
+Config-stage LLM notes:
+{notes}
+
+The execution-stage LLM should generate a single-edge graph that uses
+`CoordinatedPickment` to grasp the shared object with both grippers, lift it,
+and move the object to the configured target pose. It must not decompose this
+task into separate single-arm `PickUp`, `MoveHeldObject`, or `Place` actions.
 """
 
 
@@ -1293,6 +1376,8 @@ the object still hovering in the gripper.
 
 
 def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    if spec.intent == "coordinated_pickment":
+        return _make_coordinated_pickment_atom_actions_prompt(spec)
     if spec.intent == "hold_hover":
         return _make_hold_hover_atom_actions_prompt(spec)
     if len(spec.placements) > 1:
@@ -1373,6 +1458,18 @@ def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
   {_format_hover_move_spec(active_arm, placement)}
 - Keep gripper closed:
   {_format_gripper_spec(active_arm, "close", sample_interval=10, post_hold_steps=20)}"""
+
+
+def _make_coordinated_pickment_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Coordinated Pickment
+
+Use only this native atomic action class JSON spec. `CoordinatedPickment`
+controls both arms, so the nominal graph must put this spec in
+`left_arm_action` and set `right_arm_action` to null.
+
+- Coordinated pick and move `{spec.moved_runtime_uid}`:
+  {_format_coordinated_pickment_spec(spec)}
+"""
 
 
 def make_basket_task_prompt(
@@ -1655,6 +1752,53 @@ def _format_pick_up_spec(
             "cfg": {
                 "pre_grasp_distance": 0.08,
                 "sample_interval": sample_interval,
+            },
+        }
+    )
+
+
+def _format_coordinated_pickment_spec(
+    placement: _RelativePlacementLike,
+    *,
+    sample_interval: int = 120,
+) -> str:
+    target_object_pose: dict[str, Any]
+    if getattr(placement, "reference_is_initial_pose", False):
+        if placement.release_position is None:
+            raise ValueError(
+                "CoordinatedPickment self-relative target requires release_position."
+            )
+        target_object_pose = {
+            "reference": "absolute",
+            "position": [float(value) for value in placement.release_position],
+            "orientation_goal": placement.orientation_goal,
+            "orientation_axis": placement.orientation_axis,
+        }
+    else:
+        x, y, z = placement.release_offset
+        target_object_pose = {
+            "reference": "object",
+            "obj_name": placement.reference_runtime_uid,
+            "offset": [float(x), float(y), float(z)],
+            "orientation_goal": placement.orientation_goal,
+            "orientation_axis": placement.orientation_axis,
+        }
+    if placement.orientation_align_to_runtime_uid is not None:
+        target_object_pose["align_to"] = placement.orientation_align_to_runtime_uid
+    return _compact_json(
+        {
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": placement.moved_runtime_uid,
+                "affordance": "antipodal",
+            },
+            "target_object_pose": target_object_pose,
+            "cfg": {
+                "pre_grasp_distance": 0.1,
+                "sample_interval": sample_interval,
+                "hand_interp_steps": 10,
             },
         }
     )

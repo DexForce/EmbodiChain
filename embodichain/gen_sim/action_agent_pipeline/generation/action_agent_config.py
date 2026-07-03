@@ -1297,7 +1297,7 @@ def _build_relative_placement_bundle(
     reference_runtime_uids = {
         placement.reference_runtime_uid
         for placement in spec.placements
-        if placement.intent == "place_relative"
+        if placement.intent in {"place_relative", "coordinated_pickment"}
     }
     registered_runtime_uids = sorted(
         {runtime_uids[obj.source_uid] for obj in rigid_objects} | reference_runtime_uids
@@ -1406,7 +1406,7 @@ def _build_relative_placement_bundle(
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
-    if spec.intent == "place_relative":
+    if spec.intent in {"place_relative", "coordinated_pickment"}:
         spec = _with_self_relative_absolute_targets(spec, gym_config)
         spec = _with_inside_container_slot_offsets(
             spec,

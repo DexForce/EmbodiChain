@@ -42,6 +42,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import (
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionResult,
+    CoordinatedHeldObjectState,
+    CoordinatedPickmentCfg,
+    CoordinatedPickmentTarget,
     EndEffectorPoseTarget,
     GraspTarget,
     HeldObjectPoseTarget,
@@ -60,18 +63,23 @@ class _FakeRobot:
     uid = "fake_robot"
     device = torch.device("cpu")
     dof = 6
-    control_parts = {
-        "left_arm": [0, 1],
-        "left_eef": [2],
-        "right_arm": [3, 4],
-        "right_eef": [5],
-    }
+
+    def __init__(self):
+        self.control_parts = {
+            "left_arm": [0, 1],
+            "left_eef": [2],
+            "right_arm": [3, 4],
+            "right_eef": [5],
+        }
+        self._joint_ids = {
+            name: list(joint_ids) for name, joint_ids in self.control_parts.items()
+        }
 
     def get_qpos(self):
         return torch.zeros(1, 6)
 
     def get_joint_ids(self, name: str):
-        return list(self.control_parts[name])
+        return list(self._joint_ids[name])
 
 
 class _FakeObject:
@@ -203,6 +211,31 @@ class _FakeBackendAction:
     def execute(self, target, state, **kwargs):
         if self.capture is not None:
             self.capture[-1].update({"target": target, "state": state})
+        if self.cfg.name == "coordinated_pickment":
+            trajectory = torch.tensor(
+                [
+                    [
+                        [0.1, 0.2, 0.0, 0.3, 0.4, 0.0],
+                        [0.4, 0.5, 0.04, 0.6, 0.7, 0.04],
+                    ]
+                ],
+                dtype=torch.float32,
+            )
+            coordinated = CoordinatedHeldObjectState(
+                semantics=target.object_semantics,
+                left_object_to_eef=target.left_object_to_eef.unsqueeze(0),
+                right_object_to_eef=target.right_object_to_eef.unsqueeze(0),
+                left_grasp_xpos=torch.eye(4).unsqueeze(0),
+                right_grasp_xpos=torch.eye(4).unsqueeze(0),
+            )
+            return ActionResult(
+                success=True,
+                trajectory=trajectory,
+                next_state=WorldState(
+                    last_qpos=trajectory[:, -1, :],
+                    coordinated_held_object=coordinated,
+                ),
+            )
         if self.cfg.name == "move_joints":
             joint_ids = self.motion_generator.robot.get_joint_ids(self.cfg.control_part)
             trajectory = state.last_qpos.unsqueeze(1).repeat(1, 2, 1)
@@ -369,6 +402,32 @@ def test_normalize_atomic_action_spec_rejects_multiple_target_fields() -> None:
                 "cfg": {},
             }
         )
+
+
+def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> None:
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "apple",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.16, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        }
+    )
+
+    assert normalized["atomic_action_class"] == "CoordinatedPickment"
+    assert normalized["target_object"]["obj_name"] == "apple"
+    assert normalized["target_object_pose"]["offset"] == [0.16, 0.0, 0.0]
 
 
 def test_normalize_atomic_action_spec_rejects_orientation_field() -> None:
@@ -833,6 +892,64 @@ def test_target_object_builds_pick_up_cfg(monkeypatch) -> None:
     assert capture[0]["target"].semantics.label == "apple"
     assert capture[0]["target"].semantics.affordance.mesh_vertices is not None
     assert capture[0]["target"].semantics.affordance.mesh_triangles is not None
+
+
+def test_coordinated_pickment_builds_full_robot_stream(monkeypatch) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    result = execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "apple",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.16, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        },
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    assert len(result["actions"]) == 2
+    assert env.stepped_actions[-1].shape == (1, 6)
+    assert isinstance(capture[0]["cfg"], CoordinatedPickmentCfg)
+    assert capture[0]["cfg"].control_part == "dual_arm"
+    assert env.robot.control_parts["dual_arm"] == [0, 1, 3, 4]
+    assert env.robot._joint_ids["dual_arm"] == [0, 1, 3, 4]
+    assert capture[0]["cfg"].left_arm_control_part == "left_arm"
+    assert capture[0]["cfg"].right_arm_control_part == "right_arm"
+    assert isinstance(capture[0]["target"], CoordinatedPickmentTarget)
+    assert capture[0]["target"].object_target_pose[:3, 3].tolist() == pytest.approx(
+        [0.56, -0.2, 0.1]
+    )
+    assert env.left_arm_current_qpos.tolist() == pytest.approx([0.4, 0.5])
+    assert env.right_arm_current_qpos.tolist() == pytest.approx([0.6, 0.7])
+    assert env.left_arm_current_gripper_state.tolist() == pytest.approx([0.04])
+    assert env.right_arm_current_gripper_state.tolist() == pytest.approx([0.04])
+    assert result["world_states"]["coordinated"].coordinated_held_object is not None
 
 
 def test_place_action_builds_place_cfg(monkeypatch) -> None:
