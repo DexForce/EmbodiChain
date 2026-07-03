@@ -18,7 +18,7 @@
 
 This module provides a unified interface for the atomic motion primitives
 (``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``), with typed targets, a ``WorldState`` threaded across sequenced
+``place``, ``press``), with typed targets, a ``WorldState`` threaded across sequenced
 actions, and extensible custom action registration.
 """
 
@@ -31,6 +31,9 @@ from .core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
+    CoordinatedHeldObjectState,
+    CoordinatedPickmentTarget,
+    CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -42,16 +45,22 @@ from .core import (
     WorldState,
 )
 from .actions import (
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
+    CoordinatedPlacement,
+    CoordinatedPlacementCfg,
     MoveEndEffector,
     MoveJoints,
     MoveHeldObject,
     PickUp,
     Place,
+    Press,
     MoveEndEffectorCfg,
     MoveJointsCfg,
     MoveHeldObjectCfg,
     PickUpCfg,
     PlaceCfg,
+    PressCfg,
 )
 from .engine import (
     AtomicActionEngine,
@@ -67,6 +76,9 @@ __all__ = [
     "AntipodalAffordance",
     "InteractionPoints",
     "ObjectSemantics",
+    "CoordinatedHeldObjectState",
+    "CoordinatedPickmentTarget",
+    "CoordinatedPlacementTarget",
     "HeldObjectState",
     "HeldObjectPoseTarget",
     "JointPositionTarget",
@@ -79,16 +91,22 @@ __all__ = [
     "ActionCfg",
     "AtomicAction",
     # Action implementations
+    "CoordinatedPickment",
+    "CoordinatedPlacement",
     "MoveEndEffector",
     "MoveJoints",
     "MoveHeldObject",
     "PickUp",
     "Place",
+    "Press",
+    "CoordinatedPickmentCfg",
+    "CoordinatedPlacementCfg",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",
     "PickUpCfg",
     "PlaceCfg",
+    "PressCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",

@@ -39,6 +39,9 @@ from embodichain.lab.sim.cfg import (
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
+ACTION_SWITCH_INTERVAL = 100
+ACTION_CYCLE_STEPS = 4 * ACTION_SWITCH_INTERVAL
+
 
 def main():
     """Main function to demonstrate robot simulation."""
@@ -94,7 +97,7 @@ def create_robot(sim):
     # Joint names in control_parts can be regex patterns
     CONTROL_PARTS = {
         "arm": [
-            "JOINT[1-6]",  # Matches JOINT1, JOINT2, ..., JOINT6
+            "joint[1-6]",  # Matches JOINT1, JOINT2, ..., JOINT6
         ],
         "hand": ["LEFT_.*"],  # Matches all joints starting with L_
     }
@@ -121,8 +124,8 @@ def create_robot(sim):
         ),
         control_parts=CONTROL_PARTS,
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[1-6]": 1e4, "LEFT_.*": 1e3},
-            damping={"JOINT[1-6]": 1e3, "LEFT_.*": 1e2},
+            stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
+            damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
         ),
     )
 
@@ -171,20 +174,21 @@ def run_simulation(sim: SimulationManager, robot: Robot):
         while True:
             # Update physics
             sim.update(step=1)
+            cycle_step = step_count % ACTION_CYCLE_STEPS
 
-            if step_count % 4000 == 0:
+            if cycle_step == 0:
                 robot.set_qpos(qpos=arm_position1, joint_ids=arm_joint_ids)
                 print(f"Moving to arm position 1")
 
-            if step_count % 4000 == 1000:
+            if cycle_step == ACTION_SWITCH_INTERVAL:
                 robot.set_qpos(qpos=arm_position2, joint_ids=arm_joint_ids)
                 print(f"Moving to arm position 2")
 
-            if step_count % 4000 == 2000:
+            if cycle_step == 2 * ACTION_SWITCH_INTERVAL:
                 robot.set_qpos(qpos=hand_position_close, joint_ids=hand_joint_ids)
                 print(f"Closing hand")
 
-            if step_count % 4000 == 3000:
+            if cycle_step == 3 * ACTION_SWITCH_INTERVAL:
                 robot.set_qpos(qpos=hand_position_open, joint_ids=hand_joint_ids)
                 print(f"Opening hand")
 
