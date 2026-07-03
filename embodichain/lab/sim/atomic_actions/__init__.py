@@ -18,8 +18,9 @@
 
 This module provides a unified interface for the atomic motion primitives
 (``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``), with typed targets, a ``WorldState`` threaded across sequenced
-actions, and extensible custom action registration.
+``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``),
+with typed targets, a ``WorldState`` threaded across sequenced actions, and
+extensible custom action registration.
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ from .core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
+    CoordinatedHeldObjectState,
+    CoordinatedPickmentTarget,
+    CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -50,6 +54,10 @@ from .engine import (
     get_registered_actions,
 )
 from .primitives import (
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
+    CoordinatedPlacement,
+    CoordinatedPlacementCfg,
     MoveEndEffector,
     MoveEndEffectorCfg,
     MoveHeldObject,
@@ -60,6 +68,8 @@ from .primitives import (
     PickUpCfg,
     Place,
     PlaceCfg,
+    Press,
+    PressCfg,
 )
 from .trajectory import TrajectoryBuilder
 
@@ -70,10 +80,13 @@ __all__ = [
     "InteractionPoints",
     "ObjectSemantics",
     "HeldObjectState",
+    "CoordinatedHeldObjectState",
     "HeldObjectPoseTarget",
     "JointPositionTarget",
     "NamedJointPositionTarget",
     "EndEffectorPoseTarget",
+    "CoordinatedPickmentTarget",
+    "CoordinatedPlacementTarget",
     "GraspTarget",
     "Target",
     "WorldState",
@@ -81,16 +94,22 @@ __all__ = [
     "ActionCfg",
     "AtomicAction",
     # Action implementations
+    "CoordinatedPickment",
+    "CoordinatedPlacement",
     "MoveEndEffector",
     "MoveJoints",
     "MoveHeldObject",
     "PickUp",
     "Place",
+    "Press",
+    "CoordinatedPickmentCfg",
+    "CoordinatedPlacementCfg",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",
     "PickUpCfg",
     "PlaceCfg",
+    "PressCfg",
     # Engine
     "AtomicActionEngine",
     "register_action",

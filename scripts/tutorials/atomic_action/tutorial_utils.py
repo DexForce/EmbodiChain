@@ -27,6 +27,7 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
 from embodichain.lab.sim.robots import URRobotCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -47,9 +48,40 @@ GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
 GRIPPER_TCP_Z = 0.15
 
 
+def make_ur5_solver_cfg(tcp_z: float) -> URSolverCfg:
+    """Create the UR5 arm solver cfg used by atomic-action tutorials."""
+    cfg = URSolverCfg(
+        ur_type="ur5",
+        end_link_name="ee_link",
+        root_link_name="base_link",
+        tcp=[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, tcp_z],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    cfg.urdf_path = None
+    return cfg
+
+
 def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
     """Return the viewer window size used by atomic-action tutorials."""
     return VIEWER_WIDTH, VIEWER_HEIGHT
+
+
+def should_open_tutorial_window(args: argparse.Namespace) -> bool:
+    """Return whether an interactive viewer window should be opened."""
+    return not (
+        getattr(args, "headless", False)
+        or getattr(args, "diagnose_plan", False)
+        or getattr(args, "headless_play", False)
+    )
+
+
+def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
+    """Return whether the tutorial should pause for terminal input."""
+    return not getattr(args, "auto_play", False)
 
 
 def start_auto_play_recording(
@@ -104,6 +136,7 @@ def draw_axis_marker(
     xpos: torch.Tensor,
     axis_len: float = DEFAULT_AXIS_LEN,
     axis_size: float = DEFAULT_AXIS_SIZE,
+    arena_index: int = -1,
 ) -> None:
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
     sim.draw_marker(
@@ -113,6 +146,7 @@ def draw_axis_marker(
             axis_xpos=xpos,
             axis_size=axis_size,
             axis_len=axis_len,
+            arena_index=arena_index,
         )
     )
 
@@ -193,7 +227,10 @@ __all__ = [
     "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
     "create_ur5_gripper_robot_cfg",
+    "make_ur5_solver_cfg",
     "get_tutorial_window_size",
+    "should_open_tutorial_window",
+    "should_wait_for_tutorial_input",
     "start_auto_play_recording",
     "stop_auto_play_recording",
     "draw_axis_marker",

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""MoveHeldObject atomic action implementation."""
+"""Press atomic action implementation."""
 
 from __future__ import annotations
 
@@ -25,24 +25,27 @@ import torch
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
 
-from ._helpers import arm_qpos_from_state, resolve_object_target
+from ._helpers import arm_qpos_from_state
 from ..core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
-    HeldObjectPoseTarget,
+    EndEffectorPoseTarget,
     WorldState,
 )
 from ..trajectory import TrajectoryBuilder
 
 
 @configclass
-class MoveHeldObjectCfg(ActionCfg):
-    name: str = "move_held_object"
+class PressCfg(ActionCfg):
+    name: str = "press"
     """Name of the action, used for identification and logging."""
 
-    sample_interval: int = 50
-    """Number of waypoints in the planned trajectory."""
+    sample_interval: int = 80
+    """Number of waypoints for the full trajectory (hand close + down + back)."""
+
+    hand_interp_steps: int = 5
+    """Number of waypoints for closing the gripper before pressing."""
 
     hand_control_part: str = "hand"
     """Name of the robot part that controls the hand joints."""
@@ -51,76 +54,87 @@ class MoveHeldObjectCfg(ActionCfg):
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
 
 
-class MoveHeldObject(AtomicAction):
-    """Move the held object to a target object pose; keep the gripper closed."""
+class Press(AtomicAction):
+    """Close the gripper, press down to a target pose, then return."""
 
-    TargetType: ClassVar[type] = HeldObjectPoseTarget
+    TargetType: ClassVar[type] = EndEffectorPoseTarget
 
     def __init__(
         self,
         motion_generator,
-        cfg: MoveHeldObjectCfg | None = None,
+        cfg: PressCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveHeldObjectCfg())
+        super().__init__(motion_generator, cfg or PressCfg())
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.arm_dof = len(self.arm_joint_ids)
+        self.hand_dof = len(self.hand_joint_ids)
         self.robot_dof = self.robot.dof
 
         if self.cfg.hand_close_qpos is None:
             logger.log_error(
-                "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
+                "hand_close_qpos must be specified in PressCfg", ValueError
             )
-        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
-
-    def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
-        if state.held_object is None:
-            logger.log_error(
-                "MoveHeldObject requires WorldState.held_object - run PickUp first.",
-                ValueError,
-            )
-        object_target_pose = resolve_object_target(
-            target.object_target_pose, n_envs=self.n_envs, device=self.device
+        self.hand_close_qpos = self.builder.expand_hand_qpos(
+            self.cfg.hand_close_qpos,
+            n_envs=self.n_envs,
+            hand_dof=self.hand_dof,
         )
-        object_to_eef = state.held_object.object_to_eef.to(
-            device=self.device, dtype=torch.float32
-        )
-        if object_to_eef.shape == (4, 4):
-            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
-        move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
+    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+        press_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
         start_arm_qpos = self.builder.resolve_start_qpos(
             arm_qpos_from_state(state, self.arm_joint_ids),
             n_envs=self.n_envs,
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
+        start_hand_qpos = state.last_qpos[:, self.hand_joint_ids]
+
+        n_close, n_down, n_back = self._compute_phase_waypoints()
+
+        hand_close_path = self.builder.interpolate_hand_qpos(
+            start_hand_qpos,
+            self.hand_close_qpos,
+            n_waypoints=n_close,
+        )
 
         target_states_list = [
-            [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
+            [PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, arm_traj = self.builder.plan_arm_traj(
+        ok, down_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
-            self.cfg.sample_interval,
+            n_down,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
         )
         if not ok:
-            logger.log_warning("MoveHeldObject failed to plan trajectory.")
+            logger.log_warning("Press failed to plan the down trajectory.")
             return self._fail(state)
 
+        press_arm_qpos = down_arm[:, -1, :]
+        back_arm = self.builder.plan_joint_traj(press_arm_qpos, start_arm_qpos, n_back)
+
         full = torch.empty(
-            (self.n_envs, arm_traj.shape[1], self.robot_dof),
+            (self.n_envs, n_close + n_down + n_back, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :, self.arm_joint_ids] = arm_traj
-        full[:, :, self.hand_joint_ids] = self.hand_close_qpos
+        full[:, :n_close, self.arm_joint_ids] = start_arm_qpos.unsqueeze(1)
+        full[:, :n_close, self.hand_joint_ids] = hand_close_path
+        full[:, n_close : n_close + n_down, self.arm_joint_ids] = down_arm
+        full[:, n_close : n_close + n_down, self.hand_joint_ids] = (
+            self.hand_close_qpos.unsqueeze(1)
+        )
+        full[:, n_close + n_down :, self.arm_joint_ids] = back_arm
+        full[:, n_close + n_down :, self.hand_joint_ids] = (
+            self.hand_close_qpos.unsqueeze(1)
+        )
 
         return ActionResult(
             success=True,
@@ -131,6 +145,24 @@ class MoveHeldObject(AtomicAction):
                 coordinated_held_object=state.coordinated_held_object,
             ),
         )
+
+    def _compute_phase_waypoints(self) -> tuple[int, int, int]:
+        n_close = self.cfg.hand_interp_steps
+        if n_close < 1:
+            logger.log_error(
+                "hand_interp_steps must be at least 1 for PressCfg.", ValueError
+            )
+
+        motion_waypoints = self.cfg.sample_interval - n_close
+        n_down = motion_waypoints // 2
+        n_back = motion_waypoints - n_down
+        if n_down < 2 or n_back < 2:
+            logger.log_error(
+                "Not enough waypoints for press trajectory. Increase "
+                "sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
+        return n_close, n_down, n_back
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
@@ -144,4 +176,4 @@ class MoveHeldObject(AtomicAction):
         )
 
 
-__all__ = ["MoveHeldObject", "MoveHeldObjectCfg"]
+__all__ = ["Press", "PressCfg"]
