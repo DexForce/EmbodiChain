@@ -24,7 +24,12 @@ import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import pose_inv
+from embodichain.utils.math import (
+    matrix_from_quat,
+    pose_inv,
+    quat_error_magnitude,
+    quat_from_matrix,
+)
 
 from ._helpers import arm_qpos_from_state
 from ..affordance import AntipodalAffordance
@@ -112,7 +117,14 @@ class PickUp(AtomicAction):
                 "PickUp requires an entity on the target semantics.", ValueError
             )
 
-        is_success, grasp_xpos = self._resolve_grasp_pose(sem)
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            arm_qpos_from_state(state, self.arm_joint_ids),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+
+        is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
@@ -120,13 +132,6 @@ class PickUp(AtomicAction):
         grasp_z = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = self.builder.apply_local_offset(
             grasp_xpos, -grasp_z * self.cfg.pre_grasp_distance
-        )
-
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
         )
 
         n_approach, n_close, n_lift = self.builder.split_three_phase(
@@ -222,14 +227,13 @@ class PickUp(AtomicAction):
         )
 
     def _resolve_grasp_pose(
-        self, semantics: ObjectSemantics
+        self, semantics: ObjectSemantics, start_qpos: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses, approach_direction=self.approach_direction
         )
         n_envs = obj_poses.shape[0]
-        init_qpos = self.robot.get_qpos(name=self.cfg.control_part)
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
         grasp_xpos_padding = torch.zeros(
             (n_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
@@ -242,15 +246,18 @@ class PickUp(AtomicAction):
         )
         for i in range(n_envs):
             n_pose = grasp_poses_result[i][0].shape[0]
-            grasp_xpos_padding[i, :n_pose] = grasp_poses_result[i][0]
-            grasp_cost_padding[i, :n_pose] = grasp_poses_result[i][1]
-            grasp_xpos_padding[i, n_pose:] = grasp_poses_result[i][0][0]
-            grasp_cost_padding[i, n_pose:] = grasp_poses_result[i][1][0]
-        init_qpos_repeat = init_qpos[:, None, :].repeat(1, n_max_pose, 1)
-        ik_success, _ = self.robot.compute_batch_ik(
-            pose=grasp_xpos_padding,
-            name=self.cfg.control_part,
-            joint_seed=init_qpos_repeat,
+            grasp_poses = grasp_poses_result[i][0].to(
+                device=self.device, dtype=torch.float32
+            )
+            grasp_costs = grasp_poses_result[i][1].to(
+                device=self.device, dtype=torch.float32
+            )
+            grasp_xpos_padding[i, :n_pose] = grasp_poses
+            grasp_cost_padding[i, :n_pose] = grasp_costs
+            grasp_xpos_padding[i, n_pose:] = grasp_poses[0]
+            grasp_cost_padding[i, n_pose:] = grasp_costs[0]
+        grasp_xpos_padding, ik_success = self._select_symmetric_grasp_variants(
+            grasp_xpos_padding, start_qpos
         )
         grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
         best_cost, best_idx = grasp_cost_masked.min(dim=1)
@@ -259,6 +266,41 @@ class PickUp(AtomicAction):
             torch.arange(n_envs, device=self.device), best_idx
         ]
         return is_success, best_grasp_xpos
+
+    def _select_symmetric_grasp_variants(
+        self, grasp_xpos: torch.Tensor, start_qpos: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Choose the closest TCP z-roll variant, then validate reachability."""
+        n_envs, n_pose = grasp_xpos.shape[:2]
+        mirrored_grasp_xpos = grasp_xpos.clone()
+        mirrored_grasp_xpos[..., :3, 0] = -mirrored_grasp_xpos[..., :3, 0]
+        mirrored_grasp_xpos[..., :3, 1] = -mirrored_grasp_xpos[..., :3, 1]
+        grasp_variants = torch.stack([grasp_xpos, mirrored_grasp_xpos], dim=2)
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=self.cfg.control_part,
+            to_matrix=True,
+        )
+        start_quat = quat_from_matrix(start_xpos[:, :3, :3])
+        variant_quat = quat_from_matrix(grasp_variants[..., :3, :3])
+        start_quat = start_quat[:, None, None, :].expand_as(variant_quat)
+        rotation_error = quat_error_magnitude(
+            variant_quat.reshape(-1, 4),
+            start_quat.reshape(-1, 4),
+        ).reshape(n_envs, n_pose, 2)
+        best_variant_idx = rotation_error.argmin(dim=2)
+
+        env_idx = torch.arange(n_envs, device=self.device)[:, None]
+        pose_idx = torch.arange(n_pose, device=self.device)[None, :]
+        selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
+        start_qpos_repeat = start_qpos[:, None, :].repeat(1, n_pose, 1)
+        ik_success, _ = self.robot.compute_batch_ik(
+            pose=selected_grasp_xpos,
+            name=self.cfg.control_part,
+            joint_seed=start_qpos_repeat,
+        )
+        return selected_grasp_xpos, ik_success
 
 
 __all__ = ["PickUp", "PickUpCfg"]

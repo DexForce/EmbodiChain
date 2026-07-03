@@ -435,6 +435,56 @@ class TestPickUpAction:
         assert isinstance(result.next_state.held_object, HeldObjectState)
         assert result.next_state.held_object.semantics is sem
 
+    def test_execute_chooses_symmetric_grasp_variant_closest_to_start_pose(self):
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+        )
+        action = PickUp(self.mg, cfg)
+        compute_batch_ik = self.mg.robot.compute_batch_ik
+        self.mg.robot.compute_batch_ik = Mock(side_effect=compute_batch_ik)
+
+        rz_pi_grasp = torch.eye(4)
+        rz_pi_grasp[:3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (rz_pi_grasp.unsqueeze(0), torch.tensor([0.5])) for _ in range(NUM_ENVS)
+            ]
+        )
+
+        entity = Mock()
+        entity.get_local_pose = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="mug",
+            entity=entity,
+        )
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+            result = action.execute(GraspTarget(semantics=sem), state)
+
+        assert result.success is True
+        assert isinstance(result.next_state.held_object, HeldObjectState)
+        expected_grasp = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        assert torch.allclose(result.next_state.held_object.grasp_xpos, expected_grasp)
+        self.mg.robot.compute_batch_ik.assert_called_once()
+        ik_kwargs = self.mg.robot.compute_batch_ik.call_args.kwargs
+        assert ik_kwargs["pose"].shape == (NUM_ENVS, 1, 4, 4)
+        assert torch.allclose(ik_kwargs["pose"][:, 0], expected_grasp)
+        assert ik_kwargs["joint_seed"].shape == (NUM_ENVS, 1, ARM_DOF)
+
 
 # ---------------------------------------------------------------------------
 # MoveHeldObject
@@ -615,7 +665,7 @@ class TestPressAction:
     def test_default_name_is_explicit(self):
         assert PressCfg(hand_close_qpos=_hand_close()).name == "press"
 
-    def test_execute_closes_hand_then_returns_to_start_arm_qpos(self):
+    def test_execute_closes_hand_and_preserves_held_object(self):
         cfg = PressCfg(
             hand_close_qpos=_hand_close(),
             sample_interval=12,
