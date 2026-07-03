@@ -171,6 +171,8 @@ while keeping both grippers closed. On success, the returned `WorldState` carrie
 **Target:** `CoordinatedPickmentTarget(...)` with a target object pose, object
 semantics, and left/right object-to-EEF transforms.
 
+**Tutorial:** `scripts/tutorials/atomic_action/coordinated_pickment.py`
+
 ![CoordinatedPickment demo](../../../_static/atomic_actions/coordinated_pickment.gif)
 
 ---
@@ -208,5 +210,7 @@ held objects.
 **Target:** `CoordinatedPlacementTarget(...)` with placing/support object target
 poses plus the corresponding `HeldObjectState` values. On success, the returned
 `WorldState.held_object` is the support object's held state.
+
+**Tutorial:** `scripts/tutorials/atomic_action/coordinated_placement.py`
 
 ![CoordinatedPlacement demo](../../../_static/atomic_actions/coordinated_placement.gif)
