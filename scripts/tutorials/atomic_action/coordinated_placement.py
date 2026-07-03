@@ -108,10 +108,10 @@ def transform_baseline_pose(
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-SCRIPT_DIR = Path(__file__).resolve().parent
-TABLE_MESH_PATH = SCRIPT_DIR / "table.glb"
-BREAD_MESH_PATH = SCRIPT_DIR / "bread.glb"
-PAN_MESH_PATH = SCRIPT_DIR / "pan.glb"
+PLACEMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
+TABLE_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/table.glb"
+BREAD_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/bread.glb"
+PAN_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/pan.glb"
 BREAD_LABEL = "bread"
 PAN_LABEL = "pan"
 GRIPPER_TCP_Z = 0.121
@@ -371,7 +371,7 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="table",
-            shape=MeshCfg(fpath=str(TABLE_MESH_PATH)),
+            shape=MeshCfg(fpath=get_cached_data_path(TABLE_MESH_PATH)),
             attrs=RigidBodyAttributesCfg(
                 mass=10.0,
                 dynamic_friction=0.9,
@@ -390,7 +390,9 @@ def create_bread(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="bread",
-            shape=MeshCfg(fpath=str(BREAD_MESH_PATH), compute_uv=False),
+            shape=MeshCfg(
+                fpath=get_cached_data_path(BREAD_MESH_PATH), compute_uv=False
+            ),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
                 contact_offset=0.003,
@@ -413,7 +415,7 @@ def create_pan(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="pan",
-            shape=MeshCfg(fpath=str(PAN_MESH_PATH), compute_uv=False),
+            shape=MeshCfg(fpath=get_cached_data_path(PAN_MESH_PATH), compute_uv=False),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
                 dynamic_friction=0.97,

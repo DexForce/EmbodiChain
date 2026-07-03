@@ -30,6 +30,7 @@ EndEffectorPoseTarget(xpos)                │
 JointPositionTarget(qpos)                  ├─ IK solve when pose-based
 NamedJointPositionTarget(name)             ├─ Motion plan / interpolation
 HeldObjectPoseTarget(pose)                 └─ Gripper interpolation when needed
+CoordinatedPickmentTarget(...)             │
 CoordinatedPlacementTarget(...)            │
                                                    │
                                            ActionResult
@@ -63,6 +64,7 @@ and every action declares the target type, or tuple of target types, it accepts 
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
 | `GraspTarget` | `GraspTarget(semantics)` | `PickUp` |
 | `HeldObjectPoseTarget` | `HeldObjectPoseTarget(object_target_pose)` | `MoveHeldObject` |
+| `CoordinatedPickmentTarget` | `CoordinatedPickmentTarget(...)` | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget` | `CoordinatedPlacementTarget(...)` | `CoordinatedPlacement` |
 
 `Target` is the union of these typed target dataclasses.
@@ -101,6 +103,7 @@ action's `TargetType` before calling `execute`:
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
 | `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
 | `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
+| `CoordinatedPickmentTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget(...)` | Two held-object states plus object-centric placing/support target poses | `CoordinatedPlacement` |
 
 `WorldState` is threaded between actions and carries the robot's `last_qpos` plus an optional
@@ -111,6 +114,7 @@ action's `TargetType` before calling `execute`:
 | `PickUp` | Populates it (computed object-to-EEF transform) |
 | `MoveHeldObject` | Requires it; preserves it unchanged |
 | `Place` | Clears it to `None` |
+| `CoordinatedPickment` | Leaves `held_object` as `None` and populates `coordinated_held_object` |
 | `CoordinatedPlacement` | Returns the support arm's `HeldObjectState`; the placing object is released |
 | `MoveEndEffector` | Leaves it unchanged |
 | `MoveJoints` | Leaves it unchanged |
@@ -311,6 +315,7 @@ builtin_actions
   - `scripts/tutorials/atomic_action/move_held_object.py`
   - `scripts/tutorials/atomic_action/place.py`
   - `scripts/tutorials/atomic_action/press.py`
+  - `scripts/tutorials/atomic_action/coordinated_pickment.py`
   - `scripts/tutorials/atomic_action/coordinated_placement.py`
 
 Run a demo in headless CPU mode with `--auto_play --headless --device cpu` to record
