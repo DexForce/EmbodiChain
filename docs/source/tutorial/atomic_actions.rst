@@ -18,7 +18,7 @@ Key Features
   ``GraspTarget`` (wrapping an ``ObjectSemantics``), or ``HeldObjectPoseTarget``. The
   engine checks each step's target against the action's declared ``TargetType`` before running.
 - **Built-in primitives** — ``MoveEndEffector``, ``MoveJoints``, ``PickUp``, ``MoveHeldObject``,
-  ``Place``, and ``Press``
+  ``Place``, ``Press``, ``CoordinatedPickment``, and ``CoordinatedPlacement``
   cover the most common tabletop manipulation workflows out of the box.
   See :doc:`/overview/sim/atomic_actions/index` for configs and target types.
 - **Extensible registry** — custom action *classes* can be registered globally with
@@ -43,6 +43,8 @@ Focused demo scripts are available for the built-in primitives in the
 - ``move_held_object.py``
 - ``place.py``
 - ``press.py``
+- ``coordinated_pickment.py``
+- ``coordinated_placement.py``
 
 Each script supports interactive inspection by default. Add ``--auto_play`` to skip
 keyboard prompts, and combine it with ``--headless --device cpu`` to record an MP4 under
@@ -55,6 +57,8 @@ keyboard prompts, and combine it with ``--headless --device cpu`` to record an M
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/move_held_object.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/place.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/coordinated_pickment.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/coordinated_placement.py --headless --auto_play --device cpu
 
 Typical Usage
 -------------
