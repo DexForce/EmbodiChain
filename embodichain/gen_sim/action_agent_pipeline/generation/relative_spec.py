@@ -587,6 +587,8 @@ def _apply_relative_task_response(
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
         hover_height=primary.hover_height,
         upright_in_place=primary.upright_in_place,
+        pickup_upright_direction=primary.pickup_upright_direction,
+        pickup_rotate_upright=primary.pickup_rotate_upright,
     )
 
 

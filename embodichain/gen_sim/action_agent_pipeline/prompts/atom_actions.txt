@@ -31,6 +31,9 @@ Use only these native atomic action classes:
      {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
    - Typical cfg:
      {"pre_grasp_distance": 0.08, "sample_interval": 45}
+   - For upright-in-place bottle tasks, cfg may also include
+     {"obj_upright_direction": [x, y, z], "rotate_upright": 0.7853981633974483}
+     to bias the grasp pose before lifting.
 
 3. `MoveHeldObject`
    - Use only after the same arm has successfully executed `PickUp`.

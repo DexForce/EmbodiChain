@@ -114,6 +114,8 @@ SUPPORTED_CFG_KEYS = {
     "hold_steps",
     "object_motion_keyframes",
     "post_hold_steps",
+    "obj_upright_direction",
+    "rotate_upright",
 }
 
 
@@ -266,6 +268,7 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"Unsupported atomic action cfg keys: {', '.join(sorted(unknown_cfg))}."
         )
+    _validate_cfg_values(cfg)
 
     target_values = _normalize_action_target(
         spec,
@@ -1184,6 +1187,7 @@ def _build_action_cfg(
     if spec.atomic_action_class == "PickUp":
         if spec.control != "arm":
             raise ValueError("PickUp atomic action requires control='arm'.")
+        _normalize_pickup_cfg_values(cfg_values, device)
         return PickUpCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
@@ -1225,6 +1229,38 @@ def _build_action_cfg(
             **_cfg_supported_kwargs(MoveEndEffectorCfg, cfg_values),
         )
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
+
+
+def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
+    if "obj_upright_direction" in cfg:
+        _xyz(cfg["obj_upright_direction"], "obj_upright_direction")
+    if "rotate_upright" in cfg:
+        value = cfg["rotate_upright"]
+        if value is not None and not isinstance(value, int | float):
+            raise ValueError("rotate_upright must be a numeric value in radians.")
+
+
+def _normalize_pickup_cfg_values(cfg_values: dict[str, Any], device) -> None:
+    if "rotate_upright" in cfg_values and cfg_values["rotate_upright"] is not None:
+        cfg_values["rotate_upright"] = float(cfg_values["rotate_upright"])
+    if "obj_upright_direction" not in cfg_values:
+        return
+
+    direction = cfg_values["obj_upright_direction"]
+    if torch.is_tensor(direction):
+        if direction.shape != (3,):
+            raise ValueError("obj_upright_direction must have shape (3,).")
+        cfg_values["obj_upright_direction"] = direction.to(
+            device=device,
+            dtype=torch.float32,
+        )
+        return
+
+    cfg_values["obj_upright_direction"] = torch.tensor(
+        _xyz(direction, "obj_upright_direction"),
+        dtype=torch.float32,
+        device=device,
+    )
 
 
 def _resolve_target(

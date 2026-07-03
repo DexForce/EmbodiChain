@@ -87,6 +87,8 @@ class _RelativePlacementLike(Protocol):
     orientation_align_to_runtime_uid: str | None
     hover_height: float
     upright_in_place: bool
+    pickup_upright_direction: Sequence[float] | None
+    pickup_rotate_upright: float | None
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -609,7 +611,12 @@ def make_relative_task_prompt(
     )
     active_slot = f"{spec.active_side}_arm_action"
     action_sketch = _format_action_sketch(spec.action_sketch)
-    pick_spec = _format_pick_up_spec(active_arm, spec.moved_runtime_uid)
+    pick_spec = _format_pick_up_spec(
+        active_arm,
+        spec.moved_runtime_uid,
+        pickup_upright_direction=spec.pickup_upright_direction,
+        pickup_rotate_upright=spec.pickup_rotate_upright,
+    )
     initial_spec = _format_initial_qpos_spec(active_arm, sample_interval=30)
     reference_line = _relative_reference_line(spec)
     final_planning_rule = _relative_final_planning_rule(project_name, spec)
@@ -832,20 +839,20 @@ def _make_dual_relative_task_prompt(
     first_slot = f"{first.active_side}_arm_action"
     second_slot = f"{second.active_side}_arm_action"
     action_sketch = _format_action_sketch(spec.action_sketch)
-    first_pick_spec = _format_pick_up_spec(first_arm, first.moved_runtime_uid)
-    second_pick_spec = _format_pick_up_spec(second_arm, second.moved_runtime_uid)
-    first_high_spec = _format_relative_pose_spec(
+    first_pick_spec = _format_pick_up_spec(
         first_arm,
-        first,
-        pose_kind="high",
-        sample_interval=45,
+        first.moved_runtime_uid,
+        pickup_upright_direction=first.pickup_upright_direction,
+        pickup_rotate_upright=first.pickup_rotate_upright,
     )
-    second_high_spec = _format_relative_pose_spec(
+    second_pick_spec = _format_pick_up_spec(
         second_arm,
-        second,
-        pose_kind="high",
-        sample_interval=45,
+        second.moved_runtime_uid,
+        pickup_upright_direction=second.pickup_upright_direction,
+        pickup_rotate_upright=second.pickup_rotate_upright,
     )
+    first_high_spec = _format_high_staging_spec(first_arm, first)
+    second_high_spec = _format_high_staging_spec(second_arm, second)
     first_close_spec = _format_gripper_spec(
         first_arm,
         "close",
@@ -1042,22 +1049,6 @@ def _dual_relative_release_edge_blocks(
     if _is_pose_sensitive_placement(placement):
         return [
             (
-                f"Lift `{placement.moved_runtime_uid}` to the safe high staging "
-                "pose without changing orientation",
-                {
-                    active_slot: _format_relative_pose_spec(
-                        active_arm,
-                        placement,
-                        pose_kind="high",
-                        sample_interval=45,
-                        orientation_goal="preserve",
-                        orientation_axis="none",
-                        align_to=None,
-                    ),
-                    waiting_slot: waiting_value,
-                },
-            ),
-            (
                 f"Adjust `{placement.moved_runtime_uid}` orientation at the same "
                 "safe high staging pose",
                 {
@@ -1150,10 +1141,10 @@ def _dual_relative_release_edge_blocks(
 def _dual_relative_release_rule(spec: _RelativeSpecLike) -> str:
     if any(_is_pose_sensitive_placement(placement) for placement in spec.placements):
         return (
-            "For pose-sensitive placements, first lift the held object to the "
-            "safe high staging pose with orientation preserved, then adjust "
-            "orientation at the same high pose before moving down to the final "
-            "release object pose. The following `Place` must be the exact "
+            "For pose-sensitive placements, the high-staging edge must keep "
+            "orientation preserved, then adjust orientation at the same high "
+            "pose before moving down to the final release object pose. The "
+            "following `Place` must be the exact "
             "relative-zero release-only spec shown below, and then the empty "
             "hand retreats upward. Support-surface `on` placements must also "
             "use final object-pose `MoveHeldObject` plus relative-zero "
@@ -1387,6 +1378,12 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
     high_actions = _relative_high_action_patterns(active_arm, spec)
     release_actions = _relative_release_action_patterns(active_arm, spec)
+    pick_spec = _format_pick_up_spec(
+        active_arm,
+        spec.moved_runtime_uid,
+        pickup_upright_direction=spec.pickup_upright_direction,
+        pickup_rotate_upright=spec.pickup_rotate_upright,
+    )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
 
 Use only the native atomic action class JSON specs shown below. The active arm
@@ -1395,7 +1392,7 @@ the nominal graph.
 
 Use exactly these action patterns:
 - Pick up `{spec.moved_runtime_uid}`:
-  {_format_pick_up_spec(active_arm, spec.moved_runtime_uid)}
+  {pick_spec}
 {high_actions}
 {release_actions}
 - Return to initial qpos:
@@ -1413,6 +1410,18 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     second_high_actions = _relative_high_action_patterns(second_arm, second)
     first_release_actions = _relative_release_action_patterns(first_arm, first)
     second_release_actions = _relative_release_action_patterns(second_arm, second)
+    first_pick_spec = _format_pick_up_spec(
+        first_arm,
+        first.moved_runtime_uid,
+        pickup_upright_direction=first.pickup_upright_direction,
+        pickup_rotate_upright=first.pickup_rotate_upright,
+    )
+    second_pick_spec = _format_pick_up_spec(
+        second_arm,
+        second.moved_runtime_uid,
+        pickup_upright_direction=second.pickup_upright_direction,
+        pickup_rotate_upright=second.pickup_rotate_upright,
+    )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
 
 Use only the native atomic action class JSON specs shown below.
@@ -1421,9 +1430,9 @@ Use only the native atomic action class JSON specs shown below.
 
 Use these action patterns:
 - First arm pick-up:
-  {_format_pick_up_spec(first_arm, first.moved_runtime_uid)}
+  {first_pick_spec}
 - Second arm pick-up:
-  {_format_pick_up_spec(second_arm, second.moved_runtime_uid)}
+  {second_pick_spec}
 {first_high_actions}
 {first_release_actions}
 {second_high_actions}
@@ -1739,7 +1748,18 @@ def _format_pick_up_spec(
     obj_name: str,
     *,
     sample_interval: int = 45,
+    pickup_upright_direction: Sequence[float] | None = None,
+    pickup_rotate_upright: float | None = None,
 ) -> str:
+    cfg: dict[str, Any] = {
+        "pre_grasp_distance": 0.08,
+        "sample_interval": sample_interval,
+    }
+    if pickup_upright_direction is not None and pickup_rotate_upright is not None:
+        cfg["obj_upright_direction"] = [
+            float(value) for value in pickup_upright_direction
+        ]
+        cfg["rotate_upright"] = float(pickup_rotate_upright)
     return _compact_json(
         {
             "atomic_action_class": "PickUp",
@@ -1749,10 +1769,7 @@ def _format_pick_up_spec(
                 "obj_name": obj_name,
                 "affordance": "antipodal",
             },
-            "cfg": {
-                "pre_grasp_distance": 0.08,
-                "sample_interval": sample_interval,
-            },
+            "cfg": cfg,
         }
     )
 
@@ -1905,6 +1922,28 @@ def _format_relative_pose_spec(
         orientation_goal=resolved_orientation_goal,
         orientation_axis=resolved_orientation_axis,
         align_to=resolved_align_to,
+    )
+
+
+def _format_high_staging_spec(
+    robot_name: str,
+    placement: _RelativePlacementLike,
+) -> str:
+    if _is_pose_sensitive_placement(placement):
+        return _format_relative_pose_spec(
+            robot_name,
+            placement,
+            pose_kind="high",
+            sample_interval=45,
+            orientation_goal="preserve",
+            orientation_axis="none",
+            align_to=None,
+        )
+    return _format_relative_pose_spec(
+        robot_name,
+        placement,
+        pose_kind="high",
+        sample_interval=45,
     )
 
 

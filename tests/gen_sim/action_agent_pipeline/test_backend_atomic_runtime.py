@@ -430,6 +430,61 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
     assert normalized["target_object_pose"]["offset"] == [0.16, 0.0, 0.0]
 
 
+def test_pickup_upright_cfg_is_normalized_for_typed_cfg() -> None:
+    rotate_upright = 0.7853981633974483
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "PickUp",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "apple",
+                "affordance": "antipodal",
+            },
+            "cfg": {
+                "sample_interval": 45,
+                "obj_upright_direction": [1.0, 0.0, 0.0],
+                "rotate_upright": rotate_upright,
+            },
+        }
+    )
+
+    spec = atom_actions.AtomicActionSpec.from_normalized(normalized)
+    cfg = atom_actions._build_action_cfg(
+        _FakeEnv(),
+        spec,
+        arm_part="left_arm",
+        hand_part="left_eef",
+        hand_dof=1,
+    )
+
+    assert isinstance(cfg, PickUpCfg)
+    assert torch.allclose(
+        cfg.obj_upright_direction,
+        torch.tensor([1.0, 0.0, 0.0]),
+    )
+    assert cfg.rotate_upright == pytest.approx(rotate_upright)
+
+
+def test_pickup_upright_cfg_rejects_invalid_direction() -> None:
+    with pytest.raises(ValueError, match="obj_upright_direction"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "PickUp",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object": {
+                    "obj_name": "apple",
+                    "affordance": "antipodal",
+                },
+                "cfg": {
+                    "obj_upright_direction": [1.0, 0.0],
+                    "rotate_upright": 0.7853981633974483,
+                },
+            }
+        )
+
+
 def test_normalize_atomic_action_spec_rejects_orientation_field() -> None:
     with pytest.raises(ValueError, match="Unsupported target_pose fields"):
         normalize_atomic_action_spec(
