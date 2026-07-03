@@ -1014,21 +1014,12 @@ class PickUp(AtomicAction):
     def _select_symmetric_grasp_variants(
         self, grasp_xpos: torch.Tensor, start_qpos: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Choose the TCP z-roll variant closest to the current end-effector pose."""
+        """Choose the closest TCP z-roll variant, then validate reachability."""
         n_envs, n_pose = grasp_xpos.shape[:2]
         mirrored_grasp_xpos = grasp_xpos.clone()
         mirrored_grasp_xpos[..., :3, 0] = -mirrored_grasp_xpos[..., :3, 0]
         mirrored_grasp_xpos[..., :3, 1] = -mirrored_grasp_xpos[..., :3, 1]
         grasp_variants = torch.stack([grasp_xpos, mirrored_grasp_xpos], dim=2)
-
-        flattened_variants = grasp_variants.reshape(n_envs, n_pose * 2, 4, 4)
-        start_qpos_repeat = start_qpos[:, None, :].repeat(1, n_pose * 2, 1)
-        ik_success, _ = self.robot.compute_batch_ik(
-            pose=flattened_variants,
-            name=self.cfg.control_part,
-            joint_seed=start_qpos_repeat,
-        )
-        ik_success = ik_success.reshape(n_envs, n_pose, 2)
 
         start_xpos = self.robot.compute_fk(
             qpos=start_qpos,
@@ -1042,13 +1033,18 @@ class PickUp(AtomicAction):
             variant_quat.reshape(-1, 4),
             start_quat.reshape(-1, 4),
         ).reshape(n_envs, n_pose, 2)
-        rotation_error = torch.where(ik_success, rotation_error, torch.inf)
         best_variant_idx = rotation_error.argmin(dim=2)
 
         env_idx = torch.arange(n_envs, device=self.device)[:, None]
         pose_idx = torch.arange(n_pose, device=self.device)[None, :]
         selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
-        return selected_grasp_xpos, ik_success.any(dim=2)
+        start_qpos_repeat = start_qpos[:, None, :].repeat(1, n_pose, 1)
+        ik_success, _ = self.robot.compute_batch_ik(
+            pose=selected_grasp_xpos,
+            name=self.cfg.control_part,
+            joint_seed=start_qpos_repeat,
+        )
+        return selected_grasp_xpos, ik_success
 
 
 # =============================================================================
