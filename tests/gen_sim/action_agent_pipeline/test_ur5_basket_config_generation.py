@@ -1897,6 +1897,98 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     assert '"offset":[0.0,0.0,0.2]' not in task_prompt
 
 
+def test_dual_upright_in_place_supports_cup_like_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "44_Upright Cup And Can_gym_project"
+    _write_dual_upright_cup_can_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "manipulations": [
+                {
+                    "moved_object": "paper_cup_1",
+                    "reference_object": "table",
+                    "goal_relation": "on",
+                    "arm": "left",
+                    "orientation_goal": "upright",
+                    "orientation_reference": "none",
+                },
+                {
+                    "moved_object": "soda_can_1",
+                    "reference_object": "table",
+                    "goal_relation": "on",
+                    "arm": "right",
+                    "orientation_goal": "upright",
+                    "orientation_reference": "none",
+                },
+            ],
+            "task_prompt_summary": "Use both arms to stand the cup and can upright.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_upright_agent",
+        task_name="Demo44",
+        task_description="左臂扶正纸杯放回桌面，右臂扶正罐头放回桌面",
+        target_body_scale=0.8,
+        prewarm_coacd_cache=False,
+    )
+
+    assert paths.summary["mode"] == "dual_arm_object_manipulation"
+    manipulations = {
+        item["moved_object"]: item for item in paths.summary["manipulations"]
+    }
+    assert set(manipulations) == {"paper_cup", "soda_can"}
+    assert manipulations["paper_cup"]["upright_in_place"] is True
+    assert manipulations["paper_cup"]["orientation_goal"] == "upright"
+    assert manipulations["paper_cup"]["active_arm"] == "left_arm"
+    assert manipulations["paper_cup"]["release_offset"][:2] == pytest.approx(
+        [0.06, 0.10]
+    )
+    assert manipulations["soda_can"]["upright_in_place"] is True
+    assert manipulations["soda_can"]["orientation_goal"] == "upright"
+    assert manipulations["soda_can"]["active_arm"] == "right_arm"
+    assert manipulations["soda_can"]["release_offset"][:2] == pytest.approx(
+        [0.05, -0.10]
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    extensions = gym_config["env"]["extensions"]
+    assert set(extensions["agent_grasp_pose_overrides"]) == {
+        "paper_cup",
+        "soda_can",
+    }
+    assert {
+        override["mode"]
+        for override in extensions["agent_grasp_pose_overrides"].values()
+    } == {"upright_bottle_side_grasp"}
+
+    success = extensions["agent_success"]
+    assert success["op"] == "all"
+    per_object_terms = {
+        placement_success["terms"][0]["object"]: {
+            term["type"] for term in placement_success["terms"]
+        }
+        for placement_success in success["terms"]
+    }
+    assert per_object_terms == {
+        "paper_cup": {"object_axis_near", "object_not_fallen"},
+        "soda_can": {"object_axis_near", "object_not_fallen"},
+    }
+
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert task_prompt.count('"orientation_goal":"upright"') >= 2
+    assert '"obj_name":"table"' not in task_prompt
+
+
 def test_relative_on_preserve_uses_object_pose_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3885,6 +3977,61 @@ def _write_stacking_bowls_project(project_dir: Path, *, count: int) -> None:
             )
         ],
         "rigid_object": rigid_objects,
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_dual_upright_cup_can_project(project_dir: Path) -> None:
+    table_vertices = [
+        (-0.5, -0.4, 0.0),
+        (0.5, -0.4, 0.0),
+        (0.0, 0.4, 0.0),
+        (-0.5, -0.4, 0.36),
+        (0.5, -0.4, 0.36),
+        (0.0, 0.4, 0.36),
+    ]
+    uprightable_vertices = [
+        (-0.025, -0.025, -0.04),
+        (0.025, -0.025, -0.04),
+        (0.0, 0.025, 0.06),
+    ]
+    _write_minimal_glb(project_dir / "mesh_assets/table/table_0.glb", table_vertices)
+    _write_minimal_glb(
+        project_dir / "mesh_assets/paper_cup/paper_cup_1/paper_cup_1.glb",
+        uprightable_vertices,
+    )
+    _write_minimal_glb(
+        project_dir / "mesh_assets/soda_can/soda_can_1/soda_can_1.glb",
+        uprightable_vertices,
+    )
+
+    gym_config = {
+        "id": "Image2Tabletop-upright-cup-can-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, -0.02],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "paper_cup_1",
+                "mesh_assets/paper_cup/paper_cup_1/paper_cup_1.glb",
+                [0.06, 0.10, 0.36],
+                [0.0, 0.0, 90.0],
+            ),
+            _mesh_object(
+                "soda_can_1",
+                "mesh_assets/soda_can/soda_can_1/soda_can_1.glb",
+                [0.05, -0.10, 0.36],
+                [0.0, 0.0, -90.0],
+            ),
+        ],
     }
     (project_dir / "gym_config.json").write_text(
         json.dumps(gym_config, indent=2),

@@ -84,7 +84,21 @@ _BOTTLE_LIKE_KEYWORDS = (
     "瓶",
     "瓶子",
 )
+_CUP_LIKE_KEYWORDS = (
+    "cup",
+    "mug",
+    "paper cup",
+    "water cup",
+    "纸杯",
+    "水杯",
+    "杯子",
+    "马克杯",
+    "茶杯",
+)
 _SHORT_BOTTLE_LIKE_KEYWORDS = {"can", "jar", "tin"}
+_SHORT_CUP_LIKE_KEYWORDS = {"cup", "mug"}
+_UPRIGHTABLE_KEYWORDS = (*_BOTTLE_LIKE_KEYWORDS, *_CUP_LIKE_KEYWORDS)
+_SHORT_UPRIGHTABLE_KEYWORDS = _SHORT_BOTTLE_LIKE_KEYWORDS | _SHORT_CUP_LIKE_KEYWORDS
 _UPRIGHT_TASK_KEYWORDS = (
     "upright",
     "stand up",
@@ -813,24 +827,22 @@ def _is_cube_like_object(obj: _SceneObject) -> bool:
     return any(keyword in text for keyword in _CUBE_LIKE_KEYWORDS)
 
 
-def _is_bottle_like_object(obj: _SceneObject) -> bool:
+def _is_uprightable_object(obj: _SceneObject) -> bool:
     shape = obj.config.get("shape", {}) or {}
     mesh_path = str(shape.get("fpath", "")) if isinstance(shape, Mapping) else ""
     mesh_parts = Path(mesh_path.replace("\\", "/")).parts[-4:] if mesh_path else ()
     description = str(obj.config.get("description", ""))
-    text = " ".join(
-        [obj.source_uid, _base_name(obj), description, *mesh_parts]
-    ).lower()
-    return _has_bottle_like_keyword(text)
+    text = " ".join([obj.source_uid, _base_name(obj), description, *mesh_parts]).lower()
+    return _has_uprightable_keyword(text)
 
 
-def _has_bottle_like_keyword(text: str) -> bool:
+def _has_uprightable_keyword(text: str) -> bool:
     tokens = (
         text.replace("_", " ").replace("-", " ").replace("/", " ").replace(".", " ")
     ).split()
     return any(
-        keyword in tokens if keyword in _SHORT_BOTTLE_LIKE_KEYWORDS else keyword in text
-        for keyword in _BOTTLE_LIKE_KEYWORDS
+        keyword in tokens if keyword in _SHORT_UPRIGHTABLE_KEYWORDS else keyword in text
+        for keyword in _UPRIGHTABLE_KEYWORDS
     )
 
 
@@ -856,7 +868,7 @@ def _should_upright_in_place(
             orientation_goal != "upright"
             and not _is_upright_task_description(task_description)
         )
-        or not _is_bottle_like_object(moved_object)
+        or not _is_uprightable_object(moved_object)
     ):
         return False
     return reference_source_uid in {table_source_uid, moved_object.source_uid}
