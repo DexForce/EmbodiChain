@@ -155,7 +155,22 @@ class MatplotlibManager:
             (axes[1], second_image, request.second_label),
         ):
             ax.imshow(image)
-            ax.set_title(label, fontsize=16, loc="left")
+            ax.text(
+                0.03,
+                0.92,
+                label,
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=16,
+                color="white",
+                bbox={
+                    "boxstyle": "round,pad=0.25",
+                    "facecolor": "black",
+                    "edgecolor": "none",
+                    "alpha": 0.55,
+                },
+            )
             ax.axis("off")
         fig.tight_layout()
         fig.savefig(output_path, dpi=self._dpi, facecolor="white")

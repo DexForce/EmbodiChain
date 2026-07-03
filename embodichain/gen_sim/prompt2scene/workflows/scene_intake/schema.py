@@ -25,148 +25,11 @@ from embodichain.gen_sim.prompt2scene.workflows.request import (
 )
 
 __all__ = [
-    "SCENE_INTAKE_JSON_SCHEMA",
     "SceneIntakeAsset",
     "SceneIntakeInputRecord",
     "SceneIntakeSpec",
     "SceneIntakeTable",
 ]
-
-SCENE_INTAKE_JSON_SCHEMA: dict[str, Any] = {
-    "title": "SceneIntakeModelOutput",
-    "description": (
-        "Objects and table information extracted from a text or image input."
-    ),
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "table": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": (
-                        "Canonical English class name for the visible table "
-                        "or tabletop target, such as table, desk, dining_table, "
-                        "coffee_table, workbench, or tabletop."
-                    ),
-                },
-                "description": {
-                    "type": "string",
-                    "minLength": 20,
-                    "maxLength": 180,
-                    "description": (
-                        "One concise standalone appearance description of the "
-                        "visible table or tabletop region."
-                    ),
-                },
-                "complete_table_description": {
-                    "type": "string",
-                    "minLength": 20,
-                    "maxLength": 220,
-                    "description": (
-                        "One concise standalone description of a complete table "
-                        "asset for text-to-3D generation, matching the visible "
-                        "tabletop color, material, and texture."
-                    ),
-                },
-                "is_complete_visible_table": {
-                    "type": "boolean",
-                    "description": (
-                        "For image input, whether a mostly complete table is "
-                        "visible and suitable as the final table geometry source. "
-                        "For text input, this should be false."
-                    ),
-                },
-                "class_candidate": {
-                    "type": "array",
-                    "minItems": 5,
-                    "maxItems": 5,
-                    "description": (
-                        "Exactly five likely class names for segmenting the "
-                        "visible table or tabletop target."
-                    ),
-                    "items": {
-                        "type": "string",
-                        "minLength": 1,
-                    },
-                },
-                "object_coverage_percent": {
-                    "type": "integer",
-                    "enum": [10, 30, 50, 70],
-                    "description": (
-                        "For image input with a complete visible table ONLY: "
-                        "choose the closest coverage bucket for objects on the "
-                        "tabletop: 10 (mostly empty, a few small objects), "
-                        "30 (lightly cluttered), 50 (moderately cluttered), "
-                        "70 (densely packed). Omit this field entirely for "
-                        "text input or when is_complete_visible_table is false."
-                    ),
-                },
-            },
-            "required": [
-                "name",
-                "description",
-                "complete_table_description",
-                "is_complete_visible_table",
-                "class_candidate",
-            ],
-        },
-        "assets": {
-            "type": "array",
-            "description": (
-                "Object category groups on or intended for the tabletop scene."
-            ),
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": (
-                            "Canonical English object name, singular, "
-                            "snake_case preferred."
-                        ),
-                    },
-                    "description": {
-                        "type": "string",
-                        "minLength": 20,
-                        "maxLength": 180,
-                        "description": (
-                            "One concise appearance description of the object for "
-                            "image and 3D geometry generation."
-                        ),
-                    },
-                    "class_candidate": {
-                        "type": "array",
-                        "minItems": 5,
-                        "maxItems": 5,
-                        "description": (
-                            "Exactly five likely object class names for later "
-                            "image detection or segmentation."
-                        ),
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                        },
-                    },
-                    "count": {
-                        "type": "integer",
-                        "description": (
-                            "Number of repeated instances in this object category "
-                            "group. Only group objects that can share the same name, "
-                            "description, and class_candidate list."
-                        ),
-                        "minimum": 1,
-                    },
-                },
-                "required": ["name", "description", "class_candidate", "count"],
-            },
-        },
-    },
-    "required": ["table", "assets"],
-}
 
 
 @dataclass(frozen=True)
@@ -182,7 +45,7 @@ class SceneIntakeInputRecord:
         """Create an input record from a prompt2scene request."""
         return cls(
             input_kind=request.input_kind,
-            text=request.text,
+            text=None,
             image_path=str(request.image_path) if request.image_path else None,
         )
 

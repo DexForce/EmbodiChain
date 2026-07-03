@@ -191,6 +191,8 @@ embodichain/agents/policy/runs/*
 *.pth
 outputs
 test_configs/*
+embodichain_data/
+scripts/tutorials/atomic_action/*.glb
 
 wandb/
 *.mp4

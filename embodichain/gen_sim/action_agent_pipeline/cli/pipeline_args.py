@@ -191,8 +191,19 @@ def build_parser() -> argparse.ArgumentParser:
         dest="prompt2scene_text",
         default=None,
         help=(
-            "Text prompt passed to prompt2scene. If omitted, prompt2scene uses "
-            "--image or --image-name."
+            "Deprecated. Text-only prompt2scene input was removed upstream and "
+            "is rejected; use --image or --image-name."
+        ),
+    )
+    parser.add_argument(
+        "--prompt2scene-gravity-settle-mode",
+        "--prompt2scene_gravity_settle_mode",
+        dest="prompt2scene_gravity_settle_mode",
+        choices=("geometry", "physics"),
+        default="geometry",
+        help=(
+            "Gravity settle mode passed to prompt2scene. 'geometry' translates "
+            "each GLB by AABB; 'physics' runs simulation. Defaults to geometry."
         ),
     )
     parser.add_argument(
@@ -326,6 +337,19 @@ def build_parser() -> argparse.ArgumentParser:
             "--target_body_scale, and absolute sets objects directly to "
             "--target_body_scale. Defaults to preserve when --target_body_scale "
             "is omitted and multiply when it is provided."
+        ),
+    )
+    parser.add_argument(
+        "--inside-container-slot-distance-scale",
+        "--inside_container_slot_distance_scale",
+        dest="inside_container_slot_distance_scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale factor for generated inside-container release slot offsets "
+            "when multiple objects are placed into one container. Values below "
+            "1.0 move release points closer to the container center. Defaults "
+            "to 1.0."
         ),
     )
     parser.add_argument(

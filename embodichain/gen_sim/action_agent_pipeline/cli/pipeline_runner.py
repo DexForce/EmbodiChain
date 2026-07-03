@@ -51,6 +51,7 @@ __all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
 PIPELINE_RUNNER_REQUIRED_ARGS = (
     "config_output_dir",
     "convex_decomposition_method",
+    "inside_container_slot_distance_scale",
     "overwrite_config",
     "prewarm_coacd_cache",
     "prompt2scene_mesh_x_rotation_degrees",
@@ -148,6 +149,9 @@ def _run_pipeline(
                 args.prompt2scene_mesh_x_rotation_degrees
                 if resolution.mode == "prompt2scene"
                 else 0.0
+            ),
+            inside_container_slot_distance_scale=(
+                args.inside_container_slot_distance_scale
             ),
             target_replacements=target_replacements,
             sync_replacement_names=args.sync_replacement_names,

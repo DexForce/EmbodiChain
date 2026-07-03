@@ -12,8 +12,8 @@ filter_extra_instances_system: |
   - One target object description.
   - The expected number of target instances.
   - A short candidate class list for that target object.
-  - One image with numbered colored masks drawn over candidate segmentation
-    results for that target object.
+  - One image with numbered colored mask outlines drawn over candidate
+    segmentation results for that target object.
 
   Your only task is to choose which numbered masks should be removed so the
   remaining masks best match the requested object class, target description, and
@@ -25,6 +25,16 @@ filter_extra_instances_system: |
   </task>
 
   <decision_rules>
+  - The colored mask outlines and red number labels are annotations only. Do NOT
+    treat annotation colors as the object's real color, material, texture, label,
+    logo, or surface appearance.
+  - The red number label is only an approximate index marker. It may sit near,
+    above, or partly over a neighboring or occluding object. Do NOT decide mask
+    ownership from where the number label is drawn.
+  - Decide whether a candidate is correct from the region enclosed by the colored
+    mask outline, not from the label position.
+  - Judge the object's real appearance from the underlying original image pixels
+    inside and around each outline.
   - Use the target object class name as the primary class.
   - Use the target description to distinguish visually similar objects from the
     same broad category.
@@ -124,7 +134,12 @@ filter_extra_instances_user: |
   </input>
 
   <instruction>
-  Inspect the numbered-mask image.
+  Inspect the numbered-mask-outline image.
+  The colored outlines and number labels are annotations only, not real object
+  colors or textures.
+  The red number label is only an approximate index marker; judge each candidate
+  by the object region enclosed by that numbered outline, not by where the label
+  happens to be placed.
   Return the 1-based numbers of masks that should be removed so the remaining
   masks best match the target description and expected instance count.
   </instruction>
@@ -151,6 +166,12 @@ spatial_layout_system: |
 
   <axis_definitions>
   - x_order must be ordered from image/table left to image/table right.
+  - The camera view may be oblique, rotated, or perspective-distorted. Still
+    judge left/right from the visible tabletop image as a human would understand
+    the normal viewing direction of this image, not from object IDs, prompt
+    order, 3D generation order, or arbitrary simulation axes.
+  - The final left_of relations derived from x_order must reflect your visual
+    judgment from the attached image under that normal image/table view.
   - y_order must be ordered from table front to table back.
   - Split x_order groups when the left/right order is reasonably clear from the
     bbox-name image.
@@ -236,3 +257,83 @@ spatial_layout_user: |
   </asset_ids>
 
   Inspect the attached bbox-name image and return the JSON object.
+
+spatial_layout_verifier_system: |
+  <role>
+  You are a strict verifier for tabletop spatial ordering.
+  </role>
+
+  <task>
+  You will receive one bbox-name tabletop image, the full asset_id list, and a
+  draft spatial layout JSON. Verify whether the draft x_order and y_order are
+  visually correct.
+
+  If the draft is correct, set passed=true and return the same layout in
+  corrected_layout. If any order is wrong or too specific/uncertain, set
+  passed=false and return a corrected complete spatial layout JSON in
+  corrected_layout.
+  </task>
+
+  <verification_rules>
+  - x_order is the source for derived left_of relations. Check it carefully.
+  - The camera view may be oblique, rotated, or perspective-distorted. Still
+    judge left/right from the visible tabletop image as a human would understand
+    the normal viewing direction of this image, not from object IDs, prompt
+    order, 3D generation order, or arbitrary simulation axes.
+  - If a left/right relation is unclear, overlapping, occluded, or visually too
+    close to trust, place the objects in the same x_order group instead of
+    forcing an order.
+  - Check y_order more conservatively than x_order. If front/back is uncertain,
+    place objects in the same y_order group.
+  - Every asset_id must appear exactly once in corrected_layout.x_order,
+    corrected_layout.y_order, and corrected_layout.asset_states.
+  - Preserve or correct anchor and asset_states as needed, but focus primarily
+    on spatial order correctness.
+  - Return JSON only.
+  </verification_rules>
+
+  <output_schema>
+  {
+    "passed": false,
+    "reason": "The draft placed two overlapping objects in a forced left/right order, but the image does not support that relation.",
+    "corrected_layout": {
+      "anchor": {
+        "asset_id": "interact_paper_cup_0",
+        "grid": "center",
+        "reason": "The paper cup is clearly visible near the table center."
+      },
+      "x_order": [
+        ["interact_paper_cup_0", "interact_snack_bag_0"]
+      ],
+      "y_order": [
+        ["interact_paper_cup_0", "interact_snack_bag_0"]
+      ],
+      "asset_states": [
+        {
+          "asset_id": "interact_paper_cup_0",
+          "is_arbitrary_layout": false,
+          "reason": "The paper cup is standing upright and needs an upright support pose."
+        },
+        {
+          "asset_id": "interact_snack_bag_0",
+          "is_arbitrary_layout": false,
+          "reason": "The snack bag should keep a deliberate lying or leaning support pose."
+        }
+      ]
+    }
+  }
+  </output_schema>
+
+spatial_layout_verifier_user: |
+  Verify this draft spatial layout for the detected object instances:
+
+  <asset_ids>
+  $asset_ids
+  </asset_ids>
+
+  <draft_spatial_layout>
+  $draft_spatial_layout_json
+  </draft_spatial_layout>
+
+  Inspect the attached bbox-name image. Return whether the draft passes, the
+  reason, and a complete corrected_layout JSON.

@@ -29,7 +29,7 @@ class InputKind(str, Enum):
     """Supported prompt2scene input kinds."""
 
     IMAGE = "image"
-    TEXT = "text"
+    EDIT = "edit"
 
 
 @dataclass(frozen=True)
@@ -39,21 +39,23 @@ class Prompt2SceneInput:
     input_kind: InputKind
     output_root: Path
     image_path: Path | None = None
-    text: str | None = None
+    prompt: str | None = None
+    gravity_settle_mode: str = "geometry"
 
     @classmethod
     def from_cli_args(
         cls,
         *,
         image_path: Path | None,
-        text: str | None,
+        prompt: str | None,
         output_root: Path,
+        gravity_settle_mode: str = "geometry",
     ) -> "Prompt2SceneInput":
         """Create a prompt2scene input from CLI arguments.
 
         Args:
             image_path: Input image path, if image mode is selected.
-            text: Text prompt, if text mode is selected.
+            prompt: Optional edit prompt.
             output_root: Directory where prompt2scene outputs are written.
 
         Returns:
@@ -61,9 +63,13 @@ class Prompt2SceneInput:
 
         Raises:
             FileNotFoundError: If the image input path does not exist.
-            ValueError: If the image path is invalid or text input is empty.
+            ValueError: If the image path is invalid.
         """
         output_root = output_root.expanduser().resolve()
+        prompt_text = prompt.strip() if prompt is not None else None
+        if prompt_text == "":
+            prompt_text = None
+        gravity_settle_mode = cls._validate_gravity_settle_mode(gravity_settle_mode)
 
         if image_path is not None:
             image_path = image_path.expanduser().resolve()
@@ -72,15 +78,15 @@ class Prompt2SceneInput:
                 input_kind=InputKind.IMAGE,
                 image_path=image_path,
                 output_root=output_root,
+                prompt=prompt_text,
+                gravity_settle_mode=gravity_settle_mode,
             )
 
-        if text is None or not text.strip():
-            raise ValueError("Text input must be non-empty.")
-
         return cls(
-            input_kind=InputKind.TEXT,
-            text=text.strip(),
+            input_kind=InputKind.EDIT,
             output_root=output_root,
+            prompt=cls._validate_edit_only_prompt(prompt_text, output_root),
+            gravity_settle_mode=gravity_settle_mode,
         )
 
     def to_manifest(self) -> dict[str, str]:
@@ -88,14 +94,37 @@ class Prompt2SceneInput:
         manifest: dict[str, str] = {
             "input_kind": self.input_kind.value,
             "output_root": str(self.output_root),
+            "gravity_settle_mode": self.gravity_settle_mode,
         }
         if self.input_kind == InputKind.IMAGE:
             image_path = self.image_path
             manifest["image_path"] = str(image_path)
-        else:
-            text = self.text
-            manifest["text"] = "" if text is None else text
+        if self.prompt is not None:
+            manifest["prompt"] = self.prompt
         return manifest
+
+    @staticmethod
+    def _validate_edit_only_prompt(prompt: str | None, output_root: Path) -> str:
+        if prompt is None:
+            raise ValueError(
+                "Provide --image or --prompt with an existing output_root."
+            )
+        scene_state = output_root / "gym_export" / "scene_state" / "result.json"
+        if not scene_state.is_file():
+            raise FileNotFoundError(
+                "Edit-only mode requires an existing scene state: " f"{scene_state}"
+            )
+        return prompt
+
+    @staticmethod
+    def _validate_gravity_settle_mode(gravity_settle_mode: str) -> str:
+        mode = str(gravity_settle_mode or "geometry").strip().lower()
+        if mode not in {"geometry", "physics"}:
+            raise ValueError(
+                "gravity_settle_mode must be 'geometry' or 'physics', "
+                f"got {gravity_settle_mode!r}."
+            )
+        return mode
 
     @staticmethod
     def _validate_image_path(image_path: Path) -> None:

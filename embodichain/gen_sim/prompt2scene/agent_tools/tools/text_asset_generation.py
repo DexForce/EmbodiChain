@@ -53,6 +53,7 @@ def generate_text_object_asset(
     image_gen_dir: Path,
     glb_gen_dir: Path,
     debug_dir: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Generate one object asset from a text-origin object spec."""
     object_id = str(object_spec.get("id", "object"))
@@ -148,6 +149,7 @@ def generate_text_object_asset(
                 output_path=glb_gen_dir
                 / "text_objects_simready"
                 / f"{object_id}_simready.glb",
+                gravity_settle_mode=gravity_settle_mode,
             )
         )
         mesh_path = str(simready_result.output_path)
@@ -179,6 +181,7 @@ def generate_text_object_assets(
     image_gen_dir: Path,
     glb_gen_dir: Path,
     debug_dir: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> list[dict[str, Any]]:
     """Generate all object assets for a text-origin unified scene."""
     log_info(f"text object batch generation started count={len(object_specs)}")
@@ -188,6 +191,7 @@ def generate_text_object_assets(
             image_gen_dir=image_gen_dir,
             glb_gen_dir=glb_gen_dir,
             debug_dir=debug_dir,
+            gravity_settle_mode=gravity_settle_mode,
         )
         for object_spec in object_specs
     ]
@@ -205,6 +209,7 @@ def generate_text_table_asset(
     image_gen_dir: Path,
     glb_gen_dir: Path,
     debug_dir: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Generate the table asset for a text-origin unified scene."""
     table_id = str(table_spec.get("id", "table"))
@@ -266,6 +271,7 @@ def generate_text_table_asset(
                     output_path=glb_gen_dir
                     / "text_objects_simready"
                     / f"{table_id}_simready.glb",
+                    gravity_settle_mode=gravity_settle_mode,
                 )
             ).output_path
         )

@@ -16,10 +16,12 @@
 
 """Concrete atomic actions built on :class:`AtomicAction` and :class:`TrajectoryBuilder`.
 
-Five sibling actions live here: :class:`MoveEndEffector`, :class:`MoveJoints`,
-:class:`PickUp`, :class:`MoveHeldObject`, and :class:`Place`. Each inherits
-:class:`AtomicAction` directly and composes a :class:`TrajectoryBuilder` for
-shared trajectory math. ``execute`` takes a typed target plus a
+Built-in sibling actions live here: :class:`MoveEndEffector`, :class:`MoveJoints`,
+:class:`PickUp`, :class:`MoveHeldObject`, :class:`Place`, :class:`Press`,
+:class:`CoordinatedPickment`, and :class:`CoordinatedPlacement`.
+Each inherits :class:`AtomicAction` directly and composes a
+:class:`TrajectoryBuilder` for shared trajectory math. ``execute`` takes a typed
+target plus a
 :class:`WorldState` and returns an :class:`ActionResult` whose trajectory is
 full-robot DoF shaped ``(n_envs, n_waypoints, robot.dof)``.
 """
@@ -31,13 +33,16 @@ from typing import ClassVar
 
 from embodichain.lab.sim.planners import PlanState, MoveType
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import pose_inv
+from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
 from .affordance import AntipodalAffordance
 from .core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
+    CoordinatedHeldObjectState,
+    CoordinatedPickmentTarget,
+    CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -144,6 +149,129 @@ class PlaceCfg(ActionCfg):
     """Height (m) to retract the end-effector after opening the gripper."""
 
 
+@configclass
+class CoordinatedPickmentCfg(ActionCfg):
+    name: str = "coordinated_pickment"
+    """Name of the action, used for identification and logging."""
+
+    control_part: str = "dual_arm"
+    """Combined control part containing left and right arm joints."""
+
+    left_arm_control_part: str = "left_arm"
+    """Left arm control part used to grasp one end of the object."""
+
+    right_arm_control_part: str = "right_arm"
+    """Right arm control part used to grasp the other end of the object."""
+
+    left_hand_control_part: str = "left_hand"
+    """Hand attached to the left arm."""
+
+    right_hand_control_part: str = "right_hand"
+    """Hand attached to the right arm."""
+
+    left_hand_open_qpos: torch.Tensor | None = None
+    """Left hand qpos for the open state."""
+
+    left_hand_close_qpos: torch.Tensor | None = None
+    """Left hand qpos for the closed state."""
+
+    right_hand_open_qpos: torch.Tensor | None = None
+    """Right hand qpos for the open state."""
+
+    right_hand_close_qpos: torch.Tensor | None = None
+    """Right hand qpos for the closed state."""
+
+    object_motion_keyframes: int = 6
+    """Number of object-pose keyframes solved by IK before joint-space interpolation."""
+
+    pre_grasp_distance: float = 0.10
+    """World distance to retreat from each grasp pose along negative TCP z."""
+
+    lift_height: float = 0.08
+    """World-Z lift distance before moving to the object target pose."""
+
+    sample_interval: int = 120
+    """Number of waypoints for the full coordinated pickment trajectory."""
+
+    hand_interp_steps: int = 10
+    """Number of waypoints used for the simultaneous hand close phase."""
+
+    hold_steps: int = 4
+    """Number of waypoints to hold the final object target pose."""
+
+
+@configclass
+class CoordinatedPlacementCfg(ActionCfg):
+    name: str = "coordinated_placement"
+    """Name of the action, used for identification and logging."""
+
+    control_part: str = "dual_arm"
+    """Robot control part containing both placing and support arms."""
+
+    placing_arm_control_part: str = "left_arm"
+    """Arm that places and releases its held object."""
+
+    support_arm_control_part: str = "right_arm"
+    """Arm that moves the support object and keeps holding it."""
+
+    placing_hand_control_part: str = "left_hand"
+    """Hand attached to the placing arm."""
+
+    support_hand_control_part: str = "right_hand"
+    """Hand attached to the support arm."""
+
+    placing_hand_open_qpos: torch.Tensor | None = None
+    """Placing-hand qpos for the open state, shape ``[hand_dof,]``."""
+
+    placing_hand_close_qpos: torch.Tensor | None = None
+    """Placing-hand qpos for the closed state, shape ``[hand_dof,]``."""
+
+    support_hand_close_qpos: torch.Tensor | None = None
+    """Support-hand qpos for the closed state, shape ``[hand_dof,]``."""
+
+    release: bool = True
+    """Whether to open the placing hand at the aligned placement pose."""
+
+    placing_height_offset: float = 0.0
+    """Default World-Z offset above the placing object target pose."""
+
+    support_height_offset: float = 0.0
+    """Default World-Z offset above the support object target pose."""
+
+    lift_height: float = 0.08
+    """World-Z lift distance for the placing arm after release."""
+
+    sample_interval: int = 100
+    """Number of waypoints for the full coordinated placement trajectory."""
+
+    hand_interp_steps: int = 10
+    """Number of waypoints for the placing-hand release interpolation."""
+
+    hold_steps: int = 4
+    """Number of waypoints to hold alignment before releasing."""
+
+    retreat_steps: int = 16
+    """Number of waypoints used for the placing-arm lift retreat."""
+
+
+@configclass
+class PressCfg(ActionCfg):
+    name: str = "press"
+    """Name of the action, used for identification and logging."""
+
+    sample_interval: int = 80
+    """Number of waypoints for the full trajectory (hand close + down + back)."""
+
+    hand_interp_steps: int = 5
+    """Number of waypoints for closing the gripper before pressing."""
+
+    hand_control_part: str = "hand"
+    """Name of the robot part that controls the hand joints."""
+
+    hand_close_qpos: torch.Tensor | None = None
+    """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+
+
 # =============================================================================
 # Shared helpers private to this module
 # =============================================================================
@@ -169,6 +297,320 @@ def _arm_qpos_from_state(
 ) -> torch.Tensor:
     """Extract the arm slice of the full-DoF last_qpos carried in WorldState."""
     return state.last_qpos[:, arm_joint_ids]
+
+
+# =============================================================================
+# MoveEndEffector
+# =============================================================================
+
+
+class _DualArmHelpers:
+    """Shared trajectory helpers for dual-arm coordinated actions."""
+
+    def _init_dual_arm_parts(
+        self,
+        *,
+        first_arm_control_part: str,
+        second_arm_control_part: str,
+        first_hand_control_part: str,
+        second_hand_control_part: str,
+    ) -> None:
+        self.builder = TrajectoryBuilder(self.motion_generator)
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.robot_dof = self.robot.dof
+        self.dual_arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.first_arm_joint_ids = self.robot.get_joint_ids(name=first_arm_control_part)
+        self.second_arm_joint_ids = self.robot.get_joint_ids(
+            name=second_arm_control_part
+        )
+        self.first_hand_joint_ids = self.robot.get_joint_ids(
+            name=first_hand_control_part
+        )
+        self.second_hand_joint_ids = self.robot.get_joint_ids(
+            name=second_hand_control_part
+        )
+        self.first_arm_dof = len(self.first_arm_joint_ids)
+        self.second_arm_dof = len(self.second_arm_joint_ids)
+        self.dual_arm_dof = len(self.dual_arm_joint_ids)
+        self.first_hand_dof = len(self.first_hand_joint_ids)
+        self.second_hand_dof = len(self.second_hand_joint_ids)
+        self._dual_id_to_col = {
+            joint_id: col for col, joint_id in enumerate(self.dual_arm_joint_ids)
+        }
+        self._first_arm_cols = self._lookup_joint_columns(
+            self.first_arm_joint_ids,
+            self._dual_id_to_col,
+            first_arm_control_part,
+        )
+        self._second_arm_cols = self._lookup_joint_columns(
+            self.second_arm_joint_ids,
+            self._dual_id_to_col,
+            second_arm_control_part,
+        )
+
+    @staticmethod
+    def _lookup_joint_columns(
+        joint_ids: list[int],
+        joint_id_to_col: dict[int, int],
+        control_part: str,
+    ) -> list[int]:
+        """Map global joint ids into local trajectory columns."""
+        missing = [
+            joint_id for joint_id in joint_ids if joint_id not in joint_id_to_col
+        ]
+        if missing:
+            logger.log_error(
+                f"Joints {missing} from '{control_part}' are not included in "
+                "the configured dual-arm control part.",
+                ValueError,
+            )
+        return [joint_id_to_col[joint_id] for joint_id in joint_ids]
+
+    def _fail(self, state: WorldState) -> ActionResult:
+        return ActionResult(
+            success=False,
+            trajectory=torch.empty(
+                (self.n_envs, 0, self.robot_dof),
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            next_state=state,
+        )
+
+    def _expand_qpos(self, qpos: torch.Tensor, dof: int, name: str) -> torch.Tensor:
+        """Resolve qpos to batched shape ``(n_envs, dof)``."""
+        qpos = qpos.to(device=self.device, dtype=torch.float32)
+        if qpos.shape == (dof,):
+            return qpos.unsqueeze(0).repeat(self.n_envs, 1)
+        if qpos.shape == (self.n_envs, dof):
+            return qpos
+        logger.log_error(
+            f"{name} must have shape ({dof},) or "
+            f"({self.n_envs}, {dof}), but got {qpos.shape}",
+            ValueError,
+        )
+        raise AssertionError("unreachable")
+
+    def _resolve_pose(self, pose: torch.Tensor, name: str) -> torch.Tensor:
+        """Resolve a pose tensor into batched shape ``(n_envs, 4, 4)``."""
+        pose = pose.to(device=self.device, dtype=torch.float32)
+        if pose.shape == (4, 4):
+            pose = pose.unsqueeze(0).repeat(self.n_envs, 1, 1)
+        if pose.shape != (self.n_envs, 4, 4):
+            logger.log_error(
+                f"{name} must have shape (4, 4) or "
+                f"({self.n_envs}, 4, 4), but got {pose.shape}",
+                ValueError,
+            )
+        return pose
+
+    def _resolve_dual_arm_start(
+        self,
+        state: WorldState,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Resolve full-robot state into the two arm qpos tensors."""
+        dual_start = state.last_qpos[:, self.dual_arm_joint_ids].to(
+            device=self.device, dtype=torch.float32
+        )
+        return (
+            dual_start[:, self._first_arm_cols],
+            dual_start[:, self._second_arm_cols],
+        )
+
+    def _plan_named_arm_trajectory(
+        self,
+        control_part: str,
+        start_qpos: torch.Tensor,
+        target_poses: torch.Tensor,
+        n_waypoints: int,
+    ) -> tuple[bool, torch.Tensor]:
+        """Plan a batched arm trajectory for a named control part."""
+        n_state = target_poses.shape[1]
+        arm_dof = start_qpos.shape[-1]
+        trajectory = torch.zeros(
+            (self.n_envs, n_state, arm_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        qpos_seed = start_qpos
+        for i in range(n_state):
+            is_success, qpos = self.robot.compute_ik(
+                pose=target_poses[:, i],
+                name=control_part,
+                joint_seed=qpos_seed,
+            )
+            if not self.builder.all_envs_success(is_success):
+                logger.log_warning(
+                    f"Failed to compute IK for {control_part} target state {i}."
+                )
+                return False, trajectory
+            trajectory[:, i] = qpos
+            qpos_seed = qpos
+
+        trajectory = torch.cat([start_qpos.unsqueeze(1), trajectory], dim=1)
+        return True, (
+            self.builder.plan_joint_traj(
+                trajectory[:, 0],
+                trajectory[:, -1],
+                n_waypoints,
+            )
+            if n_state == 1
+            else self._interpolate_keyframe_qpos(trajectory, n_waypoints)
+        )
+
+    def _compose_dual_arm_trajectory(
+        self,
+        first_arm_traj: torch.Tensor,
+        second_arm_traj: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compose first and second arm trajectories in dual-arm joint order."""
+        n_waypoints = first_arm_traj.shape[1]
+        dual_arm_traj = torch.zeros(
+            (self.n_envs, n_waypoints, self.dual_arm_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        dual_arm_traj[:, :, self._first_arm_cols] = first_arm_traj
+        dual_arm_traj[:, :, self._second_arm_cols] = second_arm_traj
+        return dual_arm_traj
+
+    def _assemble_phase(
+        self,
+        state: WorldState,
+        first_arm_traj: torch.Tensor,
+        second_arm_traj: torch.Tensor,
+        first_hand_traj: torch.Tensor,
+        second_hand_traj: torch.Tensor,
+    ) -> torch.Tensor:
+        """Embed dual-arm and hand trajectories into full robot DoF order."""
+        n_waypoints = first_arm_traj.shape[1]
+        full = torch.empty(
+            (self.n_envs, n_waypoints, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full[:, :, :] = state.last_qpos.to(self.device).unsqueeze(1)
+        full[:, :, self.dual_arm_joint_ids] = self._compose_dual_arm_trajectory(
+            first_arm_traj, second_arm_traj
+        )
+        full[:, :, self.first_hand_joint_ids] = first_hand_traj
+        full[:, :, self.second_hand_joint_ids] = second_hand_traj
+        return full
+
+    @staticmethod
+    def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
+        """Repeat batched qpos across waypoints."""
+        return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+
+    def _interpolate_qpos(
+        self,
+        start_qpos: torch.Tensor,
+        end_qpos: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate batched qpos between two states."""
+        weights = torch.linspace(
+            0.0,
+            1.0,
+            steps=n_waypoints,
+            device=self.device,
+            dtype=start_qpos.dtype,
+        )
+        return torch.lerp(
+            start_qpos.unsqueeze(1),
+            end_qpos.unsqueeze(1),
+            weights[None, :, None],
+        )
+
+    def _interpolate_keyframe_qpos(
+        self, keyframe_qpos: torch.Tensor, n_waypoints: int
+    ) -> torch.Tensor:
+        """Interpolate a sequence of qpos keyframes into ``n_waypoints`` samples."""
+        n_keyframes = keyframe_qpos.shape[1]
+        keyframe_indices = (
+            torch.linspace(
+                0,
+                n_waypoints - 1,
+                steps=n_keyframes,
+                device=self.device,
+            )
+            .round()
+            .to(dtype=torch.long)
+        )
+        return self._interpolate_qpos_keyframes(
+            keyframe_qpos, keyframe_indices, n_waypoints
+        )
+
+    def _interpolate_qpos_keyframes(
+        self,
+        keyframe_qpos: torch.Tensor,
+        keyframe_indices: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate qpos keyframes using shared waypoint indices."""
+        trajectory = torch.zeros(
+            (self.n_envs, n_waypoints, keyframe_qpos.shape[-1]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        for segment_idx in range(len(keyframe_indices) - 1):
+            start_idx = int(keyframe_indices[segment_idx].item())
+            end_idx = int(keyframe_indices[segment_idx + 1].item())
+            n_segment = end_idx - start_idx + 1
+            weights = torch.linspace(
+                0.0,
+                1.0,
+                steps=n_segment,
+                dtype=keyframe_qpos.dtype,
+                device=self.device,
+            )
+            segment = torch.lerp(
+                keyframe_qpos[:, segment_idx : segment_idx + 1],
+                keyframe_qpos[:, segment_idx + 1 : segment_idx + 2],
+                weights[None, :, None],
+            )
+            trajectory[:, start_idx : end_idx + 1] = segment
+        return trajectory
+
+    def _interpolate_object_pose(
+        self,
+        start_pose: torch.Tensor,
+        end_pose: torch.Tensor,
+        n_waypoints: int,
+        *,
+        include_orientation: bool,
+    ) -> torch.Tensor:
+        """Interpolate object translation and optionally orientation."""
+        weights = torch.linspace(
+            0.0,
+            1.0,
+            steps=n_waypoints,
+            device=self.device,
+            dtype=start_pose.dtype,
+        )
+        poses = start_pose.unsqueeze(1).repeat(1, n_waypoints, 1, 1)
+        poses[:, :, :3, 3] = torch.lerp(
+            start_pose[:, None, :3, 3],
+            end_pose[:, None, :3, 3],
+            weights[None, :, None],
+        )
+        if not include_orientation:
+            return poses
+
+        start_quat = quat_from_matrix(start_pose[:, :3, :3])
+        end_quat = quat_from_matrix(end_pose[:, :3, :3])
+        quat_dot = torch.sum(start_quat * end_quat, dim=-1, keepdim=True)
+        end_quat = torch.where(quat_dot < 0.0, -end_quat, end_quat)
+        quat = torch.lerp(
+            start_quat.unsqueeze(1),
+            end_quat.unsqueeze(1),
+            weights[None, :, None],
+        )
+        quat = quat / torch.linalg.norm(quat, dim=-1, keepdim=True).clamp_min(1e-8)
+        poses[:, :, :3, :3] = matrix_from_quat(quat.reshape(-1, 4)).reshape(
+            self.n_envs, n_waypoints, 3, 3
+        )
+        return poses
 
 
 # =============================================================================
@@ -224,7 +666,9 @@ class MoveEndEffector(AtomicAction):
             success=True,
             trajectory=full,
             next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(), held_object=state.held_object
+                last_qpos=full[:, -1, :].clone(),
+                held_object=state.held_object,
+                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -328,7 +772,9 @@ class MoveJoints(AtomicAction):
             success=True,
             trajectory=full,
             next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(), held_object=state.held_object
+                last_qpos=full[:, -1, :].clone(),
+                held_object=state.held_object,
+                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -501,7 +947,11 @@ class PickUp(AtomicAction):
         return ActionResult(
             success=True,
             trajectory=full,
-            next_state=WorldState(last_qpos=full[:, -1, :].clone(), held_object=held),
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=held,
+                coordinated_held_object=state.coordinated_held_object,
+            ),
         )
 
     def _fail(self, state: WorldState) -> ActionResult:
@@ -637,6 +1087,7 @@ class MoveHeldObject(AtomicAction):
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
                 held_object=state.held_object,
+                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -778,7 +1229,11 @@ class Place(AtomicAction):
         return ActionResult(
             success=True,
             trajectory=full,
-            next_state=WorldState(last_qpos=full[:, -1, :].clone(), held_object=None),
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=None,
+                coordinated_held_object=state.coordinated_held_object,
+            ),
         )
 
     def _fail(self, state: WorldState) -> ActionResult:
@@ -793,7 +1248,940 @@ class Place(AtomicAction):
         )
 
 
+# =============================================================================
+# CoordinatedPickment
+# =============================================================================
+
+
+class CoordinatedPickment(AtomicAction):
+    """Pick and move a single object pinched by two hands."""
+
+    TargetType: ClassVar[type] = CoordinatedPickmentTarget
+
+    _assemble_phase = _DualArmHelpers._assemble_phase
+    _compose_dual_arm_trajectory = _DualArmHelpers._compose_dual_arm_trajectory
+    _expand_qpos = _DualArmHelpers._expand_qpos
+    _fail = _DualArmHelpers._fail
+    _init_dual_arm_parts = _DualArmHelpers._init_dual_arm_parts
+    _interpolate_keyframe_qpos = _DualArmHelpers._interpolate_keyframe_qpos
+    _interpolate_object_pose = _DualArmHelpers._interpolate_object_pose
+    _interpolate_qpos = _DualArmHelpers._interpolate_qpos
+    _interpolate_qpos_keyframes = _DualArmHelpers._interpolate_qpos_keyframes
+    _lookup_joint_columns = staticmethod(_DualArmHelpers._lookup_joint_columns)
+    _plan_named_arm_trajectory = _DualArmHelpers._plan_named_arm_trajectory
+    _repeat_qpos = staticmethod(_DualArmHelpers._repeat_qpos)
+    _resolve_dual_arm_start = _DualArmHelpers._resolve_dual_arm_start
+    _resolve_pose = _DualArmHelpers._resolve_pose
+
+    def __init__(
+        self,
+        motion_generator,
+        cfg: CoordinatedPickmentCfg | None = None,
+    ) -> None:
+        super().__init__(motion_generator, cfg or CoordinatedPickmentCfg())
+        self._init_dual_arm_parts(
+            first_arm_control_part=self.cfg.left_arm_control_part,
+            second_arm_control_part=self.cfg.right_arm_control_part,
+            first_hand_control_part=self.cfg.left_hand_control_part,
+            second_hand_control_part=self.cfg.right_hand_control_part,
+        )
+        self.left_arm_joint_ids = self.first_arm_joint_ids
+        self.right_arm_joint_ids = self.second_arm_joint_ids
+        self.left_hand_joint_ids = self.first_hand_joint_ids
+        self.right_hand_joint_ids = self.second_hand_joint_ids
+        self.left_arm_dof = self.first_arm_dof
+        self.right_arm_dof = self.second_arm_dof
+        self.left_hand_dof = self.first_hand_dof
+        self.right_hand_dof = self.second_hand_dof
+
+        self._validate_hand_qpos_cfg()
+        self.left_hand_open_qpos = self._expand_qpos(
+            self.cfg.left_hand_open_qpos, self.left_hand_dof, "left_hand_open_qpos"
+        )
+        self.left_hand_close_qpos = self._expand_qpos(
+            self.cfg.left_hand_close_qpos, self.left_hand_dof, "left_hand_close_qpos"
+        )
+        self.right_hand_open_qpos = self._expand_qpos(
+            self.cfg.right_hand_open_qpos, self.right_hand_dof, "right_hand_open_qpos"
+        )
+        self.right_hand_close_qpos = self._expand_qpos(
+            self.cfg.right_hand_close_qpos,
+            self.right_hand_dof,
+            "right_hand_close_qpos",
+        )
+
+    def _validate_hand_qpos_cfg(self) -> None:
+        """Ensure all hand state tensors are provided."""
+        for name in (
+            "left_hand_open_qpos",
+            "left_hand_close_qpos",
+            "right_hand_open_qpos",
+            "right_hand_close_qpos",
+        ):
+            if getattr(self.cfg, name) is None:
+                logger.log_error(f"{name} must be specified in CoordinatedPickmentCfg")
+
+    def _resolve_object_initial_pose(
+        self, target: CoordinatedPickmentTarget
+    ) -> torch.Tensor:
+        """Resolve the current pose of the object being grasped."""
+        if target.object_initial_pose is not None:
+            return self._resolve_pose(target.object_initial_pose, "object_initial_pose")
+        if target.object_semantics.entity is None:
+            logger.log_error(
+                "CoordinatedPickmentTarget requires object_initial_pose when "
+                "object_semantics.entity is not provided.",
+                ValueError,
+            )
+        return self._resolve_pose(
+            target.object_semantics.entity.get_local_pose(to_matrix=True),
+            "object_initial_pose",
+        )
+
+    def _resolve_target(
+        self,
+        target: CoordinatedPickmentTarget,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        CoordinatedHeldObjectState,
+    ]:
+        """Resolve an object-centric pickment target into left/right TCP poses."""
+        object_initial_pose = self._resolve_object_initial_pose(target)
+        object_target_pose = self._resolve_pose(
+            target.object_target_pose, "object_target_pose"
+        )
+        left_object_to_eef = self._resolve_pose(
+            target.left_object_to_eef, "left_object_to_eef"
+        )
+        right_object_to_eef = self._resolve_pose(
+            target.right_object_to_eef, "right_object_to_eef"
+        )
+
+        left_grasp_xpos = torch.bmm(object_initial_pose, left_object_to_eef)
+        right_grasp_xpos = torch.bmm(object_initial_pose, right_object_to_eef)
+        left_target_xpos = torch.bmm(object_target_pose, left_object_to_eef)
+        right_target_xpos = torch.bmm(object_target_pose, right_object_to_eef)
+        held_state = CoordinatedHeldObjectState(
+            semantics=target.object_semantics,
+            left_object_to_eef=left_object_to_eef,
+            right_object_to_eef=right_object_to_eef,
+            left_grasp_xpos=left_grasp_xpos,
+            right_grasp_xpos=right_grasp_xpos,
+        )
+        return (
+            object_initial_pose,
+            object_target_pose,
+            left_grasp_xpos,
+            right_grasp_xpos,
+            left_target_xpos,
+            right_target_xpos,
+            held_state,
+        )
+
+    def _compute_segment_lengths(self) -> dict[str, int]:
+        """Compute waypoint counts for coordinated pickment phases."""
+        n_close = max(2, self.cfg.hand_interp_steps)
+        n_hold = max(0, self.cfg.hold_steps)
+        n_motion = self.cfg.sample_interval - n_close - n_hold
+        n_approach = n_motion // 3
+        n_lift = n_motion // 3
+        n_move = n_motion - n_approach - n_lift
+        if min(n_approach, n_lift, n_move) < 2:
+            logger.log_error(
+                "Not enough waypoints for coordinated pickment. Please increase "
+                "sample_interval or decrease hand_interp_steps/hold_steps.",
+                ValueError,
+            )
+        return {
+            "approach": n_approach,
+            "close": n_close,
+            "lift": n_lift,
+            "move": n_move,
+            "hold": n_hold,
+        }
+
+    def get_segment_lengths(self) -> dict[str, int]:
+        """Return waypoint counts for the coordinated pickment phase sequence."""
+        return self._compute_segment_lengths()
+
+    def _compute_pre_grasp_xpos(self, grasp_xpos: torch.Tensor) -> torch.Tensor:
+        """Compute pre-grasp poses by backing away along each TCP z axis."""
+        grasp_z = grasp_xpos[:, :3, 2]
+        return self.builder.apply_local_offset(
+            grasp_xpos, -grasp_z * self.cfg.pre_grasp_distance
+        )
+
+    def _select_motion_keyframe_indices(self, n_waypoints: int) -> torch.Tensor:
+        """Select sparse object motion keyframes for IK, including endpoints."""
+        n_keyframes = min(max(2, int(self.cfg.object_motion_keyframes)), n_waypoints)
+        return (
+            torch.linspace(
+                0,
+                n_waypoints - 1,
+                steps=n_keyframes,
+                device=self.device,
+            )
+            .round()
+            .to(dtype=torch.long)
+        )
+
+    def _plan_synchronized_object_motion(
+        self,
+        left_start_qpos: torch.Tensor,
+        right_start_qpos: torch.Tensor,
+        object_pose_traj: torch.Tensor,
+        left_object_to_eef: torch.Tensor,
+        right_object_to_eef: torch.Tensor,
+    ) -> tuple[bool, torch.Tensor, torch.Tensor]:
+        """Plan both arms from the same sparse object-pose trajectory."""
+        n_waypoints = object_pose_traj.shape[1]
+        keyframe_indices = self._select_motion_keyframe_indices(n_waypoints)
+        left_traj = torch.zeros(
+            (self.n_envs, len(keyframe_indices), left_start_qpos.shape[-1]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        right_traj = torch.zeros(
+            (self.n_envs, len(keyframe_indices), right_start_qpos.shape[-1]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        left_qpos_seed = left_start_qpos
+        right_qpos_seed = right_start_qpos
+        for keyframe_col, waypoint_idx in enumerate(keyframe_indices.tolist()):
+            left_xpos = torch.bmm(object_pose_traj[:, waypoint_idx], left_object_to_eef)
+            right_xpos = torch.bmm(
+                object_pose_traj[:, waypoint_idx], right_object_to_eef
+            )
+            left_success, left_qpos = self.robot.compute_ik(
+                pose=left_xpos,
+                name=self.cfg.left_arm_control_part,
+                joint_seed=left_qpos_seed,
+            )
+            right_success, right_qpos = self.robot.compute_ik(
+                pose=right_xpos,
+                name=self.cfg.right_arm_control_part,
+                joint_seed=right_qpos_seed,
+            )
+            if not self.builder.all_envs_success(left_success):
+                logger.log_warning(
+                    f"Failed to compute IK for {self.cfg.left_arm_control_part} "
+                    f"object waypoint {waypoint_idx}."
+                )
+                return False, left_traj, right_traj
+            if not self.builder.all_envs_success(right_success):
+                logger.log_warning(
+                    f"Failed to compute IK for {self.cfg.right_arm_control_part} "
+                    f"object waypoint {waypoint_idx}."
+                )
+                return False, left_traj, right_traj
+            left_traj[:, keyframe_col] = left_qpos
+            right_traj[:, keyframe_col] = right_qpos
+            left_qpos_seed = left_qpos
+            right_qpos_seed = right_qpos
+
+        return (
+            True,
+            self._interpolate_qpos_keyframes(left_traj, keyframe_indices, n_waypoints),
+            self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
+        )
+
+    def execute(
+        self, target: CoordinatedPickmentTarget, state: WorldState
+    ) -> ActionResult:
+        (
+            object_initial_pose,
+            object_target_pose,
+            left_grasp_xpos,
+            right_grasp_xpos,
+            left_target_xpos,
+            right_target_xpos,
+            held_state,
+        ) = self._resolve_target(target)
+        left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(state)
+        segments = self._compute_segment_lengths()
+
+        left_pre_grasp_xpos = self._compute_pre_grasp_xpos(left_grasp_xpos)
+        right_pre_grasp_xpos = self._compute_pre_grasp_xpos(right_grasp_xpos)
+        left_approach_targets = torch.stack(
+            [left_pre_grasp_xpos, left_grasp_xpos], dim=1
+        )
+        right_approach_targets = torch.stack(
+            [right_pre_grasp_xpos, right_grasp_xpos], dim=1
+        )
+        ok, left_approach_traj = self._plan_named_arm_trajectory(
+            self.cfg.left_arm_control_part,
+            left_start_qpos,
+            left_approach_targets,
+            segments["approach"],
+        )
+        if not ok:
+            return self._fail(state)
+        ok, right_approach_traj = self._plan_named_arm_trajectory(
+            self.cfg.right_arm_control_part,
+            right_start_qpos,
+            right_approach_targets,
+            segments["approach"],
+        )
+        if not ok:
+            return self._fail(state)
+
+        left_grasp_qpos = left_approach_traj[:, -1]
+        right_grasp_qpos = right_approach_traj[:, -1]
+        approach_trajectory = self._assemble_phase(
+            state,
+            left_approach_traj,
+            right_approach_traj,
+            self._repeat_qpos(self.left_hand_open_qpos, segments["approach"]),
+            self._repeat_qpos(self.right_hand_open_qpos, segments["approach"]),
+        )
+
+        close_trajectory = self._assemble_phase(
+            state,
+            self._repeat_qpos(left_grasp_qpos, segments["close"]),
+            self._repeat_qpos(right_grasp_qpos, segments["close"]),
+            self._interpolate_qpos(
+                self.left_hand_open_qpos,
+                self.left_hand_close_qpos,
+                segments["close"],
+            ),
+            self._interpolate_qpos(
+                self.right_hand_open_qpos,
+                self.right_hand_close_qpos,
+                segments["close"],
+            ),
+        )
+
+        lift_object_pose = self.builder.apply_local_offset(
+            object_initial_pose,
+            torch.tensor([0.0, 0.0, self.cfg.lift_height], device=self.device),
+        )
+        lift_object_traj = self._interpolate_object_pose(
+            object_initial_pose,
+            lift_object_pose,
+            segments["lift"],
+            include_orientation=False,
+        )
+        ok, left_lift_traj, right_lift_traj = self._plan_synchronized_object_motion(
+            left_grasp_qpos,
+            right_grasp_qpos,
+            lift_object_traj,
+            held_state.left_object_to_eef,
+            held_state.right_object_to_eef,
+        )
+        if not ok:
+            return self._fail(state)
+
+        left_lift_qpos = left_lift_traj[:, -1]
+        right_lift_qpos = right_lift_traj[:, -1]
+        lift_trajectory = self._assemble_phase(
+            state,
+            left_lift_traj,
+            right_lift_traj,
+            self._repeat_qpos(self.left_hand_close_qpos, segments["lift"]),
+            self._repeat_qpos(self.right_hand_close_qpos, segments["lift"]),
+        )
+
+        move_object_traj = self._interpolate_object_pose(
+            lift_object_pose,
+            object_target_pose,
+            segments["move"],
+            include_orientation=True,
+        )
+        ok, left_move_traj, right_move_traj = self._plan_synchronized_object_motion(
+            left_lift_qpos,
+            right_lift_qpos,
+            move_object_traj,
+            held_state.left_object_to_eef,
+            held_state.right_object_to_eef,
+        )
+        if not ok:
+            return self._fail(state)
+
+        left_target_qpos = left_move_traj[:, -1]
+        right_target_qpos = right_move_traj[:, -1]
+        move_trajectory = self._assemble_phase(
+            state,
+            left_move_traj,
+            right_move_traj,
+            self._repeat_qpos(self.left_hand_close_qpos, segments["move"]),
+            self._repeat_qpos(self.right_hand_close_qpos, segments["move"]),
+        )
+
+        hold_trajectory = torch.empty(
+            (self.n_envs, 0, self.robot_dof), dtype=torch.float32, device=self.device
+        )
+        if segments["hold"] > 0:
+            hold_trajectory = self._assemble_phase(
+                state,
+                self._repeat_qpos(left_target_qpos, segments["hold"]),
+                self._repeat_qpos(right_target_qpos, segments["hold"]),
+                self._repeat_qpos(self.left_hand_close_qpos, segments["hold"]),
+                self._repeat_qpos(self.right_hand_close_qpos, segments["hold"]),
+            )
+
+        full = torch.cat(
+            [
+                approach_trajectory,
+                close_trajectory,
+                lift_trajectory,
+                move_trajectory,
+                hold_trajectory,
+            ],
+            dim=1,
+        )
+        coordinated_held_object = CoordinatedHeldObjectState(
+            semantics=held_state.semantics,
+            left_object_to_eef=held_state.left_object_to_eef,
+            right_object_to_eef=held_state.right_object_to_eef,
+            left_grasp_xpos=left_target_xpos,
+            right_grasp_xpos=right_target_xpos,
+        )
+        return ActionResult(
+            success=True,
+            trajectory=full,
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=None,
+                coordinated_held_object=coordinated_held_object,
+            ),
+        )
+
+
+# =============================================================================
+# CoordinatedPlacement
+# =============================================================================
+
+
+class CoordinatedPlacement(AtomicAction):
+    """Coordinate two held objects: support object below, placing object above."""
+
+    TargetType: ClassVar[type] = CoordinatedPlacementTarget
+
+    def __init__(
+        self,
+        motion_generator,
+        cfg: CoordinatedPlacementCfg | None = None,
+    ) -> None:
+        super().__init__(motion_generator, cfg or CoordinatedPlacementCfg())
+        self.builder = TrajectoryBuilder(motion_generator)
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.robot_dof = self.robot.dof
+
+        self.dual_arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.placing_arm_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.placing_arm_control_part
+        )
+        self.support_arm_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.support_arm_control_part
+        )
+        self.placing_hand_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.placing_hand_control_part
+        )
+        self.support_hand_joint_ids = self.robot.get_joint_ids(
+            name=self.cfg.support_hand_control_part
+        )
+        self.joint_ids = (
+            self.dual_arm_joint_ids
+            + self.placing_hand_joint_ids
+            + self.support_hand_joint_ids
+        )
+        self.placing_arm_dof = len(self.placing_arm_joint_ids)
+        self.support_arm_dof = len(self.support_arm_joint_ids)
+        self.placing_hand_dof = len(self.placing_hand_joint_ids)
+        self.support_hand_dof = len(self.support_hand_joint_ids)
+
+        self._validate_hand_qpos_cfg()
+        self.placing_hand_open_qpos = self.builder.expand_hand_qpos(
+            self.cfg.placing_hand_open_qpos,
+            n_envs=self.n_envs,
+            hand_dof=self.placing_hand_dof,
+        )
+        self.placing_hand_close_qpos = self.builder.expand_hand_qpos(
+            self.cfg.placing_hand_close_qpos,
+            n_envs=self.n_envs,
+            hand_dof=self.placing_hand_dof,
+        )
+        self.support_hand_close_qpos = self.builder.expand_hand_qpos(
+            self.cfg.support_hand_close_qpos,
+            n_envs=self.n_envs,
+            hand_dof=self.support_hand_dof,
+        )
+
+    def execute(
+        self, target: CoordinatedPlacementTarget, state: WorldState
+    ) -> ActionResult:
+        placing_xpos, support_xpos, release, support_held_object = self._resolve_target(
+            target
+        )
+        placing_start_qpos, support_start_qpos = self._resolve_start_qpos(state)
+        segments = self._compute_segment_lengths(release)
+
+        placing_lift_xpos = self.builder.apply_local_offset(
+            placing_xpos,
+            torch.tensor(
+                [0.0, 0.0, self.cfg.lift_height],
+                dtype=torch.float32,
+                device=self.device,
+            ),
+        )
+
+        ok, placing_approach_traj = self._plan_named_arm_trajectory(
+            self.cfg.placing_arm_control_part,
+            placing_start_qpos,
+            torch.stack([placing_lift_xpos, placing_xpos], dim=1),
+            segments["approach"],
+        )
+        if not ok:
+            logger.log_warning("CoordinatedPlacement failed to plan placing approach.")
+            return self._fail(state)
+
+        ok, support_approach_traj = self._plan_named_arm_trajectory(
+            self.cfg.support_arm_control_part,
+            support_start_qpos,
+            support_xpos.unsqueeze(1),
+            segments["approach"],
+        )
+        if not ok:
+            logger.log_warning("CoordinatedPlacement failed to plan support approach.")
+            return self._fail(state)
+
+        placing_place_qpos = placing_approach_traj[:, -1]
+        support_place_qpos = support_approach_traj[:, -1]
+        approach_trajectory = self._assemble_phase(
+            state.last_qpos,
+            placing_approach_traj,
+            support_approach_traj,
+            self._repeat_qpos(self.placing_hand_close_qpos, segments["approach"]),
+            self._repeat_qpos(self.support_hand_close_qpos, segments["approach"]),
+        )
+
+        hold_trajectory = self._empty_phase(state)
+        if segments["hold"] > 0:
+            hold_trajectory = self._assemble_phase(
+                state.last_qpos,
+                self._repeat_qpos(placing_place_qpos, segments["hold"]),
+                self._repeat_qpos(support_place_qpos, segments["hold"]),
+                self._repeat_qpos(self.placing_hand_close_qpos, segments["hold"]),
+                self._repeat_qpos(self.support_hand_close_qpos, segments["hold"]),
+            )
+
+        release_trajectory = self._empty_phase(state)
+        if release:
+            release_trajectory = self._assemble_phase(
+                state.last_qpos,
+                self._repeat_qpos(placing_place_qpos, segments["release"]),
+                self._repeat_qpos(support_place_qpos, segments["release"]),
+                self.builder.interpolate_hand_qpos(
+                    self.placing_hand_close_qpos,
+                    self.placing_hand_open_qpos,
+                    n_waypoints=segments["release"],
+                ),
+                self._repeat_qpos(self.support_hand_close_qpos, segments["release"]),
+            )
+
+        ok, placing_retreat_traj = self._plan_named_arm_trajectory(
+            self.cfg.placing_arm_control_part,
+            placing_place_qpos,
+            placing_lift_xpos.unsqueeze(1),
+            segments["retreat"],
+        )
+        if not ok:
+            logger.log_warning("CoordinatedPlacement failed to plan placing retreat.")
+            return self._fail(state)
+
+        placing_hand_retreat_qpos = (
+            self.placing_hand_open_qpos if release else self.placing_hand_close_qpos
+        )
+        retreat_trajectory = self._assemble_phase(
+            state.last_qpos,
+            placing_retreat_traj,
+            self._repeat_qpos(support_place_qpos, segments["retreat"]),
+            self._repeat_qpos(placing_hand_retreat_qpos, segments["retreat"]),
+            self._repeat_qpos(self.support_hand_close_qpos, segments["retreat"]),
+        )
+
+        full = torch.cat(
+            [
+                approach_trajectory,
+                hold_trajectory,
+                release_trajectory,
+                retreat_trajectory,
+            ],
+            dim=1,
+        )
+        return ActionResult(
+            success=True,
+            trajectory=full,
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=support_held_object,
+            ),
+        )
+
+    def _validate_hand_qpos_cfg(self) -> None:
+        """Ensure all hand state tensors are provided."""
+        required_names = (
+            "placing_hand_open_qpos",
+            "placing_hand_close_qpos",
+            "support_hand_close_qpos",
+        )
+        for name in required_names:
+            if getattr(self.cfg, name) is None:
+                logger.log_error(
+                    f"{name} must be specified in CoordinatedPlacementCfg",
+                    ValueError,
+                )
+
+    def _resolve_object_pose(
+        self,
+        pose: torch.Tensor,
+        height_offset: float,
+        name: str,
+    ) -> torch.Tensor:
+        """Resolve an object target pose into a batched pose with height offset."""
+        object_pose = _resolve_object_target(
+            pose,
+            n_envs=self.n_envs,
+            device=self.device,
+        )
+        return self.builder.apply_local_offset(
+            object_pose,
+            torch.tensor(
+                [0.0, 0.0, height_offset],
+                dtype=torch.float32,
+                device=self.device,
+            ),
+        )
+
+    def _resolve_object_to_eef(
+        self,
+        held_state: HeldObjectState,
+        name: str,
+    ) -> torch.Tensor:
+        """Resolve a held-object transform into batched shape."""
+        return self._resolve_held_matrix(
+            held_state.object_to_eef,
+            f"{name}.object_to_eef",
+        )
+
+    def _resolve_held_matrix(self, matrix: torch.Tensor, name: str) -> torch.Tensor:
+        """Resolve a held-object pose-like matrix into batched shape."""
+        matrix = matrix.to(device=self.device, dtype=torch.float32)
+        if matrix.shape == (4, 4):
+            matrix = matrix.unsqueeze(0).repeat(self.n_envs, 1, 1)
+        if matrix.shape != (self.n_envs, 4, 4):
+            logger.log_error(
+                f"{name} must have shape (4, 4) or ({self.n_envs}, 4, 4), "
+                f"but got {matrix.shape}",
+                ValueError,
+            )
+        return matrix
+
+    def _resolve_held_state(
+        self,
+        held_state: HeldObjectState,
+        name: str,
+        object_to_eef: torch.Tensor,
+    ) -> HeldObjectState:
+        """Return a held-object state normalized to batched tensor shapes."""
+        return HeldObjectState(
+            semantics=held_state.semantics,
+            object_to_eef=object_to_eef,
+            grasp_xpos=self._resolve_held_matrix(
+                held_state.grasp_xpos,
+                f"{name}.grasp_xpos",
+            ),
+        )
+
+    def _resolve_target(
+        self,
+        target: CoordinatedPlacementTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor, bool, HeldObjectState]:
+        """Resolve object-centric target into placing and support TCP poses."""
+        placing_height_offset = (
+            self.cfg.placing_height_offset
+            if target.placing_height_offset is None
+            else target.placing_height_offset
+        )
+        support_height_offset = (
+            self.cfg.support_height_offset
+            if target.support_height_offset is None
+            else target.support_height_offset
+        )
+        placing_object_pose = self._resolve_object_pose(
+            target.placing_object_target_pose,
+            placing_height_offset,
+            "placing_object_target_pose",
+        )
+        support_object_pose = self._resolve_object_pose(
+            target.support_object_target_pose,
+            support_height_offset,
+            "support_object_target_pose",
+        )
+        placing_object_to_eef = self._resolve_object_to_eef(
+            target.placing_held_object,
+            "placing_held_object",
+        )
+        support_object_to_eef = self._resolve_object_to_eef(
+            target.support_held_object,
+            "support_held_object",
+        )
+        placing_xpos = torch.bmm(placing_object_pose, placing_object_to_eef)
+        support_xpos = torch.bmm(support_object_pose, support_object_to_eef)
+        release = self.cfg.release if target.release is None else target.release
+        return (
+            placing_xpos,
+            support_xpos,
+            release,
+            self._resolve_held_state(
+                target.support_held_object,
+                "support_held_object",
+                support_object_to_eef,
+            ),
+        )
+
+    def _resolve_start_qpos(
+        self, state: WorldState
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Extract per-arm start qpos from full-robot WorldState qpos."""
+        if state.last_qpos.shape != (self.n_envs, self.robot_dof):
+            logger.log_error(
+                f"WorldState.last_qpos must have shape ({self.n_envs}, {self.robot_dof}), "
+                f"but got {state.last_qpos.shape}",
+                ValueError,
+            )
+        start_qpos = state.last_qpos.to(device=self.device, dtype=torch.float32)
+        return (
+            start_qpos[:, self.placing_arm_joint_ids],
+            start_qpos[:, self.support_arm_joint_ids],
+        )
+
+    def _compute_segment_lengths(self, release: bool) -> dict[str, int]:
+        """Compute waypoint counts for coordinated placement phases."""
+        n_release = max(2, self.cfg.hand_interp_steps) if release else 0
+        n_hold = max(0, self.cfg.hold_steps)
+        n_retreat = max(2, self.cfg.retreat_steps)
+        n_approach = self.cfg.sample_interval - n_hold - n_release - n_retreat
+        if n_approach < 2:
+            logger.log_error(
+                "Not enough waypoints for coordinated placement. Increase "
+                "sample_interval or decrease hold/release/retreat steps.",
+                ValueError,
+            )
+        return {
+            "approach": n_approach,
+            "hold": n_hold,
+            "release": n_release,
+            "retreat": n_retreat,
+        }
+
+    def _plan_named_arm_trajectory(
+        self,
+        control_part: str,
+        start_qpos: torch.Tensor,
+        target_poses: torch.Tensor,
+        n_waypoints: int,
+    ) -> tuple[bool, torch.Tensor]:
+        """Plan a batched arm trajectory for a named control part."""
+        target_states_list = [
+            [
+                PlanState(xpos=target_poses[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(target_poses.shape[1])
+            ]
+            for i in range(self.n_envs)
+        ]
+        return self.builder.plan_arm_traj(
+            target_states_list,
+            start_qpos,
+            n_waypoints,
+            control_part=control_part,
+            arm_dof=start_qpos.shape[-1],
+        )
+
+    @staticmethod
+    def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
+        """Repeat batched qpos across waypoints."""
+        return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+
+    def _empty_phase(self, state: WorldState) -> torch.Tensor:
+        """Return an empty full-DoF phase for optional segments."""
+        return torch.empty(
+            (self.n_envs, 0, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+    def _assemble_phase(
+        self,
+        base_full_qpos: torch.Tensor,
+        placing_arm_traj: torch.Tensor,
+        support_arm_traj: torch.Tensor,
+        placing_hand_traj: torch.Tensor,
+        support_hand_traj: torch.Tensor,
+    ) -> torch.Tensor:
+        """Assemble arm and hand trajectories into full-robot DoF order."""
+        n_waypoints = placing_arm_traj.shape[1]
+        full = base_full_qpos.to(device=self.device, dtype=torch.float32)
+        full = full.unsqueeze(1).repeat(1, n_waypoints, 1).clone()
+        full[:, :, self.placing_arm_joint_ids] = placing_arm_traj
+        full[:, :, self.support_arm_joint_ids] = support_arm_traj
+        full[:, :, self.placing_hand_joint_ids] = placing_hand_traj
+        full[:, :, self.support_hand_joint_ids] = support_hand_traj
+        return full
+
+    def _fail(self, state: WorldState) -> ActionResult:
+        return ActionResult(
+            success=False,
+            trajectory=torch.empty(
+                (self.n_envs, 0, self.robot_dof),
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            next_state=state,
+        )
+
+
+# =============================================================================
+# Press
+# =============================================================================
+
+
+class Press(AtomicAction):
+    """Close the gripper, press down to a target pose, then return."""
+
+    TargetType: ClassVar[type] = EndEffectorPoseTarget
+
+    def __init__(
+        self,
+        motion_generator,
+        cfg: PressCfg | None = None,
+    ) -> None:
+        super().__init__(motion_generator, cfg or PressCfg())
+        self.builder = TrajectoryBuilder(motion_generator)
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.arm_dof = len(self.arm_joint_ids)
+        self.hand_dof = len(self.hand_joint_ids)
+        self.robot_dof = self.robot.dof
+
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error(
+                "hand_close_qpos must be specified in PressCfg", ValueError
+            )
+        self.hand_close_qpos = self.builder.expand_hand_qpos(
+            self.cfg.hand_close_qpos,
+            n_envs=self.n_envs,
+            hand_dof=self.hand_dof,
+        )
+
+    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+        press_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            _arm_qpos_from_state(state, self.arm_joint_ids, self.robot_dof),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+        start_hand_qpos = state.last_qpos[:, self.hand_joint_ids]
+
+        n_close, n_down, n_back = self._compute_phase_waypoints()
+
+        # Phase 1: close the hand while holding the current EEF pose.
+        hand_close_path = self.builder.interpolate_hand_qpos(
+            start_hand_qpos,
+            self.hand_close_qpos,
+            n_waypoints=n_close,
+        )
+
+        # Phase 2: press down to the target pose.
+        target_states_list = [
+            [PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE)]
+            for i in range(self.n_envs)
+        ]
+        ok, down_arm = self.builder.plan_arm_traj(
+            target_states_list,
+            start_arm_qpos,
+            n_down,
+            control_part=self.cfg.control_part,
+            arm_dof=self.arm_dof,
+        )
+        if not ok:
+            logger.log_warning("Press failed to plan the down trajectory.")
+            return self._fail(state)
+
+        # Phase 3: return to the arm pose from before pressing.
+        press_arm_qpos = down_arm[:, -1, :]
+        back_arm = self.builder.plan_joint_traj(press_arm_qpos, start_arm_qpos, n_back)
+
+        full = torch.empty(
+            (self.n_envs, n_close + n_down + n_back, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full[:, :, :] = state.last_qpos.unsqueeze(1)
+        full[:, :n_close, self.arm_joint_ids] = start_arm_qpos.unsqueeze(1)
+        full[:, :n_close, self.hand_joint_ids] = hand_close_path
+        full[:, n_close : n_close + n_down, self.arm_joint_ids] = down_arm
+        full[:, n_close : n_close + n_down, self.hand_joint_ids] = (
+            self.hand_close_qpos.unsqueeze(1)
+        )
+        full[:, n_close + n_down :, self.arm_joint_ids] = back_arm
+        full[:, n_close + n_down :, self.hand_joint_ids] = (
+            self.hand_close_qpos.unsqueeze(1)
+        )
+
+        return ActionResult(
+            success=True,
+            trajectory=full,
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=state.held_object,
+                coordinated_held_object=state.coordinated_held_object,
+            ),
+        )
+
+    def _compute_phase_waypoints(self) -> tuple[int, int, int]:
+        n_close = self.cfg.hand_interp_steps
+        if n_close < 1:
+            logger.log_error(
+                "hand_interp_steps must be at least 1 for PressCfg.", ValueError
+            )
+
+        motion_waypoints = self.cfg.sample_interval - n_close
+        n_down = motion_waypoints // 2
+        n_back = motion_waypoints - n_down
+        if n_down < 2 or n_back < 2:
+            logger.log_error(
+                "Not enough waypoints for press trajectory. Increase "
+                "sample_interval or decrease hand_interp_steps.",
+                ValueError,
+            )
+        return n_close, n_down, n_back
+
+    def _fail(self, state: WorldState) -> ActionResult:
+        return ActionResult(
+            success=False,
+            trajectory=torch.empty(
+                (self.n_envs, 0, self.robot_dof),
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            next_state=state,
+        )
+
+
 __all__ = [
+    "CoordinatedPickment",
+    "CoordinatedPickmentCfg",
+    "CoordinatedPlacement",
+    "CoordinatedPlacementCfg",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
     "MoveJoints",
@@ -804,4 +2192,6 @@ __all__ = [
     "PickUpCfg",
     "Place",
     "PlaceCfg",
+    "Press",
+    "PressCfg",
 ]

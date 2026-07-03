@@ -191,6 +191,9 @@ def build_pipeline_record(
         "pipeline_history_path": _record_path(history_path, repo_root),
         "target_body_scale": args.target_body_scale,
         "target_body_scale_mode": getattr(args, "target_body_scale_mode", None),
+        "inside_container_slot_distance_scale": (
+            args.inside_container_slot_distance_scale
+        ),
         "target_replacements": _target_replacement_records(
             args,
             target_replacements,
@@ -314,8 +317,14 @@ def _source_request_record(
                 ),
             }
         )
-        if args.prompt2scene_text:
-            record["prompt2scene_text"] = args.prompt2scene_text
+        prompt2scene_text = getattr(args, "prompt2scene_text", None)
+        if prompt2scene_text:
+            record["prompt2scene_text"] = prompt2scene_text
+        record["prompt2scene_gravity_settle_mode"] = getattr(
+            args,
+            "prompt2scene_gravity_settle_mode",
+            "geometry",
+        )
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees
         )

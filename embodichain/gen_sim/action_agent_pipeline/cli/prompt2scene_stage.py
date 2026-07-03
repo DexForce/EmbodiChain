@@ -31,16 +31,18 @@ __all__ = ["resolve_prompt2scene_image", "run_prompt2scene_stage"]
 
 def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     """Run the in-repo prompt2scene stage and return its exported gym config."""
+    output_root = Path(args.prompt2scene_output_root).expanduser().resolve()
+    _reject_prompt2scene_text(args)
+    image_path = resolve_prompt2scene_image(args)
+    gravity_settle_mode = _resolve_gravity_settle_mode(args)
     load_llm_config, run_prompt2scene, prompt2scene_input_cls = (
         _load_prompt2scene_components()
     )
-    output_root = Path(args.prompt2scene_output_root).expanduser().resolve()
-    text = _resolve_prompt2scene_text(args)
-    image_path = None if text is not None else resolve_prompt2scene_image(args)
     request = prompt2scene_input_cls.from_cli_args(
         image_path=image_path,
-        text=text,
+        prompt=None,
         output_root=output_root,
+        gravity_settle_mode=gravity_settle_mode,
     )
     llm_cfg = load_llm_config(
         Path(args.prompt2scene_llm_config).expanduser()
@@ -51,8 +53,9 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     print("Running prompt2scene pipeline:", flush=True)
     if request.image_path is not None:
         print(f"  image: {request.image_path}", flush=True)
-    if request.text is not None:
-        print(f"  text: {request.text}", flush=True)
+    if request.prompt is not None:
+        print(f"  prompt: {request.prompt}", flush=True)
+    print(f"  gravity_settle_mode: {request.gravity_settle_mode}", flush=True)
     print(f"  output_root: {request.output_root}", flush=True)
 
     result = run_prompt2scene(request, llm_cfg=llm_cfg)
@@ -82,15 +85,19 @@ def resolve_prompt2scene_image(args: argparse.Namespace) -> Path:
     return Path(image_input).expanduser().resolve()
 
 
-def _resolve_prompt2scene_text(args: argparse.Namespace) -> str | None:
+def _reject_prompt2scene_text(args: argparse.Namespace) -> None:
     text = str(getattr(args, "prompt2scene_text", "") or "").strip()
     if text:
-        if args.image or args.image_name:
-            raise ValueError(
-                "--prompt2scene-text cannot be combined with --image or --image-name."
-            )
-        return text
-    return None
+        raise ValueError(
+            "--prompt2scene-text is no longer supported by prompt2scene. "
+            "Use --image or --image-name as prompt2scene input."
+        )
+
+
+def _resolve_gravity_settle_mode(args: argparse.Namespace) -> str:
+    return str(
+        getattr(args, "prompt2scene_gravity_settle_mode", "geometry") or "geometry"
+    )
 
 
 def _resolve_image_name(image_name: str) -> Path:

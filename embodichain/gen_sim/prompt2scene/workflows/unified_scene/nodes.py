@@ -25,7 +25,6 @@ from embodichain.gen_sim.prompt2scene.workflows.unified_scene.state import (
 )
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene.utils import (
     build_unified_scene_from_image_relations,
-    build_unified_scene_from_text_relations,
 )
 
 __all__ = ["build_unified_scene_node"]
@@ -35,20 +34,14 @@ def build_unified_scene_node(state: UnifiedSceneState) -> dict[str, object]:
     """Assemble the final unified scene manifest."""
     scene_intake = state["scene_intake"]
     image_relations = state.get("image_relations")
-    text_relations = state.get("text_relations")
 
     if image_relations is not None and image_relations.status == "ok":
         unified_scene = build_unified_scene_from_image_relations(
             scene_intake=scene_intake,
             image_relations=image_relations,
         )
-    elif text_relations is not None:
-        unified_scene = build_unified_scene_from_text_relations(
-            scene_intake=scene_intake,
-            text_relations=text_relations,
-        )
     else:
-        raise ValueError("Unified scene requires image_relations or text_relations.")
+        raise ValueError("Unified scene requires image_relations.")
 
     WorkflowArtifactWriter(
         state["output_root"],
