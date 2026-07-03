@@ -28,9 +28,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _StackingStepSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _TABLETOP_OBJECT_CLEARANCE,
     _clean_vector3,
     _iter_generated_scene_object_configs,
     _mesh_config_local_zmin_after_rotation,
+    _mesh_config_world_xy_center,
     _mesh_config_world_z_bounds,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
@@ -243,7 +245,7 @@ def _apply_stacking_task_response(
     else:
         ordered_source_uids = object_source_uids
 
-    anchor_xy = _table_anchor_xy(table_obj, anchor)
+    anchor_xy = _table_anchor_xy(table_obj, anchor, scene_dir=scene_dir)
     steps = []
     for layer_index, source_uid in enumerate(ordered_source_uids):
         obj = rigid_by_uid[source_uid]
@@ -298,6 +300,11 @@ def _with_stacking_generated_targets(
         for obj in _iter_generated_scene_object_configs(gym_config)
         if obj.get("uid") is not None
     }
+    table_config = object_configs.get("table") or object_configs.get(
+        spec.table_source_uid
+    )
+    anchor_xy = _generated_stacking_anchor_xy(table_config, spec.anchor_xy)
+    table_top_z = _generated_table_top_z(table_config)
     z_by_runtime_uid: dict[str, float] = {}
     steps = []
     for step in spec.steps:
@@ -311,7 +318,16 @@ def _with_stacking_generated_targets(
             continue
 
         if step.layer_index == 0:
-            target_z = _clean_vector3(moved_config.get("init_pos", [0.0, 0.0, 0.0]))[2]
+            if table_top_z is None:
+                target_z = _clean_vector3(
+                    moved_config.get("init_pos", [0.0, 0.0, 0.0])
+                )[2]
+            else:
+                target_z = (
+                    float(table_top_z)
+                    + _TABLETOP_OBJECT_CLEARANCE
+                    - float(moved_bottom_offset)
+                )
         else:
             support_uid = step.support_runtime_uid
             support_z = z_by_runtime_uid.get(str(support_uid))
@@ -331,8 +347,8 @@ def _with_stacking_generated_targets(
             )
 
         target_position = [
-            float(spec.anchor_xy[0]),
-            float(spec.anchor_xy[1]),
+            float(anchor_xy[0]),
+            float(anchor_xy[1]),
             round(float(target_z), 6),
         ]
         high_position = list(target_position)
@@ -341,11 +357,38 @@ def _with_stacking_generated_targets(
         steps.append(
             replace(
                 step,
+                active_side=_arm_side_for_position(
+                    _clean_vector3(moved_config.get("init_pos", [0.0, 0.0, 0.0]))
+                ),
                 target_position=target_position,
                 high_position=high_position,
             )
         )
-    return replace(spec, steps=tuple(steps))
+    return replace(spec, anchor_xy=anchor_xy, steps=tuple(steps))
+
+
+def _generated_stacking_anchor_xy(
+    table_config: Mapping[str, Any] | None,
+    fallback_xy: Sequence[float],
+) -> list[float]:
+    if table_config is not None:
+        center = _mesh_config_world_xy_center(table_config)
+        if center is not None:
+            return center
+        init_pos = _clean_vector3(table_config.get("init_pos", [0.0, 0.0, 0.0]))
+        return [round(init_pos[0], 6), round(init_pos[1], 6)]
+    return [round(float(fallback_xy[0]), 6), round(float(fallback_xy[1]), 6)]
+
+
+def _generated_table_top_z(
+    table_config: Mapping[str, Any] | None,
+) -> float | None:
+    if table_config is None:
+        return None
+    z_bounds = _mesh_config_world_z_bounds(table_config)
+    if z_bounds is None:
+        return None
+    return float(z_bounds[1])
 
 
 def _make_stacking_summary(spec: _StackingSpec) -> dict[str, Any]:
@@ -531,8 +574,18 @@ def _stacking_runtime_uid_mapping(
     }
 
 
-def _table_anchor_xy(table_obj: _SceneObject, anchor: str) -> list[float]:
+def _table_anchor_xy(
+    table_obj: _SceneObject,
+    anchor: str,
+    *,
+    scene_dir: Path,
+) -> list[float]:
     _normalize_anchor(anchor)
+    center = _mesh_config_world_xy_center(
+        _resolved_mesh_config(table_obj, scene_dir=scene_dir)
+    )
+    if center is not None:
+        return center
     init_pos = _clean_vector3(table_obj.config.get("init_pos", [0.0, 0.0, 0.0]))
     return [round(init_pos[0], 6), round(init_pos[1], 6)]
 

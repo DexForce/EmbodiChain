@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import base64
 import hashlib
 import json
+import re
 import struct
 
 import pytest
@@ -49,6 +50,13 @@ from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking impo
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_observations_config,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _TABLETOP_OBJECT_CLEARANCE,
+    _mesh_config_local_zmin_after_rotation,
+    _mesh_config_world_xy_bounds,
+    _mesh_config_world_xy_center,
+    _mesh_config_world_z_bounds,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
@@ -2921,6 +2929,111 @@ def test_arrangement_layout_fails_when_row_cannot_fit(
         )
 
 
+def test_arrangement_uses_table_mesh_bounds_center_when_table_origin_is_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "offset_table_arrangement_gym_project"
+    _write_offset_table_center_project(project_dir, count=3)
+
+    def fake_call_arrangement_task_llm(**kwargs):
+        return {
+            "objects": ["cube_1", "cube_2", "cube_3"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "left_to_right",
+            "task_prompt_summary": "Arrange three cubes on the real table center.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_arrangement_task_llm",
+        fake_call_arrangement_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_offset_table_arrangement_agent",
+        task_description="把三个方块摆成一排",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    summary = paths.summary
+    assert summary["mode"] == "arrangement_line"
+    assert summary["line_origin_xy"][1] == pytest.approx(0.24)
+    assert all(
+        0.0 < placement["target_xy"][1] < 0.48 for placement in summary["placements"]
+    )
+    _assert_arrangement_slots_avoid_initial_objects(summary, gym_config)
+
+
+def test_arrangement_recomputes_targets_after_scene_rotation_and_scale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "rotated_offset_table_arrangement_gym_project"
+    _write_offset_table_center_project(project_dir, count=3)
+
+    def fake_call_arrangement_task_llm(**kwargs):
+        return {
+            "objects": ["cube_1", "cube_2", "cube_3"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "left_to_right",
+            "task_prompt_summary": "Arrange three cubes after scene conversion.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_arrangement_task_llm",
+        fake_call_arrangement_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_rotated_arrangement_agent",
+        task_description="把三个方块摆成一排",
+        target_body_scale=0.8,
+        source_scene_body_scale_mode="multiply",
+        preserve_source_scene_geometry=True,
+        source_scene_z_rotation_degrees=-90.0,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    table_config = next(
+        obj for obj in gym_config["background"] if obj["uid"] == "table"
+    )
+    table_center = _mesh_config_world_xy_center(table_config)
+    table_bounds = _mesh_config_world_xy_bounds(table_config)
+    assert table_center == pytest.approx([0.192, 0.0])
+    assert paths.summary["line_origin_xy"] == pytest.approx(table_center)
+    assert table_bounds is not None
+    table_min, table_max = table_bounds
+    for placement in paths.summary["placements"]:
+        target_xy = placement["target_xy"]
+        assert table_min[0] < target_xy[0] < table_max[0]
+        assert table_min[1] < target_xy[1] < table_max[1]
+
+    release_positions = _arrangement_release_positions_from_prompt(
+        paths.task_prompt.read_text(encoding="utf-8")
+    )
+    assert len(release_positions) == len(paths.summary["placements"])
+    rigid_by_uid = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    table_top_z = _mesh_config_world_z_bounds(table_config)[1]
+    for placement, release_position in zip(
+        paths.summary["placements"], release_positions
+    ):
+        assert release_position[:2] == pytest.approx(placement["target_xy"])
+        object_config = rigid_by_uid[placement["object"]]
+        object_bottom_offset = _mesh_config_local_zmin_after_rotation(object_config)
+        expected_z = table_top_z + _TABLETOP_OBJECT_CLEARANCE - object_bottom_offset
+        assert release_position[2] == pytest.approx(expected_z)
+
+
 def test_task_description_generates_three_block_stacking_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3006,6 +3119,118 @@ def test_task_description_generates_three_block_stacking_config(
     assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert atom_actions.count('"orientation_goal":"axis_align"') == 6
+
+
+def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "offset_table_stacking_gym_project"
+    _write_offset_table_center_project(project_dir, count=3)
+
+    def fake_call_stacking_task_llm(**kwargs):
+        return {
+            "objects": ["cube_1", "cube_2", "cube_3"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["cube_1", "cube_2", "cube_3"],
+            "order_by": "explicit",
+            "anchor": "table_center",
+            "task_prompt_summary": "Stack three cubes at the real table center.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fake_call_stacking_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_offset_table_stacking_agent",
+        task_description="把三个方块叠放到桌面中央",
+        prewarm_coacd_cache=False,
+    )
+
+    summary = paths.summary
+    assert summary["mode"] == "stacking"
+    assert summary["anchor_xy"] == pytest.approx([0.0, 0.24])
+    assert [
+        placement["target_position"][:2] for placement in summary["placements"]
+    ] == [summary["anchor_xy"]] * 3
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    success = gym_config["env"]["extensions"]["agent_success"]
+    bottom_xy_terms = [
+        term
+        for term in success["terms"]
+        if term["type"] == "object_xy_near" and term["object"] == "cube_1"
+    ]
+    assert len(bottom_xy_terms) == 1
+    assert bottom_xy_terms[0]["target_xy"] == pytest.approx(summary["anchor_xy"])
+
+
+def test_stacking_recomputes_anchor_after_scene_rotation_and_scale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "rotated_offset_table_stacking_gym_project"
+    _write_offset_table_center_project(project_dir, count=3)
+
+    def fake_call_stacking_task_llm(**kwargs):
+        return {
+            "objects": ["cube_1", "cube_2", "cube_3"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["cube_1", "cube_2", "cube_3"],
+            "order_by": "explicit",
+            "anchor": "table_center",
+            "task_prompt_summary": "Stack three cubes after scene conversion.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fake_call_stacking_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_rotated_stacking_agent",
+        task_description="把三个方块叠放到桌面中央",
+        target_body_scale=0.8,
+        source_scene_body_scale_mode="multiply",
+        preserve_source_scene_geometry=True,
+        source_scene_z_rotation_degrees=-90.0,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    table_config = next(
+        obj for obj in gym_config["background"] if obj["uid"] == "table"
+    )
+    table_center = _mesh_config_world_xy_center(table_config)
+    assert table_center == pytest.approx([0.192, 0.0])
+    assert paths.summary["anchor_xy"] == pytest.approx(table_center)
+    assert [
+        placement["target_position"][:2] for placement in paths.summary["placements"]
+    ] == [paths.summary["anchor_xy"]] * 3
+
+    rigid_by_uid = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    table_top_z = _mesh_config_world_z_bounds(table_config)[1]
+    bottom_placement = paths.summary["placements"][0]
+    bottom_config = rigid_by_uid[bottom_placement["object"]]
+    bottom_offset = _mesh_config_local_zmin_after_rotation(bottom_config)
+    expected_bottom_z = table_top_z + _TABLETOP_OBJECT_CLEARANCE - bottom_offset
+    assert bottom_placement["target_position"][2] == pytest.approx(expected_bottom_z)
+
+    success = gym_config["env"]["extensions"]["agent_success"]
+    bottom_xy_terms = [
+        term
+        for term in success["terms"]
+        if term["type"] == "object_xy_near"
+        and term["object"] == bottom_placement["object"]
+    ]
+    assert len(bottom_xy_terms) == 1
+    assert bottom_xy_terms[0]["target_xy"] == pytest.approx(paths.summary["anchor_xy"])
 
 
 def test_task_description_generates_two_block_stacking_config(
@@ -3891,6 +4116,45 @@ def _write_arrangement_project_with_count(
     )
 
 
+def _write_offset_table_center_project(project_dir: Path, *, count: int) -> None:
+    _write_minimal_glb(
+        project_dir / "mesh_assets/table/table_0.glb",
+        [(-0.45, 0.0, 0.0), (0.45, 0.0, 0.0), (0.0, 0.48, 0.0)],
+    )
+    rigid_objects = []
+    for index in range(count):
+        uid = f"cube_{index + 1}"
+        _write_minimal_glb(
+            project_dir / f"mesh_assets/cube/{uid}/{uid}.glb",
+            [(-0.02, -0.02, 0.0), (0.02, -0.02, 0.0), (0.0, 0.02, 0.04)],
+        )
+        rigid_objects.append(
+            _mesh_object(
+                uid,
+                f"mesh_assets/cube/{uid}/{uid}.glb",
+                [round(-0.12 + index * 0.12, 6), 0.06, 0.76],
+                [0.0, 0.0, 0.0],
+            )
+        )
+
+    gym_config = {
+        "id": "Image2Tabletop-offset-table-center-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": rigid_objects,
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _write_stacking_blocks_project(project_dir: Path, *, count: int) -> None:
     _write_minimal_glb(
         project_dir / "mesh_assets/table/table_0.glb",
@@ -4165,10 +4429,10 @@ def _assert_arrangement_slots_avoid_initial_objects(
     clearance = float(summary["layout_clearance"])
     spacing = float(summary["spacing"])
     half_extent = max(0.035, (spacing - clearance) / 2.0)
-    initial_bounds = [
-        _xy_bounds_around(obj["init_pos"][:2], half_extent)
+    initial_bounds_by_uid = {
+        obj["uid"]: _xy_bounds_around(obj["init_pos"][:2], half_extent)
         for obj in gym_config["rigid_object"]
-    ]
+    }
     for placement in summary["placements"]:
         slot_bounds = _xy_bounds_around(placement["target_xy"], half_extent)
         assert all(
@@ -4177,8 +4441,17 @@ def _assert_arrangement_slots_avoid_initial_objects(
                 init_bound,
                 clearance=clearance,
             )
-            for init_bound in initial_bounds
+            for uid, init_bound in initial_bounds_by_uid.items()
+            if uid != placement["object"]
         )
+
+
+def _arrangement_release_positions_from_prompt(prompt: str) -> list[list[float]]:
+    positions = [
+        json.loads(f"[{match.group(1)}]")
+        for match in re.finditer(r'"position":\[(.*?)\]', prompt)
+    ]
+    return positions[2::3]
 
 
 def _xy_bounds_around(

@@ -33,6 +33,8 @@ __all__ = [
     "_clean_vector3",
     "_dual_ur5_init_z_from_table_top",
     "_iter_generated_scene_object_configs",
+    "_mesh_config_world_xy_bounds",
+    "_mesh_config_world_xy_center",
     "_mesh_config_world_xy_extents",
     "_mesh_config_world_z_bounds",
     "_mesh_config_world_zmax",
@@ -120,6 +122,32 @@ def _mesh_config_world_zmax(obj_config: Mapping[str, Any]) -> float | None:
 def _mesh_config_world_xy_extents(
     obj_config: Mapping[str, Any],
 ) -> tuple[float, float] | None:
+    bounds = _mesh_config_world_xy_bounds(obj_config)
+    if bounds is None:
+        return None
+    mins, maxs = bounds
+    return (
+        float(maxs[0]) - float(mins[0]),
+        float(maxs[1]) - float(mins[1]),
+    )
+
+
+def _mesh_config_world_xy_center(
+    obj_config: Mapping[str, Any],
+) -> list[float] | None:
+    bounds = _mesh_config_world_xy_bounds(obj_config)
+    if bounds is None:
+        return None
+    mins, maxs = bounds
+    return [
+        round((float(mins[0]) + float(maxs[0])) / 2.0, 6),
+        round((float(mins[1]) + float(maxs[1])) / 2.0, 6),
+    ]
+
+
+def _mesh_config_world_xy_bounds(
+    obj_config: Mapping[str, Any],
+) -> tuple[list[float], list[float]] | None:
     shape = obj_config.get("shape", {})
     if not isinstance(shape, Mapping):
         return None
@@ -135,8 +163,8 @@ def _mesh_config_world_xy_extents(
     x_values = [vertex[0] for vertex in transformed_vertices]
     y_values = [vertex[1] for vertex in transformed_vertices]
     return (
-        max(x_values) - min(x_values),
-        max(y_values) - min(y_values),
+        [min(x_values), min(y_values)],
+        [max(x_values), max(y_values)],
     )
 
 

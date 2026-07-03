@@ -28,7 +28,12 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _TABLETOP_OBJECT_CLEARANCE,
     _clean_vector3,
+    _iter_generated_scene_object_configs,
+    _mesh_config_local_zmin_after_rotation,
+    _mesh_config_world_xy_bounds,
+    _mesh_config_world_xy_center,
     _mesh_config_world_xy_extents,
     _mesh_config_world_z_bounds,
 )
@@ -49,6 +54,7 @@ __all__ = [
     "_call_arrangement_task_llm",
     "_is_arrangement_task_description",
     "_make_arrangement_scene_summary",
+    "_with_arrangement_generated_pose_targets",
     "_with_arrangement_generated_z_targets",
 ]
 
@@ -266,7 +272,7 @@ def _apply_arrangement_task_response(
         ordered_source_uids = object_source_uids
         order_direction = "given"
 
-    anchor_xy = _table_anchor_xy(table_obj, anchor)
+    anchor_xy = _table_anchor_xy(table_obj, anchor, scene_dir=scene_dir)
     spacing = _arrangement_spacing(
         [rigid_by_uid[uid] for uid in object_source_uids],
         scene_dir=scene_dir,
@@ -274,12 +280,13 @@ def _apply_arrangement_task_response(
     slots, line_origin_xy = _arrangement_collision_aware_line_slots(
         anchor_xy=anchor_xy,
         table_obj=table_obj,
-        objects=[rigid_by_uid[uid] for uid in object_source_uids],
+        objects=[rigid_by_uid[uid] for uid in ordered_source_uids],
         count=len(ordered_source_uids),
         spacing=spacing,
         line_axis=axis,
         scene_dir=scene_dir,
         clearance=_LAYOUT_CLEARANCE,
+        ignore_self_initial_overlap=True,
     )
     orientation_axis = _arrangement_orientation_axis(axis)
 
@@ -375,6 +382,7 @@ def _arrangement_collision_aware_line_slots(
     line_axis: str,
     scene_dir: Path,
     clearance: float,
+    ignore_self_initial_overlap: bool = False,
 ) -> tuple[list[list[float]], list[float]]:
     axis = _normalize_axis(line_axis)
     if axis != "left_to_right":
@@ -389,7 +397,6 @@ def _arrangement_collision_aware_line_slots(
     object_footprints = [
         _arrangement_object_footprint(obj, scene_dir=scene_dir) for obj in objects
     ]
-    max_half_extent = max(footprint.half_extent for footprint in object_footprints)
     init_bounds = [footprint.xy_bounds for footprint in object_footprints]
 
     for x_offset in _row_search_offsets(_ROW_SEARCH_RADIUS, _ROW_SEARCH_STEP):
@@ -404,7 +411,8 @@ def _arrangement_collision_aware_line_slots(
             line_axis=axis,
         )
         slot_bounds = [
-            _slot_xy_bounds(slot, max_half_extent=max_half_extent) for slot in slots
+            _slot_xy_bounds(slot, max_half_extent=footprint.half_extent)
+            for slot, footprint in zip(slots, object_footprints)
         ]
         if not _slot_bounds_within_table(
             slot_bounds,
@@ -413,10 +421,11 @@ def _arrangement_collision_aware_line_slots(
             clearance=clearance,
         ):
             continue
-        if any(
-            _xy_bounds_overlap(slot_bound, init_bound, clearance=clearance)
-            for slot_bound in slot_bounds
-            for init_bound in init_bounds
+        if _slot_bounds_overlap_initial_objects(
+            slot_bounds,
+            init_bounds,
+            clearance=clearance,
+            ignore_self_initial_overlap=ignore_self_initial_overlap,
         ):
             continue
         return slots, origin
@@ -427,6 +436,22 @@ def _arrangement_collision_aware_line_slots(
         "occupying all candidate row positions; use a larger table or add parking "
         "slot planning."
     )
+
+
+def _slot_bounds_overlap_initial_objects(
+    slot_bounds: Sequence[tuple[list[float], list[float]]],
+    init_bounds: Sequence[tuple[list[float], list[float]]],
+    *,
+    clearance: float,
+    ignore_self_initial_overlap: bool,
+) -> bool:
+    for slot_index, slot_bound in enumerate(slot_bounds):
+        for init_index, init_bound in enumerate(init_bounds):
+            if ignore_self_initial_overlap and slot_index == init_index:
+                continue
+            if _xy_bounds_overlap(slot_bound, init_bound, clearance=clearance):
+                return True
+    return False
 
 
 def _row_search_offsets(radius: float, step: float) -> list[float]:
@@ -478,34 +503,6 @@ def _source_object_xy_bounds(
 ) -> tuple[list[float], list[float]] | None:
     config = _resolved_mesh_config(obj, scene_dir=scene_dir)
     return _mesh_config_world_xy_bounds(config)
-
-
-def _mesh_config_world_xy_bounds(
-    obj_config: Mapping[str, Any],
-) -> tuple[list[float], list[float]] | None:
-    shape = obj_config.get("shape", {})
-    if not isinstance(shape, Mapping):
-        return None
-    mesh_path = shape.get("fpath")
-    if not isinstance(mesh_path, str):
-        return None
-    from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
-        _load_mesh_vertices,
-        _mesh_config_transform_matrix,
-        _transform_point,
-    )
-
-    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
-    if not vertices:
-        return None
-    matrix = _mesh_config_transform_matrix(obj_config)
-    transformed_vertices = [_transform_point(matrix, vertex) for vertex in vertices]
-    x_values = [vertex[0] for vertex in transformed_vertices]
-    y_values = [vertex[1] for vertex in transformed_vertices]
-    return (
-        [min(x_values), min(y_values)],
-        [max(x_values), max(y_values)],
-    )
 
 
 def _slot_xy_bounds(
@@ -565,6 +562,96 @@ def _with_arrangement_generated_z_targets(
     spec: _ArrangementLineSpec,
     gym_config: Mapping[str, Any],
 ) -> _ArrangementLineSpec:
+    return _with_arrangement_generated_pose_targets(spec, gym_config)
+
+
+def _with_arrangement_generated_pose_targets(
+    spec: _ArrangementLineSpec,
+    gym_config: Mapping[str, Any],
+) -> _ArrangementLineSpec:
+    table_config = _generated_table_config(gym_config, spec.table_source_uid)
+    rigid_configs = _generated_rigid_object_configs(gym_config)
+    if table_config is None:
+        return _with_arrangement_generated_z_targets_fallback(spec, gym_config)
+
+    generated_objects = []
+    for step in spec.steps:
+        config = rigid_configs.get(step.runtime_uid)
+        if config is None:
+            return _with_arrangement_generated_z_targets_fallback(spec, gym_config)
+        generated_objects.append(
+            _SceneObject(
+                source_uid=step.runtime_uid,
+                source_role="rigid_object",
+                config=dict(config),
+            )
+        )
+
+    table_obj = _SceneObject(
+        source_uid=str(table_config.get("uid", spec.table_source_uid)),
+        source_role="background",
+        config=dict(table_config),
+    )
+    anchor_xy = _generated_table_anchor_xy(table_config, spec.line_origin_xy)
+    spacing = _arrangement_spacing(generated_objects, scene_dir=Path("."))
+    slots, line_origin_xy = _arrangement_collision_aware_line_slots(
+        anchor_xy=anchor_xy,
+        table_obj=table_obj,
+        objects=generated_objects,
+        count=len(spec.steps),
+        spacing=spacing,
+        line_axis=spec.axis,
+        scene_dir=Path("."),
+        clearance=spec.layout_clearance,
+        ignore_self_initial_overlap=True,
+    )
+    table_top_z = _generated_table_top_z(table_config)
+
+    steps = []
+    for step, target_xy in zip(spec.steps, slots):
+        config = rigid_configs[step.runtime_uid]
+        release_z = _generated_release_z(config, table_top_z)
+        release_position = [
+            round(float(target_xy[0]), 6),
+            round(float(target_xy[1]), 6),
+            release_z,
+        ]
+        high_position = list(release_position)
+        high_position[2] = round(high_position[2] + _DEFAULT_STAGING_Z_DELTA, 6)
+        steps.append(
+            replace(
+                step,
+                active_side=_arm_side_for_position(
+                    _clean_vector3(config.get("init_pos", [0.0, 0.0, 0.0]))
+                ),
+                target_xy=[
+                    round(float(target_xy[0]), 6),
+                    round(float(target_xy[1]), 6),
+                ],
+                release_position=release_position,
+                high_position=high_position,
+                size_score=_arrangement_object_size_score(
+                    _SceneObject(
+                        source_uid=step.runtime_uid,
+                        source_role="rigid_object",
+                        config=dict(config),
+                    ),
+                    scene_dir=Path("."),
+                ),
+            )
+        )
+    return replace(
+        spec,
+        steps=tuple(steps),
+        line_origin_xy=line_origin_xy,
+        spacing=spacing,
+    )
+
+
+def _with_arrangement_generated_z_targets_fallback(
+    spec: _ArrangementLineSpec,
+    gym_config: Mapping[str, Any],
+) -> _ArrangementLineSpec:
     init_z_by_uid = {
         str(obj.get("uid")): _clean_vector3(obj.get("init_pos", [0.0, 0.0, 0.0]))[2]
         for obj in gym_config.get("rigid_object", [])
@@ -591,6 +678,67 @@ def _with_arrangement_generated_z_targets(
             )
         )
     return replace(spec, steps=tuple(steps))
+
+
+def _generated_table_config(
+    gym_config: Mapping[str, Any],
+    table_source_uid: str,
+) -> Mapping[str, Any] | None:
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if isinstance(obj, Mapping) and obj.get("uid") is not None
+    }
+    return object_configs.get("table") or object_configs.get(table_source_uid)
+
+
+def _generated_rigid_object_configs(
+    gym_config: Mapping[str, Any],
+) -> dict[str, Mapping[str, Any]]:
+    return {
+        str(obj.get("uid")): obj
+        for obj in gym_config.get("rigid_object", [])
+        if isinstance(obj, Mapping) and obj.get("uid") is not None
+    }
+
+
+def _generated_table_anchor_xy(
+    table_config: Mapping[str, Any],
+    fallback_xy: Sequence[float],
+) -> list[float]:
+    center = _mesh_config_world_xy_center(table_config)
+    if center is not None:
+        return center
+    try:
+        init_pos = _clean_vector3(table_config.get("init_pos", [0.0, 0.0, 0.0]))
+        return [round(float(init_pos[0]), 6), round(float(init_pos[1]), 6)]
+    except ValueError:
+        pass
+    return [round(float(fallback_xy[0]), 6), round(float(fallback_xy[1]), 6)]
+
+
+def _generated_table_top_z(table_config: Mapping[str, Any]) -> float | None:
+    z_bounds = _mesh_config_world_z_bounds(table_config)
+    if z_bounds is None:
+        return None
+    return float(z_bounds[1])
+
+
+def _generated_release_z(
+    object_config: Mapping[str, Any],
+    table_top_z: float | None,
+) -> float:
+    if table_top_z is not None:
+        local_zmin = _mesh_config_local_zmin_after_rotation(object_config)
+        if local_zmin is not None:
+            return round(
+                float(table_top_z) + _TABLETOP_OBJECT_CLEARANCE - float(local_zmin),
+                6,
+            )
+    init_pos = object_config.get("init_pos")
+    if isinstance(init_pos, Sequence) and len(init_pos) == 3:
+        return round(float(init_pos[2]) + _DEFAULT_RELEASE_Z, 6)
+    return _DEFAULT_RELEASE_Z
 
 
 def _resolve_arrangement_object_uids(
@@ -818,8 +966,18 @@ def _arrangement_runtime_uid_mapping(
     }
 
 
-def _table_anchor_xy(table_obj: _SceneObject, anchor: str) -> list[float]:
+def _table_anchor_xy(
+    table_obj: _SceneObject,
+    anchor: str,
+    *,
+    scene_dir: Path,
+) -> list[float]:
     _normalize_anchor(anchor)
+    center = _mesh_config_world_xy_center(
+        _resolved_mesh_config(table_obj, scene_dir=scene_dir)
+    )
+    if center is not None:
+        return center
     init_pos = _clean_vector3(table_obj.config.get("init_pos", [0.0, 0.0, 0.0]))
     return [round(init_pos[0], 6), round(init_pos[1], 6)]
 

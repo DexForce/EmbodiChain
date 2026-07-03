@@ -67,7 +67,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _build_arrangement_line_spec_with_llm,
     _call_arrangement_task_llm,
-    _with_arrangement_generated_z_targets,
+    _with_arrangement_generated_pose_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _build_stacking_spec_with_llm,
@@ -762,7 +762,7 @@ def _build_arrangement_line_bundle(
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
-    spec = _with_arrangement_generated_z_targets(spec, gym_config)
+    spec = _with_arrangement_generated_pose_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_arrangement_extensions_config(spec)
     gym_config["env"]["dataset"] = _make_arrangement_dataset_config(
         project_name,
