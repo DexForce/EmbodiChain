@@ -18,13 +18,20 @@
 
 from __future__ import annotations
 
+from .coordinated_pickment import CoordinatedPickment, CoordinatedPickmentCfg
+from .coordinated_placement import CoordinatedPlacement, CoordinatedPlacementCfg
 from .move_end_effector import MoveEndEffector, MoveEndEffectorCfg
 from .move_held_object import MoveHeldObject, MoveHeldObjectCfg
 from .move_joints import MoveJoints, MoveJointsCfg
 from .pick_up import PickUp, PickUpCfg
 from .place import Place, PlaceCfg
+from .press import Press, PressCfg
 
 __all__ = [
+    "CoordinatedPickment",
+    "CoordinatedPickmentCfg",
+    "CoordinatedPlacement",
+    "CoordinatedPlacementCfg",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
     "MoveHeldObject",
@@ -35,4 +42,6 @@ __all__ = [
     "PickUpCfg",
     "Place",
     "PlaceCfg",
+    "Press",
+    "PressCfg",
 ]

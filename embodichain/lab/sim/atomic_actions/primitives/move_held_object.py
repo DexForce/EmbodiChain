@@ -128,6 +128,7 @@ class MoveHeldObject(AtomicAction):
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
                 held_object=state.held_object,
+                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 

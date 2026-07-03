@@ -26,7 +26,11 @@ from ..core import WorldState
 
 
 def resolve_object_target(
-    target: torch.Tensor, *, n_envs: int, device: torch.device
+    target: torch.Tensor,
+    *,
+    n_envs: int,
+    device: torch.device,
+    name: str = "object_target_pose",
 ) -> torch.Tensor:
     """Broadcast an object target pose to ``(n_envs, 4, 4)`` or validate it."""
     target = target.to(device=device, dtype=torch.float32)
@@ -34,7 +38,7 @@ def resolve_object_target(
         target = target.unsqueeze(0).repeat(n_envs, 1, 1)
     if target.shape != (n_envs, 4, 4):
         logger.log_error(
-            f"object_target_pose must be (4, 4) or ({n_envs}, 4, 4), but got {target.shape}",
+            f"{name} must be (4, 4) or ({n_envs}, 4, 4), but got {target.shape}",
             ValueError,
         )
     return target

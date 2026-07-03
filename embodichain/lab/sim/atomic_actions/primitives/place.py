@@ -174,7 +174,11 @@ class Place(AtomicAction):
         return ActionResult(
             success=True,
             trajectory=full,
-            next_state=WorldState(last_qpos=full[:, -1, :].clone(), held_object=None),
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=None,
+                coordinated_held_object=state.coordinated_held_object,
+            ),
         )
 
     def _fail(self, state: WorldState) -> ActionResult:

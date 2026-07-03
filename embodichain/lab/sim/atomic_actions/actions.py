@@ -23,6 +23,10 @@ from ``atomic_actions.actions`` remains supported for existing callers.
 from __future__ import annotations
 
 from .primitives import (
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
+    CoordinatedPlacement,
+    CoordinatedPlacementCfg,
     MoveEndEffector,
     MoveEndEffectorCfg,
     MoveHeldObject,
@@ -33,9 +37,15 @@ from .primitives import (
     PickUpCfg,
     Place,
     PlaceCfg,
+    Press,
+    PressCfg,
 )
 
 __all__ = [
+    "CoordinatedPickment",
+    "CoordinatedPickmentCfg",
+    "CoordinatedPlacement",
+    "CoordinatedPlacementCfg",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
     "MoveJoints",
@@ -46,4 +56,6 @@ __all__ = [
     "PickUpCfg",
     "Place",
     "PlaceCfg",
+    "Press",
+    "PressCfg",
 ]
