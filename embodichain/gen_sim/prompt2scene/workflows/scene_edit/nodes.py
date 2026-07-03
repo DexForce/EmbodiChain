@@ -178,6 +178,7 @@ def analyze_scene_edit_intent_node(
 
 def generate_edit_assets_node(
     *,
+    request: SceneEditRequest,
     intent_analysis: dict[str, Any],
     output_dir: Path,
     llm: Any | None = None,
@@ -202,6 +203,7 @@ def generate_edit_assets_node(
         generated_objects=generated_objects,
         output_root=output_dir.parent,
         output_dir=output_dir,
+        gravity_settle_mode=request.gravity_settle_mode,
     )
     generated_assets = generation_result.get("generated_assets", [])
     if isinstance(generated_assets, list) and generated_assets:

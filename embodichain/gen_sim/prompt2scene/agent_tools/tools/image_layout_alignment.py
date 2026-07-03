@@ -69,6 +69,7 @@ def _export_support_aligned_layout_glbs(
     llm: Any | None,
     output_dir: Path,
     output_root: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Export layout-baked GLBs aligned by support normal and left-right order."""
     try:
@@ -201,6 +202,7 @@ def _export_support_aligned_layout_glbs(
         output_dir=output_dir / "footprint_layout",
         output_root=output_root,
         trimesh=trimesh,
+        gravity_settle_mode=gravity_settle_mode,
     )
     object_scenes = footprint_result["object_scenes"]
 

@@ -68,6 +68,7 @@ def run_scene_edit(
         llm=llm,
     )
     generated_assets = generate_edit_assets_node(
+        request=request,
         intent_analysis=intent_analysis,
         output_dir=output_dir,
         llm=llm,

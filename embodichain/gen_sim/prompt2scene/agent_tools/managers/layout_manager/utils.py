@@ -95,6 +95,7 @@ def _settle_and_pack_object_footprints(
     output_dir: Path,
     output_root: Path,
     trimesh: Any,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     sim = SimulationManager(headless=True, sim_device="cpu")
     footprint_items: list[dict[str, Any]] = []
@@ -132,6 +133,7 @@ def _settle_and_pack_object_footprints(
                         glb_path=pre_gravity_path,
                         max_convex_hull_num=16,
                         initial_height=gravity_initial_height,
+                        gravity_settle_mode=gravity_settle_mode,
                     )
                 )
                 gravity_transform = GeometryManager.matrix_from_json(
@@ -160,6 +162,7 @@ def _settle_and_pack_object_footprints(
                     "bottom_to_xy_plane_transform": bottom_to_xy_plane_transform,
                     "mesh_z_height": mesh_z_height,
                     "gravity_initial_height": gravity_initial_height,
+                    "gravity_settle_mode": gravity_settle_mode,
                     "gravity_transform": gravity_transform,
                     "settled_bounds": settled_bounds,
                     "settled_xy_center": settled_xy_center,
@@ -225,6 +228,7 @@ def _settle_and_pack_object_footprints(
                 ].tolist(),
                 "mesh_z_height": entry["mesh_z_height"],
                 "gravity_initial_height": entry["gravity_initial_height"],
+                "gravity_settle_mode": entry["gravity_settle_mode"],
                 "gravity_transform": entry["gravity_transform"].tolist(),
                 "placement_transform": placement_transform.tolist(),
                 "object_layout_transform": object_transform.tolist(),
@@ -240,6 +244,7 @@ def _settle_and_pack_object_footprints(
         "output_dir": relative_path(str(output_dir), output_root),
         "internal_up_axis": [0.0, 0.0, 1.0],
         "gravity_glb_up_axis": [0.0, 1.0, 0.0],
+        "gravity_settle_mode": gravity_settle_mode,
         "internal_to_gravity_glb_transform": output_axis_transform.tolist(),
         "gravity_glb_to_internal_transform": output_to_internal_transform.tolist(),
         "layout_optimization": layout_result["metadata"],

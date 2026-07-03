@@ -140,6 +140,7 @@ def run_prompt2scene(
             SceneEditRequest(
                 output_root=request.output_root,
                 prompt=request.prompt or "",
+                gravity_settle_mode=request.gravity_settle_mode,
             ),
             llm_cfg=llm_cfg,
         )
@@ -209,6 +210,7 @@ def run_prompt2scene(
             request.output_root,
             unified_scene_result_path=unified_scene_path,
             llm_cfg=llm_cfg,
+            gravity_settle_mode=request.gravity_settle_mode,
         )
         log.log_info("step end unified_scene_gen status=ok")
 
@@ -221,6 +223,7 @@ def run_prompt2scene(
                 SceneEditRequest(
                     output_root=request.output_root,
                     prompt=request.prompt,
+                    gravity_settle_mode=request.gravity_settle_mode,
                 ),
                 llm_cfg=llm_cfg,
             )

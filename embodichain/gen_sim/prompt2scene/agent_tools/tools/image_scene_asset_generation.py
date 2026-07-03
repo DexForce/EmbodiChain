@@ -82,6 +82,7 @@ def generate_image_scene_assets(
     debug_dir: Path,
     output_root: Path,
     llm: Any | None = None,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Run layout-aware table/support and object generation from image masks."""
     log_info(f"image object layout generation started count={len(object_specs)}")
@@ -230,6 +231,7 @@ def generate_image_scene_assets(
                                 input_path=Path(raw_geometry_path),
                                 output_path=simready_dir
                                 / f"{requested['id']}_simready.glb",
+                                gravity_settle_mode=gravity_settle_mode,
                             )
                         )
                         simready_geometry_path = str(table_result.output_path)
@@ -240,6 +242,7 @@ def generate_image_scene_assets(
                             input_path=Path(raw_geometry_path),
                             output_path=simready_dir
                             / f"{requested['id']}_simready.glb",
+                            gravity_settle_mode=gravity_settle_mode,
                         )
                     )
                     simready_geometry_path = str(asset_result.output_path)
@@ -359,6 +362,7 @@ def generate_image_scene_assets(
                             output_path=glb_gen_dir
                             / "multi_object_layouts_simready"
                             / f"{incomplete_table_id}_simready.glb",
+                            gravity_settle_mode=gravity_settle_mode,
                         )
                     )
                     generated_item.update(
@@ -420,6 +424,7 @@ def generate_image_scene_assets(
                 llm=llm,
                 output_dir=aligned_dir,
                 output_root=output_root,
+                gravity_settle_mode=gravity_settle_mode,
             )
             aligned_object_by_id = {
                 item["id"]: item for item in alignment_result["objects"]

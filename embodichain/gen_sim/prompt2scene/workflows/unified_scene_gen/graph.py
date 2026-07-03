@@ -56,12 +56,14 @@ def run_unified_scene_gen(
     *,
     unified_scene_result_path: Path | None = None,
     llm_cfg: OpenAICompatibleLLMCfg | None = None,
+    gravity_settle_mode: str = "geometry",
 ) -> UnifiedSceneGenState:
     """Run downstream generation routing from a unified-scene result."""
     llm = build_chat_model(llm_cfg) if llm_cfg is not None else None
     initial_state: UnifiedSceneGenState = {
         "output_root": output_root,
         "unified_scene_result_path": unified_scene_result_path,
+        "gravity_settle_mode": gravity_settle_mode,
         "llm": llm,
         "unified_scene": None,
         "input_kind": None,

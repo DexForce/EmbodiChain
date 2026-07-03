@@ -40,6 +40,7 @@ class Prompt2SceneInput:
     output_root: Path
     image_path: Path | None = None
     prompt: str | None = None
+    gravity_settle_mode: str = "geometry"
 
     @classmethod
     def from_cli_args(
@@ -48,6 +49,7 @@ class Prompt2SceneInput:
         image_path: Path | None,
         prompt: str | None,
         output_root: Path,
+        gravity_settle_mode: str = "geometry",
     ) -> "Prompt2SceneInput":
         """Create a prompt2scene input from CLI arguments.
 
@@ -67,6 +69,9 @@ class Prompt2SceneInput:
         prompt_text = prompt.strip() if prompt is not None else None
         if prompt_text == "":
             prompt_text = None
+        gravity_settle_mode = cls._validate_gravity_settle_mode(
+            gravity_settle_mode
+        )
 
         if image_path is not None:
             image_path = image_path.expanduser().resolve()
@@ -76,12 +81,14 @@ class Prompt2SceneInput:
                 image_path=image_path,
                 output_root=output_root,
                 prompt=prompt_text,
+                gravity_settle_mode=gravity_settle_mode,
             )
 
         return cls(
             input_kind=InputKind.EDIT,
             output_root=output_root,
             prompt=cls._validate_edit_only_prompt(prompt_text, output_root),
+            gravity_settle_mode=gravity_settle_mode,
         )
 
     def to_manifest(self) -> dict[str, str]:
@@ -89,6 +96,7 @@ class Prompt2SceneInput:
         manifest: dict[str, str] = {
             "input_kind": self.input_kind.value,
             "output_root": str(self.output_root),
+            "gravity_settle_mode": self.gravity_settle_mode,
         }
         if self.input_kind == InputKind.IMAGE:
             image_path = self.image_path
@@ -110,6 +118,16 @@ class Prompt2SceneInput:
                 f"{scene_state}"
             )
         return prompt
+
+    @staticmethod
+    def _validate_gravity_settle_mode(gravity_settle_mode: str) -> str:
+        mode = str(gravity_settle_mode or "geometry").strip().lower()
+        if mode not in {"geometry", "physics"}:
+            raise ValueError(
+                "gravity_settle_mode must be 'geometry' or 'physics', "
+                f"got {gravity_settle_mode!r}."
+            )
+        return mode
 
     @staticmethod
     def _validate_image_path(image_path: Path) -> None:

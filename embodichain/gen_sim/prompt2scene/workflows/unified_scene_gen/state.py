@@ -29,6 +29,7 @@ class UnifiedSceneGenState(AttemptState):
 
     output_root: Path
     unified_scene_result_path: Path | None
+    gravity_settle_mode: str
     llm: Any | None
     unified_scene: dict[str, Any] | None
     input_kind: str | None

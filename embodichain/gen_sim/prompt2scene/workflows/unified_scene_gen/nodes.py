@@ -120,6 +120,7 @@ def generate_image_assets_node(state: UnifiedSceneGenState) -> dict[str, object]
         debug_dir=debug_dir,
         output_root=output_root,
         llm=state.get("llm"),
+        gravity_settle_mode=str(state.get("gravity_settle_mode") or "geometry"),
     )
     table_result = object_layout_result.get("table") or {
         "id": str(table_spec.get("id", "table")),
@@ -169,6 +170,7 @@ def fit_image_table_to_clutter_node(state: UnifiedSceneGenState) -> dict[str, ob
         fallback_table_result=state.get("table_result"),
         output_root=output_root,
         output_dir=output_dir,
+        gravity_settle_mode=str(state.get("gravity_settle_mode") or "geometry"),
     )
     layout_result["table_fit_to_clutter"] = table_fit_result
     WorkflowArtifactWriter(output_root, UNIFIED_SCENE_GEN_STEP).write_step_result(

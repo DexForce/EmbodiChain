@@ -405,6 +405,7 @@ def generate_scene_edit_object_assets(
     generated_objects: list[dict[str, Any]],
     output_root: Path,
     output_dir: Path,
+    gravity_settle_mode: str = "geometry",
 ) -> dict[str, Any]:
     """Generate simready assets for scene-edit add/replace objects."""
     image_gen_dir = output_dir / "image_gen"
@@ -427,6 +428,7 @@ def generate_scene_edit_object_assets(
         image_gen_dir=image_gen_dir,
         glb_gen_dir=glb_gen_dir,
         debug_dir=debug_dir,
+        gravity_settle_mode=gravity_settle_mode,
     )
     normalized_results = [
         _normalize_generated_asset_result(result, output_root=output_root)

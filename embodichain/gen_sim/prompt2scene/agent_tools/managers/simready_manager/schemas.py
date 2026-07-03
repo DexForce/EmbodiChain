@@ -39,6 +39,7 @@ class MakeAssetSimreadyRequest:
     input_up_axis: list[float] | None = None
     up_axis: list[float] | None = None
     ground_clearance: float = 0.01
+    gravity_settle_mode: str = "geometry"
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class MakeTableSimreadyRequest:
     input_up_axis: list[float] | None = None
     up_axis: list[float] | None = None
     ground_clearance: float = 0.01
+    gravity_settle_mode: str = "geometry"
 
 
 @dataclass(frozen=True)

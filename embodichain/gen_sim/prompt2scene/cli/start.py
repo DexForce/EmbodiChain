@@ -31,6 +31,7 @@ def cli_prompt2scene(
     prompt: str | None,
     output_root: str,
     llm_config_path: str | None = None,
+    gravity_settle_mode: str = "geometry",
 ) -> None:
     """Run prompt2scene from normalized CLI argument values.
 
@@ -44,6 +45,7 @@ def cli_prompt2scene(
         image_path=Path(image_path) if image_path is not None else None,
         prompt=prompt,
         output_root=Path(output_root),
+        gravity_settle_mode=gravity_settle_mode,
     )
     llm_cfg = load_llm_config(
         Path(llm_config_path) if llm_config_path is not None else None
@@ -84,6 +86,15 @@ def main() -> None:
         default=None,
         help="Path to the LLM config JSON file",
     )
+    parser.add_argument(
+        "--gravity_settle_mode",
+        choices=("geometry", "physics"),
+        default="geometry",
+        help=(
+            "Gravity settle mode. 'geometry' translates each GLB so its AABB "
+            "bottom center is at world origin; 'physics' runs simulation."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -92,6 +103,7 @@ def main() -> None:
         args.prompt,
         args.output_root,
         args.llm_config,
+        args.gravity_settle_mode,
     )
 
 
