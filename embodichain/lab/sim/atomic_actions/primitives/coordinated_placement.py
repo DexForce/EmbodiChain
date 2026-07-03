@@ -280,6 +280,7 @@ class CoordinatedPlacement(AtomicAction):
             pose,
             n_envs=self.n_envs,
             device=self.device,
+            name=name,
         )
         return self.builder.apply_local_offset(
             object_pose,

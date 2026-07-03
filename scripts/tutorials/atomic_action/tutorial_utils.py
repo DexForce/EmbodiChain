@@ -81,7 +81,12 @@ def should_open_tutorial_window(args: argparse.Namespace) -> bool:
 
 def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
     """Return whether the tutorial should pause for terminal input."""
-    return not getattr(args, "auto_play", False)
+    return not (
+        getattr(args, "auto_play", False)
+        or getattr(args, "headless", False)
+        or getattr(args, "diagnose_plan", False)
+        or getattr(args, "headless_play", False)
+    )
 
 
 def start_auto_play_recording(

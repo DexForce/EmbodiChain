@@ -17,6 +17,12 @@ embodichain.lab.sim.atomic_actions.primitives
       MoveHeldObject
       PlaceCfg
       Place
+      PressCfg
+      Press
+      CoordinatedPickmentCfg
+      CoordinatedPickment
+      CoordinatedPlacementCfg
+      CoordinatedPlacement
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
 
@@ -56,6 +62,30 @@ Place
 -----
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.place
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+Press
+-----
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.press
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+CoordinatedPickment
+-------------------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.coordinated_pickment
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+CoordinatedPlacement
+--------------------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.coordinated_placement
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
