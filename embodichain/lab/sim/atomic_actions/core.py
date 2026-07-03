@@ -139,16 +139,6 @@ class CoordinatedPickmentTarget:
     """Optional initial object pose. Defaults to ``object_semantics.entity`` pose."""
 
 
-Target = (
-    EndEffectorPoseTarget
-    | JointPositionTarget
-    | NamedJointPositionTarget
-    | GraspTarget
-    | HeldObjectPoseTarget
-    | CoordinatedPickmentTarget
-)
-
-
 # =============================================================================
 # World state threaded between actions
 # =============================================================================
@@ -186,6 +176,47 @@ class CoordinatedHeldObjectState:
 
     right_grasp_xpos: torch.Tensor
     """Right end-effector grasp pose for the shared object, shape [n_envs, 4, 4]."""
+
+
+@dataclass(frozen=True)
+class CoordinatedPlacementTarget:
+    """Object-centric target for dual-arm coordinated placement.
+
+    The placing arm moves its held object to the upper target and releases it.
+    The support arm moves its held object to the lower target and keeps holding.
+    """
+
+    placing_object_target_pose: torch.Tensor
+    """Target pose for the object released by the placing arm."""
+
+    support_object_target_pose: torch.Tensor
+    """Target pose for the object held by the support arm."""
+
+    placing_held_object: HeldObjectState
+    """Held-object state for the placing arm."""
+
+    support_held_object: HeldObjectState
+    """Held-object state for the support arm."""
+
+    placing_height_offset: float | None = None
+    """World-Z offset above the placing object target pose."""
+
+    support_height_offset: float | None = None
+    """World-Z offset above the support object target pose."""
+
+    release: bool | None = None
+    """Whether the placing hand releases. ``None`` uses action config."""
+
+
+Target = (
+    EndEffectorPoseTarget
+    | JointPositionTarget
+    | NamedJointPositionTarget
+    | GraspTarget
+    | HeldObjectPoseTarget
+    | CoordinatedPickmentTarget
+    | CoordinatedPlacementTarget
+)
 
 
 @dataclass
@@ -278,6 +309,7 @@ __all__ = [
     "AtomicAction",
     "CoordinatedHeldObjectState",
     "CoordinatedPickmentTarget",
+    "CoordinatedPlacementTarget",
     "GraspTarget",
     "HeldObjectState",
     "HeldObjectPoseTarget",

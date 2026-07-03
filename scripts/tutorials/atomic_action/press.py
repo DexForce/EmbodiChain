@@ -53,11 +53,11 @@ from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_tutorial_window_size,
+    make_ur5_solver_cfg,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
@@ -160,18 +160,7 @@ def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
             "arm": ["JOINT[0-9]"],
             "hand": [GRIPPER_HAND_JOINT_PATTERN],
         },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-            )
-        },
+        solver_cfg={"arm": make_ur5_solver_cfg(GRIPPER_TCP_Z)},
         init_qpos=[0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
         init_pos=position,
     )
