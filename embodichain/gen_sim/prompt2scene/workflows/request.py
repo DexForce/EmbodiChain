@@ -30,6 +30,7 @@ class InputKind(str, Enum):
 
     IMAGE = "image"
     TEXT = "text"
+    EDIT = "edit"
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class Prompt2SceneInput:
     output_root: Path
     image_path: Path | None = None
     text: str | None = None
+    prompt: str | None = None
 
     @classmethod
     def from_cli_args(
@@ -47,6 +49,7 @@ class Prompt2SceneInput:
         *,
         image_path: Path | None,
         text: str | None,
+        prompt: str | None,
         output_root: Path,
     ) -> "Prompt2SceneInput":
         """Create a prompt2scene input from CLI arguments.
@@ -54,6 +57,7 @@ class Prompt2SceneInput:
         Args:
             image_path: Input image path, if image mode is selected.
             text: Text prompt, if text mode is selected.
+            prompt: Optional edit prompt.
             output_root: Directory where prompt2scene outputs are written.
 
         Returns:
@@ -64,6 +68,12 @@ class Prompt2SceneInput:
             ValueError: If the image path is invalid or text input is empty.
         """
         output_root = output_root.expanduser().resolve()
+        prompt_text = prompt.strip() if prompt is not None else None
+        if prompt_text == "":
+            prompt_text = None
+
+        if image_path is not None and text is not None and text.strip():
+            raise ValueError("Image and text inputs cannot be used at the same time.")
 
         if image_path is not None:
             image_path = image_path.expanduser().resolve()
@@ -72,15 +82,21 @@ class Prompt2SceneInput:
                 input_kind=InputKind.IMAGE,
                 image_path=image_path,
                 output_root=output_root,
+                prompt=prompt_text,
             )
 
-        if text is None or not text.strip():
-            raise ValueError("Text input must be non-empty.")
+        if text is not None and text.strip():
+            return cls(
+                input_kind=InputKind.TEXT,
+                text=text.strip(),
+                output_root=output_root,
+                prompt=prompt_text,
+            )
 
         return cls(
-            input_kind=InputKind.TEXT,
-            text=text.strip(),
+            input_kind=InputKind.EDIT,
             output_root=output_root,
+            prompt=cls._validate_edit_only_prompt(prompt_text, output_root),
         )
 
     def to_manifest(self) -> dict[str, str]:
@@ -92,10 +108,25 @@ class Prompt2SceneInput:
         if self.input_kind == InputKind.IMAGE:
             image_path = self.image_path
             manifest["image_path"] = str(image_path)
-        else:
+        elif self.input_kind == InputKind.TEXT:
             text = self.text
             manifest["text"] = "" if text is None else text
+        if self.prompt is not None:
+            manifest["prompt"] = self.prompt
         return manifest
+
+    @staticmethod
+    def _validate_edit_only_prompt(prompt: str | None, output_root: Path) -> str:
+        if prompt is None:
+            raise ValueError(
+                "Provide --image, --text, or --prompt with an existing output_root."
+            )
+        scene_state = output_root / "gym_export" / "scene_state" / "result.json"
+        if not scene_state.is_file():
+            raise FileNotFoundError(
+                "Edit-only mode requires an existing scene state: " f"{scene_state}"
+            )
+        return prompt
 
     @staticmethod
     def _validate_image_path(image_path: Path) -> None:

@@ -24,15 +24,17 @@ from embodichain.gen_sim.prompt2scene.workflows.request import (
     InputKind,
     Prompt2SceneInput,
 )
-from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
+from embodichain.gen_sim.prompt2scene.workflows.paths import (
     IMAGE_SEGMENTS_STEP,
     IMAGE_SPATIAL_RELATIONS_STEP,
+    SCENE_EDIT_STEP,
     SCENE_INTAKE_STEP,
-    STEP_RESULT_FILENAME,
-    step_result_path,
-    write_step_result,
     TEXT_RELATIONS_STEP,
     UNIFIED_SCENE_STEP,
+    PipelinePaths,
+)
+from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
+    write_step_result,
 )
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene.graph import (
     run_unified_scene,
@@ -40,8 +42,12 @@ from embodichain.gen_sim.prompt2scene.workflows.unified_scene.graph import (
 from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.graph import (
     run_unified_scene_gen,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.tools.gym_export import (
+from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
     export_gym_config,
+)
+from embodichain.gen_sim.prompt2scene.workflows.scene_edit import run_scene_edit
+from embodichain.gen_sim.prompt2scene.workflows.scene_edit.schema import (
+    SceneEditRequest,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import write_json
 from embodichain.gen_sim.prompt2scene.utils import log
@@ -57,6 +63,7 @@ __all__ = [
     "IMAGE_SEGMENTS_DIRNAME",
     "IMAGE_SPATIAL_RELATIONS_DIRNAME",
     "INPUT_MANIFEST_FILENAME",
+    "SCENE_EDIT_DIRNAME",
     "SCENE_INTAKE_DIRNAME",
     "STEP_RESULT_FILENAME",
     "TEXT_RELATIONS_DIRNAME",
@@ -67,6 +74,7 @@ __all__ = [
 
 INPUT_MANIFEST_FILENAME = "input_manifest.json"
 SCENE_INTAKE_DIRNAME = SCENE_INTAKE_STEP
+SCENE_EDIT_DIRNAME = SCENE_EDIT_STEP
 IMAGE_SEGMENTS_DIRNAME = IMAGE_SEGMENTS_STEP
 IMAGE_SPATIAL_RELATIONS_DIRNAME = IMAGE_SPATIAL_RELATIONS_STEP
 TEXT_RELATIONS_DIRNAME = TEXT_RELATIONS_STEP
@@ -85,6 +93,8 @@ class Prompt2SceneRunResult:
         image_spatial_relations_path: Path to serialized image spatial relations.
         text_relations_path: Path to serialized text spatial relations.
         unified_scene_path: Path to serialized unified scene output.
+        gym_config_path: Path to the exported gym config.
+        scene_edit_path: Path to serialized scene edit output.
     """
 
     output_root: Path
@@ -95,6 +105,7 @@ class Prompt2SceneRunResult:
     text_relations_path: Path | None = None
     unified_scene_path: Path | None = None
     gym_config_path: Path | None = None
+    scene_edit_path: Path | None = None
 
 
 def run_prompt2scene(
@@ -118,6 +129,7 @@ def run_prompt2scene(
         f"input_kind={request.input_kind.value} output_root={request.output_root}"
     )
     request.output_root.mkdir(parents=True, exist_ok=True)
+    paths = PipelinePaths(request.output_root)
     manifest_path = request.output_root / INPUT_MANIFEST_FILENAME
     manifest = request.to_manifest()
     if llm_cfg is not None:
@@ -130,7 +142,21 @@ def run_prompt2scene(
     text_relations_path = None
     unified_scene_path = None
     gym_config_path = None
-    if llm_cfg is not None:
+    scene_edit_path = None
+    if request.input_kind == InputKind.EDIT:
+        log.log_info("step start scene_edit")
+        run_scene_edit(
+            SceneEditRequest(
+                output_root=request.output_root,
+                prompt=request.prompt or "",
+            ),
+            llm_cfg=llm_cfg,
+        )
+        scene_edit_path = paths.step_result(SCENE_EDIT_STEP)
+        log.log_info(
+            f"step end scene_edit status=pending_implementation output={scene_edit_path}"
+        )
+    elif llm_cfg is not None:
         log.log_info("step start scene_intake")
         scene_intake = run_scene_intake(request, llm_cfg=llm_cfg)
         scene_intake_path = write_step_result(
@@ -138,9 +164,7 @@ def run_prompt2scene(
             SCENE_INTAKE_STEP,
             scene_intake.to_manifest(),
         )
-        log.log_info(
-            f"step end scene_intake status=ok output={scene_intake_path}"
-        )
+        log.log_info(f"step end scene_intake status=ok output={scene_intake_path}")
         if request.input_kind == InputKind.IMAGE:
             log.log_info("step start image_relations")
             image_relations = run_image_relations(
@@ -149,8 +173,7 @@ def run_prompt2scene(
                 llm_cfg=llm_cfg,
                 output_root=request.output_root,
             )
-            image_segments_path = step_result_path(
-                request.output_root,
+            image_segments_path = paths.step_result(
                 IMAGE_SEGMENTS_STEP,
             )
             if not image_segments_path.is_file():
@@ -159,8 +182,7 @@ def run_prompt2scene(
                     IMAGE_SEGMENTS_STEP,
                     image_relations.to_segmentation_manifest(),
                 )
-            image_spatial_relations_path = step_result_path(
-                request.output_root,
+            image_spatial_relations_path = paths.step_result(
                 IMAGE_SPATIAL_RELATIONS_STEP,
             )
             if not image_spatial_relations_path.is_file():
@@ -180,8 +202,7 @@ def run_prompt2scene(
                 image_relations=image_relations,
                 output_root=request.output_root,
             )
-            unified_scene_path = step_result_path(
-                request.output_root,
+            unified_scene_path = paths.step_result(
                 UNIFIED_SCENE_STEP,
             )
         else:
@@ -192,8 +213,7 @@ def run_prompt2scene(
                 llm_cfg=llm_cfg,
                 output_root=request.output_root,
             )
-            text_relations_path = step_result_path(
-                request.output_root,
+            text_relations_path = paths.step_result(
                 TEXT_RELATIONS_STEP,
             )
             log.log_info(
@@ -206,13 +226,10 @@ def run_prompt2scene(
                 text_relations=text_relations,
                 output_root=request.output_root,
             )
-            unified_scene_path = step_result_path(
-                request.output_root,
+            unified_scene_path = paths.step_result(
                 UNIFIED_SCENE_STEP,
             )
-        log.log_info(
-            f"step end unified_scene status=ok output={unified_scene_path}"
-        )
+        log.log_info(f"step end unified_scene status=ok output={unified_scene_path}")
         log.log_info("step start unified_scene_gen")
         run_unified_scene_gen(
             request.output_root,
@@ -224,6 +241,19 @@ def run_prompt2scene(
         log.log_info("step start gym_export")
         gym_config_path = export_gym_config(request.output_root)
         log.log_info(f"step end gym_export status=ok output={gym_config_path}")
+        if request.prompt:
+            log.log_info("step start scene_edit")
+            run_scene_edit(
+                SceneEditRequest(
+                    output_root=request.output_root,
+                    prompt=request.prompt,
+                ),
+                llm_cfg=llm_cfg,
+            )
+            scene_edit_path = paths.step_result(SCENE_EDIT_STEP)
+            log.log_info(
+                f"step end scene_edit status=pending_implementation output={scene_edit_path}"
+            )
 
     log.log_info(f"run end output_root={request.output_root}")
 
@@ -236,4 +266,5 @@ def run_prompt2scene(
         text_relations_path=text_relations_path,
         unified_scene_path=unified_scene_path,
         gym_config_path=gym_config_path,
+        scene_edit_path=scene_edit_path,
     )

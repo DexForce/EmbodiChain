@@ -16,14 +16,8 @@
 
 from __future__ import annotations
 
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.alignment import (
-    _export_support_aligned_layout_glbs,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.manifests import (
-    _write_multi_object_layout_manifests,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.manager import (
+    LayoutManager,
 )
 
-__all__ = [
-    "_export_support_aligned_layout_glbs",
-    "_write_multi_object_layout_manifests",
-]
+__all__ = ["LayoutManager"]

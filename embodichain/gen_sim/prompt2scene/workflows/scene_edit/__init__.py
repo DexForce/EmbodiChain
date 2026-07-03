@@ -16,22 +16,8 @@
 
 from __future__ import annotations
 
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.metric_scale_manager.manager import (
-    METRIC_SCALE_ENABLED,
-    MetricScaleManager,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.metric_scale_manager.schemas import (
-    EstimateMetricScalesRequest,
-    EstimateMetricScalesResult,
-    GlobalMetricScaleRequest,
-    MetricScaleObjectInput,
+from embodichain.gen_sim.prompt2scene.workflows.scene_edit.graph import (
+    run_scene_edit,
 )
 
-__all__ = [
-    "METRIC_SCALE_ENABLED",
-    "EstimateMetricScalesRequest",
-    "EstimateMetricScalesResult",
-    "GlobalMetricScaleRequest",
-    "MetricScaleManager",
-    "MetricScaleObjectInput",
-]
+__all__ = ["run_scene_edit"]

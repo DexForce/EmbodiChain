@@ -23,7 +23,7 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
     ImageAnchor,
     ImageRelationSpec,
 )
-from embodichain.gen_sim.prompt2scene.workflows.spatial import (
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.spatial_relations import (
     assign_grids_from_anchor_and_orders,
     derive_relations_from_orders,
     transitive_relation_closure,
@@ -97,9 +97,7 @@ def build_unified_table(
         "id": scene_intake.table.id,
         "name": scene_intake.table.name,
         "description": scene_intake.table.description,
-        "complete_table_description": (
-            scene_intake.table.complete_table_description
-        ),
+        "complete_table_description": (scene_intake.table.complete_table_description),
         "is_complete_visible_table": scene_intake.table.is_complete_visible_table,
         "class_candidate": list(scene_intake.table.class_candidate),
         "image_path": None,
@@ -107,9 +105,7 @@ def build_unified_table(
         "grid_cells": grid_cells,
     }
     if scene_intake.table.object_coverage_percent is not None:
-        table["object_coverage_percent"] = (
-            scene_intake.table.object_coverage_percent
-        )
+        table["object_coverage_percent"] = scene_intake.table.object_coverage_percent
     return table
 
 
@@ -173,14 +169,18 @@ def text_grids_by_object_id(
     ids_by_name: dict[str, list[str]],
 ) -> dict[str, str | None]:
     """Assign explicit text table constraints to object ids."""
-    grids: dict[str, str | None] = {object_id: None for ids in ids_by_name.values() for object_id in ids}
+    grids: dict[str, str | None] = {
+        object_id: None for ids in ids_by_name.values() for object_id in ids
+    }
     for constraint in text_relations.table_constraints:
         for object_id in ids_by_name.get(constraint.asset, []):
             grids[object_id] = constraint.grid
     return grids
 
 
-def grid_cells_from_objects(objects: list[dict[str, Any]]) -> dict[str, list[str]] | None:
+def grid_cells_from_objects(
+    objects: list[dict[str, Any]],
+) -> dict[str, list[str]] | None:
     """Build table grid cell membership from unified objects."""
     grid_cells: dict[str, list[str]] = {
         "center": [],
@@ -238,9 +238,7 @@ def build_unified_scene_from_image_relations(
     anchor = build_unified_spatial_anchor(image_relations.anchor)
     if anchor is None:
         raise ValueError("Image unified scene requires an anchor.")
-    layout_by_id = {
-        layout.asset_id: layout for layout in image_relations.asset_layouts
-    }
+    layout_by_id = {layout.asset_id: layout for layout in image_relations.asset_layouts}
     objects = []
     for spec in object_specs:
         is_arbitrary_layout, layout_reason = resolve_image_layout(
@@ -294,9 +292,7 @@ def build_unified_scene_from_text_relations(
         text_relations=text_relations,
         ids_by_name=ids_by_name,
     )
-    layout_by_name = {
-        layout.asset: layout for layout in text_relations.object_layouts
-    }
+    layout_by_name = {layout.asset: layout for layout in text_relations.object_layouts}
     objects = []
     for spec in object_specs:
         is_arbitrary_layout, layout_reason = resolve_text_layout(

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.prompt2scene.utils.log import log_info, log_warning
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.text_layout_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_object_settle import (
     settle_text_objects_to_ground,
 )
 

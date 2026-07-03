@@ -470,10 +470,11 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
 
     class FakePrompt2SceneInput:
         @classmethod
-        def from_cli_args(cls, *, image_path, text, output_root):
+        def from_cli_args(cls, *, image_path, text, prompt, output_root):
             return SimpleNamespace(
                 image_path=image_path,
                 text=text,
+                prompt=prompt,
                 output_root=output_root.expanduser().resolve(),
             )
 
@@ -497,6 +498,7 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     assert captured["llm_config_path"] == llm_config
     assert captured["llm_cfg"] == "llm-cfg"
     assert captured["request"].text == "a tabletop scene with bread and a basket"
+    assert captured["request"].prompt is None
     assert captured["request"].output_root == output_root.resolve()
 
 

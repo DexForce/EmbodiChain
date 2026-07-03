@@ -19,7 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from embodichain.gen_sim.prompt2scene.agent_tools.clients.image_segmentation_client.schemas import (
     ImageSegmentationCandidate,
@@ -154,12 +155,12 @@ def draw_numbered_masks(
     draw_overlay = ImageDraw.Draw(overlay)
     font = _load_label_font(image.width)
     colors = [
-        (255, 64, 64, 110),
-        (64, 160, 255, 110),
-        (64, 220, 120, 110),
-        (255, 190, 64, 110),
-        (190, 96, 255, 110),
-        (255, 96, 190, 110),
+        (255, 64, 64, 255),
+        (64, 160, 255, 255),
+        (64, 220, 120, 255),
+        (255, 190, 64, 255),
+        (190, 96, 255, 255),
+        (255, 96, 190, 255),
     ]
 
     for index, segment in enumerate(segments, start=1):
@@ -170,9 +171,10 @@ def draw_numbered_masks(
         if mask.size != image.size:
             mask = mask.resize(image.size, Image.Resampling.NEAREST)
         color = colors[(index - 1) % len(colors)]
+        outline = _mask_outline(mask)
         color_layer = Image.new("RGBA", image.size, color)
         transparent = Image.new("RGBA", image.size)
-        overlay.alpha_composite(Image.composite(color_layer, transparent, mask))
+        overlay.alpha_composite(Image.composite(color_layer, transparent, outline))
         _draw_mask_label(
             draw=draw_overlay,
             segment=segment,
@@ -298,25 +300,45 @@ def _draw_mask_label(
     label: str,
     font: ImageFont.ImageFont,
 ) -> None:
-    bbox = mask.getbbox()
-    if bbox is None:
+    anchor = _mask_visible_pixel_centroid(mask)
+    if anchor is None:
         x1, y1, x2, y2 = segment["bbox_xyxy"]
         x = float(x1 + x2) * 0.5
         y = float(y1 + y2) * 0.5
     else:
-        x1, y1, x2, y2 = bbox
-        x = float(x1 + x2) * 0.5
-        y = float(y1 + y2) * 0.5
+        x, y = anchor
 
-    label_box = draw.textbbox((x, y), label, font=font)
+    label_box = draw.textbbox((0, 0), label, font=font)
     padding = 8
+    label_width = label_box[2] - label_box[0]
+    label_height = label_box[3] - label_box[1]
+    text_x = x - label_width * 0.5
+    text_y = y - label_height * 0.5
     draw.rectangle(
         (
-            label_box[0] - padding,
-            label_box[1] - padding,
-            label_box[2] + padding,
-            label_box[3] + padding,
+            text_x - padding,
+            text_y - padding,
+            text_x + label_width + padding,
+            text_y + label_height + padding,
         ),
         fill="red",
+        outline="white",
+        width=3,
     )
-    draw.text((x, y), label, fill="white", font=font)
+    draw.text((text_x, text_y), label, fill="white", font=font)
+
+
+def _mask_visible_pixel_centroid(mask: Image.Image) -> tuple[float, float] | None:
+    """Return the centroid of actual visible mask pixels, not the bbox center."""
+    alpha = np.asarray(mask.convert("L"), dtype=np.uint8)
+    ys, xs = np.nonzero(alpha > 0)
+    if len(xs) == 0:
+        return None
+    return float(np.mean(xs)), float(np.mean(ys))
+
+
+def _mask_outline(mask: Image.Image) -> Image.Image:
+    """Return a thick binary outline so overlays do not recolor the object."""
+    alpha = mask.convert("L")
+    edge = alpha.filter(ImageFilter.FIND_EDGES)
+    return edge.filter(ImageFilter.MaxFilter(5))

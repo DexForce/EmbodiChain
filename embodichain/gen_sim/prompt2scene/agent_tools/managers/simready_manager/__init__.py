@@ -17,19 +17,40 @@
 from __future__ import annotations
 
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager.manager import (
+    METRIC_SCALE_ENABLED,
     SimreadyManager,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager.schemas import (
+    EstimateMetricScalesRequest,
+    EstimateMetricScalesResult,
+    GlobalMetricScaleRequest,
     MakeAssetSimreadyRequest,
     MakeAssetSimreadyResult,
     MakeTableSimreadyRequest,
     MakeTableSimreadyResult,
+    MetricScaleObjectInput,
+)
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
+    build_image_metric_scale_messages,
+)
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
+    IMAGE_METRIC_SCALE_JSON_SCHEMA,
 )
 
+MetricScaleManager = SimreadyManager
+
 __all__ = [
+    "EstimateMetricScalesRequest",
+    "EstimateMetricScalesResult",
+    "GlobalMetricScaleRequest",
+    "IMAGE_METRIC_SCALE_JSON_SCHEMA",
     "MakeAssetSimreadyRequest",
     "MakeAssetSimreadyResult",
     "MakeTableSimreadyRequest",
     "MakeTableSimreadyResult",
+    "METRIC_SCALE_ENABLED",
+    "MetricScaleManager",
+    "MetricScaleObjectInput",
     "SimreadyManager",
+    "build_image_metric_scale_messages",
 ]

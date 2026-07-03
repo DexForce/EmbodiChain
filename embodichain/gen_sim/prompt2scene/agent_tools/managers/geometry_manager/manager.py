@@ -60,6 +60,180 @@ class GeometryManager:
     the same pattern as service clients.
     """
 
+    @staticmethod
+    def compose_json_matrices(*values: Any) -> list[list[float]]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_json_matrices(*values)
+
+    @staticmethod
+    def compose_simready_to_aligned_matrix(
+        *, raw_to_aligned_matrix: Any, raw_to_simready_matrix: Any
+    ) -> list[list[float]]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_simready_to_aligned_matrix(
+            raw_to_aligned_matrix=raw_to_aligned_matrix,
+            raw_to_simready_matrix=raw_to_simready_matrix,
+        )
+
+    @staticmethod
+    def decompose_transform_matrix(matrix_value: Any) -> dict[str, Any]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._decompose_transform_matrix(matrix_value)
+
+    @staticmethod
+    def support_normal_flip_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._support_normal_flip_transform(**kwargs)
+
+    @staticmethod
+    def z_yaw_transform(yaw_degrees: float) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._z_yaw_transform(yaw_degrees)
+
+    @staticmethod
+    def z_up_to_glb_y_up_transform() -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._z_up_to_glb_y_up_transform()
+
+    @staticmethod
+    def copy_scene_with_transform(scene: Any, transform: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._copy_scene_with_transform(scene, transform)
+
+    @staticmethod
+    def matrix_from_json(value: Any, *, name: str) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._matrix_from_json(value, name=name)
+
+    @staticmethod
+    def load_scene_with_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._load_scene_with_transform(**kwargs)
+
+    @staticmethod
+    def estimate_support_normal(mesh: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._estimate_support_normal(mesh)
+
+    @staticmethod
+    def rotation_between_vectors(source: Any, target: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._rotation_between_vectors(source, target)
+
+    @staticmethod
+    def transform_point(transform: Any, point: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._transform_point(transform, point)
+
+    @staticmethod
+    def aabb_center(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._aabb_center(bounds)
+
+    @staticmethod
+    def xy_aabb_center(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._xy_aabb_center(bounds)
+
+    @staticmethod
+    def xy_aabb_size(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._xy_aabb_size(bounds)
+
+    @staticmethod
+    def aabb_bottom_to_xy_plane_transform(bounds: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._aabb_bottom_to_xy_plane_transform(bounds)
+
+    @staticmethod
+    def scale_transform(scale: float) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._scale_transform(scale)
+
+    @staticmethod
+    def compose_sam3d_multi_object_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_sam3d_multi_object_transform(**kwargs)
+
+    @staticmethod
+    def detect_table_fit_support_quad(
+        mesh: Any,
+        *,
+        target_aspect: float,
+    ) -> dict[str, Any]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._detect_table_fit_support_quad(
+            mesh,
+            target_aspect=target_aspect,
+        )
+
+    @staticmethod
+    def load_table_fit_scene_internal_z(
+        path: Path, *, trimesh: Any, y_to_z: Any
+    ) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._load_table_fit_scene_internal_z(
+            path,
+            trimesh=trimesh,
+            y_to_z=y_to_z,
+        )
+
+    @staticmethod
+    def table_fit_scene_union_bounds(scenes: list[Any], *, trimesh: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_scene_union_bounds(scenes, trimesh=trimesh)
+
+    @staticmethod
+    def table_fit_bounds_xy_manifest(
+        bounds: Any,
+        *,
+        unit_scale: float,
+    ) -> dict[str, Any]:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_bounds_xy_manifest(
+            bounds,
+            unit_scale=unit_scale,
+        )
+
+    @staticmethod
+    def table_fit_uniform_xy_scale_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_uniform_xy_scale_transform(**kwargs)
+
+    @staticmethod
+    def table_fit_uniform_scale_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_uniform_scale_transform(**kwargs)
+
+    @staticmethod
+    def table_fit_safe_positive_ratio(numerator: float, denominator: float) -> float:
+        from . import utils as geometry_utils
+
+        return geometry_utils._table_fit_safe_positive_ratio(numerator, denominator)
 
     @staticmethod
     def load_mesh(request: LoadMeshRequest) -> LoadMeshResult:
@@ -89,7 +263,6 @@ class GeometryManager:
         if not output_path.is_file():
             raise FileNotFoundError(f"Mesh was not written: {output_path}")
         return ExportMeshResult(output_path=output_path)
-
 
     @staticmethod
     def convert_up_axis(request: ConvertUpAxisRequest) -> ConvertUpAxisResult:
@@ -171,6 +344,39 @@ class GeometryManager:
         return size
 
     @staticmethod
+    def mesh_pca_bbox_size(mesh: Any) -> Any:
+        """Return bbox extents in the mesh PCA frame.
+
+        This is used for metric-scale estimation because it is less sensitive
+        to arbitrary object yaw/tilt than a world-axis AABB.
+        """
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        if vertices.ndim != 2 or vertices.shape[1] != 3 or len(vertices) < 3:
+            return GeometryManager.mesh_aabb_size(mesh)
+
+        centered = vertices - np.mean(vertices, axis=0)
+        cov = np.cov(centered, rowvar=False)
+        if cov.shape != (3, 3) or not np.all(np.isfinite(cov)):
+            return GeometryManager.mesh_aabb_size(mesh)
+
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        order = np.argsort(eigvals)[::-1]
+        axes = eigvecs[:, order]
+        if np.linalg.det(axes) < 0.0:
+            axes[:, -1] *= -1.0
+
+        projected = centered @ axes
+        size = projected.max(axis=0) - projected.min(axis=0)
+        if np.any(size <= 0.0) or not np.all(np.isfinite(size)):
+            return GeometryManager.mesh_aabb_size(mesh)
+        return size
+
+    @staticmethod
+    def mesh_metric_bbox_size(mesh: Any) -> Any:
+        """Return the bbox size used by metric-scale estimation."""
+        return GeometryManager.mesh_pca_bbox_size(mesh)
+
+    @staticmethod
     def bbox_ratio(size: Any) -> Any:
         """Return bbox dimensions normalized by the largest axis."""
         size = np.asarray(size, dtype=np.float64)
@@ -228,17 +434,20 @@ class GeometryManager:
         return best
 
     @staticmethod
-    def scene_to_mesh(scene: Any) -> Any:
+    def scene_to_mesh(scene: Any, *, trimesh: Any | None = None) -> Any:
         """Convert a trimesh Scene or mesh-like object to one mesh."""
-        if isinstance(scene, trimesh.Trimesh):
+        trimesh_module = globals()["trimesh"]
+        if trimesh is not None:
+            trimesh_module = trimesh
+        if isinstance(scene, trimesh_module.Trimesh):
             return scene
         dumped = scene.dump(concatenate=True)
-        if isinstance(dumped, trimesh.Trimesh):
+        if isinstance(dumped, trimesh_module.Trimesh):
             return dumped
-        meshes = [item for item in dumped if isinstance(item, trimesh.Trimesh)]
+        meshes = [item for item in dumped if isinstance(item, trimesh_module.Trimesh)]
         if not meshes:
             raise ValueError("Scene contains no mesh geometry.")
-        return trimesh.util.concatenate(meshes)
+        return trimesh_module.util.concatenate(meshes)
 
     @staticmethod
     def detect_tabletop(
@@ -263,7 +472,6 @@ class GeometryManager:
             oriented_normal=oriented_normal,
             candidates=candidates,
         )
-
 
     @staticmethod
     def align_xy_long_axis(
@@ -298,7 +506,6 @@ class GeometryManager:
             yaw_angle_degrees=float(np.rad2deg(rotation_angle)),
         )
 
-
     @staticmethod
     def _align_vector_to_axis(
         mesh: Any,
@@ -306,24 +513,17 @@ class GeometryManager:
         source_axis: list[float],
         target_axis: list[float],
     ) -> Any:
-        source = GeometryManager._normalize(
-            np.asarray(source_axis, dtype=float)
-        )
-        target = GeometryManager._normalize(
-            np.asarray(target_axis, dtype=float)
-        )
+        source = GeometryManager._normalize(np.asarray(source_axis, dtype=float))
+        target = GeometryManager._normalize(np.asarray(target_axis, dtype=float))
         if np.linalg.norm(source) == 0:
             raise ValueError("source_axis must be non-zero.")
         if np.linalg.norm(target) == 0:
             raise ValueError("target_axis must be non-zero.")
 
-        transform = GeometryManager._rotation_transform_between_vectors(
-            source, target
-        )
+        transform = GeometryManager._rotation_transform_between_vectors(source, target)
         aligned = mesh.copy()
         aligned.apply_transform(transform)
         return aligned
-
 
     @staticmethod
     def _find_support_plane_candidates(
@@ -345,9 +545,7 @@ class GeometryManager:
             raise ValueError("Mesh has no positive face area.")
 
         if plane_distance_tol is None:
-            extent = float(
-                np.linalg.norm(np.asarray(mesh.extents, dtype=float))
-            )
+            extent = float(np.linalg.norm(np.asarray(mesh.extents, dtype=float)))
             plane_distance_tol = max(extent * 0.01, 1e-4)
 
         cos_tol = float(np.cos(np.deg2rad(normal_angle_tol_deg)))
@@ -381,15 +579,10 @@ class GeometryManager:
                 continue
 
             weighted_normal = GeometryManager._normalize(
-                np.sum(
-                    normals[face_indices] * areas[face_indices, None], axis=0
-                ),
+                np.sum(normals[face_indices] * areas[face_indices, None], axis=0),
             )
             center = (
-                np.sum(
-                    centers[face_indices] * areas[face_indices, None], axis=0
-                )
-                / area
+                np.sum(centers[face_indices] * areas[face_indices, None], axis=0) / area
             )
             candidate = GeometryManager._build_candidate(
                 normal=weighted_normal,
@@ -420,9 +613,7 @@ class GeometryManager:
     ) -> list[float]:
         GeometryManager._validate_mesh(mesh)
 
-        normal = GeometryManager._normalize(
-            np.asarray(plane_normal, dtype=float)
-        )
+        normal = GeometryManager._normalize(np.asarray(plane_normal, dtype=float))
         center = np.asarray(plane_center, dtype=float)
         if np.linalg.norm(normal) == 0:
             raise ValueError("plane_normal must be non-zero.")
@@ -457,9 +648,7 @@ class GeometryManager:
 
         smaller_score = min(below_score, above_score)
         larger_score = max(below_score, above_score)
-        asymmetry_score = min(
-            (larger_score + 1e-9) / (smaller_score + 1e-9), 10.0
-        )
+        asymmetry_score = min((larger_score + 1e-9) / (smaller_score + 1e-9), 10.0)
         score = float(area * asymmetry_score)
         return SupportPlaneCandidate(
             normal=[float(v) for v in normal],
@@ -472,7 +661,6 @@ class GeometryManager:
             above_area_score=above_score,
             score=score,
         )
-
 
     @staticmethod
     def _select_xy_vertices(
@@ -489,9 +677,7 @@ class GeometryManager:
         return vertices[selected_vertex_indices, :2]
 
     @staticmethod
-    def _minimal_angle_to_align_axis(
-        source_angle: float, target_angle: float
-    ) -> float:
+    def _minimal_angle_to_align_axis(source_angle: float, target_angle: float) -> float:
         candidates = [
             GeometryManager._wrap_to_pi(target_angle - source_angle),
             GeometryManager._wrap_to_pi(
@@ -520,11 +706,8 @@ class GeometryManager:
         )
         return transform
 
-
     @staticmethod
-    def _rotation_transform_between_vectors(
-        source: Any, target: Any
-    ) -> Any:
+    def _rotation_transform_between_vectors(source: Any, target: Any) -> Any:
         dot = float(np.clip(np.dot(source, target), -1.0, 1.0))
         transform = np.eye(4)
         if dot > 1.0 - 1e-8:

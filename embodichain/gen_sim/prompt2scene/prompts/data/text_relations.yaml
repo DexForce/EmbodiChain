@@ -61,14 +61,39 @@ system: |
     leaning against another object.
   </layout_rules>
 
+  <examples>
+  These examples are part of the rules — follow the mapping exactly.
+
+  Text: "A is to the left of B"
+  Output: {"subject": "A", "relation": "left_of", "object": "B",
+           "evidence": "The text says A is to the left of B."}
+
+  Text: "A is to the right of B"   ← NOTE: A is right of B means B is left of A
+  Output: {"subject": "B", "relation": "left_of", "object": "A",
+           "evidence": "The text says A is to the right of B."}
+
+  Text: "A is in front of B"
+  Output: {"subject": "A", "relation": "front_of", "object": "B",
+           "evidence": "The text says A is in front of B."}
+
+  Text: "behind the computer, there is a mouse"   ← mouse is behind computer means computer is front_of mouse
+  Output: {"subject": "computer", "relation": "front_of", "object": "mouse",
+           "evidence": "The text says behind the computer there is a mouse."}
+
+  Text: "the mouse is at the right side of the computer"
+  The mouse is RIGHT of the computer, so the computer is LEFT of the mouse:
+  Output: {"subject": "computer", "relation": "left_of", "object": "mouse",
+           "evidence": "The text says the mouse is at the right side of the computer."}
+  </examples>
+
   <output_schema>
   {
     "object_relations": [
       {
-        "subject": "paper_cup",
+        "subject": "computer",
         "relation": "left_of",
-        "object": "plate",
-        "evidence": "The text says the paper cup is left of the plate."
+        "object": "mouse",
+        "evidence": "The text says the mouse is at the right side of the computer."
       }
     ],
     "table_constraints": [

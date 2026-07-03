@@ -19,94 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from embodichain.gen_sim.prompt2scene.workflows.spatial import GRID_VALUE_LIST
-
 __all__ = [
-    "FILTER_EXTRA_INSTANCES_JSON_SCHEMA",
     "ImageAnchor",
     "ImageAssetLayout",
     "ImageAssetSegment",
     "ImageRelationGroup",
     "ImageRelationSpec",
-    "SPATIAL_LAYOUT_JSON_SCHEMA",
 ]
-
-FILTER_EXTRA_INSTANCES_JSON_SCHEMA: dict[str, Any] = {
-    "title": "FilterExtraImageInstancesOutput",
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "extra_instance_numbers": {
-            "type": "array",
-            "description": "1-based mask numbers that should be removed.",
-            "items": {"type": "integer", "minimum": 1},
-        },
-        "reason": {
-            "type": "string",
-            "description": "Brief reason for the removal decision.",
-        },
-    },
-    "required": ["extra_instance_numbers", "reason"],
-}
-
-SPATIAL_LAYOUT_JSON_SCHEMA: dict[str, Any] = {
-    "title": "ImageSpatialLayoutOutput",
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "anchor": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "asset_id": {"type": "string", "minLength": 1},
-                "grid": {
-                    "type": "string",
-                    "enum": GRID_VALUE_LIST,
-                },
-                "reason": {"type": "string"},
-            },
-            "required": ["asset_id", "grid", "reason"],
-        },
-        "x_order": {
-            "type": "array",
-            "description": "Asset-id groups ordered from left to right.",
-            "items": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1},
-                "minItems": 1,
-            },
-            "minItems": 1,
-        },
-        "y_order": {
-            "type": "array",
-            "description": "Asset-id groups ordered from front to back.",
-            "items": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1},
-                "minItems": 1,
-            },
-            "minItems": 1,
-        },
-        "asset_states": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": True,
-                "properties": {
-                    "asset_id": {"type": "string", "minLength": 1},
-                    "is_arbitrary_layout": {"type": "boolean"},
-                    "reason": {"type": "string", "minLength": 1},
-                },
-                "required": [
-                    "asset_id",
-                    "is_arbitrary_layout",
-                    "reason",
-                ],
-            },
-        },
-    },
-    "required": ["anchor", "x_order", "y_order", "asset_states"],
-}
 
 
 @dataclass(frozen=True)
@@ -244,7 +163,5 @@ class ImageRelationSpec:
                 "left_to_right": [list(group) for group in self.x_order],
                 "front_to_back": [list(group) for group in self.y_order],
             },
-            "objects": [
-                layout.to_manifest() for layout in self.asset_layouts
-            ],
+            "objects": [layout.to_manifest() for layout in self.asset_layouts],
         }

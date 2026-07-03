@@ -40,6 +40,7 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     request = prompt2scene_input_cls.from_cli_args(
         image_path=image_path,
         text=text,
+        prompt=None,
         output_root=output_root,
     )
     llm_cfg = load_llm_config(

@@ -19,73 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from embodichain.gen_sim.prompt2scene.workflows.spatial import (
-    GRID_VALUE_LIST,
-    RELATION_VALUE_LIST,
-)
-
 __all__ = [
-    "TEXT_RELATIONS_JSON_SCHEMA",
     "TextObjectLayout",
     "TextObjectRelation",
     "TextRelationSpec",
     "TextTableConstraint",
 ]
-
-TEXT_RELATIONS_JSON_SCHEMA: dict[str, Any] = {
-    "title": "TextRelationsOutput",
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "object_relations": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "subject": {"type": "string", "minLength": 1},
-                    "relation": {
-                        "type": "string",
-                        "enum": RELATION_VALUE_LIST,
-                    },
-                    "object": {"type": "string", "minLength": 1},
-                    "evidence": {"type": "string", "minLength": 1},
-                },
-                "required": ["subject", "relation", "object", "evidence"],
-            },
-        },
-        "table_constraints": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "asset": {"type": "string", "minLength": 1},
-                    "grid": {
-                        "type": "string",
-                        "enum": GRID_VALUE_LIST,
-                    },
-                    "evidence": {"type": "string", "minLength": 1},
-                },
-                "required": ["asset", "grid", "evidence"],
-            },
-        },
-        "object_layouts": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "asset": {"type": "string", "minLength": 1},
-                    "is_arbitrary_layout": {"type": "boolean"},
-                    "reason": {"type": "string", "minLength": 1},
-                },
-                "required": ["asset", "is_arbitrary_layout", "reason"],
-            },
-        },
-    },
-    "required": ["object_relations", "table_constraints", "object_layouts"],
-}
 
 
 @dataclass(frozen=True)

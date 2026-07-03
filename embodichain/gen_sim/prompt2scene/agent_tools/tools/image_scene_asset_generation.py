@@ -41,7 +41,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_segmentation_ma
     AssetImageToRgbaRequest,
     ImageSegmentationManager,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.image_layout_alignment import (
     _export_support_aligned_layout_glbs,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager import (
@@ -49,23 +49,19 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager impo
     MakeTableSimreadyRequest,
     SimreadyManager,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.metric_scale_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager import (
     METRIC_SCALE_ENABLED,
     EstimateMetricScalesRequest,
+    IMAGE_METRIC_SCALE_JSON_SCHEMA,
     MetricScaleManager,
     MetricScaleObjectInput,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager.scene_geometry import (
-    _compose_sam3d_multi_object_transform,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager import (
-    _write_multi_object_layout_manifests,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.prompts import (
     build_image_metric_scale_messages,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_scene_manager.schemas import (
-    IMAGE_METRIC_SCALE_JSON_SCHEMA,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
+    GeometryManager,
+)
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.layout_manifests import (
+    _write_multi_object_layout_manifests,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import (
     relative_path,
@@ -115,9 +111,7 @@ def generate_image_scene_assets(
 
     table_id = str(table_spec.get("id", "table")).strip() or "table"
     table_name = str(table_spec.get("name", "table")).strip() or "table"
-    is_complete_visible_table = bool(
-        table_spec.get("is_complete_visible_table", False)
-    )
+    is_complete_visible_table = bool(table_spec.get("is_complete_visible_table", False))
     skipped_table: dict[str, Any] | None = None
     if table_segment is None:
         skipped_table = {
@@ -212,7 +206,7 @@ def generate_image_scene_assets(
             status_parts: list[str] = []
             transform_matrix: list[list[float]] = []
             try:
-                transform = _compose_sam3d_multi_object_transform(
+                transform = GeometryManager.compose_sam3d_multi_object_transform(
                     rotation_quaternion_wxyz=generated.rotation_quaternion_wxyz,
                     translation=generated.translation,
                     scale=generated.scale,
@@ -255,29 +249,35 @@ def generate_image_scene_assets(
                 "id": requested["id"],
                 "name": requested["name"],
                 "kind": requested["kind"],
-                "description": str(table_spec.get("description", ""))
-                if requested["kind"] == "table"
-                else str(requested.get("description", "")),
-                "complete_table_description": str(
-                    table_spec.get("complete_table_description")
-                    or table_spec.get("description", "")
-                ).strip()
-                if requested["kind"] == "table"
-                else "",
-                "is_complete_visible_table": is_complete_visible_table
-                if requested["kind"] == "table"
-                else False,
+                "description": (
+                    str(table_spec.get("description", ""))
+                    if requested["kind"] == "table"
+                    else str(requested.get("description", ""))
+                ),
+                "complete_table_description": (
+                    str(
+                        table_spec.get("complete_table_description")
+                        or table_spec.get("description", "")
+                    ).strip()
+                    if requested["kind"] == "table"
+                    else ""
+                ),
+                "is_complete_visible_table": (
+                    is_complete_visible_table if requested["kind"] == "table" else False
+                ),
                 "status": item_status,
                 "mask_path": relative_path(requested["mask_path"], output_root),
                 "raw_geometry_path": relative_path(raw_geometry_path, output_root),
-                "simready_geometry_path": relative_path(
-                    simready_geometry_path, output_root
-                )
-                if simready_geometry_path
-                else "",
-                "mesh_path": relative_path(simready_geometry_path, output_root)
-                if simready_geometry_path
-                else "",
+                "simready_geometry_path": (
+                    relative_path(simready_geometry_path, output_root)
+                    if simready_geometry_path
+                    else ""
+                ),
+                "mesh_path": (
+                    relative_path(simready_geometry_path, output_root)
+                    if simready_geometry_path
+                    else ""
+                ),
                 "sam3d_name": generated.name,
                 "downloaded_raw_geometry_path": relative_path(
                     str(downloaded_raw_path), output_root
@@ -309,9 +309,7 @@ def generate_image_scene_assets(
                 if not is_complete_visible_table:
                     # Replace partial image table with description-generated table.
                     incomplete_table_id = str(
-                        generated_item.get("id")
-                        or table_spec.get("id")
-                        or "table"
+                        generated_item.get("id") or table_spec.get("id") or "table"
                     )
                     incomplete_table_desc = str(
                         table_spec.get("complete_table_description")
@@ -336,9 +334,11 @@ def generate_image_scene_assets(
                         segmentation_manager.convert_asset_image_to_rgba(
                             AssetImageToRgbaRequest(
                                 image_path=Path(incomplete_raw_image),
-                                prompt=incomplete_table_desc
-                                if incomplete_table_desc.strip()
-                                else "whole table",
+                                prompt=(
+                                    incomplete_table_desc
+                                    if incomplete_table_desc.strip()
+                                    else "whole table"
+                                ),
                                 output_path=image_gen_dir
                                 / f"{incomplete_table_id}_complete.png",
                             )
@@ -367,9 +367,7 @@ def generate_image_scene_assets(
                     )
                     generated_item.update(
                         {
-                            "image_path": relative_path(
-                                incomplete_rgba, output_root
-                            ),
+                            "image_path": relative_path(incomplete_rgba, output_root),
                             "raw_geometry_path": relative_path(
                                 str(incomplete_table_raw_path), output_root
                             ),
@@ -387,9 +385,7 @@ def generate_image_scene_assets(
                             "raw_to_simready_glb_matrix": (
                                 incomplete_simready.transform_matrix
                             ),
-                            "transform_matrix": np.eye(
-                                4, dtype=np.float64
-                            ).tolist(),
+                            "transform_matrix": np.eye(4, dtype=np.float64).tolist(),
                             "table_asset_source": "description_generated",
                             "complete_table_description": incomplete_table_desc,
                         }
@@ -418,9 +414,9 @@ def generate_image_scene_assets(
                 table=generated_table,
                 objects=generated_objects,
                 spatial_relations=spatial_relations,
-                original_image_path=Path(original_image_path)
-                if original_image_path
-                else None,
+                original_image_path=(
+                    Path(original_image_path) if original_image_path else None
+                ),
                 llm=llm,
                 output_dir=aligned_dir,
                 output_root=output_root,
@@ -434,6 +430,10 @@ def generate_image_scene_assets(
                     generated_object["aligned_geometry_path"] = aligned_object[
                         "aligned_geometry_path"
                     ]
+            if isinstance(generated_table, dict):
+                generated_table["complete_table_relative_scale_hint"] = (
+                    alignment_result.get("complete_table_relative_scale_hint")
+                )
         except Exception as exc:
             status = "failed"
             failure_reason = traceback.format_exc()
@@ -467,6 +467,7 @@ def generate_image_scene_assets(
         "simready_geometry_path",
         "aligned_geometry_path",
         "mesh_path",
+        "complete_table_relative_scale_hint",
     )
     object_fields = (
         "id",
@@ -495,7 +496,11 @@ def generate_image_scene_assets(
     workflow_alignment = (
         {
             key: alignment_result[key]
-            for key in ("status", "final_clutter_2d_aabb_cm")
+            for key in (
+                "status",
+                "final_clutter_2d_aabb_cm",
+                "complete_table_relative_scale_hint",
+            )
             if key in alignment_result
         }
         if alignment_result is not None

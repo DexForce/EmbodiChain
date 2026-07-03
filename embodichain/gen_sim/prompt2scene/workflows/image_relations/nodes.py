@@ -19,9 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.prompt2scene.agent_tools.clients.image_segmentation_client import (
-    decode_rle_mask,
-    draw_numbered_masks,
+from embodichain.gen_sim.prompt2scene.agent_tools.tools.image_segment_filter import (
+    filter_segments_with_vlm,
 )
 from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
     ImageAssetSegment,
@@ -29,8 +28,7 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
     ImageRelationSpec,
 )
 from embodichain.gen_sim.prompt2scene.workflows.request import InputKind
-from embodichain.gen_sim.prompt2scene.workflows.image_relations.schema import (
-    FILTER_EXTRA_INSTANCES_JSON_SCHEMA,
+from embodichain.gen_sim.prompt2scene.prompts.schemas import (
     SPATIAL_LAYOUT_JSON_SCHEMA,
 )
 from embodichain.gen_sim.prompt2scene.utils import (
@@ -48,23 +46,26 @@ from embodichain.gen_sim.prompt2scene.workflows.image_relations.utils import (
     asset_bbox_label,
     draw_labeled_bboxes,
     expand_asset_ids,
-    filter_group_segments_with_vlm,
-    filter_segments_with_vlm,
+    filter_group_segments_with_artifacts,
     merge_non_overlapping_segments,
     prompt_text,
     path_token,
     require_image_path,
+    segment_area,
     segment_prompt,
     segments_from_response,
+    select_largest_table_segment,
+    table_segmentation_prompts,
+    verify_spatial_layout_output,
+    write_table_candidate_debug_image,
 )
-from embodichain.gen_sim.prompt2scene.workflows.image_relations.prompts import (
-    build_filter_extra_instances_messages,
+from embodichain.gen_sim.prompt2scene.prompts.builders import (
     build_spatial_layout_messages,
 )
 from embodichain.gen_sim.prompt2scene.workflows.image_relations.state import (
     ImageRelationsState,
 )
-from embodichain.gen_sim.prompt2scene.workflows.llm_output import (
+from embodichain.gen_sim.prompt2scene.llms.llm_output import (
     call_structured_json_model_step,
     is_model_output_error,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "segment_table_node",
     "segment_by_name_node",
 ]
+
 
 def prepare_segmentation_input_node(state: ImageRelationsState) -> dict[str, object]:
     """Prepare scene-intake asset groups for class-level segmentation."""
@@ -140,7 +142,22 @@ def call_vlm_filter_initial_segments_node(
     llm: Any,
 ) -> dict[str, object]:
     """Ask VLM to remove wrong masks from initial name-based SAM3 output."""
-    return filter_segments_with_vlm(state=state, llm=llm, stage="initial")
+    image_path = require_image_path(state)
+    art = WorkflowArtifactWriter(state["output_root"], IMAGE_SEGMENTS_STEP)
+    return filter_segments_with_vlm(
+        llm=llm,
+        image_path=image_path,
+        step_name=IMAGE_SEGMENTS_STEP,
+        segment_groups=state["segment_groups"],
+        attempt_count=state["attempt_count"],
+        errors=state["errors"],
+        stage="initial",
+        next_debug_round_name=art.next_debug_round_name,
+        debug_round_dir=art.debug_round_dir,
+        write_debug_json=art.write_debug_round_json,
+    )
+
+
 def retry_missing_by_candidates_node(
     state: ImageRelationsState,
     *,
@@ -154,6 +171,11 @@ def retry_missing_by_candidates_node(
         group = dict(group)
         segments = group["segments"]
         expected_count = group["expected_count"]
+        confirmed_segments = [
+            segment
+            for existing_group in state["segment_groups"]
+            for segment in existing_group.get("segments", [])
+        ]
         for candidate_name in group["class_candidate"][1:]:
             if len(segments) >= expected_count:
                 break
@@ -167,19 +189,22 @@ def retry_missing_by_candidates_node(
                 response=response,
                 source_prompt=prompt,
             )
-            new_segments = filter_group_segments_with_vlm(
+            stage_label = f"fallback_{path_token(prompt)}"
+            new_segments = filter_group_segments_with_artifacts(
                 llm=llm,
                 image_path=image_path,
                 artifact_writer=artifact_writer,
                 group=group,
                 segments=new_segments,
-                stage=f"fallback_{path_token(prompt)}",
+                stage=stage_label,
+                confirmed_segments=confirmed_segments,
             )
             segments = merge_non_overlapping_segments(
                 existing=segments,
                 incoming=new_segments,
                 limit=expected_count,
             )
+            confirmed_segments = confirmed_segments + new_segments
         if len(segments) < expected_count:
             description_prompt = str(group.get("description") or "").strip()
             if description_prompt and description_prompt not in group["tried_prompts"]:
@@ -196,19 +221,21 @@ def retry_missing_by_candidates_node(
                     response=response,
                     source_prompt=description_prompt,
                 )
-                new_segments = filter_group_segments_with_vlm(
+                new_segments = filter_group_segments_with_artifacts(
                     llm=llm,
                     image_path=image_path,
                     artifact_writer=artifact_writer,
                     group=group,
                     segments=new_segments,
                     stage="fallback_description",
+                    confirmed_segments=confirmed_segments,
                 )
                 segments = merge_non_overlapping_segments(
                     existing=segments,
                     incoming=new_segments,
                     limit=expected_count,
                 )
+                confirmed_segments = confirmed_segments + new_segments
         group["segments"] = segments
         segment_groups.append(group)
     return {"segment_groups": segment_groups}
@@ -324,7 +351,7 @@ def segment_table_node(
     }
     segments: list[dict[str, Any]] = []
 
-    for prompt in _table_segmentation_prompts(group):
+    for prompt in table_segmentation_prompts(group):
         if len(segments) >= 1:
             break
         response = segment_prompt(image_path=image_path, prompt=prompt)
@@ -334,14 +361,14 @@ def segment_table_node(
             response=response,
             source_prompt=prompt,
         )
-        _write_table_candidate_debug_image(
+        write_table_candidate_debug_image(
             image_path=image_path,
             artifact_writer=artifact_writer,
             group=group,
             segments=new_segments,
             stage=f"table_{path_token(prompt)}",
         )
-        selected_segment = _select_largest_table_segment(new_segments)
+        selected_segment = select_largest_table_segment(new_segments)
         if selected_segment is not None:
             segments = [selected_segment]
 
@@ -383,70 +410,15 @@ def segment_table_node(
         y_order=image_relations.y_order,
         asset_layouts=image_relations.asset_layouts,
     )
-    artifact_writer.write_step_result(updated_image_relations.to_segmentation_manifest())
+    artifact_writer.write_step_result(
+        updated_image_relations.to_segmentation_manifest()
+    )
     return {"image_relations": updated_image_relations}
 
-
-def _table_segmentation_prompts(group: dict[str, Any]) -> list[str]:
-    """Return table/support segmentation prompts in object-style fallback order."""
-    prompts = [prompt_text(group["name"])]
-    for candidate_name in group["class_candidate"][1:]:
-        prompts.append(prompt_text(candidate_name))
-    description_prompt = str(group.get("description") or "").strip()
-    if description_prompt:
-        prompts.append(description_prompt)
-
-    unique_prompts: list[str] = []
-    for prompt in prompts:
-        if prompt and prompt not in unique_prompts:
-            unique_prompts.append(prompt)
-    return unique_prompts
-
-
-def _write_table_candidate_debug_image(
-    *,
-    image_path: Path,
-    artifact_writer: WorkflowArtifactWriter,
-    group: dict[str, Any],
-    segments: list[dict[str, Any]],
-    stage: str,
-) -> None:
-    """Write table/support candidate mask debug image without VLM filtering."""
-    if not segments:
-        return
-    round_name = artifact_writer.next_debug_round_name(label=f"{stage}_{group['name']}")
-    round_dir = artifact_writer.debug_round_dir(round_name)
-    debug_image_path = draw_numbered_masks(
-        image_path=image_path,
-        segments=segments,
-        output_path=round_dir / "mask.png",
+    artifact_writer.write_step_result(
+        updated_image_relations.to_segmentation_manifest()
     )
-    group["debug_images"] = append_unique(
-        group["debug_images"],
-        str(debug_image_path),
-    )
-
-
-def _select_largest_table_segment(
-    segments: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    """Select the largest SAM3 table/support candidate without VLM filtering."""
-    if not segments:
-        return None
-    return max(segments, key=_segment_area)
-
-
-def _segment_area(segment: dict[str, Any]) -> float:
-    mask_rle = segment.get("mask_rle")
-    if mask_rle is not None:
-        try:
-            mask = decode_rle_mask(mask_rle).convert("L")
-            histogram = mask.histogram()
-            return float(sum(count for value, count in enumerate(histogram) if value))
-        except Exception:
-            pass
-    x1, y1, x2, y2 = segment["bbox_xyxy"]
-    return max(0.0, float(x2) - float(x1)) * max(0.0, float(y2) - float(y1))
+    return {"image_relations": updated_image_relations}
 
 
 def call_vlm_spatial_layout_node(
@@ -483,20 +455,29 @@ def call_vlm_spatial_layout_node(
             schema=SPATIAL_LAYOUT_JSON_SCHEMA,
             messages=messages,
             context="Image spatial layout",
-            step_name=IMAGE_SPATIAL_RELATIONS_STEP,
-            output_root=None,
             attempt_count=attempt_count,
-            raw_output_label="spatial_layout",
+        )
+        verifier_output = verify_spatial_layout_output(
+            llm=llm,
+            bbox_name_image_path=Path(image_relations.bbox_name_image_path),
+            asset_ids=asset_ids,
+            raw_model_output=raw_model_output,
+            attempt_count=attempt_count,
             artifact_writer=artifact_writer,
         )
+        verified_model_output = verifier_output["corrected_layout"]
         updated_image_relations = apply_spatial_layout_output(
             image_relations=image_relations,
-            raw_model_output=raw_model_output,
+            raw_model_output=verified_model_output,
         )
-        artifact_writer.write_step_result(updated_image_relations.to_spatial_manifest())
+        spatial_manifest = updated_image_relations.to_spatial_manifest()
+        spatial_manifest["spatial_layout_verifier"] = verifier_output
+        artifact_writer.write_step_result(spatial_manifest)
     except Exception as exc:
         if is_model_output_error(exc) or isinstance(exc, ValueError):
-            error = format_attempt_error("Image relations spatial layout", attempt_count, exc)
+            error = format_attempt_error(
+                "Image relations spatial layout", attempt_count, exc
+            )
             log.log_warning(error)
             return {
                 "attempt_count": attempt_count,

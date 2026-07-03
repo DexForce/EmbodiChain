@@ -21,7 +21,12 @@ from .base import PromptRenderer
 
 default_prompt_renderer = PromptRenderer(data)
 
-__all__ = ["load_prompt", "load_prompt_data", "render_prompt", "default_prompt_renderer"]
+__all__ = [
+    "load_prompt",
+    "load_prompt_data",
+    "render_prompt",
+    "default_prompt_renderer",
+]
 
 
 def load_prompt(prompt_name: str) -> str:

@@ -30,18 +30,11 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager im
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager.schemas import (
     GravityDropRequest,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.optimization_manager import (
-    _object_scenes_xy_aabb_manifest,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager import (
+    LayoutManager,
 )
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager.scene_geometry import (
-    _aabb_bottom_to_xy_plane_transform,
-    _copy_scene_with_transform,
-    _matrix_from_json,
-    _scale_transform,
-    _scene_to_mesh,
-    _xy_aabb_center,
-    _xy_aabb_size,
-    _z_up_to_glb_y_up_transform,
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
+    GeometryManager,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import (
     relative_path,
@@ -51,9 +44,6 @@ from embodichain.gen_sim.prompt2scene.utils.log import log_warning
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.matplotlib_manager import (
     MatplotlibManager,
     RenderFootprintLayoutRequest,
-)
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.text_layout_manager.layout import (
-    _layout_text_objects_grid,
 )
 
 __all__ = ["settle_text_objects_to_ground"]
@@ -89,7 +79,7 @@ def settle_text_objects_to_ground(
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     sim = SimulationManager(headless=True, sim_device=sim_device)
-    z_to_y = _z_up_to_glb_y_up_transform()
+    z_to_y = GeometryManager.z_up_to_glb_y_up_transform()
     y_to_z = np.linalg.inv(z_to_y)
 
     settled_objects: list[dict[str, Any]] = []
@@ -144,21 +134,29 @@ def settle_text_objects_to_ground(
             try:
                 # Load simready (GLB Y-up) → convert to internal Z-up
                 scene_yup = trimesh.load(simready_path, force="scene")
-                scene = _copy_scene_with_transform(scene_yup, y_to_z)
+                scene = GeometryManager.copy_scene_with_transform(scene_yup, y_to_z)
 
                 # Apply real-world scale
-                scale_transform = _scale_transform(scale_factor)
+                scale_transform = GeometryManager.scale_transform(scale_factor)
                 scene.apply_transform(scale_transform)
 
                 # Settle the object under gravity.
-                mesh = _scene_to_mesh(scene, trimesh=trimesh)
+                mesh = GeometryManager.scene_to_mesh(scene, trimesh=trimesh)
                 mesh_bounds = np.asarray(mesh.bounds, dtype=np.float64)
                 mesh_z_height = max(float(mesh_bounds[1][2] - mesh_bounds[0][2]), 0.0)
-                bottom_to_xy = _aabb_bottom_to_xy_plane_transform(mesh_bounds)
-                normalized_scene = _copy_scene_with_transform(scene, bottom_to_xy)
+                bottom_to_xy = GeometryManager.aabb_bottom_to_xy_plane_transform(
+                    mesh_bounds
+                )
+                normalized_scene = GeometryManager.copy_scene_with_transform(
+                    scene,
+                    bottom_to_xy,
+                )
 
                 # Export to Y-up GLB for gravity
-                pre_gravity_scene = _copy_scene_with_transform(normalized_scene, z_to_y)
+                pre_gravity_scene = GeometryManager.copy_scene_with_transform(
+                    normalized_scene,
+                    z_to_y,
+                )
                 pre_gravity_path = tmp_path / f"{obj_id}_pre_gravity.glb"
                 pre_gravity_scene.export(pre_gravity_path)
                 gravity_initial_height = mesh_z_height * 0.1
@@ -174,7 +172,7 @@ def settle_text_objects_to_ground(
                             initial_height=gravity_initial_height,
                         )
                     )
-                    gravity_transform = _matrix_from_json(
+                    gravity_transform = GeometryManager.matrix_from_json(
                         gravity_result.final_pose,
                         name=f"{obj_id}.gravity_final_pose",
                     )
@@ -183,16 +181,19 @@ def settle_text_objects_to_ground(
                     gravity_reason = traceback.format_exc()
 
                 # Apply gravity result (in internal Z-up space)
-                settled_scene = _copy_scene_with_transform(
+                settled_scene = GeometryManager.copy_scene_with_transform(
                     normalized_scene,
                     gravity_transform,
                 )
 
                 # Center the bottom of the AABB at the XY origin.
-                settled_mesh = _scene_to_mesh(settled_scene, trimesh=trimesh)
+                settled_mesh = GeometryManager.scene_to_mesh(
+                    settled_scene,
+                    trimesh=trimesh,
+                )
                 settled_bounds = np.asarray(settled_mesh.bounds, dtype=np.float64)
-                settled_xy_center = _xy_aabb_center(settled_bounds)
-                settled_xy_size = _xy_aabb_size(settled_bounds)
+                settled_xy_center = GeometryManager.xy_aabb_center(settled_bounds)
+                settled_xy_size = GeometryManager.xy_aabb_size(settled_bounds)
                 settled_bottom_z = float(settled_bounds[0, 2])
 
                 centre_transform = np.eye(4, dtype=np.float64)
@@ -201,19 +202,22 @@ def settle_text_objects_to_ground(
                     -float(settled_xy_center[1]),
                     -settled_bottom_z,
                 ]
-                centred_scene = _copy_scene_with_transform(
+                centred_scene = GeometryManager.copy_scene_with_transform(
                     settled_scene,
                     centre_transform,
                 )
 
                 # Verify final bounds
-                centred_mesh = _scene_to_mesh(centred_scene, trimesh=trimesh)
+                centred_mesh = GeometryManager.scene_to_mesh(
+                    centred_scene,
+                    trimesh=trimesh,
+                )
                 centred_bounds = np.asarray(centred_mesh.bounds, dtype=np.float64)
-                centred_xy_size = _xy_aabb_size(centred_bounds)
+                centred_xy_size = GeometryManager.xy_aabb_size(centred_bounds)
 
                 # Export settled GLB (Z-up → Y-up for GLB output)
                 settled_glb_path = output_dir / f"{obj_id}_settled.glb"
-                _copy_scene_with_transform(centred_scene, z_to_y).export(
+                GeometryManager.copy_scene_with_transform(centred_scene, z_to_y).export(
                     settled_glb_path
                 )
 
@@ -261,13 +265,15 @@ def settle_text_objects_to_ground(
     if object_scenes:
         xy_sizes = {
             oid: np.asarray(
-                _xy_aabb_size(_scene_to_mesh(scene, trimesh=trimesh).bounds),
+                GeometryManager.xy_aabb_size(
+                    GeometryManager.scene_to_mesh(scene, trimesh=trimesh).bounds
+                ),
                 dtype=np.float64,
             )
             for oid, scene in object_scenes
         }
         relations = list(spatial_relations or [])
-        layout_result = _layout_text_objects_grid(
+        layout_result = LayoutManager.layout_text_objects_grid(
             object_ids=[oid for oid, _ in object_scenes],
             xy_sizes=xy_sizes,
             spatial_relations=relations,
@@ -320,21 +326,27 @@ def settle_text_objects_to_ground(
         laid_out_scenes: list[tuple[str, Any]] = []
         for oid, scene in object_scenes:
             target_xy = target_centers[oid]
-            settled_mesh = _scene_to_mesh(scene, trimesh=trimesh)
+            settled_mesh = GeometryManager.scene_to_mesh(scene, trimesh=trimesh)
             settled_bounds = np.asarray(settled_mesh.bounds, dtype=np.float64)
-            current_xy = _xy_aabb_center(settled_bounds)
+            current_xy = GeometryManager.xy_aabb_center(settled_bounds)
             placement = np.eye(4, dtype=np.float64)
             placement[:3, 3] = [
                 float(target_xy[0] - current_xy[0]),
                 float(target_xy[1] - current_xy[1]),
                 0.0,
             ]
-            laid_out_scene = _copy_scene_with_transform(scene, placement)
+            laid_out_scene = GeometryManager.copy_scene_with_transform(
+                scene,
+                placement,
+            )
             laid_out_scenes.append((oid, laid_out_scene))
 
             # Export laid-out GLB (replaces the origin-centred one)
             laid_out_glb_path = output_dir / f"{oid}_laid_out.glb"
-            _copy_scene_with_transform(laid_out_scene, z_to_y).export(laid_out_glb_path)
+            GeometryManager.copy_scene_with_transform(
+                laid_out_scene,
+                z_to_y,
+            ).export(laid_out_glb_path)
 
             # Update per-object metadata with layout position
             for item in settled_objects:
@@ -345,17 +357,20 @@ def settle_text_objects_to_ground(
                         str(laid_out_glb_path), output_root
                     )
                     laid_out_bounds = np.asarray(
-                        _scene_to_mesh(laid_out_scene, trimesh=trimesh).bounds,
+                        GeometryManager.scene_to_mesh(
+                            laid_out_scene,
+                            trimesh=trimesh,
+                        ).bounds,
                         dtype=np.float64,
                     )
                     item["laid_out_xy_size_cm"] = (
-                        _xy_aabb_size(laid_out_bounds) * 100.0
+                        GeometryManager.xy_aabb_size(laid_out_bounds) * 100.0
                     ).tolist()
                     break
 
         object_scenes = laid_out_scenes
 
-    clutter_2d_aabb_cm = _object_scenes_xy_aabb_manifest(
+    clutter_2d_aabb_cm = LayoutManager.object_scenes_xy_aabb_manifest(
         object_scenes=object_scenes,
         trimesh=trimesh,
         unit_scale=100.0,

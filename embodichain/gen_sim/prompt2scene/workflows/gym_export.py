@@ -26,9 +26,9 @@ from typing import Any
 
 import numpy as np
 
-from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
-    STEP_RESULT_FILENAME,
+from embodichain.gen_sim.prompt2scene.workflows.paths import (
     UNIFIED_SCENE_GEN_STEP,
+    PipelinePaths,
 )
 
 __all__ = ["export_gym_config"]
@@ -54,11 +54,6 @@ _DEFAULT_MAX_CONVEX_HULL_NUM = 32
 _DEFAULT_CONVEX_DECOMPOSITION_METHOD = "vhacd"
 
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
 def _resolve_path(value: str, output_root: Path) -> Path:
     path = Path(value).expanduser()
     if path.is_absolute():
@@ -67,11 +62,45 @@ def _resolve_path(value: str, output_root: Path) -> Path:
 
 
 def _read_json(path: Path) -> dict[str, Any]:
+    if path.is_dir():
+        raise IsADirectoryError(f"Expected JSON file but got directory: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"JSON file not found: {path}")
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object at {path}")
     return data
+
+
+def _resolve_table_fit_manifest_path(
+    *,
+    manifest_path_value: Any,
+    output_root: Path,
+    paths: PipelinePaths,
+) -> Path:
+    if not manifest_path_value:
+        raise FileNotFoundError(
+            "table_fit_to_clutter manifest_path is missing or empty"
+        )
+
+    resolved = _resolve_path(str(manifest_path_value), output_root)
+    if resolved.is_file():
+        return resolved
+
+    default_manifest = paths.table_fit_manifest
+    if default_manifest.is_file():
+        return default_manifest
+
+    if resolved.is_dir():
+        raise IsADirectoryError(
+            "table_fit_to_clutter manifest_path points to a directory, not a JSON "
+            f"file: value={manifest_path_value!r} resolved={resolved}"
+        )
+    raise FileNotFoundError(
+        "table_fit_to_clutter manifest_path does not point to a JSON file: "
+        f"value={manifest_path_value!r} resolved={resolved}"
+    )
 
 
 def _matrix_to_euler_xyz_deg(matrix: list[list[float]]) -> list[float]:
@@ -117,6 +146,25 @@ def _glb_scale_to_sim(scale: Sequence[float]) -> list[float]:
     if len(values) != 3:
         raise ValueError("scale must have three components")
     return [values[0], values[2], values[1]]
+
+
+def _decompose_affine_matrix(
+    matrix_value: Any,
+) -> tuple[list[float], list[float], list[float]]:
+    matrix = np.asarray(matrix_value, dtype=np.float64)
+    if matrix.shape != (4, 4):
+        raise ValueError("Expected a 4x4 affine matrix.")
+    linear = matrix[:3, :3]
+    scale = np.linalg.norm(linear, axis=0)
+    rotation = np.eye(3, dtype=np.float64)
+    for index in range(3):
+        if scale[index] > 1.0e-12:
+            rotation[:, index] = linear[:, index] / scale[index]
+    return (
+        matrix[:3, 3].tolist(),
+        _matrix_to_euler_xyz_deg(rotation.tolist()),
+        scale.tolist(),
+    )
 
 
 def _glb_max_z(glb_path: Path) -> float:
@@ -189,9 +237,252 @@ def _rotated_aabb_offsets(
     )
 
 
-# ---------------------------------------------------------------------------
-# consolidated object manifest
-# ---------------------------------------------------------------------------
+def _sim_world_xy_aabb(
+    glb_path: Path,
+    rotation_matrix: list[list[float]] | None,
+    scale: float | Sequence[float],
+    init_pos: Sequence[float],
+) -> dict[str, Any]:
+    """Project a transformed simready GLB onto the simulation XY plane."""
+    import trimesh
+
+    scene = trimesh.load(glb_path, force="scene")
+    if isinstance(scene, trimesh.Trimesh):
+        mesh = scene
+    else:
+        dumped = scene.dump(concatenate=True)
+        mesh = (
+            dumped
+            if isinstance(dumped, trimesh.Trimesh)
+            else trimesh.util.concatenate(
+                [m for m in dumped if isinstance(m, trimesh.Trimesh)]
+            )
+        )
+    verts = np.asarray(mesh.vertices.copy(), dtype=np.float64)
+    if isinstance(scale, Sequence) and not isinstance(scale, (str, bytes)):
+        scale_array = np.asarray(list(scale), dtype=np.float64)
+        if scale_array.shape != (3,):
+            raise ValueError("scale must be a scalar or a 3-vector")
+        verts *= scale_array
+    else:
+        verts *= float(scale)
+    if rotation_matrix is not None:
+        rot = np.asarray(rotation_matrix, dtype=np.float64)
+        if rot.shape == (4, 4):
+            rot = rot[:3, :3]
+        verts = (rot @ verts.T).T
+
+    init = np.asarray(list(init_pos), dtype=np.float64)
+    if init.shape != (3,):
+        raise ValueError("init_pos must have three components")
+    sim_xy = np.column_stack((verts[:, 0] + init[0], -verts[:, 2] + init[1]))
+    min_xy = sim_xy.min(axis=0)
+    max_xy = sim_xy.max(axis=0)
+    center_xy = 0.5 * (min_xy + max_xy)
+    size_xy = np.maximum(max_xy - min_xy, 0.0)
+    return {
+        "unit": "m",
+        "center_xy": center_xy.tolist(),
+        "aabb_xy": [min_xy.tolist(), max_xy.tolist()],
+        "size_xy": size_xy.tolist(),
+    }
+
+
+def _support_region_2d(table_fit_manifest: dict[str, Any]) -> dict[str, Any]:
+    support = table_fit_manifest.get("final_support_quad_centered") or {}
+    corners = np.asarray(support.get("corners_xy", []), dtype=np.float64)
+    if corners.shape != (4, 2):
+        return {
+            "unit": "m",
+            "center_xy": [],
+            "aabb_xy": [],
+            "size_xy": [],
+            "corners_xy": [],
+        }
+    min_xy = corners.min(axis=0)
+    max_xy = corners.max(axis=0)
+    center_xy = np.asarray(
+        support.get("center_xy") or (0.5 * (min_xy + max_xy)).tolist(),
+        dtype=np.float64,
+    )
+    size_xy = np.asarray(
+        support.get("size_xy") or (max_xy - min_xy).tolist(),
+        dtype=np.float64,
+    )
+    return {
+        "unit": "m",
+        "center_xy": center_xy.tolist(),
+        "aabb_xy": [min_xy.tolist(), max_xy.tolist()],
+        "size_xy": size_xy.tolist(),
+        "corners_xy": corners.tolist(),
+    }
+
+
+def _write_scene_state(
+    *,
+    export_dir: Path,
+    config_path: Path,
+    table_desc: str,
+    table_support_region_2d: dict[str, Any],
+    object_states: list[dict[str, Any]],
+    source_snapshots: dict[str, str],
+) -> Path:
+    scene_state_dir = export_dir / "scene_state"
+    scene_state_dir.mkdir(parents=True, exist_ok=True)
+    plot_path = scene_state_dir / "topdown_2d.png"
+    state_path = scene_state_dir / "result.json"
+    state = {
+        "version": 1,
+        "coordinate_frame": {
+            "unit": "m",
+            "plane": "simulation_xy",
+            "x_axis": "simulation +X",
+            "y_axis": "simulation +Y",
+            "note": "2D values are top-down projections onto the simulation XY plane.",
+        },
+        "gym_config_path": str(config_path.relative_to(export_dir)),
+        "topdown_2d_plot_path": str(plot_path.relative_to(export_dir)),
+        "source_snapshots": source_snapshots,
+        "table": {
+            "id": "table",
+            "role": "background",
+            "description": table_desc,
+            "support_region_2d": table_support_region_2d,
+        },
+        "objects": object_states,
+    }
+    state_path.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    _render_scene_state_topdown(
+        support_region=table_support_region_2d,
+        objects=object_states,
+        output_path=plot_path,
+    )
+    return state_path
+
+
+def _copy_scene_source_snapshots(
+    *,
+    paths: PipelinePaths,
+    export_dir: Path,
+    scene_state_dir: Path,
+) -> dict[str, str]:
+    scene_state_dir.mkdir(parents=True, exist_ok=True)
+    snapshots: dict[str, str] = {}
+    sources = {
+        "unified_scene": paths.unified_scene_result,
+        "unified_scene_gen": paths.step_result(UNIFIED_SCENE_GEN_STEP),
+    }
+    for name, source in sources.items():
+        if not source.is_file():
+            continue
+        destination = scene_state_dir / f"{name}.json"
+        shutil.copy2(source, destination)
+        snapshots[name] = str(destination.relative_to(export_dir))
+    return snapshots
+
+
+def _render_scene_state_topdown(
+    *,
+    support_region: dict[str, Any],
+    objects: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon, Rectangle
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(9, 9))
+
+    data_points: list[np.ndarray] = []
+    corners = np.asarray(support_region.get("corners_xy", []), dtype=np.float64)
+    if corners.shape == (4, 2):
+        ax.add_patch(
+            Polygon(
+                corners,
+                closed=True,
+                facecolor=(0.18, 0.62, 0.32, 0.14),
+                edgecolor=(0.05, 0.38, 0.16, 1.0),
+                linewidth=2.0,
+                label="table support region",
+            )
+        )
+        data_points.append(corners)
+
+    for obj in objects:
+        footprint = obj.get("footprint_2d") or {}
+        aabb = np.asarray(footprint.get("aabb_xy", []), dtype=np.float64)
+        center = np.asarray(footprint.get("center_xy", []), dtype=np.float64)
+        if aabb.shape != (2, 2) or center.shape != (2,):
+            continue
+        size = np.maximum(aabb[1] - aabb[0], 0.0)
+        ax.add_patch(
+            Rectangle(
+                aabb[0],
+                size[0],
+                size[1],
+                facecolor=(0.25, 0.48, 0.95, 0.22),
+                edgecolor=(0.08, 0.20, 0.65, 1.0),
+                linewidth=1.5,
+            )
+        )
+        ax.plot(center[0], center[1], "o", color="#102a7a", markersize=4)
+        label = str(obj.get("id", "")).replace("interact_", "")
+        ax.text(
+            center[0],
+            center[1],
+            f"{label}\n({center[0]:.3f}, {center[1]:.3f})",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="black",
+        )
+        data_points.append(aabb)
+
+    if data_points:
+        all_points = np.vstack(data_points)
+        data_min = all_points.min(axis=0)
+        data_max = all_points.max(axis=0)
+    else:
+        data_min = np.array([-0.5, -0.5], dtype=np.float64)
+        data_max = np.array([0.5, 0.5], dtype=np.float64)
+    span = np.maximum(data_max - data_min, 1.0e-3)
+    padding = max(float(span.max()) * 0.18, 0.05)
+    x_limits = (float(data_min[0] - padding), float(data_max[0] + padding))
+    y_limits = (float(data_min[1] - padding), float(data_max[1] + padding))
+
+    ax.axhline(0.0, color="#303030", linewidth=1.2, alpha=0.75)
+    ax.axvline(0.0, color="#303030", linewidth=1.2, alpha=0.75)
+    ax.annotate(
+        "+X",
+        xy=(x_limits[1], 0.0),
+        xytext=(x_limits[1] - 0.08 * (x_limits[1] - x_limits[0]), 0.02),
+        arrowprops={"arrowstyle": "->", "color": "#303030", "lw": 1.4},
+        color="#303030",
+    )
+    ax.annotate(
+        "+Y",
+        xy=(0.0, y_limits[1]),
+        xytext=(0.02, y_limits[1] - 0.08 * (y_limits[1] - y_limits[0])),
+        arrowprops={"arrowstyle": "->", "color": "#303030", "lw": 1.4},
+        color="#303030",
+    )
+    ax.set_xlim(*x_limits)
+    ax.set_ylim(*y_limits)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title("Prompt2Scene Gym Export Top-Down 2D State")
+    ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.45)
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, facecolor="white")
+    plt.close(fig)
 
 
 def _build_object_manifest(
@@ -279,11 +570,6 @@ def _build_object_manifest(
     return consolidated
 
 
-# ---------------------------------------------------------------------------
-# main export
-# ---------------------------------------------------------------------------
-
-
 def export_gym_config(
     output_root: Path,
     *,
@@ -301,33 +587,37 @@ def export_gym_config(
         export_dir = export_dir.expanduser().resolve()
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── data sources ────────────────────────────────────────────────────
-    step_result = _read_json(
-        output_root / UNIFIED_SCENE_GEN_STEP / STEP_RESULT_FILENAME
-    )
+    paths = PipelinePaths(output_root)
+
+    step_result = _read_json(paths.step_result(UNIFIED_SCENE_GEN_STEP))
     table_fit = step_result.get("table_fit_to_clutter") or {}
+    if table_fit.get("status") != "ok":
+        raise RuntimeError(
+            "Cannot export gym_config because table_fit_to_clutter did not "
+            f"succeed: status={table_fit.get('status')!r} "
+            f"reason={table_fit.get('reason', '')}"
+        )
+    manifest_path_value = table_fit.get("manifest_path") or ""
     table_fit_manifest = _read_json(
-        _resolve_path(table_fit.get("manifest_path", ""), output_root)
+        _resolve_table_fit_manifest_path(
+            manifest_path_value=manifest_path_value,
+            output_root=output_root,
+            paths=paths,
+        )
     )
 
     aligned_by_id: dict[str, dict[str, Any]] = {}
-    aligned_manifest_path = (
-        output_root
-        / UNIFIED_SCENE_GEN_STEP
-        / "glb_gen"
-        / "simready_to_aligned_manifest.json"
-    )
-    if aligned_manifest_path.is_file():
-        for item in _read_json(aligned_manifest_path).get("items", []) or []:
+    if paths.simready_to_aligned_manifest.is_file():
+        for item in (
+            _read_json(paths.simready_to_aligned_manifest).get("items", []) or []
+        ):
             if isinstance(item, dict) and item.get("id"):
                 aligned_by_id[str(item["id"])] = item
 
-    # ── consolidated per-object manifest ─────────────────────────────────
     object_manifest = _build_object_manifest(
         output_root, step_result, table_fit_manifest, aligned_by_id
     )
 
-    # ── table ────────────────────────────────────────────────────────────
     table_info = step_result.get("table") or {}
     table_desc = str(
         table_info.get("complete_table_description")
@@ -347,39 +637,41 @@ def export_gym_config(
     table_dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(table_simready, table_dst)
 
-    table_surface_z = _glb_max_z(table_simready)
+    table_fit_transform = table_fit_manifest.get("table_fit_transform")
+    if table_fit_transform:
+        table_init_pos, table_init_rot, table_body_scale = _decompose_affine_matrix(
+            table_fit_transform
+        )
+    else:
+        uniform_scale = 1.0
+        ts = table_fit_manifest.get("table_xy_scale")
+        if isinstance(ts, dict):
+            uniform_scale = float(ts.get("uniform_scale", 1.0))
+        table_init_pos = [0.0, 0.0, 0.0]
+        table_init_rot = [0.0, 0.0, 0.0]
+        table_body_scale = [uniform_scale, uniform_scale, 1.0]
 
-    uniform_scale = 1.0
-    ts = table_fit_manifest.get("table_xy_scale")
-    if isinstance(ts, dict):
-        uniform_scale = float(ts.get("uniform_scale", 1.0))
-
-    # ── objects ──────────────────────────────────────────────────────────
     rigid_objects: list[dict[str, Any]] = []
+    object_states: list[dict[str, Any]] = []
 
     total = len(object_manifest)
     for idx, (oid, om) in enumerate(object_manifest.items()):
-        # Copy simready GLB
         safe_name = oid.replace("interact_", "").strip("_") or "object"
         obj_dir = mesh_assets_dir / safe_name / oid
         obj_dir.mkdir(parents=True, exist_ok=True)
         object_dst = obj_dir / f"{oid}.glb"
         shutil.copy2(om["simready_path"], object_dst)
 
-        # body_scale.  Image-scene alignment may contain a full simready→aligned
-        # scale; text-scene layout only has the per-object metric scale.
         sf = om["scale_factor"]
         scale_glb = om.get("transform_scale") or [sf, sf, sf]
         body_scale = _glb_scale_to_sim(scale_glb)
 
-        # init_rot
         init_rot: list[float] = [0.0, 0.0, 0.0]
         if om["rotation_matrix"] is not None:
             init_rot = _matrix_to_euler_xyz_deg(
                 _glb_rotation_to_sim(om["rotation_matrix"])
             )
 
-        # init_pos = world_bc - rotated_aabb_offset
         ro = _rotated_aabb_offsets(
             om["simready_path"], om["rotation_matrix"], scale_glb
         )
@@ -387,7 +679,7 @@ def export_gym_config(
         if wbc is not None:
             init_pos = [wbc[0] - ro[0], wbc[1] - ro[1], wbc[2] - ro[2]]
         else:
-            init_pos = [-ro[0], -ro[1], table_surface_z - ro[2]]
+            raise ValueError(f"Missing table-fit world_aabb_bottom_center for {oid}")
 
         rigid_objects.append(
             {
@@ -407,14 +699,30 @@ def export_gym_config(
                 "convex_decomposition_method": _DEFAULT_CONVEX_DECOMPOSITION_METHOD,
             }
         )
-        wbc = om["world_aabb_bottom_center"]
-        wbc_flag = "wbc" if wbc is not None else "fallback"
+        footprint_2d = _sim_world_xy_aabb(
+            om["simready_path"],
+            om["rotation_matrix"],
+            scale_glb,
+            init_pos,
+        )
+        object_states.append(
+            {
+                "id": oid,
+                "name": safe_name,
+                "role": "interact",
+                "description": om["description"],
+                "init_pos": init_pos,
+                "init_rot": init_rot,
+                "body_scale": body_scale,
+                "footprint_2d": footprint_2d,
+            }
+        )
+        wbc_flag = "wbc" if wbc is not None else "missing_wbc"
         print(
             f"  [{idx+1}/{total}] [{oid}] {om['description']}"
             f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src={wbc_flag}"
         )
 
-    # ── write gym config ─────────────────────────────────────────────────
     config = {
         "id": f"Prompt2Scene-{int(time.time() * 1000)}-v0",
         "max_episodes": 10,
@@ -433,10 +741,10 @@ def export_gym_config(
                     "compute_uv": False,
                 },
                 "attrs": dict(_DEFAULT_TABLE_ATTRS),
-                "body_scale": [uniform_scale, uniform_scale, 1.0],
+                "body_scale": table_body_scale,
                 "body_type": "kinematic",
-                "init_pos": [0.0, 0.0, 0.0],
-                "init_rot": [0.0, 0.0, 0.0],
+                "init_pos": table_init_pos,
+                "init_rot": table_init_rot,
             }
         ],
         "rigid_object": rigid_objects,
@@ -447,5 +755,20 @@ def export_gym_config(
         json.dumps(config, indent=4, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    scene_state_dir = export_dir / "scene_state"
+    source_snapshots = _copy_scene_source_snapshots(
+        paths=paths,
+        export_dir=export_dir,
+        scene_state_dir=scene_state_dir,
+    )
+    scene_state_path = _write_scene_state(
+        export_dir=export_dir,
+        config_path=config_path,
+        table_desc=table_desc,
+        table_support_region_2d=_support_region_2d(table_fit_manifest),
+        object_states=object_states,
+        source_snapshots=source_snapshots,
+    )
+    print(f"  scene_state={scene_state_path.relative_to(export_dir)}")
 
     return config_path

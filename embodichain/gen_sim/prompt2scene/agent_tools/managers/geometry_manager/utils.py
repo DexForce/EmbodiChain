@@ -495,6 +495,20 @@ def _table_fit_uniform_xy_scale_transform(
     return center @ scale_mat @ uncenter
 
 
+def _table_fit_uniform_scale_transform(
+    *,
+    center_xy: np.ndarray,
+    scale: float,
+) -> np.ndarray:
+    center = np.eye(4, dtype=np.float64)
+    center[:3, 3] = [float(center_xy[0]), float(center_xy[1]), 0.0]
+    uncenter = np.eye(4, dtype=np.float64)
+    uncenter[:3, 3] = [-float(center_xy[0]), -float(center_xy[1]), 0.0]
+    scale_mat = np.eye(4, dtype=np.float64)
+    scale_mat[:3, :3] *= float(scale)
+    return center @ scale_mat @ uncenter
+
+
 def _table_fit_safe_positive_ratio(numerator: float, denominator: float) -> float:
     return max(float(numerator) / max(float(denominator), 1.0e-6), 1.0e-6)
 

@@ -29,6 +29,7 @@ __all__ = ["cli_prompt2scene", "main"]
 def cli_prompt2scene(
     image_path: str | None,
     text: str | None,
+    prompt: str | None,
     output_root: str,
     llm_config_path: str | None = None,
 ) -> None:
@@ -37,12 +38,14 @@ def cli_prompt2scene(
     Args:
         image_path: Path to an input image, if image mode is used.
         text: Text prompt, if text mode is used.
+        prompt: Optional edit prompt.
         output_root: Directory where prompt2scene outputs are written.
         llm_config_path: Optional path to the LLM config JSON file.
     """
     request = Prompt2SceneInput.from_cli_args(
         image_path=Path(image_path) if image_path is not None else None,
         text=text,
+        prompt=prompt,
         output_root=Path(output_root),
     )
     llm_cfg = load_llm_config(
@@ -57,7 +60,7 @@ def main() -> None:
         description="embodichain.gen_sim.prompt2scene Prompt-to-Scene Pipeline"
     )
 
-    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group = parser.add_mutually_exclusive_group(required=False)
     input_group.add_argument(
         "--image",
         type=str,
@@ -67,6 +70,15 @@ def main() -> None:
         "--text",
         type=str,
         help="Text prompt describing the target scene",
+    )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help=(
+            "Optional edit instruction. Use with --image/--text to edit after "
+            "generation, or with only --output_root to edit an existing scene."
+        ),
     )
     parser.add_argument(
         "--output_root",
@@ -83,7 +95,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    cli_prompt2scene(args.image, args.text, args.output_root, args.llm_config)
+    cli_prompt2scene(
+        args.image,
+        args.text,
+        args.prompt,
+        args.output_root,
+        args.llm_config,
+    )
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.prompt2scene.agent_tools.managers.metric_scale_manager import (
+from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager import (
     METRIC_SCALE_ENABLED,
     EstimateMetricScalesRequest,
     MetricScaleManager,

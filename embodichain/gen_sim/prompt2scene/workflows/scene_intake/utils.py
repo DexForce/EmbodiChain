@@ -87,9 +87,7 @@ def _parse_table(raw_table: dict[str, Any]) -> SceneIntakeTable:
 
     if "complete_table_description" not in raw_table:
         raise ValueError("Scene intake table.complete_table_description is required.")
-    complete_table_description = str(
-        raw_table["complete_table_description"]
-    ).strip()
+    complete_table_description = str(raw_table["complete_table_description"]).strip()
     if not complete_table_description:
         raise ValueError(
             "Scene intake table.complete_table_description must be non-empty."
@@ -206,20 +204,37 @@ def _parse_class_candidate(
         raise ValueError(
             f"Scene intake asset {asset_index}.class_candidate must be a list."
         )
-    class_candidate = [normalize_asset_name(str(item)) for item in raw_class_candidate]
-    if len(class_candidate) != 5:
+    class_candidate = [
+        normalize_asset_name(str(item))
+        for item in raw_class_candidate
+        if normalize_asset_name(str(item))
+    ]
+    expected_name = normalize_asset_name(raw_name)
+    normalized_candidates = [expected_name]
+    for candidate in class_candidate:
+        if candidate != expected_name and candidate not in normalized_candidates:
+            normalized_candidates.append(candidate)
+    generic_fallbacks = [
+        "object",
+        "item",
+        "container",
+        "tableware",
+        "household_object",
+    ]
+    for fallback in generic_fallbacks:
+        if len(normalized_candidates) >= 5:
+            break
+        if fallback != expected_name and fallback not in normalized_candidates:
+            normalized_candidates.append(fallback)
+    if len(normalized_candidates) != 5:
         raise ValueError(
             f"Scene intake asset {asset_index}.class_candidate must contain exactly five entries."
         )
-    if any(not candidate for candidate in class_candidate):
+    if any(not candidate for candidate in normalized_candidates):
         raise ValueError(
             f"Scene intake asset {asset_index}.class_candidate has empty entries."
         )
-    if class_candidate[0] != normalize_asset_name(raw_name):
-        raise ValueError(
-            f"Scene intake asset {asset_index}.class_candidate[0] must equal name."
-        )
-    return class_candidate
+    return normalized_candidates
 
 
 def _parse_count(raw_count: Any, *, asset_index: int) -> int:
