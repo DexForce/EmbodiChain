@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import gc
 import math
 
 import numpy as np
@@ -108,7 +109,25 @@ class TestToppraCfgFields:
 
         cfg = ToppraPlannerCfg(robot_uid="x")
         assert cfg.max_workers is None
-        assert cfg.mp_context == "fork"
+        assert cfg.mp_context is None  # None => auto-select by device
+
+    def test_mp_context_auto_resolution(self):
+        # _resolve_mp_context is a pure function of (cfg value, device) — no sim
+        # needed. None auto-selects: fork on CPU, spawn on GPU; explicit values
+        # are honored as-is.
+        import torch
+
+        from embodichain.lab.sim.planners.toppra_planner import ToppraPlanner
+
+        resolve = ToppraPlanner._resolve_mp_context
+        # Auto: CPU -> fork, CUDA -> spawn (creating a torch.device does NOT
+        # initialize CUDA, so this is safe to assert without a GPU).
+        assert resolve(None, torch.device("cpu")) == "fork"
+        assert resolve(None, torch.device("cuda", 0)) == "spawn"
+        assert resolve(None, torch.device("cuda")) == "spawn"
+        # Explicit override wins regardless of device.
+        assert resolve("spawn", torch.device("cpu")) == "spawn"
+        assert resolve("fork", torch.device("cuda", 0)) == "fork"
 
 
 class TestToppraPlanBatched:
@@ -154,7 +173,8 @@ class TestToppraPlanBatched:
             assert r.success.all().item()
             assert r.positions.shape == (B, 15, dofs)
         finally:
-            planner.close()
+            del planner
+            gc.collect()
             sim.destroy()
             import embodichain.lab.sim as om
 
@@ -201,14 +221,18 @@ class TestToppraPlanBatched:
             padded = tail[n_real:]  # all padded rows
             assert torch.allclose(padded, held.expand(padded.shape))
         finally:
-            planner.close()
+            del planner
+            gc.collect()
             sim.destroy()
             import embodichain.lab.sim as om
 
             om.SimulationManager.flush_cleanup_queue()
 
-    def test_plan_batched_pool_path(self):
-        # Exercise the real ProcessPoolExecutor branch (max_workers=2, B=3).
+    @pytest.mark.parametrize("mp_context", ["fork", "spawn"])
+    def test_plan_batched_pool_path(self, mp_context):
+        # Exercise the real ProcessPoolExecutor branch (max_workers=2, B=3)
+        # under both start methods: 'fork' is the CPU default, 'spawn' is the
+        # GPU fallback. Both must plan correctly and reap workers on GC.
         from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
         from embodichain.lab.sim.planners.toppra_planner import (
             ToppraPlanner,
@@ -226,7 +250,10 @@ class TestToppraPlanBatched:
                 {"uid": "p", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
             )
         )
-        planner = ToppraPlanner(ToppraPlannerCfg(robot_uid="p", max_workers=2))
+        planner = ToppraPlanner(
+            ToppraPlannerCfg(robot_uid="p", max_workers=2, mp_context=mp_context)
+        )
+        assert planner._mp_context == mp_context
         try:
             B, dofs = 3, 6
             wp = torch.zeros(B, dofs)
@@ -245,7 +272,81 @@ class TestToppraPlanBatched:
             assert r.success.all().item()
             assert r.positions.shape == (B, 12, dofs)
         finally:
-            planner.close()
+            del planner
+            gc.collect()
+            sim.destroy()
+            import embodichain.lab.sim as om
+
+            om.SimulationManager.flush_cleanup_queue()
+
+    @pytest.mark.parametrize("mp_context", ["fork", "spawn"])
+    def test_workers_reaped_on_gc(self, mp_context):
+        # Regression: abandoning the planner must reap its worker processes,
+        # under both 'fork' (CPU default) and 'spawn' (GPU fallback).
+        #
+        # Workers install prctl(PR_SET_PDEATHSIG) in _worker_init, so the kernel
+        # kills them the moment the parent process dies — including the
+        # os._exit(0) path taken by SimulationManager.destroy(), which skips
+        # every Python finalizer. That covers process exit. For in-process GC
+        # of an abandoned planner (e.g. between tests in a long-running
+        # session), __del__ -> _shutdown_pool() must terminate workers
+        # synchronously so none leak.
+        from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
+        from embodichain.lab.sim.planners.toppra_planner import (
+            ToppraPlanner,
+            ToppraPlannerCfg,
+            ToppraPlanOptions,
+        )
+        from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+        from embodichain.lab.sim.robots import CobotMagicCfg
+
+        sim = SimulationManager(
+            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+        )
+        sim.add_robot(
+            cfg=CobotMagicCfg.from_dict(
+                {
+                    "uid": "close_reap",
+                    "init_pos": [0, 0, 0.7775],
+                    "init_qpos": [0.0] * 16,
+                }
+            )
+        )
+        planner = ToppraPlanner(
+            ToppraPlannerCfg(
+                robot_uid="close_reap", max_workers=2, mp_context=mp_context
+            )
+        )
+        assert planner._mp_context == mp_context
+        worker_processes = []
+        try:
+            B, dofs = 3, 6
+            wp = torch.zeros(B, dofs)
+            wp[:, 0] = torch.linspace(0.1, 0.5, B)
+            states = [
+                PlanState.from_qpos(torch.zeros(B, dofs)),
+                PlanState.from_qpos(wp),
+            ]
+            opts = ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=12,
+                constraints={"velocity": 1.0, "acceleration": 2.0},
+            )
+            r = planner.plan(states, opts)
+            assert r.success.all().item()
+
+            # Capture the worker processes created by the executor.
+            worker_processes = list(planner._pool._processes.values())
+            assert len(worker_processes) == 2
+        finally:
+            # Abandon the planner; __del__ -> _shutdown_pool must reap workers.
+            del planner
+            gc.collect()
+            for proc in worker_processes:
+                assert not proc.is_alive(), (
+                    f"TOPPRA worker process {proc.pid} survived planner GC; "
+                    "worker processes must be reaped when the planner is collected."
+                )
             sim.destroy()
             import embodichain.lab.sim as om
 
@@ -301,7 +402,8 @@ class TestToppraNumericalRegression:
                     r.positions[b].cpu().numpy(), single["positions"], atol=1e-5
                 )
         finally:
-            planner.close()
+            del planner
+            gc.collect()
             sim.destroy()
             import embodichain.lab.sim as om
 

@@ -164,6 +164,72 @@ def _empty_failure(dofs: int) -> dict:
     }
 
 
+def _set_parent_death_signal() -> None:
+    r"""Best-effort: ask the kernel to SIGKILL this worker when its parent dies.
+
+    This is the **only** cleanup mechanism that survives ``os._exit(0)`` in the
+    parent process, which is what :meth:`SimulationManager.destroy` does by
+    default (gated by ``EMBODICHAIN_SIM_EXIT_PROCESS``).  ``os._exit`` skips
+    every Python-level finalizer — ``atexit`` handlers, ``__del__`` methods,
+    and ``concurrent.futures``' internal ``_python_exit`` that would otherwise
+    join/terminate daemon workers — so the worker processes would be orphaned
+    and reparented to init, leaving residual python processes behind.
+
+    A kernel parent-death signal fires regardless of *how* the parent exits
+    (``os._exit``, a crash, or a normal return), so workers are reaped even
+    when no Python cleanup runs.  No-op on non-Linux or if ``prctl`` is
+    unavailable; in that case workers still rely on ``__del__`` and the
+    daemon-process reaping that runs on a normal interpreter shutdown.
+    """
+    try:
+        import ctypes
+        import signal
+
+        libc = ctypes.CDLL(None)
+        PR_SET_PDEATHSIG = 1
+        libc.prctl.argtypes = [
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        ]
+        libc.prctl.restype = ctypes.c_int
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+    except Exception:
+        pass
+
+
+def _worker_init() -> None:
+    r"""Initializer run in each worker when the pool starts.
+
+    Two responsibilities:
+
+    1. **Parent-death signal (Linux).**  Install ``prctl(PR_SET_PDEATHSIG,
+       SIGKILL)`` so the kernel kills this worker the instant its parent
+       dies.  This is what guarantees no residual worker processes when the
+       parent exits via ``os._exit(0)`` (see :func:`_set_parent_death_signal`).
+       Because of this, callers never need to explicitly shut the planner
+       down — workers self-terminate with the parent.
+
+    2. **atexit clearing (fork only).**  When ``fork`` is used, the parent
+       has usually already initialized CUDA/GPU by the time the pool is
+       created, and ``fork`` copies the parent's atexit registry into the
+       child.  Without clearing it the worker would try to run the parent's
+       cleanup routines on exit, which can deadlock or corrupt state.  With
+       ``spawn`` this is not necessary, but the initializer still runs so
+       that ``fork`` remains usable for advanced callers who create the pool
+       before CUDA is initialized.
+    """
+    import atexit
+    import multiprocessing as mp
+
+    if mp.get_start_method() == "fork":
+        atexit._clear()
+
+    _set_parent_death_signal()
+
+
 __all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
 
 
@@ -173,8 +239,22 @@ class ToppraPlannerCfg(BasePlannerCfg):
     planner_type: str = "toppra"
     max_workers: int | None = None
     """Worker process count for the batched fan-out. None => min(cpu_count()//2, B)."""
-    mp_context: str = "fork"
-    """Multiprocessing start method. 'fork' (default, TOPPRA is pure-CPU) or 'spawn'."""
+    mp_context: str | None = None
+    """Multiprocessing start method for the batched fan-out.
+
+    ``None`` (default) auto-selects based on the simulation device:
+    ``'fork'`` on CPU and ``'spawn'`` on GPU. ``'fork'`` is faster — workers
+    inherit the parent's already-loaded modules, so pool startup is
+    near-instant — and is safe here because the TOPPRA worker
+    (:func:`_toppra_solve_one_env`) is pure numpy/scipy and never touches the
+    parent's Vulkan/Warp/CUDA context or render threads; ``_worker_init``
+    clears the inherited atexit registry and installs ``prctl(PR_SET_PDEATHSIG)``
+    so workers are reaped when the parent dies (incl. the ``os._exit`` path).
+    ``'spawn'`` is the safer choice when the parent has initialized CUDA
+    physics (``sim_device='cuda'``) — fork-after-CUDA-init is the officially
+    unsupported case — or if fork deadlocks are observed, at the cost of
+    re-importing modules per worker.
+    """
 
 
 @configclass
@@ -216,9 +296,34 @@ class ToppraPlanner(BasePlanner):
         super().__init__(cfg)
 
         self._pool = None
-        import atexit
+        # Resolve the multiprocessing start method once, now that self.device
+        # (from BasePlanner) is known. None => auto: fork on CPU, spawn on GPU.
+        self._mp_context = self._resolve_mp_context(cfg.mp_context, self.device)
+        # No atexit / __del__-based shutdown is registered here: workers install
+        # prctl(PR_SET_PDEATHSIG) in _worker_init, so the kernel reaps them the
+        # moment the parent process dies — including the os._exit(0) path taken
+        # by SimulationManager.destroy(), which skips every Python finalizer.
+        # __del__ below only handles in-process GC of an abandoned planner.
 
-        atexit.register(self.close)
+    @staticmethod
+    def _resolve_mp_context(mp_context: str | None, device: torch.device) -> str:
+        """Return the multiprocessing start method to use for the worker pool.
+
+        An explicit ``mp_context`` is honored as-is. ``None`` auto-selects:
+        ``'fork'`` on CPU (fast — workers inherit loaded modules; safe because
+        the worker is pure numpy/scipy), ``'spawn'`` everywhere else (safer
+        under an initialized CUDA context).
+
+        Args:
+            mp_context: The cfg value; ``None`` means auto-select.
+            device: The physics device the planner's robot runs on.
+
+        Returns:
+            One of ``'fork'`` / ``'spawn'``.
+        """
+        if mp_context is not None:
+            return mp_context
+        return "fork" if device.type == "cpu" else "spawn"
 
     def _get_pool(self, batch_size: int):
         if self._pool is not None:
@@ -228,20 +333,66 @@ class ToppraPlanner(BasePlanner):
         max_workers = self.cfg.max_workers
         if max_workers is None:
             max_workers = max(1, min((os.cpu_count() or 2) // 2, batch_size))
-        ctx = mp.get_context(self.cfg.mp_context)
+        ctx = mp.get_context(self._mp_context)
         from concurrent.futures import ProcessPoolExecutor
 
-        self._pool = ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+        self._pool = ProcessPoolExecutor(
+            max_workers=max_workers,
+            mp_context=ctx,
+            initializer=_worker_init,
+        )
         return self._pool
 
-    def close(self):
-        if self._pool is not None:
-            self._pool.shutdown(wait=False, cancel_futures=True)
-            self._pool = None
+    def _shutdown_pool(self) -> None:
+        r"""Shut down the TOPPRA worker process pool (internal).
+
+        We do **not** use ``shutdown(wait=True)``: with ``fork`` workers can
+        inherit the parent's CUDA/GPU context, causing them to deadlock inside
+        the driver at exit.  ``wait=True`` would then hang the main process,
+        and if the user kills it the workers are left behind as residual
+        python processes.
+
+        Instead we cancel pending work and then forcibly terminate/join/kill
+        every worker process so that this method returns only after all
+        workers are actually gone.
+
+        This is **not** part of the public API.  It exists for two internal
+        callers: the ``BrokenProcessPool`` recovery path in :meth:`plan`, and
+        ``__del__`` (so an abandoned planner in a long-running process does
+        not leak workers).  Normal process exit does not rely on it — workers
+        install ``prctl(PR_SET_PDEATHSIG)`` in :func:`_worker_init` and are
+        reaped by the kernel when the parent dies, even under ``os._exit``.
+        """
+        if self._pool is None:
+            return
+
+        # Capture the worker process objects before shutdown clears them.
+        worker_processes = list(getattr(self._pool, "_processes", {}).values())
+
+        # Stop accepting new work and cancel any futures that have not started.
+        self._pool.shutdown(wait=False, cancel_futures=True)
+
+        # Forcibly reap every worker.  This is required for fork-based pools
+        # when the parent has initialized CUDA: the children inherit the
+        # context and may not exit cleanly on their own.
+        for proc in worker_processes:
+            if not proc.is_alive():
+                continue
+            proc.terminate()
+            proc.join(timeout=5.0)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=1.0)
+
+        self._pool = None
 
     def __del__(self):
+        # Only matters for in-process GC of an abandoned planner (and as a
+        # non-Linux fallback).  Process-exit cleanup is handled by the kernel
+        # via PR_SET_PDEATHSIG installed in each worker, which survives the
+        # os._exit(0) path that SimulationManager.destroy() takes.
         try:
-            self.close()
+            self._shutdown_pool()
         except Exception:
             pass
 
@@ -283,44 +434,48 @@ class ToppraPlanner(BasePlanner):
             for i in range(b)
         ]
 
-        # Inline fallback for B==1 or max_workers==1
-        max_workers = self.cfg.max_workers
-        use_inline = (
-            (b == 1)
-            or (max_workers == 1)
-            or (max_workers is None and ((os.cpu_count() or 2) // 2) <= 1)
-        )
-        if use_inline:
+        # Single-env planning never needs a process pool.
+        if b == 1:
             results = [_toppra_solve_one_env(*a) for a in args_per_env]
         else:
-            pool = self._get_pool(b)
-            results = [None] * b
-            try:
-                futures = [pool.submit(_toppra_solve_one_env, *a) for a in args_per_env]
-                broken = False
-                for i, fut in enumerate(futures):
-                    try:
-                        results[i] = fut.result()
-                    except BrokenProcessPool:
-                        logger.log_warning(
-                            "TOPPRA process pool broke; returning failure."
-                        )
-                        self.close()
-                        broken = True
-                        break
-                    except Exception:
-                        results[i] = _empty_failure(dofs)
-                if broken:
+            # Inline fallback for max_workers==1 or a single-core machine.
+            max_workers = self.cfg.max_workers
+            use_inline = (max_workers == 1) or (
+                max_workers is None and ((os.cpu_count() or 2) // 2) <= 1
+            )
+            if use_inline:
+                results = [_toppra_solve_one_env(*a) for a in args_per_env]
+            else:
+                pool = self._get_pool(b)
+                results = [None] * b
+                try:
+                    futures = [
+                        pool.submit(_toppra_solve_one_env, *a) for a in args_per_env
+                    ]
+                    broken = False
+                    for i, fut in enumerate(futures):
+                        try:
+                            results[i] = fut.result()
+                        except BrokenProcessPool:
+                            logger.log_warning(
+                                "TOPPRA process pool broke; returning failure."
+                            )
+                            self._shutdown_pool()
+                            broken = True
+                            break
+                        except Exception:
+                            results[i] = _empty_failure(dofs)
+                    if broken:
+                        for i in range(b):
+                            if results[i] is None:
+                                results[i] = _empty_failure(dofs)
+                except BrokenProcessPool:
+                    # pool was already broken at submit time
+                    logger.log_warning("TOPPRA process pool broke; returning failure.")
+                    self._shutdown_pool()
                     for i in range(b):
                         if results[i] is None:
                             results[i] = _empty_failure(dofs)
-            except BrokenProcessPool:
-                # pool was already broken at submit time
-                logger.log_warning("TOPPRA process pool broke; returning failure.")
-                self.close()
-                for i in range(b):
-                    if results[i] is None:
-                        results[i] = _empty_failure(dofs)
 
         return self._assemble_batched_result(results, dofs)
 

@@ -100,6 +100,22 @@ class TestToppraPlanner:
         assert result.positions.shape == (1, 2, 6)
         assert result.duration.item() == 0.0
 
+    def test_single_env_does_not_spawn_pool(self):
+        # Single-env plans must stay inline and never create a ProcessPoolExecutor.
+        target_states = [
+            PlanState.single(qpos=torch.zeros(6)),
+            PlanState.single(qpos=torch.zeros(6)),
+        ]
+
+        opts = ToppraPlanOptions(
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.1,
+            constraints={"velocity": 1.0, "acceleration": 2.0},
+        )
+        result = self.planner.plan(target_states, options=opts)
+        assert result.success.all().item()
+        assert self.planner._pool is None
+
 
 if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)
