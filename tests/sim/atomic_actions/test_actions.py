@@ -649,6 +649,90 @@ class TestPlaceAction:
         # start prepended to the 3 down-phase IK solutions -> 4 keyframes.
         assert captured["down_keyframes"].shape == (NUM_ENVS, 4, ARM_DOF)
 
+    def test_execute_preserves_release_pose_without_tcp_symmetry(self):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+        )
+        action = Place(self.mg, cfg)
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        rz_pi_pose = torch.eye(4)
+        rz_pi_pose[:3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        def repeat_last_keyframe(trajectory, interp_num, device):
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=repeat_last_keyframe,
+        ):
+            result = action.execute(EndEffectorPoseTarget(xpos=rz_pi_pose), state)
+
+        assert result.success is True
+        assert len(seen_poses) == 3
+        assert torch.allclose(
+            seen_poses[1], rz_pi_pose.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+
+    def test_execute_with_tcp_symmetry_selects_closest_release_variant(self):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            lift_height=0.1,
+        )
+        action = Place(self.mg, cfg)
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        rz_pi_pose = torch.eye(4)
+        rz_pi_pose[:3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        def repeat_last_keyframe(trajectory, interp_num, device):
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=repeat_last_keyframe,
+        ):
+            result = action.execute(
+                EndEffectorPoseTarget(
+                    xpos=rz_pi_pose,
+                    tcp_symmetry="z_roll_180",
+                ),
+                state,
+            )
+
+        assert result.success is True
+        assert len(seen_poses) == 3
+        expected_release = torch.eye(4)
+        expected_retract = torch.eye(4)
+        expected_retract[2, 3] += cfg.lift_height
+        assert torch.allclose(
+            seen_poses[0], expected_retract.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        assert torch.allclose(
+            seen_poses[1], expected_release.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        assert torch.allclose(
+            seen_poses[2], expected_retract.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+
 
 # ---------------------------------------------------------------------------
 # Press
