@@ -1001,10 +1001,10 @@ def test_coordinated_pickment_builds_full_robot_stream(monkeypatch) -> None:
         [0.56, -0.2, 0.1]
     )
     assert capture[0]["target"].left_object_to_eef[:3, 2].tolist() == pytest.approx(
-        [0.0, -1.0, 0.0]
+        [0.0, 0.0, -1.0]
     )
     assert capture[0]["target"].right_object_to_eef[:3, 2].tolist() == pytest.approx(
-        [0.0, 1.0, 0.0]
+        [0.0, 0.0, -1.0]
     )
     assert env.left_arm_current_qpos.tolist() == pytest.approx([0.4, 0.5])
     assert env.right_arm_current_qpos.tolist() == pytest.approx([0.6, 0.7])
@@ -1013,14 +1013,14 @@ def test_coordinated_pickment_builds_full_robot_stream(monkeypatch) -> None:
     assert result["world_states"]["coordinated"].coordinated_held_object is not None
 
 
-def test_coordinated_pickment_assigns_yawed_side_grasps_by_arm_pose(
+def test_coordinated_pickment_prefers_yawed_top_down_grasps(
     monkeypatch,
 ) -> None:
     env = _FakeEnv()
     env.left_arm_current_xpos = torch.eye(4)
-    env.left_arm_current_xpos[:3, 3] = torch.tensor([0.4, 0.2, 0.04])
+    env.left_arm_current_xpos[:3, 3] = torch.tensor([0.4, 0.3, 0.04])
     env.right_arm_current_xpos = torch.eye(4)
-    env.right_arm_current_xpos[:3, 3] = torch.tensor([0.3, 0.2, 0.04])
+    env.right_arm_current_xpos[:3, 3] = torch.tensor([0.3, -0.3, 0.04])
     capture = []
     _FakeBackendAction.capture = capture
 
@@ -1060,8 +1060,68 @@ def test_coordinated_pickment_assigns_yawed_side_grasps_by_arm_pose(
 
     target = capture[0]["target"]
     assert isinstance(target, CoordinatedPickmentTarget)
-    assert target.left_object_to_eef[1, 3].item() == pytest.approx(0.0)
-    assert target.right_object_to_eef[1, 3].item() == pytest.approx(0.1)
+    obj_pose = env.sim.get_rigid_object("pad_y").get_local_pose(to_matrix=True)[0]
+    left_world = obj_pose @ target.left_object_to_eef
+    right_world = obj_pose @ target.right_object_to_eef
+    assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert abs(left_world[1, 3].item() - right_world[1, 3].item()) > 0.25
+
+
+def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
+        # Reject the compact world-Y candidate and force the selector to try
+        # the next top-down endpoint candidate.
+        if abs(float(target_xpos[0, 3]) - 0.6) < 0.03:
+            return False, torch.zeros(2)
+        return True, torch.tensor([0.2, 0.3]) if is_left else torch.tensor([0.4, 0.5])
+
+    env.get_arm_ik = fake_get_arm_ik
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "pad_x",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        },
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    target = capture[0]["target"]
+    left_local = target.left_object_to_eef[:3, 3]
+    right_local = target.right_object_to_eef[:3, 3]
+    assert {round(float(left_local[0]), 3), round(float(right_local[0]), 3)} == {
+        0.032,
+        0.368,
+    }
 
 
 def test_place_action_builds_place_cfg(monkeypatch) -> None:

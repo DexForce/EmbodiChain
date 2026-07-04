@@ -66,7 +66,7 @@ _SUPPORTED_STACK_MODES = {"on_top", "nested"}
 _SUPPORTED_ORDER_BY = {"explicit", "size"}
 _STACKING_ANCHOR = "table_center"
 _STAGING_Z_DELTA = 0.10
-_STACK_CLEARANCE = 0.003
+_STACK_CLEARANCE = 0.02
 
 
 def _is_stacking_task_description(task_description: str) -> bool:
