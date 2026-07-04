@@ -119,12 +119,60 @@ class HeldObjectPoseTarget:
     """(4, 4) or (n_envs, 4, 4) target pose for the held object."""
 
 
+@dataclass(frozen=True)
+class CoordinatedPickmentTarget:
+    """Object-centric target for picking and moving one object with two hands."""
+
+    object_target_pose: torch.Tensor
+    """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+
+    object_semantics: ObjectSemantics
+    """Semantic description of the shared object."""
+
+    left_object_to_eef: torch.Tensor
+    """Transform from object frame to left end-effector frame."""
+
+    right_object_to_eef: torch.Tensor
+    """Transform from object frame to right end-effector frame."""
+
+    object_initial_pose: torch.Tensor | None = None
+    """Optional initial object pose. Defaults to ``object_semantics.entity`` pose."""
+
+
+@dataclass(frozen=True)
+class CoordinatedPlacementTarget:
+    """Object-centric target for dual-arm coordinated placement."""
+
+    placing_object_target_pose: torch.Tensor
+    """Target pose for the object released by the placing arm."""
+
+    support_object_target_pose: torch.Tensor
+    """Target pose for the object held by the support arm."""
+
+    placing_held_object: HeldObjectState
+    """Held-object state for the placing arm."""
+
+    support_held_object: HeldObjectState
+    """Held-object state for the support arm."""
+
+    placing_height_offset: float | None = None
+    """World-Z offset above the placing object target pose."""
+
+    support_height_offset: float | None = None
+    """World-Z offset above the support object target pose."""
+
+    release: bool | None = None
+    """Whether the placing hand releases. ``None`` uses the action config."""
+
+
 Target = (
     EndEffectorPoseTarget
     | JointPositionTarget
     | NamedJointPositionTarget
     | GraspTarget
     | HeldObjectPoseTarget
+    | CoordinatedPickmentTarget
+    | CoordinatedPlacementTarget
 )
 
 
@@ -148,6 +196,26 @@ class HeldObjectState:
 
 
 @dataclass
+class CoordinatedHeldObjectState:
+    """State of a single object jointly held by two robot hands."""
+
+    semantics: ObjectSemantics
+    """Semantic object currently held by the two grippers."""
+
+    left_object_to_eef: torch.Tensor
+    """Transform from object frame to left end-effector frame, shape ``[n_envs, 4, 4]``."""
+
+    right_object_to_eef: torch.Tensor
+    """Transform from object frame to right end-effector frame, shape ``[n_envs, 4, 4]``."""
+
+    left_grasp_xpos: torch.Tensor
+    """Left end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
+
+    right_grasp_xpos: torch.Tensor
+    """Right end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
+
+
+@dataclass
 class WorldState:
     """State the engine threads through a sequence of actions."""
 
@@ -156,6 +224,9 @@ class WorldState:
 
     held_object: HeldObjectState | None = None
     """Object currently held by the gripper, or None."""
+
+    coordinated_held_object: CoordinatedHeldObjectState | None = None
+    """Object currently held by two grippers, or None."""
 
 
 @dataclass
@@ -256,6 +327,9 @@ __all__ = [
     "ActionCfg",
     "ActionResult",
     "AtomicAction",
+    "CoordinatedHeldObjectState",
+    "CoordinatedPickmentTarget",
+    "CoordinatedPlacementTarget",
     "GraspTarget",
     "HeldObjectState",
     "HeldObjectPoseTarget",

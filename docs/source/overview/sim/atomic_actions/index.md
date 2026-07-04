@@ -5,6 +5,10 @@
 
 Atomic actions are the building blocks for automated robot motion generation. Each action encapsulates a complete, self-contained motion primitive — such as picking up an object or moving to a pose — that can be chained together to form complex manipulation workflows.
 
+```{note}
+Atomic actions currently support gripper-based manipulation only. Dexterous-hand manipulation is not supported yet.
+```
+
 ## Design Overview
 
 The module is organized into three layers:
@@ -16,7 +20,8 @@ AtomicActionEngine          ← orchestrates a sequence of (name, typed_target) 
     │       │
     │       └── MotionGenerator   ← low-level trajectory planner (IK + trajectory optimization)
     │
-    └── WorldState           ← threaded action-to-action (last_qpos + held_object)
+    └── WorldState           ← threaded action-to-action
+                               (last_qpos + held_object/coordinated_held_object)
 ```
 
 Each action receives a typed target and a `WorldState`, runs its planning pipeline, and
@@ -30,6 +35,8 @@ EndEffectorPoseTarget(xpos)                │
 JointPositionTarget(qpos)                  ├─ IK solve when pose-based
 NamedJointPositionTarget(name)             ├─ Motion plan / interpolation
 HeldObjectPoseTarget(pose)                 └─ Gripper interpolation when needed
+CoordinatedPickmentTarget(...)             │
+CoordinatedPlacementTarget(...)            │
                                                    │
                                            ActionResult
                                            (success, full-DoF traj, next_state)
@@ -62,6 +69,8 @@ and every action declares the target type, or tuple of target types, it accepts 
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
 | `GraspTarget` | `GraspTarget(semantics)` | `PickUp` |
 | `HeldObjectPoseTarget` | `HeldObjectPoseTarget(object_target_pose)` | `MoveHeldObject` |
+| `CoordinatedPickmentTarget` | `CoordinatedPickmentTarget(...)` | `CoordinatedPickment` |
+| `CoordinatedPlacementTarget` | `CoordinatedPlacementTarget(...)` | `CoordinatedPlacement` |
 
 `Target` is the union of these typed target dataclasses.
 
@@ -99,15 +108,20 @@ action's `TargetType` before calling `execute`:
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
 | `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
 | `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
+| `CoordinatedPickmentTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
+| `CoordinatedPlacementTarget(...)` | Two held-object states plus object-centric placing/support target poses | `CoordinatedPlacement` |
 
-`WorldState` is threaded between actions and carries the robot's `last_qpos` plus an optional
-`held_object: HeldObjectState`. The built-in actions update it as follows:
+`WorldState` is threaded between actions and carries the robot's `last_qpos` plus optional
+`held_object: HeldObjectState` and `coordinated_held_object: CoordinatedHeldObjectState`.
+The built-in actions update it as follows:
 
 | Action | Effect on `held_object` |
 |---|---|
 | `PickUp` | Populates it (computed object-to-EEF transform) |
 | `MoveHeldObject` | Requires it; preserves it unchanged |
 | `Place` | Clears it to `None` |
+| `CoordinatedPickment` | Leaves `held_object` as `None` and populates `coordinated_held_object` |
+| `CoordinatedPlacement` | Returns the support arm's `HeldObjectState`; the placing object is released |
 | `MoveEndEffector` | Leaves it unchanged |
 | `MoveJoints` | Leaves it unchanged |
 | `Press` | Leaves it unchanged |
@@ -212,6 +226,10 @@ is_success, traj, final_state = engine.run(
 
 You can add any motion primitive by subclassing `AtomicAction`, composing a
 `TrajectoryBuilder` for the shared planning math, and registering an instance with the engine.
+Built-in primitives live one action per module under
+`embodichain/lab/sim/atomic_actions/primitives/`, while
+`embodichain.lab.sim.atomic_actions` remains the public import surface and
+`embodichain.lab.sim.atomic_actions.actions` stays as a compatibility re-export.
 
 ### Step 1 — Define the config
 
@@ -307,6 +325,8 @@ builtin_actions
   - `scripts/tutorials/atomic_action/move_held_object.py`
   - `scripts/tutorials/atomic_action/place.py`
   - `scripts/tutorials/atomic_action/press.py`
+  - `scripts/tutorials/atomic_action/coordinated_pickment.py`
+  - `scripts/tutorials/atomic_action/coordinated_placement.py`
 
 Run a demo in headless CPU mode with `--auto_play --headless --device cpu` to record
 an MP4 under `outputs/videos`. For example:

@@ -22,10 +22,11 @@ full-DoF trajectory.
 | Base classes (`ActionCfg`, `AtomicAction`, `WorldState`, `ActionResult`, typed targets, `ObjectSemantics`) | `embodichain/lab/sim/atomic_actions/core.py` |
 | Affordance types (`Affordance`, `AntipodalAffordance`, `InteractionPoints`) | `embodichain/lab/sim/atomic_actions/affordance.py` |
 | Stateless trajectory helpers (`TrajectoryBuilder`) | `embodichain/lab/sim/atomic_actions/trajectory.py` |
-| Built-in actions (reference implementations) | `embodichain/lab/sim/atomic_actions/actions.py` |
+| Built-in action primitives (reference implementations) | `embodichain/lab/sim/atomic_actions/primitives/` |
+| Backward-compatible action re-export module | `embodichain/lab/sim/atomic_actions/actions.py` |
 | Engine + global registry (`register_action`, `AtomicActionEngine.register` / `run`) | `embodichain/lab/sim/atomic_actions/engine.py` |
 | Public API exports | `embodichain/lab/sim/atomic_actions/__init__.py` |
-| Reference docs | `docs/source/overview/sim/atomic_actions.md` |
+| Reference docs | `docs/source/overview/sim/atomic_actions/index.md`, `docs/source/overview/sim/atomic_actions/builtin_actions.md` |
 
 ## The Contract (read first)
 
@@ -53,9 +54,9 @@ There is **no** `validate` method, **no** `**kwargs`, **no** `start_qpos` parame
 ### 1. Define the config
 
 Add a `@configclass`-decorated class that extends `ActionCfg` **directly** (the cfg
-hierarchy is flat — do not inherit from another action's cfg). Place it in
-`embodichain/lab/sim/atomic_actions/actions.py` alongside the existing configs, or in
-a new file if the action is large.
+hierarchy is flat — do not inherit from another action's cfg). For a built-in
+primitive, place the config beside the action class in
+`embodichain/lab/sim/atomic_actions/primitives/<action_name>.py`.
 
 ```python
 from __future__ import annotations
@@ -228,11 +229,25 @@ register_action("push", Push)
 
 ### 5. Export from the public API
 
-Add the config, action class, and any new target to
+Add the config, action class, and any new target to the package exports. For a
+built-in primitive, first export it from
+`embodichain/lab/sim/atomic_actions/primitives/__init__.py`:
+
+```python
+from .push import Push, PushCfg
+
+__all__ = [
+    ...,
+    "Push",
+    "PushCfg",
+]
+```
+
+Then export it from the public API in
 `embodichain/lab/sim/atomic_actions/__init__.py`:
 
 ```python
-from .actions import Push, PushCfg
+from .primitives import Push, PushCfg
 # (and from .core import PushTarget if you defined one)
 
 __all__ = [
@@ -242,12 +257,16 @@ __all__ = [
 ]
 ```
 
+Keep `embodichain/lab/sim/atomic_actions/actions.py` as a compatibility facade;
+update it only if the new built-in should also be available from the legacy
+`embodichain.lab.sim.atomic_actions.actions` import path.
+
 ### 6. Update the supported actions table
 
-Add a row to the table in `docs/source/overview/sim/atomic_actions.md`:
+Add a row to the table in `docs/source/overview/sim/atomic_actions/builtin_actions.md`:
 
 ```markdown
-| `Push` | `PushCfg` | `PushTarget` — contact pose | Approach → push forward |
+| `Push` | Single | `PushTarget` — contact pose | Approach → push forward | Add a demo asset or `N/A` |
 ```
 
 ### 7. Write a test
@@ -301,6 +320,6 @@ def test_push_action_returns_full_dof_trajectory():
 | 2 | Define a typed target (or reuse `EndEffectorPoseTarget` / `JointPositionTarget` / `NamedJointPositionTarget` / `GraspTarget` / `HeldObjectPoseTarget`) |
 | 3 | Subclass `AtomicAction` directly, set `TargetType`, compose `TrajectoryBuilder`, implement `execute(target, state) -> ActionResult` |
 | 4 | Register: `engine.register(Push(mg, cfg=...))` (instance) or `register_action("push", Push)` (class) |
-| 5 | Export config + action (+ target) from `__init__.py` |
-| 6 | Add a row to the supported-actions table in the overview docs |
+| 5 | Export config + action (+ target) from `primitives/__init__.py` and `atomic_actions/__init__.py` |
+| 6 | Add a row to the supported-actions table in `builtin_actions.md` and update API reference docs |
 | 7 | Write behavioural tests (target type, full-DoF shape, `WorldState` contract) |
