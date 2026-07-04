@@ -85,7 +85,14 @@ class _FakeRobot:
 class _FakeObject:
     cfg = SimpleNamespace(shape=SimpleNamespace(fpath="/tmp/fake.obj"))
 
-    def __init__(self, xyz, *, yaw_degrees: float = 0.0, extents=(0.3, 0.1, 0.05)):
+    def __init__(
+        self,
+        xyz,
+        *,
+        yaw_degrees: float = 0.0,
+        geometry_yaw_degrees: float = 0.0,
+        extents=(0.3, 0.1, 0.05),
+    ):
         self._pose = torch.eye(4)
         self._pose[:3, 3] = torch.tensor(xyz, dtype=torch.float32)
         yaw = torch.deg2rad(torch.tensor(float(yaw_degrees)))
@@ -93,6 +100,7 @@ class _FakeObject:
         self._pose[0, 1] = -torch.sin(yaw)
         self._pose[1, 0] = torch.sin(yaw)
         self._pose[1, 1] = torch.cos(yaw)
+        self._geometry_yaw_degrees = float(geometry_yaw_degrees)
         self._extents = torch.tensor(extents, dtype=torch.float32)
 
     def get_local_pose(self, to_matrix: bool = True):
@@ -100,16 +108,30 @@ class _FakeObject:
 
     def get_vertices(self, env_ids=None, scale: bool = True):
         x, y, z = self._extents.tolist()
-        return [
-            torch.tensor(
+        vertices = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [x, 0.0, 0.0],
+                [0.0, y, 0.0],
+                [x, y, 0.0],
+                [0.0, 0.0, z],
+                [x, 0.0, z],
+                [0.0, y, z],
+                [x, y, z],
+            ],
+            dtype=torch.float32,
+        )
+        if abs(self._geometry_yaw_degrees) > 1e-6:
+            yaw = torch.deg2rad(torch.tensor(self._geometry_yaw_degrees))
+            rotation = torch.stack(
                 [
-                    [0.0, 0.0, 0.0],
-                    [x, 0.0, 0.0],
-                    [0.0, y, 0.0],
-                    [0.0, 0.0, z],
+                    torch.stack([torch.cos(yaw), -torch.sin(yaw)]),
+                    torch.stack([torch.sin(yaw), torch.cos(yaw)]),
                 ]
             )
-        ]
+            center = torch.tensor([x * 0.5, y * 0.5], dtype=torch.float32)
+            vertices[:, :2] = (vertices[:, :2] - center) @ rotation.T + center
+        return [vertices]
 
     def get_triangles(self, env_ids=None):
         return [torch.tensor([[0, 1, 2], [0, 1, 3]])]
@@ -128,6 +150,13 @@ class _FakeSim:
                 yaw_degrees=90.0,
                 extents=(0.4, 0.1, 0.02),
             ),
+            "pad_baked_diag": _FakeObject(
+                [0.4, 0.0, 0.0],
+                geometry_yaw_degrees=45.0,
+                extents=(0.4, 0.1, 0.02),
+            ),
+            "umbrella": _FakeObject([0.4, 0.0, 0.0], extents=(0.8, 0.04, 0.04)),
+            "cooking_pot": _FakeObject([0.4, 0.0, 0.0], extents=(0.5, 0.3, 0.08)),
         }
 
     def get_rigid_object(self, uid: str):
@@ -1065,7 +1094,192 @@ def test_coordinated_pickment_prefers_yawed_top_down_grasps(
     right_world = obj_pose @ target.right_object_to_eef
     assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
-    assert abs(left_world[1, 3].item() - right_world[1, 3].item()) > 0.25
+    assert {
+        round(float(target.left_object_to_eef[0, 3]), 3),
+        round(float(target.right_object_to_eef[0, 3]), 3),
+    } == {
+        0.08,
+        0.32,
+    }
+    short_axis_world = torch.tensor([-1.0, 0.0, 0.0])
+    assert abs(float(torch.dot(left_world[:3, 0], short_axis_world))) == pytest.approx(
+        1.0
+    )
+    assert abs(float(torch.dot(right_world[:3, 0], short_axis_world))) == pytest.approx(
+        1.0
+    )
+    assert abs(left_world[1, 3].item() - right_world[1, 3].item()) > 0.20
+
+
+def test_coordinated_pickment_aligns_gripper_to_baked_diagonal_mesh(
+    monkeypatch,
+) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "pad_baked_diag",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        },
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    target = capture[0]["target"]
+    obj_pose = env.sim.get_rigid_object("pad_baked_diag").get_local_pose(
+        to_matrix=True
+    )[0]
+    left_world = obj_pose @ target.left_object_to_eef
+    right_world = obj_pose @ target.right_object_to_eef
+    hand_delta = left_world[:3, 3] - right_world[:3, 3]
+    hand_delta[2] = 0.0
+    hand_axis = hand_delta / torch.linalg.norm(hand_delta)
+    long_axis_world = torch.tensor([2**-0.5, 2**-0.5, 0.0])
+    short_axis_world = torch.tensor([-(2**-0.5), 2**-0.5, 0.0])
+
+    assert abs(float(torch.dot(hand_axis, long_axis_world))) == pytest.approx(1.0)
+    assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert abs(float(torch.dot(left_world[:3, 0], short_axis_world))) == pytest.approx(
+        1.0
+    )
+    assert abs(float(torch.dot(right_world[:3, 0], short_axis_world))) == pytest.approx(
+        1.0
+    )
+
+
+def test_coordinated_pickment_keeps_long_axis_top_down_for_slender_object(
+    monkeypatch,
+) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "umbrella",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        },
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    target = capture[0]["target"]
+    assert isinstance(target, CoordinatedPickmentTarget)
+    assert target.left_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert target.right_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert {
+        round(float(target.left_object_to_eef[0, 3]), 3),
+        round(float(target.right_object_to_eef[0, 3]), 3),
+    } == {
+        0.16,
+        0.64,
+    }
+
+
+def test_coordinated_pickment_prefers_world_lateral_top_down_for_pot(
+    monkeypatch,
+) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "cooking_pot",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        },
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    target = capture[0]["target"]
+    obj_pose = env.sim.get_rigid_object("cooking_pot").get_local_pose(to_matrix=True)[0]
+    left_world = obj_pose @ target.left_object_to_eef
+    right_world = obj_pose @ target.right_object_to_eef
+    assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert {round(float(left_world[1, 3]), 3), round(float(right_world[1, 3]), 3)} == {
+        0.06,
+        0.24,
+    }
 
 
 def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> None:
@@ -1074,9 +1288,11 @@ def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> No
     _FakeBackendAction.capture = capture
 
     def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
-        # Reject the compact world-Y candidate and force the selector to try
-        # the next top-down endpoint candidate.
-        if abs(float(target_xpos[0, 3]) - 0.6) < 0.03:
+        # Reject the 20/80 long-axis inset and force the selector to try 28/72.
+        if any(
+            abs(float(target_xpos[0, 3]) - rejected_x) < 0.015
+            for rejected_x in (0.48, 0.72)
+        ):
             return False, torch.zeros(2)
         return True, torch.tensor([0.2, 0.3]) if is_left else torch.tensor([0.4, 0.5])
 
@@ -1119,8 +1335,8 @@ def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> No
     left_local = target.left_object_to_eef[:3, 3]
     right_local = target.right_object_to_eef[:3, 3]
     assert {round(float(left_local[0]), 3), round(float(right_local[0]), 3)} == {
-        0.032,
-        0.368,
+        0.112,
+        0.288,
     }
 
 
