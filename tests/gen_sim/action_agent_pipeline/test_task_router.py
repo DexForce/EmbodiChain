@@ -24,6 +24,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
     _TASK_ROUTE_ARRANGEMENT_LINE,
     _TASK_ROUTE_OBJECT_MANIPULATION,
+    _TASK_ROUTE_STACKING,
     _route_task_with_llm,
 )
 
@@ -107,6 +108,45 @@ def test_task_router_normalizes_cooperative_transport_to_object_manipulation() -
     )
 
     assert route.route == _TASK_ROUTE_OBJECT_MANIPULATION
+
+
+def test_task_router_downgrades_single_object_on_support_to_manipulation() -> None:
+    route = _route_task_with_llm(
+        scene_objects=_router_scene_objects(),
+        project_name="router_project",
+        task_description="用左臂把木块放到纸盒上",
+        model=None,
+        task_router_llm_caller=lambda **_: {
+            "route": "stacking",
+            "confidence": 0.9,
+            "reason": "The final state is vertical contact.",
+            "candidate_objects": ["wood_block_0", "cardboard_box_0"],
+        },
+    )
+
+    assert route.route == _TASK_ROUTE_OBJECT_MANIPULATION
+    assert any("Downgraded stacking route" in warning for warning in route.warnings)
+
+
+def test_task_router_keeps_explicit_global_stacking_route() -> None:
+    route = _route_task_with_llm(
+        scene_objects=_router_scene_objects(),
+        project_name="router_project",
+        task_description="将三个方块叠成一列",
+        model=None,
+        task_router_llm_caller=lambda **_: {
+            "route": "stacking",
+            "confidence": 0.92,
+            "reason": "The task asks for one vertical stack.",
+            "candidate_objects": [
+                "wood_block_0",
+                "wood_block_1",
+                "cardboard_box_0",
+            ],
+        },
+    )
+
+    assert route.route == _TASK_ROUTE_STACKING
 
 
 def test_task_router_rejects_unknown_candidate_object() -> None:
