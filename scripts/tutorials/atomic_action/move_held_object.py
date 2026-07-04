@@ -24,7 +24,6 @@ import time
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
@@ -41,7 +40,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.demo_base import DemoBase
-from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.utility.demo_utils import (

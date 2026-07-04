@@ -22,7 +22,6 @@ import argparse
 
 import torch
 
-from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     JointPositionTarget,
@@ -31,7 +30,6 @@ from embodichain.lab.sim.atomic_actions import (
     NamedJointPositionTarget,
 )
 from embodichain.lab.sim.demo_base import DemoBase
-from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.utility.demo_utils import (
     DemoRecording,

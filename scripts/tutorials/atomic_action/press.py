@@ -24,7 +24,6 @@ import time
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     EndEffectorPoseTarget,
