@@ -421,13 +421,14 @@ class CoordinatedPlacement(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        return self.builder.plan_arm_traj(
+        success, trajectory = self.builder.plan_arm_traj(
             target_states_list,
             start_qpos,
             n_waypoints,
             control_part=control_part,
             arm_dof=start_qpos.shape[-1],
         )
+        return self.builder.all_envs_success(success), trajectory
 
     @staticmethod
     def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
