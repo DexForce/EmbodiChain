@@ -1478,6 +1478,8 @@ class Articulation(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         local_joint_ids = np.arange(self.dof) if joint_ids is None else joint_ids
+        cache_env_ids = self._resolve_env_ids(env_ids)
+        cache_joint_ids = self._resolve_joint_ids(joint_ids)
 
         for i, env_idx in enumerate(local_env_ids):
             drive_args = {
@@ -1497,6 +1499,19 @@ class Articulation(BatchEntity):
             if armature is not None:
                 drive_args["armature"] = armature[i].cpu().numpy()
             self._entities[env_idx].set_drive(**drive_args)
+
+        if max_velocity is not None:
+            max_velocity = torch.as_tensor(
+                max_velocity, dtype=torch.float32, device=self.device
+            )
+            self._data._qvel_limits[cache_env_ids[:, None], cache_joint_ids] = (
+                max_velocity
+            )
+        if max_effort is not None:
+            max_effort = torch.as_tensor(
+                max_effort, dtype=torch.float32, device=self.device
+            )
+            self._data._qf_limits[cache_env_ids[:, None], cache_joint_ids] = max_effort
 
     def get_joint_drive(
         self,
@@ -1769,9 +1784,6 @@ class Articulation(BatchEntity):
             armature=self.default_joint_armature,
             drive_type=drive_type,
         )
-        # Keep mutable limit reads aligned with the configured drive maxima.
-        self._data._qvel_limits.copy_(self.default_joint_max_velocity)
-        self._data._qf_limits.copy_(self.default_joint_max_effort)
 
     def compute_fk(
         self,

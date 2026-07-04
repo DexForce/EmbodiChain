@@ -350,6 +350,83 @@ class BaseArticulationTest:
             qf_limits, expected_qf_limits, atol=1e-5
         ), "FAIL: qf_limits does not match expected filtered values"
 
+    def test_joint_limit_cache_tracks_set_joint_drive_updates(self):
+        """Test qvel/qf limit caches stay aligned with set_joint_drive writes."""
+        (
+            _stiffness_before,
+            _damping_before,
+            all_qf_limits_before,
+            all_qvel_limits_before,
+            _friction_before,
+            _armature_before,
+        ) = self.art.get_joint_drive()
+
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 2, 4] if NUM_ARENAS >= 5 else [0]
+        env_ids_tensor = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.sim.device
+        )
+        joint_ids_tensor = torch.as_tensor(
+            joint_ids, dtype=torch.long, device=self.sim.device
+        )
+
+        new_qvel_limits = torch.full(
+            (len(env_ids), len(joint_ids)),
+            321.0,
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        new_qf_limits = torch.full(
+            (len(env_ids), len(joint_ids)),
+            654.0,
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+
+        self.art.set_joint_drive(
+            max_effort=new_qf_limits,
+            max_velocity=new_qvel_limits,
+            joint_ids=joint_ids,
+            env_ids=env_ids,
+        )
+
+        (
+            _stiffness_after,
+            _damping_after,
+            all_qf_limits_after,
+            all_qvel_limits_after,
+            _friction_after,
+            _armature_after,
+        ) = self.art.get_joint_drive()
+        qvel_limits = self.art.get_qvel_limits(joint_ids=joint_ids, env_ids=env_ids)
+        qf_limits = self.art.get_qf_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        expected_qvel_limits = all_qvel_limits_before.clone()
+        expected_qvel_limits[env_ids_tensor[:, None], joint_ids_tensor] = (
+            new_qvel_limits
+        )
+        expected_qf_limits = all_qf_limits_before.clone()
+        expected_qf_limits[env_ids_tensor[:, None], joint_ids_tensor] = new_qf_limits
+
+        assert torch.allclose(
+            self.art.body_data.qvel_limits, expected_qvel_limits, atol=1e-5
+        ), "FAIL: qvel_limits backing tensor did not track set_joint_drive max_velocity"
+        assert torch.allclose(
+            self.art.body_data.qf_limits, expected_qf_limits, atol=1e-5
+        ), "FAIL: qf_limits backing tensor did not track set_joint_drive max_effort"
+        assert torch.allclose(
+            all_qvel_limits_after, expected_qvel_limits, atol=1e-5
+        ), "FAIL: live qvel limits did not match expected post-write state"
+        assert torch.allclose(
+            all_qf_limits_after, expected_qf_limits, atol=1e-5
+        ), "FAIL: live qf limits did not match expected post-write state"
+        assert torch.allclose(
+            qvel_limits, new_qvel_limits, atol=1e-5
+        ), "FAIL: filtered qvel_limits did not return the updated max_velocity values"
+        assert torch.allclose(
+            qf_limits, new_qf_limits, atol=1e-5
+        ), "FAIL: filtered qf_limits did not return the updated max_effort values"
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
