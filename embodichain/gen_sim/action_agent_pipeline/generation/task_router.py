@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 import json
+import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
@@ -68,6 +69,31 @@ _TASK_ROUTE_ALIASES = {
     "stacking": _TASK_ROUTE_STACKING,
     "unsupported": _TASK_ROUTE_UNSUPPORTED,
 }
+_STACKING_DOWNGRADE_WARNING = (
+    "Downgraded stacking route to object_manipulation because the task describes "
+    "one moved object being placed relative to a support object."
+)
+_SINGLE_OBJECT_ON_SUPPORT_PATTERNS = (
+    re.compile(
+        r"\b(?:place|put|move|set|stack)\b.+\b(?:on|onto|on_top_of|on_top|above)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bon\s+top\s+of\b", re.IGNORECASE),
+    re.compile(
+        r"把.+(?:放到|放在|放置到|放置在|移到|移动到|摆到|摆在)"
+        r".+(?:上|上方|顶部)"
+    ),
+)
+_GLOBAL_STACKING_PATTERNS = (
+    re.compile(
+        r"\b(?:stack|pile|nest)\s+(?:all|these|those|the selected|the listed)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:nested|nesting|vertical stack)\b", re.IGNORECASE),
+    re.compile(
+        r"(?:叠放|堆叠|叠成|堆成|摞成|叠起来|堆起来|摞起来|堆叠起来)"
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +134,7 @@ def _route_task_with_llm(
     return _normalize_task_route_response(
         response,
         scene_objects=scene_objects,
+        task_description=task_description,
     )
 
 
@@ -149,12 +176,19 @@ def _call_task_router_llm(
         "phrases such as 摆成一排, 排成一行, 排列, 排序, 从左到右, 由大到小, "
         "and mixed object types such as bottles, blocks, boxes, or cans in one "
         "line.\n"
-        "- Choose stacking when objects should be vertically stacked, piled, "
-        "placed one on top of another as a stack, or nested into each other. "
-        "This includes Chinese phrases such as 叠, 叠放, 堆叠, 摞.\n"
+        "- Choose stacking only when the task asks to build, reorder, or move "
+        "a selected set of multiple objects into one vertical stack, pile, or "
+        "nested stack. Examples include stacking all blocks, nesting bowls "
+        "large-to-small, or Chinese phrases such as 把这些物体叠起来, 堆叠这些物体, "
+        "叠成一列, 摞起来.\n"
+        "- Do not choose stacking for a single moved object placed/put/moved "
+        "on top of a support object, even when the final contact is vertical; "
+        "choose object_manipulation for that case.\n"
         "- Choose object_manipulation for one or two moved objects with a "
         "relative placement, insertion, support-surface placement, directional "
-        "move, upright/lay-flat adjustment, pick-up, hold, or hover task. Also "
+        "move, upright/lay-flat adjustment, pick-up, hold, or hover task. This "
+        "includes tasks such as placing A on top of B where A is the only moved "
+        "object and B is a support/reference. Also "
         "choose object_manipulation for cooperative/bimanual transport where "
         "both arms move one shared rigid object such as a pot, tray, long "
         "object, large cuboid, closed umbrella-like cylinder, or object-loaded "
@@ -210,12 +244,19 @@ def _normalize_task_route_response(
     response: Mapping[str, Any],
     *,
     scene_objects: Sequence[_SceneObject],
+    task_description: str,
 ) -> _TaskRouteSpec:
     route = _normalize_task_route(response.get("route"))
     confidence = _normalize_confidence(response.get("confidence", 0.0))
     reason = str(response.get("reason", "")).strip()
     candidate_objects = tuple(_string_list(response.get("candidate_objects")))
     warnings = tuple(_string_list(response.get("warnings")))
+    if (
+        route == _TASK_ROUTE_STACKING
+        and _is_single_object_on_support_task(task_description)
+    ):
+        route = _TASK_ROUTE_OBJECT_MANIPULATION
+        warnings = (*warnings, _STACKING_DOWNGRADE_WARNING)
     _validate_candidate_objects(candidate_objects, scene_objects)
     _validate_route_feasibility(route, scene_objects)
     if not reason:
@@ -227,6 +268,16 @@ def _normalize_task_route_response(
         candidate_objects=candidate_objects,
         warnings=warnings,
     )
+
+
+def _is_single_object_on_support_task(task_description: str) -> bool:
+    """Return whether text describes one moved object placed onto a support."""
+    text = task_description.strip()
+    if not text:
+        return False
+    if any(pattern.search(text) for pattern in _GLOBAL_STACKING_PATTERNS):
+        return False
+    return any(pattern.search(text) for pattern in _SINGLE_OBJECT_ON_SUPPORT_PATTERNS)
 
 
 def _normalize_task_route(value: Any) -> str:

@@ -3844,6 +3844,64 @@ def test_task_description_on_object_uses_object_on_object_success(
     assert "on top of `apple_1`" in task_prompt
 
 
+def test_single_moved_object_on_support_is_not_generated_as_stacking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_task_router_llm",
+        lambda **_: {
+            "route": "stacking",
+            "confidence": 0.9,
+            "reason": "The final state is vertical contact.",
+            "candidate_objects": ["apple_2", "apple_1"],
+        },
+    )
+
+    def fail_if_stacking_is_used(**kwargs):
+        raise AssertionError("Single-object on-support tasks must not use stacking.")
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fail_if_stacking_is_used,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **_: {
+            "moved_object": "apple_2",
+            "reference_object": "apple_1",
+            "goal_relation": "on",
+            "arm": "left",
+            "task_prompt_summary": "Use the left arm to place apple_2 on apple_1.",
+        },
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_single_object_on_support_agent",
+        task_description="用左臂把 apple_2 放到 apple_1 上方",
+        target_body_scale=0.6,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    success = gym_config["env"]["extensions"]["agent_success"]
+
+    assert paths.summary["mode"] == "object_manipulation"
+    assert paths.summary["active_arm"] == "left_arm"
+    assert set(rigid_objects) == {"apple_2"}
+    assert success["type"] == "object_on_object"
+    assert success["object"] == "apple_2"
+    assert success["support"] == "apple_1"
+
+
 def test_task_description_rejects_unknown_llm_uid(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
