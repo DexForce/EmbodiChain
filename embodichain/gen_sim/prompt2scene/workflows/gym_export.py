@@ -115,6 +115,14 @@ def _glb_to_sim_rotation() -> np.ndarray:
     )
 
 
+def _glb_scale_to_sim(scale: Sequence[float]) -> list[float]:
+    """Convert GLB-axis scale components to sim-axis body_scale components."""
+    values = [float(v) for v in scale]
+    if len(values) != 3:
+        raise ValueError("scale must have three components")
+    return [values[0], values[2], values[1]]
+
+
 def _sim_world_xy_aabb(
     glb_path: Path,
     rotation_matrix: list[list[float]] | None,
