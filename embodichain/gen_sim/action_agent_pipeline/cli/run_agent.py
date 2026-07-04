@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+from typing import Any
 
 import gymnasium
 import numpy as np
@@ -35,6 +37,10 @@ from embodichain.utils.logger import log_error, log_info, log_warning
 from embodichain.utils.utility import load_config
 
 __all__ = ["cli"]
+
+_SHOW_PHYSICAL_COLLISION_ENV = "EMBODICHAIN_SHOW_PHYSICAL_COLLISION"
+_PHYSICAL_COLLISION_RGBA = (0.0, 1.0, 0.0, 0.85)
+_FALSE_ENV_VALUES = {"", "0", "false", "no", "off"}
 
 
 def cli() -> None:
@@ -82,13 +88,14 @@ def cli() -> None:
             agent_config_path=args.agent_config,
             task_name=args.task_name,
         )
+    _show_physical_collision_if_requested(env)
 
     with timing_scope("run_agent.total", metadata={"task_name": args.task_name}):
         _run_action_agent(args, env, gym_config)
 
     if args.headless:
         with timing_scope("run_agent.final_reset"):
-            env.reset(options={"final": True})
+            _reset_env_with_physical_collision(env, options={"final": True})
 
 
 def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: dict):
@@ -103,7 +110,7 @@ def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: 
             env,
             trajectory_idx,
         )
-    _, _ = env.reset()
+    _, _ = _reset_env_with_physical_collision(env)
 
 
 def _generate_action_agent_trajectory(
@@ -115,7 +122,7 @@ def _generate_action_agent_trajectory(
         "run_agent.trajectory_reset",
         metadata={"trajectory_idx": trajectory_idx},
     ):
-        _, _ = env.reset()
+        _, _ = _reset_env_with_physical_collision(env)
     with timing_scope(
         "run_agent.create_demo_action_list",
         metadata={"trajectory_idx": trajectory_idx},
@@ -176,6 +183,73 @@ def _log_task_success(env: gymnasium.Env) -> bool | None:
         success_value = bool(np.asarray(success).flatten().all())
     log_info(f"Task success after execution: {success_value}", color="green")
     return success_value
+
+
+def _reset_env_with_physical_collision(
+    env: gymnasium.Env,
+    *args: Any,
+    **kwargs: Any,
+) -> tuple[Any, dict[str, Any]]:
+    result = env.reset(*args, **kwargs)
+    _show_physical_collision_if_requested(env)
+    return result
+
+
+def _show_physical_collision_if_requested(env: gymnasium.Env) -> None:
+    if not _physical_collision_debug_enabled():
+        return
+
+    sim = _get_wrapped_attr(env, "sim")
+    if sim is None:
+        log_warning("Physical collision visualization skipped: env.sim is unavailable.")
+        return
+
+    asset_uids: list[str] = []
+    for getter_name in (
+        "get_rigid_object_uid_list",
+        "get_rigid_object_group_uid_list",
+        "get_articulation_uid_list",
+    ):
+        getter = getattr(sim, getter_name, None)
+        if getter is not None:
+            asset_uids.extend(getter())
+
+    visible_count = 0
+    for uid in asset_uids:
+        asset = sim.get_asset(uid)
+        if asset is None or not hasattr(asset, "set_physical_visible"):
+            continue
+        try:
+            asset.set_physical_visible(
+                visible=True,
+                rgba=_PHYSICAL_COLLISION_RGBA,
+            )
+        except Exception as exc:
+            log_warning(f"Failed to show physical collision for asset '{uid}': {exc}")
+            continue
+        visible_count += 1
+
+    if not getattr(env, "_physical_collision_debug_logged", False):
+        log_info(
+            "Physical collision visualization enabled "
+            f"for {visible_count} scene assets via {_SHOW_PHYSICAL_COLLISION_ENV}.",
+            color="green",
+        )
+        setattr(env, "_physical_collision_debug_logged", True)
+
+
+def _physical_collision_debug_enabled() -> bool:
+    value = os.environ.get(_SHOW_PHYSICAL_COLLISION_ENV, "")
+    return value.strip().lower() not in _FALSE_ENV_VALUES
+
+
+def _get_wrapped_attr(env: gymnasium.Env, name: str) -> Any:
+    if hasattr(env, "get_wrapper_attr"):
+        try:
+            return env.get_wrapper_attr(name)
+        except AttributeError:
+            pass
+    return getattr(env, name, None)
 
 
 if __name__ == "__main__":
