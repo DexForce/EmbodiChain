@@ -59,6 +59,11 @@ _TASK_ROUTE_ALIASES = {
     "manipulation": _TASK_ROUTE_OBJECT_MANIPULATION,
     "object": _TASK_ROUTE_OBJECT_MANIPULATION,
     "object_manipulation": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "bimanual_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "cooperative_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "coordinated_pickment": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "coordinated_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "dual_arm_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
     "stack": _TASK_ROUTE_STACKING,
     "stacking": _TASK_ROUTE_STACKING,
     "unsupported": _TASK_ROUTE_UNSUPPORTED,
@@ -149,10 +154,16 @@ def _call_task_router_llm(
         "This includes Chinese phrases such as 叠, 叠放, 堆叠, 摞.\n"
         "- Choose object_manipulation for one or two moved objects with a "
         "relative placement, insertion, support-surface placement, directional "
-        "move, upright/lay-flat adjustment, pick-up, hold, or hover task.\n"
+        "move, upright/lay-flat adjustment, pick-up, hold, or hover task. Also "
+        "choose object_manipulation for cooperative/bimanual transport where "
+        "both arms move one shared rigid object such as a pot, tray, long "
+        "object, large cuboid, closed umbrella-like cylinder, or object-loaded "
+        "tray; the downstream object-manipulation spec will decide whether to "
+        "use CoordinatedPickment.\n"
         "- Choose unsupported when none of the existing routes can represent "
         "the task, for example pouring, opening articulated objects, cutting, "
-        "deformable manipulation, or long tool-use workflows.\n"
+        "deformable manipulation, or long tool-use workflows that are not a "
+        "single shared-object cooperative transport.\n"
         "- candidate_objects should list source_uid values that appear central "
         "to the task. It may be empty if the object set is ambiguous.\n"
         "- Do not use markdown.\n\n"

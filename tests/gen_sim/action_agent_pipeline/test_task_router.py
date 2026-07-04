@@ -92,6 +92,23 @@ def test_task_router_normalizes_route_aliases() -> None:
     assert route.route == _TASK_ROUTE_OBJECT_MANIPULATION
 
 
+def test_task_router_normalizes_cooperative_transport_to_object_manipulation() -> None:
+    route = _route_task_with_llm(
+        scene_objects=_router_scene_objects(),
+        project_name="router_project",
+        task_description="用双臂共同搬运桌面上的长方体",
+        model=None,
+        task_router_llm_caller=lambda **_: {
+            "route": "cooperative_transport",
+            "confidence": 0.88,
+            "reason": "Both arms transport one shared rigid object.",
+            "candidate_objects": ["cardboard_box_0"],
+        },
+    )
+
+    assert route.route == _TASK_ROUTE_OBJECT_MANIPULATION
+
+
 def test_task_router_rejects_unknown_candidate_object() -> None:
     with pytest.raises(ValueError, match="unknown candidate object"):
         _route_task_with_llm(

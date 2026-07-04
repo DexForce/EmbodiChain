@@ -110,6 +110,8 @@ class _RelativePlacementStepSpec:
     orientation_align_to_runtime_uid: str | None = None
     hover_height: float = 0.10
     upright_in_place: bool = False
+    pickup_upright_direction: list[float] | None = None
+    pickup_rotate_upright: float | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,8 @@ class _RelativePlacementSpec:
     orientation_align_to_runtime_uid: str | None = None
     hover_height: float = 0.10
     upright_in_place: bool = False
+    pickup_upright_direction: list[float] | None = None
+    pickup_rotate_upright: float | None = None
 
 
 _ObjectManipulationStepSpec = _RelativePlacementStepSpec

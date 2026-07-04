@@ -45,6 +45,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
     MeshFrameNormalizer,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
+    _normalize_runtime_uid,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking import (
     bake_body_scale_into_meshes,
 )
@@ -605,6 +608,24 @@ def _build_ur5_basket_bundle(
             ],
         ],
     }
+    _maybe_preserve_source_scene_vertical_contacts(
+        gym_config,
+        _source_objects_by_runtime_uid(
+            {
+                roles.table_source_uid: "table",
+                roles.container_source_uid: roles.container_runtime_uid,
+                roles.left_target_source_uid: roles.left_target_runtime_uid,
+                roles.right_target_source_uid: roles.right_target_runtime_uid,
+                **{
+                    obj.source_uid: _normalize_runtime_uid(obj.source_uid)
+                    for obj in [*extra_background_objects, *extra_rigid_objects]
+                },
+            },
+            by_uid=by_uid,
+        ),
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_apply_tabletop_z_placement(
         gym_config,
         table_top_z,
@@ -756,6 +777,12 @@ def _build_arrangement_line_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
+    _maybe_preserve_source_scene_vertical_contacts(
+        gym_config,
+        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_apply_tabletop_z_placement(
         gym_config,
         table_top_z,
@@ -938,6 +965,12 @@ def _build_stacking_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
+    _maybe_preserve_source_scene_vertical_contacts(
+        gym_config,
+        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_apply_tabletop_z_placement(
         gym_config,
         table_top_z,
@@ -1145,6 +1178,93 @@ def _maybe_apply_tabletop_z_placement(
     _apply_tabletop_z_placement(gym_config, table_top_z)
 
 
+def _source_objects_by_runtime_uid(
+    runtime_uids_by_source_uid: Mapping[str, str],
+    *,
+    by_uid: Mapping[str, _SceneObject],
+) -> dict[str, _SceneObject]:
+    return {
+        runtime_uid: by_uid[source_uid]
+        for source_uid, runtime_uid in runtime_uids_by_source_uid.items()
+        if source_uid in by_uid
+    }
+
+
+def _maybe_preserve_source_scene_vertical_contacts(
+    gym_config: dict[str, Any],
+    source_objects_by_runtime_uid: Mapping[str, _SceneObject],
+    *,
+    preserve_source_scene_geometry: bool,
+    source_scene_body_scale_mode: str | None,
+) -> None:
+    if not preserve_source_scene_geometry:
+        return
+    if source_scene_body_scale_mode in {None, "preserve"}:
+        return
+
+    for obj_config in _iter_scene_pose_configs(gym_config):
+        runtime_uid = str(obj_config.get("uid", ""))
+        source_obj = source_objects_by_runtime_uid.get(runtime_uid)
+        if source_obj is None:
+            continue
+        _preserve_source_scene_vertical_boundary(obj_config, source_obj)
+    _sync_robot_init_z_to_current_tabletop(gym_config)
+
+
+def _preserve_source_scene_vertical_boundary(
+    obj_config: dict[str, Any],
+    source_obj: _SceneObject,
+) -> None:
+    source_scale = _source_body_scale(source_obj)
+    current_scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    if all(
+        math.isclose(source, current, rel_tol=0.0, abs_tol=1e-12)
+        for source, current in zip(source_scale, current_scale)
+    ):
+        return
+
+    source_config = dict(obj_config)
+    source_config["body_scale"] = source_scale
+    source_bounds = _mesh_config_world_z_bounds(source_config)
+    current_bounds = _mesh_config_world_z_bounds(obj_config)
+    if source_bounds is None or current_bounds is None:
+        return
+
+    boundary_index = 1 if obj_config.get("uid") == "table" else 0
+    delta_z = source_bounds[boundary_index] - current_bounds[boundary_index]
+    if math.isclose(delta_z, 0.0, rel_tol=0.0, abs_tol=1e-12):
+        return
+
+    init_pos = _clean_vector3(obj_config.get("init_pos", [0.0, 0.0, 0.0]))
+    init_pos[2] = _round_pose_value(init_pos[2] + delta_z)
+    obj_config["init_pos"] = init_pos
+
+
+def _sync_robot_init_z_to_current_tabletop(gym_config: dict[str, Any]) -> None:
+    robot_config = gym_config.get("robot")
+    if not isinstance(robot_config, dict):
+        return
+
+    table_config = next(
+        (
+            obj_config
+            for obj_config in _iter_scene_pose_configs(gym_config)
+            if obj_config.get("uid") == "table"
+        ),
+        None,
+    )
+    if table_config is None:
+        return
+
+    table_top_z = _mesh_config_world_zmax(table_config)
+    if table_top_z is None:
+        return
+
+    init_pos = _clean_vector3(robot_config.get("init_pos", [0.0, 0.0, 0.0]))
+    init_pos[2] = _dual_ur5_init_z_from_table_top(table_top_z)
+    robot_config["init_pos"] = init_pos
+
+
 def _apply_scene_z_rotation(
     gym_config: dict[str, Any],
     rotation_degrees: float,
@@ -1326,7 +1446,7 @@ def _build_relative_placement_bundle(
     reference_runtime_uids = {
         placement.reference_runtime_uid
         for placement in spec.placements
-        if placement.intent == "place_relative"
+        if placement.intent in {"place_relative", "coordinated_pickment"}
     }
     registered_runtime_uids = sorted(
         {runtime_uids[obj.source_uid] for obj in rigid_objects} | reference_runtime_uids
@@ -1429,13 +1549,19 @@ def _build_relative_placement_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
+    _maybe_preserve_source_scene_vertical_contacts(
+        gym_config,
+        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        preserve_source_scene_geometry=preserve_source_scene_geometry,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_apply_tabletop_z_placement(
         gym_config,
         table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
-    if spec.intent == "place_relative":
+    if spec.intent in {"place_relative", "coordinated_pickment"}:
         spec = _with_self_relative_absolute_targets(spec, gym_config)
         spec = _with_inside_container_slot_offsets(
             spec,

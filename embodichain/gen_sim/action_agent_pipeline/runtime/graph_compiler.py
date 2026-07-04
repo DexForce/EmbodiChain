@@ -228,13 +228,13 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
     if "action" in spec:
         raise ValueError(
             "Legacy action schema is not supported. Use atomic_action_class with "
-            "PickUp, MoveEndEffector, MoveJoints, MoveHeldObject, or Place."
+            "CoordinatedPickment, PickUp, MoveEndEffector, MoveJoints, "
+            "MoveHeldObject, or Place."
         )
     if spec.get("atomic_action_class") is None:
         raise ValueError(
             "Atomic action class schema requires atomic_action_class, robot_name, "
-            "control, cfg, and exactly one of target_object, target_pose, or "
-            "target_qpos, or target_object_pose."
+            "control, cfg, and target fields."
         )
 
     normalized = action_module.normalize_atomic_action_spec(spec)

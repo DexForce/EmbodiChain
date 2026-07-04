@@ -65,6 +65,7 @@ _STAGING_Z_DELTA = 0.10
 _POSE_SENSITIVE_STAGING_Z_DELTA = 0.25
 _ON_RELEASE_Z_OFFSET = 0.2
 _ON_SURFACE_RELEASE_CLEARANCE = 0.003
+_PICKUP_UPRIGHT_ROTATE_RADIANS = math.pi / 4.0
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
 _DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER = {"right": 0, "left": 1}
@@ -147,6 +148,8 @@ def _with_self_relative_absolute_targets(
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
         hover_height=primary.hover_height,
         upright_in_place=primary.upright_in_place,
+        pickup_upright_direction=primary.pickup_upright_direction,
+        pickup_rotate_upright=primary.pickup_rotate_upright,
     )
 
 
@@ -164,24 +167,11 @@ def _with_self_relative_absolute_target(
         )
     release_position = _offset_position(initial_position, placement.release_offset)
     high_position = _offset_position(initial_position, placement.high_offset)
-    return _RelativePlacementStepSpec(
-        intent=placement.intent,
-        moved_source_uid=placement.moved_source_uid,
-        reference_source_uid=placement.reference_source_uid,
-        moved_runtime_uid=placement.moved_runtime_uid,
-        reference_runtime_uid=placement.reference_runtime_uid,
-        relation=placement.relation,
-        active_side=placement.active_side,
-        release_offset=placement.release_offset,
-        high_offset=placement.high_offset,
+    return replace(
+        placement,
         reference_is_initial_pose=True,
         release_position=release_position,
         high_position=high_position,
-        orientation_goal=placement.orientation_goal,
-        orientation_axis=placement.orientation_axis,
-        orientation_align_to_runtime_uid=placement.orientation_align_to_runtime_uid,
-        hover_height=placement.hover_height,
-        upright_in_place=placement.upright_in_place,
     )
 
 
@@ -286,6 +276,8 @@ def _replace_relative_spec_placements(
         orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
         hover_height=primary.hover_height,
         upright_in_place=primary.upright_in_place,
+        pickup_upright_direction=primary.pickup_upright_direction,
+        pickup_rotate_upright=primary.pickup_rotate_upright,
     )
 
 
@@ -357,7 +349,18 @@ def _with_on_surface_release_offset(
         high_position = _offset_position(reference_origin, high_offset)
         update_kwargs["release_position"] = release_position
         update_kwargs["high_position"] = high_position
+        pickup_upright_direction = _pickup_upright_direction(moved_config)
+        if pickup_upright_direction is not None:
+            update_kwargs["pickup_upright_direction"] = pickup_upright_direction
+            update_kwargs["pickup_rotate_upright"] = _PICKUP_UPRIGHT_ROTATE_RADIANS
     return replace(placement, **update_kwargs)
+
+
+def _pickup_upright_direction(obj_config: Mapping[str, Any]) -> list[float] | None:
+    vertices = _mesh_config_scaled_vertices(obj_config)
+    if not vertices:
+        return None
+    return [round(float(value), 6) for value in _principal_local_axes(vertices)[0]]
 
 
 def _target_local_zmin_for_orientation(
@@ -743,6 +746,20 @@ def _offset_position(
 
 
 def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
+    if spec.intent == "coordinated_pickment":
+        return {
+            "mode": "coordinated_pickment",
+            "intent": spec.intent,
+            "moved_object": spec.moved_runtime_uid,
+            "reference_object": spec.reference_runtime_uid,
+            "relation": spec.relation,
+            "active_arm": "dual_arm",
+            "release_offset": spec.release_offset,
+            "target_position": spec.release_position,
+            "orientation_goal": spec.orientation_goal,
+            "orientation_axis": spec.orientation_axis,
+            "orientation_align_to": spec.orientation_align_to_runtime_uid,
+        }
     if len(spec.placements) == 1:
         summary = {
             "mode": "object_manipulation",
@@ -759,6 +776,10 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
         }
         if spec.upright_in_place:
             summary["upright_in_place"] = True
+        if spec.pickup_upright_direction is not None:
+            summary["pickup_upright_direction"] = spec.pickup_upright_direction
+        if spec.pickup_rotate_upright is not None:
+            summary["pickup_rotate_upright"] = spec.pickup_rotate_upright
         return summary
     return {
         "mode": "dual_arm_object_manipulation",
@@ -785,4 +806,8 @@ def _relative_placement_summary(
     }
     if placement.upright_in_place:
         summary["upright_in_place"] = True
+    if placement.pickup_upright_direction is not None:
+        summary["pickup_upright_direction"] = placement.pickup_upright_direction
+    if placement.pickup_rotate_upright is not None:
+        summary["pickup_rotate_upright"] = placement.pickup_rotate_upright
     return summary

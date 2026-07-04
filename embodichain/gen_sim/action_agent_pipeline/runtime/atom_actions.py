@@ -36,9 +36,13 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
+    CoordinatedPickmentTarget,
     EndEffectorPoseTarget,
     GraspTarget,
     HeldObjectPoseTarget,
+    HeldObjectState,
     JointPositionTarget,
     MoveEndEffector,
     MoveEndEffectorCfg,
@@ -77,6 +81,7 @@ __all__ = [
 
 
 SUPPORTED_ATOMIC_ACTION_CLASSES = {
+    "CoordinatedPickment",
     "PickUp",
     "MoveEndEffector",
     "MoveJoints",
@@ -106,11 +111,16 @@ SUPPORTED_CFG_KEYS = {
     "pre_grasp_distance",
     "lift_height",
     "hand_interp_steps",
+    "hold_steps",
+    "object_motion_keyframes",
     "post_hold_steps",
+    "obj_upright_direction",
+    "rotate_upright",
 }
 
 
 ATOMIC_ACTION_REGISTRY = {
+    "CoordinatedPickment": (CoordinatedPickment, CoordinatedPickmentCfg),
     "PickUp": (PickUp, PickUpCfg),
     "MoveEndEffector": (MoveEndEffector, MoveEndEffectorCfg),
     "MoveJoints": (MoveJoints, MoveJointsCfg),
@@ -219,7 +229,8 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
     if "action" in spec:
         raise ValueError(
             "Legacy action schema is not supported. Use atomic_action_class with "
-            "PickUp, MoveEndEffector, MoveJoints, MoveHeldObject, or Place."
+            "CoordinatedPickment, PickUp, MoveEndEffector, MoveJoints, "
+            "MoveHeldObject, or Place."
         )
     if "target" in spec:
         raise ValueError(
@@ -257,8 +268,9 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"Unsupported atomic action cfg keys: {', '.join(sorted(unknown_cfg))}."
         )
+    _validate_cfg_values(cfg)
 
-    target_field, target_spec = _normalize_action_target(
+    target_values = _normalize_action_target(
         spec,
         atomic_action_class=atomic_action_class,
         control=control,
@@ -270,7 +282,7 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         "control": control,
         "cfg": cfg,
     }
-    normalized[target_field] = target_spec
+    normalized.update(target_values)
     return normalized
 
 
@@ -279,8 +291,31 @@ def _normalize_action_target(
     *,
     atomic_action_class: str,
     control: str,
-) -> tuple[str, dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     target_fields = [field for field in TARGET_SPEC_FIELDS if field in spec]
+    if atomic_action_class == "CoordinatedPickment":
+        required_fields = {"target_object", "target_object_pose"}
+        if set(target_fields) != required_fields:
+            raise ValueError(
+                "CoordinatedPickment requires target_object and " "target_object_pose."
+            )
+        if control != "arm":
+            raise ValueError("CoordinatedPickment requires control='arm'.")
+        target_object = spec["target_object"]
+        target_object_pose = spec["target_object_pose"]
+        if not isinstance(target_object, Mapping) or not target_object:
+            raise ValueError("target_object must be a non-empty object.")
+        if not isinstance(target_object_pose, Mapping) or not target_object_pose:
+            raise ValueError("target_object_pose must be a non-empty object.")
+        target_object = dict(target_object)
+        target_object_pose = dict(target_object_pose)
+        _validate_target_object(target_object)
+        _validate_target_object_pose(target_object_pose)
+        return {
+            "target_object": target_object,
+            "target_object_pose": target_object_pose,
+        }
+
     if len(target_fields) != 1:
         raise ValueError(
             "Atomic action spec requires exactly one of target_object, target_pose, "
@@ -297,13 +332,13 @@ def _normalize_action_target(
         if control != "arm" or target_field != "target_object":
             raise ValueError("PickUp requires control='arm' and target_object.")
         _validate_target_object(target_spec)
-        return target_field, target_spec
+        return {target_field: target_spec}
 
     if atomic_action_class == "Place":
         if control != "arm" or target_field != "target_pose":
             raise ValueError("Place requires control='arm' and target_pose.")
         _validate_target_pose(target_spec)
-        return target_field, target_spec
+        return {target_field: target_spec}
 
     if atomic_action_class == "MoveEndEffector":
         if control != "arm":
@@ -311,13 +346,13 @@ def _normalize_action_target(
         if target_field != "target_pose":
             raise ValueError("MoveEndEffector requires target_pose.")
         _validate_target_pose(target_spec)
-        return target_field, target_spec
+        return {target_field: target_spec}
 
     if atomic_action_class == "MoveJoints":
         if target_field != "target_qpos":
             raise ValueError("MoveJoints requires target_qpos.")
         _validate_target_qpos(target_spec, control=control)
-        return target_field, target_spec
+        return {target_field: target_spec}
 
     if atomic_action_class == "MoveHeldObject":
         if control != "arm" or target_field != "target_object_pose":
@@ -325,7 +360,7 @@ def _normalize_action_target(
                 "MoveHeldObject requires control='arm' and target_object_pose."
             )
         _validate_target_object_pose(target_spec)
-        return target_field, target_spec
+        return {target_field: target_spec}
 
     raise ValueError(f"Unsupported atomic action class: {atomic_action_class}.")
 
@@ -536,12 +571,15 @@ def execute_atomic_action(
         state=state,
         **runtime_kwargs,
     )
-    _sync_agent_state_from_atomic_action(
-        env,
-        executed.robot_name,
-        executed.action,
-        executed.control,
-    )
+    if executed.control == "coordinated":
+        _sync_agent_states_from_coordinated_action(env, executed.action)
+    else:
+        _sync_agent_state_from_atomic_action(
+            env,
+            executed.robot_name,
+            executed.action,
+            executed.control,
+        )
     return executed.action
 
 
@@ -582,6 +620,8 @@ def _execute_atomic_action_result(
             f"Atomic action failed: atomic_action_class={spec.atomic_action_class}, "
             f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
         )
+    if spec.atomic_action_class == "CoordinatedPickment":
+        return _executed_coordinated_atomic_action(env, spec, result)
     if spec.atomic_action_class == "MoveJoints":
         joint_ids = arm_joints if spec.control == "arm" else eef_joints
     else:
@@ -611,6 +651,7 @@ def _execute_atomic_action_result(
         next_state = WorldState(
             last_qpos=next_state.last_qpos.clone(),
             held_object=next_state.held_object,
+            coordinated_held_object=next_state.coordinated_held_object,
         )
     return _ExecutedAtomicAction(
         action=action_np,
@@ -660,6 +701,38 @@ def build_parallel_action_stream(
         raise ValueError("env is required to build parallel atomic actions.")
     if world_states is None:
         world_states = init_parallel_world_states(env)
+    coordinated_action = _pop_coordinated_edge_action(left_arm_action, right_arm_action)
+    if coordinated_action is not None:
+        executed = _resolve_action_spec(
+            coordinated_action,
+            env,
+            runtime_kwargs,
+            state=world_states.get("coordinated"),
+        )
+        if not isinstance(executed, _ExecutedAtomicAction):
+            raise TypeError("Coordinated action must resolve to an atomic action.")
+        action_np = _as_2d_action(
+            _executed_action_array(executed),
+            "coordinated_action",
+        )
+        actions = _full_robot_action_array_to_steps(action_np)
+        result = {
+            "actions": actions,
+            "world_states": {
+                **world_states,
+                "coordinated": executed.next_state,
+                "left": executed.next_state,
+                "right": executed.next_state,
+            },
+            "arm_actions": {
+                "left": executed,
+                "right": None,
+            },
+        }
+        if return_result:
+            return result
+        return actions
+
     left_arm_action = _resolve_action_spec(
         left_arm_action,
         env,
@@ -747,6 +820,7 @@ def init_parallel_world_states(env: Any) -> dict[str, WorldState]:
     """Seed independent per-arm WorldState slots from the current robot qpos."""
     qpos = env.robot.get_qpos().clone()
     return {
+        "coordinated": WorldState(last_qpos=qpos.clone()),
         "left": WorldState(last_qpos=qpos.clone()),
         "right": WorldState(last_qpos=qpos.clone()),
     }
@@ -794,12 +868,93 @@ def _executed_action_array(action):
     return action
 
 
+def _pop_coordinated_edge_action(left_arm_action, right_arm_action):
+    left_is_coordinated = _is_coordinated_action(left_arm_action)
+    right_is_coordinated = _is_coordinated_action(right_arm_action)
+    if left_is_coordinated and right_is_coordinated:
+        raise ValueError(
+            "A graph edge may contain only one CoordinatedPickment action."
+        )
+    if left_is_coordinated:
+        if right_arm_action is not None:
+            raise ValueError(
+                "CoordinatedPickment controls both arms; right_arm_action must be null."
+            )
+        return left_arm_action
+    if right_is_coordinated:
+        if left_arm_action is not None:
+            raise ValueError(
+                "CoordinatedPickment controls both arms; left_arm_action must be null."
+            )
+        return right_arm_action
+    return None
+
+
+def _is_coordinated_action(action_spec) -> bool:
+    if isinstance(action_spec, AtomicActionSpec):
+        return action_spec.atomic_action_class == "CoordinatedPickment"
+    if isinstance(action_spec, Mapping):
+        return action_spec.get("atomic_action_class") == "CoordinatedPickment"
+    return False
+
+
+def _executed_coordinated_atomic_action(
+    env,
+    spec: AtomicActionSpec,
+    result,
+) -> _ExecutedAtomicAction:
+    trajectory = result.trajectory
+    if isinstance(trajectory, torch.Tensor):
+        trajectory = trajectory.detach()
+    else:
+        trajectory = torch.as_tensor(trajectory)
+    if trajectory.dim() == 3:
+        trajectory = trajectory[0]
+    if trajectory.dim() != 2 or trajectory.shape[0] == 0:
+        raise ValueError(
+            "Coordinated atomic action trajectory must have shape (T, D) or "
+            f"(N, T, D), got {trajectory.shape}."
+        )
+    action_np = trajectory.detach().cpu().numpy().astype(np.float32)
+    action_np = _append_hold_steps(
+        action_np,
+        int(spec.cfg.get("post_hold_steps", 0)),
+        "coordinated atomic action",
+    )
+    log_info(
+        "Using coordinated atomic action: "
+        f"atomic_action_class={spec.atomic_action_class}, "
+        f"target={_target_summary(spec)}, steps={len(action_np)}.",
+        color="green",
+    )
+    return _ExecutedAtomicAction(
+        action=action_np,
+        next_state=result.next_state,
+        robot_name=None,
+        control="coordinated",
+    )
+
+
+def _full_robot_action_array_to_steps(action_np: np.ndarray) -> list[torch.Tensor]:
+    action_np = np.asarray(action_np, dtype=np.float32)
+    if action_np.ndim != 2 or action_np.shape[0] == 0:
+        raise ValueError(
+            "Coordinated action stream must have shape (T, robot_dof), "
+            f"got {action_np.shape}."
+        )
+    actions = torch.from_numpy(action_np).to(dtype=torch.float32).unsqueeze(1)
+    return list(actions.unbind(dim=0))
+
+
 def _sync_agent_states_from_parallel_actions(
     env,
     arm_actions: Mapping[str, Any],
 ) -> None:
     for executed in arm_actions.values():
         if not isinstance(executed, _ExecutedAtomicAction):
+            continue
+        if executed.control == "coordinated":
+            _sync_agent_states_from_coordinated_action(env, executed.action)
             continue
         _sync_agent_state_from_atomic_action(
             env,
@@ -822,11 +977,76 @@ def _select_arm_parts(env, robot_name: str):
     return is_left, arm_part, hand_part, list(arm_joints), list(eef_joints)
 
 
+def _agent_parts_for_side(env, *, is_left: bool) -> tuple[str, str]:
+    if hasattr(env, "get_agent_arm_control_part"):
+        arm_part = env.get_agent_arm_control_part(is_left)
+        hand_part = env.get_agent_eef_control_part(is_left)
+    else:
+        arm_part = "left_arm" if is_left else "right_arm"
+        hand_part = "left_eef" if is_left else "right_eef"
+    if not arm_part or not hand_part:
+        side = "left" if is_left else "right"
+        raise ValueError(f"CoordinatedPickment requires {side} arm and hand parts.")
+    return str(arm_part), str(hand_part)
+
+
+def _joint_ids_for_control_part(env, control_part: str | None) -> list[int]:
+    if not control_part:
+        return []
+    if control_part not in (getattr(env.robot, "control_parts", {}) or {}):
+        return []
+    return list(env.robot.get_joint_ids(name=control_part))
+
+
+def _dual_arm_control_part(
+    env,
+    left_arm_part: str,
+    right_arm_part: str,
+) -> str:
+    control_parts = getattr(env.robot, "control_parts", {}) or {}
+    expected = _joint_ids_for_control_part(
+        env, left_arm_part
+    ) + _joint_ids_for_control_part(
+        env,
+        right_arm_part,
+    )
+    if "dual_arm" in control_parts:
+        _sync_control_part_joint_ids(env, "dual_arm", expected)
+        return "dual_arm"
+    for name, _ in control_parts.items():
+        if list(env.robot.get_joint_ids(name=name)) == expected:
+            return str(name)
+    if isinstance(control_parts, dict):
+        left_joint_names = list(control_parts.get(left_arm_part, []))
+        right_joint_names = list(control_parts.get(right_arm_part, []))
+        if left_joint_names and right_joint_names:
+            control_parts["dual_arm"] = left_joint_names + right_joint_names
+            _sync_control_part_joint_ids(env, "dual_arm", expected)
+            return "dual_arm"
+    raise ValueError(
+        "CoordinatedPickment requires a dual-arm control part containing both "
+        f"{left_arm_part!r} and {right_arm_part!r}."
+    )
+
+
+def _sync_control_part_joint_ids(
+    env,
+    control_part: str,
+    joint_ids: list[int],
+) -> None:
+    joint_id_cache = getattr(env.robot, "_joint_ids", None)
+    if isinstance(joint_id_cache, dict):
+        joint_id_cache[control_part] = list(joint_ids)
+
+
 def _state_with_current_agent_qpos(
     env,
     spec: AtomicActionSpec,
     state: WorldState,
 ) -> WorldState:
+    if spec.atomic_action_class == "CoordinatedPickment":
+        return _coordinated_state_with_current_agent_qpos(env, state)
+
     qpos = state.last_qpos.clone()
     _, _, current_arm_qpos, _, current_gripper_state = get_arm_states(
         env,
@@ -845,7 +1065,41 @@ def _state_with_current_agent_qpos(
             len(eef_joints),
             qpos.device,
         ).reshape(1, len(eef_joints))
-    return WorldState(last_qpos=qpos, held_object=state.held_object)
+    return WorldState(
+        last_qpos=qpos,
+        held_object=state.held_object,
+        coordinated_held_object=state.coordinated_held_object,
+    )
+
+
+def _coordinated_state_with_current_agent_qpos(
+    env,
+    state: WorldState,
+) -> WorldState:
+    qpos = state.last_qpos.clone()
+    for robot_name in ("left_arm", "right_arm"):
+        _, _, current_arm_qpos, _, current_gripper_state = get_arm_states(
+            env,
+            robot_name,
+        )
+        _, _, _, arm_joints, eef_joints = _select_arm_parts(env, robot_name)
+        if arm_joints:
+            qpos[:, arm_joints] = torch.as_tensor(
+                current_arm_qpos,
+                dtype=torch.float32,
+                device=qpos.device,
+            ).reshape(1, len(arm_joints))
+        if eef_joints:
+            qpos[:, eef_joints] = _state_to_hand_qpos(
+                current_gripper_state,
+                len(eef_joints),
+                qpos.device,
+            ).reshape(1, len(eef_joints))
+    return WorldState(
+        last_qpos=qpos,
+        held_object=state.held_object,
+        coordinated_held_object=state.coordinated_held_object,
+    )
 
 
 def _motion_generator_for_env(
@@ -880,6 +1134,8 @@ def _get_atomic_action_class(atomic_action_class: str):
 
 
 def _build_typed_target(spec: AtomicActionSpec, target):
+    if spec.atomic_action_class == "CoordinatedPickment":
+        return target
     if spec.atomic_action_class == "PickUp":
         return GraspTarget(semantics=target)
     if spec.atomic_action_class in {"MoveEndEffector", "Place"}:
@@ -902,9 +1158,36 @@ def _build_action_cfg(
     cfg_values.pop("post_hold_steps", None)
     device = env.robot.device
 
+    if spec.atomic_action_class == "CoordinatedPickment":
+        left_arm_part, left_hand_part = _agent_parts_for_side(env, is_left=True)
+        right_arm_part, right_hand_part = _agent_parts_for_side(env, is_left=False)
+        left_hand_dof = len(_joint_ids_for_control_part(env, left_hand_part))
+        right_hand_dof = len(_joint_ids_for_control_part(env, right_hand_part))
+        return CoordinatedPickmentCfg(
+            control_part=_dual_arm_control_part(env, left_arm_part, right_arm_part),
+            left_arm_control_part=left_arm_part,
+            right_arm_control_part=right_arm_part,
+            left_hand_control_part=left_hand_part,
+            right_hand_control_part=right_hand_part,
+            left_hand_open_qpos=_state_to_hand_qpos(
+                env.open_state, left_hand_dof, device
+            ),
+            left_hand_close_qpos=_state_to_hand_qpos(
+                env.close_state, left_hand_dof, device
+            ),
+            right_hand_open_qpos=_state_to_hand_qpos(
+                env.open_state, right_hand_dof, device
+            ),
+            right_hand_close_qpos=_state_to_hand_qpos(
+                env.close_state, right_hand_dof, device
+            ),
+            **_cfg_supported_kwargs(CoordinatedPickmentCfg, cfg_values),
+        )
+
     if spec.atomic_action_class == "PickUp":
         if spec.control != "arm":
             raise ValueError("PickUp atomic action requires control='arm'.")
+        _normalize_pickup_cfg_values(cfg_values, device)
         return PickUpCfg(
             control_part=arm_part,
             hand_control_part=hand_part,
@@ -948,6 +1231,38 @@ def _build_action_cfg(
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
 
 
+def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
+    if "obj_upright_direction" in cfg:
+        _xyz(cfg["obj_upright_direction"], "obj_upright_direction")
+    if "rotate_upright" in cfg:
+        value = cfg["rotate_upright"]
+        if value is not None and not isinstance(value, int | float):
+            raise ValueError("rotate_upright must be a numeric value in radians.")
+
+
+def _normalize_pickup_cfg_values(cfg_values: dict[str, Any], device) -> None:
+    if "rotate_upright" in cfg_values and cfg_values["rotate_upright"] is not None:
+        cfg_values["rotate_upright"] = float(cfg_values["rotate_upright"])
+    if "obj_upright_direction" not in cfg_values:
+        return
+
+    direction = cfg_values["obj_upright_direction"]
+    if torch.is_tensor(direction):
+        if direction.shape != (3,):
+            raise ValueError("obj_upright_direction must have shape (3,).")
+        cfg_values["obj_upright_direction"] = direction.to(
+            device=device,
+            dtype=torch.float32,
+        )
+        return
+
+    cfg_values["obj_upright_direction"] = torch.tensor(
+        _xyz(direction, "obj_upright_direction"),
+        dtype=torch.float32,
+        device=device,
+    )
+
+
 def _resolve_target(
     env,
     spec: AtomicActionSpec,
@@ -965,6 +1280,8 @@ def _resolve_target(
         return _resolve_move_held_object_target(env, spec, state)
     if spec.atomic_action_class == "Place":
         return _resolve_place_target(env, spec)
+    if spec.atomic_action_class == "CoordinatedPickment":
+        return _resolve_coordinated_pickment_target(env, spec, runtime_kwargs, state)
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
 
 
@@ -1006,6 +1323,266 @@ def _resolve_place_target(env, spec: AtomicActionSpec):
     if not spec.target_pose:
         raise ValueError("Place requires target_pose.")
     return _resolve_pose_target(env, spec)
+
+
+def _resolve_coordinated_pickment_target(
+    env,
+    spec: AtomicActionSpec,
+    runtime_kwargs: dict[str, Any],
+    state: WorldState | None,
+) -> CoordinatedPickmentTarget:
+    if not spec.target_object:
+        raise ValueError("CoordinatedPickment requires target_object.")
+    if not spec.target_object_pose:
+        raise ValueError("CoordinatedPickment requires target_object_pose.")
+    semantics = _build_object_semantics(env, spec.target_object, runtime_kwargs)
+    object_target_pose = _resolve_coordinated_object_pose_target(
+        env,
+        spec,
+        semantics,
+        state,
+    )
+    object_initial_pose = _ensure_pose_tensor(
+        semantics.entity.get_local_pose(to_matrix=True),
+        env.robot.device,
+    )
+    left_object_to_eef, right_object_to_eef = _default_coordinated_object_to_eef(
+        semantics,
+        env.robot.device,
+        object_initial_pose,
+        env=env,
+    )
+    return CoordinatedPickmentTarget(
+        object_target_pose=object_target_pose,
+        object_semantics=semantics,
+        left_object_to_eef=left_object_to_eef,
+        right_object_to_eef=right_object_to_eef,
+        object_initial_pose=object_initial_pose,
+    )
+
+
+def _resolve_coordinated_object_pose_target(
+    env,
+    spec: AtomicActionSpec,
+    semantics: ObjectSemantics,
+    state: WorldState | None,
+) -> torch.Tensor:
+    target_pose_spec = spec.target_object_pose
+    current_object_pose = _ensure_pose_tensor(
+        semantics.entity.get_local_pose(to_matrix=True),
+        env.robot.device,
+    )
+    target_pose = _resolve_object_target_pose_like(
+        env,
+        target_pose_spec,
+        current_object_pose,
+    )
+    orientation_state = state or WorldState(last_qpos=env.robot.get_qpos().clone())
+    if orientation_state.held_object is None:
+        orientation_state = WorldState(
+            last_qpos=orientation_state.last_qpos,
+            held_object=_semantics_as_held_object_state(
+                semantics,
+                current_object_pose,
+                env.robot.device,
+            ),
+            coordinated_held_object=orientation_state.coordinated_held_object,
+        )
+    target_pose[:3, :3] = _resolve_object_orientation(
+        env,
+        target_pose_spec,
+        current_object_pose,
+        orientation_state,
+    )
+    return target_pose
+
+
+def _resolve_object_target_pose_like(
+    env,
+    target_pose_spec: Mapping[str, Any],
+    current_object_pose: torch.Tensor,
+) -> torch.Tensor:
+    reference = target_pose_spec["reference"]
+    target_pose = current_object_pose.clone()
+    if reference == "absolute":
+        position = target_pose_spec.get("position")
+        if not isinstance(position, list) or len(position) != 3:
+            raise ValueError("absolute target_object_pose requires position.")
+        for index, value in enumerate(position):
+            if value is not None:
+                target_pose[index, 3] = float(value)
+        return target_pose
+    if reference == "object":
+        obj_name = target_pose_spec.get("obj_name")
+        target_obj = env.sim.get_rigid_object(obj_name)
+        if target_obj is None:
+            raise ValueError(f"No rigid object found for {obj_name}.")
+        target_pose = _ensure_pose_tensor(
+            target_obj.get_local_pose(to_matrix=True),
+            env.robot.device,
+        )
+        offset = _xyz(target_pose_spec.get("offset", [0.0, 0.0, 0.0]), "offset")
+        target_pose[:3, 3] += torch.tensor(
+            offset,
+            dtype=torch.float32,
+            device=env.robot.device,
+        )
+        return target_pose
+    if reference == "relative":
+        offset = _xyz(target_pose_spec.get("offset", [0.0, 0.0, 0.0]), "offset")
+        frame = target_pose_spec.get("frame", "world")
+        mode = "extrinsic" if frame == "world" else "intrinsic"
+        target_pose = get_offset_pose(target_pose, offset[0], "x", mode)
+        target_pose = get_offset_pose(target_pose, offset[1], "y", mode)
+        target_pose = get_offset_pose(target_pose, offset[2], "z", mode)
+        return torch.as_tensor(
+            target_pose,
+            dtype=torch.float32,
+            device=env.robot.device,
+        )
+    raise ValueError(f"Unsupported target_object_pose reference: {reference}.")
+
+
+def _semantics_as_held_object_state(
+    semantics: ObjectSemantics,
+    object_pose: torch.Tensor,
+    device,
+):
+    identity = torch.eye(4, dtype=torch.float32, device=device).unsqueeze(0)
+    return HeldObjectState(
+        semantics=semantics,
+        object_to_eef=identity,
+        grasp_xpos=object_pose.unsqueeze(0),
+    )
+
+
+def _default_coordinated_object_to_eef(
+    semantics: ObjectSemantics,
+    device,
+    object_initial_pose: torch.Tensor,
+    *,
+    env=None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    vertices = semantics.geometry.get("mesh_vertices")
+    if vertices is None:
+        vertices = semantics.entity.get_vertices(env_ids=[0], scale=True)[0]
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=device)
+    if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+        raise ValueError("CoordinatedPickment mesh_vertices must have shape (N, 3).")
+    mins = vertices.min(dim=0).values
+    maxs = vertices.max(dim=0).values
+    center = (mins + maxs) * 0.5
+    extents = maxs - mins
+    side_axis_index = _coordinated_side_axis_index(extents)
+    side_axis = torch.eye(3, dtype=torch.float32, device=device)[:, side_axis_index]
+    lateral_offset = max(float(extents[side_axis_index]) * 0.5, 0.04)
+    vertical_offset = max(float(extents[2]) * 0.25, 0.03)
+
+    positive_side = _make_coordinated_side_grasp_pose(
+        center=center,
+        side_axis=side_axis,
+        side_sign=1.0,
+        lateral_offset=lateral_offset,
+        vertical_offset=vertical_offset,
+    )
+    negative_side = _make_coordinated_side_grasp_pose(
+        center=center,
+        side_axis=side_axis,
+        side_sign=-1.0,
+        lateral_offset=lateral_offset,
+        vertical_offset=vertical_offset,
+    )
+    return _assign_coordinated_grasp_pair_to_arms(
+        positive_side,
+        negative_side,
+        object_initial_pose=object_initial_pose,
+        env=env,
+        device=device,
+    )
+
+
+def _coordinated_side_axis_index(extents: torch.Tensor) -> int:
+    x_extent = float(extents[0])
+    y_extent = float(extents[1])
+    if abs(x_extent - y_extent) < 1e-6:
+        return 1
+    return 0 if x_extent < y_extent else 1
+
+
+def _make_coordinated_side_grasp_pose(
+    *,
+    center: torch.Tensor,
+    side_axis: torch.Tensor,
+    side_sign: float,
+    lateral_offset: float,
+    vertical_offset: float,
+) -> torch.Tensor:
+    pose = torch.eye(4, dtype=torch.float32, device=center.device)
+    pose[:3, 3] = center + side_axis * float(side_sign) * lateral_offset
+    pose[2, 3] = center[2] + vertical_offset
+
+    z_axis = _normalize_vector(-side_axis * float(side_sign))
+    world_up = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float32, device=center.device)
+    x_axis = torch.linalg.cross(world_up, z_axis)
+    if float(torch.linalg.norm(x_axis)) < 1e-6:
+        x_axis = torch.tensor(
+            [1.0, 0.0, 0.0], dtype=torch.float32, device=center.device
+        )
+    x_axis = _normalize_vector(x_axis)
+    y_axis = _normalize_vector(torch.linalg.cross(z_axis, x_axis))
+    pose[:3, :3] = torch.stack([x_axis, y_axis, z_axis], dim=1)
+    return pose
+
+
+def _assign_coordinated_grasp_pair_to_arms(
+    first_pose: torch.Tensor,
+    second_pose: torch.Tensor,
+    *,
+    object_initial_pose: torch.Tensor,
+    env,
+    device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    first_world = _transform_local_point(object_initial_pose, first_pose[:3, 3])
+    second_world = _transform_local_point(object_initial_pose, second_pose[:3, 3])
+    arm_positions = _current_arm_positions(env, device)
+    if arm_positions is not None:
+        left_pos, right_pos = arm_positions
+        direct_cost = torch.linalg.norm(left_pos - first_world) + torch.linalg.norm(
+            right_pos - second_world
+        )
+        swapped_cost = torch.linalg.norm(left_pos - second_world) + torch.linalg.norm(
+            right_pos - first_world
+        )
+        if float(swapped_cost) + 1e-6 < float(direct_cost):
+            return second_pose, first_pose
+        if float(direct_cost) + 1e-6 < float(swapped_cost):
+            return first_pose, second_pose
+
+    if float(first_world[1]) >= float(second_world[1]):
+        return first_pose, second_pose
+    return second_pose, first_pose
+
+
+def _transform_local_point(object_pose: torch.Tensor, local_point: torch.Tensor):
+    homogeneous = torch.cat(
+        [
+            local_point.to(device=object_pose.device, dtype=torch.float32),
+            torch.ones(1, dtype=torch.float32, device=object_pose.device),
+        ]
+    )
+    return (object_pose @ homogeneous)[:3]
+
+
+def _current_arm_positions(env, device) -> tuple[torch.Tensor, torch.Tensor] | None:
+    if env is None or not hasattr(env, "get_current_xpos_agent"):
+        return None
+    try:
+        left_pose, right_pose = env.get_current_xpos_agent()
+        left_pose = _ensure_pose_tensor(left_pose, device)
+        right_pose = _ensure_pose_tensor(right_pose, device)
+    except Exception:
+        return None
+    return left_pose[:3, 3], right_pose[:3, 3]
 
 
 def _resolve_pose_target(env, spec: AtomicActionSpec):
@@ -1746,6 +2323,35 @@ def _sync_agent_state_from_atomic_action(env, robot_name, action_np, control):
         ),
         is_left=is_left,
     )
+
+
+def _sync_agent_states_from_coordinated_action(env, action_np) -> None:
+    if action_np is None or len(action_np) == 0:
+        raise ValueError("Coordinated atomic action is empty; cannot sync state.")
+    final_qpos = np.asarray(action_np[-1], dtype=np.float32)
+    for side, is_left in (("left", True), ("right", False)):
+        arm_joints = list(getattr(env, f"{side}_arm_joints", []) or [])
+        eef_joints = list(getattr(env, f"{side}_eef_joints", []) or [])
+        if arm_joints:
+            arm_qpos = torch.as_tensor(
+                final_qpos[arm_joints],
+                dtype=torch.float32,
+                device=env.robot.device,
+            )
+            env.set_current_qpos_agent(arm_qpos, is_left=is_left)
+            env.set_current_xpos_agent(
+                env.get_arm_fk(qpos=arm_qpos, is_left=is_left),
+                is_left=is_left,
+            )
+        if eef_joints:
+            env.set_current_gripper_state_agent(
+                torch.as_tensor(
+                    final_qpos[eef_joints],
+                    dtype=torch.float32,
+                    device=env.robot.device,
+                ),
+                is_left=is_left,
+            )
 
 
 def _current_arm_qpos(env, is_left: bool, arm_joints: list[int]) -> torch.Tensor:

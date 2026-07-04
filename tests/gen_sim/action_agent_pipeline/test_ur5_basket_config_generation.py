@@ -51,6 +51,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking impo
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_observations_config,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _RelativePlacementSpec,
+    _RelativePlacementStepSpec,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _TABLETOP_OBJECT_CLEARANCE,
     _mesh_config_local_zmin_after_rotation,
@@ -61,6 +65,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
+    make_relative_task_prompt,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _apply_arrangement_task_response,
@@ -942,6 +949,72 @@ def test_task_description_generates_relative_front_of_config(
     }
 
 
+def test_task_description_generates_coordinated_pickment_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == "用双臂将 apple_1 往前移动"
+        return {
+            "manipulations": [
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_1",
+                    "reference_object": "apple_1",
+                    "goal_relation": "front_of",
+                    "arm": "auto",
+                }
+            ],
+            "task_prompt_summary": "Use both arms to move apple_1 forward.",
+            "basic_background_notes": "One shared object requires both arms.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_coordinated_pickment_agent",
+        task_name="MoveAppleForwardWithBothArms",
+        task_description="用双臂将 apple_1 往前移动",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    assert "left_arm" in gym_config["robot"]["control_parts"]
+    assert "right_arm" in gym_config["robot"]["control_parts"]
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    for text in (task_prompt, atom_actions):
+        assert '"atomic_action_class":"CoordinatedPickment"' in text
+        assert '"robot_name":"dual_arm"' in text
+        assert '"target_object":{"obj_name":"apple_1","affordance":"antipodal"}' in text
+        assert '"atomic_action_class":"PickUp"' not in text
+    assert '"position":[0.54,0.11' in task_prompt
+
+    assert _stable_summary(paths.summary) == {
+        "mode": "coordinated_pickment",
+        "intent": "coordinated_pickment",
+        "moved_object": "apple_1",
+        "reference_object": "apple_1",
+        "relation": "front_of",
+        "active_arm": "dual_arm",
+        "release_offset": [0.16, 0.0, 0.12],
+        "target_position": paths.summary["target_position"],
+    }
+
+
 def test_task_description_generates_self_relative_front_left_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1444,6 +1517,18 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     assert scaled_body_meshes["fork"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.31, 0.32, 0.33]]
     )
+    assert _mesh_config_world_z_bounds(scaled_rigid_objects["cup"])[
+        0
+    ] == pytest.approx(_mesh_config_world_z_bounds(rigid_objects["cup"])[0])
+    assert _mesh_config_world_z_bounds(scaled_background_objects["pad"])[
+        0
+    ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["pad"])[0])
+    assert _mesh_config_world_z_bounds(scaled_background_objects["fork"])[
+        0
+    ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["fork"])[0])
+    assert _mesh_config_world_z_bounds(scaled_background_objects["table"])[
+        1
+    ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["table"])[1])
 
     absolute_paths = generate_action_agent_config_from_project(
         gym_config_path,
@@ -1873,11 +1958,14 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     assert summary["release_offset"][2] == pytest.approx(expected_release_offset_z)
     assert summary["release_offset"] == pytest.approx(expected_release_offset)
     assert summary["reference_object"] == "table"
+    assert summary["pickup_rotate_upright"] == pytest.approx(0.7853981633974483)
+    assert sum(abs(value) for value in summary["pickup_upright_direction"]) == 1.0
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     extensions = gym_config["env"]["extensions"]
+    moved_object = summary["moved_object"]
     assert (
-        extensions["agent_grasp_pose_overrides"][summary["moved_object"]]["mode"]
+        extensions["agent_grasp_pose_overrides"][moved_object]["mode"]
         == "upright_bottle_side_grasp"
     )
     success = extensions["agent_success"]
@@ -1897,6 +1985,13 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     release_position_json = json.dumps(
         expected_release_position, ensure_ascii=False, separators=(",", ":")
     )
+    pickup_direction_json = json.dumps(
+        summary["pickup_upright_direction"],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert f'"obj_upright_direction":{pickup_direction_json}' in task_prompt
+    assert '"rotate_upright":0.7853981633974483' in task_prompt
     assert (
         f'"position":{release_position_json},"orientation_goal":"upright"'
         in task_prompt
@@ -2433,6 +2528,90 @@ def test_task_description_generates_dual_arm_relative_config(
     assert '"obj_name":"apple_2"' in atom_actions
     assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in atom_actions
     assert '"obj_name":"apple_1"' in atom_actions
+
+
+def test_dual_upright_prompt_preserves_before_orientation_adjustment() -> None:
+    rotate_upright = 0.7853981633974483
+    left = _RelativePlacementStepSpec(
+        intent="place_relative",
+        moved_source_uid="left_bottle_src",
+        reference_source_uid="table_src",
+        moved_runtime_uid="left_bottle",
+        reference_runtime_uid="table",
+        relation="on",
+        active_side="left",
+        release_offset=[0.1, 0.2, 0.3],
+        high_offset=[0.1, 0.2, 0.55],
+        release_position=[0.1, 0.2, 0.3],
+        high_position=[0.1, 0.2, 0.55],
+        orientation_goal="upright",
+        orientation_axis="none",
+        upright_in_place=True,
+        pickup_upright_direction=[1.0, 0.0, 0.0],
+        pickup_rotate_upright=rotate_upright,
+    )
+    right = _RelativePlacementStepSpec(
+        intent="place_relative",
+        moved_source_uid="right_bottle_src",
+        reference_source_uid="table_src",
+        moved_runtime_uid="right_bottle",
+        reference_runtime_uid="table",
+        relation="on",
+        active_side="right",
+        release_offset=[0.1, -0.2, 0.3],
+        high_offset=[0.1, -0.2, 0.55],
+        release_position=[0.1, -0.2, 0.3],
+        high_position=[0.1, -0.2, 0.55],
+        orientation_goal="upright",
+        orientation_axis="none",
+        upright_in_place=True,
+        pickup_upright_direction=[0.0, 1.0, 0.0],
+        pickup_rotate_upright=rotate_upright,
+    )
+    spec = _RelativePlacementSpec(
+        intent="place_relative",
+        table_source_uid="table_src",
+        moved_source_uid=left.moved_source_uid,
+        reference_source_uid=left.reference_source_uid,
+        moved_runtime_uid=left.moved_runtime_uid,
+        reference_runtime_uid=left.reference_runtime_uid,
+        relation=left.relation,
+        active_side=left.active_side,
+        task_description="用双臂分别将双边的瓶子扶正",
+        task_prompt_summary="Stand both bottles upright in place.",
+        basic_background_notes="Both bottles start on their sides.",
+        action_sketch=["Pick both bottles", "Stand each bottle upright"],
+        release_offset=left.release_offset,
+        high_offset=left.high_offset,
+        placements=(left, right),
+        release_position=left.release_position,
+        high_position=left.high_position,
+        orientation_goal=left.orientation_goal,
+        orientation_axis=left.orientation_axis,
+        upright_in_place=True,
+        pickup_upright_direction=left.pickup_upright_direction,
+        pickup_rotate_upright=left.pickup_rotate_upright,
+    )
+
+    prompt = make_relative_task_prompt("DemoUpright", "demo_project", spec)
+
+    assert "Generate one deterministic nominal graph with exactly 12 nominal edges" in (
+        prompt
+    )
+    assert '"obj_upright_direction":[1.0,0.0,0.0]' in prompt
+    assert '"obj_upright_direction":[0.0,1.0,0.0]' in prompt
+    assert f'"rotate_upright":{rotate_upright}' in prompt
+    left_high_preserve = (
+        '"position":[0.1,0.2,0.55],'
+        '"orientation_goal":"preserve","orientation_axis":"none"'
+    )
+    left_high_upright = (
+        '"position":[0.1,0.2,0.55],'
+        '"orientation_goal":"upright","orientation_axis":"none"'
+    )
+    assert left_high_preserve in prompt
+    assert left_high_upright in prompt
+    assert prompt.index(left_high_preserve) < prompt.index(left_high_upright)
 
 
 def test_task_description_generates_dual_hold_hover_config(

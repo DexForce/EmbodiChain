@@ -87,6 +87,8 @@ class _RelativePlacementLike(Protocol):
     orientation_align_to_runtime_uid: str | None
     hover_height: float
     upright_in_place: bool
+    pickup_upright_direction: Sequence[float] | None
+    pickup_rotate_upright: float | None
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -596,6 +598,8 @@ def make_relative_task_prompt(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "coordinated_pickment":
+        return _make_coordinated_pickment_task_prompt(task_name, project_name, spec)
     if spec.intent == "hold_hover":
         return _make_hold_hover_task_prompt(task_name, project_name, spec)
     if len(spec.placements) > 1:
@@ -607,7 +611,12 @@ def make_relative_task_prompt(
     )
     active_slot = f"{spec.active_side}_arm_action"
     action_sketch = _format_action_sketch(spec.action_sketch)
-    pick_spec = _format_pick_up_spec(active_arm, spec.moved_runtime_uid)
+    pick_spec = _format_pick_up_spec(
+        active_arm,
+        spec.moved_runtime_uid,
+        pickup_upright_direction=spec.pickup_upright_direction,
+        pickup_rotate_upright=spec.pickup_rotate_upright,
+    )
     initial_spec = _format_initial_qpos_spec(active_arm, sample_interval=30)
     reference_line = _relative_reference_line(spec)
     final_planning_rule = _relative_final_planning_rule(project_name, spec)
@@ -772,6 +781,51 @@ Final state: `{spec.moved_runtime_uid}` must be
 """
 
 
+def _make_coordinated_pickment_task_prompt(
+    task_name: str,
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    action_sketch = _format_action_sketch(spec.action_sketch)
+    action_spec = _format_coordinated_pickment_spec(spec)
+    final_planning_rule = _relative_final_planning_rule(project_name, spec)
+    return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This config was generated from a simple task description by the config-stage
+LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
+
+Original simple task description:
+{spec.task_description}
+
+Config-stage LLM interpretation:
+{action_sketch}
+
+Coordinated shared-object mapping:
+- Use both arms together to pick and move `{spec.moved_runtime_uid}`.
+- Source object: `{spec.moved_source_uid}`.
+- Target relation: `{spec.relation}` ({_relative_relation_phrase(spec.relation)})
+  relative to `{spec.reference_runtime_uid}`.
+
+{_RELATIVE_COORDINATE_CONVENTION}
+
+Generate one deterministic nominal graph with exactly 1 nominal edge. Use only
+the `CoordinatedPickment` JSON spec shown below. It controls both arms in one
+atomic action, so put it in `left_arm_action` and keep `right_arm_action` null.
+Do not add separate `PickUp`, `MoveHeldObject`, `Place`, return-to-initial, or
+gripper actions.
+
+1. Coordinated pick and move `{spec.moved_runtime_uid}`:
+   - left_arm_action: {action_spec}
+   - right_arm_action: null
+
+Final state: `{spec.moved_runtime_uid}` must be
+{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}` and
+may remain held by both grippers.
+{final_planning_rule}
+"""
+
+
 def _make_dual_relative_task_prompt(
     task_name: str,
     project_name: str,
@@ -785,20 +839,20 @@ def _make_dual_relative_task_prompt(
     first_slot = f"{first.active_side}_arm_action"
     second_slot = f"{second.active_side}_arm_action"
     action_sketch = _format_action_sketch(spec.action_sketch)
-    first_pick_spec = _format_pick_up_spec(first_arm, first.moved_runtime_uid)
-    second_pick_spec = _format_pick_up_spec(second_arm, second.moved_runtime_uid)
-    first_high_spec = _format_relative_pose_spec(
+    first_pick_spec = _format_pick_up_spec(
         first_arm,
-        first,
-        pose_kind="high",
-        sample_interval=45,
+        first.moved_runtime_uid,
+        pickup_upright_direction=first.pickup_upright_direction,
+        pickup_rotate_upright=first.pickup_rotate_upright,
     )
-    second_high_spec = _format_relative_pose_spec(
+    second_pick_spec = _format_pick_up_spec(
         second_arm,
-        second,
-        pose_kind="high",
-        sample_interval=45,
+        second.moved_runtime_uid,
+        pickup_upright_direction=second.pickup_upright_direction,
+        pickup_rotate_upright=second.pickup_rotate_upright,
     )
+    first_high_spec = _format_high_staging_spec(first_arm, first)
+    second_high_spec = _format_high_staging_spec(second_arm, second)
     first_close_spec = _format_gripper_spec(
         first_arm,
         "close",
@@ -995,22 +1049,6 @@ def _dual_relative_release_edge_blocks(
     if _is_pose_sensitive_placement(placement):
         return [
             (
-                f"Lift `{placement.moved_runtime_uid}` to the safe high staging "
-                "pose without changing orientation",
-                {
-                    active_slot: _format_relative_pose_spec(
-                        active_arm,
-                        placement,
-                        pose_kind="high",
-                        sample_interval=45,
-                        orientation_goal="preserve",
-                        orientation_axis="none",
-                        align_to=None,
-                    ),
-                    waiting_slot: waiting_value,
-                },
-            ),
-            (
                 f"Adjust `{placement.moved_runtime_uid}` orientation at the same "
                 "safe high staging pose",
                 {
@@ -1103,10 +1141,10 @@ def _dual_relative_release_edge_blocks(
 def _dual_relative_release_rule(spec: _RelativeSpecLike) -> str:
     if any(_is_pose_sensitive_placement(placement) for placement in spec.placements):
         return (
-            "For pose-sensitive placements, first lift the held object to the "
-            "safe high staging pose with orientation preserved, then adjust "
-            "orientation at the same high pose before moving down to the final "
-            "release object pose. The following `Place` must be the exact "
+            "For pose-sensitive placements, the high-staging edge must keep "
+            "orientation preserved, then adjust orientation at the same high "
+            "pose before moving down to the final release object pose. The "
+            "following `Place` must be the exact "
             "relative-zero release-only spec shown below, and then the empty "
             "hand retreats upward. Support-surface `on` placements must also "
             "use final object-pose `MoveHeldObject` plus relative-zero "
@@ -1172,6 +1210,8 @@ def make_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
 ) -> str:
+    if spec.intent == "coordinated_pickment":
+        return _make_coordinated_pickment_basic_background(project_name, spec)
     if spec.intent == "hold_hover":
         return _make_hold_hover_basic_background(project_name, spec)
     if len(spec.placements) > 1:
@@ -1210,6 +1250,40 @@ pose-sensitive placements must use a final `MoveHeldObject` object-pose move
 followed by release-only `Place`. Pose-sensitive placements must additionally
 use a safe high `MoveHeldObject` lift with orientation preserved before
 high-pose orientation adjustment.
+"""
+
+
+def _make_coordinated_pickment_basic_background(
+    project_name: str,
+    spec: _RelativeSpecLike,
+) -> str:
+    notes = spec.basic_background_notes or (
+        "No extra scene notes were provided by the config-stage LLM."
+    )
+    return f"""The scene comes from the exported {project_name} mesh environment.
+
+This configuration directory is for a Dual-UR5 coordinated shared-object task
+generated from a simple natural-language task description.
+
+The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+- left_arm is the semantic robot-view left slot, mapped to the physical
+  right_arm control part.
+- right_arm is the semantic robot-view right slot, mapped to the physical
+  left_arm control part.
+
+Both arms must act through one `CoordinatedPickment` action. The graph should
+place that action in `left_arm_action` and keep `right_arm_action` null.
+
+Interactive task object:
+- {spec.moved_runtime_uid}: shared moved object from source `{spec.moved_source_uid}`.
+
+Config-stage LLM notes:
+{notes}
+
+The execution-stage LLM should generate a single-edge graph that uses
+`CoordinatedPickment` to grasp the shared object with both grippers, lift it,
+and move the object to the configured target pose. It must not decompose this
+task into separate single-arm `PickUp`, `MoveHeldObject`, or `Place` actions.
 """
 
 
@@ -1293,6 +1367,8 @@ the object still hovering in the gripper.
 
 
 def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    if spec.intent == "coordinated_pickment":
+        return _make_coordinated_pickment_atom_actions_prompt(spec)
     if spec.intent == "hold_hover":
         return _make_hold_hover_atom_actions_prompt(spec)
     if len(spec.placements) > 1:
@@ -1302,6 +1378,12 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
     high_actions = _relative_high_action_patterns(active_arm, spec)
     release_actions = _relative_release_action_patterns(active_arm, spec)
+    pick_spec = _format_pick_up_spec(
+        active_arm,
+        spec.moved_runtime_uid,
+        pickup_upright_direction=spec.pickup_upright_direction,
+        pickup_rotate_upright=spec.pickup_rotate_upright,
+    )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
 
 Use only the native atomic action class JSON specs shown below. The active arm
@@ -1310,7 +1392,7 @@ the nominal graph.
 
 Use exactly these action patterns:
 - Pick up `{spec.moved_runtime_uid}`:
-  {_format_pick_up_spec(active_arm, spec.moved_runtime_uid)}
+  {pick_spec}
 {high_actions}
 {release_actions}
 - Return to initial qpos:
@@ -1328,6 +1410,18 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
     second_high_actions = _relative_high_action_patterns(second_arm, second)
     first_release_actions = _relative_release_action_patterns(first_arm, first)
     second_release_actions = _relative_release_action_patterns(second_arm, second)
+    first_pick_spec = _format_pick_up_spec(
+        first_arm,
+        first.moved_runtime_uid,
+        pickup_upright_direction=first.pickup_upright_direction,
+        pickup_rotate_upright=first.pickup_rotate_upright,
+    )
+    second_pick_spec = _format_pick_up_spec(
+        second_arm,
+        second.moved_runtime_uid,
+        pickup_upright_direction=second.pickup_upright_direction,
+        pickup_rotate_upright=second.pickup_rotate_upright,
+    )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
 
 Use only the native atomic action class JSON specs shown below.
@@ -1336,9 +1430,9 @@ Use only the native atomic action class JSON specs shown below.
 
 Use these action patterns:
 - First arm pick-up:
-  {_format_pick_up_spec(first_arm, first.moved_runtime_uid)}
+  {first_pick_spec}
 - Second arm pick-up:
-  {_format_pick_up_spec(second_arm, second.moved_runtime_uid)}
+  {second_pick_spec}
 {first_high_actions}
 {first_release_actions}
 {second_high_actions}
@@ -1373,6 +1467,18 @@ def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
   {_format_hover_move_spec(active_arm, placement)}
 - Keep gripper closed:
   {_format_gripper_spec(active_arm, "close", sample_interval=10, post_hold_steps=20)}"""
+
+
+def _make_coordinated_pickment_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Coordinated Pickment
+
+Use only this native atomic action class JSON spec. `CoordinatedPickment`
+controls both arms, so the nominal graph must put this spec in
+`left_arm_action` and set `right_arm_action` to null.
+
+- Coordinated pick and move `{spec.moved_runtime_uid}`:
+  {_format_coordinated_pickment_spec(spec)}
+"""
 
 
 def make_basket_task_prompt(
@@ -1642,7 +1748,18 @@ def _format_pick_up_spec(
     obj_name: str,
     *,
     sample_interval: int = 45,
+    pickup_upright_direction: Sequence[float] | None = None,
+    pickup_rotate_upright: float | None = None,
 ) -> str:
+    cfg: dict[str, Any] = {
+        "pre_grasp_distance": 0.08,
+        "sample_interval": sample_interval,
+    }
+    if pickup_upright_direction is not None and pickup_rotate_upright is not None:
+        cfg["obj_upright_direction"] = [
+            float(value) for value in pickup_upright_direction
+        ]
+        cfg["rotate_upright"] = float(pickup_rotate_upright)
     return _compact_json(
         {
             "atomic_action_class": "PickUp",
@@ -1652,9 +1769,53 @@ def _format_pick_up_spec(
                 "obj_name": obj_name,
                 "affordance": "antipodal",
             },
+            "cfg": cfg,
+        }
+    )
+
+
+def _format_coordinated_pickment_spec(
+    placement: _RelativePlacementLike,
+    *,
+    sample_interval: int = 120,
+) -> str:
+    target_object_pose: dict[str, Any]
+    if getattr(placement, "reference_is_initial_pose", False):
+        if placement.release_position is None:
+            raise ValueError(
+                "CoordinatedPickment self-relative target requires release_position."
+            )
+        target_object_pose = {
+            "reference": "absolute",
+            "position": [float(value) for value in placement.release_position],
+            "orientation_goal": placement.orientation_goal,
+            "orientation_axis": placement.orientation_axis,
+        }
+    else:
+        x, y, z = placement.release_offset
+        target_object_pose = {
+            "reference": "object",
+            "obj_name": placement.reference_runtime_uid,
+            "offset": [float(x), float(y), float(z)],
+            "orientation_goal": placement.orientation_goal,
+            "orientation_axis": placement.orientation_axis,
+        }
+    if placement.orientation_align_to_runtime_uid is not None:
+        target_object_pose["align_to"] = placement.orientation_align_to_runtime_uid
+    return _compact_json(
+        {
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": placement.moved_runtime_uid,
+                "affordance": "antipodal",
+            },
+            "target_object_pose": target_object_pose,
             "cfg": {
-                "pre_grasp_distance": 0.08,
+                "pre_grasp_distance": 0.1,
                 "sample_interval": sample_interval,
+                "hand_interp_steps": 10,
             },
         }
     )
@@ -1761,6 +1922,28 @@ def _format_relative_pose_spec(
         orientation_goal=resolved_orientation_goal,
         orientation_axis=resolved_orientation_axis,
         align_to=resolved_align_to,
+    )
+
+
+def _format_high_staging_spec(
+    robot_name: str,
+    placement: _RelativePlacementLike,
+) -> str:
+    if _is_pose_sensitive_placement(placement):
+        return _format_relative_pose_spec(
+            robot_name,
+            placement,
+            pose_kind="high",
+            sample_interval=45,
+            orientation_goal="preserve",
+            orientation_axis="none",
+            align_to=None,
+        )
+    return _format_relative_pose_spec(
+        robot_name,
+        placement,
+        pose_kind="high",
+        sample_interval=45,
     )
 
 
