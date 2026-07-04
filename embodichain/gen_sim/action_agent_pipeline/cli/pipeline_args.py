@@ -192,7 +192,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Deprecated. Text-only prompt2scene input was removed upstream and "
-            "is rejected; use --image or --image-name."
+            "is rejected; use --prompt2scene-prompt for scene edit or "
+            "randomization."
+        ),
+    )
+    parser.add_argument(
+        "--prompt2scene-prompt",
+        "--prompt2scene_prompt",
+        dest="prompt2scene_prompt",
+        default=None,
+        help=(
+            "Prompt passed to prompt2scene for scene edit or scene "
+            "randomization. This is independent from --task_description."
         ),
     )
     parser.add_argument(

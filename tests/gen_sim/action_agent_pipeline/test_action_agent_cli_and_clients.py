@@ -63,6 +63,23 @@ def test_action_agent_config_generation_imports() -> None:
     )
 
 
+def test_prompt2scene_prompt_is_independent_from_task_description() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "--use-prompt2scene",
+            "--prompt2scene-prompt",
+            "move the can left",
+            "--task_description",
+            "put the can into the pot",
+        ]
+    )
+
+    assert args.prompt2scene_prompt == "move the can left"
+    assert args.task_description == "put the can into the pot"
+
+
 def test_action_agent_python_modules_declare_all() -> None:
     missing_all = []
     for path in sorted(_ACTION_AGENT_PACKAGE_ROOT.rglob("*.py")):
@@ -489,6 +506,7 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     result = prompt2scene_stage.run_prompt2scene_stage(
         SimpleNamespace(
             prompt2scene_text=None,
+            prompt2scene_prompt="move the can left",
             prompt2scene_output_root=str(output_root),
             prompt2scene_llm_config=str(llm_config),
             prompt2scene_gravity_settle_mode="physics",
@@ -501,18 +519,76 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     assert captured["llm_config_path"] == llm_config
     assert captured["llm_cfg"] == "llm-cfg"
     assert captured["request"].image_path == image_path.resolve()
-    assert captured["request"].prompt is None
+    assert captured["request"].prompt == "move the can left"
     assert captured["request"].gravity_settle_mode == "physics"
+    assert captured["request"].output_root == output_root.resolve()
+
+
+def test_prompt2scene_stage_edit_only_does_not_use_default_image(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import prompt2scene_stage
+
+    output_root = tmp_path / "prompt2scene"
+    gym_config = output_root / "gym_export/gym_config.json"
+    gym_config.parent.mkdir(parents=True)
+    gym_config.write_text("{}", encoding="utf-8")
+    captured = {}
+
+    def fake_load_llm_config(path):
+        captured["llm_config_path"] = path
+        return "llm-cfg"
+
+    def fake_run_prompt2scene(request, *, llm_cfg):
+        captured["request"] = request
+        captured["llm_cfg"] = llm_cfg
+        return SimpleNamespace(gym_config_path=None)
+
+    class FakePrompt2SceneInput:
+        @classmethod
+        def from_cli_args(cls, *, image_path, prompt, output_root, gravity_settle_mode):
+            return SimpleNamespace(
+                image_path=image_path,
+                prompt=prompt,
+                gravity_settle_mode=gravity_settle_mode,
+                output_root=output_root.expanduser().resolve(),
+            )
+
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "_load_prompt2scene_components",
+        lambda: (fake_load_llm_config, fake_run_prompt2scene, FakePrompt2SceneInput),
+    )
+
+    result = prompt2scene_stage.run_prompt2scene_stage(
+        SimpleNamespace(
+            prompt2scene_text=None,
+            prompt2scene_prompt="move the can left",
+            prompt2scene_output_root=str(output_root),
+            prompt2scene_llm_config=None,
+            prompt2scene_gravity_settle_mode="geometry",
+            image=None,
+            image_name=None,
+        )
+    )
+
+    assert result == gym_config
+    assert captured["llm_config_path"] is None
+    assert captured["llm_cfg"] == "llm-cfg"
+    assert captured["request"].image_path is None
+    assert captured["request"].prompt == "move the can left"
     assert captured["request"].output_root == output_root.resolve()
 
 
 def test_prompt2scene_stage_rejects_text_input(tmp_path) -> None:
     from embodichain.gen_sim.action_agent_pipeline.cli import prompt2scene_stage
 
-    with pytest.raises(ValueError, match="no longer supported"):
+    with pytest.raises(ValueError, match="--prompt2scene-prompt"):
         prompt2scene_stage.run_prompt2scene_stage(
             SimpleNamespace(
                 prompt2scene_text="a tabletop scene with bread and a basket",
+                prompt2scene_prompt=None,
                 prompt2scene_output_root=str(tmp_path / "prompt2scene"),
                 prompt2scene_llm_config=None,
                 prompt2scene_gravity_settle_mode="geometry",
@@ -560,6 +636,10 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
                 repo_root / "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
             ),
             prompt2scene_text=None,
+            prompt2scene_prompt="move the bread left",
+            prompt2scene_existing_gym_project=str(
+                repo_root / "gym_project/prompt2scene/demo/gym_export"
+            ),
             prompt2scene_gravity_settle_mode="physics",
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
@@ -601,11 +681,73 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
         "embodichain/gen_sim/prompt2scene/configs/llm_config.json"
     )
     assert "prompt2scene_text" not in record
+    assert record["prompt2scene_prompt"] == "move the bread left"
+    assert record["prompt2scene_existing_gym_project"] == (
+        "gym_project/prompt2scene/demo/gym_export"
+    )
     assert record["prompt2scene_gravity_settle_mode"] == "physics"
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
     assert record["target_body_scale_mode"] == "multiply"
     assert record["convex_decomposition_method"] == "vhacd"
+
+
+@pytest.mark.parametrize(
+    "path_kind",
+    ["output_root", "gym_export", "gym_config"],
+)
+def test_existing_prompt2scene_project_prompt_routes_through_prompt2scene(
+    monkeypatch,
+    tmp_path,
+    path_kind,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import project_resolution
+
+    output_root = tmp_path / "prompt2scene/demo"
+    gym_export = output_root / "gym_export"
+    gym_config = gym_export / "gym_config.json"
+    scene_state = gym_export / "scene_state/result.json"
+    scene_state.parent.mkdir(parents=True)
+    scene_state.write_text("{}", encoding="utf-8")
+    gym_config.write_text("{}", encoding="utf-8")
+    input_path = {
+        "output_root": output_root,
+        "gym_export": gym_export,
+        "gym_config": gym_config,
+    }[path_kind]
+    captured = {}
+
+    def fake_run_prompt2scene_stage(args):
+        captured["prompt2scene_output_root"] = args.prompt2scene_output_root
+        captured["prompt2scene_prompt"] = args.prompt2scene_prompt
+        captured["prompt2scene_existing_gym_project"] = (
+            args.prompt2scene_existing_gym_project
+        )
+        return gym_config
+
+    monkeypatch.setattr(
+        project_resolution,
+        "run_prompt2scene_stage",
+        fake_run_prompt2scene_stage,
+    )
+
+    resolution = project_resolution.resolve_gym_project(
+        SimpleNamespace(
+            use_image2scene=False,
+            use_prompt2scene=False,
+            use_existing_gym_project=True,
+            base_task_name=None,
+            base_history_index=None,
+            gym_project=str(input_path),
+            prompt2scene_prompt="move the can right",
+        )
+    )
+
+    assert resolution.mode == "prompt2scene"
+    assert resolution.path == gym_config
+    assert Path(captured["prompt2scene_output_root"]) == output_root.resolve()
+    assert captured["prompt2scene_prompt"] == "move the can right"
+    assert Path(captured["prompt2scene_existing_gym_project"]) == input_path.resolve()
 
 
 @pytest.mark.parametrize(

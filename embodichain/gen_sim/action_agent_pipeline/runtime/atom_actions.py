@@ -191,6 +191,7 @@ class _ExecutedAtomicAction:
 class _CoordinatedGraspPair:
     left_object_to_eef: torch.Tensor
     right_object_to_eef: torch.Tensor
+    priority: int
     score: float
 
 
@@ -1504,7 +1505,7 @@ def _default_coordinated_object_to_eef(
             "No IK-feasible CoordinatedPickment grasp candidate found; "
             "falling back to the best heuristic candidate."
         )
-    fallback = min(candidates, key=lambda pair: pair.score)
+    fallback = min(candidates, key=lambda pair: (pair.priority, pair.score))
     return fallback.left_object_to_eef, fallback.right_object_to_eef
 
 
@@ -1520,7 +1521,8 @@ def _coordinated_grasp_pair_candidates(
     center = (mins + maxs) * 0.5
     extents = maxs - mins
     candidates: list[_CoordinatedGraspPair] = []
-    for axis_index in _coordinated_top_down_axis_indices(extents):
+    top_down_axis_indices = _coordinated_top_down_axis_indices(extents)
+    for priority, axis_index in enumerate(top_down_axis_indices):
         candidates.extend(
             _coordinated_top_down_grasp_candidates(
                 mins=mins,
@@ -1532,6 +1534,7 @@ def _coordinated_grasp_pair_candidates(
                 object_initial_pose=object_initial_pose,
                 env=env,
                 device=device,
+                priority=priority,
             )
         )
     side_axis_index = _coordinated_side_axis_index(extents)
@@ -1567,10 +1570,11 @@ def _coordinated_grasp_pair_candidates(
             object_initial_pose=object_initial_pose,
             env=env,
             device=device,
+            priority=len(top_down_axis_indices) + 10,
             score_bias=10.0,
         )
     )
-    return sorted(candidates, key=lambda pair: pair.score)
+    return sorted(candidates, key=lambda pair: (pair.priority, pair.score))
 
 
 def _coordinated_top_down_axis_indices(extents: torch.Tensor) -> list[int]:
@@ -1589,6 +1593,7 @@ def _coordinated_top_down_grasp_candidates(
     object_initial_pose: torch.Tensor,
     env,
     device,
+    priority: int,
 ) -> list[_CoordinatedGraspPair]:
     margin = min(max(float(extents[axis_index]) * 0.08, 0.015), 0.06)
     first_local = center.clone()
@@ -1645,6 +1650,7 @@ def _coordinated_top_down_grasp_candidates(
             object_initial_pose=object_initial_pose,
             env=env,
             device=device,
+            priority=priority,
             score_bias=0.0,
         )
     ]
@@ -1690,6 +1696,7 @@ def _make_coordinated_grasp_pair(
     object_initial_pose: torch.Tensor,
     env,
     device,
+    priority: int,
     score_bias: float,
 ) -> _CoordinatedGraspPair:
     left_world = object_initial_pose @ left_object_to_eef
@@ -1703,6 +1710,7 @@ def _make_coordinated_grasp_pair(
     return _CoordinatedGraspPair(
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
+        priority=priority,
         score=score + float(score_bias),
     )
 
