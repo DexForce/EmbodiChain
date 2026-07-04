@@ -29,6 +29,7 @@ from embodichain.lab.sim.planners import (
     ToppraPlannerCfg,
     NeuralPlanner,
     NeuralPlannerCfg,
+    NeuralPlanOptions,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 from embodichain.utils import logger, configclass
@@ -155,6 +156,13 @@ class MotionGenerator:
         Returns:
             PlanResult containing the planned trajectory details.
         """
+        if options.is_interpolate and isinstance(self.planner, NeuralPlanner):
+            logger.log_warning(
+                "is_interpolate=True is not supported with NeuralPlanner; "
+                "disabling interpolation."
+            )
+            options.is_interpolate = False
+
         if options.is_interpolate:
             move_type = target_states[0].move_type
             if move_type == MoveType.EEF_MOVE:
@@ -223,6 +231,17 @@ class MotionGenerator:
                 options.plan_opts = self.planner.default_plan_options()
             else:
                 options.plan_opts = PlanOptions()
+
+        # Propagate MotionGenOptions fields into NeuralPlanOptions so that callers
+        # can set control_part/start_qpos at the MotionGenerator level.
+        if isinstance(self.planner, NeuralPlanner) and isinstance(
+            options.plan_opts, NeuralPlanOptions
+        ):
+            if options.plan_opts.control_part is None:
+                options.plan_opts.control_part = options.control_part
+            if options.plan_opts.start_qpos is None:
+                options.plan_opts.start_qpos = options.start_qpos
+
         return self.planner.plan(
             target_states=target_plan_states, options=options.plan_opts
         )

@@ -175,8 +175,12 @@ class BasePlanner(ABC):
             PlanResult: An env-batched object containing:
                 - success: torch.Tensor ``(B,)`` bool, per-env success
                 - positions: torch.Tensor ``(B, N, DOF)``, joint positions
-                - velocities: torch.Tensor ``(B, N, DOF)``, joint velocities
-                - accelerations: torch.Tensor ``(B, N, DOF)``, joint accelerations
+                - velocities: torch.Tensor ``(B, N, DOF)`` or ``None``, joint
+                  velocities. Populated by planners that compute dynamics; may be
+                  ``None`` for planners that do not.
+                - accelerations: torch.Tensor ``(B, N, DOF)`` or ``None``, joint
+                  accelerations. Populated by planners that compute dynamics; may
+                  be ``None`` for planners that do not.
                 - dt: torch.Tensor ``(B, N)``, per-point time deltas
                 - duration: torch.Tensor ``(B,)``, total trajectory duration per env
         """

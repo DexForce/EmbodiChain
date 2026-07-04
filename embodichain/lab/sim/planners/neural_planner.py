@@ -40,6 +40,30 @@ __all__ = [
 ]
 
 
+def _safe_torch_load(path: Path, map_location: torch.device) -> dict:
+    """Load a PyTorch checkpoint with safe deserialization when possible.
+
+    Attempts ``weights_only=True`` first. If that fails (e.g. on older PyTorch
+    versions or checkpoints with unsupported pickle objects), falls back to
+    ``weights_only=False`` and logs a warning.
+
+    Args:
+        path: Path to the checkpoint file.
+        map_location: Device to map tensors to.
+
+    Returns:
+        The loaded checkpoint dictionary.
+    """
+    try:
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except (TypeError, RuntimeError, AttributeError) as exc:
+        logger.log_warning(
+            f"Failed to load checkpoint with weights_only=True from {path}: {exc}. "
+            "Falling back to weights_only=False."
+        )
+        return torch.load(path, map_location=map_location, weights_only=False)
+
+
 def _layer_init(layer: nn.Linear, std: float = np.sqrt(2), bias_const: float = 0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -204,6 +228,23 @@ class NeuralPlanOptions(PlanOptions):
 
 
 class NeuralPlanner(BasePlanner):
+    r"""Neural motion planner based on an APG waypoint transformer policy.
+
+    The planner loads a checkpoint containing a waypoint-conditioned actor and
+    rolls it out in closed loop to drive the arm toward a sequence of
+    end-effector waypoints. Velocities and accelerations in the returned
+    :class:`PlanResult` are estimated via finite differences over the generated
+    position trajectory.
+
+    Args:
+        cfg: Configuration for the neural planner.
+
+    Raises:
+        ValueError: If ``checkpoint_path`` is missing or invalid.
+        FileNotFoundError: If the checkpoint file does not exist.
+        KeyError: If the checkpoint is missing required keys.
+    """
+
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)
 
@@ -221,7 +262,7 @@ class NeuralPlanner(BasePlanner):
                 f"Checkpoint not found: {checkpoint_path}", FileNotFoundError
             )
 
-        ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        ckpt = _safe_torch_load(checkpoint_path, map_location=self.device)
         if "agent" not in ckpt:
             raise KeyError(
                 f"Checkpoint at '{checkpoint_path}' is missing 'agent'. "
@@ -308,6 +349,30 @@ class NeuralPlanner(BasePlanner):
         target_states: list[PlanState],
         options: NeuralPlanOptions = NeuralPlanOptions(),
     ) -> PlanResult:
+        r"""Execute neural trajectory planning.
+
+        Runs the waypoint transformer policy in closed loop for each environment
+        until all waypoints are reached or ``max_steps`` is exhausted.
+
+        Args:
+            target_states: List of :class:`PlanState` waypoints. Each entry must
+                use :attr:`MoveType.EEF_MOVE` and carry an ``xpos`` tensor of
+                shape ``(B, 4, 4)``.
+            options: :class:`NeuralPlanOptions` with ``control_part``,
+                ``start_qpos``, and ``max_steps`` overrides.
+
+        Returns:
+            :class:`PlanResult` containing the planned trajectory. All tensor
+            fields are env-batched with leading dim ``B``: ``success`` ``(B,)``,
+            ``positions``/``velocities``/``accelerations`` ``(B, N, DOF)``,
+            ``xpos_list`` ``(B, N, 4, 4)``, ``dt`` ``(B, N)``, and
+            ``duration`` ``(B,)``. Velocities and accelerations are computed
+            via finite differences and are therefore approximate.
+
+        Raises:
+            ValueError: If ``control_part`` is not provided, if a target state
+                is not ``EEF_MOVE``, or if ``start_qpos`` has too few joints.
+        """
         if not target_states:
             return PlanResult(
                 success=torch.zeros(0, dtype=torch.bool, device=self.device),
@@ -388,10 +453,15 @@ class NeuralPlanner(BasePlanner):
         dt = dt.unsqueeze(0).expand(b, -1)
         positions_t = positions_t.permute(1, 0, 2)
         xpos_t = xpos_t.permute(1, 0, 2, 3)
+        velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
+            positions_t, dt
+        )
         success = active_idx >= episode_k
         return PlanResult(
             success=success,
             positions=positions_t,
+            velocities=velocities_t,
+            accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
             duration=torch.full(
@@ -520,3 +590,64 @@ class NeuralPlanner(BasePlanner):
         )
         reached = (pos_dist < self._pos_eps) & rot_ok
         return reached
+
+    @staticmethod
+    def _compute_vel_acc_via_finite_diff(
+        positions: torch.Tensor, dt: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        r"""Estimate velocities and accelerations via finite differences.
+
+        Uses a second-order central difference for interior points and one-sided
+        differences at the boundaries. The estimates are approximate because the
+        neural policy does not produce velocities or accelerations directly.
+
+        Args:
+            positions: Joint positions of shape ``(B, N, DOF)``.
+            dt: Per-point time deltas of shape ``(B, N)``. ``dt[:, t]`` is the
+                interval used to reach point ``t`` from point ``t - 1``.
+
+        Returns:
+            Tuple of ``(velocities, accelerations)``, each of shape
+            ``(B, N, DOF)``.
+        """
+        b, n, dof = positions.shape
+        if n == 1:
+            zeros = torch.zeros_like(positions)
+            return zeros, zeros
+
+        # Forward difference for the first point: (p[1] - p[0]) / dt[1]
+        v_first = (positions[:, 1] - positions[:, 0]) / dt[:, 1].unsqueeze(-1)
+        # Backward difference for the last point: (p[N-1] - p[N-2]) / dt[N-1]
+        v_last = (positions[:, -1] - positions[:, -2]) / dt[:, -1].unsqueeze(-1)
+
+        if n == 2:
+            velocities = torch.stack([v_first, v_last], dim=1)
+            return velocities, torch.zeros_like(velocities)
+
+        # Central difference for interior points:
+        # (p[i+1] - p[i-1]) / (dt[i] + dt[i+1])
+        p_next = positions[:, 2:]
+        p_prev = positions[:, :-2]
+        dt_sum = (dt[:, 1:-1] + dt[:, 2:]).unsqueeze(-1)
+        v_interior = (p_next - p_prev) / dt_sum.clamp_min(1e-12)
+        velocities = torch.cat(
+            [v_first.unsqueeze(1), v_interior, v_last.unsqueeze(1)], dim=1
+        )
+
+        # Acceleration via second-order finite differences.
+        # Boundary points use a one-sided stencil; interior points use
+        # (p[i+1] - 2*p[i] + p[i-1]) / dt[i]^2
+        a_first = (positions[:, 2] - 2.0 * positions[:, 1] + positions[:, 0]) / (
+            dt[:, 1].unsqueeze(-1) ** 2
+        )
+        a_last = (positions[:, -1] - 2.0 * positions[:, -2] + positions[:, -3]) / (
+            dt[:, -1].unsqueeze(-1) ** 2
+        )
+        a_interior = (
+            positions[:, 2:] - 2.0 * positions[:, 1:-1] + positions[:, :-2]
+        ) / (dt[:, 1:-1].unsqueeze(-1) ** 2)
+        accelerations = torch.cat(
+            [a_first.unsqueeze(1), a_interior, a_last.unsqueeze(1)], dim=1
+        )
+
+        return velocities, accelerations
