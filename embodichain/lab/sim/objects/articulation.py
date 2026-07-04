@@ -153,7 +153,7 @@ class ArticulationData:
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
         self._qpos_limits = torch.as_tensor(
-            np.array([entity.get_joint_limits() for entity in self.entities]),
+            np.array([entity.get_joint_position_limits() for entity in self.entities]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -1126,13 +1126,13 @@ class Articulation(BatchEntity):
         )
 
         for i, env_idx in enumerate(local_env_ids.detach().cpu().tolist()):
-            result = self._entities[env_idx].set_joint_limits(
+            result = self._entities[env_idx].set_joint_position_limits(
                 qpos_limits[i].detach().cpu().numpy(),
                 joint_ids_np,
             )
             if result == -1:
                 logger.log_error(
-                    f"set_joint_limits failed for env {env_idx} and joint_ids {joint_ids_np.tolist()}."
+                    f"set_joint_position_limits failed for env {env_idx} and joint_ids {joint_ids_np.tolist()}."
                 )
             self.body_data.qpos_limits[env_idx, local_joint_ids, :] = qpos_limits[i]
 

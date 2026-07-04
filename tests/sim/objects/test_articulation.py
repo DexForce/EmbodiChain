@@ -661,11 +661,11 @@ class BaseArticulationTest:
 
         self.art._entities[0] = _EntityMethodOverride(
             original_entity,
-            "set_joint_limits",
+            "set_joint_position_limits",
             _fail_set_joint_limits,
         )
         try:
-            with pytest.raises(RuntimeError, match="set_joint_limits failed"):
+            with pytest.raises(RuntimeError, match="set_joint_position_limits failed"):
                 self.art.set_qpos_limits(
                     qpos_limits, joint_ids=joint_ids, env_ids=env_ids
                 )
