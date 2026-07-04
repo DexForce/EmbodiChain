@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.objects import Robot
 
 
 __all__ = [
@@ -38,6 +40,10 @@ __all__ = [
     "format_tensor",
     "maybe_init_gpu_physics",
     "DemoRecording",
+    "maybe_open_window",
+    "maybe_wait_for_user",
+    "maybe_pause_for_inspection",
+    "replay_trajectory",
 ]
 
 
@@ -248,3 +254,80 @@ class DemoRecording:
         if self.sim.is_window_recording():
             self.sim.stop_window_record()
         self.sim.wait_window_record_saves()
+
+
+def maybe_open_window(sim: SimulationManager, args: argparse.Namespace) -> None:
+    """Open the viewer window unless running headless.
+
+    Args:
+        sim: The simulation manager.
+        args: Parsed arguments containing ``headless``.
+    """
+    if not args.headless:
+        sim.open_window()
+
+
+def maybe_wait_for_user(args: argparse.Namespace, prompt: str) -> None:
+    """Wait for user input unless auto_play is enabled.
+
+    Args:
+        args: Parsed arguments containing ``auto_play``.
+        prompt: Message to display when waiting.
+    """
+    if not args.auto_play:
+        input(prompt)
+
+
+def maybe_pause_for_inspection(args: argparse.Namespace) -> None:
+    """Pause at the end of a demo for visual inspection.
+
+    Args:
+        args: Parsed arguments containing ``auto_play``.
+    """
+    maybe_wait_for_user(args, "Demo finished. Press Enter to exit...")
+
+
+def replay_trajectory(
+    sim: SimulationManager,
+    robot: Robot,
+    traj: torch.Tensor,
+    *,
+    post_steps: int = 60,
+    step_size: int = 4,
+    sleep: float = 1e-2,
+    arm_name: str | None = None,
+) -> None:
+    """Replay a joint-space trajectory on a robot.
+
+    ``traj`` may be either a 1-D tensor of shape ``(num_joints,)``, a 2-D
+    tensor of shape ``(num_steps, num_joints)`` or a 3-D tensor of shape
+    ``(batch, num_steps, num_joints)``. For 1-D input the single
+    configuration is held for ``post_steps``. For 2-D/3-D input each step is
+    applied sequentially and the final configuration is held.
+
+    Args:
+        sim: The simulation manager.
+        robot: The robot instance.
+        traj: Joint position trajectory tensor.
+        post_steps: Number of steps to hold the final configuration.
+        step_size: Number of physics steps per ``sim.update()`` call.
+        sleep: Sleep duration between steps (seconds).
+        arm_name: Optional arm name passed to ``robot.set_qpos``.
+    """
+    if traj.dim() == 1:
+        traj = traj.unsqueeze(0).unsqueeze(0)
+    elif traj.dim() == 2:
+        traj = traj.unsqueeze(0)
+
+    joint_ids = robot.get_joint_ids(arm_name) if arm_name is not None else None
+
+    for i in range(traj.shape[1]):
+        robot.set_qpos(qpos=traj[:, i, :], joint_ids=joint_ids)
+        sim.update(step=step_size)
+        time.sleep(sleep)
+
+    final_qpos = traj[:, -1, :]
+    for _ in range(post_steps):
+        robot.set_qpos(qpos=final_qpos, joint_ids=joint_ids)
+        sim.update(step=2)
+        time.sleep(sleep)

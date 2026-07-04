@@ -22,12 +22,15 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-from unittest.mock import Mock
+from unittest.mock import Mock, call, patch
 
 from embodichain.lab.sim.utility.demo_utils import (
     DemoRecording,
     add_demo_args,
     format_tensor,
+    maybe_open_window,
+    maybe_wait_for_user,
+    replay_trajectory,
     setup_print_options,
     shutdown_sim,
 )
@@ -147,3 +150,47 @@ def test_demo_recording_warns_and_skips_on_start_failure():
         with DemoRecording(sim, args, prefix="demo"):
             pass
     sim.stop_window_record.assert_not_called()
+
+
+def test_maybe_open_window_opens_when_not_headless():
+    sim = Mock(spec=["open_window"])
+    args = SimpleNamespace(headless=False)
+    maybe_open_window(sim, args)
+    sim.open_window.assert_called_once()
+
+
+def test_maybe_open_window_does_nothing_when_headless():
+    sim = Mock(spec=["open_window"])
+    args = SimpleNamespace(headless=True)
+    maybe_open_window(sim, args)
+    sim.open_window.assert_not_called()
+
+
+def test_maybe_wait_for_user_prompts_when_not_auto_play():
+    args = SimpleNamespace(auto_play=False)
+    with patch("builtins.input", return_value="") as mock_input:
+        maybe_wait_for_user(args, "Press enter")
+    mock_input.assert_called_once_with("Press enter")
+
+
+def test_maybe_wait_for_user_skips_when_auto_play():
+    args = SimpleNamespace(auto_play=True)
+    with patch("builtins.input") as mock_input:
+        maybe_wait_for_user(args, "Press enter")
+    mock_input.assert_not_called()
+
+
+def test_replay_trajectory_sets_qpos_and_updates_sim():
+    robot = Mock(spec=["set_qpos", "get_joint_ids"])
+    robot.get_joint_ids.return_value = None
+    sim = Mock(spec=["update"])
+    # Shape: (batch=1, num_steps=2, num_joints=3)
+    traj = torch.tensor(
+        [
+            [[0.0, 0.1, 0.2], [0.3, 0.4, 0.5]],
+        ]
+    )
+    replay_trajectory(sim, robot, traj, post_steps=1, step_size=4, sleep=0.0)
+    assert robot.set_qpos.call_count == 3  # 2 traj + 1 post
+    assert sim.update.call_count == 3
+    sim.update.assert_has_calls([call(step=4), call(step=4), call(step=2)])
