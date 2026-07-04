@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -85,6 +86,7 @@ class BlenderRenderingManager:
         timeout_seconds: int,
     ) -> None:
         script = cls._front_oblique_script(glb_paths, output_path)
+        executable = cls._resolve_bpy_executable()
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".py",
@@ -95,7 +97,7 @@ class BlenderRenderingManager:
             file.write(script)
         try:
             subprocess.run(
-                ["blender", "--background", "--python", str(script_path)],
+                [executable, str(script_path)],
                 check=True,
                 timeout=timeout_seconds,
                 stdout=subprocess.PIPE,
@@ -111,6 +113,40 @@ class BlenderRenderingManager:
             script_path.unlink(missing_ok=True)
         if not output_path.is_file():
             raise FileNotFoundError(f"Blender render was not written: {output_path}")
+
+    @classmethod
+    def _resolve_bpy_executable(cls) -> str:
+        conda_prefix = os.environ.get("CONDA_PREFIX")
+        if not conda_prefix:
+            raise FileNotFoundError(
+                "CONDA_PREFIX is not set; Blender rendering requires the conda "
+                "environment that provides bpy."
+            )
+
+        conda_python = Path(conda_prefix) / "bin" / "python"
+        if cls._python_can_import_bpy(conda_python):
+            return str(conda_python)
+
+        raise FileNotFoundError(
+            "No usable bpy runtime was found in the conda environment. "
+            "Rendering aborted."
+        )
+
+    @staticmethod
+    def _python_can_import_bpy(python_executable: Path) -> bool:
+        if not python_executable.is_file():
+            return False
+        try:
+            completed = subprocess.run(
+                [str(python_executable), "-c", "import bpy"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except Exception:
+            return False
+        return completed.returncode == 0
 
     @staticmethod
     def _front_oblique_script(glb_paths: list[Path], output_path: Path) -> str:
