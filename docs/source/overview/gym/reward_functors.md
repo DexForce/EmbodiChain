@@ -5,6 +5,13 @@
 
 This page lists all available reward functors that can be used with the Reward Manager. Reward functors are configured using {class}`~cfg.RewardCfg` and return scalar reward tensors that are weighted and summed to form the total environment reward.
 
+## Quick Reference
+
+- Use this page when composing scalar reward terms for RL tasks.
+- Reward functors are configured with {class}`~cfg.RewardCfg`.
+- Each reward functor returns a tensor of shape ``(num_envs,)`` before weighting.
+- Final rewards are the weighted sum of all configured reward terms.
+
 ````{tip}
 **Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new reward functor with the correct signature (`env, obs, action, info, ...`), module placement in `rewards.py`, and `__all__` export. Use **`/add-test`** to generate mock-based tests.
 ````
