@@ -70,6 +70,25 @@ def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
     return VIEWER_WIDTH, VIEWER_HEIGHT
 
 
+def should_open_tutorial_window(args: argparse.Namespace) -> bool:
+    """Return whether an interactive viewer window should be opened."""
+    return not (
+        getattr(args, "headless", False)
+        or getattr(args, "diagnose_plan", False)
+        or getattr(args, "headless_play", False)
+    )
+
+
+def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
+    """Return whether the tutorial should pause for terminal input."""
+    return not (
+        getattr(args, "auto_play", False)
+        or getattr(args, "headless", False)
+        or getattr(args, "diagnose_plan", False)
+        or getattr(args, "headless_play", False)
+    )
+
+
 def start_auto_play_recording(
     sim: SimulationManager,
     args: argparse.Namespace,
@@ -215,6 +234,8 @@ __all__ = [
     "create_ur5_gripper_robot_cfg",
     "make_ur5_solver_cfg",
     "get_tutorial_window_size",
+    "should_open_tutorial_window",
+    "should_wait_for_tutorial_input",
     "start_auto_play_recording",
     "stop_auto_play_recording",
     "draw_axis_marker",

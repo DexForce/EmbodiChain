@@ -124,7 +124,7 @@ class CoordinatedPickmentTarget:
     """Object-centric target for picking and moving one object with two hands."""
 
     object_target_pose: torch.Tensor
-    """Target pose for the shared object, shape (4, 4) or (n_envs, 4, 4)."""
+    """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
 
     object_semantics: ObjectSemantics
     """Semantic description of the shared object."""
@@ -137,6 +137,43 @@ class CoordinatedPickmentTarget:
 
     object_initial_pose: torch.Tensor | None = None
     """Optional initial object pose. Defaults to ``object_semantics.entity`` pose."""
+
+
+@dataclass(frozen=True)
+class CoordinatedPlacementTarget:
+    """Object-centric target for dual-arm coordinated placement."""
+
+    placing_object_target_pose: torch.Tensor
+    """Target pose for the object released by the placing arm."""
+
+    support_object_target_pose: torch.Tensor
+    """Target pose for the object held by the support arm."""
+
+    placing_held_object: HeldObjectState
+    """Held-object state for the placing arm."""
+
+    support_held_object: HeldObjectState
+    """Held-object state for the support arm."""
+
+    placing_height_offset: float | None = None
+    """World-Z offset above the placing object target pose."""
+
+    support_height_offset: float | None = None
+    """World-Z offset above the support object target pose."""
+
+    release: bool | None = None
+    """Whether the placing hand releases. ``None`` uses the action config."""
+
+
+Target = (
+    EndEffectorPoseTarget
+    | JointPositionTarget
+    | NamedJointPositionTarget
+    | GraspTarget
+    | HeldObjectPoseTarget
+    | CoordinatedPickmentTarget
+    | CoordinatedPlacementTarget
+)
 
 
 # =============================================================================
@@ -166,57 +203,16 @@ class CoordinatedHeldObjectState:
     """Semantic object currently held by the two grippers."""
 
     left_object_to_eef: torch.Tensor
-    """Transform from object frame to left end-effector frame, shape [n_envs, 4, 4]."""
+    """Transform from object frame to left end-effector frame, shape ``[n_envs, 4, 4]``."""
 
     right_object_to_eef: torch.Tensor
-    """Transform from object frame to right end-effector frame, shape [n_envs, 4, 4]."""
+    """Transform from object frame to right end-effector frame, shape ``[n_envs, 4, 4]``."""
 
     left_grasp_xpos: torch.Tensor
-    """Left end-effector grasp pose for the shared object, shape [n_envs, 4, 4]."""
+    """Left end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
 
     right_grasp_xpos: torch.Tensor
-    """Right end-effector grasp pose for the shared object, shape [n_envs, 4, 4]."""
-
-
-@dataclass(frozen=True)
-class CoordinatedPlacementTarget:
-    """Object-centric target for dual-arm coordinated placement.
-
-    The placing arm moves its held object to the upper target and releases it.
-    The support arm moves its held object to the lower target and keeps holding.
-    """
-
-    placing_object_target_pose: torch.Tensor
-    """Target pose for the object released by the placing arm."""
-
-    support_object_target_pose: torch.Tensor
-    """Target pose for the object held by the support arm."""
-
-    placing_held_object: HeldObjectState
-    """Held-object state for the placing arm."""
-
-    support_held_object: HeldObjectState
-    """Held-object state for the support arm."""
-
-    placing_height_offset: float | None = None
-    """World-Z offset above the placing object target pose."""
-
-    support_height_offset: float | None = None
-    """World-Z offset above the support object target pose."""
-
-    release: bool | None = None
-    """Whether the placing hand releases. ``None`` uses action config."""
-
-
-Target = (
-    EndEffectorPoseTarget
-    | JointPositionTarget
-    | NamedJointPositionTarget
-    | GraspTarget
-    | HeldObjectPoseTarget
-    | CoordinatedPickmentTarget
-    | CoordinatedPlacementTarget
-)
+    """Right end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
 
 
 @dataclass

@@ -74,6 +74,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_tutorial_window_size,
     make_ur5_solver_cfg,
+    should_open_tutorial_window,
+    should_wait_for_tutorial_input,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
@@ -972,11 +974,11 @@ def run_coordinated_placement_demo(
     full_joint_ids = list(range(robot.dof))
     state = WorldState(last_qpos=robot.get_qpos().clone())
 
-    wait_for_user = not args.auto_play and not args.headless_play
-    if not args.diagnose_plan and not args.headless_play and not args.headless:
+    wait_for_user = should_wait_for_tutorial_input(args)
+    if should_open_tutorial_window(args):
         sim.open_window()
-        if wait_for_user:
-            input("Inspect the scene, then press Enter to plan left pick-up...")
+    if wait_for_user and not args.diagnose_plan:
+        input("Inspect the scene, then press Enter to plan left pick-up...")
 
     bread_grasp_pose = build_flat_object_grasp_pose(
         bread_pose,

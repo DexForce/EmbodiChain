@@ -5,6 +5,10 @@
 
 Atomic actions are the building blocks for automated robot motion generation. Each action encapsulates a complete, self-contained motion primitive — such as picking up an object or moving to a pose — that can be chained together to form complex manipulation workflows.
 
+```{note}
+Atomic actions currently support gripper-based manipulation only. Dexterous-hand manipulation is not supported yet.
+```
+
 ## Design Overview
 
 The module is organized into three layers:
@@ -16,7 +20,8 @@ AtomicActionEngine          ← orchestrates a sequence of (name, typed_target) 
     │       │
     │       └── MotionGenerator   ← low-level trajectory planner (IK + trajectory optimization)
     │
-    └── WorldState           ← threaded action-to-action (last_qpos + held_object)
+    └── WorldState           ← threaded action-to-action
+                               (last_qpos + held_object/coordinated_held_object)
 ```
 
 Each action receives a typed target and a `WorldState`, runs its planning pipeline, and
@@ -106,8 +111,9 @@ action's `TargetType` before calling `execute`:
 | `CoordinatedPickmentTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget(...)` | Two held-object states plus object-centric placing/support target poses | `CoordinatedPlacement` |
 
-`WorldState` is threaded between actions and carries the robot's `last_qpos` plus an optional
-`held_object: HeldObjectState`. The built-in actions update it as follows:
+`WorldState` is threaded between actions and carries the robot's `last_qpos` plus optional
+`held_object: HeldObjectState` and `coordinated_held_object: CoordinatedHeldObjectState`.
+The built-in actions update it as follows:
 
 | Action | Effect on `held_object` |
 |---|---|
@@ -220,6 +226,10 @@ is_success, traj, final_state = engine.run(
 
 You can add any motion primitive by subclassing `AtomicAction`, composing a
 `TrajectoryBuilder` for the shared planning math, and registering an instance with the engine.
+Built-in primitives live one action per module under
+`embodichain/lab/sim/atomic_actions/primitives/`, while
+`embodichain.lab.sim.atomic_actions` remains the public import surface and
+`embodichain.lab.sim.atomic_actions.actions` stays as a compatibility re-export.
 
 ### Step 1 — Define the config
 

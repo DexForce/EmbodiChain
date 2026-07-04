@@ -24,7 +24,8 @@ Key Features
 - **Extensible registry** — custom action *classes* can be registered globally with
   ``register_action``; action *instances* are registered per-engine under a name.
 - **Engine orchestration** — ``AtomicActionEngine.run(steps, state)`` sequences named
-  ``(name, typed_target)`` steps, threads a ``WorldState`` (``last_qpos`` + ``held_object``)
+  ``(name, typed_target)`` steps, threads a ``WorldState`` (``last_qpos`` +
+  ``held_object`` / ``coordinated_held_object``)
   from one action into the next, and returns a single concatenated full-DOF trajectory
   ready to replay in the simulator.
 
@@ -57,8 +58,15 @@ keyboard prompts, and combine it with ``--headless --device cpu`` to record an M
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/move_held_object.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/place.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/press.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/coordinated_pickment.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/coordinated_placement.py --headless --auto_play --device cpu
+
+The concrete implementations are organized one primitive per module under
+``embodichain/lab/sim/atomic_actions/primitives``. Public imports from
+``embodichain.lab.sim.atomic_actions`` remain the recommended API, and
+``embodichain.lab.sim.atomic_actions.actions`` stays as a compatibility
+re-export surface.
 
 Typical Usage
 -------------
