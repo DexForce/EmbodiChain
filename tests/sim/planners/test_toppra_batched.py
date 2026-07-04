@@ -86,6 +86,21 @@ class TestToppraWorker:
         assert out["n"] == 2
         assert out["duration"] == 0.0
 
+    def test_solve_one_env_duplicate_plateau(self):
+        # Long plateaus of identical waypoints (e.g. from interpolating a
+        # segment where start_qpos equals the first target) must not make
+        # TOPPRA's controllable-set computation fail.
+        wp = np.array([[0.3] * 6] * 12 + [[0.5] * 6] * 12)
+        out = _toppra_solve_one_env(
+            waypoints=wp,
+            vel_constraint=1.0,
+            acc_constraint=2.0,
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=20,
+        )
+        assert out["success"] is True
+        assert out["positions"].shape == (20, 6)
+
 
 class TestToppraCfgFields:
     def test_cfg_defaults(self):

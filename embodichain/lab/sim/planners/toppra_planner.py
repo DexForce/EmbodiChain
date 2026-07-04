@@ -82,6 +82,19 @@ def _toppra_solve_one_env(
     if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
         return _empty_failure(dofs)
 
+    # Remove consecutive duplicate waypoints. Long plateaus of identical points
+    # (e.g. when start_qpos equals the first target and joint-space interpolation
+    # is enabled) can make TOPPRA's controllable-set computation numerically
+    # ill-conditioned and fail with "Instance is not controllable".
+    dup_tol = 1e-6
+    keep = [0]
+    for i in range(1, len(waypoints)):
+        if np.max(np.abs(waypoints[i] - waypoints[keep[-1]])) >= dup_tol:
+            keep.append(i)
+    if keep[-1] != len(waypoints) - 1:
+        keep.append(len(waypoints) - 1)
+    waypoints = waypoints[keep]
+
     # Trivial same-waypoint shortcut
     if len(waypoints) == 2 and np.sum(np.abs(waypoints[1] - waypoints[0])) < 1e-3:
         pos = np.stack([waypoints[0], waypoints[1]])
