@@ -28,6 +28,19 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    format_tensor,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    maybe_pause_for_inspection,
+    maybe_wait_for_user,
+    replay_trajectory,
+    setup_print_options,
+    shutdown_sim,
+)
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -206,6 +219,19 @@ def create_ur5_gripper_robot_cfg(
 
 
 __all__ = [
+    # Generic demo helpers re-exported from embodichain.lab.sim.utility.demo_utils.
+    "DemoRecording",
+    "add_demo_args",
+    "create_default_sim",
+    "format_tensor",
+    "maybe_init_gpu_physics",
+    "maybe_open_window",
+    "maybe_pause_for_inspection",
+    "maybe_wait_for_user",
+    "replay_trajectory",
+    "setup_print_options",
+    "shutdown_sim",
+    # UR5 + gripper specific helpers.
     "DEFAULT_AUTO_PLAY_LOOK_AT",
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
