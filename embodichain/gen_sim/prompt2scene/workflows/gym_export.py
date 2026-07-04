@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-import math
 import shutil
 import time
 from collections.abc import Sequence
@@ -101,22 +100,6 @@ def _resolve_table_fit_manifest_path(
     )
 
 
-def _matrix_to_euler_xyz_deg(matrix: list[list[float]]) -> list[float]:
-    """Decompose a 3×3 or 4×4 rotation matrix into XYZ Euler angles (degrees)."""
-    m = np.asarray(matrix, dtype=np.float64)
-    r = m[:3, :3]
-    sy = math.sqrt(float(r[0, 0]) ** 2 + float(r[1, 0]) ** 2)
-    if sy > 1e-6:
-        x = math.atan2(float(r[2, 1]), float(r[2, 2]))
-        y = math.atan2(-float(r[2, 0]), sy)
-        z = math.atan2(float(r[1, 0]), float(r[0, 0]))
-    else:
-        x = math.atan2(-float(r[1, 2]), float(r[1, 1]))
-        y = math.atan2(-float(r[2, 0]), sy)
-        z = 0.0
-    return [math.degrees(x), math.degrees(y), math.degrees(z)]
-
-
 def _glb_to_sim_rotation() -> np.ndarray:
     """Return the loader basis conversion from GLB Y-up to sim Z-up."""
     return np.array(
@@ -126,110 +109,6 @@ def _glb_to_sim_rotation() -> np.ndarray:
             [0.0, 1.0, 0.0],
         ],
         dtype=np.float64,
-    )
-
-
-def _glb_rotation_to_sim(rotation_matrix: list[list[float]]) -> list[list[float]]:
-    """Convert a GLB-space local rotation into simulation-space rotation."""
-    rot = np.asarray(rotation_matrix, dtype=np.float64)
-    if rot.shape == (4, 4):
-        rot = rot[:3, :3]
-    basis = _glb_to_sim_rotation()
-    return (basis @ rot @ basis.T).tolist()
-
-
-def _glb_scale_to_sim(scale: Sequence[float]) -> list[float]:
-    """Convert GLB-axis scale components to sim-axis body_scale components."""
-    values = [float(v) for v in scale]
-    if len(values) != 3:
-        raise ValueError("scale must have three components")
-    return [values[0], values[2], values[1]]
-
-
-def _decompose_affine_matrix(matrix_value: Any) -> tuple[list[float], list[float], list[float]]:
-    matrix = np.asarray(matrix_value, dtype=np.float64)
-    if matrix.shape != (4, 4):
-        raise ValueError("Expected a 4x4 affine matrix.")
-    linear = matrix[:3, :3]
-    scale = np.linalg.norm(linear, axis=0)
-    rotation = np.eye(3, dtype=np.float64)
-    for index in range(3):
-        if scale[index] > 1.0e-12:
-            rotation[:, index] = linear[:, index] / scale[index]
-    return (
-        matrix[:3, 3].tolist(),
-        _matrix_to_euler_xyz_deg(rotation.tolist()),
-        scale.tolist(),
-    )
-
-
-def _glb_max_z(glb_path: Path) -> float:
-    """Maximum height (Y in GLB, Z in simulation) of a mesh."""
-    import trimesh
-
-    scene = trimesh.load(glb_path, force="scene")
-    if isinstance(scene, trimesh.Trimesh):
-        mesh = scene
-    else:
-        dumped = scene.dump(concatenate=True)
-        mesh = (
-            dumped
-            if isinstance(dumped, trimesh.Trimesh)
-            else trimesh.util.concatenate(
-                [m for m in dumped if isinstance(m, trimesh.Trimesh)]
-            )
-        )
-    return float(np.asarray(mesh.bounds, dtype=np.float64)[1, 1])  # max Y
-
-
-def _rotated_aabb_offsets(
-    glb_path: Path,
-    rotation_matrix: list[list[float]] | None,
-    scale: float | Sequence[float] = 1.0,
-) -> tuple[float, float, float]:
-    """Compute the AABB shift caused by rotation + scale alone.
-
-    Loads the simready GLB, applies *rotation_matrix* and *scale_factor*
-    around the local origin (the AABB bottom-centre), and returns the XY
-    centre and minimum Z of the resulting AABB.  These offsets are
-    subtracted from the fitted AABB bottom-centre to recover the true
-    world-space position of the simready local origin (the ``init_pos``
-    that the simulation expects).
-    """
-    import trimesh
-
-    scene = trimesh.load(glb_path, force="scene")
-    if isinstance(scene, trimesh.Trimesh):
-        mesh = scene
-    else:
-        dumped = scene.dump(concatenate=True)
-        mesh = (
-            dumped
-            if isinstance(dumped, trimesh.Trimesh)
-            else trimesh.util.concatenate(
-                [m for m in dumped if isinstance(m, trimesh.Trimesh)]
-            )
-        )
-    verts = mesh.vertices.copy()
-    if isinstance(scale, Sequence) and not isinstance(scale, (str, bytes)):
-        scale_array = np.asarray(list(scale), dtype=np.float64)
-        if scale_array.shape != (3,):
-            raise ValueError("scale must be a scalar or a 3-vector")
-        verts *= scale_array
-    else:
-        verts *= float(scale)
-    if rotation_matrix is not None:
-        rot = np.asarray(rotation_matrix, dtype=np.float64)
-        if rot.shape == (4, 4):
-            rot = rot[:3, :3]
-        verts = (rot @ verts.T).T
-    b = np.zeros((2, 3), dtype=np.float64)
-    b[0] = verts.min(axis=0)
-    b[1] = verts.max(axis=0)
-    return (
-        float(0.5 * (b[0, 0] + b[1, 0])),   # AABB centre X → sim X
-        float(-0.5 * (b[0, 2] + b[1, 2])),  # -centre Z → sim Y
-        float(b[0, 1]),                       # min Y → sim Z
     )
 
 
@@ -475,33 +354,93 @@ def _render_scene_state_topdown(
     plt.close(fig)
 
 
+def _load_mesh_as_trimesh(glb_path: Path) -> Any:
+    import trimesh
+
+    scene = trimesh.load(glb_path, force="scene")
+    if isinstance(scene, trimesh.Trimesh):
+        return scene
+    dumped = scene.dump(concatenate=True)
+    if isinstance(dumped, trimesh.Trimesh):
+        return dumped
+    meshes = [item for item in dumped if isinstance(item, trimesh.Trimesh)]
+    if not meshes:
+        raise ValueError(f"GLB contains no mesh geometry: {glb_path}")
+    return trimesh.util.concatenate(meshes)
+
+
+def _bake_glb_bottom_center_to_origin(source_path: Path, output_path: Path) -> None:
+    import trimesh
+
+    mesh = _load_mesh_as_trimesh(source_path)
+    verts = np.asarray(mesh.vertices, dtype=np.float64)
+    basis = _glb_to_sim_rotation()
+    verts_sim = (basis @ verts.T).T
+    bounds = np.asarray(
+        np.vstack((verts_sim.min(axis=0), verts_sim.max(axis=0))),
+        dtype=np.float64,
+    )
+    bottom_center = np.array(
+        [
+            0.5 * (bounds[0, 0] + bounds[1, 0]),
+            0.5 * (bounds[0, 1] + bounds[1, 1]),
+            bounds[0, 2],
+        ],
+        dtype=np.float64,
+    )
+    verts_sim -= bottom_center
+    baked = mesh.copy()
+    baked.vertices = (basis.T @ verts_sim.T).T
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    baked.export(output_path)
+
+
+def _ensure_file(path: Path, *, label: str) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} was not written: {path}")
+
+
+def _resolve_existing_table_fit_path(
+    value: Any,
+    *,
+    output_root: Path,
+    paths: PipelinePaths,
+) -> Path:
+    resolved = _resolve_path(str(value or ""), output_root)
+    if resolved.is_file():
+        return resolved
+
+    fallback_root = paths.table_fit_dir
+    fallback = fallback_root / resolved.name
+    if fallback.is_file():
+        return fallback
+
+    if resolved.parent.name == "table_fit_to_clutter":
+        alt = output_root / "unified_scene_gen" / "glb_gen" / "table_fit_to_clutter" / resolved.name
+        if alt.is_file():
+            return alt
+
+    return resolved
+
+
 def _build_object_manifest(
     output_root: Path,
     step_result: dict[str, Any],
     table_fit_manifest: dict[str, Any],
-    aligned_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Merge world_bc, rotation, scale into one per-object record.
-
-    Returns a dict keyed by object id, each value containing everything
-    needed to compute ``init_pos`` / ``init_rot`` / ``body_scale``.
-    """
+    """Merge table-fit object paths with their descriptions."""
     objects_info = step_result.get("objects") or []
 
-    # index metric_scale by object id
-    metric_by_id: dict[str, float] = {}
-    for obj in objects_info:
-        oid = str(obj.get("id", ""))
-        if not oid:
-            continue
-        ms = obj.get("metric_scale")
-        sf = float(ms.get("scale_factor", 1.0)) if isinstance(ms, dict) else 1.0
-        metric_by_id[oid] = sf
+    # index table-fit object records by object id
+    table_fit_by_id: dict[str, dict[str, Any]] = {}
+    for e in table_fit_manifest.get("objects") or []:
+        eid = str(e.get("id", "")) if isinstance(e, dict) else ""
+        if eid and isinstance(e, dict):
+            table_fit_by_id[eid] = e
 
     # index world_aabb_bottom_center from table-fit manifest
     world_bc_by_id: dict[str, list[float]] = {}
-    for e in table_fit_manifest.get("objects") or []:
-        eid = str(e.get("id", "")) if isinstance(e, dict) else ""
+    for eid, e in table_fit_by_id.items():
         wbc = e.get("world_aabb_bottom_center") if isinstance(e, dict) else None
         if eid and isinstance(wbc, list) and len(wbc) == 3:
             world_bc_by_id[eid] = [float(v) for v in wbc]
@@ -513,41 +452,34 @@ def _build_object_manifest(
         if not oid:
             continue
 
-        source = obj.get("simready_geometry_path") or obj.get("mesh_path")
-        simready_path = _resolve_path(source or "", output_root)
-        if not simready_path.is_file():
+        table_fit_item = table_fit_by_id.get(oid)
+        if table_fit_item is None:
             skipped_no_glb.append(oid)
             continue
 
         description = str(obj.get("description") or obj.get("name") or "").strip()
-        scale_factor = metric_by_id.get(oid, 1.0)
-
-        aligned = aligned_by_id.get(oid)
-        rot_matrix: list[list[float]] | None = None
-        transform_scale: list[float] | None = None
-        if aligned:
-            raw = aligned.get("rotation_matrix")
-            if raw and isinstance(raw, list):
-                rot_matrix = raw
-            raw_scale = aligned.get("scale")
-            if isinstance(raw_scale, list) and len(raw_scale) == 3:
-                transform_scale = [float(v) for v in raw_scale]
+        source = table_fit_item.get("path") or ""
+        table_fit_path = _resolve_existing_table_fit_path(
+            source,
+            output_root=output_root,
+            paths=PipelinePaths(output_root),
+        )
+        if not table_fit_path.is_file():
+            skipped_no_glb.append(oid)
+            continue
 
         wbc = world_bc_by_id.get(oid)
 
         consolidated[oid] = {
             "id": oid,
             "description": description,
-            "simready_path": simready_path,
-            "scale_factor": scale_factor,
-            "transform_scale": transform_scale,
-            "rotation_matrix": rot_matrix,
+            "table_fit_path": table_fit_path,
             "world_aabb_bottom_center": wbc,
         }
 
     if skipped_no_glb:
         print(
-            "  [WARN] object(s) skipped (simready GLB not found): "
+            "  [WARN] object(s) skipped (table-fit GLB not found): "
             + ", ".join(skipped_no_glb)
         )
     extra_in_manifest = set(world_bc_by_id) - set(consolidated)
@@ -567,8 +499,8 @@ def export_gym_config(
 ) -> Path:
     """Export the unified-scene-gen result as a gym_config.json bundle.
 
-    Uses **simready** GLBs — transforms are written explicitly as
-    ``body_scale``, ``init_pos``, and ``init_rot``.
+    Uses table-fit GLBs baked so their sim-space AABB bottom-centre sits at
+    the local origin. Object pose is then restored with ``init_pos`` only.
     """
     output_root = output_root.expanduser().resolve()
     if export_dir is None:
@@ -596,14 +528,8 @@ def export_gym_config(
         )
     )
 
-    aligned_by_id: dict[str, dict[str, Any]] = {}
-    if paths.simready_to_aligned_manifest.is_file():
-        for item in _read_json(paths.simready_to_aligned_manifest).get("items", []) or []:
-            if isinstance(item, dict) and item.get("id"):
-                aligned_by_id[str(item["id"])] = item
-
     object_manifest = _build_object_manifest(
-        output_root, step_result, table_fit_manifest, aligned_by_id
+        output_root, step_result, table_fit_manifest
     )
 
     table_info = step_result.get("table") or {}
@@ -615,30 +541,19 @@ def export_gym_config(
     mesh_assets_dir = export_dir / "mesh_assets"
     mesh_assets_dir.mkdir(parents=True, exist_ok=True)
 
-    table_simready = _resolve_path(
-        table_info.get("simready_geometry_path")
-        or table_info.get("mesh_path", ""),
-        output_root,
-    )
-    if not table_simready.is_file():
-        raise FileNotFoundError(f"Table simready GLB not found: {table_simready}")
     table_dst = mesh_assets_dir / "table" / "table_0.glb"
     table_dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(table_simready, table_dst)
-
-    table_fit_transform = table_fit_manifest.get("table_fit_transform")
-    if table_fit_transform:
-        table_init_pos, table_init_rot, table_body_scale = _decompose_affine_matrix(
-            table_fit_transform
-        )
-    else:
-        uniform_scale = 1.0
-        ts = table_fit_manifest.get("table_xy_scale")
-        if isinstance(ts, dict):
-            uniform_scale = float(ts.get("uniform_scale", 1.0))
-        table_init_pos = [0.0, 0.0, 0.0]
-        table_init_rot = [0.0, 0.0, 0.0]
-        table_body_scale = [uniform_scale, uniform_scale, 1.0]
+    table_fit_output = _resolve_existing_table_fit_path(
+        table_fit_manifest.get("table_output_path", ""),
+        output_root=output_root,
+        paths=paths,
+    )
+    if not table_fit_output.is_file():
+        raise FileNotFoundError(f"Table fit GLB not found: {table_fit_output}")
+    _bake_glb_bottom_center_to_origin(table_fit_output, table_dst)
+    table_init_pos = [0.0, 0.0, 0.0]
+    table_init_rot = [0.0, 0.0, 0.0]
+    table_body_scale = [1.0, 1.0, 1.0]
 
     rigid_objects: list[dict[str, Any]] = []
     object_states: list[dict[str, Any]] = []
@@ -649,26 +564,14 @@ def export_gym_config(
         obj_dir = mesh_assets_dir / safe_name / oid
         obj_dir.mkdir(parents=True, exist_ok=True)
         object_dst = obj_dir / f"{oid}.glb"
-        shutil.copy2(om["simready_path"], object_dst)
-
-        sf = om["scale_factor"]
-        scale_glb = om.get("transform_scale") or [sf, sf, sf]
-        body_scale = _glb_scale_to_sim(scale_glb)
-
-        init_rot: list[float] = [0.0, 0.0, 0.0]
-        if om["rotation_matrix"] is not None:
-            init_rot = _matrix_to_euler_xyz_deg(
-                _glb_rotation_to_sim(om["rotation_matrix"])
-            )
-
-        ro = _rotated_aabb_offsets(
-            om["simready_path"], om["rotation_matrix"], scale_glb
-        )
+        _bake_glb_bottom_center_to_origin(om["table_fit_path"], object_dst)
         wbc = om["world_aabb_bottom_center"]
         if wbc is not None:
-            init_pos = [wbc[0] - ro[0], wbc[1] - ro[1], wbc[2] - ro[2]]
+            init_pos = [float(wbc[0]), float(wbc[1]), float(wbc[2])]
         else:
             raise ValueError(f"Missing table-fit world_aabb_bottom_center for {oid}")
+        init_rot = [0.0, 0.0, 0.0]
+        body_scale = [1.0, 1.0, 1.0]
 
         rigid_objects.append(
             {
@@ -688,9 +591,9 @@ def export_gym_config(
             }
         )
         footprint_2d = _sim_world_xy_aabb(
-            om["simready_path"],
-            om["rotation_matrix"],
-            scale_glb,
+            object_dst,
+            None,
+            1.0,
             init_pos,
         )
         object_states.append(
@@ -743,6 +646,7 @@ def export_gym_config(
         json.dumps(config, indent=4, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    _ensure_file(config_path, label="gym_config.json")
     scene_state_dir = export_dir / "scene_state"
     source_snapshots = _copy_scene_source_snapshots(
         paths=paths,
@@ -757,6 +661,8 @@ def export_gym_config(
         object_states=object_states,
         source_snapshots=source_snapshots,
     )
+    _ensure_file(scene_state_path, label="scene_state/result.json")
+    _ensure_file(scene_state_dir / "topdown_2d.png", label="scene_state/topdown_2d.png")
     print(f"  scene_state={scene_state_path.relative_to(export_dir)}")
 
     return config_path
