@@ -124,8 +124,13 @@ down to the target pose. On success, the returned `WorldState` clears `held_obje
 | `hand_interp_steps` | `5` | Waypoints for the gripper open phase |
 | `sample_interval` | `80` | Total waypoints across all three phases |
 
-**Target:** `EndEffectorPoseTarget(xpos=...)` — the EEF pose at release, a `torch.Tensor` of shape
-`(4, 4)`, `(n_envs, 4, 4)` or `(n_envs, n_waypoint, 4, 4)`.
+**Target:** `EndEffectorPoseTarget(xpos=..., tcp_symmetry="none")` — the EEF pose at
+release, a `torch.Tensor` of shape `(4, 4)`, `(n_envs, 4, 4)` or
+`(n_envs, n_waypoint, 4, 4)`. Keep the default
+`tcp_symmetry="none"` when the TCP orientation is strict. Use
+`tcp_symmetry="z_roll_180"` only when releasing with TCP x/y flipped is physically
+equivalent; `Place` then chooses the closer TCP z-roll 180 variant from
+`WorldState.last_qpos` and applies that same variant across all release waypoints.
 
 ![Place demo](../../../_static/atomic_actions/place.gif)
 
