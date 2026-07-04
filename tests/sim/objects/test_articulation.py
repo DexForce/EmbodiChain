@@ -297,6 +297,46 @@ class BaseArticulationTest:
             armature, expected_armature, atol=1e-5
         ), "FAIL: armature does not match expected filtered values"
 
+    def test_joint_limit_getters_support_env_and_joint_filters(self):
+        """Test joint limit getters support joint_ids and env_ids filtering."""
+        all_qpos_limits = self.art.body_data.qpos_limits
+        all_qvel_limits = self.art.body_data.qvel_limits
+        all_qf_limits = self.art.body_data.qf_limits
+
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 2, 4] if NUM_ARENAS >= 5 else [0]
+
+        qpos_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        qvel_limits = self.art.get_qvel_limits(joint_ids=joint_ids, env_ids=env_ids)
+        qf_limits = self.art.get_qf_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        expected_qpos_limits = all_qpos_limits[env_ids][:, joint_ids, :]
+        expected_qvel_limits = all_qvel_limits[env_ids][:, joint_ids]
+        expected_qf_limits = all_qf_limits[env_ids][:, joint_ids]
+
+        expected_qpos_shape = (len(env_ids), len(joint_ids), 2)
+        expected_joint_shape = (len(env_ids), len(joint_ids))
+
+        assert (
+            qpos_limits.shape == expected_qpos_shape
+        ), f"FAIL: Expected qpos_limits shape {expected_qpos_shape}, got {qpos_limits.shape}"
+        assert (
+            qvel_limits.shape == expected_joint_shape
+        ), f"FAIL: Expected qvel_limits shape {expected_joint_shape}, got {qvel_limits.shape}"
+        assert (
+            qf_limits.shape == expected_joint_shape
+        ), f"FAIL: Expected qf_limits shape {expected_joint_shape}, got {qf_limits.shape}"
+
+        assert torch.allclose(
+            qpos_limits, expected_qpos_limits, atol=1e-5
+        ), "FAIL: qpos_limits does not match expected filtered values"
+        assert torch.allclose(
+            qvel_limits, expected_qvel_limits, atol=1e-5
+        ), "FAIL: qvel_limits does not match expected filtered values"
+        assert torch.allclose(
+            qf_limits, expected_qf_limits, atol=1e-5
+        ), "FAIL: qf_limits does not match expected filtered values"
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

@@ -152,6 +152,23 @@ class ArticulationData:
         self._qf = torch.zeros(
             (self.num_instances, max_dof), dtype=torch.float32, device=self.device
         )
+        self._qpos_limits = torch.as_tensor(
+            np.array([entity.get_joint_limits() for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._qvel_limits = torch.as_tensor(
+            np.array(
+                [entity.get_joint_velocity_limit() for entity in self.entities]
+            ),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._qf_limits = torch.as_tensor(
+            np.array([entity.get_joint_effort_limit() for entity in self.entities]),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
     @property
     def root_pose(self) -> torch.Tensor:
@@ -489,49 +506,32 @@ class ArticulationData:
             device=self.device,
         )
 
-    @cached_property
+    @property
     def qpos_limits(self) -> torch.Tensor:
         """Get the joint position limits of the articulation.
 
         Returns:
             torch.Tensor: The joint position limits of the articulation with shape (N, dof, 2).
         """
-        return torch.as_tensor(
-            np.array([entity.get_joint_limits() for entity in self.entities]),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._qpos_limits
 
-    @cached_property
+    @property
     def qvel_limits(self) -> torch.Tensor:
         """Get the joint velocity limits of the articulation.
 
         Returns:
             torch.Tensor: The joint velocity limits of the articulation with shape (N, dof).
         """
-        # TODO: get joint velocity limits always returns zero?
-        return torch.as_tensor(
-            np.array(
-                [entity.get_drive()[3] for entity in self.entities],
-            ),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._qvel_limits
 
-    @cached_property
+    @property
     def qf_limits(self) -> torch.Tensor:
         """Get the joint effort limits of the articulation.
 
         Returns:
             torch.Tensor: The joint effort limits of the articulation with shape (N, dof).
         """
-        return torch.as_tensor(
-            np.array(
-                [entity.get_drive()[2] for entity in self.entities],
-            ),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._qf_limits
 
     @cached_property
     def link_vert_face(self) -> Dict[str, Tuple[torch.Tensor, torch.Tensor]]:
@@ -875,6 +875,28 @@ class Articulation(BatchEntity):
             collision_filter_data[i, 1] = 1
         self.set_collision_filter(collision_filter_data)
 
+    def _resolve_env_ids(
+        self, env_ids: Sequence[int] | torch.Tensor | None
+    ) -> torch.Tensor:
+        """Resolve environment ids to a device tensor."""
+        if env_ids is None:
+            return torch.arange(
+                self.num_instances, dtype=torch.long, device=self.device
+            )
+        if isinstance(env_ids, torch.Tensor):
+            return env_ids.to(device=self.device, dtype=torch.long)
+        return torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+
+    def _resolve_joint_ids(
+        self, joint_ids: Sequence[int] | torch.Tensor | None
+    ) -> torch.Tensor:
+        """Resolve joint ids to a device tensor."""
+        if joint_ids is None:
+            return torch.arange(self.dof, dtype=torch.long, device=self.device)
+        if isinstance(joint_ids, torch.Tensor):
+            return joint_ids.to(device=self.device, dtype=torch.long)
+        return torch.as_tensor(joint_ids, dtype=torch.long, device=self.device)
+
     def set_collision_filter(
         self, filter_data: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -1044,6 +1066,16 @@ class Articulation(BatchEntity):
         """
         return self.body_data.qpos if not target else self.body_data.target_qpos
 
+    def get_qpos_limits(
+        self,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get joint position limits for selected environments and joints."""
+        local_env_ids = self._resolve_env_ids(env_ids)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
+        return self.body_data.qpos_limits[local_env_ids][:, local_joint_ids, :]
+
     def set_qpos(
         self,
         qpos: torch.Tensor,
@@ -1144,6 +1176,16 @@ class Articulation(BatchEntity):
             torch.Tensor: The current velocities of the articulation.
         """
         return self.body_data.qvel if not target else self.body_data.target_qvel
+
+    def get_qvel_limits(
+        self,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get joint velocity limits for selected environments and joints."""
+        local_env_ids = self._resolve_env_ids(env_ids)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
+        return self.body_data.qvel_limits[local_env_ids][:, local_joint_ids]
 
     def set_qvel(
         self,
@@ -1253,6 +1295,16 @@ class Articulation(BatchEntity):
                 gpu_indices=indices,
                 data_type=ArticulationGPUAPIWriteType.JOINT_FORCE,
             )
+
+    def get_qf_limits(
+        self,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get joint effort limits for selected environments and joints."""
+        local_env_ids = self._resolve_env_ids(env_ids)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
+        return self.body_data.qf_limits[local_env_ids][:, local_joint_ids]
 
     def set_mass(
         self,
