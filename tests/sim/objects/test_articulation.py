@@ -300,8 +300,14 @@ class BaseArticulationTest:
     def test_joint_limit_getters_support_env_and_joint_filters(self):
         """Test joint limit getters support joint_ids and env_ids filtering."""
         all_qpos_limits = self.art.body_data.qpos_limits
-        all_qvel_limits = self.art.body_data.qvel_limits
-        all_qf_limits = self.art.body_data.qf_limits
+        (
+            _stiffness,
+            _damping,
+            all_qf_limits,
+            all_qvel_limits,
+            _friction,
+            _armature,
+        ) = self.art.get_joint_drive()
 
         joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
         env_ids = [0, 2, 4] if NUM_ARENAS >= 5 else [0]
@@ -316,6 +322,13 @@ class BaseArticulationTest:
 
         expected_qpos_shape = (len(env_ids), len(joint_ids), 2)
         expected_joint_shape = (len(env_ids), len(joint_ids))
+
+        assert torch.allclose(
+            self.art.body_data.qvel_limits, all_qvel_limits, atol=1e-5
+        ), "FAIL: qvel_limits backing tensor does not match post-init joint drive state"
+        assert torch.allclose(
+            self.art.body_data.qf_limits, all_qf_limits, atol=1e-5
+        ), "FAIL: qf_limits backing tensor does not match post-init joint drive state"
 
         assert (
             qpos_limits.shape == expected_qpos_shape

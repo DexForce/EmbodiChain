@@ -158,9 +158,7 @@ class ArticulationData:
             device=self.device,
         )
         self._qvel_limits = torch.as_tensor(
-            np.array(
-                [entity.get_joint_velocity_limit() for entity in self.entities]
-            ),
+            np.array([entity.get_joint_velocity_limit() for entity in self.entities]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -1771,6 +1769,9 @@ class Articulation(BatchEntity):
             armature=self.default_joint_armature,
             drive_type=drive_type,
         )
+        # Keep mutable limit reads aligned with the configured drive maxima.
+        self._data._qvel_limits.copy_(self.default_joint_max_velocity)
+        self._data._qf_limits.copy_(self.default_joint_max_effort)
 
     def compute_fk(
         self,
