@@ -5,6 +5,13 @@
 
 This page lists all available observation functors that can be used with the Observation Manager. Observation functors are configured using {class}`~cfg.ObservationCfg` and can operate in two modes: ``modify`` (update existing observations) or ``add`` (add new observations).
 
+## Quick Reference
+
+- Use ``mode="add"`` to create a new observation entry in the observation dictionary.
+- Use ``mode="modify"`` to update an existing observation entry in place.
+- Most returned tensors are batched over ``num_envs`` as the leading dimension.
+- Use hierarchical names such as ``"object/cup/pose"`` to keep custom observations organized.
+
 ````{tip}
 **Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new observation functor with the correct signature (`env, obs, entity_cfg, ...`), module placement in `observations.py`, and `__all__` export. Use **`/add-test`** to generate mock-based tests.
 ````
