@@ -33,14 +33,15 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     """Run the in-repo prompt2scene stage and return its exported gym config."""
     output_root = Path(args.prompt2scene_output_root).expanduser().resolve()
     _reject_prompt2scene_text(args)
-    image_path = resolve_prompt2scene_image(args)
+    prompt = _resolve_prompt2scene_prompt(args)
+    image_path = resolve_prompt2scene_image(args, use_default=prompt is None)
     gravity_settle_mode = _resolve_gravity_settle_mode(args)
     load_llm_config, run_prompt2scene, prompt2scene_input_cls = (
         _load_prompt2scene_components()
     )
     request = prompt2scene_input_cls.from_cli_args(
         image_path=image_path,
-        prompt=None,
+        prompt=prompt,
         output_root=output_root,
         gravity_settle_mode=gravity_settle_mode,
     )
@@ -59,14 +60,17 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     print(f"  output_root: {request.output_root}", flush=True)
 
     result = run_prompt2scene(request, llm_cfg=llm_cfg)
-    if result.gym_config_path is None or not result.gym_config_path.is_file():
+    gym_config_path = result.gym_config_path
+    if gym_config_path is None:
+        gym_config_path = request.output_root / "gym_export" / "gym_config.json"
+    if not gym_config_path.is_file():
         raise FileNotFoundError(
             "prompt2scene did not produce an exported gym_config.json under "
             f"{request.output_root}"
         )
 
-    print(f"Using prompt2scene gym config: {result.gym_config_path}", flush=True)
-    return result.gym_config_path
+    print(f"Using prompt2scene gym config: {gym_config_path}", flush=True)
+    return gym_config_path
 
 
 def _load_prompt2scene_components() -> tuple[Any, Any, Any]:
@@ -77,11 +81,20 @@ def _load_prompt2scene_components() -> tuple[Any, Any, Any]:
     return load_llm_config, run_prompt2scene, Prompt2SceneInput
 
 
-def resolve_prompt2scene_image(args: argparse.Namespace) -> Path:
+def resolve_prompt2scene_image(
+    args: argparse.Namespace,
+    *,
+    use_default: bool = True,
+) -> Path | None:
     """Resolve prompt2scene image input from shared action-agent CLI options."""
     if args.image_name:
         return _resolve_image_name(args.image_name)
-    image_input = args.image or DEFAULT_IMAGE
+    if args.image:
+        image_input = args.image
+    elif use_default:
+        image_input = DEFAULT_IMAGE
+    else:
+        return None
     return Path(image_input).expanduser().resolve()
 
 
@@ -90,8 +103,13 @@ def _reject_prompt2scene_text(args: argparse.Namespace) -> None:
     if text:
         raise ValueError(
             "--prompt2scene-text is no longer supported by prompt2scene. "
-            "Use --image or --image-name as prompt2scene input."
+            "Use --prompt2scene-prompt for scene edit or randomization."
         )
+
+
+def _resolve_prompt2scene_prompt(args: argparse.Namespace) -> str | None:
+    prompt = str(getattr(args, "prompt2scene_prompt", "") or "").strip()
+    return prompt or None
 
 
 def _resolve_gravity_settle_mode(args: argparse.Namespace) -> str:

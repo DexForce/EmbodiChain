@@ -176,6 +176,8 @@ def run_prompt2scene(
             scene_edit_path = routed_path
         elif _route_name(route_result) == "scene_randomization":
             scene_randomization_path = routed_path
+        if paths.gym_config.is_file():
+            gym_config_path = paths.gym_config
     elif llm_cfg is not None:
         log.log_info("step start scene_intake")
         scene_intake = run_scene_intake(request, llm_cfg=llm_cfg)
