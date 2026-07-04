@@ -25,6 +25,7 @@ import torch
 from unittest.mock import Mock
 
 from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
     add_demo_args,
     format_tensor,
     setup_print_options,
@@ -61,3 +62,88 @@ def test_shutdown_sim_calls_destroy():
     sim = Mock(spec=["destroy"])
     shutdown_sim(sim)
     sim.destroy.assert_called_once()
+
+
+def _make_recording_sim():
+    sim = Mock(
+        spec=[
+            "start_window_record",
+            "stop_window_record",
+            "wait_window_record_saves",
+            "is_window_recording",
+            "sim_config",
+        ]
+    )
+    sim.sim_config = SimpleNamespace(width=1920, height=1080)
+    sim.start_window_record.return_value = True
+    sim.is_window_recording.return_value = False
+    return sim
+
+
+def test_demo_recording_does_nothing_when_record_steps_is_none():
+    sim = _make_recording_sim()
+    args = SimpleNamespace(
+        record_steps=None,
+        record_fps=30,
+        record_save_path="/tmp",
+        auto_play=False,
+        headless=True,
+    )
+    with DemoRecording(sim, args, prefix="demo"):
+        pass
+    sim.start_window_record.assert_not_called()
+
+
+def test_demo_recording_starts_and_stops_window_record():
+    sim = _make_recording_sim()
+    sim.is_window_recording.return_value = True
+    args = SimpleNamespace(
+        record_steps=10,
+        record_fps=30,
+        record_save_path="/tmp/recordings",
+        auto_play=False,
+        headless=True,
+    )
+    with DemoRecording(sim, args, prefix="demo") as rec:
+        assert rec.is_active is True
+    sim.start_window_record.assert_called_once()
+    call_kwargs = sim.start_window_record.call_args.kwargs
+    assert call_kwargs["fps"] == 30
+    assert call_kwargs["video_prefix"] == "demo"
+    assert "/tmp/recordings" in call_kwargs["save_path"]
+    assert call_kwargs["save_path"].endswith(".mp4")
+    assert call_kwargs["look_at"] is None
+    sim.stop_window_record.assert_called_once()
+    sim.wait_window_record_saves.assert_called_once()
+
+
+def test_demo_recording_passes_look_at():
+    sim = _make_recording_sim()
+    args = SimpleNamespace(
+        record_steps=10,
+        record_fps=30,
+        record_save_path="/tmp",
+        auto_play=False,
+        headless=True,
+    )
+    look_at = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    with DemoRecording(sim, args, prefix="demo", look_at=look_at):
+        pass
+    call_kwargs = sim.start_window_record.call_args.kwargs
+    assert call_kwargs["look_at"] == look_at
+
+
+def test_demo_recording_warns_and_skips_on_start_failure():
+    sim = _make_recording_sim()
+    sim.start_window_record.return_value = False
+    args = SimpleNamespace(
+        record_steps=10,
+        record_fps=30,
+        record_save_path="/tmp",
+        auto_play=False,
+        headless=True,
+    )
+    with pytest.warns(UserWarning, match="Failed to start recording"):
+        with DemoRecording(sim, args, prefix="demo"):
+            pass
+    sim.stop_window_record.assert_not_called()

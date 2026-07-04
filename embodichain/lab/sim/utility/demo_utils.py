@@ -37,6 +37,7 @@ __all__ = [
     "setup_print_options",
     "format_tensor",
     "maybe_init_gpu_physics",
+    "DemoRecording",
 ]
 
 
@@ -167,3 +168,83 @@ def maybe_init_gpu_physics(sim: SimulationManager) -> None:
     """
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
+
+
+class DemoRecording:
+    """Context manager that handles demo video recording.
+
+    Recording is only started when ``args.record_steps`` is not ``None``.
+    On exit the window record is stopped and the framework is asked to finish
+    saving the video file.
+
+    Args:
+        sim: The simulation manager.
+        args: Parsed command-line arguments. Expected to contain
+            ``record_steps``, ``record_fps`` and ``record_save_path``.
+        prefix: Prefix used for the generated video filename.
+        look_at: Optional camera look-at tuple for the recording.
+    """
+
+    def __init__(
+        self,
+        sim: SimulationManager,
+        args: argparse.Namespace,
+        prefix: str = "demo",
+        look_at: tuple[Sequence[float], Sequence[float], Sequence[float]] | None = None,
+    ):
+        self.sim = sim
+        self.args = args
+        self.prefix = prefix
+        self.look_at = look_at
+        self.is_active = False
+
+    def __enter__(self) -> DemoRecording:
+        """Start recording if requested."""
+        if self.args.record_steps is None:
+            return self
+
+        import datetime
+        import warnings
+        from pathlib import Path
+
+        save_dir = Path(self.args.record_save_path or "./recordings")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = str(save_dir / f"{self.prefix}_{timestamp}.mp4")
+
+        original_width = self.sim.sim_config.width
+        original_height = self.sim.sim_config.height
+        try:
+            # Use a smaller resolution for recording to keep files small.
+            self.sim.sim_config.width = 640
+            self.sim.sim_config.height = 480
+            started = self.sim.start_window_record(
+                save_path=save_path,
+                fps=self.args.record_fps,
+                max_memory=2048,
+                video_prefix=self.prefix,
+                look_at=self.look_at,
+                use_sim_time=True,
+            )
+        finally:
+            self.sim.sim_config.width = original_width
+            self.sim.sim_config.height = original_height
+
+        if not started:
+            warnings.warn(
+                f"Failed to start recording for prefix '{self.prefix}'. Continuing without recording.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return self
+
+        self.is_active = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        """Stop recording and wait for the file to be written."""
+        if not self.is_active:
+            return
+        if self.sim.is_window_recording():
+            self.sim.stop_window_record()
+        self.sim.wait_window_record_saves()
