@@ -84,7 +84,8 @@ _ROW_SEARCH_STEP = 0.025
 _ROW_SEARCH_RADIUS = 0.25
 _SUPPORTED_ORDER_BY = {"size", "color", "explicit"}
 _SUPPORTED_ORDER_DIRECTIONS = {"ascending", "descending", "given"}
-_SUPPORTED_AXES = {"left_to_right"}
+_SUPPORTED_AXES = {"table_long_axis", "world_x", "world_y"}
+_CONCRETE_AXES = {"world_x", "world_y"}
 
 
 def _is_arrangement_task_description(task_description: str) -> bool:
@@ -132,6 +133,7 @@ def _build_arrangement_line_spec_with_llm(
         rigid_objects=rigid_objects,
         scene_dir=scene_dir,
         task_description=task_description,
+        check_static_obstacles=False,
     )
 
 
@@ -163,7 +165,7 @@ def _call_arrangement_task_llm(
         '  "ordered_attributes": ["red", "green", "blue"],\n'
         '  "object_attributes": {"<source_uid>": {"color": "red"}},\n'
         '  "anchor": "table_center",\n'
-        '  "line_axis": "left_to_right",\n'
+        '  "line_axis": "table_long_axis|world_x|world_y",\n'
         '  "task_prompt_summary": "<short execution summary>",\n'
         '  "basic_background_notes": "<short notes>"\n'
         "}\n\n"
@@ -176,7 +178,9 @@ def _call_arrangement_task_llm(
         "- Use order_by='color' when the task specifies a color sequence such as "
         "red-green-blue. Put that sequence in ordered_attributes and include a "
         "color attribute for each object.\n"
-        "- Use line_axis='left_to_right' for left-to-right tabletop rows.\n"
+        "- Use line_axis='table_long_axis' for generic row tasks. Use "
+        "'world_x' or 'world_y' only when the task explicitly constrains the "
+        "world axis.\n"
         "- Do not return target positions, robot config, success JSON, or action "
         "graphs.\n\n"
         f"Project: {project_name}\n"
@@ -234,6 +238,7 @@ def _apply_arrangement_task_response(
     rigid_objects: list[_SceneObject],
     scene_dir: Path,
     task_description: str,
+    check_static_obstacles: bool = True,
 ) -> _ArrangementLineSpec:
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     table_obj = by_uid[table_source_uid]
@@ -277,6 +282,16 @@ def _apply_arrangement_task_response(
         [rigid_by_uid[uid] for uid in object_source_uids],
         scene_dir=scene_dir,
     )
+    table_bounds = _source_object_xy_bounds(table_obj, scene_dir=scene_dir)
+    hard_obstacle_objects = (
+        _arrangement_hard_obstacle_objects(
+            scene_objects,
+            selected_source_uids=set(object_source_uids),
+            table_source_uid=table_source_uid,
+        )
+        if check_static_obstacles
+        else ()
+    )
     slots, line_origin_xy = _arrangement_collision_aware_line_slots(
         anchor_xy=anchor_xy,
         table_obj=table_obj,
@@ -287,8 +302,9 @@ def _apply_arrangement_task_response(
         scene_dir=scene_dir,
         clearance=_LAYOUT_CLEARANCE,
         ignore_self_initial_overlap=True,
+        hard_obstacle_objects=hard_obstacle_objects,
     )
-    orientation_axis = _arrangement_orientation_axis(axis)
+    orientation_axis = _arrangement_orientation_axis(axis, table_bounds=table_bounds)
 
     steps = []
     for slot_index, (source_uid, target_xy) in enumerate(
@@ -351,20 +367,29 @@ def _arrangement_line_slot_positions(
     count: int,
     spacing: float,
     line_axis: str,
+    table_bounds: tuple[list[float], list[float]] | None = None,
 ) -> list[list[float]]:
     if count < 1:
         raise ValueError("Arrangement line requires at least one slot.")
-    axis = _normalize_axis(line_axis)
+    axis = _resolve_concrete_line_axis(line_axis, table_bounds=table_bounds)
     anchor = [float(anchor_xy[0]), float(anchor_xy[1])]
     center = (count - 1) / 2.0
     slots: list[list[float]] = []
     for index in range(count):
         axis_offset = (index - center) * float(spacing)
-        if axis == "left_to_right":
+        if axis == "world_y":
             slots.append(
                 [
                     round(anchor[0], 6),
                     round(anchor[1] + axis_offset, 6),
+                ]
+            )
+            continue
+        if axis == "world_x":
+            slots.append(
+                [
+                    round(anchor[0] + axis_offset, 6),
+                    round(anchor[1], 6),
                 ]
             )
             continue
@@ -383,10 +408,9 @@ def _arrangement_collision_aware_line_slots(
     scene_dir: Path,
     clearance: float,
     ignore_self_initial_overlap: bool = False,
+    hard_obstacle_objects: Sequence[_SceneObject] = (),
 ) -> tuple[list[list[float]], list[float]]:
     axis = _normalize_axis(line_axis)
-    if axis != "left_to_right":
-        raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
     if count != len(objects):
         raise ValueError("Arrangement slot count must match object count.")
 
@@ -394,41 +418,62 @@ def _arrangement_collision_aware_line_slots(
     if table_bounds is None:
         raise ValueError("Arrangement requires table mesh XY bounds for safe layout.")
     table_min, table_max = table_bounds
+    concrete_axis = _resolve_concrete_line_axis(axis, table_bounds=table_bounds)
     object_footprints = [
         _arrangement_object_footprint(obj, scene_dir=scene_dir) for obj in objects
     ]
     init_bounds = [footprint.xy_bounds for footprint in object_footprints]
+    hard_obstacle_bounds = [
+        _arrangement_object_footprint(obj, scene_dir=scene_dir).xy_bounds
+        for obj in hard_obstacle_objects
+    ]
 
-    for x_offset in _row_search_offsets(_ROW_SEARCH_RADIUS, _ROW_SEARCH_STEP):
-        origin = [
-            round(float(anchor_xy[0]) + x_offset, 6),
-            round(float(anchor_xy[1]), 6),
-        ]
-        slots = _arrangement_line_slot_positions(
-            anchor_xy=origin,
-            count=count,
-            spacing=spacing,
-            line_axis=axis,
-        )
-        slot_bounds = [
-            _slot_xy_bounds(slot, max_half_extent=footprint.half_extent)
-            for slot, footprint in zip(slots, object_footprints)
-        ]
-        if not _slot_bounds_within_table(
-            slot_bounds,
-            table_min=table_min,
-            table_max=table_max,
-            clearance=clearance,
+    for allow_movable_initial_overlap in (False, True):
+        for perpendicular_offset in _row_search_offsets(
+            _ROW_SEARCH_RADIUS,
+            _ROW_SEARCH_STEP,
         ):
-            continue
-        if _slot_bounds_overlap_initial_objects(
-            slot_bounds,
-            init_bounds,
-            clearance=clearance,
-            ignore_self_initial_overlap=ignore_self_initial_overlap,
-        ):
-            continue
-        return slots, origin
+            origin = _line_origin_with_perpendicular_offset(
+                anchor_xy,
+                perpendicular_offset,
+                concrete_axis,
+            )
+            slots = _arrangement_line_slot_positions(
+                anchor_xy=origin,
+                count=count,
+                spacing=spacing,
+                line_axis=concrete_axis,
+                table_bounds=table_bounds,
+            )
+            slot_bounds = [
+                _slot_xy_bounds(slot, max_half_extent=footprint.half_extent)
+                for slot, footprint in zip(slots, object_footprints)
+            ]
+            if not _slot_bounds_within_table(
+                slot_bounds,
+                table_min=table_min,
+                table_max=table_max,
+                clearance=clearance,
+            ):
+                continue
+            if _slot_bounds_overlap_initial_objects(
+                slot_bounds,
+                hard_obstacle_bounds,
+                clearance=clearance,
+                ignore_self_initial_overlap=False,
+            ):
+                continue
+            if (
+                not allow_movable_initial_overlap
+                and _slot_bounds_overlap_initial_objects(
+                    slot_bounds,
+                    init_bounds,
+                    clearance=clearance,
+                    ignore_self_initial_overlap=ignore_self_initial_overlap,
+                )
+            ):
+                continue
+            return slots, origin
 
     raise ValueError(
         "Unable to generate a collision-free one-line arrangement near the table "
@@ -551,9 +596,15 @@ def _xy_bounds_overlap(
     )
 
 
-def _arrangement_orientation_axis(line_axis: str) -> str:
-    axis = _normalize_axis(line_axis)
-    if axis == "left_to_right":
+def _arrangement_orientation_axis(
+    line_axis: str,
+    *,
+    table_bounds: tuple[list[float], list[float]] | None = None,
+) -> str:
+    axis = _resolve_concrete_line_axis(line_axis, table_bounds=table_bounds)
+    if axis == "world_x":
+        return "x"
+    if axis == "world_y":
         return "y"
     raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
 
@@ -594,6 +645,12 @@ def _with_arrangement_generated_pose_targets(
     )
     anchor_xy = _generated_table_anchor_xy(table_config, spec.line_origin_xy)
     spacing = _arrangement_spacing(generated_objects, scene_dir=Path("."))
+    moved_runtime_uids = {step.runtime_uid for step in spec.steps}
+    hard_obstacle_objects = _generated_arrangement_hard_obstacles(
+        gym_config,
+        moved_runtime_uids=moved_runtime_uids,
+        table_source_uid=spec.table_source_uid,
+    )
     slots, line_origin_xy = _arrangement_collision_aware_line_slots(
         anchor_xy=anchor_xy,
         table_obj=table_obj,
@@ -604,8 +661,13 @@ def _with_arrangement_generated_pose_targets(
         scene_dir=Path("."),
         clearance=spec.layout_clearance,
         ignore_self_initial_overlap=True,
+        hard_obstacle_objects=hard_obstacle_objects,
     )
     table_top_z = _generated_table_top_z(table_config)
+    orientation_axis = _arrangement_orientation_axis(
+        spec.axis,
+        table_bounds=_source_object_xy_bounds(table_obj, scene_dir=Path(".")),
+    )
 
     steps = []
     for step, target_xy in zip(spec.steps, slots):
@@ -628,6 +690,7 @@ def _with_arrangement_generated_pose_targets(
                     round(float(target_xy[0]), 6),
                     round(float(target_xy[1]), 6),
                 ],
+                orientation_axis=orientation_axis,
                 release_position=release_position,
                 high_position=high_position,
                 size_score=_arrangement_object_size_score(
@@ -825,17 +888,23 @@ def _normalize_order_direction(value: Any) -> str:
 
 def _normalize_axis(value: Any) -> str:
     text = (
-        str(value or "left_to_right")
+        str(value or "table_long_axis")
         .strip()
         .lower()
         .replace("-", "_")
         .replace(" ", "_")
     )
     aliases = {
-        "left_right": "left_to_right",
-        "robot_left_to_right": "left_to_right",
-        "y": "left_to_right",
-        "world_y": "left_to_right",
+        "left_to_right": "table_long_axis",
+        "left_right": "table_long_axis",
+        "robot_left_to_right": "table_long_axis",
+        "long_axis": "table_long_axis",
+        "table_long": "table_long_axis",
+        "table_longest_axis": "table_long_axis",
+        "x": "world_x",
+        "table_x": "world_x",
+        "y": "world_y",
+        "table_y": "world_y",
     }
     text = aliases.get(text, text)
     if text not in _SUPPORTED_AXES:
@@ -844,6 +913,80 @@ def _normalize_axis(value: Any) -> str:
             f"{sorted(_SUPPORTED_AXES)}."
         )
     return text
+
+
+def _resolve_concrete_line_axis(
+    line_axis: str,
+    *,
+    table_bounds: tuple[list[float], list[float]] | None = None,
+) -> str:
+    axis = _normalize_axis(line_axis)
+    if axis in _CONCRETE_AXES:
+        return axis
+    if axis != "table_long_axis":
+        raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
+    if table_bounds is None:
+        return "world_y"
+    table_min, table_max = table_bounds
+    x_extent = float(table_max[0]) - float(table_min[0])
+    y_extent = float(table_max[1]) - float(table_min[1])
+    if x_extent > y_extent:
+        return "world_x"
+    return "world_y"
+
+
+def _line_origin_with_perpendicular_offset(
+    anchor_xy: Sequence[float],
+    perpendicular_offset: float,
+    concrete_axis: str,
+) -> list[float]:
+    origin = [round(float(anchor_xy[0]), 6), round(float(anchor_xy[1]), 6)]
+    if concrete_axis == "world_x":
+        origin[1] = round(origin[1] + float(perpendicular_offset), 6)
+        return origin
+    if concrete_axis == "world_y":
+        origin[0] = round(origin[0] + float(perpendicular_offset), 6)
+        return origin
+    raise ValueError(f"Unsupported concrete arrangement axis: {concrete_axis!r}.")
+
+
+def _arrangement_hard_obstacle_objects(
+    scene_objects: Sequence[_SceneObject],
+    *,
+    selected_source_uids: set[str],
+    table_source_uid: str,
+) -> list[_SceneObject]:
+    return [
+        obj
+        for obj in scene_objects
+        if obj.source_uid != table_source_uid
+        and obj.source_uid not in selected_source_uids
+    ]
+
+
+def _generated_arrangement_hard_obstacles(
+    gym_config: Mapping[str, Any],
+    *,
+    moved_runtime_uids: set[str],
+    table_source_uid: str,
+) -> list[_SceneObject]:
+    obstacles = []
+    for config in _iter_generated_scene_object_configs(gym_config):
+        if not isinstance(config, Mapping):
+            continue
+        runtime_uid = str(config.get("uid", ""))
+        if not runtime_uid or runtime_uid in moved_runtime_uids:
+            continue
+        if runtime_uid in {"table", table_source_uid}:
+            continue
+        obstacles.append(
+            _SceneObject(
+                source_uid=runtime_uid,
+                source_role="background",
+                config=dict(config),
+            )
+        )
+    return obstacles
 
 
 def _normalize_anchor(value: Any) -> str:

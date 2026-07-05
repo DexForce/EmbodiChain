@@ -184,6 +184,25 @@ def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
 def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
     xy_tolerance = min(0.03, float(spec.spacing) * 0.35)
+    ordered_objects = [step.runtime_uid for step in spec.steps]
+    arrangement_axis = spec.steps[0].orientation_axis if spec.steps else "y"
+    terms.extend(
+        [
+            {
+                "type": "objects_collinear",
+                "objects": ordered_objects,
+                "axis": arrangement_axis,
+                "tolerance": xy_tolerance,
+            },
+            {
+                "type": "objects_ordered",
+                "objects": ordered_objects,
+                "axis": arrangement_axis,
+                "direction": "ascending",
+                "tolerance": xy_tolerance,
+            },
+        ]
+    )
     for step in spec.steps:
         terms.extend(
             [
@@ -554,6 +573,18 @@ def _validate_success_uids(
         required_keys = ("object",)
     elif success_type in {"object_xy_near", "object_near_xy"}:
         required_keys = ("object",)
+    elif success_type in {"objects_collinear", "objects_ordered"}:
+        objects = success.get("objects", success.get("object_uids", []))
+        if (
+            not isinstance(objects, Sequence)
+            or isinstance(objects, (str, bytes, Mapping))
+            or not objects
+        ):
+            raise ValueError(f"Success term {success_type!r} requires objects.")
+        for uid in objects:
+            if uid not in rigid_uids:
+                raise ValueError(f"Invalid success uid reference object={uid!r}.")
+        return
     elif success_type in {"object_not_fallen", "not_fallen"}:
         required_keys = ("object",)
     elif success_type in {"object_lifted", "object_height_above_initial"}:

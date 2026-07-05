@@ -76,6 +76,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec impor
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _is_stacking_task_description,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
+    _validate_success_uids,
+)
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
@@ -2855,15 +2858,15 @@ def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> 
     ]
     assert [step.color for step in spec.steps] == ["red", "green", "blue"]
     assert [step.slot_index for step in spec.steps] == [0, 1, 2]
-    assert [step.target_xy[1] for step in spec.steps] == sorted(
-        step.target_xy[1] for step in spec.steps
+    assert [step.target_xy[0] for step in spec.steps] == sorted(
+        step.target_xy[0] for step in spec.steps
     )
     assert [step.orientation_goal for step in spec.steps] == [
         "axis_align",
         "axis_align",
         "axis_align",
     ]
-    assert [step.orientation_axis for step in spec.steps] == ["y", "y", "y"]
+    assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x"]
 
 
 def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
@@ -2879,6 +2882,108 @@ def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
         [0.10, -0.20],
         [0.10, -0.12],
     ]
+
+
+def test_arrangement_line_slot_positions_support_world_x() -> None:
+    slots = _arrangement_line_slot_positions(
+        anchor_xy=[0.10, -0.20],
+        count=3,
+        spacing=0.08,
+        line_axis="world_x",
+    )
+
+    assert slots == [
+        [0.02, -0.20],
+        [0.10, -0.20],
+        [0.18, -0.20],
+    ]
+
+
+def test_arrangement_table_long_axis_resolves_from_table_bounds() -> None:
+    wide_slots = _arrangement_line_slot_positions(
+        anchor_xy=[0.0, 0.0],
+        count=3,
+        spacing=0.10,
+        line_axis="table_long_axis",
+        table_bounds=([-0.60, -0.20], [0.60, 0.20]),
+    )
+    tall_slots = _arrangement_line_slot_positions(
+        anchor_xy=[0.0, 0.0],
+        count=3,
+        spacing=0.10,
+        line_axis="table_long_axis",
+        table_bounds=([-0.20, -0.60], [0.20, 0.60]),
+    )
+    square_slots = _arrangement_line_slot_positions(
+        anchor_xy=[0.0, 0.0],
+        count=3,
+        spacing=0.10,
+        line_axis="table_long_axis",
+        table_bounds=([-0.50, -0.50], [0.50, 0.50]),
+    )
+
+    assert [slot[0] for slot in wide_slots] == [-0.10, 0.0, 0.10]
+    assert len({slot[1] for slot in wide_slots}) == 1
+    assert len({slot[0] for slot in tall_slots}) == 1
+    assert [slot[1] for slot in tall_slots] == [-0.10, 0.0, 0.10]
+    assert len({slot[0] for slot in square_slots}) == 1
+    assert [slot[1] for slot in square_slots] == [-0.10, 0.0, 0.10]
+
+
+def test_demo153_like_cans_can_reuse_moved_initial_positions(
+    tmp_path: Path,
+) -> None:
+    scene_objects = _write_narrow_four_can_arrangement_scene(tmp_path)
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+
+    spec = _apply_arrangement_task_response(
+        response={
+            "objects": ["can_1", "can_2", "can_3", "can_4"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "table_long_axis",
+            "task_prompt_summary": "Arrange four cans in a straight row.",
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=rigid_objects,
+        scene_dir=tmp_path,
+        task_description="将桌面上的罐头摆成一排",
+    )
+
+    target_x_values = [step.target_xy[0] for step in spec.steps]
+    target_y_values = [step.target_xy[1] for step in spec.steps]
+    assert target_x_values == sorted(target_x_values)
+    assert len({round(value, 6) for value in target_y_values}) == 1
+    assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x", "x"]
+
+
+def test_arrangement_static_unmoved_object_blocks_line_layout(
+    tmp_path: Path,
+) -> None:
+    scene_objects = _write_narrow_four_can_arrangement_scene(
+        tmp_path,
+        include_static_blocker=True,
+    )
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+
+    with pytest.raises(ValueError, match="collision-free one-line arrangement"):
+        _apply_arrangement_task_response(
+            response={
+                "objects": ["can_1", "can_2", "can_3", "can_4"],
+                "order_by": "explicit",
+                "order_direction": "given",
+                "anchor": "table_center",
+                "line_axis": "table_long_axis",
+                "task_prompt_summary": "Arrange four cans in a straight row.",
+            },
+            table_source_uid="table",
+            scene_objects=scene_objects,
+            rigid_objects=rigid_objects,
+            scene_dir=tmp_path,
+            task_description="将桌面上的罐头摆成一排",
+        )
 
 
 def test_task_router_routes_chinese_row_task_to_arrangement_config(
@@ -3005,7 +3110,7 @@ def test_task_description_generates_size_order_arrangement_config(
 
     assert _stable_summary(paths.summary) == {
         "mode": "arrangement_line",
-        "axis": "left_to_right",
+        "axis": "table_long_axis",
         "anchor": "table_center",
         "order_by": "size",
         "order_direction": "descending",
@@ -3020,7 +3125,7 @@ def test_task_description_generates_size_order_arrangement_config(
                 "active_arm": "right_arm",
                 "target_xy": paths.summary["placements"][0]["target_xy"],
                 "orientation_goal": "axis_align",
-                "orientation_axis": "y",
+                "orientation_axis": "x",
             },
             {
                 "object": "cube_1",
@@ -3029,7 +3134,7 @@ def test_task_description_generates_size_order_arrangement_config(
                 "active_arm": "left_arm",
                 "target_xy": paths.summary["placements"][1]["target_xy"],
                 "orientation_goal": "axis_align",
-                "orientation_axis": "y",
+                "orientation_axis": "x",
             },
             {
                 "object": "cube_3",
@@ -3038,7 +3143,7 @@ def test_task_description_generates_size_order_arrangement_config(
                 "active_arm": "left_arm",
                 "target_xy": paths.summary["placements"][2]["target_xy"],
                 "orientation_goal": "axis_align",
-                "orientation_axis": "y",
+                "orientation_axis": "x",
             },
         ],
     }
@@ -3048,8 +3153,8 @@ def test_task_description_generates_size_order_arrangement_config(
     target_y_values = [
         placement["target_xy"][1] for placement in paths.summary["placements"]
     ]
-    assert len({round(value, 6) for value in target_x_values}) == 1
-    assert target_y_values == sorted(target_y_values)
+    assert target_x_values == sorted(target_x_values)
+    assert len({round(value, 6) for value in target_y_values}) == 1
     assert paths.summary["spacing"] >= 0.07
     assert paths.summary["layout_clearance"] == pytest.approx(0.025)
     _assert_arrangement_slots_avoid_initial_objects(
@@ -3059,6 +3164,17 @@ def test_task_description_generates_size_order_arrangement_config(
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
+    ordered_objects = [
+        placement["object"] for placement in paths.summary["placements"]
+    ]
+    assert {
+        (term["type"], tuple(term["objects"]), term["axis"])
+        for term in success["terms"]
+        if term["type"] in {"objects_collinear", "objects_ordered"}
+    } == {
+        ("objects_collinear", tuple(ordered_objects), "x"),
+        ("objects_ordered", tuple(ordered_objects), "x"),
+    }
     xy_targets = {
         (term["object"], tuple(term["target_xy"]))
         for term in success["terms"]
@@ -3087,13 +3203,13 @@ def test_task_description_generates_size_order_arrangement_config(
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert task_prompt.count('"reference":"absolute"') >= 9
     assert task_prompt.count('"orientation_goal":"axis_align"') == 6
-    assert task_prompt.count('"orientation_axis":"y"') == 6
+    assert task_prompt.count('"orientation_axis":"x"') == 6
     assert task_prompt.count('"orientation_goal":"preserve"') == 3
     assert task_prompt.count('"target_pose":{"reference":"relative"') == 3
     assert "Collision-aware line origin xy" in task_prompt
     assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
     assert atom_actions.count('"orientation_goal":"axis_align"') == 6
-    assert atom_actions.count('"orientation_axis":"y"') == 6
+    assert atom_actions.count('"orientation_axis":"x"') == 6
     assert atom_actions.count('"atomic_action_class":"Place"') == 3
 
 
@@ -3134,13 +3250,13 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
     assert summary["layout_clearance"] == pytest.approx(0.025)
     assert all(
         placement["orientation_goal"] == "axis_align"
-        and placement["orientation_axis"] == "y"
+        and placement["orientation_axis"] == "x"
         for placement in summary["placements"]
     )
     x_values = [placement["target_xy"][0] for placement in summary["placements"]]
     y_values = [placement["target_xy"][1] for placement in summary["placements"]]
-    assert len({round(value, 6) for value in x_values}) == 1
-    assert y_values == sorted(y_values)
+    assert x_values == sorted(x_values)
+    assert len({round(value, 6) for value in y_values}) == 1
     _assert_arrangement_slots_avoid_initial_objects(summary, gym_config)
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
@@ -3268,7 +3384,12 @@ def test_arrangement_recomputes_targets_after_scene_rotation_and_scale(
     table_center = _mesh_config_world_xy_center(table_config)
     table_bounds = _mesh_config_world_xy_bounds(table_config)
     assert table_center == pytest.approx([0.192, 0.0])
+    assert paths.summary["axis"] == "table_long_axis"
     assert paths.summary["line_origin_xy"] == pytest.approx(table_center)
+    assert all(
+        placement["orientation_axis"] == "y"
+        for placement in paths.summary["placements"]
+    )
     assert table_bounds is not None
     table_min, table_max = table_bounds
     for placement in paths.summary["placements"]:
@@ -3276,9 +3397,9 @@ def test_arrangement_recomputes_targets_after_scene_rotation_and_scale(
         assert table_min[0] < target_xy[0] < table_max[0]
         assert table_min[1] < target_xy[1] < table_max[1]
 
-    release_positions = _arrangement_release_positions_from_prompt(
-        paths.task_prompt.read_text(encoding="utf-8")
-    )
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    assert "resolved to world `y`" in task_prompt
+    release_positions = _arrangement_release_positions_from_prompt(task_prompt)
     assert len(release_positions) == len(paths.summary["placements"])
     rigid_by_uid = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     table_top_z = _mesh_config_world_z_bounds(table_config)[1]
@@ -4150,6 +4271,119 @@ def test_object_on_object_success_predicate() -> None:
     assert bool(success.item()) is True
 
 
+def test_objects_collinear_success_predicate_accepts_straight_row() -> None:
+    env = _FakeEnv(
+        {
+            "can_1": [-0.10, 0.002, 0.10],
+            "can_2": [0.00, -0.001, 0.10],
+            "can_3": [0.10, 0.003, 0.10],
+        }
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "objects_collinear",
+            "objects": ["can_1", "can_2", "can_3"],
+            "axis": "x",
+            "tolerance": 0.01,
+        },
+    )
+
+    assert bool(success.item()) is True
+
+
+def test_objects_collinear_success_predicate_rejects_bent_row() -> None:
+    env = _FakeEnv(
+        {
+            "can_1": [-0.10, 0.00, 0.10],
+            "can_2": [0.00, 0.04, 0.10],
+            "can_3": [0.10, 0.00, 0.10],
+        }
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "objects_collinear",
+            "objects": ["can_1", "can_2", "can_3"],
+            "axis": "x",
+            "tolerance": 0.01,
+        },
+    )
+
+    assert bool(success.item()) is False
+
+
+def test_objects_ordered_success_predicate_accepts_monotonic_row() -> None:
+    env = _FakeEnv(
+        {
+            "can_1": [-0.10, 0.00, 0.10],
+            "can_2": [0.00, 0.00, 0.10],
+            "can_3": [0.10, 0.00, 0.10],
+        }
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "objects_ordered",
+            "objects": ["can_1", "can_2", "can_3"],
+            "axis": "x",
+            "direction": "ascending",
+            "tolerance": 0.01,
+        },
+    )
+
+    assert bool(success.item()) is True
+
+
+def test_objects_ordered_success_predicate_rejects_inverted_row() -> None:
+    env = _FakeEnv(
+        {
+            "can_1": [-0.10, 0.00, 0.10],
+            "can_2": [0.10, 0.00, 0.10],
+            "can_3": [0.00, 0.00, 0.10],
+        }
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "objects_ordered",
+            "objects": ["can_1", "can_2", "can_3"],
+            "axis": "x",
+            "direction": "ascending",
+            "tolerance": 0.01,
+        },
+    )
+
+    assert bool(success.item()) is False
+
+
+def test_success_uid_validation_checks_object_lists() -> None:
+    _validate_success_uids(
+        {
+            "type": "objects_collinear",
+            "objects": ["can_1", "can_2"],
+            "axis": "x",
+        },
+        rigid_uids={"can_1", "can_2"},
+        scene_uids={"table", "can_1", "can_2"},
+    )
+
+    with pytest.raises(ValueError, match="missing_can"):
+        _validate_success_uids(
+            {
+                "type": "objects_ordered",
+                "objects": ["can_1", "missing_can"],
+                "axis": "x",
+            },
+            rigid_uids={"can_1", "can_2"},
+            scene_uids={"table", "can_1", "can_2"},
+        )
+
+
 def test_object_held_by_gripper_success_predicate() -> None:
     env = _FakeEnv(
         {
@@ -4393,6 +4627,64 @@ def _write_arrangement_project(project_dir: Path) -> None:
         json.dumps(gym_config, indent=2),
         encoding="utf-8",
     )
+
+
+def _write_narrow_four_can_arrangement_scene(
+    scene_dir: Path,
+    *,
+    include_static_blocker: bool = False,
+) -> list:
+    _write_minimal_glb(
+        scene_dir / "mesh_assets/table/table_0.glb",
+        [(-0.18, -0.08, 0.0), (0.18, -0.08, 0.0), (0.0, 0.08, 0.0)],
+    )
+    can_vertices = [(-0.02, -0.02, 0.0), (0.02, -0.02, 0.0), (0.0, 0.02, 0.08)]
+    can_slot_x = [-0.105, -0.035, 0.035, 0.105]
+    scene_objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid="table",
+            source_role="background",
+            config=_mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            ),
+        )
+    ]
+    for index, x_value in enumerate(can_slot_x, start=1):
+        uid = f"can_{index}"
+        _write_minimal_glb(scene_dir / f"mesh_assets/can/{uid}.glb", can_vertices)
+        scene_objects.append(
+            action_agent_config_generation._SceneObject(
+                source_uid=uid,
+                source_role="rigid_object",
+                config=_mesh_object(
+                    uid,
+                    f"mesh_assets/can/{uid}.glb",
+                    [x_value, 0.0, 0.76],
+                    [0.0, 0.0, 0.0],
+                ),
+            )
+        )
+    if include_static_blocker:
+        _write_minimal_glb(
+            scene_dir / "mesh_assets/blocker/blocker.glb",
+            can_vertices,
+        )
+        scene_objects.append(
+            action_agent_config_generation._SceneObject(
+                source_uid="blocker",
+                source_role="rigid_object",
+                config=_mesh_object(
+                    "blocker",
+                    "mesh_assets/blocker/blocker.glb",
+                    [0.0, 0.0, 0.76],
+                    [0.0, 0.0, 0.0],
+                ),
+            )
+        )
+    return scene_objects
 
 
 def _write_arrangement_project_with_count(

@@ -2574,9 +2574,13 @@ def _resolve_object_orientation(
             target_pose_spec,
             env.robot.device,
         )
-        current_direction = current_rotation @ long_axis.to(
-            device=env.robot.device, dtype=torch.float32
+        current_direction = _axis_align_current_direction(
+            current_rotation,
+            local_axes,
+            env.robot.device,
         )
+        if current_direction is None:
+            return current_rotation
         return _yaw_aligned_rotation(
             current_rotation, current_direction, target_direction
         )
@@ -2696,6 +2700,32 @@ def _axis_align_target_direction(
     raise ValueError(
         "axis_align without align_to requires orientation_axis 'x' or 'y'."
     )
+
+
+def _axis_align_current_direction(
+    current_rotation: torch.Tensor,
+    local_axes: torch.Tensor,
+    device,
+) -> torch.Tensor | None:
+    horizontal_epsilon = 1e-4
+    long_axis = local_axes[:, 0].to(device=device, dtype=torch.float32)
+    long_direction = current_rotation @ long_axis
+    long_horizontal = long_direction.clone()
+    long_horizontal[2] = 0.0
+    if float(torch.linalg.norm(long_horizontal)) >= horizontal_epsilon:
+        return long_direction
+
+    candidates: list[tuple[float, torch.Tensor]] = []
+    for index in range(local_axes.shape[1]):
+        local_axis = local_axes[:, index].to(device=device, dtype=torch.float32)
+        direction = current_rotation @ local_axis
+        horizontal = direction.clone()
+        horizontal[2] = 0.0
+        candidates.append((float(torch.linalg.norm(horizontal)), direction))
+    score, direction = max(candidates, key=lambda item: item[0])
+    if score < horizontal_epsilon:
+        return None
+    return direction
 
 
 def _reference_object_axis_direction(

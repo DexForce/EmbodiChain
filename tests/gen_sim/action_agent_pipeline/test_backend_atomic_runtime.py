@@ -1621,6 +1621,42 @@ def test_axis_align_world_axes_aligns_y_axis() -> None:
     )
 
 
+def test_axis_align_upright_object_uses_horizontal_fallback_axis() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 37.0, mesh_extents=(0.05, 0.05, 0.30))
+
+    target = atom_actions._resolve_held_object_pose_target(
+        env,
+        atom_actions.AtomicActionSpec(
+            atomic_action_class="MoveHeldObject",
+            robot_name="left_arm",
+            control="arm",
+            target_object_pose={
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.1],
+                "frame": "world",
+                "orientation_goal": "axis_align",
+                "orientation_axis": "x",
+            },
+            cfg={},
+        ),
+        state,
+    )
+    target_axis = torch.tensor([1.0, 0.0, 0.0])
+    horizontal_alignments = []
+    for column_index in range(3):
+        direction = target[:3, column_index].clone()
+        direction[2] = 0.0
+        norm = torch.linalg.norm(direction)
+        if float(norm) >= 1e-6:
+            horizontal_alignments.append(
+                abs(float(torch.dot(direction / norm, target_axis)))
+            )
+
+    assert torch.isfinite(target).all()
+    assert max(horizontal_alignments) == pytest.approx(1.0)
+
+
 def test_axis_align_reference_object_long_and_short_axes() -> None:
     env = _FakeEnv()
     state = _held_state_with_yaw(env, 10.0)

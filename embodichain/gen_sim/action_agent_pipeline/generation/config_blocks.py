@@ -473,7 +473,7 @@ def _arrangement_dataset_instruction(spec: _ArrangementLineSpec) -> str:
     ordered = ", ".join(step.runtime_uid for step in spec.steps)
     return (
         "Move the selected objects to the table center and arrange them "
-        f"left-to-right as: {ordered}."
+        f"in one straight line as: {ordered}."
     )
 
 

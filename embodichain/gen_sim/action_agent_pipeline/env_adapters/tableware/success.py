@@ -75,6 +75,10 @@ def _evaluate_spec(
         return _object_axis_offset_near(env, spec)
     if term_type in {"object_axis_near", "object_coordinate_near"}:
         return _object_axis_near(env, spec)
+    if term_type == "objects_collinear":
+        return _objects_collinear(env, spec)
+    if term_type == "objects_ordered":
+        return _objects_ordered(env, spec)
     if term_type in {"object_lifted", "object_height_above_initial"}:
         return _object_lifted(env, spec)
     if term_type in {"object_held_by_gripper", "object_gripper_near"}:
@@ -117,6 +121,21 @@ def _tensor(value: Any, *, dtype: torch.dtype, device: torch.device) -> torch.Te
 
 def _object_name(spec: Mapping[str, Any]) -> str:
     return str(spec.get("object", spec.get("object_uid")))
+
+
+def _object_names(spec: Mapping[str, Any]) -> list[str]:
+    objects = spec.get("objects", spec.get("object_uids"))
+    if (
+        not isinstance(objects, Sequence)
+        or isinstance(objects, (str, bytes, Mapping))
+        or len(objects) == 0
+    ):
+        raise ValueError("Success term requires a non-empty objects list.")
+    return [str(obj) for obj in objects]
+
+
+def _object_positions(env, object_names: Sequence[str]) -> torch.Tensor:
+    return torch.stack([_position(env, uid) for uid in object_names], dim=1)
 
 
 def _object_position_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
@@ -222,6 +241,43 @@ def _object_axis_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
     target_value = float(spec.get("target", spec.get("value")))
     return torch.abs(object_position[:, axis] - target_value) <= float(
         spec.get("tolerance", 0.02)
+    )
+
+
+def _objects_collinear(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    object_names = _object_names(spec)
+    if len(object_names) <= 1:
+        return _constant(env, True)
+    positions = _object_positions(env, object_names)
+    line_axis = _axis_index(str(spec.get("axis", "y")))
+    if line_axis not in {0, 1}:
+        raise ValueError("objects_collinear axis must be 'x' or 'y'.")
+    perpendicular_axis = 1 - line_axis
+    perpendicular_values = positions[:, :, perpendicular_axis]
+    spread = perpendicular_values.max(dim=1).values - perpendicular_values.min(
+        dim=1
+    ).values
+    return spread <= float(spec.get("tolerance", 0.02))
+
+
+def _objects_ordered(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    object_names = _object_names(spec)
+    if len(object_names) <= 1:
+        return _constant(env, True)
+    positions = _object_positions(env, object_names)
+    line_axis = _axis_index(str(spec.get("axis", "y")))
+    if line_axis not in {0, 1}:
+        raise ValueError("objects_ordered axis must be 'x' or 'y'.")
+    direction = str(spec.get("direction", "ascending")).lower()
+    values = positions[:, :, line_axis]
+    diffs = values[:, 1:] - values[:, :-1]
+    tolerance = float(spec.get("tolerance", 0.02))
+    if direction == "ascending":
+        return torch.all(diffs >= -tolerance, dim=1)
+    if direction == "descending":
+        return torch.all(diffs <= tolerance, dim=1)
+    raise ValueError(
+        "objects_ordered direction must be 'ascending' or 'descending'."
     )
 
 

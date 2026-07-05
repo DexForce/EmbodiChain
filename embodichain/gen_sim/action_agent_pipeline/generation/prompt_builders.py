@@ -190,6 +190,7 @@ def make_arrangement_task_prompt(
     final_order = ", ".join(
         f"`{step.runtime_uid}` at slot {step.slot_index}" for step in spec.steps
     )
+    world_axis = _arrangement_world_axis(spec)
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
 
@@ -200,8 +201,9 @@ Original simple task description:
 {spec.task_description}
 
 Arrangement plan:
-- Layout axis: `{spec.axis}`. Slot 0 is the robot-view leftmost slot, and later
-  slots move monotonically toward robot-view right.
+- Layout axis: `{spec.axis}`, resolved to world `{world_axis}`. Slot 0 is the
+  negative end of the line, and later slots move monotonically toward positive
+  `{world_axis}`.
 - Anchor: `{spec.anchor}` in the exported {project_name} environment.
 - Collision-aware line origin xy: `{list(spec.line_origin_xy)}`.
 - Slot spacing: `{float(spec.spacing):.6g}` with clearance `{float(spec.layout_clearance):.6g}`.
@@ -225,6 +227,12 @@ with their principal axes aligned to the configured arrangement axis. Use the
 exact absolute target_object_pose JSON specs shown above; do not rewrite slot
 placement as object-referenced poses.
 """
+
+
+def _arrangement_world_axis(spec: _ArrangementSpecLike) -> str:
+    if not spec.steps:
+        return "y"
+    return spec.steps[0].orientation_axis
 
 
 def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> str:
