@@ -846,12 +846,12 @@ class SimulationManager:
 
         # Validation warnings for type-specific constraints
         if light_type_str == "mesh" and not cfg.mesh_path:
-            logger.warning(
+            logger.log_warning(
                 f"Mesh light '{uid}' has no mesh_path set. "
                 f"Use set_mesh() to assign a MeshObject."
             )
         if light_type_str == "rect" and (cfg.rect_width <= 0 or cfg.rect_height <= 0):
-            logger.warning(
+            logger.log_warning(
                 f"Rect light '{uid}' has zero or negative dimensions "
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )

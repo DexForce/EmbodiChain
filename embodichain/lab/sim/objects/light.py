@@ -108,7 +108,7 @@ class Light(BatchEntity):
                 - For shape (M, 3), M must equal num_instances, applies per-instance.
         """
         if self.cfg.light_type not in ("sun", "direction", "spot", "rect", "mesh"):
-            logger.warning(
+            logger.log_warning(
                 f"set_direction not applicable to light type "
                 f"'{self.cfg.light_type}', ignoring."
             )
@@ -133,7 +133,7 @@ class Light(BatchEntity):
             env_ids (Sequence[int] | None): Indices of instances to set.
         """
         if self.cfg.light_type != "spot":
-            logger.warning(
+            logger.log_warning(
                 f"set_spot_angle not applicable to light type "
                 f"'{self.cfg.light_type}', ignoring."
             )
@@ -210,7 +210,7 @@ class Light(BatchEntity):
             env_ids (Sequence[int] | None): Indices of instances to set.
         """
         if self.cfg.light_type != "rect":
-            logger.warning(
+            logger.log_warning(
                 f"set_rect_wh not applicable to light type "
                 f"'{self.cfg.light_type}', ignoring."
             )
@@ -282,7 +282,7 @@ class Light(BatchEntity):
                 applies to all instances.
         """
         if self.cfg.light_type != "mesh":
-            logger.warning(
+            logger.log_warning(
                 f"set_mesh not applicable to light type "
                 f"'{self.cfg.light_type}', ignoring."
             )
@@ -372,7 +372,7 @@ class Light(BatchEntity):
             to_matrix (bool): Interpret `pose` as full 4x4 matrix if True, else as vector(s).
         """
         if self.cfg.light_type == "direction":
-            logger.warning(
+            logger.log_warning(
                 "set_local_pose not applicable to 'direction' light type "
                 "(infinite distance, direction only). Use set_direction() instead."
             )
