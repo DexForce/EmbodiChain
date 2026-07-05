@@ -1596,9 +1596,9 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     assert scaled_body_meshes["fork"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.31, 0.32, 0.33]]
     )
-    assert _mesh_config_world_z_bounds(scaled_rigid_objects["cup"])[
-        0
-    ] == pytest.approx(_mesh_config_world_z_bounds(rigid_objects["cup"])[0])
+    assert _mesh_config_world_z_bounds(scaled_rigid_objects["cup"])[0] == pytest.approx(
+        _mesh_config_world_z_bounds(rigid_objects["cup"])[0]
+    )
     assert _mesh_config_world_z_bounds(scaled_background_objects["pad"])[
         0
     ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["pad"])[0])
@@ -2961,6 +2961,36 @@ def test_demo153_like_cans_can_reuse_moved_initial_positions(
     assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x", "x"]
 
 
+def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
+    tmp_path: Path,
+) -> None:
+    scene_objects = _write_demo153_like_can_arrangement_scene(tmp_path)
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+
+    spec = _apply_arrangement_task_response(
+        response={
+            "objects": ["can_1", "can_2", "can_3", "can_4"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "table_long_axis",
+            "task_prompt_summary": "Arrange four cans in a straight row.",
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=rigid_objects,
+        scene_dir=tmp_path,
+        task_description="用机械臂将桌面上的所有罐头从左往右摆成一排",
+    )
+
+    assert spec.line_origin_xy == pytest.approx([0.0, 0.0])
+    assert [step.orientation_axis for step in spec.steps] == ["y", "y", "y", "y"]
+    assert len({round(step.target_xy[0], 6) for step in spec.steps}) == 1
+    assert spec.steps[0].target_xy[0] == pytest.approx(0.0)
+    for step in spec.steps:
+        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
+
+
 def test_arrangement_static_unmoved_object_blocks_line_layout(
     tmp_path: Path,
 ) -> None:
@@ -3166,9 +3196,7 @@ def test_task_description_generates_size_order_arrangement_config(
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
-    ordered_objects = [
-        placement["object"] for placement in paths.summary["placements"]
-    ]
+    ordered_objects = [placement["object"] for placement in paths.summary["placements"]]
     assert {
         (term["type"], tuple(term["objects"]), term["axis"])
         for term in success["terms"]
@@ -4688,6 +4716,48 @@ def _write_narrow_four_can_arrangement_scene(
                     "blocker",
                     "mesh_assets/blocker/blocker.glb",
                     [0.0, 0.0, 0.76],
+                    [0.0, 0.0, 0.0],
+                ),
+            )
+        )
+    return scene_objects
+
+
+def _write_demo153_like_can_arrangement_scene(scene_dir: Path) -> list:
+    _write_minimal_glb(
+        scene_dir / "mesh_assets/table/table_0.glb",
+        [(-0.36, -0.59, 0.0), (0.36, -0.59, 0.0), (0.0, 0.59, 0.0)],
+    )
+    can_vertices = [(-0.032, -0.032, 0.0), (0.032, -0.032, 0.0), (0.0, 0.032, 0.16)]
+    init_xy = [
+        (0.07173, 0.276622),
+        (-0.093168, 0.132612),
+        (0.091263, -0.086257),
+        (-0.024065, -0.277453),
+    ]
+    scene_objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid="table",
+            source_role="background",
+            config=_mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            ),
+        )
+    ]
+    for index, (x_value, y_value) in enumerate(init_xy, start=1):
+        uid = f"can_{index}"
+        _write_minimal_glb(scene_dir / f"mesh_assets/can/{uid}.glb", can_vertices)
+        scene_objects.append(
+            action_agent_config_generation._SceneObject(
+                source_uid=uid,
+                source_role="rigid_object",
+                config=_mesh_object(
+                    uid,
+                    f"mesh_assets/can/{uid}.glb",
+                    [x_value, y_value, 0.76],
                     [0.0, 0.0, 0.0],
                 ),
             )

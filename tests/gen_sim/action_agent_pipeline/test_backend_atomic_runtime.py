@@ -1714,6 +1714,32 @@ def test_surface_z_policy_rejects_missing_support_object() -> None:
         )
 
 
+def test_move_held_object_target_summary_includes_pose_details() -> None:
+    summary = atom_actions._target_summary(
+        atom_actions.AtomicActionSpec(
+            atomic_action_class="MoveHeldObject",
+            robot_name="left_arm",
+            control="arm",
+            target_object_pose={
+                "reference": "absolute",
+                "position": [0.2, -0.045, 1.02],
+                "orientation_goal": "axis_align",
+                "orientation_axis": "y",
+                "z_policy": "object_on_surface",
+                "support": "table",
+            },
+            cfg={},
+        )
+    )
+
+    assert "target_object_pose:absolute" in summary
+    assert "position=[0.2, -0.045, 1.02]" in summary
+    assert "orientation_goal=axis_align" in summary
+    assert "orientation_axis=y" in summary
+    assert "z_policy=object_on_surface" in summary
+    assert "support=table" in summary
+
+
 def test_axis_align_world_axes_preserves_roll_pitch_and_aligns_x_axis() -> None:
     env = _FakeEnv()
     state = _held_state_with_yaw(env, 37.0)

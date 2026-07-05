@@ -3119,7 +3119,33 @@ def _target_summary(spec: AtomicActionSpec) -> str:
         return f"target_pose:{spec.target_pose.get('reference')}"
     if spec.target_qpos:
         return f"target_qpos:{spec.target_qpos.get('source')}"
+    if spec.target_object_pose:
+        return _target_object_pose_summary(spec.target_object_pose)
     return "target:none"
+
+
+def _target_object_pose_summary(target_object_pose: Mapping[str, Any]) -> str:
+    reference = target_object_pose.get("reference")
+    parts = [f"target_object_pose:{reference}"]
+    if reference == "absolute":
+        parts.append(f"position={target_object_pose.get('position')}")
+    elif reference == "object":
+        parts.append(f"obj_name={target_object_pose.get('obj_name')}")
+        parts.append(f"offset={target_object_pose.get('offset')}")
+    elif reference == "relative":
+        parts.append(f"offset={target_object_pose.get('offset')}")
+        parts.append(f"frame={target_object_pose.get('frame', 'world')}")
+    for key in (
+        "orientation_goal",
+        "orientation_axis",
+        "align_to",
+        "z_policy",
+        "support",
+    ):
+        value = target_object_pose.get(key)
+        if value is not None:
+            parts.append(f"{key}={value}")
+    return ", ".join(parts)
 
 
 def _build_object_semantics(

@@ -77,12 +77,13 @@ _ARRANGEMENT_KEYWORDS = (
 )
 _DEFAULT_RELEASE_Z = 0.04
 _DEFAULT_STAGING_Z_DELTA = 0.10
-_POSE_SENSITIVE_STAGING_Z_DELTA = 0.25
+_POSE_SENSITIVE_STAGING_Z_DELTA = 0.15
 _SLOT_MARGIN = 0.025
 _MIN_SLOT_SPACING = 0.07
 _LAYOUT_CLEARANCE = 0.025
 _ROW_SEARCH_STEP = 0.025
 _ROW_SEARCH_RADIUS = 0.25
+_MOVABLE_INITIAL_OVERLAP_SCORE_WEIGHT = 0.01
 _SUPPORTED_ORDER_BY = {"size", "color", "explicit"}
 _SUPPORTED_ORDER_DIRECTIONS = {"ascending", "descending", "given"}
 _SUPPORTED_AXES = {"table_long_axis", "world_x", "world_y"}
@@ -328,8 +329,9 @@ def _apply_arrangement_task_response(
                 source_uid=source_uid,
                 runtime_uid=runtime_uids[source_uid],
                 slot_index=slot_index,
-                active_side=_arm_side_for_position(
-                    _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))
+                active_side=_arrangement_arm_side_for_motion(
+                    _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
+                    target_xy,
                 ),
                 target_xy=[
                     round(float(target_xy[0]), 6),
@@ -432,52 +434,57 @@ def _arrangement_collision_aware_line_slots(
         for obj in hard_obstacle_objects
     ]
 
-    for allow_movable_initial_overlap in (False, True):
-        for perpendicular_offset in _row_search_offsets(
-            _ROW_SEARCH_RADIUS,
-            _ROW_SEARCH_STEP,
+    best_candidate: tuple[float, float, list[list[float]], list[float]] | None = None
+    for perpendicular_offset in _row_search_offsets(
+        _ROW_SEARCH_RADIUS,
+        _ROW_SEARCH_STEP,
+    ):
+        origin = _line_origin_with_perpendicular_offset(
+            anchor_xy,
+            perpendicular_offset,
+            concrete_axis,
+        )
+        slots = _arrangement_line_slot_positions(
+            anchor_xy=origin,
+            count=count,
+            spacing=spacing,
+            line_axis=concrete_axis,
+            table_bounds=table_bounds,
+        )
+        slot_bounds = [
+            _slot_xy_bounds(slot, max_half_extent=footprint.half_extent)
+            for slot, footprint in zip(slots, object_footprints)
+        ]
+        if not _slot_bounds_within_table(
+            slot_bounds,
+            table_min=table_min,
+            table_max=table_max,
+            clearance=clearance,
         ):
-            origin = _line_origin_with_perpendicular_offset(
-                anchor_xy,
-                perpendicular_offset,
-                concrete_axis,
-            )
-            slots = _arrangement_line_slot_positions(
-                anchor_xy=origin,
-                count=count,
-                spacing=spacing,
-                line_axis=concrete_axis,
-                table_bounds=table_bounds,
-            )
-            slot_bounds = [
-                _slot_xy_bounds(slot, max_half_extent=footprint.half_extent)
-                for slot, footprint in zip(slots, object_footprints)
-            ]
-            if not _slot_bounds_within_table(
-                slot_bounds,
-                table_min=table_min,
-                table_max=table_max,
-                clearance=clearance,
-            ):
-                continue
-            if _slot_bounds_overlap_initial_objects(
-                slot_bounds,
-                hard_obstacle_bounds,
-                clearance=clearance,
-                ignore_self_initial_overlap=False,
-            ):
-                continue
-            if (
-                not allow_movable_initial_overlap
-                and _slot_bounds_overlap_initial_objects(
-                    slot_bounds,
-                    init_bounds,
-                    clearance=clearance,
-                    ignore_self_initial_overlap=ignore_self_initial_overlap,
-                )
-            ):
-                continue
-            return slots, origin
+            continue
+        if _slot_bounds_overlap_initial_objects(
+            slot_bounds,
+            hard_obstacle_bounds,
+            clearance=clearance,
+            ignore_self_initial_overlap=False,
+        ):
+            continue
+        movable_overlap_score = _slot_bounds_initial_overlap_score(
+            slot_bounds,
+            init_bounds,
+            clearance=clearance,
+            ignore_self_initial_overlap=ignore_self_initial_overlap,
+        )
+        score = _arrangement_line_candidate_score(
+            perpendicular_offset=perpendicular_offset,
+            movable_overlap_score=movable_overlap_score,
+        )
+        candidate = (score, abs(float(perpendicular_offset)), slots, origin)
+        if best_candidate is None or candidate[:2] < best_candidate[:2]:
+            best_candidate = candidate
+
+    if best_candidate is not None:
+        return best_candidate[2], best_candidate[3]
 
     raise ValueError(
         "Unable to generate a collision-free one-line arrangement near the table "
@@ -501,6 +508,33 @@ def _slot_bounds_overlap_initial_objects(
             if _xy_bounds_overlap(slot_bound, init_bound, clearance=clearance):
                 return True
     return False
+
+
+def _slot_bounds_initial_overlap_score(
+    slot_bounds: Sequence[tuple[list[float], list[float]]],
+    init_bounds: Sequence[tuple[list[float], list[float]]],
+    *,
+    clearance: float,
+    ignore_self_initial_overlap: bool,
+) -> float:
+    overlap_count = 0
+    for slot_index, slot_bound in enumerate(slot_bounds):
+        for init_index, init_bound in enumerate(init_bounds):
+            if ignore_self_initial_overlap and slot_index == init_index:
+                continue
+            if _xy_bounds_overlap(slot_bound, init_bound, clearance=clearance):
+                overlap_count += 1
+    return float(overlap_count)
+
+
+def _arrangement_line_candidate_score(
+    *,
+    perpendicular_offset: float,
+    movable_overlap_score: float,
+) -> float:
+    return abs(float(perpendicular_offset)) + (
+        _MOVABLE_INITIAL_OVERLAP_SCORE_WEIGHT * float(movable_overlap_score)
+    )
 
 
 def _row_search_offsets(radius: float, step: float) -> list[float]:
@@ -691,8 +725,9 @@ def _with_arrangement_generated_pose_targets(
         steps.append(
             replace(
                 step,
-                active_side=_arm_side_for_position(
-                    _clean_vector3(config.get("init_pos", [0.0, 0.0, 0.0]))
+                active_side=_arrangement_arm_side_for_motion(
+                    _clean_vector3(config.get("init_pos", [0.0, 0.0, 0.0])),
+                    target_xy,
                 ),
                 target_xy=[
                     round(float(target_xy[0]), 6),
@@ -820,6 +855,18 @@ def _arrangement_staging_z_delta_for_goal(orientation_goal: str) -> float:
     if orientation_goal != "preserve":
         return _POSE_SENSITIVE_STAGING_Z_DELTA
     return _DEFAULT_STAGING_Z_DELTA
+
+
+def _arrangement_arm_side_for_motion(
+    init_position: Sequence[float],
+    target_xy: Sequence[float],
+) -> str:
+    motion_midpoint = [
+        0.5 * (float(init_position[0]) + float(target_xy[0])),
+        0.5 * (float(init_position[1]) + float(target_xy[1])),
+        float(init_position[2]) if len(init_position) >= 3 else 0.0,
+    ]
+    return _arm_side_for_position(motion_midpoint)
 
 
 def _resolve_arrangement_object_uids(
