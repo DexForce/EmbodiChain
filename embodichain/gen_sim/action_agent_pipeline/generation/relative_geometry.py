@@ -243,7 +243,7 @@ def _with_coordinated_side_release_height_offsets(
     spec: _RelativePlacementSpec,
     gym_config: Mapping[str, Any],
 ) -> _RelativePlacementSpec:
-    if spec.intent != "coordinated_pickment":
+    if spec.intent not in {"place_relative", "coordinated_pickment"}:
         return spec
     placements = tuple(
         _with_coordinated_side_release_height_offset(placement, gym_config)

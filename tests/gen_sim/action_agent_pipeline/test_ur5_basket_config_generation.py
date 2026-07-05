@@ -860,11 +860,13 @@ def test_task_description_generates_relative_left_of_config(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     assert "Move apple_2 to the left of basket_3." in task_prompt
     assert (
-        "Generate one deterministic nominal graph with exactly 4 nominal edges"
+        "Generate one deterministic nominal graph with exactly 6 nominal edges"
         in task_prompt
     )
     assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in task_prompt
+    assert '"offset":[0.0,0.16,0.01]' in task_prompt
     assert '"atomic_action_class":"Place","robot_name":"right_arm"' in task_prompt
+    assert '"target_pose":{"reference":"relative","offset":[0.0,0.0,0.0]' in task_prompt
     assert '"obj_name":"apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
     assert "Generate exactly 10 nominal edges" not in task_prompt
@@ -875,7 +877,7 @@ def test_task_description_generates_relative_left_of_config(
         "reference_object": "wicker_basket",
         "relation": "left_of",
         "active_arm": "right_arm",
-        "release_offset": [0.0, 0.16, 0.12],
+        "release_offset": [0.0, 0.16, 0.01],
     }
 
 
@@ -936,8 +938,8 @@ def test_task_description_generates_relative_front_of_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert '"offset":[0.16,0.0,0.22]' in task_prompt
-    assert '"offset":[0.16,0.0,0.22]' in atom_actions
+    assert '"offset":[0.16,0.0,0.1]' in task_prompt
+    assert '"offset":[0.16,0.0,0.1]' in atom_actions
 
     assert _stable_summary(paths.summary) == {
         "mode": "object_manipulation",
@@ -945,7 +947,7 @@ def test_task_description_generates_relative_front_of_config(
         "reference_object": "apple_2",
         "relation": "front_of",
         "active_arm": "right_arm",
-        "release_offset": [0.16, 0.0, 0.12],
+        "release_offset": [0.16, 0.0, 0.0],
     }
 
 
@@ -1225,8 +1227,8 @@ def test_task_description_generates_relative_front_right_config(
     assert ("y", -0.16) in axis_terms
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert '"offset":[0.16,-0.16,0.12]' in task_prompt
-    assert _stable_summary(paths.summary)["release_offset"] == [0.16, -0.16, 0.12]
+    assert '"offset":[0.16,-0.16,0.01]' in task_prompt
+    assert _stable_summary(paths.summary)["release_offset"] == [0.16, -0.16, 0.01]
 
 
 def test_side_relation_offsets_use_robot_view_front_back_convention() -> None:
@@ -2562,14 +2564,14 @@ def test_task_description_generates_dual_arm_relative_config(
                 "reference_object": "wicker_basket",
                 "relation": "left_of",
                 "active_arm": "left_arm",
-                "release_offset": [0.0, 0.16, 0.12],
+                "release_offset": [0.0, 0.16, 0.01],
             },
             {
                 "moved_object": "apple_1",
                 "reference_object": "wicker_basket",
                 "relation": "right_of",
                 "active_arm": "right_arm",
-                "release_offset": [0.0, -0.16, 0.12],
+                "release_offset": [0.0, -0.16, 0.01],
             },
         ],
     }
@@ -2577,7 +2579,7 @@ def test_task_description_generates_dual_arm_relative_config(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     basic_background = paths.basic_background.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 6 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 10 nominal edges" in (
         task_prompt
     )
     assert (
@@ -2592,8 +2594,11 @@ def test_task_description_generates_dual_arm_relative_config(
         '"robot_name":"right_arm","control":"hand","target_qpos":{"source":"gripper_state","state":"close"}'
         in task_prompt
     )
+    assert '"offset":[0.0,0.16,0.01]' in task_prompt
+    assert '"offset":[0.0,-0.16,0.01]' in task_prompt
     assert '"atomic_action_class":"Place","robot_name":"left_arm"' in task_prompt
     assert '"atomic_action_class":"Place","robot_name":"right_arm"' in task_prompt
+    assert '"target_pose":{"reference":"relative","offset":[0.0,0.0,0.0]' in task_prompt
     assert "The inactive arm must remain null" not in task_prompt
     assert "Both arms participate" in basic_background
     assert "left_arm moves `apple_2`" in basic_background
@@ -3681,14 +3686,26 @@ def test_dual_inside_same_container_uses_container_long_axis_slots(
         assert '"offset":[-0.04,0.0,0.22]' in text
         assert '"offset":[0.04,0.0,0.22]' in text
         assert (
+            '"atomic_action_class":"MoveHeldObject","robot_name":"left_arm",'
+            '"control":"arm","target_object_pose":{"reference":"object",'
+            '"obj_name":"wicker_basket","offset":[-0.04,0.0,0.12],'
+            '"orientation_goal":"preserve","orientation_axis":"none"}' in text
+        )
+        assert (
+            '"atomic_action_class":"MoveHeldObject","robot_name":"right_arm",'
+            '"control":"arm","target_object_pose":{"reference":"object",'
+            '"obj_name":"wicker_basket","offset":[0.04,0.0,0.12],'
+            '"orientation_goal":"preserve","orientation_axis":"none"}' in text
+        )
+        assert (
             '"atomic_action_class":"Place","robot_name":"left_arm",'
-            '"control":"arm","target_pose":{"reference":"object",'
-            '"obj_name":"wicker_basket","offset":[-0.04,0.0,0.12]}' in text
+            '"control":"arm","target_pose":{"reference":"relative",'
+            '"offset":[0.0,0.0,0.0],"frame":"world"}' in text
         )
         assert (
             '"atomic_action_class":"Place","robot_name":"right_arm",'
-            '"control":"arm","target_pose":{"reference":"object",'
-            '"obj_name":"wicker_basket","offset":[0.04,0.0,0.12]}' in text
+            '"control":"arm","target_pose":{"reference":"relative",'
+            '"offset":[0.0,0.0,0.0],"frame":"world"}' in text
         )
     assert "container XY long axis" in task_prompt
 
@@ -3758,14 +3775,20 @@ def test_dual_inside_y_axis_slots_keep_each_arm_on_its_container_side(
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     for text in (task_prompt, atom_actions):
         assert (
-            '"robot_name":"left_arm","control":"arm","target_pose":'
+            '"robot_name":"left_arm","control":"arm","target_object_pose":'
             '{"reference":"object","obj_name":"wicker_basket",'
-            '"offset":[0.0,0.02,0.12]}' in text
+            '"offset":[0.0,0.02,0.12],'
+            '"orientation_goal":"preserve","orientation_axis":"none"}' in text
         )
         assert (
-            '"robot_name":"right_arm","control":"arm","target_pose":'
+            '"robot_name":"right_arm","control":"arm","target_object_pose":'
             '{"reference":"object","obj_name":"wicker_basket",'
-            '"offset":[0.0,-0.02,0.12]}' in text
+            '"offset":[0.0,-0.02,0.12],'
+            '"orientation_goal":"preserve","orientation_axis":"none"}' in text
+        )
+        assert (
+            '"target_pose":{"reference":"relative","offset":[0.0,0.0,0.0],'
+            '"frame":"world"}' in text
         )
 
 

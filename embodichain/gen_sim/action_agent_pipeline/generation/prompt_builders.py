@@ -629,7 +629,6 @@ def make_relative_task_prompt(
         sample_interval=45,
     )
     pose_sensitive = _is_pose_sensitive_placement(spec)
-    object_pose_release = _uses_object_pose_release(spec)
     if pose_sensitive:
         safe_high_spec = _format_relative_pose_spec(
             active_arm,
@@ -686,7 +685,7 @@ def make_relative_task_prompt(
             "pose, move down to the final release object pose, and use the exact "
             "relative-zero release-only `Place` spec shown below."
         )
-    elif object_pose_release:
+    else:
         release_move_spec = _format_relative_pose_spec(
             active_arm,
             spec,
@@ -716,32 +715,9 @@ def make_relative_task_prompt(
    - {active_slot}: {initial_spec}
    - {inactive_slot}: null"""
         release_rule = (
-            "For this support-surface `on` placement, use `MoveHeldObject` for "
-            "the final release object pose, then use the exact relative-zero "
-            "release-only `Place` spec shown below."
-        )
-    else:
-        place_spec = _format_relative_place_spec(
-            active_arm,
-            spec,
-            sample_interval=80,
-            lift_height=_PLACE_LIFT_HEIGHT,
-        )
-        edge_count = 4
-        high_instruction = f"""2. Move the held object to the {high_step_label} pose:
-   - {active_slot}: {high_spec}
-   - {inactive_slot}: null
-
-3. Place the held object at the {release_step_label} pose:
-   - {active_slot}: {place_spec}
-   - {inactive_slot}: null
-
-4. Return the active arm to its initial pose:
-   - {active_slot}: {initial_spec}
-   - {inactive_slot}: null"""
-        release_rule = (
-            "Use `Place` for the release-place step so lowering, gripper "
-            "opening, and upward retreat remain one atomic action."
+            "Use `MoveHeldObject` for the final release object pose, then use "
+            "the exact relative-zero release-only `Place` spec shown below and "
+            "retreat the empty end-effector upward."
         )
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
@@ -1116,51 +1092,35 @@ def _dual_relative_release_edge_blocks(
                 },
             ),
         ]
-    if _uses_object_pose_release(placement):
-        return [
-            (
-                f"Move `{placement.moved_runtime_uid}` down to the final "
-                "release object pose",
-                {
-                    active_slot: _format_relative_pose_spec(
-                        active_arm,
-                        placement,
-                        pose_kind="release",
-                        sample_interval=45,
-                    ),
-                    waiting_slot: waiting_value,
-                },
-            ),
-            (
-                f"Release `{placement.moved_runtime_uid}` in-place without moving "
-                "the object pose",
-                {
-                    active_slot: _format_release_only_place_spec(active_arm),
-                    waiting_slot: waiting_value,
-                },
-            ),
-            (
-                f"Retreat `{active_arm}` upward after release",
-                {
-                    active_slot: _format_empty_hand_retreat_spec(active_arm),
-                    waiting_slot: waiting_value,
-                },
-            ),
-        ]
-
     return [
         (
-            f"Place `{placement.moved_runtime_uid}` at the release pose",
+            f"Move `{placement.moved_runtime_uid}` down to the final "
+            "release object pose",
             {
-                active_slot: _format_relative_place_spec(
+                active_slot: _format_relative_pose_spec(
                     active_arm,
                     placement,
-                    sample_interval=80,
-                    lift_height=_PLACE_LIFT_HEIGHT,
+                    pose_kind="release",
+                    sample_interval=45,
                 ),
                 waiting_slot: waiting_value,
             },
-        )
+        ),
+        (
+            f"Release `{placement.moved_runtime_uid}` in-place without moving "
+            "the object pose",
+            {
+                active_slot: _format_release_only_place_spec(active_arm),
+                waiting_slot: waiting_value,
+            },
+        ),
+        (
+            f"Retreat `{active_arm}` upward after release",
+            {
+                active_slot: _format_empty_hand_retreat_spec(active_arm),
+                waiting_slot: waiting_value,
+            },
+        ),
     ]
 
 
@@ -1172,22 +1132,14 @@ def _dual_relative_release_rule(spec: _RelativeSpecLike) -> str:
             "pose before moving down to the final release object pose. The "
             "following `Place` must be the exact "
             "relative-zero release-only spec shown below, and then the empty "
-            "hand retreats upward. Support-surface `on` placements must also "
-            "use final object-pose `MoveHeldObject` plus relative-zero "
-            "release-only `Place`, even when orientation is preserved. Other "
-            "preserve placements keep the normal `Place` release-place action."
-        )
-    if any(_uses_object_pose_release(placement) for placement in spec.placements):
-        return (
-            "For support-surface `on` placements, use `MoveHeldObject` for the "
-            "final release object pose. The following `Place` must be the exact "
-            "relative-zero release-only spec shown below, and then the empty "
-            "hand retreats upward. Other preserve placements keep the normal "
-            "`Place` release-place action."
+            "hand retreats upward. Preserve placements use the same final "
+            "object-pose `MoveHeldObject` plus relative-zero release-only "
+            "`Place` pattern."
         )
     return (
-        "Use `Place` for each release-place step so lowering, gripper opening, "
-        "and upward retreat remain one atomic action."
+        "Use `MoveHeldObject` for each final release object pose. The following "
+        "`Place` must be the exact relative-zero release-only spec shown below, "
+        "and then the empty hand retreats upward."
     )
 
 
@@ -1208,15 +1160,12 @@ def _relative_release_action_patterns(
     robot_name: str,
     placement: _RelativePlacementLike,
 ) -> str:
-    if _uses_object_pose_release(placement):
-        return f"""- Final release object pose:
+    return f"""- Final release object pose:
   {_format_relative_pose_spec(robot_name, placement, pose_kind="release", sample_interval=45)}
 - Release-only Place:
   {_format_release_only_place_spec(robot_name)}
 - Empty-hand retreat:
   {_format_empty_hand_retreat_spec(robot_name)}"""
-    return f"""- Place at the release pose:
-  {_format_relative_place_spec(robot_name, placement, sample_interval=80, lift_height=_PLACE_LIFT_HEIGHT)}"""
 
 
 def _relative_high_action_patterns(
@@ -1271,11 +1220,10 @@ Config-stage LLM notes:
 
 The execution-stage LLM should generate graph JSON that grasps the moved object,
 moves it to the configured high staging pose, releases it at the final pose, and
-returns the active arm to its initial pose. Support-surface `on` placements and
-pose-sensitive placements must use a final `MoveHeldObject` object-pose move
-followed by release-only `Place`. Pose-sensitive placements must additionally
-use a safe high `MoveHeldObject` lift with orientation preserved before
-high-pose orientation adjustment.
+returns the active arm to its initial pose. Release must use a final
+`MoveHeldObject` object-pose move followed by release-only `Place`.
+Pose-sensitive placements must additionally use a safe high `MoveHeldObject`
+lift with orientation preserved before high-pose orientation adjustment.
 """
 
 
@@ -1352,10 +1300,10 @@ The execution-stage LLM should generate graph JSON that grasps both moved
 objects, stages and releases the first moved object, then stages and releases
 the second moved object while the first arm returns to its initial pose. Each
 arm must release its moved object before returning to its initial pose.
-Support-surface `on` placements and pose-sensitive placements must use a final
-`MoveHeldObject` object-pose move followed by release-only `Place`.
-Pose-sensitive placements must additionally use a safe high `MoveHeldObject`
-lift with orientation preserved before high-pose orientation adjustment.
+Release must use a final `MoveHeldObject` object-pose move followed by
+release-only `Place`. Pose-sensitive placements must additionally use a safe
+high `MoveHeldObject` lift with orientation preserved before high-pose
+orientation adjustment.
 """
 
 
@@ -2021,42 +1969,8 @@ def _format_hover_move_spec(
     )
 
 
-def _format_relative_place_spec(
-    robot_name: str,
-    placement: _RelativePlacementLike,
-    *,
-    sample_interval: int,
-    lift_height: float,
-) -> str:
-    if getattr(placement, "reference_is_initial_pose", False) or getattr(
-        placement,
-        "upright_in_place",
-        False,
-    ):
-        if placement.release_position is None:
-            raise ValueError("Absolute relative placement requires release position.")
-        return _format_place_absolute_spec(
-            robot_name,
-            placement.release_position,
-            sample_interval=sample_interval,
-            lift_height=lift_height,
-        )
-
-    return _format_place_object_spec(
-        robot_name,
-        placement.reference_runtime_uid,
-        placement.release_offset,
-        sample_interval=sample_interval,
-        lift_height=lift_height,
-    )
-
-
 def _is_pose_sensitive_placement(placement: _RelativePlacementLike) -> bool:
     return placement.orientation_goal != "preserve"
-
-
-def _uses_object_pose_release(placement: _RelativePlacementLike) -> bool:
-    return _is_pose_sensitive_placement(placement) or placement.relation == "on"
 
 
 def _format_release_only_place_spec(robot_name: str) -> str:
@@ -2113,24 +2027,6 @@ def _format_pose_absolute_spec(
             "target_object_pose": target_object_pose,
             "cfg": {"sample_interval": sample_interval},
         }
-    )
-
-
-def _format_place_absolute_spec(
-    robot_name: str,
-    position: Sequence[float],
-    *,
-    sample_interval: int,
-    lift_height: float,
-) -> str:
-    return _format_place_spec(
-        robot_name,
-        {
-            "reference": "absolute",
-            "position": [float(value) for value in position],
-        },
-        sample_interval=sample_interval,
-        lift_height=lift_height,
     )
 
 
