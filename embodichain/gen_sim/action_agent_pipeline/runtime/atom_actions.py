@@ -137,6 +137,7 @@ ATOMIC_ACTION_REGISTRY = {
 
 
 _DEFAULT_SURFACE_RELEASE_CLEARANCE = 0.015
+_DEFAULT_PICKUP_LIFT_HEIGHT = 0.16
 
 
 @dataclass(frozen=True)
@@ -1378,6 +1379,7 @@ def _build_action_cfg(
     if spec.atomic_action_class == "PickUp":
         if spec.control != "arm":
             raise ValueError("PickUp atomic action requires control='arm'.")
+        cfg_values.setdefault("lift_height", _DEFAULT_PICKUP_LIFT_HEIGHT)
         _normalize_pickup_cfg_values(cfg_values, device)
         return PickUpCfg(
             control_part=arm_part,

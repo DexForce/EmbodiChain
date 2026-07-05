@@ -1020,6 +1020,9 @@ def test_target_object_builds_pick_up_cfg(monkeypatch) -> None:
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].hand_control_part == "left_eef"
     assert capture[0]["cfg"].pre_grasp_distance == pytest.approx(0.07)
+    assert capture[0]["cfg"].lift_height == pytest.approx(
+        atom_actions._DEFAULT_PICKUP_LIFT_HEIGHT
+    )
     assert isinstance(capture[0]["target"], GraspTarget)
     assert capture[0]["target"].semantics.label == "apple"
     assert capture[0]["target"].semantics.affordance.mesh_vertices is not None

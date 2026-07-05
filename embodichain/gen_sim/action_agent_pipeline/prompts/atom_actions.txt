@@ -33,7 +33,9 @@ Use only these native atomic action classes:
    - Required target_object:
      {"obj_name": "<rigid object uid>", "affordance": "antipodal"}
    - Typical cfg:
-     {"pre_grasp_distance": 0.08, "sample_interval": 45}
+     {"pre_grasp_distance": 0.08, "lift_height": 0.16, "sample_interval": 45}
+   - Keep `lift_height` high enough for an in-place vertical lift before any
+     horizontal transfer so the held object clears nearby tabletop objects.
    - For upright-in-place bottle tasks, cfg may also include
      {"obj_upright_direction": [x, y, z], "rotate_upright": 0.7853981633974483}
      to bias the grasp pose before lifting.

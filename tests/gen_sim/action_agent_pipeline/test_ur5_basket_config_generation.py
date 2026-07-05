@@ -3230,6 +3230,7 @@ def test_task_description_generates_size_order_arrangement_config(
         task_prompt
     )
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
+    assert task_prompt.count('"lift_height":0.30') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert task_prompt.count('"reference":"absolute"') >= 9
@@ -3242,6 +3243,7 @@ def test_task_description_generates_size_order_arrangement_config(
     assert task_prompt.count('"surface_clearance":0.015') == 3
     assert "Collision-aware line origin xy" in task_prompt
     assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
+    assert atom_actions.count('"lift_height":0.30') == 3
     assert atom_actions.count('"orientation_goal":"axis_align"') == 6
     assert atom_actions.count('"orientation_axis":"x"') == 6
     assert atom_actions.count('"atomic_action_class":"Place"') == 3

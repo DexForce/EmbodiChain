@@ -40,6 +40,7 @@ __all__ = [
 
 _BASKET_LEFT_RELEASE_OFFSET_Y = 0.04
 _BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
+_PICKUP_LIFT_HEIGHT = 0.30
 _PLACE_LIFT_HEIGHT = 0.10
 _RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = 10
 _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = 30
@@ -1797,11 +1798,13 @@ def _format_pick_up_spec(
     obj_name: str,
     *,
     sample_interval: int = 45,
+    lift_height: float = _PICKUP_LIFT_HEIGHT,
     pickup_upright_direction: Sequence[float] | None = None,
     pickup_rotate_upright: float | None = None,
 ) -> str:
     cfg: dict[str, Any] = {
         "pre_grasp_distance": 0.08,
+        "lift_height": float(lift_height),
         "sample_interval": sample_interval,
     }
     if pickup_upright_direction is not None and pickup_rotate_upright is not None:
