@@ -25,6 +25,9 @@ Use only these native atomic action classes:
      {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef", "orientation_goal": "preserve|upright|lay_flat|axis_align", "orientation_axis": "none|x|y|long_axis|short_axis"}
    - Typical cfg:
      {"pre_grasp_distance": 0.10, "sample_interval": 120, "hand_interp_steps": 10}
+   - To release after a coordinated move, add a following graph edge where both
+     arms execute `MoveJoints` with `control: "hand"` and
+     `target_qpos: {"source": "gripper_state", "state": "open"}` in parallel.
 
 2. `PickUp`
    - Required target_object:
@@ -93,6 +96,9 @@ Rules:
   `target_pose`, `target_qpos`, or `target_object_pose`.
 - `CoordinatedPickment` is the only exception: it must contain both
   `target_object` and `target_object_pose`.
+- Do not treat `CoordinatedPickment` as an implicit release. If the requested
+  final state is not "held", add a following parallel left/right gripper-open
+  `MoveJoints` edge.
 - To keep a holding arm closed while the other arm moves, use:
   {
     "atomic_action_class": "MoveJoints",

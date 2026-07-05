@@ -766,6 +766,8 @@ def build_parallel_action_stream(
         raise ValueError("env is required to build parallel atomic actions.")
     if world_states is None:
         world_states = init_parallel_world_states(env)
+    raw_left_arm_action = left_arm_action
+    raw_right_arm_action = right_arm_action
     coordinated_action = _pop_coordinated_edge_action(left_arm_action, right_arm_action)
     if coordinated_action is not None:
         executed = _resolve_action_spec(
@@ -871,6 +873,17 @@ def build_parallel_action_stream(
             and executed.next_state is not None
         ):
             next_world_states[side] = executed.next_state
+    if _is_dual_coordinated_release_edge(
+        raw_left_arm_action,
+        raw_right_arm_action,
+    ) and _has_coordinated_held_object(world_states):
+        release_state = _released_coordinated_world_state(
+            actions[-1],
+            next_world_states,
+        )
+        next_world_states["coordinated"] = release_state
+        next_world_states["left"] = release_state
+        next_world_states["right"] = release_state
     return {
         "actions": actions,
         "world_states": next_world_states,
@@ -961,6 +974,69 @@ def _is_coordinated_action(action_spec) -> bool:
     if isinstance(action_spec, Mapping):
         return action_spec.get("atomic_action_class") == "CoordinatedPickment"
     return False
+
+
+def _is_dual_coordinated_release_edge(left_arm_action, right_arm_action) -> bool:
+    return {
+        _gripper_open_release_side(left_arm_action),
+        _gripper_open_release_side(right_arm_action),
+    } == {"left", "right"}
+
+
+def _gripper_open_release_side(action_spec) -> str | None:
+    if isinstance(action_spec, AtomicActionSpec):
+        atomic_action_class = action_spec.atomic_action_class
+        robot_name = action_spec.robot_name
+        control = action_spec.control
+        target_qpos = action_spec.target_qpos
+    elif isinstance(action_spec, Mapping):
+        atomic_action_class = action_spec.get("atomic_action_class")
+        robot_name = action_spec.get("robot_name")
+        control = action_spec.get("control")
+        target_qpos = action_spec.get("target_qpos") or {}
+    else:
+        return None
+
+    if (
+        atomic_action_class != "MoveJoints"
+        or control != "hand"
+        or not isinstance(target_qpos, Mapping)
+        or target_qpos.get("source") != "gripper_state"
+        or target_qpos.get("state") != "open"
+    ):
+        return None
+    if robot_name == "left_arm":
+        return "left"
+    if robot_name == "right_arm":
+        return "right"
+    return None
+
+
+def _has_coordinated_held_object(world_states: Mapping[str, WorldState]) -> bool:
+    return any(
+        state.coordinated_held_object is not None
+        for state in world_states.values()
+        if isinstance(state, WorldState)
+    )
+
+
+def _released_coordinated_world_state(
+    final_action: torch.Tensor,
+    world_states: Mapping[str, WorldState],
+) -> WorldState:
+    held_object = None
+    for state in world_states.values():
+        if isinstance(state, WorldState) and state.held_object is not None:
+            held_object = state.held_object
+            break
+    final_qpos = torch.as_tensor(final_action, dtype=torch.float32)
+    if final_qpos.dim() == 1:
+        final_qpos = final_qpos.unsqueeze(0)
+    return WorldState(
+        last_qpos=final_qpos.clone(),
+        held_object=held_object,
+        coordinated_held_object=None,
+    )
 
 
 def _executed_coordinated_atomic_action(

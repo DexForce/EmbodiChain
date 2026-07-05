@@ -994,13 +994,21 @@ def test_task_description_generates_coordinated_pickment_config(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     assert "left_arm" in gym_config["robot"]["control_parts"]
     assert "right_arm" in gym_config["robot"]["control_parts"]
+    success_spec = gym_config["env"]["extensions"]["agent_success"]
+    assert "object_held_by_gripper" not in json.dumps(success_spec)
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     for text in (task_prompt, atom_actions):
         assert '"atomic_action_class":"CoordinatedPickment"' in text
         assert '"robot_name":"dual_arm"' in text
         assert '"target_object":{"obj_name":"apple_1","affordance":"antipodal"}' in text
+        assert '"robot_name":"left_arm","control":"hand"' in text
+        assert '"robot_name":"right_arm","control":"hand"' in text
+        assert '"target_qpos":{"source":"gripper_state","state":"open"}' in text
         assert '"atomic_action_class":"PickUp"' not in text
+    assert "exactly 2 nominal edges" in task_prompt
+    assert "must not remain held" in task_prompt
+    assert "may remain held" not in task_prompt
     assert '"position":[0.54,0.11' in task_prompt
 
     assert _stable_summary(paths.summary) == {

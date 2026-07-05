@@ -788,6 +788,18 @@ def _make_coordinated_pickment_task_prompt(
 ) -> str:
     action_sketch = _format_action_sketch(spec.action_sketch)
     action_spec = _format_coordinated_pickment_spec(spec)
+    left_release_spec = _format_gripper_spec(
+        "left_arm",
+        "open",
+        sample_interval=10,
+        post_hold_steps=20,
+    )
+    right_release_spec = _format_gripper_spec(
+        "right_arm",
+        "open",
+        sample_interval=10,
+        post_hold_steps=20,
+    )
     final_planning_rule = _relative_final_planning_rule(project_name, spec)
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
@@ -809,19 +821,25 @@ Coordinated shared-object mapping:
 
 {_RELATIVE_COORDINATE_CONVENTION}
 
-Generate one deterministic nominal graph with exactly 1 nominal edge. Use only
-the `CoordinatedPickment` JSON spec shown below. It controls both arms in one
-atomic action, so put it in `left_arm_action` and keep `right_arm_action` null.
-Do not add separate `PickUp`, `MoveHeldObject`, `Place`, return-to-initial, or
+Generate one deterministic nominal graph with exactly 2 nominal edges. First
+use the `CoordinatedPickment` JSON spec shown below to move the shared object.
+It controls both arms in one atomic action, so put it in `left_arm_action` and
+keep `right_arm_action` null. Then release the object by opening both grippers
+simultaneously with the `MoveJoints(control="hand")` specs shown below. Do not
+add separate `PickUp`, `MoveHeldObject`, `Place`, return-to-initial, or extra
 gripper actions.
 
 1. Coordinated pick and move `{spec.moved_runtime_uid}`:
    - left_arm_action: {action_spec}
    - right_arm_action: null
 
+2. Release `{spec.moved_runtime_uid}` from both grippers:
+   - left_arm_action: {left_release_spec}
+   - right_arm_action: {right_release_spec}
+
 Final state: `{spec.moved_runtime_uid}` must be
 {_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}` and
-may remain held by both grippers.
+must not remain held by either gripper.
 {final_planning_rule}
 """
 
@@ -1280,10 +1298,12 @@ Interactive task object:
 Config-stage LLM notes:
 {notes}
 
-The execution-stage LLM should generate a single-edge graph that uses
+The execution-stage LLM should generate a two-edge graph. First use
 `CoordinatedPickment` to grasp the shared object with both grippers, lift it,
-and move the object to the configured target pose. It must not decompose this
-task into separate single-arm `PickUp`, `MoveHeldObject`, or `Place` actions.
+and move the object to the configured target pose. Then open both grippers in
+parallel with `MoveJoints(control="hand", state="open")` to release it. It must
+not decompose this task into separate single-arm `PickUp`, `MoveHeldObject`, or
+`Place` actions.
 """
 
 
@@ -1470,14 +1490,31 @@ def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
 
 
 def _make_coordinated_pickment_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+    left_release_spec = _format_gripper_spec(
+        "left_arm",
+        "open",
+        sample_interval=10,
+        post_hold_steps=20,
+    )
+    right_release_spec = _format_gripper_spec(
+        "right_arm",
+        "open",
+        sample_interval=10,
+        post_hold_steps=20,
+    )
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Coordinated Pickment
 
-Use only this native atomic action class JSON spec. `CoordinatedPickment`
-controls both arms, so the nominal graph must put this spec in
-`left_arm_action` and set `right_arm_action` to null.
+Use only these native atomic action class JSON specs. `CoordinatedPickment`
+controls both arms, so the nominal graph must put that spec in
+`left_arm_action` and set `right_arm_action` to null. The following release
+edge must then open both hands in parallel.
 
 - Coordinated pick and move `{spec.moved_runtime_uid}`:
   {_format_coordinated_pickment_spec(spec)}
+
+- Release `{spec.moved_runtime_uid}` from both grippers:
+  left_arm_action: {left_release_spec}
+  right_arm_action: {right_release_spec}
 """
 
 

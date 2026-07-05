@@ -276,6 +276,7 @@ class _FakeBackendAction:
                 next_state=WorldState(
                     last_qpos=trajectory[:, -1, :],
                     held_object=state.held_object,
+                    coordinated_held_object=state.coordinated_held_object,
                 ),
             )
         if self.cfg.name == "move_held_object":
@@ -1041,6 +1042,80 @@ def test_coordinated_pickment_builds_full_robot_stream(monkeypatch) -> None:
     assert env.left_arm_current_gripper_state.tolist() == pytest.approx([0.04])
     assert env.right_arm_current_gripper_state.tolist() == pytest.approx([0.04])
     assert result["world_states"]["coordinated"].coordinated_held_object is not None
+
+
+def test_coordinated_pickment_release_edge_opens_grippers_and_clears_world_state(
+    monkeypatch,
+) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    pick_result = execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "CoordinatedPickment",
+            "robot_name": "dual_arm",
+            "control": "arm",
+            "target_object": {
+                "obj_name": "apple",
+                "affordance": "antipodal",
+            },
+            "target_object_pose": {
+                "reference": "relative",
+                "offset": [0.16, 0.0, 0.0],
+                "frame": "world",
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+        },
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    release_result = execute_parallel_atomic_actions(
+        left_arm_action={
+            "atomic_action_class": "MoveJoints",
+            "robot_name": "left_arm",
+            "control": "hand",
+            "target_qpos": {"source": "gripper_state", "state": "open"},
+            "cfg": {"sample_interval": 10, "post_hold_steps": 20},
+        },
+        right_arm_action={
+            "atomic_action_class": "MoveJoints",
+            "robot_name": "right_arm",
+            "control": "hand",
+            "target_qpos": {"source": "gripper_state", "state": "open"},
+            "cfg": {"sample_interval": 10, "post_hold_steps": 20},
+        },
+        env=env,
+        world_states=pick_result["world_states"],
+        return_result=True,
+    )
+
+    assert capture[-2]["state"].coordinated_held_object is not None
+    assert capture[-1]["state"].coordinated_held_object is not None
+    assert env.left_arm_current_gripper_state.tolist() == pytest.approx([0.05])
+    assert env.right_arm_current_gripper_state.tolist() == pytest.approx([0.05])
+    assert release_result["world_states"]["coordinated"].coordinated_held_object is None
+    assert release_result["world_states"]["left"].coordinated_held_object is None
+    assert release_result["world_states"]["right"].coordinated_held_object is None
+    coordinated_state = release_result["world_states"]["coordinated"]
+    assert coordinated_state.last_qpos.flatten().tolist() == pytest.approx(
+        [0.4, 0.5, 0.05, 0.6, 0.7, 0.05]
+    )
 
 
 def test_coordinated_pickment_prefers_yawed_top_down_grasps(
