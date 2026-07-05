@@ -797,14 +797,32 @@ class SimulationManager:
         logger.log_warning(f"Asset {uid} not found.")
         return None
 
+    # Light type string → dexsim LightType enum mapping
+    _LIGHT_TYPE_MAP: dict[str, LightType] = {
+        "point": LightType.POINT,
+        "sun": LightType.SUN,
+        "direction": LightType.DIRECTION,
+        "spot": LightType.SPOT,
+        "rect": LightType.RECT,
+        "mesh": LightType.MESH,
+    }
+
     def add_light(self, cfg: LightCfg) -> Light:
         """Create a light in the scene.
 
+        Supports six light types: ``"point"``, ``"sun"``, ``"direction"``,
+        ``"spot"``, ``"rect"``, and ``"mesh"``. See :class:`LightCfg` for
+        type-specific configuration fields.
+
         Args:
-            cfg (LightCfg): Configuration for the light, including type, color, intensity, and radius.
+            cfg (LightCfg): Configuration for the light, including type, color,
+                intensity, and type-specific properties.
 
         Returns:
             Light: The created light instance.
+
+        Raises:
+            ValueError: If ``cfg.light_type`` is not one of the supported types.
         """
         if cfg.uid is None:
             uid = "light"
@@ -814,13 +832,28 @@ class SimulationManager:
 
         if uid in self._lights:
             logger.log_error(f"Light {uid} already exists.")
+            return None
 
-        light_type = cfg.light_type
-        if light_type == "point":
-            light_type = LightType.POINT
-        else:
+        light_type_str = cfg.light_type
+        light_type = self._LIGHT_TYPE_MAP.get(light_type_str)
+        if light_type is None:
+            supported = ", ".join(self._LIGHT_TYPE_MAP.keys())
             logger.log_error(
-                f"Unsupported light type: {light_type}. Supported types: point."
+                f"Unsupported light type: '{light_type_str}'. "
+                f"Supported types: {supported}."
+            )
+            return None
+
+        # Validation warnings for type-specific constraints
+        if light_type_str == "mesh" and not cfg.mesh_path:
+            logger.warning(
+                f"Mesh light '{uid}' has no mesh_path set. "
+                f"Use set_mesh() to assign a MeshObject."
+            )
+        if light_type_str == "rect" and (cfg.rect_width <= 0 or cfg.rect_height <= 0):
+            logger.warning(
+                f"Rect light '{uid}' has zero or negative dimensions "
+                f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
         env_list = [self._env] if len(self._arenas) == 0 else self._arenas
