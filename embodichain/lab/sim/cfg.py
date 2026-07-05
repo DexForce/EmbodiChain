@@ -795,19 +795,97 @@ class ObjectBaseCfg:
 class LightCfg(ObjectBaseCfg):
     """Configuration for a light asset in the simulation.
 
-    This class extends the base asset configuration to include specific properties for lights,
+    Supports six light types matching the dexsim rendering backend:
+
+    - ``"point"``: Omnidirectional point light with position and falloff radius.
+    - ``"sun"``: Directional sun light with position, direction, and angular radius (sun-specific setters like halo are not yet wired through Python bindings).
+    - ``"direction"``: Pure directional light at infinite distance (direction only, no position).
+    - ``"spot"``: Spotlight with position, direction, and inner/outer cone angles.
+    - ``"rect"``: Rectangular area light with position, direction, width, and height.
+    - ``"mesh"``: Mesh-based emissive light (requires a MeshObject via :meth:`set_mesh`; not tensor-batched).
+
+    .. attention::
+        The ``angular_radius``, ``halo_size``, and ``halo_falloff`` fields are
+        reserved for future use. The dexsim Python bindings do not yet expose
+        setters for these sun-specific properties.
     """
 
-    # TODO: to be added more light type, such as spot, sun, etc.
-    light_type: Literal["point"] = "point"
+    light_type: Literal["point", "sun", "direction", "spot", "rect", "mesh"] = "point"
+    """Light type. Supported: ``"point"``, ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``."""
+
+    # ------------------------------------------------------------------
+    # Universal properties (apply to all light types)
+    # ------------------------------------------------------------------
 
     color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    """RGB color of the light source. Defaults to white ``(1.0, 1.0, 1.0)``."""
 
-    intensity: float = 50.0
-    """Intensity of the light source with unit of watts/m^2."""
+    intensity: float = 30.0
+    """Intensity of the light source in watts/m^2. Defaults to ``30.0``."""
 
-    radius: float = 1e2
-    """Falloff of the light, only used for point light."""
+    enable_shadow: bool = True
+    """Whether the light casts shadows. Defaults to ``True``."""
+
+    # ------------------------------------------------------------------
+    # Point light
+    # ------------------------------------------------------------------
+
+    radius: float = 10.0
+    """Falloff radius for point lights. Only used when ``light_type="point"``. Defaults to ``10.0``."""
+
+    # ------------------------------------------------------------------
+    # Directional properties (sun, direction, spot, rect, mesh)
+    # ------------------------------------------------------------------
+
+    direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    """Direction vector for directional, spot, rect, and mesh lights.
+    Defaults to ``(0.0, 0.0, -1.0)`` (pointing down along -Z)."""
+
+    # ------------------------------------------------------------------
+    # Sun light (reserved — Python bindings not yet available)
+    # ------------------------------------------------------------------
+
+    angular_radius: float = 0.5
+    """Angular radius of the sun disc in degrees. Reserved for future use."""
+
+    halo_size: float = 10.0
+    """Halo size for sun light. Reserved for future use."""
+
+    halo_falloff: float = 3.0
+    """Halo falloff for sun light. Reserved for future use."""
+
+    # ------------------------------------------------------------------
+    # Spot light
+    # ------------------------------------------------------------------
+
+    spot_angle_inner: float = 30.0
+    """Inner cone angle of the spotlight in degrees. Only used when ``light_type="spot"``.
+    Defaults to ``30.0``."""
+
+    spot_angle_outer: float = 45.0
+    """Outer cone angle of the spotlight in degrees. Only used when ``light_type="spot"``.
+    Defaults to ``45.0``."""
+
+    # ------------------------------------------------------------------
+    # Rect light
+    # ------------------------------------------------------------------
+
+    rect_width: float = 1.0
+    """Width of the rectangular area light. Only used when ``light_type="rect"``.
+    Defaults to ``1.0``."""
+
+    rect_height: float = 1.0
+    """Height of the rectangular area light. Only used when ``light_type="rect"``.
+    Defaults to ``1.0``."""
+
+    # ------------------------------------------------------------------
+    # Mesh light
+    # ------------------------------------------------------------------
+
+    mesh_path: str = ""
+    """Asset path for mesh-based emissive lights. Only used when ``light_type="mesh"``.
+    The actual mesh assignment is done via :meth:`Light.set_mesh` which accepts a
+    :class:`dexsim.models.MeshObject`. This field stores the path for reference."""
 
 
 @configclass
