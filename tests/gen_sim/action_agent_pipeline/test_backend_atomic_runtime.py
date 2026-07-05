@@ -144,6 +144,7 @@ class _FakeSim:
     def __init__(self):
         self.objects = {
             "apple": _FakeObject([0.4, -0.2, 0.1]),
+            "table": _FakeObject([0.0, 0.0, 0.0], extents=(1.0, 1.0, 0.2)),
             "pad_x": _FakeObject([0.4, 0.0, 0.0], extents=(0.4, 0.1, 0.02)),
             "pad_y": _FakeObject(
                 [0.4, 0.0, 0.0],
@@ -622,6 +623,51 @@ def test_move_held_object_rejects_axis_for_non_axis_align_goals() -> None:
                     "frame": "world",
                     "orientation_goal": "lay_flat",
                     "orientation_axis": "x",
+                },
+                "cfg": {},
+            }
+        )
+
+
+def test_move_held_object_accepts_surface_z_policy_fields() -> None:
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "absolute",
+                "position": [0.2, 0.1, 0.0],
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+                "z_policy": "object_on_surface",
+                "support": "table",
+                "surface_clearance": 0.015,
+            },
+            "cfg": {},
+        }
+    )
+
+    target = normalized["target_object_pose"]
+    assert target["z_policy"] == "object_on_surface"
+    assert target["support"] == "table"
+    assert target["surface_clearance"] == pytest.approx(0.015)
+
+
+def test_move_held_object_rejects_invalid_surface_z_policy() -> None:
+    with pytest.raises(ValueError, match="z_policy"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveHeldObject",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object_pose": {
+                    "reference": "absolute",
+                    "position": [0.2, 0.1, 0.0],
+                    "orientation_goal": "preserve",
+                    "orientation_axis": "none",
+                    "z_policy": "snap_to_table",
+                    "support": "table",
                 },
                 "cfg": {},
             }
@@ -1563,7 +1609,18 @@ def _resolved_held_object_direction(
     state: WorldState,
     target_object_pose: dict,
 ) -> torch.Tensor:
-    target = atom_actions._resolve_held_object_pose_target(
+    target = _resolved_held_object_pose(env, state, target_object_pose)
+    direction = target[:3, 0].clone()
+    direction[2] = 0.0
+    return direction / torch.linalg.norm(direction)
+
+
+def _resolved_held_object_pose(
+    env: _FakeEnv,
+    state: WorldState,
+    target_object_pose: dict,
+) -> torch.Tensor:
+    return atom_actions._resolve_held_object_pose_target(
         env,
         atom_actions.AtomicActionSpec(
             atomic_action_class="MoveHeldObject",
@@ -1574,9 +1631,87 @@ def _resolved_held_object_direction(
         ),
         state,
     )
-    direction = target[:3, 0].clone()
-    direction[2] = 0.0
-    return direction / torch.linalg.norm(direction)
+
+
+def test_surface_z_policy_places_held_object_above_support_top() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 0.0)
+
+    target = _resolved_held_object_pose(
+        env,
+        state,
+        {
+            "reference": "absolute",
+            "position": [0.25, -0.15, -1.0],
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+            "z_policy": "object_on_surface",
+            "support": "table",
+            "surface_clearance": 0.015,
+        },
+    )
+
+    assert torch.allclose(target[:2, 3], torch.tensor([0.25, -0.15]))
+    assert target[2, 3] == pytest.approx(0.215)
+
+
+def test_surface_z_policy_defaults_object_reference_to_support() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 0.0)
+
+    target = _resolved_held_object_pose(
+        env,
+        state,
+        {
+            "reference": "object",
+            "obj_name": "pad_x",
+            "offset": [0.03, 0.04, -1.0],
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+            "z_policy": "surface_release",
+            "surface_clearance": 0.01,
+        },
+    )
+
+    assert torch.allclose(target[:2, 3], torch.tensor([0.43, 0.04]))
+    assert target[2, 3] == pytest.approx(0.03)
+
+
+def test_surface_z_policy_preserves_absolute_z_when_policy_is_absent() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 0.0)
+
+    target = _resolved_held_object_pose(
+        env,
+        state,
+        {
+            "reference": "absolute",
+            "position": [0.25, -0.15, 0.07],
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+        },
+    )
+
+    assert torch.allclose(target[:3, 3], torch.tensor([0.25, -0.15, 0.07]))
+
+
+def test_surface_z_policy_rejects_missing_support_object() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 0.0)
+
+    with pytest.raises(ValueError, match="No support object found"):
+        _resolved_held_object_pose(
+            env,
+            state,
+            {
+                "reference": "absolute",
+                "position": [0.25, -0.15, 0.07],
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+                "z_policy": "object_on_surface",
+                "support": "missing_support",
+            },
+        )
 
 
 def test_axis_align_world_axes_preserves_roll_pitch_and_aligns_x_axis() -> None:

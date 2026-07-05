@@ -2272,7 +2272,9 @@ def test_relative_on_preserve_uses_object_pose_release(
             f'"atomic_action_class":"MoveHeldObject","robot_name":"{active_arm}",'
             '"control":"arm","target_object_pose":{"reference":"object",'
             f'"obj_name":"{reference_object}","offset":{release_offset_json},'
-            '"orientation_goal":"preserve","orientation_axis":"none"}' in text
+            '"orientation_goal":"preserve","orientation_axis":"none",'
+            '"z_policy":"object_on_surface",'
+            f'"support":"{reference_object}","surface_clearance":0.015' in text
         )
         assert (
             f'"atomic_action_class":"Place","robot_name":"{active_arm}",'
@@ -3196,21 +3198,27 @@ def test_task_description_generates_size_order_arrangement_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 21 nominal edges" in (
         task_prompt
     )
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
+    assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert task_prompt.count('"reference":"absolute"') >= 9
     assert task_prompt.count('"orientation_goal":"axis_align"') == 6
     assert task_prompt.count('"orientation_axis":"x"') == 6
     assert task_prompt.count('"orientation_goal":"preserve"') == 3
-    assert task_prompt.count('"target_pose":{"reference":"relative"') == 3
+    assert task_prompt.count('"target_pose":{"reference":"relative"') == 6
+    assert task_prompt.count('"z_policy":"object_on_surface"') == 3
+    assert task_prompt.count('"support":"table"') == 3
+    assert task_prompt.count('"surface_clearance":0.015') == 3
     assert "Collision-aware line origin xy" in task_prompt
     assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
     assert atom_actions.count('"orientation_goal":"axis_align"') == 6
     assert atom_actions.count('"orientation_axis":"x"') == 6
     assert atom_actions.count('"atomic_action_class":"Place"') == 3
+    assert atom_actions.count('"atomic_action_class":"MoveEndEffector"') == 3
+    assert atom_actions.count('"z_policy":"object_on_surface"') == 3
 
 
 def test_arrangement_collision_aware_layout_scales_to_six_objects(
@@ -3260,7 +3268,7 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
     _assert_arrangement_slots_avoid_initial_objects(summary, gym_config)
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 36 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 42 nominal edges" in (
         task_prompt
     )
 
@@ -5055,9 +5063,11 @@ def _assert_arrangement_slots_avoid_initial_objects(
     clearance = float(summary["layout_clearance"])
     spacing = float(summary["spacing"])
     half_extent = max(0.035, (spacing - clearance) / 2.0)
+    moved_uids = {placement["object"] for placement in summary["placements"]}
     initial_bounds_by_uid = {
         obj["uid"]: _xy_bounds_around(obj["init_pos"][:2], half_extent)
         for obj in gym_config["rigid_object"]
+        if obj["uid"] not in moved_uids
     }
     for placement in summary["placements"]:
         slot_bounds = _xy_bounds_around(placement["target_xy"], half_extent)
@@ -5067,8 +5077,7 @@ def _assert_arrangement_slots_avoid_initial_objects(
                 init_bound,
                 clearance=clearance,
             )
-            for uid, init_bound in initial_bounds_by_uid.items()
-            if uid != placement["object"]
+            for init_bound in initial_bounds_by_uid.values()
         )
 
 

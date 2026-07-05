@@ -105,6 +105,13 @@ ACTION_SPEC_FIELDS = {
 SUPPORTED_POSE_REFERENCES = {"object", "absolute", "relative"}
 SUPPORTED_OBJECT_ORIENTATION_GOALS = {"preserve", "upright", "lay_flat", "axis_align"}
 SUPPORTED_OBJECT_ORIENTATION_AXES = {"none", "x", "y", "long_axis", "short_axis"}
+SUPPORTED_SURFACE_Z_POLICIES = {"preserve", "object_on_surface", "surface_release"}
+SURFACE_Z_POLICY_FIELDS = {
+    "z_policy",
+    "support",
+    "support_uid",
+    "surface_clearance",
+}
 SUPPORTED_QPOS_SOURCES = {"initial", "gripper_state", "joint_delta"}
 SUPPORTED_CFG_KEYS = {
     "sample_interval",
@@ -127,6 +134,9 @@ ATOMIC_ACTION_REGISTRY = {
     "MoveHeldObject": (MoveHeldObject, MoveHeldObjectCfg),
     "Place": (Place, PlaceCfg),
 }
+
+
+_DEFAULT_SURFACE_RELEASE_CLEARANCE = 0.015
 
 
 @dataclass(frozen=True)
@@ -527,11 +537,16 @@ def _validate_target_pose_like(
     target_name: str,
 ) -> None:
     reference = target_pose.get("reference")
-    allowed_common = {"orientation_goal", "orientation_axis", "align_to"}
+    allowed_common = {
+        "orientation_goal",
+        "orientation_axis",
+        "align_to",
+    } | SURFACE_Z_POLICY_FIELDS
     if reference not in SUPPORTED_POSE_REFERENCES:
         raise ValueError(
             f"{target_name} reference must be one of {sorted(SUPPORTED_POSE_REFERENCES)}."
         )
+    _validate_surface_z_policy_fields(target_pose, target_name)
 
     if reference == "object":
         _validate_target_fields(
@@ -567,6 +582,41 @@ def _validate_target_pose_like(
     frame = target_pose.get("frame", "world")
     if frame not in {"world", "eef"}:
         raise ValueError(f"relative {target_name} frame must be 'world' or 'eef'.")
+
+
+def _validate_surface_z_policy_fields(
+    target_pose: Mapping[str, Any],
+    target_name: str,
+) -> None:
+    policy = target_pose.get("z_policy", "preserve")
+    if policy not in SUPPORTED_SURFACE_Z_POLICIES:
+        raise ValueError(
+            f"{target_name} z_policy must be one of "
+            f"{sorted(SUPPORTED_SURFACE_Z_POLICIES)}."
+        )
+    for field_name in ("support", "support_uid"):
+        support_value = target_pose.get(field_name)
+        if support_value is not None and (
+            not isinstance(support_value, str) or not support_value
+        ):
+            raise ValueError(f"{target_name} {field_name} must be a non-empty string.")
+    support = target_pose.get("support")
+    support_uid = target_pose.get("support_uid")
+    if support is not None and support_uid is not None and support != support_uid:
+        raise ValueError(
+            f"{target_name} support and support_uid must refer to the same object."
+        )
+    clearance = target_pose.get("surface_clearance")
+    if clearance is not None:
+        if isinstance(clearance, bool) or not isinstance(clearance, (int, float)):
+            raise ValueError(f"{target_name} surface_clearance must be a number.")
+        if not np.isfinite(float(clearance)) or float(clearance) < 0.0:
+            raise ValueError(
+                f"{target_name} surface_clearance must be a finite non-negative number."
+            )
+    if policy == "preserve":
+        return
+    _surface_support_uid(target_pose, target_name=target_name, require=True)
 
 
 def _validate_target_qpos(
@@ -1539,6 +1589,12 @@ def _resolve_coordinated_object_pose_target(
         current_object_pose,
         orientation_state,
     )
+    target_pose = _apply_surface_z_policy(
+        env,
+        target_pose_spec,
+        target_pose,
+        orientation_state,
+    )
     return target_pose
 
 
@@ -2501,6 +2557,11 @@ def _resolve_held_object_pose_target(
     state: WorldState,
 ) -> torch.Tensor:
     target_pose_spec = spec.target_object_pose
+    pose_metadata_fields = {
+        "orientation_goal",
+        "orientation_axis",
+        "align_to",
+    } | SURFACE_Z_POLICY_FIELDS
     pose_spec = AtomicActionSpec(
         atomic_action_class="MoveEndEffector",
         robot_name=spec.robot_name,
@@ -2508,7 +2569,7 @@ def _resolve_held_object_pose_target(
         target_pose={
             key: deepcopy(value)
             for key, value in target_pose_spec.items()
-            if key not in {"orientation_goal", "orientation_axis", "align_to"}
+            if key not in pose_metadata_fields
         },
         cfg={},
     )
@@ -2521,6 +2582,7 @@ def _resolve_held_object_pose_target(
         current_object_pose,
         state,
     )
+    target_pose = _apply_surface_z_policy(env, target_pose_spec, target_pose, state)
     return target_pose
 
 
@@ -2585,6 +2647,99 @@ def _resolve_object_orientation(
             current_rotation, current_direction, target_direction
         )
     raise ValueError(f"Unsupported orientation_goal: {orientation_goal}.")
+
+
+def _apply_surface_z_policy(
+    env,
+    target_pose_spec: Mapping[str, Any],
+    target_pose: torch.Tensor,
+    state: WorldState,
+) -> torch.Tensor:
+    policy = target_pose_spec.get("z_policy", "preserve")
+    if policy == "preserve":
+        return target_pose
+    if policy not in {"object_on_surface", "surface_release"}:
+        raise ValueError(f"Unsupported target_object_pose z_policy: {policy!r}.")
+    support_uid = _surface_support_uid(
+        target_pose_spec,
+        target_name="target_object_pose",
+        require=True,
+    )
+    support_top_z = _surface_support_top_z(env, support_uid, env.robot.device)
+    mesh_vertices = _held_object_mesh_vertices(state, env.robot.device)
+    target_local_zmin = _target_local_zmin_after_rotation(
+        mesh_vertices,
+        target_pose[:3, :3],
+    )
+    resolved_pose = target_pose.clone()
+    resolved_pose[2, 3] = (
+        float(support_top_z)
+        + _surface_release_clearance(target_pose_spec)
+        - float(target_local_zmin)
+    )
+    return resolved_pose
+
+
+def _surface_support_uid(
+    target_pose_spec: Mapping[str, Any],
+    *,
+    target_name: str,
+    require: bool,
+) -> str | None:
+    support = target_pose_spec.get("support")
+    support_uid = target_pose_spec.get("support_uid")
+    if support is not None and support_uid is not None and support != support_uid:
+        raise ValueError(
+            f"{target_name} support and support_uid must refer to the same object."
+        )
+    resolved = support if support is not None else support_uid
+    if resolved is None and target_pose_spec.get("reference") == "object":
+        resolved = target_pose_spec.get("obj_name")
+    if require and (not isinstance(resolved, str) or not resolved):
+        raise ValueError(f"{target_name} z_policy requires a support object uid.")
+    return str(resolved) if resolved is not None else None
+
+
+def _surface_release_clearance(target_pose_spec: Mapping[str, Any]) -> float:
+    clearance = target_pose_spec.get(
+        "surface_clearance",
+        _DEFAULT_SURFACE_RELEASE_CLEARANCE,
+    )
+    return float(clearance)
+
+
+def _surface_support_top_z(env, support_uid: str, device) -> float:
+    support_obj = env.sim.get_rigid_object(support_uid)
+    if support_obj is None:
+        raise ValueError(f"No support object found for {support_uid}.")
+    world_vertices = _object_world_vertices(support_obj, device)
+    return float(world_vertices[:, 2].max())
+
+
+def _object_world_vertices(obj, device) -> torch.Tensor:
+    vertices = _object_mesh_vertices(obj, device)
+    pose = _ensure_pose_tensor(obj.get_local_pose(to_matrix=True), device)
+    return (pose[:3, :3] @ vertices.T).T + pose[:3, 3]
+
+
+def _object_mesh_vertices(obj, device) -> torch.Tensor:
+    vertices = obj.get_vertices(env_ids=[0], scale=True)
+    if isinstance(vertices, (list, tuple)):
+        vertices = vertices[0]
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=device)
+    if vertices.ndim == 3 and vertices.shape[0] == 1:
+        vertices = vertices.squeeze(0)
+    if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+        raise ValueError("Object mesh vertices must have shape (N, 3).")
+    return vertices
+
+
+def _target_local_zmin_after_rotation(
+    mesh_vertices: torch.Tensor,
+    target_rotation: torch.Tensor,
+) -> float:
+    rotated_vertices = (target_rotation @ mesh_vertices.T).T
+    return float(rotated_vertices[:, 2].min())
 
 
 def _held_object_mesh_vertices(state: WorldState, device) -> torch.Tensor:

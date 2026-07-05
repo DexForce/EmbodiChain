@@ -77,6 +77,7 @@ _ARRANGEMENT_KEYWORDS = (
 )
 _DEFAULT_RELEASE_Z = 0.04
 _DEFAULT_STAGING_Z_DELTA = 0.10
+_POSE_SENSITIVE_STAGING_Z_DELTA = 0.25
 _SLOT_MARGIN = 0.025
 _MIN_SLOT_SPACING = 0.07
 _LAYOUT_CLEARANCE = 0.025
@@ -318,7 +319,10 @@ def _apply_arrangement_task_response(
             release_z,
         ]
         high_position = list(release_position)
-        high_position[2] = round(high_position[2] + _DEFAULT_STAGING_Z_DELTA, 6)
+        high_position[2] = round(
+            high_position[2] + _arrangement_staging_z_delta_for_goal("axis_align"),
+            6,
+        )
         steps.append(
             _ArrangementLineStepSpec(
                 source_uid=source_uid,
@@ -679,7 +683,11 @@ def _with_arrangement_generated_pose_targets(
             release_z,
         ]
         high_position = list(release_position)
-        high_position[2] = round(high_position[2] + _DEFAULT_STAGING_Z_DELTA, 6)
+        high_position[2] = round(
+            high_position[2]
+            + _arrangement_staging_z_delta_for_goal(step.orientation_goal),
+            6,
+        )
         steps.append(
             replace(
                 step,
@@ -732,7 +740,11 @@ def _with_arrangement_generated_z_targets_fallback(
             round(float(init_z) + _DEFAULT_RELEASE_Z, 6),
         ]
         high_position = list(release_position)
-        high_position[2] = round(high_position[2] + _DEFAULT_STAGING_Z_DELTA, 6)
+        high_position[2] = round(
+            high_position[2]
+            + _arrangement_staging_z_delta_for_goal(step.orientation_goal),
+            6,
+        )
         steps.append(
             replace(
                 step,
@@ -802,6 +814,12 @@ def _generated_release_z(
     if isinstance(init_pos, Sequence) and len(init_pos) == 3:
         return round(float(init_pos[2]) + _DEFAULT_RELEASE_Z, 6)
     return _DEFAULT_RELEASE_Z
+
+
+def _arrangement_staging_z_delta_for_goal(orientation_goal: str) -> float:
+    if orientation_goal != "preserve":
+        return _POSE_SENSITIVE_STAGING_Z_DELTA
+    return _DEFAULT_STAGING_Z_DELTA
 
 
 def _resolve_arrangement_object_uids(

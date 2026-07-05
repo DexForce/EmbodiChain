@@ -43,6 +43,8 @@ _BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
 _PLACE_LIFT_HEIGHT = 0.10
 _RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = 10
 _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = 30
+_SURFACE_RELEASE_Z_POLICY = "object_on_surface"
+_SURFACE_RELEASE_CLEARANCE = 0.015
 _USE_PLACEMENT_ALIGN_TO = object()
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
 - `left_of` means positive world y relative to the reference object.
@@ -182,7 +184,7 @@ def make_arrangement_task_prompt(
     project_name: str,
     spec: _ArrangementSpecLike,
 ) -> str:
-    edge_count = len(spec.steps) * 6
+    edge_count = len(spec.steps) * 7
     step_blocks = "\n\n".join(
         _arrangement_step_prompt_block(index, step)
         for index, step in enumerate(spec.steps, start=1)
@@ -212,13 +214,17 @@ Arrangement plan:
 
 Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
 Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges. The absolute target object
-poses are collision-aware slots computed by the config-stage generator; do not
-rewrite them. First move each held object to the high staging pose with
-orientation preserved, then use `MoveHeldObject` at the same high pose to align
-its principal axis to the configured world axis, then move down to the final
-release object pose. Use the exact relative-zero release-only `Place` spec
-shown below. The arm not listed for a step must remain null.
+monitor, search, alignment, or extra lift edges beyond the listed steps. The
+absolute target object poses are collision-aware slots computed by the
+config-stage generator; do not rewrite them. First move each held object to the
+high staging pose with orientation preserved, then use `MoveHeldObject` at the
+same high pose to align its principal axis to the configured world axis, then
+move down to the final release object pose. The final release move includes an
+explicit surface `z_policy`; keep it exactly so the runtime resolver chooses a
+safe release height from the support surface and held-object geometry. Use the
+exact relative-zero release-only `Place` spec shown below, retreat the empty
+hand upward, then return that arm. The arm not listed for a step must remain
+null.
 
 {step_blocks}
 
@@ -239,7 +245,7 @@ def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> st
     active_arm = f"{step.active_side}_arm"
     active_slot = f"{step.active_side}_arm_action"
     inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
-    base_edge = (index - 1) * 6
+    base_edge = (index - 1) * 7
     high_preserve_spec = _format_pose_absolute_spec(
         active_arm,
         step.high_position,
@@ -260,6 +266,9 @@ def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> st
         sample_interval=45,
         orientation_goal=step.orientation_goal,
         orientation_axis=step.orientation_axis,
+        z_policy=_SURFACE_RELEASE_Z_POLICY,
+        support="table",
+        surface_clearance=_SURFACE_RELEASE_CLEARANCE,
     )
     return f"""{base_edge + 1}. Pick up `{step.runtime_uid}` for slot {step.slot_index}:
    - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
@@ -281,7 +290,11 @@ def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> st
    - {active_slot}: {_format_release_only_place_spec(active_arm)}
    - {inactive_slot}: null
 
-{base_edge + 6}. Return `{active_arm}` to its initial pose:
+{base_edge + 6}. Retreat `{active_arm}` upward after release:
+   - {active_slot}: {_format_empty_hand_retreat_spec(active_arm)}
+   - {inactive_slot}: null
+
+{base_edge + 7}. Return `{active_arm}` to its initial pose:
    - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
    - {inactive_slot}: null"""
 
@@ -316,7 +329,8 @@ Config-stage LLM notes:
 The execution-stage LLM should preserve each object's initial orientation while
 lifting to the high staging pose, align the held object to the configured
 arrangement world axis at that safe height, move down to the final object pose,
-release in place, and then return the arm to its initial pose.
+release in place, retreat the empty hand upward, and then return the arm to its
+initial pose.
 """
 
 
@@ -349,17 +363,43 @@ Keep the non-active arm null for each listed object.
 
 def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
     active_arm = f"{step.active_side}_arm"
+    high_preserve_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal="preserve",
+        orientation_axis="none",
+    )
+    high_align_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+    )
+    release_move_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.release_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+        z_policy=_SURFACE_RELEASE_Z_POLICY,
+        support="table",
+        surface_clearance=_SURFACE_RELEASE_CLEARANCE,
+    )
     return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
 - Pick up:
   {_format_pick_up_spec(active_arm, step.runtime_uid)}
 - High staging without orientation change:
-  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal="preserve", orientation_axis="none")}
+  {high_preserve_spec}
 - High staging axis alignment:
-  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal=step.orientation_goal, orientation_axis=step.orientation_axis)}
+  {high_align_spec}
 - Final release object pose:
-  {_format_pose_absolute_spec(active_arm, step.release_position, sample_interval=45, orientation_goal=step.orientation_goal, orientation_axis=step.orientation_axis)}
+  {release_move_spec}
 - Release-only Place:
   {_format_release_only_place_spec(active_arm)}
+- Empty-hand retreat:
+  {_format_empty_hand_retreat_spec(active_arm)}
 - Return:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
 
@@ -1811,6 +1851,17 @@ def _format_coordinated_pickment_spec(
         }
     if placement.orientation_align_to_runtime_uid is not None:
         target_object_pose["align_to"] = placement.orientation_align_to_runtime_uid
+    if placement.relation == "on" and not getattr(
+        placement,
+        "reference_is_initial_pose",
+        False,
+    ):
+        _add_surface_z_policy(
+            target_object_pose,
+            z_policy=_SURFACE_RELEASE_Z_POLICY,
+            support=placement.reference_runtime_uid,
+            surface_clearance=_SURFACE_RELEASE_CLEARANCE,
+        )
     return _compact_json(
         {
             "atomic_action_class": "CoordinatedPickment",
@@ -1839,6 +1890,9 @@ def _format_pose_object_spec(
     orientation_goal: str = "preserve",
     orientation_axis: str = "none",
     align_to: str | None = None,
+    z_policy: str | None = None,
+    support: str | None = None,
+    surface_clearance: float | None = None,
 ) -> str:
     x, y, z = offset
     target_object_pose = {
@@ -1850,6 +1904,12 @@ def _format_pose_object_spec(
     }
     if align_to is not None:
         target_object_pose["align_to"] = align_to
+    _add_surface_z_policy(
+        target_object_pose,
+        z_policy=z_policy,
+        support=support,
+        surface_clearance=surface_clearance,
+    )
     return _compact_json(
         {
             "atomic_action_class": "MoveHeldObject",
@@ -1899,6 +1959,10 @@ def _format_relative_pose_spec(
         if align_to is _USE_PLACEMENT_ALIGN_TO
         else align_to
     )
+    surface_support = _relative_surface_support(placement, pose_kind=pose_kind)
+    surface_z_policy = (
+        _SURFACE_RELEASE_Z_POLICY if surface_support is not None else None
+    )
     if getattr(placement, "reference_is_initial_pose", False) or getattr(
         placement,
         "upright_in_place",
@@ -1920,6 +1984,11 @@ def _format_relative_pose_spec(
             orientation_goal=resolved_orientation_goal,
             orientation_axis=resolved_orientation_axis,
             align_to=resolved_align_to,
+            z_policy=surface_z_policy,
+            support=surface_support,
+            surface_clearance=(
+                _SURFACE_RELEASE_CLEARANCE if surface_z_policy is not None else None
+            ),
         )
 
     offset = placement.high_offset if pose_kind == "high" else placement.release_offset
@@ -1931,7 +2000,24 @@ def _format_relative_pose_spec(
         orientation_goal=resolved_orientation_goal,
         orientation_axis=resolved_orientation_axis,
         align_to=resolved_align_to,
+        z_policy=surface_z_policy,
+        support=surface_support,
+        surface_clearance=(
+            _SURFACE_RELEASE_CLEARANCE if surface_z_policy is not None else None
+        ),
     )
+
+
+def _relative_surface_support(
+    placement: _RelativePlacementLike,
+    *,
+    pose_kind: str,
+) -> str | None:
+    if pose_kind != "release" or placement.relation != "on":
+        return None
+    if getattr(placement, "reference_is_initial_pose", False):
+        return None
+    return placement.reference_runtime_uid
 
 
 def _format_high_staging_spec(
@@ -2018,6 +2104,9 @@ def _format_pose_absolute_spec(
     orientation_goal: str = "preserve",
     orientation_axis: str = "none",
     align_to: str | None = None,
+    z_policy: str | None = None,
+    support: str | None = None,
+    surface_clearance: float | None = None,
 ) -> str:
     target_object_pose = {
         "reference": "absolute",
@@ -2027,6 +2116,12 @@ def _format_pose_absolute_spec(
     }
     if align_to is not None:
         target_object_pose["align_to"] = align_to
+    _add_surface_z_policy(
+        target_object_pose,
+        z_policy=z_policy,
+        support=support,
+        surface_clearance=surface_clearance,
+    )
     return _compact_json(
         {
             "atomic_action_class": "MoveHeldObject",
@@ -2036,6 +2131,22 @@ def _format_pose_absolute_spec(
             "cfg": {"sample_interval": sample_interval},
         }
     )
+
+
+def _add_surface_z_policy(
+    target_object_pose: dict[str, Any],
+    *,
+    z_policy: str | None,
+    support: str | None,
+    surface_clearance: float | None,
+) -> None:
+    if z_policy is None:
+        return
+    target_object_pose["z_policy"] = z_policy
+    if support is not None:
+        target_object_pose["support"] = support
+    if surface_clearance is not None:
+        target_object_pose["surface_clearance"] = float(surface_clearance)
 
 
 def _format_place_spec(
