@@ -1005,9 +1005,13 @@ def test_task_description_generates_coordinated_pickment_config(
         assert '"robot_name":"left_arm","control":"hand"' in text
         assert '"robot_name":"right_arm","control":"hand"' in text
         assert '"target_qpos":{"source":"gripper_state","state":"open"}' in text
+        assert '"robot_name":"left_arm","control":"arm"' in text
+        assert '"robot_name":"right_arm","control":"arm"' in text
+        assert '"target_qpos":{"source":"initial"}' in text
         assert '"atomic_action_class":"PickUp"' not in text
-    assert "exactly 2 nominal edges" in task_prompt
+    assert "exactly 3 nominal edges" in task_prompt
     assert "must not remain held" in task_prompt
+    assert "Both arms must be back at their initial" in task_prompt
     assert "may remain held" not in task_prompt
     assert '"position":[0.54,0.11' in task_prompt
 

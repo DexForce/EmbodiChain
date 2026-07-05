@@ -800,6 +800,8 @@ def _make_coordinated_pickment_task_prompt(
         sample_interval=10,
         post_hold_steps=20,
     )
+    left_initial_spec = _format_initial_qpos_spec("left_arm", sample_interval=30)
+    right_initial_spec = _format_initial_qpos_spec("right_arm", sample_interval=30)
     final_planning_rule = _relative_final_planning_rule(project_name, spec)
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
@@ -821,13 +823,14 @@ Coordinated shared-object mapping:
 
 {_RELATIVE_COORDINATE_CONVENTION}
 
-Generate one deterministic nominal graph with exactly 2 nominal edges. First
+Generate one deterministic nominal graph with exactly 3 nominal edges. First
 use the `CoordinatedPickment` JSON spec shown below to move the shared object.
 It controls both arms in one atomic action, so put it in `left_arm_action` and
 keep `right_arm_action` null. Then release the object by opening both grippers
-simultaneously with the `MoveJoints(control="hand")` specs shown below. Do not
-add separate `PickUp`, `MoveHeldObject`, `Place`, return-to-initial, or extra
-gripper actions.
+simultaneously with the `MoveJoints(control="hand")` specs shown below. Finally
+return both empty arms to their initial arm joint poses with the
+`MoveJoints(control="arm")` specs shown below. Do not add separate `PickUp`,
+`MoveHeldObject`, `Place`, or extra gripper/return actions.
 
 1. Coordinated pick and move `{spec.moved_runtime_uid}`:
    - left_arm_action: {action_spec}
@@ -837,9 +840,14 @@ gripper actions.
    - left_arm_action: {left_release_spec}
    - right_arm_action: {right_release_spec}
 
+3. Return both empty arms to their initial poses:
+   - left_arm_action: {left_initial_spec}
+   - right_arm_action: {right_initial_spec}
+
 Final state: `{spec.moved_runtime_uid}` must be
 {_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}` and
-must not remain held by either gripper.
+must not remain held by either gripper. Both arms must be back at their initial
+arm joint poses with grippers open.
 {final_planning_rule}
 """
 
@@ -1298,11 +1306,12 @@ Interactive task object:
 Config-stage LLM notes:
 {notes}
 
-The execution-stage LLM should generate a two-edge graph. First use
+The execution-stage LLM should generate a three-edge graph. First use
 `CoordinatedPickment` to grasp the shared object with both grippers, lift it,
 and move the object to the configured target pose. Then open both grippers in
-parallel with `MoveJoints(control="hand", state="open")` to release it. It must
-not decompose this task into separate single-arm `PickUp`, `MoveHeldObject`, or
+parallel with `MoveJoints(control="hand", state="open")` to release it. Finally
+return both empty arms to their initial arm joint poses in parallel. It must not
+decompose this task into separate single-arm `PickUp`, `MoveHeldObject`, or
 `Place` actions.
 """
 
@@ -1502,12 +1511,15 @@ def _make_coordinated_pickment_atom_actions_prompt(spec: _RelativeSpecLike) -> s
         sample_interval=10,
         post_hold_steps=20,
     )
+    left_initial_spec = _format_initial_qpos_spec("left_arm", sample_interval=30)
+    right_initial_spec = _format_initial_qpos_spec("right_arm", sample_interval=30)
     return f"""### Atomic Action Class JSON Specs for Dual-UR5 Coordinated Pickment
 
 Use only these native atomic action class JSON specs. `CoordinatedPickment`
 controls both arms, so the nominal graph must put that spec in
 `left_arm_action` and set `right_arm_action` to null. The following release
-edge must then open both hands in parallel.
+edge must then open both hands in parallel, followed by a return-to-initial edge
+for both empty arms.
 
 - Coordinated pick and move `{spec.moved_runtime_uid}`:
   {_format_coordinated_pickment_spec(spec)}
@@ -1515,6 +1527,10 @@ edge must then open both hands in parallel.
 - Release `{spec.moved_runtime_uid}` from both grippers:
   left_arm_action: {left_release_spec}
   right_arm_action: {right_release_spec}
+
+- Return both empty arms to initial poses:
+  left_arm_action: {left_initial_spec}
+  right_arm_action: {right_initial_spec}
 """
 
 
