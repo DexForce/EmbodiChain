@@ -822,7 +822,7 @@ class SimulationManager:
             Light: The created light instance.
 
         Raises:
-            ValueError: If ``cfg.light_type`` is not one of the supported types.
+            RuntimeError: If ``cfg.light_type`` is not one of the supported types.
         """
         if cfg.uid is None:
             uid = "light"
