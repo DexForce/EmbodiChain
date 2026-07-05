@@ -51,6 +51,7 @@ __all__ = [
     "_side_relation_xy_offsets",
     "_with_on_surface_release_offsets",
     "_with_inside_container_slot_offsets",
+    "_with_coordinated_side_release_height_offsets",
     "_with_self_relative_absolute_targets",
 ]
 
@@ -236,6 +237,49 @@ def _with_inside_container_slot_offsets(
         for index, placement in enumerate(spec.placements)
     )
     return _replace_relative_spec_placements(spec, placements)
+
+
+def _with_coordinated_side_release_height_offsets(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    if spec.intent != "coordinated_pickment":
+        return spec
+    placements = tuple(
+        _with_coordinated_side_release_height_offset(placement, gym_config)
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _with_coordinated_side_release_height_offset(
+    placement: _RelativePlacementStepSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementStepSpec:
+    if placement.relation not in _SIDE_RELATIONS or placement.reference_is_initial_pose:
+        return placement
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    reference_config = object_configs.get(placement.reference_runtime_uid)
+    moved_config = object_configs.get(placement.moved_runtime_uid)
+    if reference_config is None or moved_config is None:
+        return placement
+
+    reference_origin = _clean_vector3(reference_config.get("init_pos", [0, 0, 0]))
+    moved_origin = _clean_vector3(moved_config.get("init_pos", [0, 0, 0]))
+    release_offset = list(placement.release_offset)
+    release_offset[2] = round(float(moved_origin[2] - reference_origin[2]), 6)
+    high_offset = list(release_offset)
+    high_offset[2] = round(release_offset[2] + _STAGING_Z_DELTA, 6)
+    return replace(
+        placement,
+        release_offset=release_offset,
+        high_offset=high_offset,
+    )
 
 
 def _with_relative_release_offset(

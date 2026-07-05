@@ -1023,6 +1023,68 @@ def test_task_description_generates_coordinated_pickment_config(
     }
 
 
+def test_coordinated_pickment_side_relation_preserves_object_height(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        assert kwargs["task_description"] == "用双臂将 apple_1 往右移动"
+        return {
+            "manipulations": [
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_1",
+                    "reference_object": "table",
+                    "goal_relation": "right_of",
+                    "arm": "auto",
+                }
+            ],
+            "task_prompt_summary": "Use both arms to move apple_1 right.",
+            "basic_background_notes": "One shared object requires both arms.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_coordinated_pickment_right_agent",
+        task_name="MoveAppleRightWithBothArms",
+        task_description="用双臂将 apple_1 往右移动",
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    object_configs = {
+        obj["uid"]: obj
+        for group in ("rigid_object", "background")
+        for obj in gym_config[group]
+    }
+    expected_z_offset = round(
+        object_configs["apple_1"]["init_pos"][2]
+        - object_configs["table"]["init_pos"][2],
+        6,
+    )
+    task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+
+    assert paths.summary["release_offset"] == pytest.approx(
+        [0.0, -0.16, expected_z_offset]
+    )
+    assert '"reference":"object","obj_name":"table"' in task_prompt
+    assert f'"offset":[0.0,-0.16,{expected_z_offset}]' in task_prompt
+
+
 def test_task_description_generates_self_relative_front_left_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
