@@ -14,13 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
-from typing import List, Sequence
+from typing import TYPE_CHECKING, List, Sequence
 from dexsim.render import Light as _Light
 from embodichain.lab.sim.cfg import LightCfg
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from dexsim.models import MeshObject
 
 
 class Light(BatchEntity):
@@ -87,6 +92,254 @@ class Light(BatchEntity):
         """
         self._apply_scalar(falloffs, env_ids, "set_falloff")
 
+    def set_direction(
+        self, directions: torch.Tensor, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Set direction for directional-type lights.
+
+        Only applies to ``sun``, ``direction``, ``spot``, ``rect``, and ``mesh``
+        light types. Logs a warning and no-ops for other types.
+
+        Args:
+            directions (torch.Tensor): Tensor of shape (3,) or (M, 3), representing
+                (x, y, z) direction vectors.
+            env_ids (Sequence[int] | None): Indices of instances to set. If None:
+                - For shape (3,), applies to all instances.
+                - For shape (M, 3), M must equal num_instances, applies per-instance.
+        """
+        if self.cfg.light_type not in ("sun", "direction", "spot", "rect", "mesh"):
+            logger.warning(
+                f"set_direction not applicable to light type "
+                f"'{self.cfg.light_type}', ignoring."
+            )
+            return
+        self._apply_vector3(directions, env_ids, "set_direction")
+
+    def set_spot_angle(
+        self,
+        inner_angles: torch.Tensor,
+        outer_angles: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set inner and outer cone angles for spot lights.
+
+        Only applies to ``spot`` light type. Logs a warning and no-ops for other types.
+
+        Args:
+            inner_angles (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
+                representing inner cone angle in degrees.
+            outer_angles (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
+                representing outer cone angle in degrees.
+            env_ids (Sequence[int] | None): Indices of instances to set.
+        """
+        if self.cfg.light_type != "spot":
+            logger.warning(
+                f"set_spot_angle not applicable to light type "
+                f"'{self.cfg.light_type}', ignoring."
+            )
+            return
+
+        if not torch.is_tensor(inner_angles) or not torch.is_tensor(outer_angles):
+            logger.log_error("set_spot_angle requires torch.Tensor arguments")
+            return
+
+        inner_cpu = inner_angles.detach().cpu()
+        outer_cpu = outer_angles.detach().cpu()
+
+        if env_ids is None:
+            all_ids = list(range(self.num_instances))
+        else:
+            all_ids = list(env_ids)
+
+        # Both scalar (0-dim): broadcast to all_ids
+        if inner_cpu.ndim == 0 and outer_cpu.ndim == 0:
+            iv = float(inner_cpu.item())
+            ov = float(outer_cpu.item())
+            for i in all_ids:
+                self._entities[i].set_spot_angle(iv, ov)
+            return
+
+        # Both 1D with matching length
+        if inner_cpu.ndim == 1 and outer_cpu.ndim == 1:
+            ilen, olen = inner_cpu.shape[0], outer_cpu.shape[0]
+            inner_arr = inner_cpu.numpy()
+            outer_arr = outer_cpu.numpy()
+
+            if ilen == olen == self.num_instances and env_ids is None:
+                for i in range(self.num_instances):
+                    self._entities[i].set_spot_angle(
+                        float(inner_arr[i]), float(outer_arr[i])
+                    )
+                return
+
+            if env_ids is not None and ilen == olen == len(all_ids):
+                for idx, i in enumerate(all_ids):
+                    self._entities[i].set_spot_angle(
+                        float(inner_arr[idx]), float(outer_arr[idx])
+                    )
+                return
+
+        logger.log_error(
+            f"set_spot_angle: invalid tensor shapes "
+            f"inner={tuple(inner_cpu.shape)}, outer={tuple(outer_cpu.shape)}"
+        )
+
+    def set_rect_wh(
+        self,
+        widths: torch.Tensor,
+        heights: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set width and height for rectangular area lights.
+
+        Only applies to ``rect`` light type. Logs a warning and no-ops for other types.
+
+        Args:
+            widths (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
+                representing width of the rectangular light.
+            heights (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
+                representing height of the rectangular light.
+            env_ids (Sequence[int] | None): Indices of instances to set.
+        """
+        if self.cfg.light_type != "rect":
+            logger.warning(
+                f"set_rect_wh not applicable to light type "
+                f"'{self.cfg.light_type}', ignoring."
+            )
+            return
+
+        if not torch.is_tensor(widths) or not torch.is_tensor(heights):
+            logger.log_error("set_rect_wh requires torch.Tensor arguments")
+            return
+
+        w_cpu = widths.detach().cpu()
+        h_cpu = heights.detach().cpu()
+
+        if env_ids is None:
+            all_ids = list(range(self.num_instances))
+        else:
+            all_ids = list(env_ids)
+
+        # Both scalar (0-dim): broadcast to all_ids
+        if w_cpu.ndim == 0 and h_cpu.ndim == 0:
+            wv = float(w_cpu.item())
+            hv = float(h_cpu.item())
+            for i in all_ids:
+                self._entities[i].set_rect_wh(wv, hv)
+            return
+
+        # Both 1D with matching length
+        if w_cpu.ndim == 1 and h_cpu.ndim == 1:
+            wlen, hlen = w_cpu.shape[0], h_cpu.shape[0]
+            w_arr = w_cpu.numpy()
+            h_arr = h_cpu.numpy()
+
+            if wlen == hlen == self.num_instances and env_ids is None:
+                for i in range(self.num_instances):
+                    self._entities[i].set_rect_wh(
+                        float(w_arr[i]), float(h_arr[i])
+                    )
+                return
+
+            if env_ids is not None and wlen == hlen == len(all_ids):
+                for idx, i in enumerate(all_ids):
+                    self._entities[i].set_rect_wh(
+                        float(w_arr[idx]), float(h_arr[idx])
+                    )
+                return
+
+        logger.log_error(
+            f"set_rect_wh: invalid tensor shapes "
+            f"width={tuple(w_cpu.shape)}, height={tuple(h_cpu.shape)}"
+        )
+
+    def set_mesh(
+        self,
+        mesh: "MeshObject",
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Set the mesh for mesh-type lights.
+
+        Only applies to ``mesh`` light type. Logs a warning and no-ops for other types.
+        This is NOT tensor-batched — the same MeshObject is assigned to all targeted
+        instances.
+
+        Args:
+            mesh (MeshObject): The mesh object to assign to the light.
+            env_ids (Sequence[int] | None): Indices of instances to set. If None,
+                applies to all instances.
+        """
+        if self.cfg.light_type != "mesh":
+            logger.warning(
+                f"set_mesh not applicable to light type "
+                f"'{self.cfg.light_type}', ignoring."
+            )
+            return
+
+        if env_ids is None:
+            target_ids = list(range(self.num_instances))
+        else:
+            target_ids = list(env_ids)
+
+        for i in target_ids:
+            try:
+                self._entities[i].set_mesh(mesh)
+            except Exception as e:
+                logger.log_error(f"set_mesh: error for instance {i}: {e}")
+
+    def enable_shadow(
+        self,
+        flags: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Enable or disable shadow casting.
+
+        Applies to all light types.
+
+        Args:
+            flags (torch.Tensor): Boolean tensor of shape () (0-dim), (1,), or (M,).
+                Non-zero values enable shadows; zero disables.
+            env_ids (Sequence[int] | None): Indices of instances to set.
+        """
+        if not torch.is_tensor(flags):
+            logger.log_error(f"enable_shadow requires a torch.Tensor, got {type(flags)}")
+            return
+
+        cpu = flags.detach().cpu()
+        if env_ids is None:
+            all_ids = list(range(self.num_instances))
+        else:
+            all_ids = list(env_ids)
+
+        # Scalar: broadcast
+        if cpu.ndim == 0:
+            val = bool(cpu.item() != 0)
+            for i in all_ids:
+                self._entities[i].set_shadow(val)
+            return
+
+        # 1D tensor
+        if cpu.ndim == 1:
+            length = cpu.shape[0]
+            arr = cpu.numpy()
+            if length == self.num_instances and env_ids is None:
+                for i in range(self.num_instances):
+                    self._entities[i].set_shadow(bool(arr[i] != 0))
+                return
+            if env_ids is not None and length == len(all_ids):
+                for idx, i in enumerate(all_ids):
+                    self._entities[i].set_shadow(bool(arr[idx] != 0))
+                return
+            if length == 1:
+                val = bool(arr[0] != 0)
+                for i in all_ids:
+                    self._entities[i].set_shadow(val)
+                return
+
+        logger.log_error(
+            f"enable_shadow: tensor shape {tuple(cpu.shape)} is invalid for broadcasting"
+        )
+
     def set_local_pose(
         self,
         pose: torch.Tensor,
@@ -104,6 +357,13 @@ class Light(BatchEntity):
                 - For matrix input (4,4) broadcast to all, or (M,4,4) with M == num_instances.
             to_matrix (bool): Interpret `pose` as full 4x4 matrix if True, else as vector(s).
         """
+        if self.cfg.light_type == "direction":
+            logger.warning(
+                "set_local_pose not applicable to 'direction' light type "
+                "(infinite distance, direction only). Use set_direction() instead."
+            )
+            return
+
         if not torch.is_tensor(pose):
             logger.log_error(
                 f"set_local_pose requires a torch.Tensor, got {type(pose)}"
@@ -292,8 +552,52 @@ class Light(BatchEntity):
         )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Reset the light to its initial configuration state.
+
+        Applies only the properties relevant to ``self.cfg.light_type``.
+
+        Args:
+            env_ids (Sequence[int] | None): The environment IDs to reset.
+                If None, resets all environments.
+        """
         self.cfg: LightCfg
+        light_type = self.cfg.light_type
+
+        # Universal properties
         self.set_color(torch.as_tensor(self.cfg.color), env_ids=env_ids)
         self.set_intensity(torch.as_tensor(self.cfg.intensity), env_ids=env_ids)
-        self.set_falloff(torch.as_tensor(self.cfg.radius), env_ids=env_ids)
-        self.set_local_pose(torch.as_tensor(self.cfg.init_pos), env_ids=env_ids)
+        self.enable_shadow(
+            torch.as_tensor(float(self.cfg.enable_shadow)), env_ids=env_ids
+        )
+
+        # Position (all types except direction)
+        if light_type != "direction":
+            self.set_local_pose(torch.as_tensor(self.cfg.init_pos), env_ids=env_ids)
+
+        # Point light: falloff
+        if light_type == "point":
+            self.set_falloff(torch.as_tensor(self.cfg.radius), env_ids=env_ids)
+
+        # Directional types: direction vector
+        if light_type in ("sun", "direction", "spot", "rect", "mesh"):
+            self.set_direction(torch.as_tensor(self.cfg.direction), env_ids=env_ids)
+
+        # Spot light: cone angles
+        if light_type == "spot":
+            self.set_spot_angle(
+                torch.as_tensor(self.cfg.spot_angle_inner),
+                torch.as_tensor(self.cfg.spot_angle_outer),
+                env_ids=env_ids,
+            )
+
+        # Rect light: dimensions
+        if light_type == "rect":
+            self.set_rect_wh(
+                torch.as_tensor(self.cfg.rect_width),
+                torch.as_tensor(self.cfg.rect_height),
+                env_ids=env_ids,
+            )
+
+        # Mesh light: mesh_path is stored in cfg but actual mesh assignment
+        # is done via set_mesh() which requires a MeshObject.
+        # Sun-specific angular_radius/halo are reserved for future backend support.
