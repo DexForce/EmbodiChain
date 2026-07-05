@@ -179,6 +179,14 @@ class Light(BatchEntity):
                     )
                 return
 
+            # length-1 broadcast
+            if ilen == olen == 1:
+                iv = float(inner_arr[0])
+                ov = float(outer_arr[0])
+                for i in all_ids:
+                    self._entities[i].set_spot_angle(iv, ov)
+                return
+
         logger.log_error(
             f"set_spot_angle: invalid tensor shapes "
             f"inner={tuple(inner_cpu.shape)}, outer={tuple(outer_cpu.shape)}"
@@ -236,16 +244,20 @@ class Light(BatchEntity):
 
             if wlen == hlen == self.num_instances and env_ids is None:
                 for i in range(self.num_instances):
-                    self._entities[i].set_rect_wh(
-                        float(w_arr[i]), float(h_arr[i])
-                    )
+                    self._entities[i].set_rect_wh(float(w_arr[i]), float(h_arr[i]))
                 return
 
             if env_ids is not None and wlen == hlen == len(all_ids):
                 for idx, i in enumerate(all_ids):
-                    self._entities[i].set_rect_wh(
-                        float(w_arr[idx]), float(h_arr[idx])
-                    )
+                    self._entities[i].set_rect_wh(float(w_arr[idx]), float(h_arr[idx]))
+                return
+
+            # length-1 broadcast
+            if wlen == hlen == 1:
+                wv = float(w_arr[0])
+                hv = float(h_arr[0])
+                for i in all_ids:
+                    self._entities[i].set_rect_wh(wv, hv)
                 return
 
         logger.log_error(
@@ -302,7 +314,9 @@ class Light(BatchEntity):
             env_ids (Sequence[int] | None): Indices of instances to set.
         """
         if not torch.is_tensor(flags):
-            logger.log_error(f"enable_shadow requires a torch.Tensor, got {type(flags)}")
+            logger.log_error(
+                f"enable_shadow requires a torch.Tensor, got {type(flags)}"
+            )
             return
 
         cpu = flags.detach().cpu()
