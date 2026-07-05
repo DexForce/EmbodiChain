@@ -516,7 +516,7 @@ def build_dexforce_w1_solver_cfg(
     ],
     component_versions: dict[DexforceW1Type, DexforceW1Version] | None = None,
     urdf_cfg: URDFCfg | None = None,
-) -> Dict[DexforceW1Type, SolverCfg]:
+) -> Dict[str, SolverCfg]:
     """
     Build DexforceW1 solver configuration dict.
 
@@ -527,7 +527,8 @@ def build_dexforce_w1_solver_cfg(
         urdf_cfg: Optional, URDFCfg object from build_dexforce_w1_assembly_urdf_cfg.
 
     Returns:
-        Dict[DexforceW1Type, SolverCfg]
+        Dict[str, SolverCfg]: solver config keyed by control part name
+        (e.g. ``"left_arm"``, ``"full_body"``).
     """
 
     def get_version(t, default=DexforceW1Version.V021):
@@ -550,7 +551,10 @@ def build_dexforce_w1_solver_cfg(
             )
         arm_version = get_version(arm_type)
         arm_cfg = arm_manager.get_config(arm_kind, arm_side, arm_version)
-        solver_cfg[arm_type] = SolverCfg.from_dict(
+        # Use control_parts-aligned key (e.g. "left_arm") so init_solver
+        # can match this entry to the corresponding control part.
+        solver_key = f"{arm_side.value}_arm"
+        solver_cfg[solver_key] = SolverCfg.from_dict(
             {
                 "class_type": "PytorchSolver",
                 "urdf_path": arm_cfg["urdf_path"],
@@ -567,7 +571,7 @@ def build_dexforce_w1_solver_cfg(
         else get_data_path("DexforceW1FullBodyV021/full_body.urdf")
     )
 
-    solver_cfg[DexforceW1Type.FULL_BODY] = SolverCfg.from_dict(
+    solver_cfg[DexforceW1Type.FULL_BODY.value] = SolverCfg.from_dict(
         {
             "class_type": "PytorchSolver",
             "urdf_path": full_body_urdf_path,
