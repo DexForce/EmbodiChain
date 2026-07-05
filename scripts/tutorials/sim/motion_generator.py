@@ -113,14 +113,18 @@ def compute_record_look_at(
 
 
 def move_robot_along_trajectory(
+    sim: SimulationManager,
     robot: Robot,
     arm_name: str,
     qpos_trajectory: torch.Tensor | Sequence[torch.Tensor],
-    delay: float = 0.1,
 ) -> None:
     """Play back a planned joint trajectory for one or more environments.
 
+    This function assumes the simulation is in manual-update mode and calls
+    :meth:`SimulationManager.update` after each waypoint so physics advances.
+
     Args:
+        sim: Simulation manager instance.
         robot: Robot instance.
         arm_name: Name of the robot arm to control.
         qpos_trajectory: Joint positions shaped ``(B, N, DOF)``, ``(N, DOF)``,
@@ -146,7 +150,7 @@ def move_robot_along_trajectory(
     joint_ids = robot.get_joint_ids(arm_name)
     for qpos_step in qpos_trajectory.transpose(0, 1):
         robot.set_qpos(qpos=qpos_step, joint_ids=joint_ids)
-        time.sleep(delay)
+        sim.update(step=4)
 
 
 def create_demo_trajectory(
@@ -227,7 +231,6 @@ def main() -> None:
             arena_space=args.arena_space,
         )
     )
-    sim.set_manual_update(False)
 
     robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
     arm_name = "left_arm"
@@ -280,10 +283,10 @@ def main() -> None:
         if joint_plan.positions is None:
             raise RuntimeError("Joint-space planning did not produce any positions.")
         move_robot_along_trajectory(
+            sim=sim,
             robot=robot,
             arm_name=arm_name,
             qpos_trajectory=joint_plan.positions,
-            delay=args.step_delay,
         )
 
         options.is_linear = True
@@ -297,10 +300,10 @@ def main() -> None:
             )
         sim.reset()
         move_robot_along_trajectory(
+            sim=sim,
             robot=robot,
             arm_name=arm_name,
             qpos_trajectory=cartesian_plan.positions,
-            delay=args.step_delay,
         )
     finally:
         if sim.is_window_recording():

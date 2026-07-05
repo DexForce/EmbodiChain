@@ -71,6 +71,8 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
     draw_axis_marker,
     get_tutorial_window_size,
     make_ur5_solver_cfg,
@@ -281,6 +283,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
             width=width,
             height=height,
             headless=True,
+            num_envs=args.num_envs,
             sim_device=args.device,
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
@@ -701,7 +704,10 @@ def compute_actual_held_state(
         name=arm_control_part,
         to_matrix=True,
     ).to(device=device, dtype=torch.float32)
-    object_pose = object_pose.to(device=device, dtype=torch.float32).unsqueeze(0)
+    object_pose = broadcast_pose_batch(
+        object_pose.to(device=device, dtype=torch.float32),
+        num_envs=tcp_pose.shape[0],
+    )
     object_to_eef = torch.bmm(invert_pose(object_pose), tcp_pose)
     return HeldObjectState(
         semantics=semantics,
@@ -770,7 +776,7 @@ def plan_manual_pick(
         control_part=arm_control_part,
         arm_dof=arm_dof,
     )
-    if not ok:
+    if not bool(torch.all(ok)):
         logger.log_warning(f"Failed to plan {arm_control_part} manual pick approach.")
         return (
             False,
@@ -790,7 +796,7 @@ def plan_manual_pick(
         control_part=arm_control_part,
         arm_dof=arm_dof,
     )
-    if not ok:
+    if not bool(torch.all(ok)):
         logger.log_warning(f"Failed to plan {arm_control_part} manual pick lift.")
         return (
             False,
@@ -810,13 +816,13 @@ def plan_manual_pick(
 
     full = start_state.last_qpos.unsqueeze(1).repeat(1, sample_interval, 1).clone()
     full[:, :n_approach, arm_joint_ids] = approach_arm
-    full[:, :n_approach, hand_joint_ids] = hand_open
+    full[:, :n_approach, hand_joint_ids] = hand_open.unsqueeze(1)
     full[:, n_approach : n_approach + n_close, arm_joint_ids] = (
         grasp_arm_qpos.unsqueeze(1)
     )
     full[:, n_approach : n_approach + n_close, hand_joint_ids] = hand_close_path
     full[:, n_approach + n_close :, arm_joint_ids] = lift_arm
-    full[:, n_approach + n_close :, hand_joint_ids] = hand_close
+    full[:, n_approach + n_close :, hand_joint_ids] = hand_close.unsqueeze(1)
     return True, full, WorldState(last_qpos=full[:, -1, :].clone(), held_object=None)
 
 
@@ -930,12 +936,13 @@ def run_coordinated_placement_demo(
     pan = create_pan(sim)
     settle_object(sim, bread, step=0)
     settle_object(sim, pan, step=0)
-    bread_pose = bread.get_local_pose(to_matrix=True)[0].to(
-        device=sim.device, dtype=torch.float32
-    )
-    pan_pose = pan.get_local_pose(to_matrix=True)[0].to(
-        device=sim.device, dtype=torch.float32
-    )
+    bread_pose_batch = clone_local_pose_from_first_env(bread)
+    pan_pose_batch = clone_local_pose_from_first_env(pan)
+    bread.clear_dynamics()
+    pan.clear_dynamics()
+    bread_pose = bread_pose_batch[0].to(device=sim.device, dtype=torch.float32)
+    pan_pose = pan_pose_batch[0].to(device=sim.device, dtype=torch.float32)
+    n_envs = bread_pose_batch.shape[0]
     bread_vertices = get_local_vertices(bread)
     pan_vertices = get_local_vertices(pan)
     bread_local_min, bread_local_max = compute_local_bounds(bread_vertices)
@@ -1011,13 +1018,13 @@ def run_coordinated_placement_demo(
         return
     log_action_plan(robot, "left_pick_up", left_pick_traj, full_joint_ids)
     bread_object_to_eef = torch.bmm(
-        invert_pose(bread_pose.unsqueeze(0)),
-        bread_grasp_pose.unsqueeze(0),
+        broadcast_pose_batch(invert_pose(bread_pose.unsqueeze(0)), num_envs=n_envs),
+        broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
     )
     bread_held_state = HeldObjectState(
         semantics=bread_semantics,
         object_to_eef=bread_object_to_eef,
-        grasp_xpos=bread_grasp_pose.unsqueeze(0),
+        grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
     )
 
     pan_grasp_pose = build_pan_handle_grasp_pose(
@@ -1049,13 +1056,13 @@ def run_coordinated_placement_demo(
         return
     log_action_plan(robot, "right_pick_up", right_pick_traj, full_joint_ids)
     pan_object_to_eef = torch.bmm(
-        invert_pose(pan_pose.unsqueeze(0)),
-        pan_grasp_pose.unsqueeze(0),
+        broadcast_pose_batch(invert_pose(pan_pose.unsqueeze(0)), num_envs=n_envs),
+        broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
     )
     pan_held_state = HeldObjectState(
         semantics=pan_semantics,
         object_to_eef=pan_object_to_eef,
-        grasp_xpos=pan_grasp_pose.unsqueeze(0),
+        grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
     )
 
     if args.diagnose_plan:
@@ -1083,23 +1090,27 @@ def run_coordinated_placement_demo(
             args.debug_state,
         )
         pan.clear_dynamics()
-        bread_pose = bread.get_local_pose(to_matrix=True)[0].to(
+        bread_pose_batch = clone_local_pose_from_first_env(bread).to(
             device=sim.device, dtype=torch.float32
         )
-        actual_pan_pose = pan.get_local_pose(to_matrix=True)[0].to(
+        pan_pose_batch = clone_local_pose_from_first_env(pan).to(
             device=sim.device, dtype=torch.float32
         )
+        bread.clear_dynamics()
+        pan.clear_dynamics()
+        bread_pose = bread_pose_batch[0]
+        pan_pose = pan_pose_batch[0]
         bread_held_state = compute_actual_held_state(
             robot,
             bread_semantics,
-            bread_pose,
+            bread_pose_batch,
             "left_arm",
             sim.device,
         )
         pan_held_state = compute_actual_held_state(
             robot,
             pan_semantics,
-            actual_pan_pose,
+            pan_pose_batch,
             "right_arm",
             sim.device,
         )
@@ -1125,8 +1136,12 @@ def run_coordinated_placement_demo(
             placing_target_pose,
         )
     coordinated_target = CoordinatedPlacementTarget(
-        placing_object_target_pose=placing_target_pose,
-        support_object_target_pose=support_target_pose,
+        placing_object_target_pose=broadcast_pose_batch(
+            placing_target_pose, num_envs=n_envs
+        ),
+        support_object_target_pose=broadcast_pose_batch(
+            support_target_pose, num_envs=n_envs
+        ),
         placing_held_object=bread_held_state,
         support_held_object=pan_held_state,
         placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,

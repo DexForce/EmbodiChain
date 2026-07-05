@@ -156,6 +156,50 @@ def draw_axis_marker(
     )
 
 
+def broadcast_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Expand a single pose to ``(num_envs, 4, 4)`` when needed."""
+    if pose.dim() == 2 and pose.shape == (4, 4):
+        return pose.unsqueeze(0).repeat(num_envs, 1, 1)
+    if pose.dim() == 3 and pose.shape[1:] == (4, 4):
+        if pose.shape[0] == num_envs:
+            return pose
+        if pose.shape[0] == 1:
+            return pose.repeat(num_envs, 1, 1)
+    raise ValueError(
+        "Expected a pose with shape "
+        f"(4, 4), (1, 4, 4), or ({num_envs}, 4, 4) for num_envs={num_envs}, "
+        f"got {tuple(pose.shape)}."
+    )
+
+
+def broadcast_waypoint_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Expand waypoint poses to ``(num_envs, n_waypoint, 4, 4)`` when needed."""
+    if pose.dim() == 3 and pose.shape[1:] == (4, 4):
+        return pose.unsqueeze(0).repeat(num_envs, 1, 1, 1)
+    if pose.dim() == 4 and pose.shape[2:] == (4, 4):
+        if pose.shape[0] == num_envs:
+            return pose
+        if pose.shape[0] == 1:
+            return pose.repeat(num_envs, 1, 1, 1)
+    raise ValueError(
+        "Expected waypoint poses with shape "
+        f"(n_waypoint, 4, 4), (1, n_waypoint, 4, 4), or ({num_envs}, n_waypoint, 4, 4) "
+        f"for num_envs={num_envs}, got {tuple(pose.shape)}."
+    )
+
+
+def clone_local_pose_from_first_env(entity) -> torch.Tensor:
+    """Copy the first environment's local pose onto every environment."""
+    pose = entity.get_local_pose(to_matrix=True)
+    if pose.dim() != 3 or pose.shape[1:] != (4, 4):
+        raise ValueError(
+            f"Expected entity local pose with shape (num_envs, 4, 4), got {tuple(pose.shape)}."
+        )
+    shared_pose = pose[:1].clone().repeat(pose.shape[0], 1, 1)
+    entity.set_local_pose(shared_pose)
+    return shared_pose
+
+
 def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
 ) -> RobotCfg:
@@ -231,6 +275,9 @@ __all__ = [
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
+    "broadcast_pose_batch",
+    "broadcast_waypoint_pose_batch",
+    "clone_local_pose_from_first_env",
     "create_ur5_gripper_robot_cfg",
     "make_ur5_solver_cfg",
     "get_tutorial_window_size",

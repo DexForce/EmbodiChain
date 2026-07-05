@@ -64,6 +64,8 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
     create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
@@ -76,14 +78,14 @@ GRIPPER_FINGER_LENGTH = 0.088
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 
-OBJECT_LABEL = "sugar_box"
-OBJECT_MESH_PATH = "SugarBox/sugar_box_usd/sugar_box.usda"
+OBJECT_LABEL = "paper_cup"
+OBJECT_MESH_PATH = "PaperCup/paper_cup.ply"
 OBJECT_XY = (-0.42, -0.08)
 OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
 OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
 OBJECT_INIT_ROT = (0.0, 0.0, 0.0)
-OBJECT_BODY_SCALE = (0.8, 0.8, 0.8)
-OBJECT_MASS = 0.05
+OBJECT_BODY_SCALE = (0.75, 0.75, 1.0)
+OBJECT_MASS = 0.01
 OBJECT_USE_USD_PROPERTIES = False
 
 MOVE_SAMPLE_INTERVAL = 60
@@ -95,7 +97,7 @@ POST_TRAJECTORY_STEPS = 240
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Demonstrate MoveHeldObject holding a sugar box in the gripper."
+        description="Demonstrate MoveHeldObject holding a paper cup in the gripper."
     )
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
@@ -128,6 +130,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -170,6 +173,8 @@ def create_pick_object(sim: SimulationManager) -> RigidObject:
     sim.update(
         step=10
     )  # Settle the object to ensure it is resting on the ground before planning
+    clone_local_pose_from_first_env(obj)
+    obj.clear_dynamics()
     return obj
 
 
@@ -327,16 +332,21 @@ def main() -> None:
     obj_pose = obj.get_local_pose(to_matrix=True)
     move_position = obj_pose[0, :3, 3].clone()
     move_position[2] = 0.36
-    move_target = make_pre_pick_eef_pose(robot, move_position)
-    object_target_pose = make_object_target_pose(sim.device)
+    n_envs = robot.get_qpos().shape[0]
+    move_target = broadcast_pose_batch(
+        make_pre_pick_eef_pose(robot, move_position), num_envs=n_envs
+    )
+    object_target_pose = broadcast_pose_batch(
+        make_object_target_pose(sim.device), num_envs=n_envs
+    )
     move_held_object_target = HeldObjectPoseTarget(
         object_target_pose=object_target_pose
     )
 
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "move_held_object_target_axis", object_target_pose)
+        draw_axis_marker(sim, "move_held_object_target_axis", object_target_pose[0])
     if not args.auto_play:
-        input("Inspect the sugar box, then press Enter to plan...")
+        input("Inspect the paper cup, then press Enter to plan...")
 
     # ------------------------------------------------------------------ #
     # Step 6: Plan the declared (name, typed_target) sequence             #
@@ -377,7 +387,7 @@ def main() -> None:
                 logger.log_info(f"Object dynamics cleared after grasp at step={i}")
             time.sleep(1e-2)
 
-        logger.log_info("MoveHeldObject keeps the sugar box suspended in the gripper.")
+        logger.log_info("MoveHeldObject keeps the paper cup suspended in the gripper.")
 
         final_qpos = traj[:, -1, :]
         for i in range(POST_TRAJECTORY_STEPS):
