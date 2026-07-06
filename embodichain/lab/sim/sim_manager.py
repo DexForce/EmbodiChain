@@ -807,12 +807,22 @@ class SimulationManager:
         "mesh": LightType.MESH,
     }
 
+    # Light types that are created as a single global scene light (not per-environment).
+    _GLOBAL_LIGHT_TYPES: tuple[str, ...] = ("sun", "direction")
+
     def add_light(self, cfg: LightCfg) -> Light:
         """Create a light in the scene.
 
         Supports six light types: ``"point"``, ``"sun"``, ``"direction"``,
         ``"spot"``, ``"rect"``, and ``"mesh"``. See :class:`LightCfg` for
         type-specific configuration fields.
+
+        .. attention::
+            ``"sun"`` and ``"direction"`` lights are global scene lights
+            (infinite-distance directional light sources). They are created
+            as a single instance on the root environment, not batched per
+            environment. All other types are created as per-environment
+            batched lights.
 
         Args:
             cfg (LightCfg): Configuration for the light, including type, color,
@@ -856,14 +866,21 @@ class SimulationManager:
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        light_list = []
-        for i, env in enumerate(env_list):
-            light_name = f"{uid}_{i}"
-            light = env.create_light(light_name, light_type)
-            light_list.append(light)
-
-        batch_lights = Light(cfg=cfg, entities=light_list)
+        if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
+            # Global scene light: create a single instance on the root
+            # environment. Infinite-distance lights (sun, direction) are
+            # physically scene-global and should not be duplicated per arena.
+            light = self._env.create_light(uid, light_type)
+            batch_lights = Light(cfg=cfg, entities=[light])
+        else:
+            # Per-environment batched light: one instance per arena.
+            env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+            light_list = []
+            for i, env in enumerate(env_list):
+                light_name = f"{uid}_{i}"
+                light = env.create_light(light_name, light_type)
+                light_list.append(light)
+            batch_lights = Light(cfg=cfg, entities=light_list)
 
         self._lights[uid] = batch_lights
 

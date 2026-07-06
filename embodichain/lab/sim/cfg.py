@@ -797,12 +797,21 @@ class LightCfg(ObjectBaseCfg):
 
     Supports six light types matching the dexsim rendering backend:
 
-    - ``"point"``: Omnidirectional point light with position and falloff radius.
-    - ``"sun"``: Directional sun light with position, direction, and angular radius (sun-specific setters like halo are not yet wired through Python bindings).
-    - ``"direction"``: Pure directional light at infinite distance (direction only, no position).
-    - ``"spot"``: Spotlight with position, direction, and inner/outer cone angles.
-    - ``"rect"``: Rectangular area light with position, direction, width, and height.
-    - ``"mesh"``: Mesh-based emissive light (requires a MeshObject via :meth:`set_mesh`; not tensor-batched).
+    - ``"point"``: Per-environment omnidirectional point light with position
+      and falloff radius. Created as a batched light (one per environment).
+    - ``"sun"``: Global directional sun light (infinite distance). Created as
+      a single scene-level instance. Uses direction only; position is ignored.
+      Sun-specific fields (``angular_radius``, ``halo_size``, ``halo_falloff``)
+      are reserved for future backend support.
+    - ``"direction"``: Global pure directional light at infinite distance.
+      Created as a single scene-level instance. Direction only; no position.
+    - ``"spot"``: Per-environment spotlight with position, direction, and
+      inner/outer cone angles. Created as a batched light.
+    - ``"rect"``: Per-environment rectangular area light with position,
+      direction, width, and height. Created as a batched light.
+    - ``"mesh"``: Per-environment mesh-based emissive light. Requires a
+      :class:`~dexsim.models.MeshObject` via :meth:`~Light.set_mesh`
+      (not tensor-batched). Created as a batched light.
 
     .. attention::
         The ``angular_radius``, ``halo_size``, and ``halo_falloff`` fields are
