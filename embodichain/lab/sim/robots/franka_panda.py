@@ -208,7 +208,7 @@ if __name__ == "__main__":
         headless=False,
         sim_device="cpu",
         num_envs=1,
-        render_cfg=RenderCfg(renderer="fast-rt"),
+        render_cfg=RenderCfg(renderer="hybrid"),
     )
     sim = SimulationManager(config)
 
