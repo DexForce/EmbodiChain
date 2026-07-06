@@ -247,6 +247,7 @@ def _build_relative_placement_spec_with_llm(
                 "source_uid": obj.source_uid,
                 "role": obj.source_role,
                 "object_type": _base_name(obj),
+                "description": str(obj.config.get("description", "")).strip(),
                 "is_container_like": _is_container_like(obj),
                 "mesh": obj.config.get("shape", {}).get("fpath"),
                 "init_pos": obj.config.get("init_pos"),

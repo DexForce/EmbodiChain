@@ -511,6 +511,16 @@ def _build_ur5_basket_bundle(
         for obj in scene_objects
         if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
     ]
+    runtime_uids = {
+        roles.table_source_uid: "table",
+        roles.container_source_uid: roles.container_runtime_uid,
+        roles.left_target_source_uid: roles.left_target_runtime_uid,
+        roles.right_target_source_uid: roles.right_target_runtime_uid,
+        **{
+            obj.source_uid: _normalize_runtime_uid(obj.source_uid)
+            for obj in [*extra_background_objects, *extra_rigid_objects]
+        },
+    }
     table_obj = by_uid[roles.table_source_uid]
     table_config = _make_background_config(
         scene_dir,
@@ -611,19 +621,7 @@ def _build_ur5_basket_bundle(
     }
     _maybe_preserve_source_scene_vertical_contacts(
         gym_config,
-        _source_objects_by_runtime_uid(
-            {
-                roles.table_source_uid: "table",
-                roles.container_source_uid: roles.container_runtime_uid,
-                roles.left_target_source_uid: roles.left_target_runtime_uid,
-                roles.right_target_source_uid: roles.right_target_runtime_uid,
-                **{
-                    obj.source_uid: _normalize_runtime_uid(obj.source_uid)
-                    for obj in [*extra_background_objects, *extra_rigid_objects]
-                },
-            },
-            by_uid=by_uid,
-        ),
+        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
@@ -637,7 +635,11 @@ def _build_ur5_basket_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_basket_task_prompt(task_name, project_name, roles),
-        "basic_background": make_basket_basic_background(project_name, roles),
+        "basic_background": make_basket_basic_background(
+            project_name,
+            roles,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
+        ),
         "atom_actions": make_basket_atom_actions_prompt(roles),
         "summary": {
             "mode": "basket_template",
@@ -800,7 +802,11 @@ def _build_arrangement_line_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_arrangement_task_prompt(task_name, project_name, spec),
-        "basic_background": make_arrangement_basic_background(project_name, spec),
+        "basic_background": make_arrangement_basic_background(
+            project_name,
+            spec,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
+        ),
         "atom_actions": make_arrangement_atom_actions_prompt(spec),
         "summary": {
             **_make_arrangement_summary(spec),
@@ -985,7 +991,11 @@ def _build_stacking_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_stacking_task_prompt(task_name, project_name, spec),
-        "basic_background": make_stacking_basic_background(project_name, spec),
+        "basic_background": make_stacking_basic_background(
+            project_name,
+            spec,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
+        ),
         "atom_actions": make_stacking_atom_actions_prompt(spec),
         "summary": _make_stacking_summary(spec),
     }
@@ -1331,6 +1341,30 @@ def _round_pose_value(value: float) -> float:
     return 0.0 if abs(rounded) < 1e-12 else rounded
 
 
+def _runtime_object_registry(
+    runtime_uids_by_source_uid: Mapping[str, str],
+    *,
+    by_uid: Mapping[str, _SceneObject],
+) -> list[dict[str, str]]:
+    entries = []
+    for source_uid, runtime_uid in sorted(
+        runtime_uids_by_source_uid.items(),
+        key=lambda item: item[1],
+    ):
+        obj = by_uid.get(source_uid)
+        if obj is None:
+            continue
+        entries.append(
+            {
+                "runtime_uid": str(runtime_uid),
+                "source_uid": str(source_uid),
+                "source_role": obj.source_role,
+                "description": str(obj.config.get("description", "")).strip(),
+            }
+        )
+    return entries
+
+
 def _validate_source_scene_body_scale_mode(mode: str | None) -> str | None:
     if mode is None:
         return None
@@ -1584,7 +1618,11 @@ def _build_relative_placement_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_relative_task_prompt(task_name, project_name, spec),
-        "basic_background": make_relative_basic_background(project_name, spec),
+        "basic_background": make_relative_basic_background(
+            project_name,
+            spec,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
+        ),
         "atom_actions": make_relative_atom_actions_prompt(spec),
         "summary": _make_relative_summary(spec),
     }

@@ -180,6 +180,48 @@ def make_agent_config() -> dict[str, Any]:
     }
 
 
+def _format_runtime_object_registry(
+    object_registry: Sequence[Mapping[str, Any]] | None,
+) -> str:
+    if not object_registry:
+        return ""
+
+    lines = []
+    for item in object_registry:
+        runtime_uid = str(item.get("runtime_uid", "")).strip()
+        source_uid = str(item.get("source_uid", "")).strip()
+        if not runtime_uid or not source_uid:
+            continue
+        role = str(item.get("source_role", item.get("role", ""))).strip()
+        description = _one_line_registry_text(item.get("description", ""))
+        role_text = f", role `{role}`" if role else ""
+        description_text = (
+            json.dumps(description, ensure_ascii=False)
+            if description
+            else '"No source description."'
+        )
+        lines.append(
+            f"- runtime_uid `{runtime_uid}` maps to source_uid `{source_uid}`"
+            f"{role_text}; description: {description_text}"
+        )
+    if not lines:
+        return ""
+
+    return (
+        "\nRuntime object registry:\n" + "\n".join(lines) + "\n\nRegistry rules:\n"
+        "- Descriptions are read-only semantic hints for identifying objects.\n"
+        "- In every generated graph action, use only `runtime_uid` values as "
+        "`obj_name`, `align_to`, `support`, `support_uid`, and object pose "
+        "reference ids.\n"
+        "- Do not copy `source_uid`, `description`, or registry metadata into "
+        "the action JSON.\n"
+    )
+
+
+def _one_line_registry_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
 def make_arrangement_task_prompt(
     task_name: str,
     project_name: str,
@@ -303,6 +345,7 @@ def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> st
 def make_arrangement_basic_background(
     project_name: str,
     spec: _ArrangementSpecLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
@@ -310,6 +353,7 @@ def make_arrangement_basic_background(
     object_lines = "\n".join(
         _arrangement_object_background_line(step) for step in spec.steps
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a Dual-UR5 multi-object line arrangement
@@ -323,6 +367,7 @@ The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
 
 Interactive task objects and target slots:
 {object_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -542,6 +587,7 @@ def _stacking_step_prompt_block(start_edge: int, step: _StackingStepLike) -> str
 def make_stacking_basic_background(
     project_name: str,
     spec: _StackingSpecLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
@@ -549,6 +595,7 @@ def make_stacking_basic_background(
     object_lines = "\n".join(
         _stacking_object_background_line(step) for step in spec.steps
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a Dual-UR5 stacking task generated from a
@@ -564,6 +611,7 @@ Stack mode: `{spec.stack_mode}` at table-center xy `{list(spec.anchor_xy)}`.
 
 Interactive task objects and stack layers:
 {object_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1233,19 +1281,29 @@ def _relative_high_action_patterns(
 def make_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     if spec.intent == "coordinated_pickment":
-        return _make_coordinated_pickment_basic_background(project_name, spec)
+        return _make_coordinated_pickment_basic_background(
+            project_name,
+            spec,
+            object_registry,
+        )
     if spec.intent == "hold_hover":
-        return _make_hold_hover_basic_background(project_name, spec)
+        return _make_hold_hover_basic_background(project_name, spec, object_registry)
     if len(spec.placements) > 1:
-        return _make_dual_relative_basic_background(project_name, spec)
+        return _make_dual_relative_basic_background(
+            project_name,
+            spec,
+            object_registry,
+        )
 
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a Dual-UR5 relative-placement task generated
@@ -1263,6 +1321,7 @@ The active arm for this task is `{active_arm}`. The inactive arm
 Interactive task objects:
 - {spec.moved_runtime_uid}: moved object from source `{spec.moved_source_uid}`.
 - {_relative_reference_line(spec)}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1279,10 +1338,12 @@ lift with orientation preserved before high-pose orientation adjustment.
 def _make_coordinated_pickment_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a Dual-UR5 coordinated shared-object task
@@ -1299,6 +1360,7 @@ place that action in `left_arm_action` and keep `right_arm_action` null.
 
 Interactive task object:
 - {spec.moved_runtime_uid}: shared moved object from source `{spec.moved_source_uid}`.
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1316,9 +1378,10 @@ decompose this task into separate single-arm `PickUp`, `MoveHeldObject`, or
 def _make_dual_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     if spec.intent == "hold_hover":
-        return _make_hold_hover_basic_background(project_name, spec)
+        return _make_hold_hover_basic_background(project_name, spec, object_registry)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
@@ -1328,6 +1391,7 @@ def _make_dual_relative_basic_background(
         f"`{placement.reference_runtime_uid}`."
         for placement in spec.placements
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a Dual-UR5 dual-arm relative-placement task
@@ -1341,6 +1405,7 @@ The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
 
 Both arms participate in the nominal graph:
 {placement_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1359,6 +1424,7 @@ orientation adjustment.
 def _make_hold_hover_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
@@ -1368,6 +1434,7 @@ def _make_hold_hover_basic_background(
         f"handled by {placement.active_side}_arm, hover_height={placement.hover_height}."
         for placement in spec.placements
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a Dual-UR5 object-manipulation hold-hover
@@ -1381,6 +1448,7 @@ The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
 
 Hold-hover task objects:
 {object_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1666,10 +1734,12 @@ current `{roles.container_runtime_uid}` object pose from the exported
 def make_basket_basic_background(
     project_name: str,
     roles: _BasketRolesLike,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     left_target_text = _left_target_text(roles)
     right_target_text = _right_target_text(roles)
     target_plural = _target_plural_text(roles)
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for the UR5BreadBasket task template. The
@@ -1693,6 +1763,7 @@ The interactive objects are:
   negative-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
+{registry}
 
 The nominal task starts with simultaneous dual-arm grasping. The left UR5 must
 grasp {roles.left_target_runtime_uid} while the right UR5 grasps

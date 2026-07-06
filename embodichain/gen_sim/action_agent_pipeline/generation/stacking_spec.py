@@ -198,6 +198,7 @@ def _make_stacking_scene_summary(
             "source_uid": obj.source_uid,
             "role": obj.source_role,
             "object_type": _base_name(obj),
+            "description": str(obj.config.get("description", "")).strip(),
             "mesh": obj.config.get("shape", {}).get("fpath"),
             "init_pos": obj.config.get("init_pos"),
             "body_scale": obj.config.get("body_scale"),
@@ -548,7 +549,10 @@ def _object_color(
 
 
 def _color_hint_for_object(obj: _SceneObject) -> str | None:
-    text = (f"{obj.source_uid} {obj.config.get('shape', {}).get('fpath', '')}").lower()
+    text = (
+        f"{obj.source_uid} {obj.config.get('description', '')} "
+        f"{obj.config.get('shape', {}).get('fpath', '')}"
+    ).lower()
     color_aliases = {
         "red": ("red", "红"),
         "green": ("green", "绿"),

@@ -47,6 +47,7 @@ def _refine_roles_with_llm(
             {
                 "source_uid": obj.source_uid,
                 "role": obj.source_role,
+                "description": str(obj.config.get("description", "")).strip(),
                 "mesh": obj.config.get("shape", {}).get("fpath"),
                 "init_pos": obj.config.get("init_pos"),
             }
