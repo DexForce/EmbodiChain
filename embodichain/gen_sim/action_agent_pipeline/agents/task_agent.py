@@ -79,6 +79,10 @@ class TaskAgent(AgentBase):
                 f"Using precomputed task graph from {precomputed_path}; "
                 f"cached at {file_path}."
             )
+            log_info(
+                f"Task agent output (precomputed):\n```json\n{content}\n```",
+                color="green",
+            )
             return content
 
         with timing_scope(
