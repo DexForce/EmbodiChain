@@ -70,6 +70,25 @@ def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
     return VIEWER_WIDTH, VIEWER_HEIGHT
 
 
+def should_open_tutorial_window(args: argparse.Namespace) -> bool:
+    """Return whether an interactive viewer window should be opened."""
+    return not (
+        getattr(args, "headless", False)
+        or getattr(args, "diagnose_plan", False)
+        or getattr(args, "headless_play", False)
+    )
+
+
+def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
+    """Return whether the tutorial should pause for terminal input."""
+    return not (
+        getattr(args, "auto_play", False)
+        or getattr(args, "headless", False)
+        or getattr(args, "diagnose_plan", False)
+        or getattr(args, "headless_play", False)
+    )
+
+
 def start_auto_play_recording(
     sim: SimulationManager,
     args: argparse.Namespace,
@@ -125,16 +144,74 @@ def draw_axis_marker(
     arena_index: int = -1,
 ) -> None:
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
+    arena_offsets = sim.arena_offsets
+    n_envs = arena_offsets.shape[0]
+
+    # Normalize a single (4, 4) pose to (1, 4, 4) so it is not mistaken for a
+    # per-environment batch when num_envs happens to equal 4.
+    if xpos.dim() == 2:
+        xpos = xpos.unsqueeze(0)
+
+    if n_envs == xpos.shape[0]:
+        # add arena offsets to xpos
+        draw_xpos = xpos.clone()
+        draw_xpos[:, :3, 3] += arena_offsets
+    else:
+        draw_xpos = xpos
     sim.draw_marker(
         cfg=MarkerCfg(
             name=name,
             marker_type="axis",
-            axis_xpos=xpos,
+            axis_xpos=draw_xpos,
             axis_size=axis_size,
             axis_len=axis_len,
             arena_index=arena_index,
         )
     )
+
+
+def broadcast_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Expand a single pose to ``(num_envs, 4, 4)`` when needed."""
+    if pose.dim() == 2 and pose.shape == (4, 4):
+        return pose.unsqueeze(0).repeat(num_envs, 1, 1)
+    if pose.dim() == 3 and pose.shape[1:] == (4, 4):
+        if pose.shape[0] == num_envs:
+            return pose
+        if pose.shape[0] == 1:
+            return pose.repeat(num_envs, 1, 1)
+    raise ValueError(
+        "Expected a pose with shape "
+        f"(4, 4), (1, 4, 4), or ({num_envs}, 4, 4) for num_envs={num_envs}, "
+        f"got {tuple(pose.shape)}."
+    )
+
+
+def broadcast_waypoint_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Expand waypoint poses to ``(num_envs, n_waypoint, 4, 4)`` when needed."""
+    if pose.dim() == 3 and pose.shape[1:] == (4, 4):
+        return pose.unsqueeze(0).repeat(num_envs, 1, 1, 1)
+    if pose.dim() == 4 and pose.shape[2:] == (4, 4):
+        if pose.shape[0] == num_envs:
+            return pose
+        if pose.shape[0] == 1:
+            return pose.repeat(num_envs, 1, 1, 1)
+    raise ValueError(
+        "Expected waypoint poses with shape "
+        f"(n_waypoint, 4, 4), (1, n_waypoint, 4, 4), or ({num_envs}, n_waypoint, 4, 4) "
+        f"for num_envs={num_envs}, got {tuple(pose.shape)}."
+    )
+
+
+def clone_local_pose_from_first_env(entity) -> torch.Tensor:
+    """Copy the first environment's local pose onto every environment."""
+    pose = entity.get_local_pose(to_matrix=True)
+    if pose.dim() != 3 or pose.shape[1:] != (4, 4):
+        raise ValueError(
+            f"Expected entity local pose with shape (num_envs, 4, 4), got {tuple(pose.shape)}."
+        )
+    shared_pose = pose[:1].clone().repeat(pose.shape[0], 1, 1)
+    entity.set_local_pose(shared_pose)
+    return shared_pose
 
 
 def create_ur5_gripper_robot_cfg(
@@ -212,9 +289,14 @@ __all__ = [
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
+    "broadcast_pose_batch",
+    "broadcast_waypoint_pose_batch",
+    "clone_local_pose_from_first_env",
     "create_ur5_gripper_robot_cfg",
     "make_ur5_solver_cfg",
     "get_tutorial_window_size",
+    "should_open_tutorial_window",
+    "should_wait_for_tutorial_input",
     "start_auto_play_recording",
     "stop_auto_play_recording",
     "draw_axis_marker",
