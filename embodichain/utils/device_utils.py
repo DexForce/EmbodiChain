@@ -33,7 +33,7 @@ def standardize_device_string(device: Union[str, torch.device]) -> str:
     else:
         device_str = str(device)
 
-    if device_str.startswith("cuda"):
+    if device_str == "cuda":
         device_str = "cuda:0"
 
     return device_str
