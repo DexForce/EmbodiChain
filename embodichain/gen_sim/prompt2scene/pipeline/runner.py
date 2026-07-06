@@ -144,6 +144,8 @@ def run_prompt2scene(
     pipeline_started_perf = time.perf_counter()
     timings["pipeline"] = _new_timing_entry("pipeline")
     try:
+        request.output_root.mkdir(parents=True, exist_ok=True)
+        _write_workflow_timings(request.output_root, timings)
         result = _run_prompt2scene_impl(
             request=request,
             llm_cfg=llm_cfg,
