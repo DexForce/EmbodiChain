@@ -126,6 +126,12 @@ class MoveHeldObjectCfg(ActionCfg):
     sample_interval: int = 50
     """Number of waypoints in the planned trajectory."""
 
+    pick_rotate_upright: float | None = None
+    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
+
+    obj_upright_direction: torch.Tensor | None = None
+    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
+
     hand_control_part: str = "hand"
     """Name of the robot part that controls the hand joints."""
 
@@ -815,7 +821,7 @@ class PickUp(AtomicAction):
             else:
                 upright_direction = self.cfg.obj_upright_direction.to(self.device)
             obj_pose = sem.entity.get_local_pose(to_matrix=True)
-            obj_upright = (upright_direction * obj_pose[:, :3, :3]).sum(axis=1)
+            obj_upright = (upright_direction * obj_pose[:, :3, :3]).sum(axis=2)
             grasp_ry = grasp_xpos[:, :3, 1]
             dot_result = (grasp_ry * obj_upright).sum(axis=1)
             # revert flag is -1 if the dot product is negative, 1 if positive
@@ -823,7 +829,7 @@ class PickUp(AtomicAction):
             grasp_rx = grasp_xpos[:, :3, 0]
             rota_axis_angle = self.cfg.rotate_upright * revert_flag * grasp_rx
             rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
-            upright_grasp_rota = torch.bmm(grasp_xpos[:, :3, :3], rota_offset)
+            upright_grasp_rota = torch.bmm(rota_offset, grasp_xpos[:, :3, :3])
             grasp_xpos[:, :3, :3] = upright_grasp_rota
 
         if not self.builder.all_envs_success(is_success):
@@ -1016,19 +1022,46 @@ class MoveHeldObject(AtomicAction):
         object_target_pose = _resolve_object_target(
             target.object_target_pose, n_envs=self.n_envs, device=self.device
         )
-        object_to_eef = state.held_object.object_to_eef.to(
-            device=self.device, dtype=torch.float32
-        )
-        if object_to_eef.shape == (4, 4):
-            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
-        move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
-
         start_arm_qpos = self.builder.resolve_start_qpos(
             _arm_qpos_from_state(state, self.arm_joint_ids, self.robot_dof),
             n_envs=self.n_envs,
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
+        if self.cfg.pick_rotate_upright is not None:
+            held_eef_xpos = self.robot.compute_fk(
+                qpos=start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+            )
+            held_obj_xpos = state.held_object.semantics.entity.get_local_pose(
+                to_matrix=True
+            )
+            if self.cfg.obj_upright_direction is None:
+                upright_direction = torch.tensor([0, 0, 1], device=self.device)
+            else:
+                upright_direction = self.cfg.obj_upright_direction.to(self.device)
+            obj_upright = (upright_direction * held_obj_xpos[:, :3, :3]).sum(axis=2)
+
+            grasp_ry = held_eef_xpos[:, :3, 1]
+            dot_result = (grasp_ry * obj_upright).sum(axis=1)
+            # revert flag is -1 if the dot product is negative, 1 if positive
+            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+            grasp_rx = held_eef_xpos[:, :3, 0]
+            # rotate util upright
+            rota_axis_angle = (
+                (self.cfg.pick_rotate_upright - torch.pi) * revert_flag * grasp_rx
+            )
+            gripper_rotate_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
+            # modified target xpos rotation
+            object_target_pose[:, :3, :3] = torch.bmm(
+                gripper_rotate_offset, held_obj_xpos[:, :3, :3]
+            )
+
+        object_to_eef = state.held_object.object_to_eef.to(
+            device=self.device, dtype=torch.float32
+        )
+        if object_to_eef.shape == (4, 4):
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
+        move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
