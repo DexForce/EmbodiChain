@@ -344,7 +344,7 @@ def main() -> None:
     )
 
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "move_held_object_target_axis", object_target_pose[0])
+        draw_axis_marker(sim, "move_held_object_target_axis", object_target_pose)
     if not args.auto_play:
         input("Inspect the paper cup, then press Enter to plan...")
 

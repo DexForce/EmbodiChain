@@ -850,23 +850,22 @@ def draw_coordinated_axes(
     sim: SimulationManager,
     support_target_pose: torch.Tensor,
     placing_target_pose: torch.Tensor,
+    num_envs: int,
 ) -> None:
     """Draw coordinate-frame markers for coordinated placement targets."""
     draw_axis_marker(
         sim,
         "support_pan_target_axis",
-        support_target_pose,
+        broadcast_pose_batch(support_target_pose, num_envs=num_envs),
         axis_len=0.08,
         axis_size=0.004,
-        arena_index=0,
     )
     draw_axis_marker(
         sim,
         "placing_bread_target_axis",
-        placing_target_pose,
+        broadcast_pose_batch(placing_target_pose, num_envs=num_envs),
         axis_len=0.08,
         axis_size=0.004,
-        arena_index=0,
     )
 
 
@@ -1187,6 +1186,7 @@ def run_coordinated_placement_demo(
                 sim,
                 support_target_pose,
                 placing_target_pose,
+                num_envs=n_envs,
             )
         if wait_for_user:
             input("Press Enter to execute coordinated placement...")

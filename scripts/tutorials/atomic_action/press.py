@@ -207,8 +207,6 @@ def log_block_state(block: RigidObject, label: str) -> None:
 
 
 def draw_press_target_axis(sim: SimulationManager, press_target: torch.Tensor) -> None:
-    if press_target.dim() == 2:
-        press_target = press_target.unsqueeze(0)
     draw_axis_marker(sim, "press_target_axis", press_target)
 
 
@@ -324,7 +322,7 @@ def run_press_demo(args: argparse.Namespace) -> None:
         make_top_down_eef_pose(press_position), num_envs=n_envs
     )
     if not args.no_vis_eef_axis:
-        draw_press_target_axis(sim, press_target[0])
+        draw_press_target_axis(sim, press_target)
 
     logger.log_info("Planning MoveEndEffector -> Press")
     start_time = time.time()

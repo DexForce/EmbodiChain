@@ -146,6 +146,12 @@ def draw_axis_marker(
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
     arena_offsets = sim.arena_offsets
     n_envs = arena_offsets.shape[0]
+
+    # Normalize a single (4, 4) pose to (1, 4, 4) so it is not mistaken for a
+    # per-environment batch when num_envs happens to equal 4.
+    if xpos.dim() == 2:
+        xpos = xpos.unsqueeze(0)
+
     if n_envs == xpos.shape[0]:
         # add arena offsets to xpos
         draw_xpos = xpos.clone()

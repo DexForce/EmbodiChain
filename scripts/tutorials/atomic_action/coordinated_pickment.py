@@ -626,26 +626,27 @@ def draw_pickment_target_axes(
     object_target_pose: torch.Tensor,
     left_grasp_pose: torch.Tensor,
     right_grasp_pose: torch.Tensor,
+    num_envs: int,
 ) -> None:
     """Draw semantic axes for the target object pose and two grasp TCP poses."""
     draw_axis_marker(
         sim,
         "coordinated_pickment_object_target_axis",
-        object_target_pose,
+        broadcast_pose_batch(object_target_pose, num_envs=num_envs),
         axis_len=0.12,
         axis_size=0.005,
     )
     draw_axis_marker(
         sim,
         "coordinated_pickment_left_grasp_axis",
-        left_grasp_pose,
+        broadcast_pose_batch(left_grasp_pose, num_envs=num_envs),
         axis_len=0.07,
         axis_size=0.0035,
     )
     draw_axis_marker(
         sim,
         "coordinated_pickment_right_grasp_axis",
-        right_grasp_pose,
+        broadcast_pose_batch(right_grasp_pose, num_envs=num_envs),
         axis_len=0.07,
         axis_size=0.0035,
     )
@@ -759,6 +760,7 @@ def run_coordinated_pickment_demo(
             target_pose,
             left_grasp_pose,
             right_grasp_pose,
+            num_envs=n_envs,
         )
 
     left_object_to_eef = torch.bmm(

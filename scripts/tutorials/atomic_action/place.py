@@ -60,6 +60,7 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_ur5_gripper_robot_cfg,
@@ -365,9 +366,14 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     semantics = create_object_semantics(obj, args)
     place_eef_poses = make_place_eef_poses(sim.device)
+    n_envs = robot.get_qpos().shape[0]
 
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "place_target_axis", place_eef_poses[-1])
+        draw_axis_marker(
+            sim,
+            "place_target_axis",
+            broadcast_pose_batch(place_eef_poses[-1], num_envs=n_envs),
+        )
     if not args.auto_play:
         input("Inspect the object, then press Enter to plan PickUp -> Place...")
 
@@ -377,7 +383,6 @@ def main() -> None:
     # Pass a multi-waypoint trajectory (n_envs, n_waypoint, 4, 4): Place
     # approaches from above the first waypoint, descends through each
     # waypoint in order, opens the gripper at the last, and retracts.
-    n_envs = robot.get_qpos().shape[0]
     multi_waypoint_xpos = broadcast_waypoint_pose_batch(
         place_eef_poses, num_envs=n_envs
     )
