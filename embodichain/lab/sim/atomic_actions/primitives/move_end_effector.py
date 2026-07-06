@@ -79,18 +79,17 @@ class MoveEndEffector(AtomicAction):
             control_part=self.cfg.control_part,
         )
         target_states_list = self._build_target_states(move_xpos)
-        ok, arm_traj = self.builder.plan_arm_traj(
+        success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_qpos,
             self.cfg.sample_interval,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
         full = self._embed(arm_traj, state.last_qpos)
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -127,7 +126,7 @@ class MoveEndEffector(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
