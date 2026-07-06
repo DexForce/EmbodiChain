@@ -165,17 +165,37 @@ For most new tasks, start from
 Choosing Where to Start
 -----------------------
 
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - If you want to...
+     - Start here
+   * - Understand the full ``EmbodiedEnv`` configuration surface
+     - :doc:`env`
+   * - Connect policy outputs to robot control terms
+     - :doc:`action_functors`
+   * - Randomize scenes, place objects, or capture debug/demo videos
+     - :doc:`event_functors`
+   * - Add task observations or transform existing observation entries
+     - :doc:`observation_functors`
+   * - Compose RL reward terms
+     - :doc:`reward_functors`
+   * - Save structured demonstrations or offline training datasets
+     - :doc:`dataset_functors`
+
 - Start with :doc:`env` for the full
   :class:`~embodichain.lab.gym.envs.embodied_env.EmbodiedEnv` configuration and
   custom task guide.
 - Use :doc:`action_functors` when connecting policy outputs to robot control.
 - Use :doc:`event_functors` for reset randomization, visual randomization, and
-  scene perturbations.
+  scene perturbations. This page also covers runtime camera-video capture via
+  ``record_camera_data``.
 - Use :doc:`observation_functors` to add task observations without changing base
   environment code.
 - Use :doc:`reward_functors` when composing RL reward terms.
 - Use :doc:`dataset_functors` when recording demonstrations or exporting
-  datasets.
+  datasets. Use this page for structured episode data, not debug video capture.
 
 Documentation Quality Notes
 ---------------------------

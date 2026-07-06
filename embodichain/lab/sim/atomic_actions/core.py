@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import configclass
@@ -68,7 +68,7 @@ class ObjectSemantics:
 
 @dataclass(frozen=True)
 class EndEffectorPoseTarget:
-    """End-effector pose target. Used by MoveEndEffector and Place."""
+    """End-effector pose target. Used by MoveEndEffector, Place, and Press."""
 
     xpos: torch.Tensor
     """Target end-effector homogeneous transform.
@@ -77,8 +77,24 @@ class EndEffectorPoseTarget:
 
     - ``(4, 4)`` or ``(n_envs, 4, 4)`` — a single waypoint.
     - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory; waypoints
-      are visited in order. (Only consumed as multi-waypoint by MoveEndEffector.)
+      are visited in order. (Consumed as multi-waypoint by MoveEndEffector and
+      Place.)
     """
+
+    tcp_symmetry: Literal["none", "z_roll_180"] = "none"
+    """Optional TCP-frame symmetry allowed by the target semantics.
+
+    ``"none"`` preserves the pose exactly. ``"z_roll_180"`` lets supporting
+    actions choose between the pose and its TCP z-roll 180 equivalent, which
+    flips TCP x/y while preserving TCP z and translation.
+    """
+
+    def __post_init__(self) -> None:
+        if self.tcp_symmetry not in ("none", "z_roll_180"):
+            raise ValueError(
+                "tcp_symmetry must be one of 'none' or 'z_roll_180', "
+                f"but got {self.tcp_symmetry!r}"
+            )
 
 
 @dataclass(frozen=True)
