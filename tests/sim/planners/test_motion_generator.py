@@ -219,7 +219,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         target_states = []
         for xpos in self.xpos_list:
             target_states.append(
-                PlanState(
+                PlanState.single(
                     move_type=MoveType.EEF_MOVE,
                     move_part=MovePart.LEFT,
                     xpos=xpos,
@@ -229,12 +229,17 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         plan_result = self.motion_gen.generate(
             target_states=target_states, options=options
         )
+        assert plan_result.positions.shape == (
+            1,
+            self.sample_num,
+            6,
+        ), f"Shape mismatch: {plan_result.positions.shape} != (1, {self.sample_num}, 6)"
         out_qpos_list = to_numpy(plan_result.positions)
         assert (
             len(out_qpos_list) == self.sample_num
         ), f"Sample number mismatch: {len(out_qpos_list)} != {self.sample_num}"
         test_xpos = self.robot.compute_fk(
-            qpos=plan_result.positions[-1].unsqueeze(0),
+            qpos=plan_result.positions[0, -1].unsqueeze(0),
             name=self.arm_name,
             to_matrix=True,
         )[0]
@@ -255,6 +260,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
             control_part=self.arm_name,
             is_linear=is_linear,
             is_interpolate=True,
+            interpolate_nums=1,
             plan_opts=ToppraPlanOptions(
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=20,
@@ -268,7 +274,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         target_states = []
         for qpos in self.qpos_list:
             target_states.append(
-                PlanState(
+                PlanState.single(
                     move_type=MoveType.JOINT_MOVE,
                     move_part=MovePart.LEFT,
                     qpos=qpos,
@@ -277,6 +283,11 @@ class TestMotionGenerator(BaseTestMotionGenerator):
         plan_result = self.motion_gen.generate(
             target_states=target_states, options=options
         )
+        assert plan_result.positions.shape == (
+            1,
+            self.sample_num,
+            6,
+        ), f"Shape mismatch: {plan_result.positions.shape} != (1, {self.sample_num}, 6)"
         out_qpos_list = to_numpy(plan_result.positions)
         assert (
             len(out_qpos_list) == self.sample_num

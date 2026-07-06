@@ -179,6 +179,9 @@ def play_trajectory(
     delay: float = 0.0,
 ) -> None:
     joint_ids = robot.get_joint_ids(arm_name)
+    # ``positions`` may be env-batched (B, N, DOF); this example is single-env.
+    if positions.dim() == 3:
+        positions = positions[0]
     for qpos in positions:
         robot.set_qpos(qpos=qpos.unsqueeze(0), joint_ids=joint_ids)
         sim.update(step=step_repeat)
@@ -233,7 +236,8 @@ def main() -> None:
         )
     )
     target_states = [
-        PlanState(move_type=MoveType.EEF_MOVE, xpos=waypoint) for waypoint in waypoints
+        PlanState.single(move_type=MoveType.EEF_MOVE, xpos=waypoint)
+        for waypoint in waypoints
     ]
     result = motion_generator.generate(
         target_states=target_states,
@@ -248,7 +252,7 @@ def main() -> None:
     print(f"NeuralPlanner success: {result.success}")
     print(f"positions shape: {tuple(result.positions.shape)}")
     print(f"xpos_list shape: {tuple(result.xpos_list.shape)}")
-    print(f"duration: {result.duration:.3f}s")
+    print(f"duration: {result.duration.item():.3f}s")
 
     play_trajectory(
         sim,

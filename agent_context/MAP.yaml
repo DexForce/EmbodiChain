@@ -325,3 +325,41 @@ topics:
       - manager-functor
       - env-framework
     status: active
+
+  - id: atomic-actions
+    title: Atomic Actions
+    aliases:
+      - atomic action
+      - atomic actions
+      - motion primitive
+      - action primitive
+      - AtomicAction
+      - AtomicActionEngine
+      - TrajectoryBuilder
+      - 原子动作
+    keywords:
+      - atomic
+      - action
+      - AtomicAction
+      - AtomicActionEngine
+      - TrajectoryBuilder
+      - ActionResult
+      - WorldState
+      - ActionCfg
+      - motion_source
+      - plan_arm_traj
+      - register_action
+    paths:
+      - topics/atomic-actions/atomic-actions.md
+    source_of_truth:
+      - embodichain/lab/sim/atomic_actions/core.py
+      - embodichain/lab/sim/atomic_actions/engine.py
+      - embodichain/lab/sim/atomic_actions/trajectory.py
+      - embodichain/lab/sim/atomic_actions/primitives/
+      - embodichain/lab/sim/atomic_actions/actions.py
+      - embodichain/lab/sim/atomic_actions/__init__.py
+    related_topics:
+      - motion-planning
+      - robot-system
+      - ik-solvers
+    status: active
