@@ -313,11 +313,12 @@ def main() -> None:
     move_held_object_cfg = MoveHeldObjectCfg(
         control_part="arm",
         hand_control_part="hand",
+        hand_close_qpos=hand_close,
+        sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
+        pick_rotate_upright=torch.pi / 4,
         obj_upright_direction=torch.tensor(
             [0, 1, 0], dtype=torch.float32, device=sim.device
         ),
-        hand_close_qpos=hand_close,
-        sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
     )
 
     # ------------------------------------------------------------------ #

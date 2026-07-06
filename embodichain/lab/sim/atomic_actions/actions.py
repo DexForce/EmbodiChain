@@ -1047,15 +1047,12 @@ class MoveHeldObject(AtomicAction):
             revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
             grasp_rx = held_eef_xpos[:, :3, 0]
             # rotate util upright
-            rota_axis_angle = (
-                (self.cfg.pick_rotate_upright - torch.pi) * revert_flag * grasp_rx
-            )
+            rota_axis_angle = -0.5 * torch.pi * revert_flag * grasp_rx
             gripper_rotate_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
             # modified target xpos rotation
             object_target_pose[:, :3, :3] = torch.bmm(
                 gripper_rotate_offset, held_obj_xpos[:, :3, :3]
             )
-
         object_to_eef = state.held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
