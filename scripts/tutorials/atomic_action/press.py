@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -41,39 +40,35 @@ from embodichain.lab.sim.atomic_actions import (
     PressCfg,
 )
 from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
     LightCfg,
     RenderCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
-    RobotCfg,
-    URDFCfg,
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
+    create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
+    should_open_tutorial_window,
+    should_wait_for_tutorial_input,
     start_auto_play_recording,
     stop_auto_play_recording,
 )
-
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
-GRIPPER_HAND_JOINT_PATTERN = "GRIPPER_FINGER1_JOINT_1"
-GRIPPER_TCP_Z = 0.15
 
 MOVE_SAMPLE_INTERVAL = 60
 PRESS_SAMPLE_INTERVAL = 90
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 180
-TABLE_SIZE = [1.0, 1.4, 0.05]
-TABLE_TOP_Z = -0.045
 BLOCK_SIZE = [0.12, 0.12, 0.06]
-BLOCK_CENTER = [-0.30, -0.12, TABLE_TOP_Z + 0.5 * BLOCK_SIZE[2]]
+SUPPORT_SURFACE_Z = 0.0
+BLOCK_CENTER = [-0.30, -0.12, SUPPORT_SURFACE_Z + 0.5 * BLOCK_SIZE[2]]
 PRESS_CLEARANCE = 0.13
 PRESS_SURFACE_OFFSET = 0.003
 DEFAULT_PRESS_TOLERANCE = 0.01
@@ -122,6 +117,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -140,56 +136,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
 
 
 def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
-    ur5_urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
-    gripper_urdf_path = get_data_path(GRIPPER_URDF_PATH)
-    cfg = RobotCfg(
-        uid="UR5",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur5_urdf_path},
-                {"component_type": "hand", "urdf_path": gripper_urdf_path},
-            ]
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, GRIPPER_HAND_JOINT_PATTERN: 1e3},
-            damping={"JOINT[0-9]": 1e3, GRIPPER_HAND_JOINT_PATTERN: 1e2},
-            max_effort={"JOINT[0-9]": 1e5, GRIPPER_HAND_JOINT_PATTERN: 1e4},
-            drive_type="force",
-        ),
-        control_parts={
-            "arm": ["JOINT[0-9]"],
-            "hand": [GRIPPER_HAND_JOINT_PATTERN],
-        },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-            )
-        },
-        init_qpos=[0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-        init_pos=position,
-    )
-    return sim.add_robot(cfg=cfg)
-
-
-def create_table(sim: SimulationManager) -> RigidObject:
-    cfg = RigidObjectCfg(
-        uid="table",
-        shape=CubeCfg(size=TABLE_SIZE),
-        body_type="static",
-        attrs=RigidBodyAttributesCfg(
-            dynamic_friction=0.8,
-            static_friction=0.9,
-        ),
-        init_pos=[-0.30, 0.10, TABLE_TOP_Z - 0.5 * TABLE_SIZE[2]],
-    )
-    return sim.add_rigid_object(cfg=cfg)
+    return sim.add_robot(cfg=create_ur5_gripper_robot_cfg(init_pos=position))
 
 
 def create_wooden_block(
@@ -260,8 +207,6 @@ def log_block_state(block: RigidObject, label: str) -> None:
 
 
 def draw_press_target_axis(sim: SimulationManager, press_target: torch.Tensor) -> None:
-    if press_target.dim() == 2:
-        press_target = press_target.unsqueeze(0)
     draw_axis_marker(sim, "press_target_axis", press_target)
 
 
@@ -275,37 +220,40 @@ def compute_press_center_check(
     press_segment_start = MOVE_SAMPLE_INTERVAL + HAND_INTERP_STEPS
     press_segment_end = MOVE_SAMPLE_INTERVAL + PRESS_SAMPLE_INTERVAL
     arm_traj = traj[:, press_segment_start:press_segment_end, arm_joint_ids]
+    n_envs, n_steps, _ = arm_traj.shape
     fk_pose = torch.stack(
         [
             robot.compute_fk(
-                qpos=waypoint.unsqueeze(0),
+                qpos=arm_traj[:, step_idx, :],
                 name="arm",
                 to_matrix=True,
-            )[0]
-            for waypoint in arm_traj[0]
+            )
+            for step_idx in range(n_steps)
         ],
-        dim=0,
+        dim=1,
     )
 
     block_pose = block.get_local_pose(to_matrix=True)
-    block_center = block_pose[0, :3, 3]
-    block_top_z = block_center[2] + 0.5 * BLOCK_SIZE[2]
-    target_xy = block_center[:2]
+    block_center = block_pose[:, :3, 3]
+    block_top_z = block_center[:, 2] + 0.5 * BLOCK_SIZE[2]
+    target_xy = block_center[:, :2]
     target_z = block_top_z + PRESS_SURFACE_OFFSET
 
-    xy_error = torch.linalg.norm(fk_pose[:, :2, 3] - target_xy, dim=1)
-    z_error = torch.abs(fk_pose[:, 2, 3] - target_z)
+    xy_error = torch.linalg.norm(fk_pose[:, :, :2, 3] - target_xy.unsqueeze(1), dim=2)
+    z_error = torch.abs(fk_pose[:, :, 2, 3] - target_z.unsqueeze(1))
     combined_error = xy_error + z_error
-    best_idx = int(torch.argmin(combined_error).item())
-    best_pos = fk_pose[best_idx, :3, 3]
-    center_error = float(torch.linalg.norm(best_pos[:2] - target_xy).item())
+    best_idx = torch.argmin(combined_error, dim=1)
+    env_indices = torch.arange(n_envs, device=traj.device)
+    best_pos = fk_pose[env_indices, best_idx, :3, 3]
+    center_error = torch.linalg.norm(best_pos[:, :2] - target_xy, dim=1)
+    worst_env = int(torch.argmax(center_error).item())
     return (
-        center_error <= tolerance,
-        center_error,
-        press_segment_start + best_idx,
-        best_pos,
+        bool(torch.all(center_error <= tolerance)),
+        float(center_error[worst_env].item()),
+        press_segment_start + int(best_idx[worst_env].item()),
+        best_pos[worst_env],
         torch.tensor(
-            [target_xy[0], target_xy[1], target_z],
+            [target_xy[worst_env, 0], target_xy[worst_env, 1], target_z[worst_env]],
             dtype=torch.float32,
             device=traj.device,
         ),
@@ -315,15 +263,16 @@ def compute_press_center_check(
 def run_press_demo(args: argparse.Namespace) -> None:
     sim = initialize_simulation(args)
     robot = create_robot(sim)
-    create_table(sim)
     block_center = [
         args.block_pos[0],
         args.block_pos[1],
-        TABLE_TOP_Z + 0.5 * BLOCK_SIZE[2],
+        SUPPORT_SURFACE_Z + 0.5 * BLOCK_SIZE[2],
     ]
     block = create_wooden_block(sim, block_center)
 
     settle_object(sim, block, step=5)
+    clone_local_pose_from_first_env(block)
+    block.clear_dynamics()
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
@@ -352,9 +301,10 @@ def run_press_demo(args: argparse.Namespace) -> None:
         )
     )
 
-    if not args.headless:
+    wait_for_user = should_wait_for_tutorial_input(args)
+    if should_open_tutorial_window(args):
         sim.open_window()
-    if not args.auto_play:
+    if wait_for_user:
         input("Inspect the wooden block, then press Enter to plan...")
 
     block_pose = block.get_local_pose(to_matrix=True)
@@ -364,8 +314,13 @@ def run_press_demo(args: argparse.Namespace) -> None:
     move_position = press_position.clone()
     move_position[2] = block_top_z + PRESS_CLEARANCE
 
-    move_target = make_top_down_eef_pose(move_position)
-    press_target = make_top_down_eef_pose(press_position)
+    n_envs = robot.get_qpos().shape[0]
+    move_target = broadcast_pose_batch(
+        make_top_down_eef_pose(move_position), num_envs=n_envs
+    )
+    press_target = broadcast_pose_batch(
+        make_top_down_eef_pose(press_position), num_envs=n_envs
+    )
     if not args.no_vis_eef_axis:
         draw_press_target_axis(sim, press_target)
 
@@ -379,7 +334,7 @@ def run_press_demo(args: argparse.Namespace) -> None:
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan Press demo trajectory.")
         return
 
@@ -406,7 +361,7 @@ def run_press_demo(args: argparse.Namespace) -> None:
         )
         return
 
-    if not args.auto_play:
+    if wait_for_user:
         input("Press Enter to replay the Press demo...")
 
     recording_started = start_auto_play_recording(
@@ -432,7 +387,7 @@ def run_press_demo(args: argparse.Namespace) -> None:
     finally:
         stop_auto_play_recording(sim, recording_started)
 
-    if not args.auto_play:
+    if wait_for_user:
         input("Press Enter to exit the simulation...")
 
 

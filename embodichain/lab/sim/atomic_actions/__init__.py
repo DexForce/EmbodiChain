@@ -18,9 +18,12 @@
 
 This module provides a unified interface for the atomic motion primitives
 (``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``, ``press``), with typed targets, a ``WorldState`` threaded across sequenced
-actions, and extensible custom action registration.
+``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``),
+with typed targets, a ``WorldState`` threaded across sequenced actions, and
+extensible custom action registration.
 """
+
+from __future__ import annotations
 
 from .affordance import (
     Affordance,
@@ -33,6 +36,7 @@ from .core import (
     AtomicAction,
     CoordinatedHeldObjectState,
     CoordinatedPickmentTarget,
+    CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -43,27 +47,29 @@ from .core import (
     Target,
     WorldState,
 )
-from .actions import (
-    CoordinatedPickment,
-    CoordinatedPickmentCfg,
-    MoveEndEffector,
-    MoveJoints,
-    MoveHeldObject,
-    PickUp,
-    Place,
-    Press,
-    MoveEndEffectorCfg,
-    MoveJointsCfg,
-    MoveHeldObjectCfg,
-    PickUpCfg,
-    PlaceCfg,
-    PressCfg,
-)
 from .engine import (
     AtomicActionEngine,
     register_action,
     unregister_action,
     get_registered_actions,
+)
+from .primitives import (
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
+    CoordinatedPlacement,
+    CoordinatedPlacementCfg,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
+    MoveJoints,
+    MoveJointsCfg,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
+    Press,
+    PressCfg,
 )
 from .trajectory import TrajectoryBuilder
 
@@ -73,13 +79,14 @@ __all__ = [
     "AntipodalAffordance",
     "InteractionPoints",
     "ObjectSemantics",
-    "CoordinatedHeldObjectState",
-    "CoordinatedPickmentTarget",
     "HeldObjectState",
+    "CoordinatedHeldObjectState",
     "HeldObjectPoseTarget",
     "JointPositionTarget",
     "NamedJointPositionTarget",
     "EndEffectorPoseTarget",
+    "CoordinatedPickmentTarget",
+    "CoordinatedPlacementTarget",
     "GraspTarget",
     "Target",
     "WorldState",
@@ -88,6 +95,7 @@ __all__ = [
     "AtomicAction",
     # Action implementations
     "CoordinatedPickment",
+    "CoordinatedPlacement",
     "MoveEndEffector",
     "MoveJoints",
     "MoveHeldObject",
@@ -95,6 +103,7 @@ __all__ = [
     "Place",
     "Press",
     "CoordinatedPickmentCfg",
+    "CoordinatedPlacementCfg",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",

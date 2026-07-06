@@ -14,15 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Concrete atomic actions built on :class:`AtomicAction` and :class:`TrajectoryBuilder`.
+"""Compatibility re-exports for built-in atomic actions.
 
-Six sibling actions live here: :class:`MoveEndEffector`, :class:`MoveJoints`,
-:class:`PickUp`, :class:`MoveHeldObject`, :class:`Place`, and :class:`Press`.
-Each inherits :class:`AtomicAction` directly and composes a
-:class:`TrajectoryBuilder` for shared trajectory math. ``execute`` takes a typed
-target plus a
-:class:`WorldState` and returns an :class:`ActionResult` whose trajectory is
-full-robot DoF shaped ``(n_envs, n_waypoints, robot.dof)``.
+Concrete action implementations live in ``atomic_actions.primitives``. Importing
+from ``atomic_actions.actions`` remains supported for existing callers.
 """
 
 from __future__ import annotations
@@ -1789,12 +1784,14 @@ class Press(AtomicAction):
 __all__ = [
     "CoordinatedPickment",
     "CoordinatedPickmentCfg",
+    "CoordinatedPlacement",
+    "CoordinatedPlacementCfg",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
-    "MoveJoints",
-    "MoveJointsCfg",
     "MoveHeldObject",
     "MoveHeldObjectCfg",
+    "MoveJoints",
+    "MoveJointsCfg",
     "PickUp",
     "PickUpCfg",
     "Place",
