@@ -97,7 +97,7 @@ class MoveJoints(AtomicAction):
         )
         full = self._embed(joint_traj, state.last_qpos)
         return ActionResult(
-            success=True,
+            success=torch.ones(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),

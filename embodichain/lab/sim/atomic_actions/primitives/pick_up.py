@@ -148,16 +148,14 @@ class PickUp(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        ok, approach_arm = self.builder.plan_arm_traj(
+        approach_success, approach_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_approach,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("PickUp failed to plan the approach trajectory.")
-            return self._fail(state)
 
         grasp_arm_qpos = approach_arm[:, -1, :]
         lift_xpos = self.builder.apply_local_offset(
@@ -168,16 +166,15 @@ class PickUp(AtomicAction):
             [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, lift_arm = self.builder.plan_arm_traj(
+        lift_success, lift_arm = self.builder.plan_arm_traj(
             target_states_list,
             grasp_arm_qpos,
             n_lift,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("PickUp failed to plan the lift trajectory.")
-            return self._fail(state)
+        success = approach_success & lift_success
 
         hand_close_path = self.builder.interpolate_hand_qpos(
             self.hand_open_qpos, self.hand_close_qpos, n_waypoints=n_close
@@ -206,7 +203,7 @@ class PickUp(AtomicAction):
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -217,7 +214,7 @@ class PickUp(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,

@@ -72,3 +72,9 @@ where = ["."]
 exclude = ["docs"]
 
 [tool.black]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "requires_sim: marks tests that require a real simulation backend",
+]

@@ -19,8 +19,15 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from unittest.mock import MagicMock
+
+import pytest
+import torch
 
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    broadcast_waypoint_pose_batch,
+    clone_local_pose_from_first_env,
     should_wait_for_tutorial_input,
 )
 
@@ -59,3 +66,56 @@ def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None
         )
         is False
     )
+
+
+def test_broadcast_pose_batch_repeats_single_pose_for_each_env() -> None:
+    pose = torch.eye(4, dtype=torch.float32)
+
+    batched = broadcast_pose_batch(pose, num_envs=3)
+
+    assert batched.shape == (3, 4, 4)
+    assert torch.allclose(batched[0], pose)
+    assert torch.allclose(batched[1], pose)
+    assert torch.allclose(batched[2], pose)
+
+
+def test_broadcast_waypoint_pose_batch_repeats_waypoints_for_each_env() -> None:
+    waypoints = torch.stack(
+        [torch.eye(4, dtype=torch.float32), 2.0 * torch.eye(4, dtype=torch.float32)],
+        dim=0,
+    )
+
+    batched = broadcast_waypoint_pose_batch(waypoints, num_envs=2)
+
+    assert batched.shape == (2, 2, 4, 4)
+    assert torch.allclose(batched[0], waypoints)
+    assert torch.allclose(batched[1], waypoints)
+
+
+def test_clone_local_pose_from_first_env_sets_shared_pose() -> None:
+    first_pose = torch.eye(4, dtype=torch.float32)
+    first_pose[0, 3] = 0.2
+    poses = torch.stack(
+        [
+            first_pose,
+            2.0 * torch.eye(4, dtype=torch.float32),
+            3.0 * torch.eye(4, dtype=torch.float32),
+        ],
+        dim=0,
+    )
+    entity = MagicMock()
+    entity.get_local_pose.return_value = poses
+
+    shared = clone_local_pose_from_first_env(entity)
+
+    expected = first_pose.unsqueeze(0).repeat(3, 1, 1)
+    assert torch.allclose(shared, expected)
+    entity.set_local_pose.assert_called_once()
+    assert torch.allclose(entity.set_local_pose.call_args.args[0], expected)
+
+
+def test_broadcast_pose_batch_rejects_wrong_env_count() -> None:
+    poses = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(2, 1, 1)
+
+    with pytest.raises(ValueError, match="num_envs"):
+        broadcast_pose_batch(poses, num_envs=3)
