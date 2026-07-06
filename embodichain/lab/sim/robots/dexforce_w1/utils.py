@@ -564,9 +564,9 @@ def build_dexforce_w1_solver_cfg(
             }
         )
 
-    # Use urdf_cfg.fname if provided, otherwise fallback to default path
+    # Use urdf_cfg.fpath if provided, otherwise fallback to default path
     full_body_urdf_path = (
-        urdf_cfg.fname
+        urdf_cfg.fpath or get_data_path("DexforceW1FullBodyV021/full_body.urdf")
         if urdf_cfg is not None
         else get_data_path("DexforceW1FullBodyV021/full_body.urdf")
     )

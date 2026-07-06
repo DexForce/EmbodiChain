@@ -121,20 +121,8 @@ class DexforceW1Cfg(RobotCfg):
         for key, value in physics.items():
             setattr(self, key, value)
 
-        # solver: build PytorchSolver entries for whole-body/torso, then
-        # overlay SRSSolver entries for the 7-DoF arms (DH-based, more precise).
-        from embodichain.lab.sim.robots.dexforce_w1.utils import (
-            build_dexforce_w1_solver_cfg,
-        )
-
-        pytorch_entries = build_dexforce_w1_solver_cfg(
-            arm_kind=self.arm_kind,
-            urdf_cfg=self.urdf_cfg,
-        )
-        srs_entries = self._build_default_solver_cfg(arm_kind=self.arm_kind)
-        # Merge: SRSSolver takes precedence for arm keys
-        pytorch_entries.update(srs_entries)
-        self.solver_cfg = pytorch_entries
+        # solver (set exactly once -- was previously double-set)
+        self.solver_cfg = self._build_default_solver_cfg(arm_kind=self.arm_kind)
 
     def _build_default_solver_cfg(self, arm_kind: DexforceW1ArmKind):
         """Build the default SRS solver config for the given arm kind.
