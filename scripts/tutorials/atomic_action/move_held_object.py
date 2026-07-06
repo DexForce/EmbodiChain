@@ -249,16 +249,15 @@ def make_pre_pick_eef_pose(robot: Robot, position: torch.Tensor) -> torch.Tensor
 
 def make_object_target_pose(device: torch.device) -> torch.Tensor:
     pose = torch.eye(4, dtype=torch.float32, device=device)
-    # Object target pose will be automatically calculated.
-    # pose[:3, :3] = torch.tensor(
-    #     [
-    #         [1.0, 0.0, 0.0],
-    #         [0.0, 0.0, 1.0],
-    #         [0.0, -1.0, 0.0],
-    #     ],
-    #     dtype=torch.float32,
-    #     device=device,
-    # )
+    pose[:3, :3] = torch.tensor(
+        [
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
     pose[:3, 3] = torch.tensor([-0.3, -0.3, 0.5], dtype=torch.float32, device=device)
     return pose
 
@@ -307,17 +306,15 @@ def main() -> None:
             OBJECT_APPROACH_DIRECTION, dtype=torch.float32, device=sim.device
         ),
         pre_grasp_distance=0.15,
-        lift_height=0.08,
+        lift_height=0.16,
         sample_interval=PICK_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
-        rotate_upright=torch.pi / 4,
     )
     move_held_object_cfg = MoveHeldObjectCfg(
         control_part="arm",
         hand_control_part="hand",
         hand_close_qpos=hand_close,
         sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
-        pick_rotate_upright=torch.pi / 4,
     )
 
     # ------------------------------------------------------------------ #
