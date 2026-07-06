@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +32,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
+    _bake_glb_bottom_center_to_origin,
     _render_scene_state_topdown,
 )
 from embodichain.gen_sim.prompt2scene.workflows.paths import PipelinePaths
@@ -62,17 +62,6 @@ __all__ = [
 
 def scene_state_path(output_root: Path) -> Path:
     return output_root / "gym_export" / "scene_state" / "result.json"
-
-
-def _glb_scale_to_sim(scale: list[float]) -> list[float]:
-    scale_array = np.asarray(scale, dtype=np.float64)
-    if scale_array.shape != (3,) or not np.all(np.isfinite(scale_array)):
-        raise ValueError("GLB scale must be a finite 3-vector.")
-    return [
-        float(scale_array[0]),
-        float(scale_array[2]),
-        float(scale_array[1]),
-    ]
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
@@ -1319,7 +1308,6 @@ def _build_generated_rigid_object(
     object_dir = mesh_assets_dir / safe_name / object_id
     object_dir.mkdir(parents=True, exist_ok=True)
     object_dst = object_dir / f"{object_id}.glb"
-    shutil.copy2(simready_path, object_dst)
 
     metric_scale = generated_asset.get("metric_scale")
     scale_factor = 1.0
@@ -1330,7 +1318,12 @@ def _build_generated_rigid_object(
             scale_factor = 1.0
     if not np.isfinite(scale_factor) or scale_factor <= 0.0:
         scale_factor = 1.0
-    body_scale = _glb_scale_to_sim([scale_factor, scale_factor, scale_factor])
+    _bake_glb_bottom_center_to_origin(
+        simready_path,
+        object_dst,
+        scale_factor=scale_factor,
+    )
+    body_scale = [1.0, 1.0, 1.0]
     init_rot = [0.0, 0.0, 0.0]
     target_center = np.asarray(layout_item.get("center_xy", []), dtype=np.float64)
     if target_center.shape != (2,):
