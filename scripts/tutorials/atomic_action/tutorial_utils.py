@@ -144,11 +144,19 @@ def draw_axis_marker(
     arena_index: int = -1,
 ) -> None:
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
+    arena_offsets = sim.arena_offsets
+    n_envs = arena_offsets.shape[0]
+    if n_envs == xpos.shape[0]:
+        # add arena offsets to xpos
+        draw_xpos = xpos.clone()
+        draw_xpos[:, :3, 3] += arena_offsets
+    else:
+        draw_xpos = xpos
     sim.draw_marker(
         cfg=MarkerCfg(
             name=name,
             marker_type="axis",
-            axis_xpos=xpos,
+            axis_xpos=draw_xpos,
             axis_size=axis_size,
             axis_len=axis_len,
             arena_index=arena_index,
