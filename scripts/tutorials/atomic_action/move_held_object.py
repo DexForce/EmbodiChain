@@ -310,9 +310,6 @@ def main() -> None:
         lift_height=0.08,
         sample_interval=PICK_SAMPLE_INTERVAL,
         hand_interp_steps=HAND_INTERP_STEPS,
-        obj_upright_direction=torch.tensor(
-            [0, 1, 0], dtype=torch.float32, device=sim.device
-        ),
         rotate_upright=torch.pi / 4,
     )
     move_held_object_cfg = MoveHeldObjectCfg(
@@ -321,9 +318,6 @@ def main() -> None:
         hand_close_qpos=hand_close,
         sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
         pick_rotate_upright=torch.pi / 4,
-        obj_upright_direction=torch.tensor(
-            [0, 1, 0], dtype=torch.float32, device=sim.device
-        ),
     )
 
     # ------------------------------------------------------------------ #
