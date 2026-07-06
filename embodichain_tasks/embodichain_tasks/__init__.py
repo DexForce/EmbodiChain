@@ -14,14 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base_env import *
-from .embodied_env import *
-from .wrapper import *
+"""Official task environments for EmbodiChain.
 
-# Tasks have been moved to the ``embodichain_tasks`` package.
-# The shim below preserves backward compatibility for direct imports
-# from ``embodichain.lab.gym.envs.tasks``.
-try:
-    from .tasks import *  # noqa: F403
-except ImportError:
-    pass
+Importing this package triggers auto-registration of all task environments
+via recursive sub-package import. Each task sub-package's ``__init__.py``
+calls ``@register_env`` which registers the environment in gymnasium's
+global registry.
+"""
+
+from __future__ import annotations
+
+from .utils.importer import import_packages
+
+_BLACKLIST = ["utils"]
+
+import_packages(__name__, _BLACKLIST)

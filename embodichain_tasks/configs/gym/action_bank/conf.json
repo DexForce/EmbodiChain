@@ -1,0 +1,237 @@
+{
+    "scope": {
+        "right_arm": {
+            "type": "DiGraph",
+            "dim": [
+                6
+            ],
+            "init": {
+                "method": "given_qpos",
+                "kwargs": {
+                    "given_qpos": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "init_node_name": ""
+            },
+            "dtype": "float32"
+        },
+        "left_arm": {
+            "type": "DiGraph",
+            "dim": [
+                6
+            ],
+            "init": {
+                "method": "given_qpos",
+                "kwargs": {
+                    "given_qpos": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "init_node_name": ""
+            },
+            "dtype": "float32"
+        },
+        "left_eef": {
+            "type": "DiGraph",
+            "dim": [
+                2
+            ],
+            "init": {
+                "method": "given_qpos",
+                "kwargs": {
+                    "given_qpos": [
+                        0,
+                        0
+                    ]
+                },
+                "init_node_name": ""
+            },
+            "dtype": "float32"
+        },
+        "right_eef": {
+            "type": "DiGraph",
+            "dim": [
+                2
+            ],
+            "init": {
+                "method": "given_qpos",
+                "kwargs": {
+                    "given_qpos": [
+                        0,
+                        0
+                    ]
+                },
+                "init_node_name": ""
+            },
+            "dtype": "float32"
+        }
+    },
+    "node": {
+        "right_arm": [
+            {
+                "home_qpos": {
+                    "name": "A",
+                    "kwargs": {}
+                }
+            },
+            {
+                "bottle_grasp": {
+                    "name": "B",
+                    "kwargs": {}
+                }
+            },
+            {
+                "bottle_pre1_pose": {
+                    "name": "C",
+                    "kwargs": {}
+                }
+            },
+            {
+                "bottle_pre2_pose": {
+                    "name": "C",
+                    "kwargs": {}
+                }
+            },
+            {
+                "bottle_place_pose": {
+                    "name": "D",
+                    "kwargs": {}
+                }
+            }
+        ],
+        "left_arm": [
+            {
+                "lhome_qpos": {
+                    "name": "a",
+                    "kwargs": {}
+                }
+            },
+            {
+                "cup_monitor_pose": {
+                    "name": "b",
+                    "kwargs": {}
+                }
+            }
+        ],
+        "left_eef": [
+            {
+                "open": {
+                    "name": "aa",
+                    "kwargs": {}
+                }
+            },
+            {
+                "close": {
+                    "name": "bb",
+                    "kwargs": {}
+                }
+            }
+        ],
+        "right_eef": [
+            {
+                "ropen": {
+                    "name": "cc",
+                    "kwargs": {}
+                }
+            },
+            {
+                "rclose": {
+                    "name": "dd",
+                    "kwargs": {}
+                }
+            }
+        ]
+    },
+    "edge": {
+        "right_arm": [
+            {
+                "init_to_pre1": {
+                    "src": "home_qpos",
+                    "sink": "bottle_pre1_pose",
+                    "duration": 1,
+                    "kwargs": {}
+                }
+            },
+            {
+                "grasp_to_move": {
+                    "src": "bottle_pre1_pose",
+                    "sink": "bottle_grasp",
+                    "duration": 2,
+                    "kwargs": {}
+                }
+            },
+            {
+                "move_to_rotation": {
+                    "src": "bottle_grasp",
+                    "sink": "bottle_pre2_pose",
+                    "duration": 3,
+                    "kwargs": {}
+                }
+            },
+            {
+                "rotation_back_to_move": {
+                    "src": "bottle_pre2_pose",
+                    "sink": "bottle_place_pose",
+                    "duration": 4,
+                    "kwargs": {}
+                }
+            }
+        ],
+        "left_arm": [
+            {
+                "init_to_monitor": {
+                    "src": "lhome_qpos",
+                    "sink": "cup_monitor_pose",
+                    "duration": 1,
+                    "kwargs": {}
+                }
+            },
+            {
+                "left_arm_go_back": {
+                    "src": "cup_monitor_pose",
+                    "sink": "lhome_qpos",
+                    "duration": 2,
+                    "kwargs": {}
+                }
+            }
+        ],
+        "left_eef": [
+            {
+                "lopen": {
+                    "src": "close",
+                    "sink": "open",
+                    "duration": 10,
+                    "kwargs": {}
+                }
+            }
+        ],
+        "right_eef": [
+            {
+                "ropen": {
+                    "src": "rclose",
+                    "sink": "ropen",
+                    "duration": 10,
+                    "kwargs": {}
+                }
+            }
+        ]
+    },
+    "sync": {
+        "grasp_to_move": {
+            "depend_tasks": [
+                "init_to_monitor"
+            ]
+        }
+    }
+}

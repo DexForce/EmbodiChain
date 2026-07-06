@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.metadata
 import json
+import logging
 import sys
 import torch
 
@@ -32,6 +35,8 @@ from dexsim.utility import log_warning
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import BaseEnv
+
+_logger = logging.getLogger(__name__)
 
 
 class EnvSpec:
@@ -200,3 +205,67 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
         kwargs=deepcopy(kwargs),
     )
     return cls
+
+
+def discover_task_packages() -> list[str]:
+    """Import all registered task packages via ``embodichain.tasks`` entry_points.
+
+    Each task package's ``__init__.py`` recursively imports its sub-packages,
+    which triggers ``@register_env`` → ``gym.register()``. After this call,
+    all tasks from all installed packages are available in gymnasium's global
+    registry.
+
+    Returns:
+        List of entry point names that were successfully imported.
+    """
+    imported: list[str] = []
+    try:
+        eps = importlib.metadata.entry_points(group="embodichain.tasks")
+    except TypeError:
+        # Python < 3.12: entry_points() requires a keyword argument
+        eps = importlib.metadata.entry_points().get("embodichain.tasks", [])
+
+    for ep in eps:
+        try:
+            importlib.import_module(ep.value)
+            imported.append(ep.name)
+        except Exception:
+            _logger.warning(
+                f"Failed to import task package '{ep.name}' ({ep.value})",
+                exc_info=True,
+            )
+    return imported
+
+
+def execute_init_hooks() -> list[str]:
+    """Execute all registered init hooks via ``embodichain.init`` entry_points.
+
+    Hooks are called in entry_points declaration order. An exception from one
+    hook does not prevent others from executing.
+
+    Each entry point value must be in the format ``"module.path:function_name"``.
+    The function must accept no arguments and return ``None``.
+
+    Returns:
+        List of hook names that were executed successfully.
+    """
+    executed: list[str] = []
+    try:
+        eps = importlib.metadata.entry_points(group="embodichain.init")
+    except TypeError:
+        # Python < 3.12
+        eps = importlib.metadata.entry_points().get("embodichain.init", [])
+
+    for ep in eps:
+        try:
+            module_name, func_name = ep.value.split(":", 1)
+            module = importlib.import_module(module_name)
+            func = getattr(module, func_name)
+            func()
+            executed.append(ep.name)
+        except Exception:
+            _logger.warning(
+                f"Init hook '{ep.name}' ({ep.value}) failed",
+                exc_info=True,
+            )
+    return executed

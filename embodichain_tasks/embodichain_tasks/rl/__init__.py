@@ -14,14 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base_env import *
-from .embodied_env import *
-from .wrapper import *
+from __future__ import annotations
 
-# Tasks have been moved to the ``embodichain_tasks`` package.
-# The shim below preserves backward compatibility for direct imports
-# from ``embodichain.lab.gym.envs.tasks``.
-try:
-    from .tasks import *  # noqa: F403
-except ImportError:
-    pass
+from copy import deepcopy
+from embodichain.lab.gym.utils import registration as env_registry
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
+
+
+def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):
+    """Create env from registry id, auto-inferring cfg class (EnvName -> EnvNameCfg)."""
+    env = env_registry.make(env_id, cfg=deepcopy(base_env_cfg))
+    return env
+
+
+__all__ = [
+    "build_env",
+]

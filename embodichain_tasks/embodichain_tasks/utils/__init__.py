@@ -14,14 +14,4 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .base_env import *
-from .embodied_env import *
-from .wrapper import *
-
-# Tasks have been moved to the ``embodichain_tasks`` package.
-# The shim below preserves backward compatibility for direct imports
-# from ``embodichain.lab.gym.envs.tasks``.
-try:
-    from .tasks import *  # noqa: F403
-except ImportError:
-    pass
+from __future__ import annotations
