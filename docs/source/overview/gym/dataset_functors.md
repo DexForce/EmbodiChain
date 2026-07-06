@@ -5,6 +5,10 @@
 
 This page lists all available dataset functors that can be used with the Dataset Manager. Dataset functors are configured using {class}`~cfg.DatasetFunctorCfg` and are responsible for collecting and saving episode data during environment interaction.
 
+```{note}
+This page covers structured dataset export. If you only need human-viewable debug or demo videos from a fixed camera, use {class}`~record.record_camera_data` on {doc}`event_functors`.
+```
+
 ````{tip}
 **Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new dataset functor with the correct signature, `DatasetFunctorCfg` registration, and module placement in `datasets.py`.
 ````
@@ -77,6 +81,23 @@ The LeRobotRecorder saves the following data for each frame:
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
 - ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
+
+### Dataset Recording vs Video Recording
+
+```{list-table} Recording Options
+:header-rows: 1
+:widths: 30 35 35
+
+* - Need
+  - Use
+  - Why
+* - Training or imitation-learning data
+  - {class}`~datasets.LeRobotRecorder`
+  - Saves structured observation, action, and metadata for downstream pipelines.
+* - Quick qualitative inspection or demos
+  - {class}`~record.record_camera_data`
+  - Saves MP4 videos from a dedicated camera without creating a training dataset.
+```
 
 ## Usage Example
 

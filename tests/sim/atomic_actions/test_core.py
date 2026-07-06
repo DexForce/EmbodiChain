@@ -45,6 +45,17 @@ class TestTypedTargets:
     def test_pose_target_holds_tensor(self):
         x = torch.eye(4)
         assert EndEffectorPoseTarget(xpos=x).xpos is x
+        assert EndEffectorPoseTarget(xpos=x).tcp_symmetry == "none"
+
+    def test_pose_target_can_declare_tcp_symmetry(self):
+        target = EndEffectorPoseTarget(xpos=torch.eye(4), tcp_symmetry="z_roll_180")
+        assert target.tcp_symmetry == "z_roll_180"
+
+    def test_pose_target_rejects_unknown_tcp_symmetry(self):
+        with pytest.raises(ValueError, match="tcp_symmetry"):
+            EndEffectorPoseTarget(
+                xpos=torch.eye(4), tcp_symmetry="yaw_90"  # type: ignore[arg-type]
+            )
 
     def test_pose_target_is_frozen(self):
         t = EndEffectorPoseTarget(xpos=torch.eye(4))
