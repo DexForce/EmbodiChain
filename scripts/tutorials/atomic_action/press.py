@@ -51,6 +51,8 @@ from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPl
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
     create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
@@ -115,6 +117,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -204,8 +207,6 @@ def log_block_state(block: RigidObject, label: str) -> None:
 
 
 def draw_press_target_axis(sim: SimulationManager, press_target: torch.Tensor) -> None:
-    if press_target.dim() == 2:
-        press_target = press_target.unsqueeze(0)
     draw_axis_marker(sim, "press_target_axis", press_target)
 
 
@@ -219,37 +220,40 @@ def compute_press_center_check(
     press_segment_start = MOVE_SAMPLE_INTERVAL + HAND_INTERP_STEPS
     press_segment_end = MOVE_SAMPLE_INTERVAL + PRESS_SAMPLE_INTERVAL
     arm_traj = traj[:, press_segment_start:press_segment_end, arm_joint_ids]
+    n_envs, n_steps, _ = arm_traj.shape
     fk_pose = torch.stack(
         [
             robot.compute_fk(
-                qpos=waypoint.unsqueeze(0),
+                qpos=arm_traj[:, step_idx, :],
                 name="arm",
                 to_matrix=True,
-            )[0]
-            for waypoint in arm_traj[0]
+            )
+            for step_idx in range(n_steps)
         ],
-        dim=0,
+        dim=1,
     )
 
     block_pose = block.get_local_pose(to_matrix=True)
-    block_center = block_pose[0, :3, 3]
-    block_top_z = block_center[2] + 0.5 * BLOCK_SIZE[2]
-    target_xy = block_center[:2]
+    block_center = block_pose[:, :3, 3]
+    block_top_z = block_center[:, 2] + 0.5 * BLOCK_SIZE[2]
+    target_xy = block_center[:, :2]
     target_z = block_top_z + PRESS_SURFACE_OFFSET
 
-    xy_error = torch.linalg.norm(fk_pose[:, :2, 3] - target_xy, dim=1)
-    z_error = torch.abs(fk_pose[:, 2, 3] - target_z)
+    xy_error = torch.linalg.norm(fk_pose[:, :, :2, 3] - target_xy.unsqueeze(1), dim=2)
+    z_error = torch.abs(fk_pose[:, :, 2, 3] - target_z.unsqueeze(1))
     combined_error = xy_error + z_error
-    best_idx = int(torch.argmin(combined_error).item())
-    best_pos = fk_pose[best_idx, :3, 3]
-    center_error = float(torch.linalg.norm(best_pos[:2] - target_xy).item())
+    best_idx = torch.argmin(combined_error, dim=1)
+    env_indices = torch.arange(n_envs, device=traj.device)
+    best_pos = fk_pose[env_indices, best_idx, :3, 3]
+    center_error = torch.linalg.norm(best_pos[:, :2] - target_xy, dim=1)
+    worst_env = int(torch.argmax(center_error).item())
     return (
-        center_error <= tolerance,
-        center_error,
-        press_segment_start + best_idx,
-        best_pos,
+        bool(torch.all(center_error <= tolerance)),
+        float(center_error[worst_env].item()),
+        press_segment_start + int(best_idx[worst_env].item()),
+        best_pos[worst_env],
         torch.tensor(
-            [target_xy[0], target_xy[1], target_z],
+            [target_xy[worst_env, 0], target_xy[worst_env, 1], target_z[worst_env]],
             dtype=torch.float32,
             device=traj.device,
         ),
@@ -267,6 +271,8 @@ def run_press_demo(args: argparse.Namespace) -> None:
     block = create_wooden_block(sim, block_center)
 
     settle_object(sim, block, step=5)
+    clone_local_pose_from_first_env(block)
+    block.clear_dynamics()
     motion_gen = MotionGenerator(
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
@@ -308,8 +314,13 @@ def run_press_demo(args: argparse.Namespace) -> None:
     move_position = press_position.clone()
     move_position[2] = block_top_z + PRESS_CLEARANCE
 
-    move_target = make_top_down_eef_pose(move_position)
-    press_target = make_top_down_eef_pose(press_position)
+    n_envs = robot.get_qpos().shape[0]
+    move_target = broadcast_pose_batch(
+        make_top_down_eef_pose(move_position), num_envs=n_envs
+    )
+    press_target = broadcast_pose_batch(
+        make_top_down_eef_pose(press_position), num_envs=n_envs
+    )
     if not args.no_vis_eef_axis:
         draw_press_target_axis(sim, press_target)
 
@@ -323,7 +334,7 @@ def run_press_demo(args: argparse.Namespace) -> None:
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan Press demo trajectory.")
         return
 

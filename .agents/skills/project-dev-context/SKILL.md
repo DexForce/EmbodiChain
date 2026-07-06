@@ -16,7 +16,7 @@ Use this skill when:
 - the request says `刷新项目上下文`
 - the request says `更新项目上下文`
 - the request says `写项目上下文`
-- the request names a known project topic such as `env-framework`, `manager-functor`, or `ik-solvers`
+- the request names a known project topic such as `env-framework`, `manager-functor`, `ik-solvers`, or `atomic-actions`
 
 ## Start here
 

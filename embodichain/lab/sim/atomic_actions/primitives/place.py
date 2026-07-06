@@ -132,30 +132,29 @@ class Place(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        ok, down_arm = self.builder.plan_arm_traj(
+        down_success, down_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_down,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
         reach_arm_qpos = down_arm[:, -1, :]
 
         target_states_list = [
             [PlanState(xpos=retract_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, back_arm = self.builder.plan_arm_traj(
+        back_success, back_arm = self.builder.plan_arm_traj(
             target_states_list,
             reach_arm_qpos,
             n_back,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
+        success = down_success & back_success
 
         hand_open_path = self.builder.interpolate_hand_qpos(
             self.hand_close_qpos, self.hand_open_qpos, n_waypoints=n_open
@@ -177,7 +176,7 @@ class Place(AtomicAction):
         full[:, n_down + n_open :, self.hand_joint_ids] = self.hand_open_qpos
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -188,7 +187,7 @@ class Place(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,

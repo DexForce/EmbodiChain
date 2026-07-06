@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 from copy import deepcopy
@@ -186,7 +188,9 @@ class PourWaterActionBank(ActionBank):
             )
 
             plan_state = [
-                PlanState(qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE)
+                PlanState.single(
+                    qpos=torch.as_tensor(qpos), move_type=MoveType.JOINT_MOVE
+                )
                 for qpos in keyposes
             ]
 
@@ -200,7 +204,7 @@ class PourWaterActionBank(ActionBank):
                 ),
             )
 
-            return ret.positions.detach().cpu().numpy().T
+            return ret.positions[0].detach().cpu().numpy().T
 
     @staticmethod
     @tag_edge

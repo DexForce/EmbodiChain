@@ -78,6 +78,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -178,7 +179,7 @@ def main() -> None:
             ("move_joints", JointPositionTarget(qpos=multi_waypoint_qpos)),
         ]
     )
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan MoveJoints demo trajectory.")
         return
 

@@ -42,6 +42,8 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    broadcast_waypoint_pose_batch,
     create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
@@ -77,6 +79,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -144,6 +147,7 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     sim = initialize_simulation(args)
     robot = create_robot(sim)
+    n_envs = robot.get_qpos().shape[0]
 
     # ------------------------------------------------------------------ #
     # Step 2: Create a MotionGenerator for the robot                      #
@@ -174,8 +178,16 @@ def main() -> None:
     if not args.headless:
         sim.open_window()
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "move_end_effector_target_axis", target_pose)
-        draw_axis_marker(sim, "move_end_effector_side_axis", side_pose)
+        draw_axis_marker(
+            sim,
+            "move_end_effector_target_axis",
+            broadcast_pose_batch(target_pose, num_envs=n_envs),
+        )
+        draw_axis_marker(
+            sim,
+            "move_end_effector_side_axis",
+            broadcast_pose_batch(side_pose, num_envs=n_envs),
+        )
     if not args.auto_play:
         input("Inspect the robot, then press Enter to plan MoveEndEffector...")
 
@@ -184,11 +196,8 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # Pass a multi-waypoint trajectory (n_envs, n_waypoint, 4, 4): the
     # end-effector visits `target_pose` then `side_pose` in a single plan.
-    n_envs = robot.get_qpos().shape[0]
-    multi_waypoint_xpos = (
-        torch.stack([target_pose, side_pose], dim=0)
-        .unsqueeze(0)
-        .repeat(n_envs, 1, 1, 1)
+    multi_waypoint_xpos = broadcast_waypoint_pose_batch(
+        torch.stack([target_pose, side_pose], dim=0), num_envs=n_envs
     )
     logger.log_info(
         "Planning MoveEndEffector through multi-waypoint trajectory: "
@@ -203,7 +212,7 @@ def main() -> None:
             )
         ]
     )
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")
         return
 

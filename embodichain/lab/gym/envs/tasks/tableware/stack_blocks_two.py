@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 
@@ -206,11 +208,11 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                 )
                 # Joint space trajectory
                 target_states = [
-                    PlanState(
+                    PlanState.single(
                         qpos=torch.as_tensor(qpos_waypoints_np[start_idx]),
                         move_type=MoveType.JOINT_MOVE,
                     ),
-                    PlanState(
+                    PlanState.single(
                         qpos=torch.as_tensor(qpos_waypoints_np[end_idx]),
                         move_type=MoveType.JOINT_MOVE,
                     ),
@@ -220,7 +222,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                 )
 
                 # Convert to torch and add to action list
-                for qpos_item in plan_result.positions:
+                for qpos_item in plan_result.positions[0]:
                     qpos = torch.as_tensor(
                         qpos_item, dtype=torch.float32, device=self.device
                     )

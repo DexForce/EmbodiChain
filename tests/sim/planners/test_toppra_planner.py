@@ -61,7 +61,10 @@ class TestToppraPlanner:
         assert self.planner.device == torch.device("cpu")
 
     def test_plan_basic(self):
-        target_states = [PlanState(qpos=torch.zeros(6)), PlanState(qpos=torch.zeros(6))]
+        target_states = [
+            PlanState.single(qpos=torch.zeros(6)),
+            PlanState.single(qpos=torch.zeros(6)),
+        ]
 
         opts = ToppraPlanOptions(
             sample_method=TrajectorySampleMethod.TIME,
@@ -69,10 +72,11 @@ class TestToppraPlanner:
             constraints={"velocity": 1.0, "acceleration": 2.0},
         )
         result = self.planner.plan(target_states, options=opts)
-        assert result.success is True
+        assert result.success.all().item()
         assert result.positions is not None
         assert result.velocities is not None
         assert result.accelerations is not None
+        assert result.positions.shape[0] == 1
 
         # Check constraints
         is_satisfied = self.planner.is_satisfied_constraint(
@@ -81,7 +85,10 @@ class TestToppraPlanner:
         assert is_satisfied is True
 
     def test_trivial_trajectory(self):
-        target_states = [PlanState(qpos=torch.zeros(6)), PlanState(qpos=torch.zeros(6))]
+        target_states = [
+            PlanState.single(qpos=torch.zeros(6)),
+            PlanState.single(qpos=torch.zeros(6)),
+        ]
 
         opts = ToppraPlanOptions(
             sample_method=TrajectorySampleMethod.TIME,
@@ -89,9 +96,25 @@ class TestToppraPlanner:
             constraints={"velocity": 1.0, "acceleration": 2.0},
         )
         result = self.planner.plan(target_states, options=opts)
-        assert result.success is True
-        assert len(result.positions) == 2
-        assert result.duration == 0.0
+        assert result.success.all().item()
+        assert result.positions.shape == (1, 2, 6)
+        assert result.duration.item() == 0.0
+
+    def test_single_env_does_not_spawn_pool(self):
+        # Single-env plans must stay inline and never create a ProcessPoolExecutor.
+        target_states = [
+            PlanState.single(qpos=torch.zeros(6)),
+            PlanState.single(qpos=torch.zeros(6)),
+        ]
+
+        opts = ToppraPlanOptions(
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.1,
+            constraints={"velocity": 1.0, "acceleration": 2.0},
+        )
+        result = self.planner.plan(target_states, options=opts)
+        assert result.success.all().item()
+        assert self.planner._pool is None
 
 
 if __name__ == "__main__":

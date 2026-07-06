@@ -206,7 +206,8 @@ class TestMoveEndEffectorAction:
             state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
             result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
         assert isinstance(result, ActionResult)
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         # MoveEndEffector preserves held_object.
         assert result.next_state.held_object is None
@@ -243,7 +244,8 @@ class TestMoveEndEffectorAction:
                 WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         # Two waypoints -> two IK calls, in order.
         assert len(seen_poses) == 2
@@ -295,7 +297,8 @@ class TestMoveJointsAction:
                 WorldState(last_qpos=last_qpos, held_object=held),
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         assert torch.allclose(result.trajectory[:, -1, :ARM_DOF], target_qpos)
         assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], hand_qpos)
@@ -319,7 +322,8 @@ class TestMoveJointsAction:
                 NamedJointPositionTarget(name="home"),
                 WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
             )
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert torch.allclose(
             result.next_state.last_qpos[:, :ARM_DOF],
             torch.full((NUM_ENVS, ARM_DOF), 0.2),
@@ -356,7 +360,8 @@ class TestMoveJointsAction:
                 WorldState(last_qpos=last_qpos),
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         # start prepended to the two waypoints -> 3 keyframes
         keyframes = captured["keyframes"]
@@ -429,7 +434,8 @@ class TestPickUpAction:
         ):
             state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
             result = action.execute(GraspTarget(semantics=sem), state)
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape[0] == NUM_ENVS
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert isinstance(result.next_state.held_object, HeldObjectState)
@@ -475,7 +481,8 @@ class TestPickUpAction:
             state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
             result = action.execute(GraspTarget(semantics=sem), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert isinstance(result.next_state.held_object, HeldObjectState)
         expected_grasp = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
         assert torch.allclose(result.next_state.held_object.grasp_xpos, expected_grasp)
@@ -535,7 +542,8 @@ class TestMoveHeldObjectAction:
             result = action.execute(
                 HeldObjectPoseTarget(object_target_pose=torch.eye(4)), state
             )
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
         assert result.next_state.held_object is held
 
@@ -576,7 +584,8 @@ class TestPlaceAction:
             ),
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None
 
@@ -628,7 +637,8 @@ class TestPlaceAction:
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=multi_xpos), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None
         # IK order: down phase (approach, pose0, pose1) then back phase (retract).
@@ -677,7 +687,8 @@ class TestPlaceAction:
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=rz_pi_pose), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert len(seen_poses) == 3
         assert torch.allclose(
             seen_poses[1], rz_pi_pose.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
@@ -718,7 +729,8 @@ class TestPlaceAction:
                 state,
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert len(seen_poses) == 3
         expected_release = torch.eye(4)
         expected_retract = torch.eye(4)
@@ -777,7 +789,8 @@ class TestPressAction:
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 12, TOTAL_DOF)
         expected_hand_qpos = _hand_close().unsqueeze(0).repeat(NUM_ENVS, 1)
         assert torch.allclose(result.trajectory[:, -1, ARM_DOF:], expected_hand_qpos)

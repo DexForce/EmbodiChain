@@ -155,7 +155,7 @@ class MarkerCfg:
     marker_type: Literal["axis", "line", "point"] = "axis"
     """Type of marker to display. Can be 'axis' (3D coordinate frame), 'line', or 'point'. (only axis supported now)"""
 
-    axis_xpos: List[np.ndarray] = None
+    axis_xpos: torch.Tensor | None = None
     """List of 4x4 transformation matrices defining the position and orientation of each axis marker."""
 
     axis_size: float = 0.002

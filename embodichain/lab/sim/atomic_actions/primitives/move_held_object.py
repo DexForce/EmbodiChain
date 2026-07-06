@@ -102,16 +102,14 @@ class MoveHeldObject(AtomicAction):
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, arm_traj = self.builder.plan_arm_traj(
+        success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             self.cfg.sample_interval,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("MoveHeldObject failed to plan trajectory.")
-            return self._fail(state)
 
         full = torch.empty(
             (self.n_envs, arm_traj.shape[1], self.robot_dof),
@@ -123,7 +121,7 @@ class MoveHeldObject(AtomicAction):
         full[:, :, self.hand_joint_ids] = self.hand_close_qpos
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -134,7 +132,7 @@ class MoveHeldObject(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,

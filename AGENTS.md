@@ -21,7 +21,7 @@ the agent should:
 3. Load only the matched Markdown files under `agent_context/`
 4. Avoid reading `docs/source/` unless the user explicitly asks for the Sphinx documentation
 
-Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `rl-learning`, `configclass-pattern`, `randomization`.
+Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `atomic-actions`, `rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
