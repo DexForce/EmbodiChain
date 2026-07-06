@@ -105,19 +105,18 @@ class Press(AtomicAction):
             [PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, down_arm = self.builder.plan_arm_traj(
+        down_success, down_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_down,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("Press failed to plan the down trajectory.")
-            return self._fail(state)
 
         press_arm_qpos = down_arm[:, -1, :]
         back_arm = self.builder.plan_joint_traj(press_arm_qpos, start_arm_qpos, n_back)
+        success = down_success
 
         full = torch.empty(
             (self.n_envs, n_close + n_down + n_back, self.robot_dof),
@@ -137,7 +136,7 @@ class Press(AtomicAction):
         )
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -166,7 +165,7 @@ class Press(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,

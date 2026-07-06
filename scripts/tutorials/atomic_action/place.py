@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -51,7 +50,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     AntipodalSamplerCfg,
     GraspGeneratorCfg,
@@ -61,6 +60,9 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    broadcast_waypoint_pose_batch,
+    clone_local_pose_from_first_env,
     create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
@@ -73,13 +75,13 @@ GRIPPER_FINGER_LENGTH = 0.088
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 
-OBJECT_LABEL = "sugar_box"
-OBJECT_MESH_PATH = "SugarBox/sugar_box_usd/sugar_box.usda"
+OBJECT_LABEL = "cube"
+OBJECT_SIZE = (0.05, 0.05, 0.05)
 OBJECT_XY = (-0.42, -0.08)
 OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
 OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
 OBJECT_INIT_ROT = (0.0, 0.0, 0.0)
-OBJECT_BODY_SCALE = (0.8, 0.8, 0.8)
+OBJECT_BODY_SCALE = (1.0, 1.0, 1.0)
 OBJECT_MASS = 0.05
 OBJECT_USE_USD_PROPERTIES = False
 
@@ -125,6 +127,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -150,7 +153,7 @@ def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
 def create_pick_object(sim: SimulationManager) -> RigidObject:
     cfg = RigidObjectCfg(
         uid=OBJECT_LABEL,
-        shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
+        shape=CubeCfg(size=list(OBJECT_SIZE)),
         attrs=RigidBodyAttributesCfg(
             mass=OBJECT_MASS,
             dynamic_friction=0.97,
@@ -158,7 +161,7 @@ def create_pick_object(sim: SimulationManager) -> RigidObject:
             enable_ccd=True,
         ),
         max_convex_hull_num=16,
-        init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.05],
+        init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.5 * OBJECT_SIZE[2]],
         init_rot=OBJECT_INIT_ROT,
         body_scale=OBJECT_BODY_SCALE,
         use_usd_properties=OBJECT_USE_USD_PROPERTIES,
@@ -167,6 +170,8 @@ def create_pick_object(sim: SimulationManager) -> RigidObject:
 
     # Set the object to a stable pose on the ground by simulating a few steps.
     sim.update(step=10)
+    clone_local_pose_from_first_env(obj)
+    obj.clear_dynamics()
     return obj
 
 
@@ -361,9 +366,14 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     semantics = create_object_semantics(obj, args)
     place_eef_poses = make_place_eef_poses(sim.device)
+    n_envs = robot.get_qpos().shape[0]
 
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "place_target_axis", place_eef_poses[-1])
+        draw_axis_marker(
+            sim,
+            "place_target_axis",
+            broadcast_pose_batch(place_eef_poses[-1], num_envs=n_envs),
+        )
     if not args.auto_play:
         input("Inspect the object, then press Enter to plan PickUp -> Place...")
 
@@ -373,8 +383,9 @@ def main() -> None:
     # Pass a multi-waypoint trajectory (n_envs, n_waypoint, 4, 4): Place
     # approaches from above the first waypoint, descends through each
     # waypoint in order, opens the gripper at the last, and retracts.
-    n_envs = robot.get_qpos().shape[0]
-    multi_waypoint_xpos = place_eef_poses.unsqueeze(0).repeat(n_envs, 1, 1, 1)
+    multi_waypoint_xpos = broadcast_waypoint_pose_batch(
+        place_eef_poses, num_envs=n_envs
+    )
     place_target = EndEffectorPoseTarget(xpos=multi_waypoint_xpos)
     logger.log_info("Planning PickUp precondition -> Place release trajectory")
     is_success, traj, _ = atomic_engine.run(
@@ -383,7 +394,7 @@ def main() -> None:
             ("place", place_target),
         ]
     )
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 

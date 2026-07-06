@@ -44,10 +44,20 @@ inherit from `MoveEndEffector` or any other action. Each action:
      full-DoF shaped `(n_envs, n_waypoints, robot.dof)` and `next_state` is the
      successor `WorldState` (advance `last_qpos` to the trajectory's final row;
      set/clear/preserve `held_object` per the action's semantics).
+   - `success` is a per-environment boolean tensor of shape `(n_envs,)` (or a
+     scalar bool). Use `ActionResult.success_all` (or `.success.all()`) when you
+     need a single aggregate boolean.
 
 There is **no** `validate` method, **no** `**kwargs`, **no** `start_qpos` parameter,
 **no** `updates_held_object_state` flag, and **no** `get_held_object_state`. The
 `WorldState` is the single channel for inter-action state.
+
+`ActionCfg` (and therefore every action cfg) carries two motion-source fields used
+by `TrajectoryBuilder.plan_arm_traj`:
+- `motion_source: str = "ik_interp"` — `"ik_interp"` (batched IK + interpolation)
+  or `"motion_gen"` (delegates to the batched `MotionGenerator`).
+- `planner_type: str | None = None` — `"toppra"` or `"neural"`; required when
+  `motion_source="motion_gen"`.
 
 ## Steps
 
@@ -148,20 +158,20 @@ class Push(AtomicAction):
             control_part=self.cfg.control_part,
         )
 
-        # 3. Plan the arm trajectory via the builder (uses IK + interpolation).
+        # 3. Plan the arm trajectory via the builder (uses IK + interpolation by default;
+        #    set cfg.motion_source="motion_gen" to use the MotionGenerator instead).
         target_states = [
             [PlanState(xpos=contact_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, arm_traj = self.builder.plan_arm_traj(
+        success, arm_traj = self.builder.plan_arm_traj(
             target_states,
             start_arm_qpos,
             self.cfg.sample_interval,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
 
         # 4. Embed the arm slice into a full-DoF trajectory (n_envs, n_wp, robot.dof).
         full = torch.empty(
@@ -173,7 +183,7 @@ class Push(AtomicAction):
         full[:, :, self.arm_joint_ids] = arm_traj
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -183,7 +193,7 @@ class Push(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
@@ -196,6 +206,8 @@ class Push(AtomicAction):
 **Rules:**
 - `execute()` returns an `ActionResult` — never a bare tuple.
 - `trajectory` shape is always `(n_envs, n_waypoints, robot.dof)` (full robot DoF).
+- Pass `cfg=self.cfg` to every `self.builder.plan_arm_traj(...)` call so the builder
+  reads `motion_source` / `planner_type` from the action config.
 - Use `self.builder.<helper>` for all trajectory math (`resolve_pose_target`,
   `resolve_joint_target`, `resolve_start_qpos`, `apply_local_offset`, `plan_arm_traj`,
   `plan_joint_traj`, `split_three_phase`, `interpolate_hand_qpos`). Do not reimplement
@@ -292,7 +304,7 @@ def test_push_action_returns_full_dof_trajectory():
     ):
         result = action.execute(PushTarget(contact_pose=torch.eye(4)), state)
     assert isinstance(result, ActionResult)
-    assert result.success is True
+    assert result.success_all is True
     assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
     # push preserves held_object
     assert result.next_state.held_object is state.held_object
@@ -308,6 +320,8 @@ def test_push_action_returns_full_dof_trajectory():
 | `execute(target, start_qpos=None, **kwargs)` | Signature is `execute(self, target, state: WorldState) -> ActionResult`. No `**kwargs`, no `start_qpos`. |
 | Reimplementing IK / interpolation inline | Use `self.builder.plan_arm_traj(...)`, `self.builder.plan_joint_traj(...)`, and friends. |
 | Returning arm-only or arm+hand trajectory | Always embed into full `robot.dof` before returning. |
+| Forgetting `cfg=self.cfg` in `plan_arm_traj` | The builder defaults to `motion_source="ik_interp"`; pass `cfg=self.cfg` to opt into `motion_gen` / `planner_type`. |
+| Treating `ActionResult.success` as a scalar | It is `(n_envs,)` for batched actions; use `.success_all` or `.success.all()` for a single bool. |
 | `name` not matching the engine registration key | Keep `cfg.name` identical to the key passed to `engine.register(...)` / `register_action(...)`. |
 | Forgetting to export from `__init__.py` | Users import from the public API — missing exports cause `ImportError`. |
 | Inheriting another action's cfg | Cfgs are flat; extend `ActionCfg` directly and declare the fields you need. |
@@ -318,7 +332,7 @@ def test_push_action_returns_full_dof_trajectory():
 |------|--------|
 | 1 | Define a flat `@configclass` extending `ActionCfg` with a unique `name` |
 | 2 | Define a typed target (or reuse `EndEffectorPoseTarget` / `JointPositionTarget` / `NamedJointPositionTarget` / `GraspTarget` / `HeldObjectPoseTarget`) |
-| 3 | Subclass `AtomicAction` directly, set `TargetType`, compose `TrajectoryBuilder`, implement `execute(target, state) -> ActionResult` |
+| 3 | Subclass `AtomicAction` directly, set `TargetType`, compose `TrajectoryBuilder`, implement `execute(target, state) -> ActionResult` (pass `cfg=self.cfg` to `plan_arm_traj` and return per-env `success`) |
 | 4 | Register: `engine.register(Push(mg, cfg=...))` (instance) or `register_action("push", Push)` (class) |
 | 5 | Export config + action (+ target) from `primitives/__init__.py` and `atomic_actions/__init__.py` |
 | 6 | Add a row to the supported-actions table in `builtin_actions.md` and update API reference docs |

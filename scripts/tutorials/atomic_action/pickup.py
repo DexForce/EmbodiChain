@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
@@ -48,7 +47,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     AntipodalSamplerCfg,
     GraspGeneratorCfg,
@@ -58,6 +57,7 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    clone_local_pose_from_first_env,
     create_ur5_gripper_robot_cfg,
     draw_axis_marker,
     get_tutorial_window_size,
@@ -74,11 +74,12 @@ OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
 OBJECT_XY = (-0.42, -0.08)
 
 OBJECT_PRESETS = {
-    "sugar_box": {
-        "label": "sugar_box",
-        "mesh_path": "SugarBox/sugar_box_usd/sugar_box.usda",
+    "cube": {
+        "label": "cube",
+        "cube_size": (0.05, 0.05, 0.05),
+        "init_z": 0.05,
         "init_rot": (0.0, 0.0, 0.0),
-        "body_scale": (0.8, 0.8, 0.8),
+        "body_scale": (1.0, 1.0, 1.0),
         "mass": 0.05,
         "use_usd_properties": False,
     },
@@ -103,7 +104,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--object",
         choices=sorted(OBJECT_PRESETS.keys()),
-        default="sugar_box",
+        default="cube",
         help="Object preset to pick.",
     )
     parser.add_argument(
@@ -150,6 +151,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
         width=width,
         height=height,
         headless=True,
+        num_envs=args.num_envs,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
@@ -176,14 +178,14 @@ def create_pick_object(sim: SimulationManager, object_name: str) -> RigidObject:
     preset = OBJECT_PRESETS[object_name]
     cfg = RigidObjectCfg(
         uid=preset["label"],
-        shape=MeshCfg(fpath=get_data_path(preset["mesh_path"])),
+        shape=CubeCfg(size=list(preset["cube_size"])),
         attrs=RigidBodyAttributesCfg(
             mass=preset["mass"],
             dynamic_friction=0.97,
             static_friction=0.99,
         ),
         max_convex_hull_num=16,
-        init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.0],
+        init_pos=[OBJECT_XY[0], OBJECT_XY[1], preset["init_z"]],
         init_rot=preset["init_rot"],
         body_scale=preset["body_scale"],
         use_usd_properties=preset["use_usd_properties"],
@@ -192,6 +194,8 @@ def create_pick_object(sim: SimulationManager, object_name: str) -> RigidObject:
 
     # Settle the object to ensure it is resting on the ground before planning
     sim.update(step=10)
+    clone_local_pose_from_first_env(obj)
+    obj.clear_dynamics()
     return obj
 
 
@@ -395,7 +399,7 @@ def main() -> None:
     )
     cost_time = time.time() - start_time
     logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-    if not is_success:
+    if not is_success.all():
         logger.log_warning("Failed to plan pickup demo trajectory.")
         return
 

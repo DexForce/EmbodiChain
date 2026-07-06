@@ -63,6 +63,8 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
     draw_axis_marker,
     get_tutorial_window_size,
     should_open_tutorial_window,
@@ -243,6 +245,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
             width=width,
             height=height,
             headless=True,
+            num_envs=args.num_envs,
             sim_device=args.device,
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
@@ -623,26 +626,27 @@ def draw_pickment_target_axes(
     object_target_pose: torch.Tensor,
     left_grasp_pose: torch.Tensor,
     right_grasp_pose: torch.Tensor,
+    num_envs: int,
 ) -> None:
     """Draw semantic axes for the target object pose and two grasp TCP poses."""
     draw_axis_marker(
         sim,
         "coordinated_pickment_object_target_axis",
-        object_target_pose,
+        broadcast_pose_batch(object_target_pose, num_envs=num_envs),
         axis_len=0.12,
         axis_size=0.005,
     )
     draw_axis_marker(
         sim,
         "coordinated_pickment_left_grasp_axis",
-        left_grasp_pose,
+        broadcast_pose_batch(left_grasp_pose, num_envs=num_envs),
         axis_len=0.07,
         axis_size=0.0035,
     )
     draw_axis_marker(
         sim,
         "coordinated_pickment_right_grasp_axis",
-        right_grasp_pose,
+        broadcast_pose_batch(right_grasp_pose, num_envs=num_envs),
         axis_len=0.07,
         axis_size=0.0035,
     )
@@ -694,9 +698,10 @@ def run_coordinated_pickment_demo(
     create_support_surface(sim)
     obj = create_pickment_object(sim, preset)
     settle_object(sim, obj, step=0)
-    object_pose = obj.get_local_pose(to_matrix=True)[0].to(
-        device=sim.device, dtype=torch.float32
-    )
+    object_pose_batch = clone_local_pose_from_first_env(obj)
+    obj.clear_dynamics()
+    object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
+    n_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
     object_semantics = create_object_semantics(obj, preset.label)
     motion_gen = MotionGenerator(
@@ -755,22 +760,23 @@ def run_coordinated_pickment_demo(
             target_pose,
             left_grasp_pose,
             right_grasp_pose,
+            num_envs=n_envs,
         )
 
     left_object_to_eef = torch.bmm(
-        invert_pose(object_pose.unsqueeze(0)),
-        left_grasp_pose.unsqueeze(0),
+        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
+        broadcast_pose_batch(left_grasp_pose, num_envs=n_envs),
     )
     right_object_to_eef = torch.bmm(
-        invert_pose(object_pose.unsqueeze(0)),
-        right_grasp_pose.unsqueeze(0),
+        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
+        broadcast_pose_batch(right_grasp_pose, num_envs=n_envs),
     )
     pickment_target = CoordinatedPickmentTarget(
-        object_target_pose=target_pose,
+        object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
         object_semantics=object_semantics,
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
-        object_initial_pose=object_pose,
+        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
     )
 
     wait_for_user = should_wait_for_tutorial_input(args)

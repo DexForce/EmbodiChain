@@ -31,6 +31,7 @@ __all__ = [
     "PlanResult",
     "calculate_point_allocations",
     "interpolate_xpos",
+    "interpolate_xpos_batched",
 ]
 
 
@@ -114,33 +115,44 @@ class MoveType(Enum):
 
 @dataclass
 class PlanResult:
-    r"""Data class representing the result of a motion plan."""
+    r"""Data class representing the result of a motion plan (env-batched)."""
 
     success: bool | torch.Tensor = False
-    """Whether planning succeeded."""
+    """Per-env success, shape ``(B,)`` bool tensor (or scalar bool)."""
 
     xpos_list: torch.Tensor | None = None
-    """End-effector poses along trajectory with shape `(N, 4, 4)`."""
+    """End-effector poses, shape ``(B, N, 4, 4)``."""
 
     positions: torch.Tensor | None = None
-    """Joint positions along trajectory with shape `(N, DOF)`."""
+    """Joint positions, shape ``(B, N, DOF)``."""
 
     velocities: torch.Tensor | None = None
-    """Joint velocities along trajectory with shape `(N, DOF)`."""
+    """Joint velocities, shape ``(B, N, DOF)``."""
 
     accelerations: torch.Tensor | None = None
-    """Joint accelerations along trajectory with shape `(N, DOF)`."""
+    """Joint accelerations, shape ``(B, N, DOF)``."""
 
     dt: torch.Tensor | None = None
-    """Time duration between each point with shape `(N,)`."""
+    """Per-env time deltas, shape ``(B, N)``."""
 
     duration: float | torch.Tensor = 0.0
-    """Total trajectory duration in seconds."""
+    """Per-env total duration, shape ``(B,)``."""
+
+    def is_all_success(self) -> bool:
+        """Return True only when every env succeeded."""
+        if isinstance(self.success, torch.Tensor):
+            return bool(torch.all(self.success).item())
+        return bool(self.success)
 
 
 @dataclass
 class PlanState:
-    r"""Data class representing the state for a motion plan."""
+    r"""Data class representing the state for a motion plan (env-batched).
+
+    Tensor fields carry a leading batch dim ``B``: ``qpos:(B, DOF)``,
+    ``xpos:(B, 4, 4)``. Enum/scalar fields are shared across ``B`` (vectorized
+    envs share the same task skeleton).
+    """
 
     move_type: MoveType = MoveType.JOINT_MOVE
     """Type of movement used by the plan."""
@@ -149,25 +161,72 @@ class PlanState:
     """Robot part that should move."""
 
     xpos: torch.Tensor | None = None
-    """Target TCP pose (4x4 matrix) for `MoveType.EEF_MOVE`."""
+    """Target TCP pose (Bx4x4) for ``MoveType.EEF_MOVE``."""
 
     qpos: torch.Tensor | None = None
-    """Target joint angles for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+    """Target joint angles for ``MoveType.JOINT_MOVE`` with shape ``(B, DOF)``."""
 
     qvel: torch.Tensor | None = None
-    """Target joint velocities for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+    """Target joint velocities for ``MoveType.JOINT_MOVE`` with shape ``(B, DOF)``."""
 
     qacc: torch.Tensor | None = None
-    """Target joint accelerations for `MoveType.JOINT_MOVE` with shape `(DOF,)`."""
+    """Target joint accelerations for ``MoveType.JOINT_MOVE`` with shape ``(B, DOF)``."""
 
     is_open: bool = True
-    """For `MoveType.TOOL`, indicates whether to open (`True`) or close (`False`) the tool."""
+    """For ``MoveType.TOOL``, indicates whether to open (``True``) or close (``False``) the tool."""
 
     is_world_coordinate: bool = True
-    """`True` if the target pose is in world coordinates, `False` if relative to the current pose."""
+    """``True`` if the target pose is in world coordinates, ``False`` if relative to the current pose."""
 
     pause_seconds: float = 0.0
-    """Duration of a pause when `move_type` is `MoveType.PAUSE`."""
+    """Duration of a pause when ``move_type`` is ``MoveType.PAUSE``."""
+
+    @classmethod
+    def from_qpos(
+        cls,
+        qpos: torch.Tensor,
+        *,
+        move_type: MoveType = MoveType.JOINT_MOVE,
+        move_part: MovePart = MovePart.LEFT,
+        **kwargs,
+    ) -> "PlanState":
+        """Create a PlanState from batched joint positions ``(B, DOF)``."""
+        return cls(move_type=move_type, move_part=move_part, qpos=qpos, **kwargs)
+
+    @classmethod
+    def from_xpos(
+        cls,
+        xpos: torch.Tensor,
+        *,
+        move_type: MoveType = MoveType.EEF_MOVE,
+        move_part: MovePart = MovePart.LEFT,
+        **kwargs,
+    ) -> "PlanState":
+        """Create a PlanState from batched end-effector poses ``(B, 4, 4)``."""
+        return cls(move_type=move_type, move_part=move_part, xpos=xpos, **kwargs)
+
+    @classmethod
+    def single(
+        cls,
+        *,
+        qpos: torch.Tensor | None = None,
+        xpos: torch.Tensor | None = None,
+        move_type: MoveType = MoveType.JOINT_MOVE,
+        move_part: MovePart = MovePart.LEFT,
+        **kwargs,
+    ) -> "PlanState":
+        """B=1 convenience constructor: unsqueezes a single-env qpos/xpos.
+
+        Already-batched tensors (2D qpos / 3D xpos) pass through unchanged
+        (idempotent).
+        """
+        if qpos is not None and qpos.dim() == 1:
+            qpos = qpos.unsqueeze(0)
+        if xpos is not None and xpos.dim() == 2:
+            xpos = xpos.unsqueeze(0)
+        return cls(
+            move_type=move_type, move_part=move_part, qpos=qpos, xpos=xpos, **kwargs
+        )
 
 
 def interpolate_xpos(
@@ -190,6 +249,38 @@ def interpolate_xpos(
     interp_poses[:, :3, :3] = interp_rots
     interp_poses[:, :3, 3] = interp_trans
     return interp_poses
+
+
+def interpolate_xpos_batched(
+    start_xpos: torch.Tensor, end_xpos: torch.Tensor, num_samples: int
+) -> torch.Tensor:
+    """Batched pose interpolation.
+
+    Args:
+        start_xpos: Start poses, shape ``(B, 4, 4)``.
+        end_xpos: End poses, shape ``(B, 4, 4)``.
+        num_samples: Number of samples to generate (clamped to at least 2).
+
+    Returns:
+        Interpolated poses, shape ``(B, num_samples, 4, 4)``.
+    """
+    num_samples = max(2, int(num_samples))
+    B = start_xpos.shape[0]
+    out = torch.eye(4, dtype=start_xpos.dtype, device=start_xpos.device).repeat(
+        B, num_samples, 1, 1
+    )
+    # ``scipy.spatial.transform.Slerp`` interpolates a single path, so we loop
+    # over envs. B is typically small (number of parallel envs), so this is fine.
+    for b in range(B):
+        poses = interpolate_xpos(
+            start_xpos[b].detach().cpu().numpy(),
+            end_xpos[b].detach().cpu().numpy(),
+            num_samples,
+        )
+        out[b] = torch.as_tensor(
+            poses, dtype=start_xpos.dtype, device=start_xpos.device
+        )
+    return out
 
 
 def calculate_point_allocations(
