@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from PIL import Image
 
@@ -54,17 +55,20 @@ class GeometryGenerationManager:
         output_path = request.output_path.expanduser().resolve()
         _validate_single_object_request(image_path=image_path, output_path=output_path)
 
+        started_perf = time.perf_counter()
         response = self.client.generate(
             GeometryGenerationServerRequest(
                 image_path=image_path,
                 output_path=output_path,
             ),
         )
+        elapsed_seconds = _elapsed_seconds(started_perf)
         if isinstance(response, GeometryGenerationError):
             raise RuntimeError(response.error_message)
 
         return GeometryGenerationResult(
             output_path=Path(response.result.geometry_path).expanduser().resolve(),
+            sam3d_generation_elapsed_seconds=elapsed_seconds,
         )
 
     def generate_multi_object_meshes(
@@ -79,6 +83,7 @@ class GeometryGenerationManager:
             output_dir=output_dir,
         )
 
+        started_perf = time.perf_counter()
         response = self.client.generate_multiple_objects(
             MultiObjectGenerationServerRequest(
                 image_path=image_path,
@@ -86,6 +91,7 @@ class GeometryGenerationManager:
             ),
             output_dir=output_dir,
         )
+        elapsed_seconds = _elapsed_seconds(started_perf)
         if isinstance(response, MultiObjectGenerationError):
             raise RuntimeError(response.error_message)
 
@@ -99,7 +105,10 @@ class GeometryGenerationManager:
             )
             for item in response.result.objects
         ]
-        return MultiObjectGenerationResult(objects=objects)
+        return MultiObjectGenerationResult(
+            objects=objects,
+            sam3d_generation_elapsed_seconds=elapsed_seconds,
+        )
 
     def convert_rgba_image_to_geometry(
         self,
@@ -139,7 +148,10 @@ class GeometryGenerationManager:
             )
             for item in result.objects
         ]
-        return RgbaImagesToGeometriesResult(objects=objects)
+        return RgbaImagesToGeometriesResult(
+            objects=objects,
+            sam3d_generation_elapsed_seconds=result.sam3d_generation_elapsed_seconds,
+        )
 
 
 def _validate_single_object_request(*, image_path: Path, output_path: Path) -> None:
@@ -207,3 +219,7 @@ def _validate_rgba_images_request(
 
 def _postprocess_mesh(mesh_path: Path) -> Path:
     return mesh_path.expanduser().resolve()
+
+
+def _elapsed_seconds(started_perf: float) -> float:
+    return round(max(0.0, time.perf_counter() - started_perf), 6)

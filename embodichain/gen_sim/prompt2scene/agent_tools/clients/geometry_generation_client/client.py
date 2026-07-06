@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Any
 
 import requests
@@ -56,7 +57,21 @@ __all__ = [
     "MultiObjectGenerationObject",
     "MultiObjectGenerationServerRequest",
     "MultiObjectGenerationServerResponse",
+    "clear_sam3d_generation_timings",
+    "get_sam3d_generation_timings",
 ]
+
+_SAM3D_GENERATION_TIMINGS: list[dict[str, Any]] = []
+
+
+def clear_sam3d_generation_timings() -> None:
+    """Clear SAM3D timing records for the current runner invocation."""
+    _SAM3D_GENERATION_TIMINGS.clear()
+
+
+def get_sam3d_generation_timings() -> list[dict[str, Any]]:
+    """Return SAM3D timing records collected in this process."""
+    return [dict(item) for item in _SAM3D_GENERATION_TIMINGS]
 
 
 class GeometryGenerationClient(BaseHttpClient):
@@ -99,15 +114,43 @@ class GeometryGenerationClient(BaseHttpClient):
         """Generate one GLB mesh from an object image and save it locally."""
         _validate_request(request)
         url = f"{self.base_url}{self.generate_single_object_path}"
-        response = self.post_with_retries(
-            lambda: _post_geometry_generation_request(self, url, request),
-            max_retries=max_retries,
-            error_cls=GeometryGenerationError,
-            request_label="geometry_generation",
-        )
-        if isinstance(response, GeometryGenerationError):
-            return response
-        return parse_geometry_generation_response(response, request)
+        started_perf = time.perf_counter()
+        try:
+            response = self.post_with_retries(
+                lambda: _post_geometry_generation_request(self, url, request),
+                max_retries=max_retries,
+                error_cls=GeometryGenerationError,
+                request_label="geometry_generation",
+            )
+            if isinstance(response, GeometryGenerationError):
+                _record_sam3d_generation_timing(
+                    operation="single_object",
+                    started_perf=started_perf,
+                    status="failed",
+                    image_path=request.image_path,
+                    output_path=request.output_path,
+                    error=response.error_message,
+                )
+                return response
+            parsed = parse_geometry_generation_response(response, request)
+            _record_sam3d_generation_timing(
+                operation="single_object",
+                started_perf=started_perf,
+                status="ok",
+                image_path=request.image_path,
+                output_path=request.output_path,
+            )
+            return parsed
+        except Exception as exc:
+            _record_sam3d_generation_timing(
+                operation="single_object",
+                started_perf=started_perf,
+                status="failed",
+                image_path=request.image_path,
+                output_path=request.output_path,
+                error=str(exc),
+            )
+            raise
 
     def generate_multiple_objects(
         self,
@@ -119,20 +162,79 @@ class GeometryGenerationClient(BaseHttpClient):
         """Generate multiple GLB meshes from one image and multiple masks."""
         _validate_multi_object_request(request)
         url = f"{self.base_url}{self.generate_multiple_objects_path}"
-        response = self.post_with_retries(
-            lambda: _post_multi_object_generation_request(self, url, request),
-            max_retries=max_retries,
-            error_cls=MultiObjectGenerationError,
-            request_label="multi_object_geometry_generation",
-        )
-        if isinstance(response, MultiObjectGenerationError):
-            return response
-        return parse_multi_object_generation_response(
-            response,
-            self.base_url,
-            output_dir=output_dir,
-            session=self.session,
-        )
+        started_perf = time.perf_counter()
+        try:
+            response = self.post_with_retries(
+                lambda: _post_multi_object_generation_request(self, url, request),
+                max_retries=max_retries,
+                error_cls=MultiObjectGenerationError,
+                request_label="multi_object_geometry_generation",
+            )
+            if isinstance(response, MultiObjectGenerationError):
+                _record_sam3d_generation_timing(
+                    operation="multi_object",
+                    started_perf=started_perf,
+                    status="failed",
+                    image_path=request.image_path,
+                    output_dir=output_dir,
+                    mask_count=len(request.mask_paths),
+                    error=response.error_message,
+                )
+                return response
+            parsed = parse_multi_object_generation_response(
+                response,
+                self.base_url,
+                output_dir=output_dir,
+                session=self.session,
+            )
+            _record_sam3d_generation_timing(
+                operation="multi_object",
+                started_perf=started_perf,
+                status="ok",
+                image_path=request.image_path,
+                output_dir=output_dir,
+                mask_count=len(request.mask_paths),
+            )
+            return parsed
+        except Exception as exc:
+            _record_sam3d_generation_timing(
+                operation="multi_object",
+                started_perf=started_perf,
+                status="failed",
+                image_path=request.image_path,
+                output_dir=output_dir,
+                mask_count=len(request.mask_paths),
+                error=str(exc),
+            )
+            raise
+
+
+def _record_sam3d_generation_timing(
+    *,
+    operation: str,
+    started_perf: float,
+    status: str,
+    image_path: str | Path,
+    output_path: str | Path | None = None,
+    output_dir: str | Path | None = None,
+    mask_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    record: dict[str, Any] = {
+        "operation": operation,
+        "status": status,
+        "elapsed_seconds": round(max(0.0, time.perf_counter() - started_perf), 6),
+        "image_path": str(image_path),
+    }
+    if output_path is not None:
+        record["output_path"] = str(output_path)
+    if output_dir is not None:
+        record["output_dir"] = str(output_dir)
+    if mask_count is not None:
+        record["mask_count"] = int(mask_count)
+    if error:
+        record["error"] = error
+    _SAM3D_GENERATION_TIMINGS.append(record)
 
 
 def _validate_request(request: GeometryGenerationServerRequest) -> None:

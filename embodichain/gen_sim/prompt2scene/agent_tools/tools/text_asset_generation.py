@@ -23,7 +23,7 @@ from typing import Any
 
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_generation_manager import (
     GeometryGenerationManager,
-    RgbaImageToGeometryRequest,
+    GeometryGenerationRequest,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_generation_manager import (
     ImageGenerationManager,
@@ -69,6 +69,7 @@ def generate_text_object_asset(
     raw_geometry_path = ""
     mesh_path = ""
     raw_to_simready_matrix: list[list[float]] = []
+    sam3d_generation_elapsed_seconds = 0.0
 
     debug_subdir = debug_dir / object_id
     debug_subdir.mkdir(parents=True, exist_ok=True)
@@ -129,14 +130,16 @@ def generate_text_object_asset(
                 f"No RGBA prompt succeeded for {object_id}"
             )
 
-        raw_glb_path = str(
-            geometry_manager.convert_rgba_image_to_geometry(
-                RgbaImageToGeometryRequest(
-                    image_path=Path(rgba_path),
-                    output_path=debug_subdir / f"{object_id}_raw.glb",
-                )
+        raw_geometry_result = geometry_manager.generate_single_object_mesh(
+            GeometryGenerationRequest(
+                image_path=Path(rgba_path),
+                output_path=debug_subdir / f"{object_id}_raw.glb",
             )
         )
+        sam3d_generation_elapsed_seconds = (
+            raw_geometry_result.sam3d_generation_elapsed_seconds
+        )
+        raw_glb_path = str(raw_geometry_result.output_path)
         raw_geometry_dir = glb_gen_dir / "raw_downloads"
         raw_geometry_dir.mkdir(parents=True, exist_ok=True)
         object_raw_path = raw_geometry_dir / f"{object_id}_raw.glb"
@@ -172,6 +175,7 @@ def generate_text_object_asset(
         "simready_geometry_path": mesh_path,
         "raw_to_simready_glb_matrix": raw_to_simready_matrix,
         "metric_scale": None,
+        "sam3d_generation_elapsed_seconds": sam3d_generation_elapsed_seconds,
     }
 
 
@@ -222,6 +226,7 @@ def generate_text_table_asset(
     raw_geometry_path = ""
     generated_table_raw_geometry_path = ""
     mesh_path = ""
+    sam3d_generation_elapsed_seconds = 0.0
 
     debug_subdir = debug_dir / table_id
     debug_subdir.mkdir(parents=True, exist_ok=True)
@@ -250,14 +255,16 @@ def generate_text_table_asset(
                 )
             )
         )
-        raw_glb_path = str(
-            geometry_manager.convert_rgba_image_to_geometry(
-                RgbaImageToGeometryRequest(
-                    image_path=Path(rgba_path),
-                    output_path=debug_subdir / f"{table_id}_raw.glb",
-                )
+        raw_geometry_result = geometry_manager.generate_single_object_mesh(
+            GeometryGenerationRequest(
+                image_path=Path(rgba_path),
+                output_path=debug_subdir / f"{table_id}_raw.glb",
             )
         )
+        sam3d_generation_elapsed_seconds = (
+            raw_geometry_result.sam3d_generation_elapsed_seconds
+        )
+        raw_glb_path = str(raw_geometry_result.output_path)
         generated_table_raw_geometry_path = raw_glb_path
         raw_geometry_dir = glb_gen_dir / "raw_downloads"
         raw_geometry_dir.mkdir(parents=True, exist_ok=True)
@@ -299,4 +306,5 @@ def generate_text_table_asset(
         "support_normal_source": "",
         "mesh_path": mesh_path,
         "simready_geometry_path": mesh_path,
+        "sam3d_generation_elapsed_seconds": sam3d_generation_elapsed_seconds,
     }

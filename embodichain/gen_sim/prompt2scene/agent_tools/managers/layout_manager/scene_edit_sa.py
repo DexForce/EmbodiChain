@@ -12,9 +12,18 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.sa_sta
     Tempo_SceneState,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import write_json
-from embodichain.gen_sim.prompt2scene.workflows.gym_export import _glb_scale_to_sim
 
 __all__ = ["optimize_scene_edit_layout_with_sa_node3_5"]
+
+
+def _glb_scale_to_sim(scale: list[float]) -> list[float]:
+    if len(scale) != 3:
+        raise ValueError("GLB scale must be a 3-vector.")
+    return [
+        float(scale[0]),
+        float(scale[2]),
+        float(scale[1]),
+    ]
 
 
 def _grid_to_region(grid_name: str) -> str:

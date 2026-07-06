@@ -30,7 +30,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.clients.image_segmentation_cli
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_generation_manager import (
     GeometryGenerationManager,
-    RgbaImageToGeometryRequest,
+    GeometryGenerationRequest,
     RgbaImagesToGeometriesRequest,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.image_generation_manager import (
@@ -192,6 +192,7 @@ def generate_image_scene_assets(
                 output_dir=raw_download_dir,
             )
         )
+        sam3d_batch_elapsed_seconds = result.sam3d_generation_elapsed_seconds
         if len(result.objects) != len(requested_items):
             raise RuntimeError(
                 "Multi-object SAM3D result count mismatch: "
@@ -287,6 +288,7 @@ def generate_image_scene_assets(
                 "transform_matrix": transform_matrix,
                 "raw_to_simready_glb_matrix": raw_to_simready_glb_matrix,
                 "metric_scale": metric_scale,
+                "sam3d_generation_elapsed_seconds": sam3d_batch_elapsed_seconds,
             }
             if requested["kind"] == "table":
                 support_reference_path = raw_download_dir / "support_surface_raw.glb"
@@ -343,15 +345,14 @@ def generate_image_scene_assets(
                             )
                         )
                     )
-                    incomplete_raw_glb = str(
-                        geometry_manager.convert_rgba_image_to_geometry(
-                            RgbaImageToGeometryRequest(
-                                image_path=Path(incomplete_rgba),
-                                output_path=incomplete_debug_dir
-                                / f"{incomplete_table_id}_complete_raw.glb",
-                            )
+                    incomplete_raw_result = geometry_manager.generate_single_object_mesh(
+                        GeometryGenerationRequest(
+                            image_path=Path(incomplete_rgba),
+                            output_path=incomplete_debug_dir
+                            / f"{incomplete_table_id}_complete_raw.glb",
                         )
                     )
+                    incomplete_raw_glb = str(incomplete_raw_result.output_path)
                     incomplete_table_raw_path = (
                         incomplete_raw_download_dir / "table_raw.glb"
                     )
@@ -392,6 +393,9 @@ def generate_image_scene_assets(
                             ).tolist(),
                             "table_asset_source": "description_generated",
                             "complete_table_description": incomplete_table_desc,
+                            "sam3d_generation_elapsed_seconds": (
+                                incomplete_raw_result.sam3d_generation_elapsed_seconds
+                            ),
                         }
                     )
                 generated_table = generated_item
@@ -473,6 +477,7 @@ def generate_image_scene_assets(
         "aligned_geometry_path",
         "mesh_path",
         "complete_table_relative_scale_hint",
+        "sam3d_generation_elapsed_seconds",
     )
     object_fields = (
         "id",
@@ -483,6 +488,7 @@ def generate_image_scene_assets(
         "mesh_path",
         "aligned_geometry_path",
         "metric_scale",
+        "sam3d_generation_elapsed_seconds",
     )
     workflow_table = (
         {key: generated_table[key] for key in table_fields if key in generated_table}

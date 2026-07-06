@@ -33,7 +33,6 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
-    _glb_scale_to_sim,
     _render_scene_state_topdown,
 )
 from embodichain.gen_sim.prompt2scene.workflows.paths import PipelinePaths
@@ -63,6 +62,17 @@ __all__ = [
 
 def scene_state_path(output_root: Path) -> Path:
     return output_root / "gym_export" / "scene_state" / "result.json"
+
+
+def _glb_scale_to_sim(scale: list[float]) -> list[float]:
+    scale_array = np.asarray(scale, dtype=np.float64)
+    if scale_array.shape != (3,) or not np.all(np.isfinite(scale_array)):
+        raise ValueError("GLB scale must be a finite 3-vector.")
+    return [
+        float(scale_array[0]),
+        float(scale_array[2]),
+        float(scale_array[1]),
+    ]
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
