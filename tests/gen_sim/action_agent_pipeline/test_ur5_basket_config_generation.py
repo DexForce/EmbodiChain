@@ -290,9 +290,25 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert registered_uids == {"left_apple", "right_apple", "wicker_basket"}
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    agent_config = json.loads(paths.agent_config.read_text(encoding="utf-8"))
     basic_background = paths.basic_background.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     normalized_task_prompt = " ".join(task_prompt.split())
+
+    assert agent_config["TaskAgent"]["precomputed_task_graph"] == "task_graph.json"
+    assert task_graph["start"] == "v0_start"
+    assert task_graph["goal"] == "v6_done"
+    assert task_graph["nodes"][-1]["id"] == "v6_done"
+    assert len(task_graph["nodes"]) == len(task_graph["edges"]) + 1
+    assert len(task_graph["edges"]) == 6
+    assert task_graph["edges"][3]["left_arm_action"]["target_qpos"] == {
+        "source": "initial"
+    }
+    assert (
+        task_graph["edges"][3]["right_arm_action"]["target_object_pose"]["obj_name"]
+        == "wicker_basket"
+    )
 
     assert "Generate exactly 6 nominal edges" in normalized_task_prompt
     assert "Generate exactly 10 nominal edges" not in normalized_task_prompt
@@ -3574,6 +3590,11 @@ def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
     assert [
         placement["target_position"][:2] for placement in summary["placements"]
     ] == [summary["anchor_xy"]] * 3
+    task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    assert task_graph["goal"] == "v21_done"
+    assert task_graph["nodes"][-1]["id"] == "v21_done"
+    assert len(task_graph["edges"]) == 21
+    assert len(task_graph["nodes"]) == 22
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     success = gym_config["env"]["extensions"]["agent_success"]

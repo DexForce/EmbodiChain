@@ -41,10 +41,11 @@ class TaskAgent(AgentBase):
 
     prompt_name: str
     prompt_kwargs: dict[str, dict[str, Any]]
+    precomputed_task_graph: str | None
 
     def __init__(self, llm: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if llm is None:
+        if llm is None and not getattr(self, "precomputed_task_graph", None):
             raise ValueError(
                 "LLM is None. Configure the shared MLLM entry point "
                 "`embodichain.gen_sim.action_agent_pipeline.utils.mllm` with "
@@ -59,6 +60,27 @@ class TaskAgent(AgentBase):
         )
         file_path = Path(log_dir) / "agent_task_graph.json"
         metadata_path = file_path.with_suffix(".metadata.json")
+        precomputed_path = _resolve_precomputed_task_graph_path(self)
+        if precomputed_path is not None:
+            with timing_scope("action_agent.task_graph.precomputed_read"):
+                content = normalize_json_content(
+                    precomputed_path.read_text(encoding="utf-8")
+                )
+            with timing_scope("action_agent.task_graph.cache_write"):
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(content, encoding="utf-8")
+                _write_metadata(
+                    metadata_path,
+                    prompt_hash=_stable_text_hash(content),
+                    prompt_name="precomputed_task_graph",
+                    task_name=self.task_name,
+                )
+            log_info(
+                f"Using precomputed task graph from {precomputed_path}; "
+                f"cached at {file_path}."
+            )
+            return content
+
         with timing_scope(
             "action_agent.task_graph.prompt_build",
             metadata={"prompt_name": self.prompt_name},
@@ -164,3 +186,21 @@ def _write_metadata(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _resolve_precomputed_task_graph_path(agent: TaskAgent) -> Path | None:
+    graph_name = getattr(agent, "precomputed_task_graph", None)
+    if not graph_name:
+        return None
+
+    graph_path = Path(graph_name).expanduser()
+    if graph_path.is_absolute():
+        return graph_path
+
+    config_dir = getattr(agent, "config_dir", None)
+    if config_dir:
+        config_base = Path(config_dir).expanduser()
+        if config_base.suffix:
+            config_base = config_base.parent
+        return (config_base / graph_path).resolve()
+    return graph_path.resolve()

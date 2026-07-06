@@ -22,17 +22,26 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
+from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
+    NominalGraphStep,
+    build_nominal_task_graph,
+)
+
 __all__ = [
     "make_agent_config",
+    "make_arrangement_task_graph",
     "make_arrangement_atom_actions_prompt",
     "make_arrangement_basic_background",
     "make_arrangement_task_prompt",
+    "make_basket_task_graph",
     "make_basket_atom_actions_prompt",
     "make_basket_basic_background",
     "make_basket_task_prompt",
+    "make_relative_task_graph",
     "make_relative_atom_actions_prompt",
     "make_relative_basic_background",
     "make_relative_task_prompt",
+    "make_stacking_task_graph",
     "make_stacking_atom_actions_prompt",
     "make_stacking_basic_background",
     "make_stacking_task_prompt",
@@ -159,6 +168,7 @@ def make_agent_config() -> dict[str, Any]:
     return {
         "TaskAgent": {
             "prompt_name": "generate_task_graph",
+            "precomputed_task_graph": "task_graph.json",
         },
         "CompileAgent": {},
         "Agent": {
@@ -236,17 +246,31 @@ placement as object-referenced poses.
 """
 
 
+def make_arrangement_task_graph(
+    task_name: str,
+    spec: _ArrangementSpecLike,
+) -> dict[str, Any]:
+    steps = []
+    for step in spec.steps:
+        steps.extend(
+            _nominal_step(title, actions)
+            for title, actions in _arrangement_step_edge_blocks(step)
+        )
+    return build_nominal_task_graph(task_name=task_name, steps=steps)
+
+
 def _arrangement_world_axis(spec: _ArrangementSpecLike) -> str:
     if not spec.steps:
         return "y"
     return spec.steps[0].orientation_axis
 
 
-def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> str:
+def _arrangement_step_edge_blocks(
+    step: _ArrangementStepLike,
+) -> list[tuple[str, Mapping[str, str | None]]]:
     active_arm = f"{step.active_side}_arm"
     active_slot = f"{step.active_side}_arm_action"
     inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
-    base_edge = (index - 1) * 7
     high_preserve_spec = _format_pose_absolute_spec(
         active_arm,
         step.high_position,
@@ -271,33 +295,83 @@ def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> st
         support="table",
         surface_clearance=_SURFACE_RELEASE_CLEARANCE,
     )
-    return f"""{base_edge + 1}. Pick up `{step.runtime_uid}` for slot {step.slot_index}:
-   - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
-   - {inactive_slot}: null
+    return [
+        (
+            f"Pick up `{step.runtime_uid}` for slot {step.slot_index}",
+            {
+                active_slot: _format_pick_up_spec(active_arm, step.runtime_uid),
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Move `{step.runtime_uid}` to the high staging pose above slot "
+            f"{step.slot_index} without changing orientation",
+            {
+                active_slot: high_preserve_spec,
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Align `{step.runtime_uid}` at the high staging pose to the "
+            "configured arrangement axis",
+            {
+                active_slot: high_align_spec,
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Move `{step.runtime_uid}` down to the final release object pose "
+            f"at slot {step.slot_index}",
+            {
+                active_slot: release_move_spec,
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Release `{step.runtime_uid}` in-place without moving the object pose",
+            {
+                active_slot: _format_release_only_place_spec(active_arm),
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Retreat `{active_arm}` upward after release",
+            {
+                active_slot: _format_empty_hand_retreat_spec(active_arm),
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Return `{active_arm}` to its initial pose",
+            {
+                active_slot: _format_initial_qpos_spec(active_arm, sample_interval=30),
+                inactive_slot: None,
+            },
+        ),
+    ]
 
-{base_edge + 2}. Move `{step.runtime_uid}` to the high staging pose above slot {step.slot_index} without changing orientation:
-   - {active_slot}: {high_preserve_spec}
-   - {inactive_slot}: null
 
-{base_edge + 3}. Align `{step.runtime_uid}` at the high staging pose to the configured arrangement axis:
-   - {active_slot}: {high_align_spec}
-   - {inactive_slot}: null
+def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> str:
+    base_edge = (index - 1) * 7
+    return _format_indexed_edge_blocks(
+        _arrangement_step_edge_blocks(step),
+        start_index=base_edge + 1,
+    )
 
-{base_edge + 4}. Move `{step.runtime_uid}` down to the final release object pose at slot {step.slot_index}:
-   - {active_slot}: {release_move_spec}
-   - {inactive_slot}: null
 
-{base_edge + 5}. Release `{step.runtime_uid}` in-place without moving the object pose:
-   - {active_slot}: {_format_release_only_place_spec(active_arm)}
-   - {inactive_slot}: null
-
-{base_edge + 6}. Retreat `{active_arm}` upward after release:
-   - {active_slot}: {_format_empty_hand_retreat_spec(active_arm)}
-   - {inactive_slot}: null
-
-{base_edge + 7}. Return `{active_arm}` to its initial pose:
-   - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
-   - {inactive_slot}: null"""
+def _format_indexed_edge_blocks(
+    edge_blocks: Sequence[tuple[str, Mapping[str, str | None]]],
+    *,
+    start_index: int,
+) -> str:
+    formatted_blocks = []
+    for index, (title, actions) in enumerate(edge_blocks, start=start_index):
+        action_lines = "\n".join(
+            f"   - {slot}: {action if action is not None else 'null'}"
+            for slot, action in actions.items()
+        )
+        formatted_blocks.append(f"{index}. {title}:\n{action_lines}")
+    return "\n\n".join(formatted_blocks)
 
 
 def make_arrangement_basic_background(
@@ -454,8 +528,120 @@ target_object_pose JSON specs shown above; do not rewrite them.
 """
 
 
+def make_stacking_task_graph(
+    task_name: str,
+    spec: _StackingSpecLike,
+) -> dict[str, Any]:
+    steps = []
+    for step in spec.steps:
+        steps.extend(
+            _nominal_step(title, actions)
+            for title, actions in _stacking_step_edge_blocks(step)
+        )
+    return build_nominal_task_graph(task_name=task_name, steps=steps)
+
+
 def _stacking_step_edge_count(step: _StackingStepLike) -> int:
     return 6 if step.orientation_goal == "preserve" else 7
+
+
+def _stacking_step_edge_blocks(
+    step: _StackingStepLike,
+) -> list[tuple[str, Mapping[str, str | None]]]:
+    active_arm = f"{step.active_side}_arm"
+    active_slot = f"{step.active_side}_arm_action"
+    inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
+    high_preserve_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal="preserve",
+        orientation_axis="none",
+    )
+    release_move_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.target_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
+    )
+    blocks = [
+        (
+            f"Pick up `{step.runtime_uid}` for stack layer {step.layer_index}",
+            {
+                active_slot: _format_pick_up_spec(active_arm, step.runtime_uid),
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Move `{step.runtime_uid}` to the high staging pose without "
+            "changing orientation",
+            {
+                active_slot: high_preserve_spec,
+                inactive_slot: None,
+            },
+        ),
+    ]
+    if step.orientation_goal != "preserve":
+        blocks.append(
+            (
+                f"Align `{step.runtime_uid}` at the high staging pose if the "
+                "spec requires it",
+                {
+                    active_slot: _format_pose_absolute_spec(
+                        active_arm,
+                        step.high_position,
+                        sample_interval=45,
+                        orientation_goal=step.orientation_goal,
+                        orientation_axis=step.orientation_axis,
+                    ),
+                    inactive_slot: None,
+                },
+            )
+        )
+    release_title = (
+        f"Move `{step.runtime_uid}` down to the final stack object pose"
+        if step.orientation_goal != "preserve"
+        else f"Move `{step.runtime_uid}` down to the final stack object pose "
+        "without changing orientation"
+    )
+    blocks.extend(
+        [
+            (
+                release_title,
+                {
+                    active_slot: release_move_spec,
+                    inactive_slot: None,
+                },
+            ),
+            (
+                f"Release `{step.runtime_uid}` in-place without moving the "
+                "object pose",
+                {
+                    active_slot: _format_release_only_place_spec(active_arm),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                f"Retreat `{active_arm}` upward after release",
+                {
+                    active_slot: _format_empty_hand_retreat_spec(active_arm),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                f"Return `{active_arm}` to its initial pose",
+                {
+                    active_slot: _format_initial_qpos_spec(
+                        active_arm,
+                        sample_interval=30,
+                    ),
+                    inactive_slot: None,
+                },
+            ),
+        ]
+    )
+    return blocks
 
 
 def _stacking_step_prompt_block(start_edge: int, step: _StackingStepLike) -> str:
@@ -642,6 +828,21 @@ def _stacking_atom_action_block(step: _StackingStepLike) -> str:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
 
 
+def make_relative_task_graph(
+    task_name: str,
+    spec: _RelativeSpecLike,
+) -> dict[str, Any]:
+    if spec.intent == "coordinated_pickment":
+        steps = _coordinated_pickment_graph_steps(spec)
+    elif spec.intent == "hold_hover":
+        steps = _hold_hover_graph_steps(spec)
+    elif len(spec.placements) > 1:
+        steps = _dual_relative_graph_steps(spec)
+    else:
+        steps = _single_relative_graph_steps(spec)
+    return build_nominal_task_graph(task_name=task_name, steps=steps)
+
+
 def make_relative_task_prompt(
     task_name: str,
     project_name: str,
@@ -806,6 +1007,122 @@ Final state: `{spec.moved_runtime_uid}` must be
 """
 
 
+def _single_relative_graph_steps(
+    spec: _RelativeSpecLike,
+) -> list[NominalGraphStep]:
+    active_arm = f"{spec.active_side}_arm"
+    inactive_slot = (
+        "right_arm_action" if spec.active_side == "left" else "left_arm_action"
+    )
+    active_slot = f"{spec.active_side}_arm_action"
+    pick_spec = _format_pick_up_spec(
+        active_arm,
+        spec.moved_runtime_uid,
+        pickup_upright_direction=spec.pickup_upright_direction,
+        pickup_rotate_upright=spec.pickup_rotate_upright,
+    )
+    initial_spec = _format_initial_qpos_spec(active_arm, sample_interval=30)
+    high_step_label = _relative_pose_step_label(spec, "high staging")
+    release_step_label = _relative_pose_step_label(spec, "release")
+
+    edge_blocks: list[tuple[str, Mapping[str, str | None]]] = [
+        (
+            "Pick up the moved object",
+            {
+                active_slot: pick_spec,
+                inactive_slot: None,
+            },
+        )
+    ]
+    if _is_pose_sensitive_placement(spec):
+        edge_blocks.extend(
+            [
+                (
+                    f"Move the held object up to the {high_step_label} pose "
+                    "without changing orientation",
+                    {
+                        active_slot: _format_relative_pose_spec(
+                            active_arm,
+                            spec,
+                            pose_kind="high",
+                            sample_interval=45,
+                            orientation_goal="preserve",
+                            orientation_axis="none",
+                            align_to=None,
+                        ),
+                        inactive_slot: None,
+                    },
+                ),
+                (
+                    "Adjust the held object orientation at the same safe high "
+                    "staging pose",
+                    {
+                        active_slot: _format_relative_pose_spec(
+                            active_arm,
+                            spec,
+                            pose_kind="high",
+                            sample_interval=45,
+                        ),
+                        inactive_slot: None,
+                    },
+                ),
+            ]
+        )
+    else:
+        edge_blocks.append(
+            (
+                f"Move the held object to the {high_step_label} pose",
+                {
+                    active_slot: _format_relative_pose_spec(
+                        active_arm,
+                        spec,
+                        pose_kind="high",
+                        sample_interval=45,
+                    ),
+                    inactive_slot: None,
+                },
+            )
+        )
+    edge_blocks.extend(
+        [
+            (
+                f"Move the held object down to the {release_step_label} object pose",
+                {
+                    active_slot: _format_relative_pose_spec(
+                        active_arm,
+                        spec,
+                        pose_kind="release",
+                        sample_interval=45,
+                    ),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                "Release the held object in-place without moving the object pose",
+                {
+                    active_slot: _format_release_only_place_spec(active_arm),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                "Retreat the now-empty end-effector upward",
+                {
+                    active_slot: _format_empty_hand_retreat_spec(active_arm),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                "Return the active arm to its initial pose",
+                {
+                    active_slot: initial_spec,
+                    inactive_slot: None,
+                },
+            ),
+        ]
+    )
+    return [_nominal_step(title, actions) for title, actions in edge_blocks]
+
+
 def _make_coordinated_pickment_task_prompt(
     task_name: str,
     project_name: str,
@@ -875,6 +1192,50 @@ must not remain held by either gripper. Both arms must be back at their initial
 arm joint poses with grippers open.
 {final_planning_rule}
 """
+
+
+def _coordinated_pickment_graph_steps(
+    spec: _RelativeSpecLike,
+) -> list[NominalGraphStep]:
+    return [
+        _nominal_step(
+            f"Coordinated pick and move `{spec.moved_runtime_uid}`",
+            {
+                "left_arm_action": _format_coordinated_pickment_spec(spec),
+                "right_arm_action": None,
+            },
+        ),
+        _nominal_step(
+            f"Release `{spec.moved_runtime_uid}` from both grippers",
+            {
+                "left_arm_action": _format_gripper_spec(
+                    "left_arm",
+                    "open",
+                    sample_interval=10,
+                    post_hold_steps=20,
+                ),
+                "right_arm_action": _format_gripper_spec(
+                    "right_arm",
+                    "open",
+                    sample_interval=10,
+                    post_hold_steps=20,
+                ),
+            },
+        ),
+        _nominal_step(
+            "Return both empty arms to their initial poses",
+            {
+                "left_arm_action": _format_initial_qpos_spec(
+                    "left_arm",
+                    sample_interval=30,
+                ),
+                "right_arm_action": _format_initial_qpos_spec(
+                    "right_arm",
+                    sample_interval=30,
+                ),
+            },
+        ),
+    ]
 
 
 def _make_dual_relative_task_prompt(
@@ -1014,6 +1375,96 @@ Final state: `{first.moved_runtime_uid}` must be
 """
 
 
+def _dual_relative_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
+    edge_blocks = _dual_relative_edge_blocks(spec)
+    return [_nominal_step(title, actions) for title, actions in edge_blocks]
+
+
+def _dual_relative_edge_blocks(
+    spec: _RelativeSpecLike,
+) -> list[tuple[str, Mapping[str, str | None]]]:
+    first, second = spec.placements
+    first_arm = f"{first.active_side}_arm"
+    second_arm = f"{second.active_side}_arm"
+    first_slot = f"{first.active_side}_arm_action"
+    second_slot = f"{second.active_side}_arm_action"
+    first_pick_spec = _format_pick_up_spec(
+        first_arm,
+        first.moved_runtime_uid,
+        pickup_upright_direction=first.pickup_upright_direction,
+        pickup_rotate_upright=first.pickup_rotate_upright,
+    )
+    second_pick_spec = _format_pick_up_spec(
+        second_arm,
+        second.moved_runtime_uid,
+        pickup_upright_direction=second.pickup_upright_direction,
+        pickup_rotate_upright=second.pickup_rotate_upright,
+    )
+    first_high_spec = _format_high_staging_spec(first_arm, first)
+    second_high_spec = _format_high_staging_spec(second_arm, second)
+    second_close_spec = _format_gripper_spec(
+        second_arm,
+        "close",
+        sample_interval=10,
+    )
+    first_initial_spec = _format_initial_qpos_spec(
+        first_arm,
+        sample_interval=30,
+    )
+    second_initial_spec = _format_initial_qpos_spec(
+        second_arm,
+        sample_interval=30,
+    )
+    first_release_edges = _dual_relative_release_edge_blocks(
+        placement=first,
+        active_arm=first_arm,
+        active_slot=first_slot,
+        waiting_slot=second_slot,
+        waiting_action=second_close_spec,
+    )
+    second_release_edges = _dual_relative_release_edge_blocks(
+        placement=second,
+        active_arm=second_arm,
+        active_slot=second_slot,
+        waiting_slot=first_slot,
+        waiting_action=None,
+    )
+    return [
+        (
+            "Pick up both moved objects simultaneously",
+            {
+                first_slot: first_pick_spec,
+                second_slot: second_pick_spec,
+            },
+        ),
+        (
+            f"Move `{first.moved_runtime_uid}` to the high staging pose while "
+            f"the other arm keeps holding `{second.moved_runtime_uid}`",
+            {
+                first_slot: first_high_spec,
+                second_slot: second_close_spec,
+            },
+        ),
+        *first_release_edges,
+        (
+            f"Return `{first_arm}` to its initial pose while moving "
+            f"`{second.moved_runtime_uid}` to the high staging pose",
+            {
+                first_slot: first_initial_spec,
+                second_slot: second_high_spec,
+            },
+        ),
+        *second_release_edges,
+        (
+            f"Return `{second_arm}` to its initial pose",
+            {
+                first_slot: None,
+                second_slot: second_initial_spec,
+            },
+        ),
+    ]
+
+
 def _make_hold_hover_task_prompt(
     task_name: str,
     project_name: str,
@@ -1086,6 +1537,47 @@ must keep every selected object hovering in a closed gripper.
 Final state: every selected object must remain lifted and held by its assigned
 UR5 arm in the exported {project_name} environment config.
 """
+
+
+def _hold_hover_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
+    pick_actions = {
+        f"{placement.active_side}_arm_action": _format_pick_up_spec(
+            f"{placement.active_side}_arm",
+            placement.moved_runtime_uid,
+        )
+        for placement in spec.placements
+    }
+    hover_actions = {
+        f"{placement.active_side}_arm_action": _format_hover_move_spec(
+            f"{placement.active_side}_arm",
+            placement,
+        )
+        for placement in spec.placements
+    }
+    close_actions = {
+        f"{placement.active_side}_arm_action": _format_gripper_spec(
+            f"{placement.active_side}_arm",
+            "close",
+            sample_interval=10,
+            post_hold_steps=20,
+        )
+        for placement in spec.placements
+    }
+    for side in ("left", "right"):
+        pick_actions.setdefault(f"{side}_arm_action", None)
+        hover_actions.setdefault(f"{side}_arm_action", None)
+        close_actions.setdefault(f"{side}_arm_action", None)
+    return [
+        _nominal_step("Pick up the selected object(s)", pick_actions),
+        _nominal_step(
+            "Move the held object(s) to the hover pose without releasing",
+            hover_actions,
+        ),
+        _nominal_step(
+            "Keep the gripper(s) closed and finish while holding",
+            close_actions,
+        ),
+    ]
 
 
 def _dual_relative_release_edge_blocks(
@@ -1203,6 +1695,31 @@ def _format_numbered_edge_blocks(
         )
         formatted_blocks.append(f"{index}. {title}:\n{action_lines}")
     return "\n\n".join(formatted_blocks)
+
+
+def _nominal_step(
+    title: str,
+    actions: Mapping[str, str | Mapping[str, Any] | None],
+) -> NominalGraphStep:
+    unknown_slots = set(actions) - {"left_arm_action", "right_arm_action"}
+    if unknown_slots:
+        raise ValueError(
+            "Nominal graph actions contain unsupported slots: "
+            f"{', '.join(sorted(unknown_slots))}."
+        )
+    return NominalGraphStep(
+        semantic=title,
+        left_arm_action=_action_dict(actions.get("left_arm_action")),
+        right_arm_action=_action_dict(actions.get("right_arm_action")),
+    )
+
+
+def _action_dict(spec: str | Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if spec is None:
+        return None
+    if isinstance(spec, str):
+        return json.loads(spec)
+    return dict(spec)
 
 
 def _relative_release_action_patterns(
@@ -1661,6 +2178,105 @@ with both arms moved away from the container workspace. Always plan to the
 current `{roles.container_runtime_uid}` object pose from the exported
 {project_name} environment config.
 """
+
+
+def make_basket_task_graph(
+    task_name: str,
+    roles: _BasketRolesLike,
+) -> dict[str, Any]:
+    left_pick_spec = _format_pick_up_spec(
+        "left_arm",
+        roles.left_target_runtime_uid,
+    )
+    right_pick_spec = _format_pick_up_spec(
+        "right_arm",
+        roles.right_target_runtime_uid,
+    )
+    left_high_spec = _format_pose_object_spec(
+        "left_arm",
+        roles.container_runtime_uid,
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
+        sample_interval=45,
+    )
+    right_high_spec = _format_pose_object_spec(
+        "right_arm",
+        roles.container_runtime_uid,
+        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
+        sample_interval=45,
+    )
+    left_place_spec = _format_place_object_spec(
+        "left_arm",
+        roles.container_runtime_uid,
+        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
+    )
+    right_place_spec = _format_place_object_spec(
+        "right_arm",
+        roles.container_runtime_uid,
+        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
+        sample_interval=80,
+        lift_height=_PLACE_LIFT_HEIGHT,
+    )
+    right_close_spec = _format_gripper_spec(
+        "right_arm",
+        "close",
+        sample_interval=10,
+    )
+    left_initial_spec = _format_initial_qpos_spec(
+        "left_arm",
+        sample_interval=30,
+    )
+    right_initial_spec = _format_initial_qpos_spec(
+        "right_arm",
+        sample_interval=30,
+    )
+    steps = [
+        _nominal_step(
+            "Pick up both target objects simultaneously",
+            {
+                "left_arm_action": left_pick_spec,
+                "right_arm_action": right_pick_spec,
+            },
+        ),
+        _nominal_step(
+            "Move the held left target object above the container while the "
+            "right arm keeps holding its target",
+            {
+                "left_arm_action": left_high_spec,
+                "right_arm_action": right_close_spec,
+            },
+        ),
+        _nominal_step(
+            "Place the held left target object inside the container",
+            {
+                "left_arm_action": left_place_spec,
+                "right_arm_action": right_close_spec,
+            },
+        ),
+        _nominal_step(
+            "Return the left arm to initial while staging the held right target",
+            {
+                "left_arm_action": left_initial_spec,
+                "right_arm_action": right_high_spec,
+            },
+        ),
+        _nominal_step(
+            "Place the held right target object inside the container",
+            {
+                "left_arm_action": None,
+                "right_arm_action": right_place_spec,
+            },
+        ),
+        _nominal_step(
+            "Return the right arm to its initial pose after release",
+            {
+                "left_arm_action": None,
+                "right_arm_action": right_initial_spec,
+            },
+        ),
+    ]
+    return build_nominal_task_graph(task_name=task_name, steps=steps)
 
 
 def make_basket_basic_background(

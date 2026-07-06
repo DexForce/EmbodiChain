@@ -78,6 +78,56 @@ def test_task_agent_cache_uses_prompt_hash_metadata(tmp_path, monkeypatch) -> No
     assert (tmp_path / "agent_task_graph.metadata.json").is_file()
 
 
+def test_task_agent_uses_precomputed_task_graph_without_llm(tmp_path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    config_path = config_dir / "agent_config.json"
+    task_graph_path = config_dir / "task_graph.json"
+    task_graph = {
+        "task": "unit",
+        "start": "v0_start",
+        "goal": "v1_done",
+        "nodes": [{"id": "v0_start"}, {"id": "v1_done"}],
+        "edges": [
+            {
+                "id": "e01_pick",
+                "source": "v0_start",
+                "target": "v1_done",
+                "left_arm_action": {
+                    "atomic_action_class": "PickUp",
+                    "robot_name": "left_arm",
+                    "control": "arm",
+                    "target_object": {
+                        "obj_name": "apple",
+                        "affordance": "antipodal",
+                    },
+                    "cfg": {
+                        "pre_grasp_distance": 0.08,
+                        "lift_height": 0.3,
+                        "sample_interval": 45,
+                    },
+                },
+                "right_arm_action": None,
+            }
+        ],
+    }
+    task_graph_path.write_text(json.dumps(task_graph), encoding="utf-8")
+    agent = TaskAgent(
+        None,
+        prompt_name="unused_prompt",
+        precomputed_task_graph=task_graph_path.name,
+        prompt_kwargs={},
+        task_name="UnitTask",
+        config_dir=str(config_path),
+    )
+
+    content = agent.generate(log_dir=tmp_path / "cache")
+
+    assert json.loads(content) == task_graph
+    assert (tmp_path / "cache/agent_task_graph.json").is_file()
+    assert (tmp_path / "cache/agent_task_graph.metadata.json").is_file()
+
+
 def test_task_agent_cache_hashes_prompt_value_objects(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         task_agent_module.TaskPrompt,

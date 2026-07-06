@@ -45,6 +45,7 @@ class GeneratedActionAgentConfigPaths:
     gym_config: Path
     agent_config: Path
     task_prompt: Path
+    task_graph: Path
     basic_background: Path
     atom_actions: Path
     summary: dict[str, Any]
