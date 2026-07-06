@@ -687,7 +687,8 @@ class TestPlaceAction:
         ):
             result = action.execute(EndEffectorPoseTarget(xpos=rz_pi_pose), state)
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert len(seen_poses) == 3
         assert torch.allclose(
             seen_poses[1], rz_pi_pose.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
@@ -728,7 +729,8 @@ class TestPlaceAction:
                 state,
             )
 
-        assert result.success is True
+        assert result.success.all()
+        assert result.success.shape == (NUM_ENVS,)
         assert len(seen_poses) == 3
         expected_release = torch.eye(4)
         expected_retract = torch.eye(4)
