@@ -184,6 +184,21 @@ def _hand_close():
     return torch.full((HAND_DOF,), 0.025, dtype=torch.float32)
 
 
+def _z_rotation_pose(angle: float) -> torch.Tensor:
+    pose = torch.eye(4, dtype=torch.float32)
+    cos_angle = math.cos(angle)
+    sin_angle = math.sin(angle)
+    pose[:3, :3] = torch.tensor(
+        [
+            [cos_angle, -sin_angle, 0.0],
+            [sin_angle, cos_angle, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+    return pose
+
+
 # ---------------------------------------------------------------------------
 # MoveEndEffector
 # ---------------------------------------------------------------------------
@@ -538,6 +553,59 @@ class TestPickUpAction:
                 [1.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0],
                 [0.0, -1.0, 0.0],
+            ]
+        )
+        assert result.success.all()
+        assert torch.allclose(
+            result.next_state.held_object.grasp_xpos,
+            expected_grasp,
+            atol=1.0e-6,
+        )
+
+    def test_execute_applies_upright_rotation_from_object_local_frame(self):
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            obj_upright_direction=torch.tensor([1.0, 0.0, 0.0]),
+            rotate_upright=math.pi / 2.0,
+        )
+        action = PickUp(self.mg, cfg)
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (torch.eye(4).unsqueeze(0), torch.tensor([0.5]))
+                for _ in range(NUM_ENVS)
+            ]
+        )
+        object_pose = (
+            _z_rotation_pose(-math.pi / 2.0).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        entity = Mock()
+        entity.get_local_pose = Mock(return_value=object_pose)
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="bottle",
+            entity=entity,
+        )
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+            result = action.execute(GraspTarget(semantics=sem), state)
+
+        expected_grasp = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        expected_grasp[:, :3, :3] = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0],
+                [0.0, 1.0, 0.0],
             ]
         )
         assert result.success.all()
