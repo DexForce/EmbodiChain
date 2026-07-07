@@ -43,12 +43,15 @@ __all__ = [
     "_validate_success_uids",
 ]
 
+_ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+_ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
+
 
 def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:
     return {
         **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": [0.0],
-        "gripper_close_state": [0.04],
+        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
+        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": {
@@ -85,8 +88,8 @@ def _make_relative_extensions_config(
 ) -> dict[str, Any]:
     extensions = {
         **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": [0.0],
-        "gripper_close_state": [0.04],
+        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
+        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": _make_relative_success_spec(
@@ -103,8 +106,8 @@ def _make_relative_extensions_config(
 def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
     return {
         **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": [0.0],
-        "gripper_close_state": [0.04],
+        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
+        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": _make_arrangement_success_spec(spec),
@@ -114,8 +117,8 @@ def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str,
 def _make_stacking_extensions_config(spec: _StackingSpec) -> dict[str, Any]:
     return {
         **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": [0.0],
-        "gripper_close_state": [0.04],
+        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
+        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": _make_stacking_success_spec(spec),

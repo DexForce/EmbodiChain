@@ -434,7 +434,8 @@ def make_arrangement_basic_background(
 This configuration directory is for a Dual-UR5 multi-object line arrangement
 task generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+The robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke):
 - left_arm is the semantic robot-view left slot, mapped to the physical
   right_arm control part.
 - right_arm is the semantic robot-view right slot, mapped to the physical
@@ -788,7 +789,8 @@ def make_stacking_basic_background(
 This configuration directory is for a Dual-UR5 stacking task generated from a
 simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+The robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke):
 - left_arm is the semantic robot-view left slot, mapped to the physical
   right_arm control part.
 - right_arm is the semantic robot-view right slot, mapped to the physical
@@ -1827,7 +1829,8 @@ def make_relative_basic_background(
 This configuration directory is for a Dual-UR5 relative-placement task generated
 from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+The robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke):
 - left_arm is the semantic robot-view left slot, mapped to the physical
   right_arm control part.
 - right_arm is the semantic robot-view right slot, mapped to the physical
@@ -1867,7 +1870,8 @@ def _make_coordinated_pickment_basic_background(
 This configuration directory is for a Dual-UR5 coordinated shared-object task
 generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+The robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke):
 - left_arm is the semantic robot-view left slot, mapped to the physical
   right_arm control part.
 - right_arm is the semantic robot-view right slot, mapped to the physical
@@ -1915,7 +1919,8 @@ def _make_dual_relative_basic_background(
 This configuration directory is for a Dual-UR5 dual-arm relative-placement task
 generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+The robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke):
 - left_arm is the semantic robot-view left slot, mapped to the physical
   right_arm control part.
 - right_arm is the semantic robot-view right slot, mapped to the physical
@@ -1958,7 +1963,8 @@ def _make_hold_hover_basic_background(
 This configuration directory is for a Dual-UR5 object-manipulation hold-hover
 task generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
+The robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke):
 - left_arm is the semantic robot-view left slot, mapped to the physical
   right_arm control part.
 - right_arm is the semantic robot-view right slot, mapped to the physical
@@ -2360,8 +2366,8 @@ def make_basket_basic_background(
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for the UR5BreadBasket task template. The
-current robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel
-grippers.
+current robot is a dual-UR5 composite robot with Robotiq ARG2F-140 large
+parallel grippers (140 mm stroke).
 
 The robot is a dual-UR5 composite robot with two parallel grippers:
 - left_arm is the semantic robot-view left slot, mapped to the physical

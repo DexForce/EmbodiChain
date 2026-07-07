@@ -166,6 +166,46 @@ def test_dual_ur5_template_uses_ur_solver_config() -> None:
     assert right_solver["tcp"][2][3] == pytest.approx(0.16)
 
 
+def test_dual_ur5_template_uses_robotiq_arg2f_140_grippers() -> None:
+    robot = make_dual_ur5_robot_config(robot_init_z=0.42)
+
+    components = robot["urdf_cfg"]["components"]
+    left_hand = next(
+        component
+        for component in components
+        if component["component_type"] == "left_hand"
+    )
+    right_hand = next(
+        component
+        for component in components
+        if component["component_type"] == "right_hand"
+    )
+
+    assert (
+        left_hand["urdf_path"]
+        == "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+    )
+    assert right_hand["urdf_path"] == left_hand["urdf_path"]
+    assert robot["urdf_cfg"]["fname"] == "dual_ur5_robotiq_arg2f_140_basket"
+    assert robot["control_parts"]["left_eef"] == [
+        "left_finger_joint",
+        "left_inner_knuckle_joint",
+        "left_inner_finger_joint",
+        "left_right_outer_knuckle_joint",
+        "left_right_inner_knuckle_joint",
+        "left_right_inner_finger_joint",
+    ]
+    assert robot["control_parts"]["right_eef"] == [
+        "right_finger_joint",
+        "right_left_inner_knuckle_joint",
+        "right_left_inner_finger_joint",
+        "right_outer_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "right_inner_finger_joint",
+    ]
+    assert len(robot["init_qpos"]) == 24
+
+
 def test_dual_ur5_template_deserializes_to_ur5_solver_cfg() -> None:
     robot_cfg = RobotCfg.from_dict(make_dual_ur5_robot_config(robot_init_z=0.42))
 
@@ -191,12 +231,9 @@ def test_observation_joint_ids_derive_from_dual_ur5_robot_config() -> None:
 
     observations = _make_observations_config(robot)
 
-    assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
-        12,
-        13,
-        14,
-        15,
-    ]
+    assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == list(
+        range(12, 24)
+    )
 
 
 def test_action_agent_config_generator_uses_parallel_handoff(

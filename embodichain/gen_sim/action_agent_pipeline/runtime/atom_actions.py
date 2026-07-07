@@ -210,9 +210,9 @@ class _CoordinatedGraspPair:
 class _GraspRuntimeDefaults:
     antipodal_n_sample: int = 10000
     antipodal_max_angle: float = float(np.pi / 12)
-    max_open_length: float = 0.088
+    max_open_length: float = 0.14
     min_open_length: float = 0.003
-    finger_length: float = 0.078
+    finger_length: float = 0.13
     point_sample_dense: float = 0.012
     max_deviation_angle: float = float(np.pi / 6)
     viser_port: int = 11801

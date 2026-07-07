@@ -128,13 +128,23 @@
             "components": [
                 {
                     "component_type": "hand",
-                    "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+                    "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
                 }
             ]
         },
         "init_pos": [0.0, 0.0, 0.0],
         "init_rot": [0.0, 0.0, 0.0],
-        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.04, 0.04],
+        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "control_parts": {
+            "hand": [
+                "finger_joint",
+                "left_inner_knuckle_joint",
+                "left_inner_finger_joint",
+                "right_outer_knuckle_joint",
+                "right_inner_knuckle_joint",
+                "right_inner_finger_joint"
+            ]
+        },
         "drive_pros": {
             "drive_type": "force",
             "stiffness": 100000.0,
