@@ -160,8 +160,8 @@ class _ArrangementLineStepSpec:
     high_position: list[float]
     size_score: float | None = None
     color: str | None = None
-    orientation_goal: str = "axis_align"
-    orientation_axis: str = "y"
+    orientation_goal: str = "preserve"
+    orientation_axis: str = "none"
 
 
 @dataclass(frozen=True)

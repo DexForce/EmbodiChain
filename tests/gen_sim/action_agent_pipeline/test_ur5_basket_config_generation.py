@@ -1891,7 +1891,7 @@ def test_relative_orientation_upright_does_not_emit_align_to(
     assert paths.summary["orientation_align_to"] is None
 
 
-def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
+def test_relative_cube_preserves_orientation_when_llm_preserves_orientation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1973,7 +1973,7 @@ def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
     )
 
     assert (
-        "Generate one deterministic nominal graph with exactly 7 nominal edges"
+        "Generate one deterministic nominal graph with exactly 6 nominal edges"
         in task_prompt
     )
     for text in (task_prompt, atom_actions):
@@ -1982,22 +1982,19 @@ def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
             '"orientation_axis":"none"}' in text
         )
         assert (
-            f'"offset":{high_offset_json},"orientation_goal":"axis_align",'
-            '"orientation_axis":"x"}' in text
+            f'"offset":{release_offset_json},"orientation_goal":"preserve",'
+            '"orientation_axis":"none"}' in text
         )
-        assert (
-            f'"offset":{release_offset_json},"orientation_goal":"axis_align",'
-            '"orientation_axis":"x"}' in text
-        )
+        assert '"orientation_goal":"axis_align"' not in text
         assert '"align_to"' not in text
         assert '"atomic_action_class":"Place"' in text
         assert '"atomic_action_class":"MoveEndEffector"' in text
 
     assert summary["moved_object"] == "interact_cube_1"
     assert summary["reference_object"] == "interact_cube_2"
-    assert summary["orientation_goal"] == "axis_align"
-    assert summary["orientation_axis"] == "x"
-    assert summary.get("orientation_align_to") is None
+    assert paths.summary["orientation_goal"] == "preserve"
+    assert paths.summary["orientation_axis"] == "none"
+    assert paths.summary["orientation_align_to"] is None
 
 
 def test_relative_on_table_release_offset_uses_tabletop_surface(
@@ -2915,11 +2912,11 @@ def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> 
         step.target_xy[0] for step in spec.steps
     )
     assert [step.orientation_goal for step in spec.steps] == [
-        "axis_align",
-        "axis_align",
-        "axis_align",
+        "preserve",
+        "preserve",
+        "preserve",
     ]
-    assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x"]
+    assert [step.orientation_axis for step in spec.steps] == ["none", "none", "none"]
 
 
 def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
@@ -3009,7 +3006,82 @@ def test_demo153_like_cans_can_reuse_moved_initial_positions(
     target_y_values = [step.target_xy[1] for step in spec.steps]
     assert target_x_values == sorted(target_x_values)
     assert len({round(value, 6) for value in target_y_values}) == 1
-    assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x", "x"]
+    assert [step.orientation_goal for step in spec.steps] == [
+        "preserve",
+        "preserve",
+        "preserve",
+        "preserve",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == [
+        "none",
+        "none",
+        "none",
+        "none",
+    ]
+
+
+def test_arrangement_keeps_axis_alignment_for_elongated_objects(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_glb(
+        tmp_path / "mesh_assets/table/table_0.glb",
+        [(-0.35, -0.20, 0.0), (0.35, -0.20, 0.0), (0.0, 0.20, 0.0)],
+    )
+    bar_vertices = [(-0.06, -0.01, 0.0), (0.06, -0.01, 0.0), (0.0, 0.01, 0.03)]
+    scene_objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid="table",
+            source_role="background",
+            config=_mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            ),
+        )
+    ]
+    for index, y_value in enumerate([-0.04, 0.04], start=1):
+        uid = f"bar_{index}"
+        _write_minimal_glb(tmp_path / f"mesh_assets/bar/{uid}.glb", bar_vertices)
+        scene_objects.append(
+            action_agent_config_generation._SceneObject(
+                source_uid=uid,
+                source_role="rigid_object",
+                config=_mesh_object(
+                    uid,
+                    f"mesh_assets/bar/{uid}.glb",
+                    [0.0, y_value, 0.76],
+                    [0.0, 0.0, 0.0],
+                ),
+            )
+        )
+
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    spec = _apply_arrangement_task_response(
+        response={
+            "objects": ["bar_1", "bar_2"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "world_x",
+            "task_prompt_summary": "Arrange two elongated bars in a row.",
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=rigid_objects,
+        scene_dir=tmp_path,
+        task_description="arrange two elongated bars",
+    )
+
+    assert [step.orientation_goal for step in spec.steps] == [
+        "axis_align",
+        "axis_align",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == ["x", "x"]
+    assert all(
+        step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
+        for step in spec.steps
+    )
 
 
 def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
@@ -3035,11 +3107,22 @@ def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
     )
 
     assert spec.line_origin_xy == pytest.approx([0.0, 0.0])
-    assert [step.orientation_axis for step in spec.steps] == ["y", "y", "y", "y"]
+    assert [step.orientation_goal for step in spec.steps] == [
+        "preserve",
+        "preserve",
+        "preserve",
+        "preserve",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == [
+        "none",
+        "none",
+        "none",
+        "none",
+    ]
     assert len({round(step.target_xy[0], 6) for step in spec.steps}) == 1
     assert spec.steps[0].target_xy[0] == pytest.approx(0.0)
     for step in spec.steps:
-        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
+        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.10)
 
 
 def test_arrangement_static_unmoved_object_blocks_line_layout(
@@ -3207,8 +3290,6 @@ def test_task_description_generates_size_order_arrangement_config(
                 "slot_index": 0,
                 "active_arm": "right_arm",
                 "target_xy": paths.summary["placements"][0]["target_xy"],
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
             },
             {
                 "object": "cube_1",
@@ -3216,8 +3297,6 @@ def test_task_description_generates_size_order_arrangement_config(
                 "slot_index": 1,
                 "active_arm": "left_arm",
                 "target_xy": paths.summary["placements"][1]["target_xy"],
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
             },
             {
                 "object": "cube_3",
@@ -3225,8 +3304,6 @@ def test_task_description_generates_size_order_arrangement_config(
                 "slot_index": 2,
                 "active_arm": "left_arm",
                 "target_xy": paths.summary["placements"][2]["target_xy"],
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
             },
         ],
     }
@@ -3277,17 +3354,17 @@ def test_task_description_generates_size_order_arrangement_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 21 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
         task_prompt
     )
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
     assert task_prompt.count('"lift_height":0.30') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
-    assert task_prompt.count('"reference":"absolute"') >= 9
-    assert task_prompt.count('"orientation_goal":"axis_align"') == 6
-    assert task_prompt.count('"orientation_axis":"x"') == 6
-    assert task_prompt.count('"orientation_goal":"preserve"') == 3
+    assert task_prompt.count('"reference":"absolute"') >= 6
+    assert task_prompt.count('"orientation_goal":"axis_align"') == 0
+    assert task_prompt.count('"orientation_axis":"x"') == 0
+    assert task_prompt.count('"orientation_goal":"preserve"') == 6
     assert task_prompt.count('"target_pose":{"reference":"relative"') == 6
     assert task_prompt.count('"z_policy":"object_on_surface"') == 3
     assert task_prompt.count('"support":"table"') == 3
@@ -3295,8 +3372,9 @@ def test_task_description_generates_size_order_arrangement_config(
     assert "Collision-aware line origin xy" in task_prompt
     assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
     assert atom_actions.count('"lift_height":0.30') == 3
-    assert atom_actions.count('"orientation_goal":"axis_align"') == 6
-    assert atom_actions.count('"orientation_axis":"x"') == 6
+    assert atom_actions.count('"orientation_goal":"axis_align"') == 0
+    assert atom_actions.count('"orientation_axis":"x"') == 0
+    assert atom_actions.count('"orientation_goal":"preserve"') == 6
     assert atom_actions.count('"atomic_action_class":"Place"') == 3
     assert atom_actions.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert atom_actions.count('"z_policy":"object_on_surface"') == 3
@@ -3338,8 +3416,8 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
     assert summary["spacing"] >= 0.07
     assert summary["layout_clearance"] == pytest.approx(0.025)
     assert all(
-        placement["orientation_goal"] == "axis_align"
-        and placement["orientation_axis"] == "x"
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
         for placement in summary["placements"]
     )
     x_values = [placement["target_xy"][0] for placement in summary["placements"]]
@@ -3349,7 +3427,7 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
     _assert_arrangement_slots_avoid_initial_objects(summary, gym_config)
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 42 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 36 nominal edges" in (
         task_prompt
     )
 
@@ -3476,7 +3554,8 @@ def test_arrangement_recomputes_targets_after_scene_rotation_and_scale(
     assert paths.summary["axis"] == "table_long_axis"
     assert paths.summary["line_origin_xy"] == pytest.approx(table_center)
     assert all(
-        placement["orientation_axis"] == "y"
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
         for placement in paths.summary["placements"]
     )
     assert table_bounds is not None
@@ -3555,8 +3634,8 @@ def test_task_description_generates_three_block_stacking_config(
         "green_cube",
     ]
     assert all(
-        placement["orientation_goal"] == "axis_align"
-        and placement["orientation_axis"] == "x"
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
         for placement in summary["placements"]
     )
     target_xy = [
@@ -3579,14 +3658,15 @@ def test_task_description_generates_three_block_stacking_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 21 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
         task_prompt
     )
     assert "Pick up both" not in task_prompt
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
     assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
-    assert atom_actions.count('"orientation_goal":"axis_align"') == 6
+    assert atom_actions.count('"orientation_goal":"axis_align"') == 0
+    assert atom_actions.count('"orientation_goal":"preserve"') == 6
 
 
 def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
@@ -3626,10 +3706,10 @@ def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
         placement["target_position"][:2] for placement in summary["placements"]
     ] == [summary["anchor_xy"]] * 3
     task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
-    assert task_graph["goal"] == "v21_done"
-    assert task_graph["nodes"][-1]["id"] == "v21_done"
-    assert len(task_graph["edges"]) == 21
-    assert len(task_graph["nodes"]) == 22
+    assert task_graph["goal"] == "v18_done"
+    assert task_graph["nodes"][-1]["id"] == "v18_done"
+    assert len(task_graph["edges"]) == 18
+    assert len(task_graph["nodes"]) == 19
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -3749,7 +3829,7 @@ def test_task_description_generates_two_block_stacking_config(
         for term in success_terms
     )
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert "exactly 14 nominal edges" in task_prompt
+    assert "exactly 12 nominal edges" in task_prompt
     assert "Pick up both" not in task_prompt
 
 

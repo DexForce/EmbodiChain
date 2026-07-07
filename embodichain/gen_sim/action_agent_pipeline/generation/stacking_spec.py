@@ -31,6 +31,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _TABLETOP_OBJECT_CLEARANCE,
     _clean_vector3,
     _iter_generated_scene_object_configs,
+    _mesh_config_has_distinct_xy_axis,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_world_xy_center,
     _mesh_config_world_z_bounds,
@@ -258,8 +259,11 @@ def _apply_stacking_task_response(
     steps = []
     for layer_index, source_uid in enumerate(ordered_source_uids):
         obj = rigid_by_uid[source_uid]
-        orientation_goal = "axis_align" if stack_mode == "on_top" else "preserve"
-        orientation_axis = "x" if stack_mode == "on_top" else "none"
+        orientation_goal, orientation_axis = _stacking_object_orientation(
+            obj,
+            stack_mode=stack_mode,
+            scene_dir=scene_dir,
+        )
         steps.append(
             _StackingStepSpec(
                 source_uid=source_uid,
@@ -363,6 +367,10 @@ def _with_stacking_generated_targets(
         high_position = list(target_position)
         high_position[2] = round(high_position[2] + _STAGING_Z_DELTA, 6)
         z_by_runtime_uid[step.runtime_uid] = target_position[2]
+        orientation_goal, orientation_axis = _stacking_config_orientation(
+            moved_config,
+            stack_mode=spec.stack_mode,
+        )
         steps.append(
             replace(
                 step,
@@ -371,6 +379,8 @@ def _with_stacking_generated_targets(
                 ),
                 target_position=target_position,
                 high_position=high_position,
+                orientation_goal=orientation_goal,
+                orientation_axis=orientation_axis,
             )
         )
     return replace(spec, anchor_xy=anchor_xy, steps=tuple(steps))
@@ -615,6 +625,28 @@ def _stacking_object_size_score(
     if xy_extents is None:
         return None
     return round(float(max(*xy_extents, bounds[1] - bounds[0])), 6)
+
+
+def _stacking_object_orientation(
+    obj: _SceneObject,
+    *,
+    stack_mode: str,
+    scene_dir: Path,
+) -> tuple[str, str]:
+    return _stacking_config_orientation(
+        _resolved_mesh_config(obj, scene_dir=scene_dir),
+        stack_mode=stack_mode,
+    )
+
+
+def _stacking_config_orientation(
+    obj_config: Mapping[str, Any],
+    *,
+    stack_mode: str,
+) -> tuple[str, str]:
+    if stack_mode == "on_top" and _mesh_config_has_distinct_xy_axis(obj_config):
+        return "axis_align", "x"
+    return "preserve", "none"
 
 
 def _mesh_config_world_xy_extents(

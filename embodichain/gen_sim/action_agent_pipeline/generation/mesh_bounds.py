@@ -33,6 +33,7 @@ __all__ = [
     "_clean_vector3",
     "_dual_ur5_init_z_from_table_top",
     "_iter_generated_scene_object_configs",
+    "_mesh_config_has_distinct_xy_axis",
     "_mesh_config_world_xy_bounds",
     "_mesh_config_world_xy_center",
     "_mesh_config_world_xy_extents",
@@ -129,6 +130,46 @@ def _mesh_config_world_xy_extents(
     return (
         float(maxs[0]) - float(mins[0]),
         float(maxs[1]) - float(mins[1]),
+    )
+
+
+def _mesh_config_has_distinct_xy_axis(
+    obj_config: Mapping[str, Any],
+    *,
+    min_aspect_ratio: float = 1.2,
+) -> bool:
+    extents = _mesh_config_scaled_xy_extents(obj_config)
+    if extents is None:
+        return False
+    x_extent, y_extent = (abs(float(extents[0])), abs(float(extents[1])))
+    long_extent = max(x_extent, y_extent)
+    short_extent = min(x_extent, y_extent)
+    if long_extent <= 1e-6:
+        return False
+    if short_extent <= 1e-6:
+        return True
+    return long_extent / short_extent >= min_aspect_ratio
+
+
+def _mesh_config_scaled_xy_extents(
+    obj_config: Mapping[str, Any],
+) -> tuple[float, float] | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+
+    scale = _vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    x_values = [float(vertex[0]) * scale[0] for vertex in vertices]
+    y_values = [float(vertex[1]) * scale[1] for vertex in vertices]
+    return (
+        max(x_values) - min(x_values),
+        max(y_values) - min(y_values),
     )
 
 

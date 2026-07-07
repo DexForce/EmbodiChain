@@ -77,12 +77,6 @@ _COORDINATED_DUAL_ARM_KEYWORDS = (
     "both arms",
     "two arms",
 )
-_CUBE_LIKE_KEYWORDS = (
-    "cube",
-    "block",
-    "方块",
-    "积木",
-)
 _BOTTLE_LIKE_KEYWORDS = (
     "bottle",
     "can",
@@ -120,7 +114,6 @@ _UPRIGHT_TASK_KEYWORDS = (
     "竖直",
     "立起来",
 )
-_CUBE_DEFAULT_AXIS = "x"
 _DEFAULT_HOVER_HEIGHT = 0.10
 
 _SELF_REFERENCE_VALUES = {
@@ -759,16 +752,6 @@ def _build_relative_placement_step(
         raise ValueError(
             f"Relative placement produced duplicate runtime uid {moved_runtime_uid!r}."
         )
-    if _should_axis_align_cube_by_default(
-        intent=intent,
-        moved_object=by_uid[moved_source_uid],
-        orientation_goal=orientation_goal,
-        orientation_reference=orientation_reference,
-        orientation_axis=orientation_axis,
-    ):
-        orientation_goal = "axis_align"
-        orientation_reference = "world_axes"
-        orientation_axis = _CUBE_DEFAULT_AXIS
     if intent == "hold_hover" and (
         orientation_goal != "preserve"
         or orientation_reference != "none"
@@ -855,31 +838,6 @@ def _validate_relative_placements(
             raise ValueError(
                 "Dual-arm object manipulation requires one left arm and one right arm."
             )
-
-
-def _should_axis_align_cube_by_default(
-    *,
-    intent: str,
-    moved_object: _SceneObject,
-    orientation_goal: str,
-    orientation_reference: str,
-    orientation_axis: str,
-) -> bool:
-    return (
-        intent == "place_relative"
-        and orientation_goal == "preserve"
-        and orientation_reference == "none"
-        and orientation_axis == "none"
-        and _is_cube_like_object(moved_object)
-    )
-
-
-def _is_cube_like_object(obj: _SceneObject) -> bool:
-    shape = obj.config.get("shape", {}) or {}
-    mesh_path = str(shape.get("fpath", "")) if isinstance(shape, Mapping) else ""
-    mesh_parts = Path(mesh_path.replace("\\", "/")).parts[-3:] if mesh_path else ()
-    text = " ".join([obj.source_uid, _base_name(obj), *mesh_parts]).lower()
-    return any(keyword in text for keyword in _CUBE_LIKE_KEYWORDS)
 
 
 def _is_uprightable_object(obj: _SceneObject) -> bool:

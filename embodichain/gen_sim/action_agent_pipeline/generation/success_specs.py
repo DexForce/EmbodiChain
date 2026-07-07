@@ -172,7 +172,7 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
     terms: list[dict[str, Any]] = []
     xy_tolerance = min(0.03, float(spec.spacing) * 0.35)
     ordered_objects = [step.runtime_uid for step in spec.steps]
-    arrangement_axis = spec.steps[0].orientation_axis if spec.steps else "y"
+    arrangement_axis = _arrangement_success_axis(spec)
     terms.extend(
         [
             {
@@ -207,6 +207,18 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
             ]
         )
     return {"op": "all", "terms": terms}
+
+
+def _arrangement_success_axis(spec: _ArrangementLineSpec) -> str:
+    if len(spec.steps) >= 2:
+        x_values = [float(step.target_xy[0]) for step in spec.steps]
+        y_values = [float(step.target_xy[1]) for step in spec.steps]
+        x_span = max(x_values) - min(x_values)
+        y_span = max(y_values) - min(y_values)
+        return "x" if x_span >= y_span else "y"
+    if spec.axis == "world_x":
+        return "x"
+    return "y"
 
 
 def _make_relative_success_spec(
