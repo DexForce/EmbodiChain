@@ -486,17 +486,13 @@ class SimulationManager:
                     f"not 'rt' (OfflineRT). DLSS only works with the OfflineRT renderer. "
                     f"DLSS settings will be ignored."
                 )
-            # elif sim_config.headless:
-            #     logger.log_warning(
-            #         "DLSS is enabled but the simulation is running in headless mode. "
-            #         "DLSS is window-only. DLSS settings will be ignored."
-            #     )
             else:
                 world_config.dlss_config = dlss_cfg.to_dexsim_cfg(
                     window_width=sim_config.width,
                     window_height=sim_config.height,
                 )
                 dlss = world_config.dlss_config
+                world_config.raytrace_config.window_taa_enabled = False
 
                 # Align the window size with the effective target resolution.
                 # Rule: win_config.width/height == target_width/target_height.
