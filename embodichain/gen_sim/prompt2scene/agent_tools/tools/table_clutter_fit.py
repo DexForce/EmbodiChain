@@ -330,6 +330,14 @@ def fit_table_to_clutter(
             - support_center[:2]
         ).tolist(),
     }
+    support_hull_xy = np.asarray(
+        final_support.get("support_hull_xy", []),
+        dtype=np.float64,
+    )
+    if support_hull_xy.ndim == 2 and support_hull_xy.shape[1] == 2:
+        final_support_centered["support_hull_xy"] = (
+            support_hull_xy - support_center[:2]
+        ).tolist()
     manifest = {
         "status": "ok",
         "output_dir": str(output_dir),

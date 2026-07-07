@@ -41,6 +41,8 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.spatial_relations import
 )
 from embodichain.gen_sim.prompt2scene.utils.log import log_info
 
+SCENE_EDIT_OBJECT_CLEARANCE_M = 0.05
+
 __all__ = [
     "build_scene_edit_layout",
     "extract_current_grids",
@@ -1518,7 +1520,7 @@ def _offset_center_by_relation(
     reference_size: np.ndarray,
     object_size: np.ndarray,
     relation: str,
-    padding: float = 0.02,
+    padding: float = SCENE_EDIT_OBJECT_CLEARANCE_M,
 ) -> np.ndarray:
     gap_x = 0.5 * (reference_size[0] + object_size[0]) + padding
     gap_y = 0.5 * (reference_size[1] + object_size[1]) + padding

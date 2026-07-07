@@ -165,25 +165,41 @@ def _sim_world_xy_aabb(
 
 def _support_region_2d(table_fit_manifest: dict[str, Any]) -> dict[str, Any]:
     support = table_fit_manifest.get("final_support_quad_centered") or {}
+    support_hull = np.asarray(support.get("support_hull_xy", []), dtype=np.float64)
     corners = np.asarray(support.get("corners_xy", []), dtype=np.float64)
-    if corners.shape != (4, 2):
+    if support_hull.ndim == 2 and support_hull.shape[0] >= 3 and support_hull.shape[1] == 2:
+        points = support_hull
+        source = "support_hull_aabb"
+    elif corners.shape == (4, 2):
+        points = corners
+        source = "support_quad_aabb"
+    else:
         return {"unit": "m", "center_xy": [], "aabb_xy": [], "size_xy": [], "corners_xy": []}
-    min_xy = corners.min(axis=0)
-    max_xy = corners.max(axis=0)
-    center_xy = np.asarray(
-        support.get("center_xy") or (0.5 * (min_xy + max_xy)).tolist(),
-        dtype=np.float64,
-    )
-    size_xy = np.asarray(
-        support.get("size_xy") or (max_xy - min_xy).tolist(),
+    min_xy = points.min(axis=0)
+    max_xy = points.max(axis=0)
+    center_xy = 0.5 * (min_xy + max_xy)
+    size_xy = max_xy - min_xy
+    aabb_corners = np.asarray(
+        [
+            [min_xy[0], min_xy[1]],
+            [max_xy[0], min_xy[1]],
+            [max_xy[0], max_xy[1]],
+            [min_xy[0], max_xy[1]],
+        ],
         dtype=np.float64,
     )
     return {
         "unit": "m",
+        "source": source,
         "center_xy": center_xy.tolist(),
         "aabb_xy": [min_xy.tolist(), max_xy.tolist()],
         "size_xy": size_xy.tolist(),
-        "corners_xy": corners.tolist(),
+        "corners_xy": aabb_corners.tolist(),
+        "support_hull_xy": (
+            support_hull.tolist()
+            if support_hull.ndim == 2 and support_hull.shape[1] == 2
+            else []
+        ),
     }
 
 
