@@ -54,6 +54,66 @@ DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
 
 
 @configclass
+class DLSSCfg:
+    """DLSS 3.5 configuration for the simulation window.
+
+    NVIDIA DLSS 3.5 provides two AI-powered features for the OfflineRT renderer:
+
+    - **Ray Reconstruction (RR)**: Replaces the OptiX denoiser. It takes the noisy
+      1-spp path-traced HDR image plus G-buffer guides (albedo, normals, roughness,
+      depth, motion vectors) and reconstructs a clean image at render resolution.
+    - **Super Resolution (SR)**: Upscales the RR output from render resolution to
+      target/display resolution.
+
+    .. attention::
+        DLSS is only available with the ``"rt"`` (OfflineRT) renderer in windowed
+        mode. Offscreen cameras always use the OptiX denoiser regardless of DLSS
+        settings. The window resolution (``SimulationManagerCfg.width/height``)
+        should match ``target_width/target_height`` when upscaling is enabled.
+
+    Reference: ``developer_docs/dlss/README_DLSS.md`` in the dexsim repository.
+    """
+
+    dlss_enabled: bool = False
+    """Master DLSS enable toggle. Off → standard OptiX denoiser / TAA path."""
+
+    rayreconstruction_enabled: bool = True
+    """Enable DLSS Ray Reconstruction (AI denoiser). Replaces the OptiX denoiser
+    for the window camera only."""
+
+    upscale_enabled: bool = False
+    """Enable DLSS Super Resolution (AI upscaler). When enabled, the path tracer
+    renders at ``render_width/height`` and DLSS-SR upscales to
+    ``target_width/height``."""
+
+    dlss_quality: int = 2
+    """DLSS quality preset. ``-1`` = auto (ratio-based), ``0`` = UltraPerformance
+    (~3.0×), ``1`` = Performance (~2.25×), ``2`` = Balanced (~1.75×, default),
+    ``3`` = Quality (~1.5×), ``4`` = UltraQuality (~1.3×), ``5`` = DLAA (1.0×,
+    no upscale — render must equal target)."""
+
+    render_width: int = 0
+    """Internal render resolution width. ``0`` = use window width.
+    The path tracer and DLSS-RR operate at this resolution."""
+
+    render_height: int = 0
+    """Internal render resolution height. ``0`` = use window height."""
+
+    target_width: int = 0
+    """Target/display resolution width. ``0`` = use window width.
+    DLSS-SR upscales to this resolution. Should match the window size."""
+
+    target_height: int = 0
+    """Target/display resolution height. ``0`` = use window height."""
+
+    exposure_compensation: float = 1.0
+    """Multiplier on the DLSS-RR pre-exposure scalar. ``>1`` (e.g. ``2.0``)
+    brightens the HDR fed to RR, speeding ghost rejection in dark areas;
+    ``<1`` darkens. ``1.0`` = neutral. Typical range 0.5–8.0; tune per scene.
+    No rebuild needed."""
+
+
+@configclass
 class RenderCfg:
     renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
     """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
@@ -70,6 +130,11 @@ class RenderCfg:
 
     spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
+
+    dlss: DLSSCfg | None = None
+    """DLSS 3.5 configuration for AI-powered denoising and upscaling.
+    Only effective when ``renderer="rt"`` (OfflineRT) and windowed mode.
+    Set to ``None`` to disable DLSS entirely."""
 
     def to_dexsim_flags(self):
         if self.renderer == "hybrid":
