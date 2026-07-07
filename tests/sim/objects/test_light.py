@@ -184,11 +184,22 @@ class TestLightTypes:
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize(
-        "light_type",
-        ["point", "sun", "direction", "spot", "rect", "mesh"],
+        "light_type, expected_num_instances",
+        [
+            ("point", 4),
+            ("sun", 1),
+            ("direction", 1),
+            ("spot", 4),
+            ("rect", 4),
+            ("mesh", 4),
+        ],
     )
-    def test_create_each_light_type(self, light_type):
-        """Each of the 6 light types can be created without error."""
+    def test_create_each_light_type(self, light_type, expected_num_instances):
+        """Each of the 6 light types can be created without error.
+
+        ``sun`` and ``direction`` are global scene lights with a single instance.
+        All other types are per-environment batched lights.
+        """
         cfg = LightCfg(
             uid=f"test_{light_type}",
             light_type=light_type,
@@ -196,7 +207,9 @@ class TestLightTypes:
         )
         light = self.sim.add_light(cfg=cfg)
         assert light is not None, f"Failed to create light of type '{light_type}'"
-        assert light.num_instances == 4
+        assert light.num_instances == expected_num_instances
+        if light_type in ("sun", "direction"):
+            assert light.is_global, f"{light_type} should be a global light"
 
     def test_unknown_light_type_errors(self):
         """Passing an invalid light_type raises RuntimeError."""
@@ -267,6 +280,20 @@ class TestLightTypes:
                 f"set_local_pose on direction light should warn, not crash: {e}"
             )
 
+    def test_set_local_pose_on_sun_warns(self):
+        """Calling set_local_pose on a sun light warns and no-ops."""
+        cfg = LightCfg(
+            uid="sun_light",
+            light_type="sun",
+            direction=(0.0, -1.0, 0.0),
+        )
+        light = self.sim.add_light(cfg=cfg)
+        pose = torch.tensor([1.0, 2.0, 3.0])
+        try:
+            light.set_local_pose(pose)
+        except Exception as e:
+            pytest.fail(f"set_local_pose on sun light should warn, not crash: {e}")
+
     # ------------------------------------------------------------------
     # Type-specific property tests
     # ------------------------------------------------------------------
@@ -298,15 +325,34 @@ class TestLightTypes:
         light = self.sim.add_light(cfg=cfg)
         assert light is not None
 
-    def test_direction_light_no_position_in_reset(self):
-        """Direction light reset does not set position."""
+    @pytest.mark.parametrize("light_type", ["sun", "direction"])
+    def test_global_light_no_position_in_reset(self, light_type):
+        """Global light (sun/direction) reset does not set position."""
         cfg = LightCfg(
-            uid="dir_test",
-            light_type="direction",
+            uid=f"{light_type}_test",
+            light_type=light_type,
             direction=(0.0, -1.0, 0.0),
         )
         light = self.sim.add_light(cfg=cfg)
         assert light is not None
+        assert light.is_global
+        assert light.num_instances == 1
+
+    @pytest.mark.parametrize("light_type", ["sun", "direction"])
+    def test_reset_global_light_with_env_ids(self, light_type):
+        """reset_objects_state with env_ids does not crash for global lights."""
+        cfg = LightCfg(
+            uid=f"global_{light_type}",
+            light_type=light_type,
+            direction=(0.0, -1.0, 0.0),
+        )
+        self.sim.add_light(cfg=cfg)
+        try:
+            self.sim.reset_objects_state(env_ids=[1, 2])
+        except Exception as e:
+            pytest.fail(
+                f"reset_objects_state with global light ({light_type}) failed: {e}"
+            )
 
     # ------------------------------------------------------------------
     # Broadcasting tests

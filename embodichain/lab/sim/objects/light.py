@@ -354,6 +354,19 @@ class Light(BatchEntity):
             f"enable_shadow: tensor shape {tuple(cpu.shape)} is invalid for broadcasting"
         )
 
+    @property
+    def is_global(self) -> bool:
+        """Whether this light is a global scene light (single instance).
+
+        Global lights (``"sun"``, ``"direction"``) are infinite-distance
+        light sources that illuminate the entire scene. They are never
+        batched per environment.
+
+        Returns:
+            bool: True if the light is a global scene light.
+        """
+        return self.cfg.light_type in ("sun", "direction")
+
     def set_local_pose(
         self,
         pose: torch.Tensor,
@@ -371,10 +384,10 @@ class Light(BatchEntity):
                 - For matrix input (4,4) broadcast to all, or (M,4,4) with M == num_instances.
             to_matrix (bool): Interpret `pose` as full 4x4 matrix if True, else as vector(s).
         """
-        if self.cfg.light_type == "direction":
+        if self.is_global:
             logger.log_warning(
-                "set_local_pose not applicable to 'direction' light type "
-                "(infinite distance, direction only). Use set_direction() instead."
+                f"set_local_pose not applicable to '{self.cfg.light_type}' light type "
+                f"(infinite distance, direction only). Use set_direction() instead."
             )
             return
 
@@ -570,12 +583,21 @@ class Light(BatchEntity):
 
         Applies only the properties relevant to ``self.cfg.light_type``.
 
+        .. attention::
+            For global lights (:attr:`is_global` is True), ``env_ids`` is
+            normalized to ``None`` because there is only one instance.
+            Passing per-environment indices is silently ignored.
+
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset.
                 If None, resets all environments.
         """
         self.cfg: LightCfg
         light_type = self.cfg.light_type
+
+        # Global lights have a single instance — ignore per-env indices.
+        if self.num_instances == 1:
+            env_ids = None
 
         # Universal properties
         self.set_color(torch.as_tensor(self.cfg.color), env_ids=env_ids)
@@ -584,8 +606,8 @@ class Light(BatchEntity):
             torch.as_tensor(float(self.cfg.enable_shadow)), env_ids=env_ids
         )
 
-        # Position (all types except direction)
-        if light_type != "direction":
+        # Position (all types except global infinite-distance lights)
+        if not self.is_global:
             self.set_local_pose(torch.as_tensor(self.cfg.init_pos), env_ids=env_ids)
 
         # Point light: falloff
