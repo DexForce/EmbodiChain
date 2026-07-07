@@ -492,23 +492,24 @@ class SimulationManager:
             #         "DLSS is window-only. DLSS settings will be ignored."
             #     )
             else:
+                world_config.dlss_config = dlss_cfg.to_dexsim_cfg(
+                    window_width=sim_config.width,
+                    window_height=sim_config.height,
+                )
                 dlss = world_config.dlss_config
-                dlss.dlss_enabled = True
-                dlss.rayreconstruction_enabled = True
-                dlss.upscale_enabled = True
-                dlss.dlss_quality = dlss_cfg.dlss_quality
-                dlss.render_width = dlss_cfg.render_width
-                dlss.render_height = dlss_cfg.render_height
-                dlss.target_width = dlss_cfg.target_width
-                dlss.target_height = dlss_cfg.target_height
-                dlss.exposure_compensation = dlss_cfg.exposure_compensation
 
-                # When target dimensions are specified, align the window size with
-                # the target resolution.
-                # Rule: win_config.width/height == target_width/height.
-                if dlss_cfg.target_width > 0 and dlss_cfg.target_height > 0:
-                    win_config.width = dlss_cfg.target_width
-                    win_config.height = dlss_cfg.target_height
+                # Align the window size with the effective target resolution.
+                # Rule: win_config.width/height == target_width/target_height.
+                win_config.width = dlss.target_width
+                win_config.height = dlss.target_height
+
+                logger.log_info(
+                    f"DLSS enabled with renderer='{sim_config.render_cfg.renderer}': "
+                    f"render={dlss.render_width}x{dlss.render_height}, "
+                    f"target={dlss.target_width}x{dlss.target_height}, "
+                    f"upsample_ratio={dlss_cfg.upsample_ratio}, "
+                    f"quality={dlss.dlss_quality}."
+                )
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
