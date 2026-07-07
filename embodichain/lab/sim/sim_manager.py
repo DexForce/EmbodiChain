@@ -306,6 +306,7 @@ class SimulationManager:
 
         self._create_default_plane()
         self.set_default_background()
+        self.set_default_global_lighting()
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
@@ -701,6 +702,27 @@ class SimulationManager:
 
         # TODO: add default physics attributes for the plane.
 
+    def set_default_global_lighting(self) -> None:
+        """Set default global lighting for the scene.
+
+        Configures both the environment emission (ambient) light and a
+        directional light to provide default scene illumination. The
+        directional light is a global scene light (infinite distance)
+        pointing downward along the -Z axis.
+        """
+        # Environment emission light
+        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
+
+        # Directional light as global scene light
+        dir_light_cfg = LightCfg(
+            uid="global_light",
+            light_type="direction",
+            intensity=8.0,
+            direction=(0.0, 0, -1.0),
+            color=(1.0, 0.95, 0.85),
+        )
+        self.add_light(dir_light_cfg)
+
     def set_default_background(self) -> None:
         """Set default background."""
 
@@ -714,11 +736,9 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
-                roughness=0.7,
+                roughness=0.9,
             )
         )
-
-        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
 
         self._default_plane.set_material(mat.get_instance("plane_mat").mat)
         self._visual_materials[mat_name] = mat
@@ -842,7 +862,6 @@ class SimulationManager:
 
         if uid in self._lights:
             logger.log_error(f"Light {uid} already exists.")
-            return None
 
         light_type_str = cfg.light_type
         light_type = self._LIGHT_TYPE_MAP.get(light_type_str)
