@@ -323,7 +323,7 @@ class PickUp(AtomicAction):
                 device=self.device, dtype=torch.float32
             )
         obj_pose = semantics.entity.get_local_pose(to_matrix=True)
-        obj_upright = (upright_direction * obj_pose[:, :3, :3]).sum(axis=1)
+        obj_upright = torch.matmul(obj_pose[:, :3, :3], upright_direction)
         grasp_ry = grasp_xpos[:, :3, 1]
         dot_result = (grasp_ry * obj_upright).sum(axis=1)
         revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
