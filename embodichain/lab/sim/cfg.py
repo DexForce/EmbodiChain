@@ -65,26 +65,22 @@ class DLSSCfg:
     - **Super Resolution (SR)**: Upscales the RR output from render resolution to
       target/display resolution.
 
+    When :attr:`dlss_enabled` is ``True``, both Ray Reconstruction and Super
+    Resolution are enabled together. The upscaling ratio is controlled through
+    :attr:`dlss_quality` (for example, ``5`` = DLAA / 1.0×, ``3`` = Quality).
+
     .. attention::
         DLSS is only available with the ``"rt"`` (OfflineRT) renderer in windowed
         mode. Offscreen cameras always use the OptiX denoiser regardless of DLSS
         settings. The window resolution (``SimulationManagerCfg.width/height``)
-        should match ``target_width/target_height`` when upscaling is enabled.
+        should match ``target_width/target_height`` when the target resolution is
+        explicitly set.
 
     Reference: ``developer_docs/dlss/README_DLSS.md`` in the dexsim repository.
     """
 
-    dlss_enabled: bool = False
+    dlss_enabled: bool = True
     """Master DLSS enable toggle. Off → standard OptiX denoiser / TAA path."""
-
-    rayreconstruction_enabled: bool = True
-    """Enable DLSS Ray Reconstruction (AI denoiser). Replaces the OptiX denoiser
-    for the window camera only."""
-
-    upscale_enabled: bool = False
-    """Enable DLSS Super Resolution (AI upscaler). When enabled, the path tracer
-    renders at ``render_width/height`` and DLSS-SR upscales to
-    ``target_width/height``."""
 
     dlss_quality: int = 5
     """DLSS quality preset. ``-1`` = auto (ratio-based), ``0`` = UltraPerformance
@@ -99,11 +95,11 @@ class DLSSCfg:
     render_height: int = 0
     """Internal render resolution height. ``0`` = use window height."""
 
-    target_width: int = 0
+    target_width: int = 1920
     """Target/display resolution width. ``0`` = use window width.
     DLSS-SR upscales to this resolution. Should match the window size."""
 
-    target_height: int = 0
+    target_height: int = 1080
     """Target/display resolution height. ``0`` = use window height."""
 
     exposure_compensation: float = 1.0
@@ -133,8 +129,7 @@ class RenderCfg:
 
     dlss: DLSSCfg = field(default_factory=DLSSCfg)
     """DLSS 3.5 configuration for AI-powered denoising and upscaling.
-    Only effective when ``renderer="rt"`` (OfflineRT), windowed mode, and
-    ``dlss_enabled=True``. Defaults to disabled."""
+    Only effective when ``renderer="rt"`` (OfflineRT) and in windowed mode."""
 
     def to_dexsim_flags(self):
         if self.renderer == "hybrid":
