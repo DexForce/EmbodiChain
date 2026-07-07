@@ -637,9 +637,6 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             ),
             prompt2scene_text=None,
             prompt2scene_prompt="move the bread left",
-            prompt2scene_existing_gym_project=str(
-                repo_root / "gym_project/prompt2scene/demo/gym_export"
-            ),
             prompt2scene_gravity_settle_mode="physics",
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
@@ -682,9 +679,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     )
     assert "prompt2scene_text" not in record
     assert record["prompt2scene_prompt"] == "move the bread left"
-    assert record["prompt2scene_existing_gym_project"] == (
-        "gym_project/prompt2scene/demo/gym_export"
-    )
+    assert "prompt2scene_existing_gym_project" not in record
     assert record["prompt2scene_gravity_settle_mode"] == "physics"
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
@@ -696,8 +691,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     "path_kind",
     ["output_root", "gym_export", "gym_config"],
 )
-def test_existing_prompt2scene_project_prompt_routes_through_prompt2scene(
-    monkeypatch,
+def test_existing_gym_project_rejects_prompt2scene_prompt(
     tmp_path,
     path_kind,
 ) -> None:
@@ -715,39 +709,19 @@ def test_existing_prompt2scene_project_prompt_routes_through_prompt2scene(
         "gym_export": gym_export,
         "gym_config": gym_config,
     }[path_kind]
-    captured = {}
 
-    def fake_run_prompt2scene_stage(args):
-        captured["prompt2scene_output_root"] = args.prompt2scene_output_root
-        captured["prompt2scene_prompt"] = args.prompt2scene_prompt
-        captured["prompt2scene_existing_gym_project"] = (
-            args.prompt2scene_existing_gym_project
+    with pytest.raises(ValueError, match="--use-prompt2scene"):
+        project_resolution.resolve_gym_project(
+            SimpleNamespace(
+                use_image2scene=False,
+                use_prompt2scene=False,
+                use_existing_gym_project=True,
+                base_task_name=None,
+                base_history_index=None,
+                gym_project=str(input_path),
+                prompt2scene_prompt="move the can right",
+            )
         )
-        return gym_config
-
-    monkeypatch.setattr(
-        project_resolution,
-        "run_prompt2scene_stage",
-        fake_run_prompt2scene_stage,
-    )
-
-    resolution = project_resolution.resolve_gym_project(
-        SimpleNamespace(
-            use_image2scene=False,
-            use_prompt2scene=False,
-            use_existing_gym_project=True,
-            base_task_name=None,
-            base_history_index=None,
-            gym_project=str(input_path),
-            prompt2scene_prompt="move the can right",
-        )
-    )
-
-    assert resolution.mode == "prompt2scene"
-    assert resolution.path == gym_config
-    assert Path(captured["prompt2scene_output_root"]) == output_root.resolve()
-    assert captured["prompt2scene_prompt"] == "move the can right"
-    assert Path(captured["prompt2scene_existing_gym_project"]) == input_path.resolve()
 
 
 @pytest.mark.parametrize(

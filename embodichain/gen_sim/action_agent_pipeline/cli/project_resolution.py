@@ -92,13 +92,14 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
         project_path = Path(args.gym_project).expanduser().resolve()
         if not project_path.exists():
             raise FileNotFoundError(f"gym project not found: {project_path}")
-        if _has_prompt2scene_prompt(args):
-            output_root = _infer_prompt2scene_output_root(project_path)
-            setattr(args, "prompt2scene_output_root", str(output_root))
-            setattr(args, "prompt2scene_existing_gym_project", str(project_path))
-            return ProjectResolution(
-                path=run_prompt2scene_stage(args),
-                mode="prompt2scene",
+        prompt2scene_prompt = str(
+            getattr(args, "prompt2scene_prompt", "") or ""
+        ).strip()
+        if prompt2scene_prompt:
+            raise ValueError(
+                "--prompt2scene-prompt cannot be used with "
+                "--use-existing-gym-project. Use --use-prompt2scene with "
+                "--prompt2scene-output-root for prompt2scene edit/randomization."
             )
         print(f"Using existing gym project: {project_path}", flush=True)
         return ProjectResolution(path=project_path, mode="existing_gym_project")
@@ -195,34 +196,6 @@ def _resolve_base_history_entry(args: argparse.Namespace) -> dict[str, Any]:
             f"{args.base_task_name!r} in {history_path}"
         )
     return dict(max(candidates, key=history_entry_index))
-
-
-def _has_prompt2scene_prompt(args: argparse.Namespace) -> bool:
-    return bool(str(getattr(args, "prompt2scene_prompt", "") or "").strip())
-
-
-def _infer_prompt2scene_output_root(path: Path) -> Path:
-    path = path.expanduser().resolve()
-    if path.is_file():
-        if path.name != "gym_config.json" or path.parent.name != "gym_export":
-            raise ValueError(
-                "--gym-project with --prompt2scene-prompt must point to a "
-                "prompt2scene output_root, gym_export directory, or "
-                "gym_export/gym_config.json."
-            )
-        output_root = path.parent.parent
-    elif path.name == "gym_export":
-        output_root = path.parent
-    else:
-        output_root = path
-
-    scene_state = output_root / "gym_export" / "scene_state" / "result.json"
-    if not scene_state.is_file():
-        raise FileNotFoundError(
-            "--gym-project with --prompt2scene-prompt requires prompt2scene "
-            f"scene state: {scene_state}"
-        )
-    return output_root
 
 
 def _resolve_single_image(

@@ -328,12 +328,6 @@ def _source_request_record(
         prompt2scene_prompt = getattr(args, "prompt2scene_prompt", None)
         if prompt2scene_prompt:
             record["prompt2scene_prompt"] = prompt2scene_prompt
-        existing_gym_project = getattr(args, "prompt2scene_existing_gym_project", None)
-        if existing_gym_project:
-            record["prompt2scene_existing_gym_project"] = _record_path(
-                Path(existing_gym_project).expanduser(),
-                repo_root,
-            )
         record["prompt2scene_gravity_settle_mode"] = getattr(
             args,
             "prompt2scene_gravity_settle_mode",

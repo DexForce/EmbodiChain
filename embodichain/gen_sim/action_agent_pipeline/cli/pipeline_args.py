@@ -253,7 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Skip Image2Tabletop API and start from --gym-project. Defaults to "
-            "false."
+            "false. For prompt2scene edits, use --use-prompt2scene with "
+            "--prompt2scene-output-root instead."
         ),
     )
     parser.add_argument(
