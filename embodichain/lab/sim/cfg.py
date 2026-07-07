@@ -86,7 +86,7 @@ class DLSSCfg:
     renders at ``render_width/height`` and DLSS-SR upscales to
     ``target_width/height``."""
 
-    dlss_quality: int = 2
+    dlss_quality: int = 5
     """DLSS quality preset. ``-1`` = auto (ratio-based), ``0`` = UltraPerformance
     (~3.0×), ``1`` = Performance (~2.25×), ``2`` = Balanced (~1.75×, default),
     ``3`` = Quality (~1.5×), ``4`` = UltraQuality (~1.3×), ``5`` = DLAA (1.0×,
@@ -131,10 +131,10 @@ class RenderCfg:
     spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
-    dlss: DLSSCfg | None = None
+    dlss: DLSSCfg = field(default_factory=DLSSCfg)
     """DLSS 3.5 configuration for AI-powered denoising and upscaling.
-    Only effective when ``renderer="rt"`` (OfflineRT) and windowed mode.
-    Set to ``None`` to disable DLSS entirely."""
+    Only effective when ``renderer="rt"`` (OfflineRT), windowed mode, and
+    ``dlss_enabled=True``. Defaults to disabled."""
 
     def to_dexsim_flags(self):
         if self.renderer == "hybrid":

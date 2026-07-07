@@ -478,42 +478,41 @@ class SimulationManager:
 
         # Configure DLSS 3.5 (Ray Reconstruction + Super Resolution).
         # Only effective with OfflineRT renderer in windowed mode.
-        if sim_config.render_cfg.dlss is not None:
-            dlss_cfg = sim_config.render_cfg.dlss
-            if dlss_cfg.dlss_enabled:
-                if sim_config.render_cfg.renderer != "rt":
-                    logger.log_warning(
-                        f"DLSS is enabled but renderer is '{sim_config.render_cfg.renderer}', "
-                        f"not 'rt' (OfflineRT). DLSS only works with the OfflineRT renderer. "
-                        f"DLSS settings will be ignored."
-                    )
-                elif sim_config.headless:
-                    logger.log_warning(
-                        "DLSS is enabled but the simulation is running in headless mode. "
-                        "DLSS is window-only. DLSS settings will be ignored."
-                    )
-                else:
-                    dlss = world_config.dlss_config
-                    dlss.dlss_enabled = True
-                    dlss.rayreconstruction_enabled = dlss_cfg.rayreconstruction_enabled
-                    dlss.upscale_enabled = dlss_cfg.upscale_enabled
-                    dlss.dlss_quality = dlss_cfg.dlss_quality
-                    dlss.render_width = dlss_cfg.render_width
-                    dlss.render_height = dlss_cfg.render_height
-                    dlss.target_width = dlss_cfg.target_width
-                    dlss.target_height = dlss_cfg.target_height
-                    dlss.exposure_compensation = dlss_cfg.exposure_compensation
+        dlss_cfg = sim_config.render_cfg.dlss
+        if dlss_cfg.dlss_enabled:
+            if sim_config.render_cfg.renderer != "rt":
+                logger.log_warning(
+                    f"DLSS is enabled but renderer is '{sim_config.render_cfg.renderer}', "
+                    f"not 'rt' (OfflineRT). DLSS only works with the OfflineRT renderer. "
+                    f"DLSS settings will be ignored."
+                )
+            elif sim_config.headless:
+                logger.log_warning(
+                    "DLSS is enabled but the simulation is running in headless mode. "
+                    "DLSS is window-only. DLSS settings will be ignored."
+                )
+            else:
+                dlss = world_config.dlss_config
+                dlss.dlss_enabled = True
+                dlss.rayreconstruction_enabled = dlss_cfg.rayreconstruction_enabled
+                dlss.upscale_enabled = dlss_cfg.upscale_enabled
+                dlss.dlss_quality = dlss_cfg.dlss_quality
+                dlss.render_width = dlss_cfg.render_width
+                dlss.render_height = dlss_cfg.render_height
+                dlss.target_width = dlss_cfg.target_width
+                dlss.target_height = dlss_cfg.target_height
+                dlss.exposure_compensation = dlss_cfg.exposure_compensation
 
-                    # When DLSS upscaling is enabled and target dimensions are
-                    # specified, align the window size with the target resolution.
-                    # Rule: win_config.width/height == target_width/height.
-                    if (
-                        dlss_cfg.upscale_enabled
-                        and dlss_cfg.target_width > 0
-                        and dlss_cfg.target_height > 0
-                    ):
-                        win_config.width = dlss_cfg.target_width
-                        win_config.height = dlss_cfg.target_height
+                # When DLSS upscaling is enabled and target dimensions are
+                # specified, align the window size with the target resolution.
+                # Rule: win_config.width/height == target_width/height.
+                if (
+                    dlss_cfg.upscale_enabled
+                    and dlss_cfg.target_width > 0
+                    and dlss_cfg.target_height > 0
+                ):
+                    win_config.width = dlss_cfg.target_width
+                    win_config.height = dlss_cfg.target_height
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
