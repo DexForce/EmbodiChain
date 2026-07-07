@@ -56,15 +56,19 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
     make_agent_config,
     make_arrangement_atom_actions_prompt,
     make_arrangement_basic_background,
+    make_arrangement_task_graph,
     make_arrangement_task_prompt,
     make_basket_atom_actions_prompt,
     make_basket_basic_background,
+    make_basket_task_graph,
     make_basket_task_prompt,
     make_relative_atom_actions_prompt,
     make_relative_basic_background,
+    make_relative_task_graph,
     make_relative_task_prompt,
     make_stacking_atom_actions_prompt,
     make_stacking_basic_background,
+    make_stacking_task_graph,
     make_stacking_task_prompt,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
@@ -635,6 +639,7 @@ def _build_ur5_basket_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_basket_task_prompt(task_name, project_name, roles),
+        "task_graph": make_basket_task_graph(task_name, roles),
         "basic_background": make_basket_basic_background(
             project_name,
             roles,
@@ -802,6 +807,7 @@ def _build_arrangement_line_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_arrangement_task_prompt(task_name, project_name, spec),
+        "task_graph": make_arrangement_task_graph(task_name, spec),
         "basic_background": make_arrangement_basic_background(
             project_name,
             spec,
@@ -991,6 +997,7 @@ def _build_stacking_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_stacking_task_prompt(task_name, project_name, spec),
+        "task_graph": make_stacking_task_graph(task_name, spec),
         "basic_background": make_stacking_basic_background(
             project_name,
             spec,
@@ -1590,6 +1597,12 @@ def _build_relative_placement_bundle(
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
+    if spec.intent in {"place_relative", "coordinated_pickment"}:
+        spec = _with_coordinated_side_release_height_offsets(
+            spec,
+            gym_config,
+            table_reference_mode="skip",
+        )
     _maybe_apply_tabletop_z_placement(
         gym_config,
         table_top_z,
@@ -1597,13 +1610,17 @@ def _build_relative_placement_bundle(
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     if spec.intent in {"place_relative", "coordinated_pickment"}:
+        spec = _with_coordinated_side_release_height_offsets(
+            spec,
+            gym_config,
+            table_reference_mode="only",
+        )
         spec = _with_self_relative_absolute_targets(spec, gym_config)
         spec = _with_inside_container_slot_offsets(
             spec,
             gym_config,
             slot_distance_scale=inside_container_slot_distance_scale,
         )
-        spec = _with_coordinated_side_release_height_offsets(spec, gym_config)
         spec = _with_on_surface_release_offsets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
@@ -1618,6 +1635,7 @@ def _build_relative_placement_bundle(
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
         "task_prompt": make_relative_task_prompt(task_name, project_name, spec),
+        "task_graph": make_relative_task_graph(task_name, spec),
         "basic_background": make_relative_basic_background(
             project_name,
             spec,

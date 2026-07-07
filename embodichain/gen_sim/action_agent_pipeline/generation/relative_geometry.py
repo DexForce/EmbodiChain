@@ -242,14 +242,40 @@ def _with_inside_container_slot_offsets(
 def _with_coordinated_side_release_height_offsets(
     spec: _RelativePlacementSpec,
     gym_config: Mapping[str, Any],
+    *,
+    table_reference_mode: str = "include",
 ) -> _RelativePlacementSpec:
     if spec.intent not in {"place_relative", "coordinated_pickment"}:
         return spec
     placements = tuple(
-        _with_coordinated_side_release_height_offset(placement, gym_config)
+        (
+            _with_coordinated_side_release_height_offset(placement, gym_config)
+            if _matches_table_reference_mode(
+                placement,
+                table_source_uid=spec.table_source_uid,
+                table_reference_mode=table_reference_mode,
+            )
+            else placement
+        )
         for placement in spec.placements
     )
     return _replace_relative_spec_placements(spec, placements)
+
+
+def _matches_table_reference_mode(
+    placement: _RelativePlacementStepSpec,
+    *,
+    table_source_uid: str,
+    table_reference_mode: str,
+) -> bool:
+    is_table_reference = placement.reference_source_uid == table_source_uid
+    if table_reference_mode == "include":
+        return True
+    if table_reference_mode == "skip":
+        return not is_table_reference
+    if table_reference_mode == "only":
+        return is_table_reference
+    raise ValueError(f"Unsupported table reference mode: {table_reference_mode!r}.")
 
 
 def _with_coordinated_side_release_height_offset(
@@ -274,7 +300,12 @@ def _with_coordinated_side_release_height_offset(
     release_offset = list(placement.release_offset)
     release_offset[2] = round(float(moved_origin[2] - reference_origin[2]), 6)
     high_offset = list(release_offset)
-    high_offset[2] = round(release_offset[2] + _STAGING_Z_DELTA, 6)
+    staging_z_delta = (
+        _POSE_SENSITIVE_STAGING_Z_DELTA
+        if placement.orientation_goal != "preserve"
+        else _STAGING_Z_DELTA
+    )
+    high_offset[2] = round(release_offset[2] + staging_z_delta, 6)
     return replace(
         placement,
         release_offset=release_offset,

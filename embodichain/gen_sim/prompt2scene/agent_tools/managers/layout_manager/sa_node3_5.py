@@ -569,7 +569,84 @@ def _render_collision_mesh_topdown(
     plt.close(fig)
 
 
-def _pair_separation_from_bounds(bmin_a, bmax_a, bmin_b, bmax_b, margin: float = 0.02):
+def _relation_direction_vector(relation_name: str) -> Optional[np.ndarray]:
+    if relation_name == "left_of":
+        return np.array([-1.0, 0.0], dtype=float)
+    if relation_name == "right_of":
+        return np.array([1.0, 0.0], dtype=float)
+    if relation_name == "front_of":
+        return np.array([0.0, -1.0], dtype=float)
+    if relation_name in {"back_of", "behind"}:
+        return np.array([0.0, 1.0], dtype=float)
+    return None
+
+
+def _build_relation_direction_map(
+    object_items: Dict[str, Dict[str, Any]],
+    object_to_group: Dict[str, str],
+) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
+    relation_map: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for src_id, obj in object_items.items():
+        src_gid = object_to_group.get(src_id, src_id)
+        rel = obj.get("relation", {}) or {}
+        if not isinstance(rel, dict):
+            continue
+        for relation_name in ("left_of", "right_of", "front_of", "back_of"):
+            direction = _relation_direction_vector(relation_name)
+            if direction is None:
+                continue
+            for target in rel.get(relation_name, []) or []:
+                if _is_coordinate_point(target):
+                    continue
+                target_id = str(target)
+                target_gid = object_to_group.get(target_id, target_id)
+                if not target_gid or src_gid == target_gid:
+                    continue
+                relation_map[(src_gid, target_gid)].append(
+                    {
+                        "source": src_id,
+                        "target": target_id,
+                        "relation": relation_name,
+                        "direction": direction.tolist(),
+                    }
+                )
+    return relation_map
+
+
+def _relation_candidates_for_pair(
+    group_a: str,
+    group_b: str,
+    relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]],
+) -> List[Dict[str, Any]]:
+    if not relation_direction_map:
+        return []
+    candidates: List[Dict[str, Any]] = []
+    for item in relation_direction_map.get((group_a, group_b), []) or []:
+        candidates.append(
+            {**item, "direction": np.asarray(item["direction"], dtype=float).tolist()}
+        )
+    for item in relation_direction_map.get((group_b, group_a), []) or []:
+        candidates.append(
+            {
+                **item,
+                "source": item.get("target", ""),
+                "target": item.get("source", ""),
+                "direction": (-np.asarray(item["direction"], dtype=float)).tolist(),
+                "relation": f"inverse_{item.get('relation', '')}",
+            }
+        )
+    return candidates
+
+
+def _pair_separation_from_bounds(
+    bmin_a,
+    bmax_a,
+    bmin_b,
+    bmax_b,
+    *,
+    direction_2d: Optional[np.ndarray] = None,
+    margin: float = 0.02,
+):
     bmin_a = np.asarray(bmin_a, dtype=float)
     bmax_a = np.asarray(bmax_a, dtype=float)
     bmin_b = np.asarray(bmin_b, dtype=float)
@@ -580,23 +657,53 @@ def _pair_separation_from_bounds(bmin_a, bmax_a, bmin_b, bmax_b, margin: float =
     overlap_z = min(bmax_a[2], bmax_b[2]) - max(bmin_a[2], bmin_b[2])
 
     if overlap_x <= 0 or overlap_y <= 0 or overlap_z <= 0:
-        return None, None, None
+        return None, None, None, None
 
     center_a = 0.5 * (bmin_a + bmax_a)
     center_b = 0.5 * (bmin_b + bmax_b)
 
+    if direction_2d is not None:
+        direction = np.asarray(direction_2d, dtype=float).reshape(2)
+        if np.linalg.norm(direction) < 1e-8:
+            return None, None, None, None
+        if abs(float(direction[0])) >= abs(float(direction[1])):
+            sign = 1.0 if float(direction[0]) >= 0.0 else -1.0
+            axis = 0
+            direction_2d = np.array([sign, 0.0], dtype=float)
+            overlap_axis = overlap_x
+        else:
+            sign = 1.0 if float(direction[1]) >= 0.0 else -1.0
+            axis = 1
+            direction_2d = np.array([0.0, sign], dtype=float)
+            overlap_axis = overlap_y
+        half_a = 0.5 * float(bmax_a[axis] - bmin_a[axis])
+        half_b = 0.5 * float(bmax_b[axis] - bmin_b[axis])
+        required_gap = half_a + half_b + float(margin)
+        current_gap = sign * float(center_a[axis] - center_b[axis])
+        push_distance = max(0.0, required_gap - current_gap)
+        severity = float(overlap_axis)
+        return direction_2d, required_gap, push_distance, severity
+
     if overlap_x <= overlap_y:
         sign = 1.0 if center_a[0] >= center_b[0] else -1.0
         direction_2d = np.array([sign, 0.0], dtype=float)
-        required_sep = float(overlap_x + margin)
+        half_a = 0.5 * float(bmax_a[0] - bmin_a[0])
+        half_b = 0.5 * float(bmax_b[0] - bmin_b[0])
+        required_gap = half_a + half_b + float(margin)
+        current_gap = sign * float(center_a[0] - center_b[0])
+        push_distance = max(0.0, required_gap - current_gap)
         severity = float(overlap_x)
     else:
         sign = 1.0 if center_a[1] >= center_b[1] else -1.0
         direction_2d = np.array([0.0, sign], dtype=float)
-        required_sep = float(overlap_y + margin)
+        half_a = 0.5 * float(bmax_a[1] - bmin_a[1])
+        half_b = 0.5 * float(bmax_b[1] - bmin_b[1])
+        required_gap = half_a + half_b + float(margin)
+        current_gap = sign * float(center_a[1] - center_b[1])
+        push_distance = max(0.0, required_gap - current_gap)
         severity = float(overlap_y)
 
-    return direction_2d, required_sep, severity
+    return direction_2d, required_gap, push_distance, severity
 
 
 def _clamp_group_center(
@@ -652,7 +759,8 @@ def _greedy_push_apart(
             continue
         dir2d = dir2d / norm
 
-        step = max(0.5, float(item["required_sep"]) * push_scale)
+        step = max(0.0, float(item.get("push_distance", item["required_sep"])))
+        step *= float(push_scale)
 
         a_fixed = groups[ga].get("fixed_xy") is not None
         b_fixed = groups[gb].get("fixed_xy") is not None
@@ -660,9 +768,9 @@ def _greedy_push_apart(
         if a_fixed and b_fixed:
             continue
         elif a_fixed and not b_fixed:
-            new_centers[gb] += dir2d * step
+            new_centers[gb] -= dir2d * step
         elif b_fixed and not a_fixed:
-            new_centers[ga] -= dir2d * step
+            new_centers[ga] += dir2d * step
         else:
             new_centers[ga] += dir2d * (step * 0.5)
             new_centers[gb] -= dir2d * (step * 0.5)
@@ -911,6 +1019,8 @@ def _detect_collision_pairs(
     mesh_dict: Dict[str, trimesh.Trimesh],
     pose_dict: Dict[str, np.ndarray],
     object_to_group: Dict[str, str],
+    relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]] = None,
+    separation_margin: float = 0.02,
 ):
     results = []
     ids = list(mesh_dict.keys())
@@ -934,10 +1044,37 @@ def _detect_collision_pairs(
 
                 bmin_a, bmax_a = _world_bounds(mesh_dict[uid], pose_dict[uid])
                 bmin_b, bmax_b = _world_bounds(mesh_dict[other], pose_dict[other])
+                group_a = object_to_group.get(uid, uid)
+                group_b = object_to_group.get(other, other)
 
-                dir2d, required_sep, severity = _pair_separation_from_bounds(
-                    bmin_a, bmax_a, bmin_b, bmax_b
+                candidates = _relation_candidates_for_pair(
+                    group_a, group_b, relation_direction_map
                 )
+                relation_choice = None
+                best_sep = None
+                for candidate in candidates:
+                    sep = _pair_separation_from_bounds(
+                        bmin_a,
+                        bmax_a,
+                        bmin_b,
+                        bmax_b,
+                        direction_2d=np.asarray(candidate["direction"], dtype=float),
+                        margin=separation_margin,
+                    )
+                    if sep[0] is None:
+                        continue
+                    if best_sep is None or float(sep[2]) < float(best_sep[2]):
+                        best_sep = sep
+                        relation_choice = candidate
+                if best_sep is None:
+                    best_sep = _pair_separation_from_bounds(
+                        bmin_a,
+                        bmax_a,
+                        bmin_b,
+                        bmax_b,
+                        margin=separation_margin,
+                    )
+                dir2d, required_sep, push_distance, severity = best_sep
                 if dir2d is None:
                     continue
 
@@ -949,11 +1086,14 @@ def _detect_collision_pairs(
                     {
                         "a": uid,
                         "b": other,
-                        "group_a": object_to_group.get(uid, uid),
-                        "group_b": object_to_group.get(other, other),
+                        "group_a": group_a,
+                        "group_b": group_b,
                         "direction_2d": dir2d,
                         "required_sep": required_sep,
+                        "push_distance": push_distance,
                         "severity": severity,
+                        "relation_driven": relation_choice is not None,
+                        "relation_choice": relation_choice,
                         "overlap_x": float(overlap_x),
                         "overlap_y": float(overlap_y),
                         "overlap_z": float(overlap_z),
@@ -966,9 +1106,36 @@ def _detect_collision_pairs(
                 b = ids[j]
                 bmin_a, bmax_a = _world_bounds(mesh_dict[a], pose_dict[a])
                 bmin_b, bmax_b = _world_bounds(mesh_dict[b], pose_dict[b])
-                dir2d, required_sep, severity = _pair_separation_from_bounds(
-                    bmin_a, bmax_a, bmin_b, bmax_b
+                group_a = object_to_group.get(a, a)
+                group_b = object_to_group.get(b, b)
+                candidates = _relation_candidates_for_pair(
+                    group_a, group_b, relation_direction_map
                 )
+                relation_choice = None
+                best_sep = None
+                for candidate in candidates:
+                    sep = _pair_separation_from_bounds(
+                        bmin_a,
+                        bmax_a,
+                        bmin_b,
+                        bmax_b,
+                        direction_2d=np.asarray(candidate["direction"], dtype=float),
+                        margin=separation_margin,
+                    )
+                    if sep[0] is None:
+                        continue
+                    if best_sep is None or float(sep[2]) < float(best_sep[2]):
+                        best_sep = sep
+                        relation_choice = candidate
+                if best_sep is None:
+                    best_sep = _pair_separation_from_bounds(
+                        bmin_a,
+                        bmax_a,
+                        bmin_b,
+                        bmax_b,
+                        margin=separation_margin,
+                    )
+                dir2d, required_sep, push_distance, severity = best_sep
                 if dir2d is None:
                     continue
                 overlap_x = min(bmax_a[0], bmax_b[0]) - max(bmin_a[0], bmin_b[0])
@@ -978,11 +1145,14 @@ def _detect_collision_pairs(
                     {
                         "a": a,
                         "b": b,
-                        "group_a": object_to_group.get(a, a),
-                        "group_b": object_to_group.get(b, b),
+                        "group_a": group_a,
+                        "group_b": group_b,
                         "direction_2d": dir2d,
                         "required_sep": required_sep,
+                        "push_distance": push_distance,
                         "severity": severity,
+                        "relation_driven": relation_choice is not None,
+                        "relation_choice": relation_choice,
                         "overlap_x": float(overlap_x),
                         "overlap_y": float(overlap_y),
                         "overlap_z": float(overlap_z),
@@ -1086,6 +1256,10 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
         ec_root=ec_root,
         groups=groups,
         object_to_group=object_to_group,
+    )
+    relation_direction_map = _build_relation_direction_map(
+        object_items,
+        object_to_group,
     )
 
     group_ids = list(groups.keys())
@@ -1306,7 +1480,12 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             base_model["object_to_group"],
         )
         collisions = _detect_collision_pairs(
-            cm, mesh_dict, pose_dict, base_model["object_to_group"]
+            cm,
+            mesh_dict,
+            pose_dict,
+            base_model["object_to_group"],
+            relation_direction_map=relation_direction_map,
+            separation_margin=collision_margin,
         )
 
         if not collisions:
@@ -1331,14 +1510,17 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             if np.linalg.norm(dir2d) < 1e-8:
                 continue
 
-            required_sep = float(item["required_sep"]) + float(collision_margin)
+            required_gap = float(item["required_sep"])
 
             collision_terms_history.append(
                 {
                     "ga": ga,
                     "gb": gb,
                     "direction_2d": dir2d.tolist(),
-                    "margin": required_sep,
+                    "margin": required_gap,
+                    "push_distance": float(item.get("push_distance", 0.0)),
+                    "relation_driven": bool(item.get("relation_driven", False)),
+                    "relation_choice": item.get("relation_choice"),
                 }
             )
             seen_pair_keys.add(pair_key)
@@ -1353,7 +1535,7 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
                 collisions,
                 groups,
                 state.table_size,
-                push_scale=0.05,
+                push_scale=1.0,
             )
             continue
 
@@ -1370,7 +1552,7 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
                 collisions,
                 groups,
                 state.table_size,
-                push_scale=0.5,
+                push_scale=1.0,
             )
             continue
 
@@ -1400,7 +1582,12 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             base_model["object_to_group"],
         )
         post_collisions = _detect_collision_pairs(
-            cm2, mesh_dict2, pose_dict2, base_model["object_to_group"]
+            cm2,
+            mesh_dict2,
+            pose_dict2,
+            base_model["object_to_group"],
+            relation_direction_map=relation_direction_map,
+            separation_margin=collision_margin,
         )
 
         if not post_collisions:
@@ -1427,7 +1614,12 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             base_model["object_to_group"],
         )
         remaining = _detect_collision_pairs(
-            cm_s, mesh_dict_s, pose_dict_s, base_model["object_to_group"]
+            cm_s,
+            mesh_dict_s,
+            pose_dict_s,
+            base_model["object_to_group"],
+            relation_direction_map=relation_direction_map,
+            separation_margin=collision_margin,
         )
         if not remaining:
             break
@@ -1439,7 +1631,7 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             remaining,
             groups,
             state.table_size,
-            push_scale=0.05,
+            push_scale=1.0,
         )
 
     optimized_layout = {}
@@ -1494,7 +1686,12 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
         state.optimization_model["debug_renders"] = debug_renders
 
     final_collisions = _detect_collision_pairs(
-        cm_f, mesh_dict_f, pose_dict_f, base_model["object_to_group"]
+        cm_f,
+        mesh_dict_f,
+        pose_dict_f,
+        base_model["object_to_group"],
+        relation_direction_map=relation_direction_map,
+        separation_margin=collision_margin,
     )
     if final_collisions:
         state.messages.append(

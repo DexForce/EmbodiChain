@@ -174,6 +174,9 @@ def _run_pipeline(
     print(f"Using gym project/config: {resolution.path}", flush=True)
     print(f"Generated gym config: {paths.gym_config}", flush=True)
     print(f"Generated agent config: {paths.agent_config}", flush=True)
+    task_graph_path = getattr(paths, "task_graph", None)
+    if task_graph_path is not None:
+        print(f"Generated task graph: {task_graph_path}", flush=True)
     if args.skip_run_agent:
         write_llm_usage_summary(usage_paths)
         return 0

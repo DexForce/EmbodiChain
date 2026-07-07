@@ -386,13 +386,22 @@ def _load_mesh_as_trimesh(glb_path: Path) -> Any:
     return trimesh.util.concatenate(meshes)
 
 
-def _bake_glb_bottom_center_to_origin(source_path: Path, output_path: Path) -> None:
+def _bake_glb_bottom_center_to_origin(
+    source_path: Path,
+    output_path: Path,
+    *,
+    scale_factor: float = 1.0,
+) -> None:
     import trimesh
 
     mesh = _load_mesh_as_trimesh(source_path)
     verts = np.asarray(mesh.vertices, dtype=np.float64)
+    scale = float(scale_factor)
+    if not np.isfinite(scale) or scale <= 0.0:
+        scale = 1.0
     basis = _glb_to_sim_rotation()
     verts_sim = (basis @ verts.T).T
+    verts_sim *= scale
     bounds = np.asarray(
         np.vstack((verts_sim.min(axis=0), verts_sim.max(axis=0))),
         dtype=np.float64,

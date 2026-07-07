@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +32,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
-    _glb_scale_to_sim,
+    _bake_glb_bottom_center_to_origin,
     _render_scene_state_topdown,
 )
 from embodichain.gen_sim.prompt2scene.workflows.paths import PipelinePaths
@@ -1335,7 +1334,6 @@ def _build_generated_rigid_object(
     object_dir = mesh_assets_dir / safe_name / object_id
     object_dir.mkdir(parents=True, exist_ok=True)
     object_dst = object_dir / f"{object_id}.glb"
-    shutil.copy2(simready_path, object_dst)
 
     metric_scale = generated_asset.get("metric_scale")
     scale_factor = 1.0
@@ -1346,7 +1344,12 @@ def _build_generated_rigid_object(
             scale_factor = 1.0
     if not np.isfinite(scale_factor) or scale_factor <= 0.0:
         scale_factor = 1.0
-    body_scale = _glb_scale_to_sim([scale_factor, scale_factor, scale_factor])
+    _bake_glb_bottom_center_to_origin(
+        simready_path,
+        object_dst,
+        scale_factor=scale_factor,
+    )
+    body_scale = [1.0, 1.0, 1.0]
     init_rot = [0.0, 0.0, 0.0]
     target_center = np.asarray(layout_item.get("center_xy", []), dtype=np.float64)
     if target_center.shape != (2,):

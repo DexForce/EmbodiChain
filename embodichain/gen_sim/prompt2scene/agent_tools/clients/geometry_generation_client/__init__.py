@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_client.client import (
     GeometryGenerationClient,
+    clear_sam3d_generation_timings,
+    get_sam3d_generation_timings,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_client.schemas import (
     GeometryGenerationError,
@@ -46,4 +48,6 @@ __all__ = [
     "MultiObjectGenerationResult",
     "MultiObjectGenerationServerRequest",
     "MultiObjectGenerationServerResponse",
+    "clear_sam3d_generation_timings",
+    "get_sam3d_generation_timings",
 ]

@@ -53,6 +53,7 @@ class RgbaImagesToGeometriesResult:
     """Result of multi-object geometry generation."""
 
     objects: list[RgbaImagesToGeometriesObject]
+    sam3d_generation_elapsed_seconds: float = 0.0
 
     @property
     def geometry_paths(self) -> list[Path]:
@@ -72,6 +73,7 @@ class GeometryGenerationResult:
     """Generated mesh path."""
 
     output_path: Path
+    sam3d_generation_elapsed_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,7 @@ class MultiObjectGenerationResult:
     """Result of multi-object geometry generation."""
 
     objects: list[MultiObjectGenerationObject]
+    sam3d_generation_elapsed_seconds: float = 0.0
 
     @property
     def geometry_paths(self) -> list[Path]:

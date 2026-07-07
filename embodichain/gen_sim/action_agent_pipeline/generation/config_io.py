@@ -45,6 +45,7 @@ def write_config_bundle(
         gym_config=output_dir / "fast_gym_config.json",
         agent_config=output_dir / "agent_config.json",
         task_prompt=output_dir / "task_prompt.txt",
+        task_graph=output_dir / "task_graph.json",
         basic_background=output_dir / "basic_background.txt",
         atom_actions=output_dir / "atom_actions.txt",
         summary=dict(bundle.get("summary", {})),
@@ -55,6 +56,7 @@ def write_config_bundle(
     write_json(paths.gym_config, bundle["gym_config"])
     write_json(paths.agent_config, bundle["agent_config"])
     write_text(paths.task_prompt, bundle["task_prompt"])
+    write_json(paths.task_graph, bundle["task_graph"])
     write_text(paths.basic_background, bundle["basic_background"])
     write_text(paths.atom_actions, bundle["atom_actions"])
     return paths
@@ -67,6 +69,7 @@ def raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
         output_dir / "fast_gym_config.json",
         output_dir / "agent_config.json",
         output_dir / "task_prompt.txt",
+        output_dir / "task_graph.json",
         output_dir / "basic_background.txt",
         output_dir / "atom_actions.txt",
     ]

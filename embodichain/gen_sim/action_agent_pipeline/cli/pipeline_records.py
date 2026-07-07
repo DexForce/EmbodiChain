@@ -180,6 +180,11 @@ def build_pipeline_record(
             Path(generated_paths.task_prompt),
             repo_root,
         ),
+        "generated_task_graph": (
+            _record_path(Path(generated_paths.task_graph), repo_root)
+            if getattr(generated_paths, "task_graph", None) is not None
+            else None
+        ),
         "generated_basic_background": _record_path(
             Path(generated_paths.basic_background),
             repo_root,
