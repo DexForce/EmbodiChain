@@ -720,6 +720,37 @@ def test_build_parallel_action_stream_does_not_step_env() -> None:
     assert env.stepped_actions == []
 
 
+def test_build_parallel_action_stream_rejects_slot_robot_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _FakeEnv()
+
+    def fake_resolve_action_spec(action_spec, env, runtime_kwargs, *, state):
+        if action_spec is None:
+            return None
+        return atom_actions._ExecutedAtomicAction(
+            action=torch.zeros((2, 3)),
+            next_state=None,
+            robot_name=action_spec["robot_name"],
+            control="arm",
+        )
+
+    monkeypatch.setattr(
+        atom_actions,
+        "_resolve_action_spec",
+        fake_resolve_action_spec,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="left_arm_action contains robot_name='right_arm'",
+    ):
+        build_parallel_action_stream(
+            left_arm_action={"robot_name": "right_arm"},
+            env=env,
+        )
+
+
 def test_step_env_with_actions_steps_and_updates_env() -> None:
     class _StepEnv:
         def __init__(self) -> None:

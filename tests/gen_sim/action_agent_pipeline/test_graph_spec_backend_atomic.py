@@ -105,6 +105,19 @@ def test_compile_agent_graph_accepts_atomic_action_class_spec() -> None:
     assert left_arm_action.to_dict() == action
 
 
+def test_compile_agent_graph_rejects_slot_robot_mismatch() -> None:
+    task_graph = _task_graph(_pick_up_spec("right_arm", "apple"))
+
+    with pytest.raises(
+        ValueError,
+        match="left_arm_action contains robot_name='right_arm'",
+    ):
+        compile_agent_graph_spec(
+            task_graph,
+            graph_cls=_FakeGraph,
+        )
+
+
 def test_compile_agent_graph_rejects_legacy_action_schema() -> None:
     task_graph = _task_graph({"action": "pick_up", "robot_name": "left_arm"})
 

@@ -826,6 +826,7 @@ def _build_relative_placement_step(
         active_side=active_side,
         release_offset=release_offset,
         high_offset=high_offset,
+        arm_request=requested_side,
         reference_is_initial_pose=reference_is_initial_pose,
         orientation_goal=orientation_goal,
         orientation_axis=orientation_axis,

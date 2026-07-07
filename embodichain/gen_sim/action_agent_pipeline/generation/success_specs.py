@@ -19,6 +19,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.generation.arm_binding import (
+    make_dual_ur5_arm_slot_config,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
     _BasketTaskRoles,
@@ -43,7 +46,7 @@ __all__ = [
 
 def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:
     return {
-        **_make_dual_ur5_arm_slot_config(),
+        **make_dual_ur5_arm_slot_config(),
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
         "ignore_terminations_during_agent": True,
@@ -75,32 +78,13 @@ def _object_in_container_success(object_uid: str, container_uid: str) -> dict[st
     }
 
 
-def _make_dual_ur5_arm_slot_config() -> dict[str, Any]:
-    return {
-        "agent_arm_slots": {
-            "left": {
-                "arm": "right_arm",
-                "eef": "right_eef",
-            },
-            "right": {
-                "arm": "left_arm",
-                "eef": "left_eef",
-            },
-        },
-        "arm_aim_yaw_offset": {
-            "left": 3.141592653589793,
-            "right": 0.0,
-        },
-    }
-
-
 def _make_relative_extensions_config(
     spec: _RelativePlacementSpec,
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
     extensions = {
-        **_make_dual_ur5_arm_slot_config(),
+        **make_dual_ur5_arm_slot_config(),
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
         "ignore_terminations_during_agent": True,
@@ -118,7 +102,7 @@ def _make_relative_extensions_config(
 
 def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
     return {
-        **_make_dual_ur5_arm_slot_config(),
+        **make_dual_ur5_arm_slot_config(),
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
         "ignore_terminations_during_agent": True,
@@ -129,7 +113,7 @@ def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str,
 
 def _make_stacking_extensions_config(spec: _StackingSpec) -> dict[str, Any]:
     return {
-        **_make_dual_ur5_arm_slot_config(),
+        **make_dual_ur5_arm_slot_config(),
         "gripper_open_state": [0.0],
         "gripper_close_state": [0.04],
         "ignore_terminations_during_agent": True,

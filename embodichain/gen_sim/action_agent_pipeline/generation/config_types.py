@@ -103,6 +103,7 @@ class _RelativePlacementStepSpec:
     active_side: str
     release_offset: list[float]
     high_offset: list[float]
+    arm_request: str = "auto"
     reference_is_initial_pose: bool = False
     release_position: list[float] | None = None
     high_position: list[float] | None = None

@@ -158,6 +158,7 @@ def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
             edge.get("right_arm_action")
         ):
             raise ValueError(f"Nominal edge '{edge_id}' must define an arm action.")
+        _validate_edge_action_slots(edge, edge_id)
 
         for node_key in ("source", "target"):
             node_id = edge[node_key]
@@ -242,6 +243,68 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
     if spec_cls is None:
         return normalized
     return spec_cls.from_normalized(normalized)
+
+
+def _validate_edge_action_slots(edge: Mapping[str, Any], edge_id: str) -> None:
+    left_action = edge.get("left_arm_action")
+    right_action = edge.get("right_arm_action")
+    left_is_coordinated = _is_coordinated_action_spec(left_action)
+    right_is_coordinated = _is_coordinated_action_spec(right_action)
+    if left_is_coordinated and right_is_coordinated:
+        raise ValueError(
+            f"Nominal edge '{edge_id}' may contain only one CoordinatedPickment "
+            "action."
+        )
+    if left_is_coordinated and not _is_empty_action_spec(right_action):
+        raise ValueError(
+            f"Nominal edge '{edge_id}' uses CoordinatedPickment in left_arm_action; "
+            "right_arm_action must be null."
+        )
+    if right_is_coordinated and not _is_empty_action_spec(left_action):
+        raise ValueError(
+            f"Nominal edge '{edge_id}' uses CoordinatedPickment in right_arm_action; "
+            "left_arm_action must be null."
+        )
+
+    for slot_name, expected_side, action in (
+        ("left_arm_action", "left", left_action),
+        ("right_arm_action", "right", right_action),
+    ):
+        action_side = _action_robot_side(action)
+        if action_side is not None and action_side != expected_side:
+            raise ValueError(
+                f"Nominal edge '{edge_id}' {slot_name} contains "
+                f"robot_name={_action_robot_name(action)!r}, which resolves to "
+                f"{action_side}_arm. Keep the outer graph slot consistent with "
+                "the semantic arm name."
+            )
+
+
+def _is_coordinated_action_spec(spec: Any) -> bool:
+    if not isinstance(spec, Mapping):
+        return False
+    return spec.get("atomic_action_class") == "CoordinatedPickment"
+
+
+def _action_robot_side(spec: Any) -> str | None:
+    robot_name = _action_robot_name(spec)
+    if robot_name is None:
+        return None
+    text = robot_name.strip().lower()
+    if "right" in text:
+        return "right"
+    if "left" in text:
+        return "left"
+    return None
+
+
+def _action_robot_name(spec: Any) -> str | None:
+    if not isinstance(spec, Mapping):
+        return None
+    value = spec.get("robot_name")
+    if value is None:
+        return None
+    return str(value)
 
 
 def _is_empty_action_spec(spec: Any) -> bool:

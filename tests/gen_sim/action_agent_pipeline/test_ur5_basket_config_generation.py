@@ -62,6 +62,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _mesh_config_world_xy_center,
     _mesh_config_world_z_bounds,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    _arm_side_for_position,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
@@ -4061,6 +4064,60 @@ def test_task_description_dual_auto_assigns_complementary_arms(
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
+
+
+def test_task_description_dual_auto_reassigns_after_scene_rotation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "left_of",
+                    "arm": "auto",
+                },
+                {
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "right_of",
+                    "arm": "auto",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_auto_rotated_relative_agent",
+        task_description="双臂分别移动两个苹果",
+        source_scene_z_rotation_degrees=-90.0,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    manipulations = paths.summary["manipulations"]
+    active_arms = [placement["active_arm"] for placement in manipulations]
+    expected_arms = []
+    for placement in manipulations:
+        moved_object = rigid_objects[placement["moved_object"]]
+        expected_arms.append(
+            f"{_arm_side_for_position(moved_object['init_pos'])}_arm"
+        )
+
+    assert active_arms == expected_arms
+    assert active_arms == ["left_arm", "right_arm"]
 
 
 def test_task_description_on_object_uses_object_on_object_success(

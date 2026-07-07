@@ -125,6 +125,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _relative_release_offset,
     _side_relation_xy_offsets,
     _with_coordinated_side_release_height_offsets,
+    _with_final_auto_arm_sides,
     _with_inside_container_slot_offsets,
     _with_on_surface_release_offsets,
     _with_self_relative_absolute_targets,
@@ -1518,6 +1519,7 @@ def _build_relative_placement_bundle(
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
+    spec = _with_final_auto_arm_sides(spec, gym_config)
     if spec.intent in {"place_relative", "coordinated_pickment"}:
         spec = _with_coordinated_side_release_height_offsets(
             spec,
