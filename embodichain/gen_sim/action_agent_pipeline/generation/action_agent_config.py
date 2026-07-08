@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 import math
@@ -483,6 +483,48 @@ def generate_action_agent_config_from_project(
     )
 
 
+def _make_sensor_config_for_robot(
+    robot_config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    sensors = _make_sensor_config()
+    wrist_parent_by_uid = {
+        "cam_wrist_left": _robot_solver_end_link(robot_config, "left_arm"),
+        "cam_wrist_right": _robot_solver_end_link(robot_config, "right_arm"),
+    }
+    for sensor in sensors:
+        parent = wrist_parent_by_uid.get(str(sensor.get("uid", "")))
+        if not parent:
+            continue
+        extrinsics = sensor.get("extrinsics")
+        if isinstance(extrinsics, dict):
+            extrinsics["parent"] = parent
+    return sensors
+
+
+def _make_sensor_config_factory_for_robot(
+    robot_config: Mapping[str, Any],
+) -> Callable[[], list[dict[str, Any]]]:
+    def sensor_config_factory() -> list[dict[str, Any]]:
+        return _make_sensor_config_for_robot(robot_config)
+
+    return sensor_config_factory
+
+
+def _robot_solver_end_link(
+    robot_config: Mapping[str, Any], arm_name: str
+) -> str | None:
+    solver_cfg = robot_config.get("solver_cfg", {})
+    if not isinstance(solver_cfg, Mapping):
+        return None
+    arm_solver_cfg = solver_cfg.get(arm_name, {})
+    if not isinstance(arm_solver_cfg, Mapping):
+        return None
+    end_link_name = arm_solver_cfg.get("end_link_name")
+    if end_link_name is None:
+        return None
+    return str(end_link_name)
+
+
 def _build_basket_bundle(
     *,
     scene_dir: Path,
@@ -551,6 +593,7 @@ def _build_basket_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_config = robot_profile.make_robot_config(table_top_z)
+    sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -560,7 +603,7 @@ def _build_basket_bundle(
             "extensions": _make_extensions_config(roles, robot_profile=robot_profile),
             "events": _make_events_config(
                 roles,
-                sensor_config_factory=_make_sensor_config,
+                sensor_config_factory=sensor_config_factory,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": _make_dataset_config(
@@ -570,7 +613,7 @@ def _build_basket_bundle(
             ),
         },
         "robot": robot_config,
-        "sensor": _make_sensor_config(),
+        "sensor": sensor_config_factory(),
         "light": _make_light_config(),
         "background": [table_config],
         "rigid_object": [
@@ -735,6 +778,7 @@ def _build_arrangement_line_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_config = robot_profile.make_robot_config(table_top_z)
+    sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -744,13 +788,13 @@ def _build_arrangement_line_bundle(
             "extensions": {},
             "events": _make_arrangement_events_config(
                 [step.runtime_uid for step in spec.steps],
-                sensor_config_factory=_make_sensor_config,
+                sensor_config_factory=sensor_config_factory,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
         },
         "robot": robot_config,
-        "sensor": _make_sensor_config(),
+        "sensor": sensor_config_factory(),
         "light": _make_light_config(),
         "background": [table_config],
         "rigid_object": [
@@ -906,6 +950,7 @@ def _build_stacking_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_config = robot_profile.make_robot_config(table_top_z)
+    sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -915,13 +960,13 @@ def _build_stacking_bundle(
             "extensions": {},
             "events": _make_arrangement_events_config(
                 [step.runtime_uid for step in spec.steps],
-                sensor_config_factory=_make_sensor_config,
+                sensor_config_factory=sensor_config_factory,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
         },
         "robot": robot_config,
-        "sensor": _make_sensor_config(),
+        "sensor": sensor_config_factory(),
         "light": _make_light_config(),
         "background": [table_config],
         "rigid_object": [
@@ -1532,6 +1577,7 @@ def _build_relative_placement_bundle(
     )
     table_top_z = _mesh_config_world_zmax(table_config)
     robot_config = robot_profile.make_robot_config(table_top_z)
+    sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1542,13 +1588,13 @@ def _build_relative_placement_bundle(
             "events": _make_relative_events_config(
                 spec,
                 registered_runtime_uids,
-                sensor_config_factory=_make_sensor_config,
+                sensor_config_factory=sensor_config_factory,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
         },
         "robot": robot_config,
-        "sensor": _make_sensor_config(),
+        "sensor": sensor_config_factory(),
         "light": _make_light_config(),
         "background": [table_config],
         "rigid_object": [

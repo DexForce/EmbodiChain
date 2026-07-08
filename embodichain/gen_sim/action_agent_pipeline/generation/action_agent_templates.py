@@ -24,6 +24,7 @@ from typing import Any
 
 __all__ = [
     "make_dual_franka_panda_robot_config",
+    "make_dual_franka_v3_robot_config",
     "make_dual_ur_dh_pgi_robot_config",
     "make_dual_ur5_robot_config",
     "make_light_config",
@@ -236,6 +237,56 @@ def make_dual_franka_panda_robot_config(*, robot_init_z: float) -> dict[str, Any
             },
         },
     }
+
+
+def make_dual_franka_v3_robot_config(*, robot_init_z: float) -> dict[str, Any]:
+    """Return a fresh Dual Franka V3/FR3 config at the requested z position."""
+    config = make_dual_franka_panda_robot_config(robot_init_z=robot_init_z)
+    config["uid"] = "DualFrankaV3"
+    config["urdf_cfg"]["fname"] = "dual_franka_v3_basket"
+    config["control_parts"] = {
+        "left_arm": [
+            "left_fr3_joint1",
+            "left_fr3_joint2",
+            "left_fr3_joint3",
+            "left_fr3_joint4",
+            "left_fr3_joint5",
+            "left_fr3_joint6",
+            "left_fr3_joint7",
+        ],
+        "left_eef": ["left_fr3_finger_joint[1-2]"],
+        "right_arm": [
+            "right_fr3_joint1",
+            "right_fr3_joint2",
+            "right_fr3_joint3",
+            "right_fr3_joint4",
+            "right_fr3_joint5",
+            "right_fr3_joint6",
+            "right_fr3_joint7",
+        ],
+        "right_eef": ["right_fr3_finger_joint[1-2]"],
+        "dual_arm": [
+            "left_fr3_joint1",
+            "left_fr3_joint2",
+            "left_fr3_joint3",
+            "left_fr3_joint4",
+            "left_fr3_joint5",
+            "left_fr3_joint6",
+            "left_fr3_joint7",
+            "right_fr3_joint1",
+            "right_fr3_joint2",
+            "right_fr3_joint3",
+            "right_fr3_joint4",
+            "right_fr3_joint5",
+            "right_fr3_joint6",
+            "right_fr3_joint7",
+        ],
+    }
+    config["solver_cfg"]["left_arm"]["end_link_name"] = "left_fr3_hand_tcp"
+    config["solver_cfg"]["left_arm"]["root_link_name"] = "left_base"
+    config["solver_cfg"]["right_arm"]["end_link_name"] = "right_fr3_hand_tcp"
+    config["solver_cfg"]["right_arm"]["root_link_name"] = "right_base"
+    return config
 
 
 def make_sensor_config() -> list[dict[str, Any]]:

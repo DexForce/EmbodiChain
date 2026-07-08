@@ -408,10 +408,44 @@ def test_action_agent_config_generator_uses_parallel_handoff(
 
 
 @pytest.mark.parametrize(
-    ("robot_profile", "expected_uid", "expected_solver_type", "expected_meta_type"),
+    (
+        "robot_profile",
+        "expected_uid",
+        "expected_solver_type",
+        "expected_meta_type",
+        "expected_wrist_parents",
+    ),
     [
-        ("ur10", "DualUR10", "URSolver", "DualUR10"),
-        ("franka", "DualFrankaPanda", "PinocchioSolver", "DualFrankaPanda"),
+        (
+            "ur10",
+            "DualUR10",
+            "URSolver",
+            "DualUR10",
+            {
+                "cam_wrist_left": "left_ee_link",
+                "cam_wrist_right": "right_ee_link",
+            },
+        ),
+        (
+            "franka",
+            "DualFrankaPanda",
+            "PinocchioSolver",
+            "DualFrankaPanda",
+            {
+                "cam_wrist_left": "left_ee_link",
+                "cam_wrist_right": "right_ee_link",
+            },
+        ),
+        (
+            "franka_v3",
+            "DualFrankaV3",
+            "PinocchioSolver",
+            "DualFrankaV3",
+            {
+                "cam_wrist_left": "left_fr3_hand_tcp",
+                "cam_wrist_right": "right_fr3_hand_tcp",
+            },
+        ),
     ],
 )
 def test_action_agent_config_generator_uses_selected_robot_profile(
@@ -420,6 +454,7 @@ def test_action_agent_config_generator_uses_selected_robot_profile(
     expected_uid: str,
     expected_solver_type: str,
     expected_meta_type: str,
+    expected_wrist_parents: dict[str, str],
 ) -> None:
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
@@ -436,10 +471,16 @@ def test_action_agent_config_generator_uses_selected_robot_profile(
     extensions = gym_config["env"]["extensions"]
     dataset_params = gym_config["env"]["dataset"]["lerobot"]["params"]
     basic_background = paths.basic_background.read_text(encoding="utf-8")
+    wrist_parents = {
+        sensor["uid"]: sensor["extrinsics"]["parent"]
+        for sensor in gym_config["sensor"]
+        if sensor["uid"] in expected_wrist_parents
+    }
 
     assert robot["uid"] == expected_uid
     assert robot["solver_cfg"]["left_arm"]["class_type"] == expected_solver_type
     assert robot["solver_cfg"]["right_arm"]["class_type"] == expected_solver_type
+    assert wrist_parents == expected_wrist_parents
     assert extensions["agent_robot_profile"] == paths.summary["robot_profile"]["id"]
     assert dataset_params["robot_meta"]["robot_type"] == expected_meta_type
     assert paths.summary["robot_profile"]["robot_meta_type"] == expected_meta_type

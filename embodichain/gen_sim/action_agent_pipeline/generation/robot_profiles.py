@@ -25,6 +25,7 @@ from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
     make_dual_franka_panda_robot_config,
+    make_dual_franka_v3_robot_config,
     make_dual_ur_dh_pgi_robot_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
@@ -235,6 +236,50 @@ def _dual_franka_profile() -> RobotProfile:
     )
 
 
+def _dual_franka_v3_profile() -> RobotProfile:
+    return RobotProfile(
+        id="dual_franka_v3",
+        display_name="Dual Franka V3",
+        robot_meta_type="DualFrankaV3",
+        robot_config_factory=(
+            lambda robot_init_z: make_dual_franka_v3_robot_config(
+                robot_init_z=robot_init_z,
+            )
+        ),
+        agent_arm_slots={
+            "left": {
+                "arm": "right_arm",
+                "eef": "right_eef",
+            },
+            "right": {
+                "arm": "left_arm",
+                "eef": "left_eef",
+            },
+        },
+        gripper_open_state=(0.04, 0.04),
+        gripper_close_state=(0.0, 0.0),
+        arm_aim_yaw_offset={
+            "left": _PI,
+            "right": 0.0,
+        },
+        grasp_runtime_defaults={
+            "grasp_max_open_length": 0.08,
+            "grasp_min_open_length": 0.0,
+            "grasp_finger_length": 0.058,
+        },
+        prompt_description=(
+            "The robot is a Dual Franka V3 composite robot with FR3 arms and "
+            "Franka parallel grippers."
+        ),
+        prompt_slot_description=(
+            "- left_arm is the semantic robot-view left slot, mapped to the "
+            "physical right_arm control part.\n"
+            "- right_arm is the semantic robot-view right slot, mapped to the "
+            "physical left_arm control part."
+        ),
+    )
+
+
 _ROBOT_PROFILES: dict[str, RobotProfile] = {
     "dual_ur3": _dual_ur_profile(
         profile_id="dual_ur3",
@@ -252,6 +297,7 @@ _ROBOT_PROFILES: dict[str, RobotProfile] = {
         display_name="Dual UR10",
     ),
     "dual_franka": _dual_franka_profile(),
+    "dual_franka_v3": _dual_franka_v3_profile(),
 }
 
 _ROBOT_PROFILE_ALIASES = {
@@ -271,4 +317,8 @@ _ROBOT_PROFILE_ALIASES = {
     "panda": "dual_franka",
     "dual_panda": "dual_franka",
     "dual_franka_panda": "dual_franka",
+    "franka_v3": "dual_franka_v3",
+    "franka_fr3": "dual_franka_v3",
+    "fr3": "dual_franka_v3",
+    "dual_fr3": "dual_franka_v3",
 }
