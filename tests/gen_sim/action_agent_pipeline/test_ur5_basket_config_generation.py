@@ -439,7 +439,7 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         (
             "franka_v3",
             "DualFrankaV3",
-            "PinocchioSolver",
+            "PytorchSolver",
             "DualFrankaV3",
             {
                 "cam_wrist_left": "left_fr3_hand_tcp",

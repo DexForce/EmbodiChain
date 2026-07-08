@@ -145,8 +145,10 @@ def test_dual_franka_v3_profile_matches_fr3_asset_naming() -> None:
     ]
     assert robot["control_parts"]["left_eef"] == ["left_fr3_finger_joint[1-2]"]
     assert robot["control_parts"]["right_eef"] == ["right_fr3_finger_joint[1-2]"]
+    assert robot["solver_cfg"]["left_arm"]["class_type"] == "PytorchSolver"
     assert robot["solver_cfg"]["left_arm"]["root_link_name"] == "left_base"
     assert robot["solver_cfg"]["left_arm"]["end_link_name"] == "left_fr3_hand_tcp"
+    assert robot["solver_cfg"]["right_arm"]["class_type"] == "PytorchSolver"
     assert robot["solver_cfg"]["right_arm"]["root_link_name"] == "right_base"
     assert robot["solver_cfg"]["right_arm"]["end_link_name"] == "right_fr3_hand_tcp"
     assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [

@@ -282,8 +282,10 @@ def make_dual_franka_v3_robot_config(*, robot_init_z: float) -> dict[str, Any]:
             "right_fr3_joint7",
         ],
     }
+    config["solver_cfg"]["left_arm"]["class_type"] = "PytorchSolver"
     config["solver_cfg"]["left_arm"]["end_link_name"] = "left_fr3_hand_tcp"
     config["solver_cfg"]["left_arm"]["root_link_name"] = "left_base"
+    config["solver_cfg"]["right_arm"]["class_type"] = "PytorchSolver"
     config["solver_cfg"]["right_arm"]["end_link_name"] = "right_fr3_hand_tcp"
     config["solver_cfg"]["right_arm"]["root_link_name"] = "right_base"
     return config
