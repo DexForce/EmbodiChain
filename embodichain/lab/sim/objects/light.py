@@ -584,9 +584,11 @@ class Light(BatchEntity):
         Applies only the properties relevant to ``self.cfg.light_type``.
 
         .. attention::
-            For global lights (:attr:`is_global` is True), ``env_ids`` is
-            normalized to ``None`` because there is only one instance.
-            Passing per-environment indices is silently ignored.
+            When this light has only one instance (global lights such as
+            ``"sun"`` and ``"direction"``, or any light in a single-environment
+            scene), ``env_ids`` is normalized to ``None`` because there is only
+            one instance to update. Passing per-environment indices is silently
+            ignored.
 
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset.

@@ -810,7 +810,8 @@ class LightCfg(ObjectBaseCfg):
     - ``"rect"``: Per-environment rectangular area light with position,
       direction, width, and height. Created as a batched light.
     - ``"mesh"``: Per-environment mesh-based emissive light. Requires a
-      :class:`~dexsim.models.MeshObject` via :meth:`~Light.set_mesh`
+      :class:`~dexsim.models.MeshObject` via
+      :meth:`embodichain.lab.sim.objects.light.Light.set_mesh`
       (not tensor-batched). Created as a batched light.
 
     .. attention::
@@ -893,7 +894,8 @@ class LightCfg(ObjectBaseCfg):
 
     mesh_path: str = ""
     """Asset path for mesh-based emissive lights. Only used when ``light_type="mesh"``.
-    The actual mesh assignment is done via :meth:`Light.set_mesh` which accepts a
+    The actual mesh assignment is done via
+    :meth:`embodichain.lab.sim.objects.light.Light.set_mesh` which accepts a
     :class:`dexsim.models.MeshObject`. This field stores the path for reference."""
 
 
