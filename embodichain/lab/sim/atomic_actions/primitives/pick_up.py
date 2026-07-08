@@ -25,10 +25,10 @@ import torch
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import (
-    matrix_from_quat,
     pose_inv,
     quat_error_magnitude,
     quat_from_matrix,
+    axis_angle_to_rotation_matrix,
 )
 
 from ._helpers import arm_qpos_from_state
@@ -74,6 +74,12 @@ class PickUpCfg(ActionCfg):
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
     """Approach direction in the object local frame."""
 
+    obj_upright_direction: torch.Tensor | None = None
+    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
+
+    rotate_upright: float | None = None
+    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
+
 
 class PickUp(AtomicAction):
     """Approach a grasp pose, close the gripper, lift."""
@@ -116,15 +122,32 @@ class PickUp(AtomicAction):
             logger.log_error(
                 "PickUp requires an entity on the target semantics.", ValueError
             )
-
         start_arm_qpos = self.builder.resolve_start_qpos(
             arm_qpos_from_state(state, self.arm_joint_ids),
             n_envs=self.n_envs,
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-
         is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
+
+        # apply grasp yr rotation offset if specified
+        if self.cfg.rotate_upright is not None:
+            if self.cfg.obj_upright_direction is None:
+                upright_direction = torch.tensor([0, 0, 1], device=self.device)
+            else:
+                upright_direction = self.cfg.obj_upright_direction.to(self.device)
+            obj_pose = sem.entity.get_local_pose(to_matrix=True)
+            obj_upright = (upright_direction * obj_pose[:, :3, :3]).sum(axis=2)
+            grasp_ry = grasp_xpos[:, :3, 1]
+            dot_result = (grasp_ry * obj_upright).sum(axis=1)
+            # revert flag is -1 if the dot product is negative, 1 if positive
+            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+            grasp_rx = grasp_xpos[:, :3, 0]
+            rota_axis_angle = self.cfg.rotate_upright * revert_flag * grasp_rx
+            rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
+            upright_grasp_rota = torch.bmm(rota_offset, grasp_xpos[:, :3, :3])
+            grasp_xpos[:, :3, :3] = upright_grasp_rota
+
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
