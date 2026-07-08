@@ -103,17 +103,7 @@ def make_dual_franka_panda_robot_config(*, robot_init_z: float) -> dict[str, Any
             "components": [
                 {
                     "component_type": "left_arm",
-                    "urdf_path": "Franka/Panda/PandaWithHand.urdf",
-                    "transform": [
-                        [0.0, -1.0, 0.0, -0.3],
-                        [1.0, 0.0, 0.0, -1.25],
-                        [0.0, 0.0, 1.0, 0.4],
-                        [0.0, 0.0, 0.0, 1.0],
-                    ],
-                },
-                {
-                    "component_type": "right_arm",
-                    "urdf_path": "Franka/Panda/PandaWithHand.urdf",
+                    "urdf_path": "Franka/Panda/PandaWithHandFake.urdf",
                     "transform": [
                         [0.0, -1.0, 0.0, 0.3],
                         [1.0, 0.0, 0.0, -1.25],
@@ -121,29 +111,39 @@ def make_dual_franka_panda_robot_config(*, robot_init_z: float) -> dict[str, Any
                         [0.0, 0.0, 0.0, 1.0],
                     ],
                 },
+                {
+                    "component_type": "right_arm",
+                    "urdf_path": "Franka/Panda/PandaWithHandFake.urdf",
+                    "transform": [
+                        [0.0, -1.0, 0.0, -0.3],
+                        [1.0, 0.0, 0.0, -1.25],
+                        [0.0, 0.0, 1.0, 0.4],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                },
             ],
         },
-        "init_pos": [-2.0, 0.0, float(robot_init_z)],
-        "init_rot": [0.0, 0.0, 90.0],
+        "init_pos": [1.0, 0.0, float(robot_init_z)],
+        "init_rot": [0.0, 0.0, -90.0],
         "init_qpos": [
-            0.0,
-            -0.7853981633974483,
-            0.0,
-            -2.356194490192345,
-            0.0,
-            1.5707963267948966,
-            0.7853981633974483,
-            0.04,
-            0.04,
-            0.0,
-            -0.7853981633974483,
-            0.0,
-            -2.356194490192345,
-            0.0,
-            1.5707963267948966,
-            0.7853981633974483,
-            0.04,
-            0.04,
+            0.0,  # Joint1
+            0.0,  # Joint1
+            -0.569,  # Joint2
+            -0.569,  # Joint2
+            0.0,  # Joint3
+            0.0,  # Joint3
+            -2.810,  # Joint4
+            -2.810,  # Joint4
+            0.0,  # Joint5
+            0.0,  # Joint5
+            3.037,  # Joint6
+            3.037,  # Joint6
+            0.741,  # Joint7
+            0.741,  # Joint7
+            0.06,  # finger_joint1
+            0.06,  # finger_joint1
+            0.06,  # finger_joint2
+            0.06,  # finger_joint2
         ],
         "drive_pros": {
             "stiffness": {
