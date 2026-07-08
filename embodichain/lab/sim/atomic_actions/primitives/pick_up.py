@@ -148,7 +148,6 @@ class PickUp(AtomicAction):
             upright_grasp_rota = torch.bmm(rota_offset, grasp_xpos[:, :3, :3])
             grasp_xpos[:, :3, :3] = upright_grasp_rota
 
-        is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
