@@ -548,6 +548,7 @@ def _build_ur5_basket_bundle(
             "events": _make_events_config(
                 roles,
                 sensor_config_factory=_make_sensor_config,
+                task_name=task_name,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": _make_dataset_config(project_name, roles),
@@ -717,6 +718,7 @@ def _build_arrangement_line_bundle(
             "events": _make_arrangement_events_config(
                 [step.runtime_uid for step in spec.steps],
                 sensor_config_factory=_make_sensor_config,
+                task_name=task_name,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
@@ -873,6 +875,7 @@ def _build_stacking_bundle(
             "events": _make_arrangement_events_config(
                 [step.runtime_uid for step in spec.steps],
                 sensor_config_factory=_make_sensor_config,
+                task_name=task_name,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
@@ -1465,6 +1468,7 @@ def _build_relative_placement_bundle(
                 spec,
                 registered_runtime_uids,
                 sensor_config_factory=_make_sensor_config,
+                task_name=task_name,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
