@@ -50,7 +50,7 @@ _DEFAULT_TABLE_ATTRS: dict[str, Any] = {
 }
 
 _DEFAULT_OBJECT_MAX_CONVEX_HULL_NUM = 16
-_DEFAULT_TABLE_MAX_CONVEX_HULL_NUM = 8
+_DEFAULT_TABLE_MAX_CONVEX_HULL_NUM = 16
 
 
 def _resolve_path(value: str, output_root: Path) -> Path:
@@ -661,6 +661,7 @@ def export_gym_config(
                 "body_type": "kinematic",
                 "init_pos": table_init_pos,
                 "init_rot": table_init_rot,
+                "max_convex_hull_num": _DEFAULT_TABLE_MAX_CONVEX_HULL_NUM,
             }
         ],
         "rigid_object": rigid_objects,
