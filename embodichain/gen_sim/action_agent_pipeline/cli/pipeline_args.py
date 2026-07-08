@@ -34,6 +34,10 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
     DEFAULT_TASK_NAME,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    DEFAULT_ROBOT_PROFILE_ID,
+    available_robot_profile_choices,
+)
 
 __all__ = ["build_parser"]
 
@@ -322,6 +326,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             'Task description passed to config generation. Defaults to "". '
             "Ignored for default-template tasks such as Demo1_Text."
+        ),
+    )
+    parser.add_argument(
+        "--robot-profile",
+        "--robot_profile",
+        dest="robot_profile",
+        choices=available_robot_profile_choices(),
+        default=DEFAULT_ROBOT_PROFILE_ID,
+        help=(
+            "Robot profile used by action-agent config generation. Defaults to "
+            f"{DEFAULT_ROBOT_PROFILE_ID}."
         ),
     )
     parser.add_argument(

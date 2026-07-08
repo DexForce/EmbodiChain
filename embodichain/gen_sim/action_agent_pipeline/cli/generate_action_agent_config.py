@@ -23,6 +23,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config im
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    DEFAULT_ROBOT_PROFILE_ID,
+    available_robot_profile_choices,
+)
 from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
     resolve_target_replacements,
 )
@@ -87,6 +91,16 @@ def cli() -> None:
         type=str,
         default=None,
         help="Optional LLM model override for --use_llm_roles.",
+    )
+    parser.add_argument(
+        "--robot-profile",
+        "--robot_profile",
+        choices=available_robot_profile_choices(),
+        default=DEFAULT_ROBOT_PROFILE_ID,
+        help=(
+            "Robot profile used by action-agent config generation. Defaults to "
+            f"{DEFAULT_ROBOT_PROFILE_ID}."
+        ),
     )
     parser.add_argument(
         "--target_body_scale",
@@ -272,6 +286,7 @@ def cli() -> None:
         task_description=task_description,
         use_llm_roles=args.use_llm_roles,
         llm_model=args.llm_model,
+        robot_profile=args.robot_profile,
         target_body_scale=args.target_body_scale,
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
         source_scene_body_scale_mode=args.source_scene_body_scale_mode,

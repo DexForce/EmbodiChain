@@ -83,9 +83,13 @@ from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _with_stacking_generated_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
-    make_dual_ur5_robot_config as _make_dual_ur5_robot_config,
     make_light_config as _make_light_config,
     make_sensor_config as _make_sensor_config,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    DEFAULT_ROBOT_PROFILE_ID,
+    RobotProfile,
+    resolve_robot_profile,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _clean_vector3,
@@ -113,7 +117,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _DUAL_UR5_TABLETOP_CLEARANCE,
     _TABLETOP_OBJECT_CLEARANCE,
     _apply_tabletop_z_placement,
-    _dual_ur5_init_z_from_table_top,
     _mesh_config_world_z_bounds,
     _mesh_config_world_zmax,
     _resolve_table_mesh_world_zmax,
@@ -190,6 +193,7 @@ def generate_action_agent_config_from_project(
     task_description: str | None = None,
     use_llm_roles: bool = False,
     llm_model: str | None = None,
+    robot_profile: str | RobotProfile | None = DEFAULT_ROBOT_PROFILE_ID,
     target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
     preserve_source_target_body_scale: bool = False,
     source_target_body_scale_multiplier: float | None = None,
@@ -209,10 +213,11 @@ def generate_action_agent_config_from_project(
 ) -> GeneratedActionAgentConfigPaths:
     """Generate action-agent configs from an exported gym project.
 
-    This first-stage generator intentionally keeps the UR5BreadBasket task
+    For the default basket template, this first-stage generator keeps the task
     structure fixed: the left arm grasps the left target object, the right arm
     grasps the right target object, and both objects are placed into one
-    basket-like container.
+    basket-like container. The generated robot can be switched with
+    ``robot_profile``.
 
     Args:
         gym_project: Project root, formatted scene folder, ``gym_config.json``,
@@ -224,6 +229,9 @@ def generate_action_agent_config_from_project(
             config-level task spec and generates prompts from that spec.
         use_llm_roles: If true, use an LLM only to refine object role mapping.
         llm_model: Optional model override for role refinement.
+        robot_profile: Robot profile ID or profile instance used to generate the
+            robot config, runtime arm-slot mapping, prompts, and dataset robot
+            metadata. Defaults to ``dual_ur5``.
         target_body_scale: Uniform or xyz scale applied to generated target
             objects. Basket-like containers keep their source ``body_scale``.
         preserve_source_target_body_scale: If true, moved target objects keep
@@ -279,6 +287,7 @@ def generate_action_agent_config_from_project(
 
     output_dir_path = Path(output_dir).expanduser().resolve()
     _raise_if_generated_files_exist(output_dir_path, overwrite)
+    robot_profile = resolve_robot_profile(robot_profile)
 
     input_path = Path(gym_project).expanduser().resolve()
     gym_config_path = _resolve_gym_config_path(input_path)
@@ -327,6 +336,7 @@ def generate_action_agent_config_from_project(
                 spec=spec,
                 project_name=project_name,
                 task_name=task_name,
+                robot_profile=robot_profile,
                 target_body_scale=target_body_scale,
                 max_episodes=max_episodes,
                 max_episode_steps=max_episode_steps,
@@ -360,6 +370,7 @@ def generate_action_agent_config_from_project(
                 spec=spec,
                 project_name=project_name,
                 task_name=task_name,
+                robot_profile=robot_profile,
                 target_body_scale=target_body_scale,
                 max_episodes=max_episodes,
                 max_episode_steps=max_episode_steps,
@@ -401,6 +412,7 @@ def generate_action_agent_config_from_project(
             spec=spec,
             project_name=project_name,
             task_name=task_name,
+            robot_profile=robot_profile,
             target_body_scale=target_body_scale,
             preserve_source_target_body_scale=preserve_source_target_body_scale,
             source_target_body_scale_multiplier=source_target_body_scale_multiplier,
@@ -445,12 +457,13 @@ def generate_action_agent_config_from_project(
             resolved_replacements,
         )
 
-    bundle = _build_ur5_basket_bundle(
+    bundle = _build_basket_bundle(
         scene_dir=scene_dir,
         source_config=source_config,
         roles=roles,
         project_name=project_name,
         task_name=task_name,
+        robot_profile=robot_profile,
         target_body_scale=target_body_scale,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         target_replacements=resolved_replacements,
@@ -472,13 +485,14 @@ def generate_action_agent_config_from_project(
     )
 
 
-def _build_ur5_basket_bundle(
+def _build_basket_bundle(
     *,
     scene_dir: Path,
     source_config: Mapping[str, Any],
     roles: _BasketTaskRoles,
     project_name: str,
     task_name: str,
+    robot_profile: RobotProfile,
     target_body_scale: float | list[float] | tuple[float, float, float],
     source_scene_body_scale_mode: str | None,
     target_replacements: Sequence[_ResolvedTargetReplacement],
@@ -528,21 +542,24 @@ def _build_ur5_basket_bundle(
         source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
-    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
-    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
+    robot_config = robot_profile.make_robot_config(table_top_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
         "max_episodes": int(max_episodes),
         "max_episode_steps": int(max_episode_steps),
         "env": {
-            "extensions": _make_extensions_config(roles),
+            "extensions": _make_extensions_config(roles, robot_profile=robot_profile),
             "events": _make_events_config(
                 roles,
                 sensor_config_factory=_make_sensor_config,
             ),
             "observations": _make_observations_config(robot_config),
-            "dataset": _make_dataset_config(project_name, roles),
+            "dataset": _make_dataset_config(
+                project_name,
+                roles,
+                robot_profile=robot_profile,
+            ),
         },
         "robot": robot_config,
         "sensor": _make_sensor_config(),
@@ -630,6 +647,7 @@ def _build_ur5_basket_bundle(
         ),
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
+        robot_profile=robot_profile,
     )
     _maybe_apply_tabletop_z_placement(
         gym_config,
@@ -640,12 +658,25 @@ def _build_ur5_basket_bundle(
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
-        "task_prompt": make_basket_task_prompt(task_name, project_name, roles),
+        "task_prompt": make_basket_task_prompt(
+            task_name,
+            project_name,
+            roles,
+            robot_profile=robot_profile,
+        ),
         "task_graph": make_basket_task_graph(task_name, roles),
-        "basic_background": make_basket_basic_background(project_name, roles),
-        "atom_actions": make_basket_atom_actions_prompt(roles),
+        "basic_background": make_basket_basic_background(
+            project_name,
+            roles,
+            robot_profile=robot_profile,
+        ),
+        "atom_actions": make_basket_atom_actions_prompt(
+            roles,
+            robot_profile=robot_profile,
+        ),
         "summary": {
             "mode": "basket_template",
+            "robot_profile": robot_profile.summary(),
             "left_target": roles.left_target_runtime_uid,
             "right_target": roles.right_target_runtime_uid,
             "container": roles.container_runtime_uid,
@@ -671,6 +702,7 @@ def _build_arrangement_line_bundle(
     spec: _ArrangementLineSpec,
     project_name: str,
     task_name: str,
+    robot_profile: RobotProfile,
     target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
@@ -712,8 +744,7 @@ def _build_arrangement_line_bundle(
         source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
-    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
-    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
+    robot_config = robot_profile.make_robot_config(table_top_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -788,6 +819,7 @@ def _build_arrangement_line_bundle(
         _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
+        robot_profile=robot_profile,
     )
     _maybe_apply_tabletop_z_placement(
         gym_config,
@@ -796,19 +828,36 @@ def _build_arrangement_line_bundle(
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     spec = _with_arrangement_generated_pose_targets(spec, gym_config)
-    gym_config["env"]["extensions"] = _make_arrangement_extensions_config(spec)
+    gym_config["env"]["extensions"] = _make_arrangement_extensions_config(
+        spec,
+        robot_profile=robot_profile,
+    )
     gym_config["env"]["dataset"] = _make_arrangement_dataset_config(
         project_name,
         spec,
+        robot_profile=robot_profile,
     )
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
-        "task_prompt": make_arrangement_task_prompt(task_name, project_name, spec),
+        "task_prompt": make_arrangement_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=robot_profile,
+        ),
         "task_graph": make_arrangement_task_graph(task_name, spec),
-        "basic_background": make_arrangement_basic_background(project_name, spec),
-        "atom_actions": make_arrangement_atom_actions_prompt(spec),
+        "basic_background": make_arrangement_basic_background(
+            project_name,
+            spec,
+            robot_profile=robot_profile,
+        ),
+        "atom_actions": make_arrangement_atom_actions_prompt(
+            spec,
+            robot_profile=robot_profile,
+        ),
         "summary": {
+            "robot_profile": robot_profile.summary(),
             **_make_arrangement_summary(spec),
         },
     }
@@ -860,6 +909,7 @@ def _build_stacking_bundle(
     spec: _StackingSpec,
     project_name: str,
     task_name: str,
+    robot_profile: RobotProfile,
     target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
@@ -901,8 +951,7 @@ def _build_stacking_bundle(
         source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
-    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
-    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
+    robot_config = robot_profile.make_robot_config(table_top_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -977,6 +1026,7 @@ def _build_stacking_bundle(
         _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
+        robot_profile=robot_profile,
     )
     _maybe_apply_tabletop_z_placement(
         gym_config,
@@ -985,22 +1035,46 @@ def _build_stacking_bundle(
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     spec = _with_stacking_generated_targets(spec, gym_config)
-    gym_config["env"]["extensions"] = _make_stacking_extensions_config(spec)
-    gym_config["env"]["dataset"] = _make_stacking_dataset_config(project_name, spec)
+    gym_config["env"]["extensions"] = _make_stacking_extensions_config(
+        spec,
+        robot_profile=robot_profile,
+    )
+    gym_config["env"]["dataset"] = _make_stacking_dataset_config(
+        project_name,
+        spec,
+        robot_profile=robot_profile,
+    )
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
-        "task_prompt": make_stacking_task_prompt(task_name, project_name, spec),
+        "task_prompt": make_stacking_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=robot_profile,
+        ),
         "task_graph": make_stacking_task_graph(task_name, spec),
-        "basic_background": make_stacking_basic_background(project_name, spec),
-        "atom_actions": make_stacking_atom_actions_prompt(spec),
-        "summary": _make_stacking_summary(spec),
+        "basic_background": make_stacking_basic_background(
+            project_name,
+            spec,
+            robot_profile=robot_profile,
+        ),
+        "atom_actions": make_stacking_atom_actions_prompt(
+            spec,
+            robot_profile=robot_profile,
+        ),
+        "summary": {
+            "robot_profile": robot_profile.summary(),
+            **_make_stacking_summary(spec),
+        },
     }
 
 
 def _make_stacking_dataset_config(
     project_name: str,
     spec: _StackingSpec,
+    *,
+    robot_profile: RobotProfile,
 ) -> dict[str, Any]:
     ordered = ", ".join(step.runtime_uid for step in spec.steps)
     return {
@@ -1009,7 +1083,7 @@ def _make_stacking_dataset_config(
             "mode": "save",
             "params": {
                 "robot_meta": {
-                    "robot_type": "DualUR5",
+                    "robot_type": robot_profile.robot_meta_type,
                     "control_freq": 25,
                 },
                 "instruction": {
@@ -1204,6 +1278,7 @@ def _maybe_preserve_source_scene_vertical_contacts(
     *,
     preserve_source_scene_geometry: bool,
     source_scene_body_scale_mode: str | None,
+    robot_profile: RobotProfile | str | None = None,
 ) -> None:
     if not preserve_source_scene_geometry:
         return
@@ -1216,7 +1291,7 @@ def _maybe_preserve_source_scene_vertical_contacts(
         if source_obj is None:
             continue
         _preserve_source_scene_vertical_boundary(obj_config, source_obj)
-    _sync_robot_init_z_to_current_tabletop(gym_config)
+    _sync_robot_init_z_to_current_tabletop(gym_config, robot_profile=robot_profile)
 
 
 def _preserve_source_scene_vertical_boundary(
@@ -1248,7 +1323,11 @@ def _preserve_source_scene_vertical_boundary(
     obj_config["init_pos"] = init_pos
 
 
-def _sync_robot_init_z_to_current_tabletop(gym_config: dict[str, Any]) -> None:
+def _sync_robot_init_z_to_current_tabletop(
+    gym_config: dict[str, Any],
+    *,
+    robot_profile: RobotProfile | str | None = None,
+) -> None:
     robot_config = gym_config.get("robot")
     if not isinstance(robot_config, dict):
         return
@@ -1268,8 +1347,12 @@ def _sync_robot_init_z_to_current_tabletop(gym_config: dict[str, Any]) -> None:
     if table_top_z is None:
         return
 
+    profile = resolve_robot_profile(
+        robot_profile
+        or gym_config.get("env", {}).get("extensions", {}).get("agent_robot_profile")
+    )
     init_pos = _clean_vector3(robot_config.get("init_pos", [0.0, 0.0, 0.0]))
-    init_pos[2] = _dual_ur5_init_z_from_table_top(table_top_z)
+    init_pos[2] = profile.robot_init_z_from_table_top(table_top_z)
     robot_config["init_pos"] = init_pos
 
 
@@ -1429,6 +1512,7 @@ def _build_relative_placement_bundle(
     spec: _RelativePlacementSpec,
     project_name: str,
     task_name: str,
+    robot_profile: RobotProfile,
     target_body_scale: float | list[float] | tuple[float, float, float],
     preserve_source_target_body_scale: bool,
     source_target_body_scale_multiplier: float | None,
@@ -1478,8 +1562,7 @@ def _build_relative_placement_bundle(
         source_scene_body_scale_mode=source_scene_body_scale_mode,
     )
     table_top_z = _mesh_config_world_zmax(table_config)
-    robot_init_z = _dual_ur5_init_z_from_table_top(table_top_z)
-    robot_config = _make_dual_ur5_robot_config(robot_init_z=robot_init_z)
+    robot_config = robot_profile.make_robot_config(table_top_z)
 
     gym_config = {
         "id": "AtomicActionsAgent-v3",
@@ -1562,6 +1645,7 @@ def _build_relative_placement_bundle(
         _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
+        robot_profile=robot_profile,
     )
     _maybe_apply_tabletop_z_placement(
         gym_config,
@@ -1580,19 +1664,36 @@ def _build_relative_placement_bundle(
         spec = _with_on_surface_release_offsets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
+        robot_profile=robot_profile,
         side_relation_xy_offsets=_side_relation_xy_offsets,
     )
     gym_config["env"]["dataset"] = _make_relative_dataset_config(
         project_name,
         spec,
+        robot_profile=robot_profile,
         relation_phrase=_relative_relation_phrase,
     )
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
-        "task_prompt": make_relative_task_prompt(task_name, project_name, spec),
+        "task_prompt": make_relative_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=robot_profile,
+        ),
         "task_graph": make_relative_task_graph(task_name, spec),
-        "basic_background": make_relative_basic_background(project_name, spec),
-        "atom_actions": make_relative_atom_actions_prompt(spec),
-        "summary": _make_relative_summary(spec),
+        "basic_background": make_relative_basic_background(
+            project_name,
+            spec,
+            robot_profile=robot_profile,
+        ),
+        "atom_actions": make_relative_atom_actions_prompt(
+            spec,
+            robot_profile=robot_profile,
+        ),
+        "summary": {
+            "robot_profile": robot_profile.summary(),
+            **_make_relative_summary(spec),
+        },
     }

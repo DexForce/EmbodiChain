@@ -26,6 +26,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
     NominalGraphStep,
     build_nominal_task_graph,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    DEFAULT_ROBOT_PROFILE_ID,
+    RobotProfile,
+    resolve_robot_profile,
+)
 
 __all__ = [
     "make_agent_config",
@@ -194,7 +199,10 @@ def make_arrangement_task_prompt(
     task_name: str,
     project_name: str,
     spec: _ArrangementSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    resolve_robot_profile(robot_profile)
     edge_count = len(spec.steps) * 7
     step_blocks = "\n\n".join(
         _arrangement_step_prompt_block(index, step)
@@ -374,10 +382,17 @@ def _format_indexed_edge_blocks(
     return "\n\n".join(formatted_blocks)
 
 
+def _robot_context(robot_profile: RobotProfile | str | None) -> str:
+    return resolve_robot_profile(robot_profile).prompt_robot_context()
+
+
 def make_arrangement_basic_background(
     project_name: str,
     spec: _ArrangementSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
@@ -386,14 +401,10 @@ def make_arrangement_basic_background(
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for a Dual-UR5 multi-object line arrangement
+This configuration directory is for a {profile.display_name} multi-object line arrangement
 task generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
 Interactive task objects and target slots:
 {object_lines}
@@ -423,9 +434,14 @@ def _arrangement_object_background_line(step: _ArrangementStepLike) -> str:
     )
 
 
-def make_arrangement_atom_actions_prompt(spec: _ArrangementSpecLike) -> str:
+def make_arrangement_atom_actions_prompt(
+    spec: _ArrangementSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     blocks = "\n\n".join(_arrangement_atom_action_block(step) for step in spec.steps)
-    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Line Arrangement
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Line Arrangement
 
 Use only the native atomic action class JSON specs shown below. Each object is
 moved to an absolute collision-aware slot pose computed by the config-stage
@@ -483,7 +499,10 @@ def make_stacking_task_prompt(
     task_name: str,
     project_name: str,
     spec: _StackingSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    resolve_robot_profile(robot_profile)
     edge_count = sum(_stacking_step_edge_count(step) for step in spec.steps)
     edge_index = 1
     step_blocks_list = []
@@ -728,7 +747,10 @@ def _stacking_step_prompt_block(start_edge: int, step: _StackingStepLike) -> str
 def make_stacking_basic_background(
     project_name: str,
     spec: _StackingSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
@@ -737,14 +759,10 @@ def make_stacking_basic_background(
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for a Dual-UR5 stacking task generated from a
-simple natural-language task description.
+This configuration directory is for a {profile.display_name} stacking task
+generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
 Stack mode: `{spec.stack_mode}` at table-center xy `{list(spec.anchor_xy)}`.
 
@@ -776,9 +794,14 @@ def _stacking_object_background_line(step: _StackingStepLike) -> str:
     )
 
 
-def make_stacking_atom_actions_prompt(spec: _StackingSpecLike) -> str:
+def make_stacking_atom_actions_prompt(
+    spec: _StackingSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     blocks = "\n\n".join(_stacking_atom_action_block(step) for step in spec.steps)
-    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Stacking
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Stacking
 
 Use only the native atomic action class JSON specs shown below. Each object is
 moved to an absolute table-center stack pose computed by the config-stage
@@ -847,13 +870,31 @@ def make_relative_task_prompt(
     task_name: str,
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "coordinated_pickment":
-        return _make_coordinated_pickment_task_prompt(task_name, project_name, spec)
+        return _make_coordinated_pickment_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
     if spec.intent == "hold_hover":
-        return _make_hold_hover_task_prompt(task_name, project_name, spec)
+        return _make_hold_hover_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
     if len(spec.placements) > 1:
-        return _make_dual_relative_task_prompt(task_name, project_name, spec)
+        return _make_dual_relative_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
 
     active_arm = f"{spec.active_side}_arm"
     inactive_slot = (
@@ -1127,7 +1168,10 @@ def _make_coordinated_pickment_task_prompt(
     task_name: str,
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    resolve_robot_profile(robot_profile)
     action_sketch = _format_action_sketch(spec.action_sketch)
     action_spec = _format_coordinated_pickment_spec(spec)
     left_release_spec = _format_gripper_spec(
@@ -1242,9 +1286,17 @@ def _make_dual_relative_task_prompt(
     task_name: str,
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "hold_hover":
-        return _make_hold_hover_task_prompt(task_name, project_name, spec)
+        return _make_hold_hover_task_prompt(
+            task_name,
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
     first, second = spec.placements
     first_arm = f"{first.active_side}_arm"
     second_arm = f"{second.active_side}_arm"
@@ -1469,7 +1521,10 @@ def _make_hold_hover_task_prompt(
     task_name: str,
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     pick_actions = {
         f"{placement.active_side}_arm_action": _format_pick_up_spec(
             f"{placement.active_side}_arm",
@@ -1535,7 +1590,7 @@ must keep every selected object hovering in a closed gripper.
 {numbered_edges}
 
 Final state: every selected object must remain lifted and held by its assigned
-UR5 arm in the exported {project_name} environment config.
+{profile.display_name} arm in the exported {project_name} environment config.
 """
 
 
@@ -1750,13 +1805,28 @@ def _relative_high_action_patterns(
 def make_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "coordinated_pickment":
-        return _make_coordinated_pickment_basic_background(project_name, spec)
+        return _make_coordinated_pickment_basic_background(
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
     if spec.intent == "hold_hover":
-        return _make_hold_hover_basic_background(project_name, spec)
+        return _make_hold_hover_basic_background(
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
     if len(spec.placements) > 1:
-        return _make_dual_relative_basic_background(project_name, spec)
+        return _make_dual_relative_basic_background(
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
 
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
@@ -1765,14 +1835,10 @@ def make_relative_basic_background(
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for a Dual-UR5 relative-placement task generated
-from a simple natural-language task description.
+This configuration directory is for a {profile.display_name} relative-placement
+task generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
 The active arm for this task is `{active_arm}`. The inactive arm
 `{inactive_arm}` must stay null in the nominal graph.
@@ -1796,20 +1862,19 @@ lift with orientation preserved before high-pose orientation adjustment.
 def _make_coordinated_pickment_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for a Dual-UR5 coordinated shared-object task
-generated from a simple natural-language task description.
+This configuration directory is for a {profile.display_name} coordinated
+shared-object task generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
 Both arms must act through one `CoordinatedPickment` action. The graph should
 place that action in `left_arm_action` and keep `right_arm_action` null.
@@ -1833,9 +1898,16 @@ decompose this task into separate single-arm `PickUp`, `MoveHeldObject`, or
 def _make_dual_relative_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "hold_hover":
-        return _make_hold_hover_basic_background(project_name, spec)
+        return _make_hold_hover_basic_background(
+            project_name,
+            spec,
+            robot_profile=profile,
+        )
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
@@ -1847,14 +1919,11 @@ def _make_dual_relative_basic_background(
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for a Dual-UR5 dual-arm relative-placement task
-generated from a simple natural-language task description.
+This configuration directory is for a {profile.display_name} dual-arm
+relative-placement task generated from a simple natural-language task
+description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
 Both arms participate in the nominal graph:
 {placement_lines}
@@ -1876,7 +1945,10 @@ orientation adjustment.
 def _make_hold_hover_basic_background(
     project_name: str,
     spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
@@ -1887,14 +1959,10 @@ def _make_hold_hover_basic_background(
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for a Dual-UR5 object-manipulation hold-hover
-task generated from a simple natural-language task description.
+This configuration directory is for a {profile.display_name} object-manipulation
+hold-hover task generated from a simple natural-language task description.
 
-The robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
 Hold-hover task objects:
 {object_lines}
@@ -1909,13 +1977,21 @@ the object still hovering in the gripper.
 """
 
 
-def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+def make_relative_atom_actions_prompt(
+    spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "coordinated_pickment":
-        return _make_coordinated_pickment_atom_actions_prompt(spec)
+        return _make_coordinated_pickment_atom_actions_prompt(
+            spec,
+            robot_profile=profile,
+        )
     if spec.intent == "hold_hover":
-        return _make_hold_hover_atom_actions_prompt(spec)
+        return _make_hold_hover_atom_actions_prompt(spec, robot_profile=profile)
     if len(spec.placements) > 1:
-        return _make_dual_relative_atom_actions_prompt(spec)
+        return _make_dual_relative_atom_actions_prompt(spec, robot_profile=profile)
 
     active_arm = f"{spec.active_side}_arm"
     inactive_arm = "right_arm" if spec.active_side == "left" else "left_arm"
@@ -1927,7 +2003,7 @@ def make_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
         pickup_upright_direction=spec.pickup_upright_direction,
         pickup_rotate_upright=spec.pickup_rotate_upright,
     )
-    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Relative Placement
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Relative Placement
 
 Use only the native atomic action class JSON specs shown below. The active arm
 is `{active_arm}`. Keep `{inactive_arm}` null in
@@ -1943,9 +2019,14 @@ Use exactly these action patterns:
 """
 
 
-def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+def _make_dual_relative_atom_actions_prompt(
+    spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "hold_hover":
-        return _make_hold_hover_atom_actions_prompt(spec)
+        return _make_hold_hover_atom_actions_prompt(spec, robot_profile=profile)
     first, second = spec.placements
     first_arm = f"{first.active_side}_arm"
     second_arm = f"{second.active_side}_arm"
@@ -1965,7 +2046,7 @@ def _make_dual_relative_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
         pickup_upright_direction=second.pickup_upright_direction,
         pickup_rotate_upright=second.pickup_rotate_upright,
     )
-    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Dual-Arm Relative Placement
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Dual-Arm Relative Placement
 
 Use only the native atomic action class JSON specs shown below.
 - `{first_arm}` manipulates `{first.moved_runtime_uid}`.
@@ -1987,11 +2068,16 @@ Use these action patterns:
 """
 
 
-def _make_hold_hover_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+def _make_hold_hover_atom_actions_prompt(
+    spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     blocks = "\n\n".join(
         _hold_hover_atom_action_block(placement) for placement in spec.placements
     )
-    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Object Manipulation
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Object Manipulation
 
 Use only the native atomic action class JSON specs shown below. The final state
 must keep the listed object(s) held in closed grippers. Do not use `Place` and
@@ -2012,7 +2098,12 @@ def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
   {_format_gripper_spec(active_arm, "close", sample_interval=10, post_hold_steps=20)}"""
 
 
-def _make_coordinated_pickment_atom_actions_prompt(spec: _RelativeSpecLike) -> str:
+def _make_coordinated_pickment_atom_actions_prompt(
+    spec: _RelativeSpecLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     left_release_spec = _format_gripper_spec(
         "left_arm",
         "open",
@@ -2027,7 +2118,7 @@ def _make_coordinated_pickment_atom_actions_prompt(spec: _RelativeSpecLike) -> s
     )
     left_initial_spec = _format_initial_qpos_spec("left_arm", sample_interval=30)
     right_initial_spec = _format_initial_qpos_spec("right_arm", sample_interval=30)
-    return f"""### Atomic Action Class JSON Specs for Dual-UR5 Coordinated Pickment
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Coordinated Pickment
 
 Use only these native atomic action class JSON specs. `CoordinatedPickment`
 controls both arms, so the nominal graph must put that spec in
@@ -2052,7 +2143,10 @@ def make_basket_task_prompt(
     task_name: str,
     project_name: str,
     roles: _BasketRolesLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     left_target_text = _left_target_text(roles)
     right_target_text = _right_target_text(roles)
     target_pair_text = _target_pair_text(roles)
@@ -2105,17 +2199,17 @@ def make_basket_task_prompt(
         sample_interval=30,
     )
     return f"""Task:
-{task_name}: use the current two-UR5 configuration to place
+{task_name}: use the current {profile.display_name} configuration to place
 {target_pair_text} into the {roles.container_runtime_uid}.
 
 The task starts with both arms acting simultaneously:
-the left UR5 grasps the left {left_target_text} while the right UR5 grasps the
+the left arm grasps the left {left_target_text} while the right arm grasps the
 right {right_target_text} in the same nominal graph edge. After both
-{target_plural} are grasped, the left UR5 places its {left_target_text} into the
-{roles.container_runtime_uid} and retreats upward. While the left UR5 returns
-to its initial pose, the right UR5 must simultaneously begin placing its
+{target_plural} are grasped, the left arm places its {left_target_text} into the
+{roles.container_runtime_uid} and retreats upward. While the left arm returns
+to its initial pose, the right arm must simultaneously begin placing its
 already-grasped {right_target_text} by moving it to the high staging pose above
-the {roles.container_runtime_uid}. The right UR5 then completes its placement
+the {roles.container_runtime_uid}. The right arm then completes its placement
 and returns to its initial pose.
 
 Object and arm mapping:
@@ -2156,7 +2250,7 @@ released its held target object.
    - left_arm_action: {left_place_spec}
    - right_arm_action: {right_close_spec}
 
-4. After the left gripper has retreated upward, return the left UR5 to its
+4. After the left gripper has retreated upward, return the left arm to its
    initial pose while simultaneously moving the held right target object
    directly above the right half of the {roles.container_runtime_uid}. This
    parallel handoff must remain one graph edge:
@@ -2168,7 +2262,7 @@ released its held target object.
    - left_arm_action: null
    - right_arm_action: {right_place_spec}
 
-6. Return the right UR5 to its initial pose after releasing the target object:
+6. Return the right arm to its initial pose after releasing the target object:
    - left_arm_action: null
    - right_arm_action: {right_initial_spec}
 
@@ -2282,23 +2376,21 @@ def make_basket_task_graph(
 def make_basket_basic_background(
     project_name: str,
     roles: _BasketRolesLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     left_target_text = _left_target_text(roles)
     right_target_text = _right_target_text(roles)
     target_plural = _target_plural_text(roles)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
-This configuration directory is for the UR5BreadBasket task template. The
-current robot is a dual-UR5 composite robot with DH_PGI_140_80 parallel
-grippers.
+This configuration directory is for a basket-placement task template. The
+current robot is {profile.display_name}.
 
-The robot is a dual-UR5 composite robot with two parallel grippers:
-- left_arm is the semantic robot-view left slot, mapped to the physical
-  right_arm control part.
-- right_arm is the semantic robot-view right slot, mapped to the physical
-  left_arm control part.
+{_robot_context(profile)}
 
-Both UR5 bases are on the same long side of the table and face inward toward
+Both robot bases are on the same long side of the table and face inward toward
 the central {roles.container_runtime_uid}. The bases are intentionally kept
 outside the table edge to avoid initial robot-table contact.
 
@@ -2310,25 +2402,25 @@ The interactive objects are:
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
 
-The nominal task starts with simultaneous dual-arm grasping. The left UR5 must
-grasp {roles.left_target_runtime_uid} while the right UR5 grasps
+The nominal task starts with simultaneous dual-arm grasping. The left arm must
+grasp {roles.left_target_runtime_uid} while the right arm grasps
 {roles.right_target_runtime_uid} in the same graph edge. After both
-{target_plural} are held, the left UR5 places
+{target_plural} are held, the left arm places
 {roles.left_target_runtime_uid} into {roles.container_runtime_uid} with one
-`Place`. The next graph edge is a parallel handoff: the left UR5 returns
-to its initial pose while the right UR5 simultaneously moves its
+`Place`. The next graph edge is a parallel handoff: the left arm returns
+to its initial pose while the right arm simultaneously moves its
 already-grasped {roles.right_target_runtime_uid} to the high staging pose above
-{roles.container_runtime_uid}. The right UR5 then places
+{roles.container_runtime_uid}. The right arm then places
 {roles.right_target_runtime_uid} with one `Place` and returns to its
 initial pose. To change the insertion order later, edit the task prompt sequence
 and keep the same atomic action API.
 
-The {roles.container_runtime_uid} area is a shared workspace. A UR5 should
-complete its `Place` retreat before the other UR5 moves to the container,
-otherwise the two arms may collide near the container. The right UR5 should keep
-holding {roles.right_target_runtime_uid} while the left UR5 performs its
-placement. Once that `Place` is complete, the right UR5 may move toward
-the container while the left UR5 simultaneously returns to its initial pose; it
+The {roles.container_runtime_uid} area is a shared workspace. An arm should
+complete its `Place` retreat before the other arm moves to the container,
+otherwise the two arms may collide near the container. The right arm should keep
+holding {roles.right_target_runtime_uid} while the left arm performs its
+placement. Once that `Place` is complete, the right arm may move toward
+the container while the left arm simultaneously returns to its initial pose; it
 must not wait for the left return-to-initial motion to finish.
 
 A target object at a high pose above `{roles.container_runtime_uid}` is only
@@ -2341,7 +2433,12 @@ actions.
 """
 
 
-def make_basket_atom_actions_prompt(roles: _BasketRolesLike) -> str:
+def make_basket_atom_actions_prompt(
+    roles: _BasketRolesLike,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> str:
+    profile = resolve_robot_profile(robot_profile)
     left_high_spec = _format_pose_object_spec(
         "left_arm",
         roles.container_runtime_uid,
@@ -2368,7 +2465,7 @@ def make_basket_atom_actions_prompt(roles: _BasketRolesLike) -> str:
         sample_interval=80,
         lift_height=_PLACE_LIFT_HEIGHT,
     )
-    return f"""### Atomic Action Class JSON Specs for UR5BreadBasket Dual-UR5 Placement
+    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Basket Placement
 
 Use only the native atomic action class JSON specs shown below. Use
 `robot_name="left_arm"` only for

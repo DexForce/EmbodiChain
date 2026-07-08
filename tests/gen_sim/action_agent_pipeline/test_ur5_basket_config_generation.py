@@ -369,6 +369,45 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert paths.summary["mode"] == "basket_template"
 
 
+@pytest.mark.parametrize(
+    ("robot_profile", "expected_uid", "expected_solver_type", "expected_meta_type"),
+    [
+        ("ur10", "DualUR10", "URSolver", "DualUR10"),
+        ("franka", "DualFrankaPanda", "PinocchioSolver", "DualFrankaPanda"),
+    ],
+)
+def test_action_agent_config_generator_uses_selected_robot_profile(
+    tmp_path: Path,
+    robot_profile: str,
+    expected_uid: str,
+    expected_solver_type: str,
+    expected_meta_type: str,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / f"generated_agent_{robot_profile}",
+        robot_profile=robot_profile,
+        target_body_scale=0.6,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    robot = gym_config["robot"]
+    extensions = gym_config["env"]["extensions"]
+    dataset_params = gym_config["env"]["dataset"]["lerobot"]["params"]
+    basic_background = paths.basic_background.read_text(encoding="utf-8")
+
+    assert robot["uid"] == expected_uid
+    assert robot["solver_cfg"]["left_arm"]["class_type"] == expected_solver_type
+    assert robot["solver_cfg"]["right_arm"]["class_type"] == expected_solver_type
+    assert extensions["agent_robot_profile"] == paths.summary["robot_profile"]["id"]
+    assert dataset_params["robot_meta"]["robot_type"] == expected_meta_type
+    assert paths.summary["robot_profile"]["robot_meta_type"] == expected_meta_type
+    assert paths.summary["robot_profile"]["display_name"] in basic_background
+
+
 def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
     tmp_path: Path,
 ) -> None:

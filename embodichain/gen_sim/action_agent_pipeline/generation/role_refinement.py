@@ -111,7 +111,7 @@ def _call_role_llm(
     )
 
     prompt = (
-        "Identify roles for a fixed Dual-UR5 basket-placement simulation task. "
+        "Identify roles for a fixed dual-arm basket-placement simulation task. "
         "Return only one JSON object with keys: container_object, "
         "left_target_object, right_target_object, target_noun, "
         "container_runtime_uid. Use only source_uid values from the scene. The "
