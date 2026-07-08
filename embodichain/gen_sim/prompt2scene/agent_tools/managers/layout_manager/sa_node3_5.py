@@ -34,6 +34,9 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.sa_sta
 __all__ = ["run_node_3_5"]
 
 
+DEFAULT_OBJECT_CLEARANCE_M = 0.05
+
+
 def _parse_coordinate_range(
     coordinate_range: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Optional[List[float]]]]:
@@ -645,7 +648,7 @@ def _pair_separation_from_bounds(
     bmax_b,
     *,
     direction_2d: Optional[np.ndarray] = None,
-    margin: float = 0.02,
+    margin: float = DEFAULT_OBJECT_CLEARANCE_M,
 ):
     bmin_a = np.asarray(bmin_a, dtype=float)
     bmax_a = np.asarray(bmax_a, dtype=float)
@@ -1020,7 +1023,7 @@ def _detect_collision_pairs(
     pose_dict: Dict[str, np.ndarray],
     object_to_group: Dict[str, str],
     relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]] = None,
-    separation_margin: float = 0.02,
+    separation_margin: float = DEFAULT_OBJECT_CLEARANCE_M,
 ):
     results = []
     ids = list(mesh_dict.keys())
@@ -1271,7 +1274,7 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
     A_ub, b_ub = [], []
     A_eq, b_eq = [], []
     relation_terms = []
-    clearance = 0.03
+    clearance = DEFAULT_OBJECT_CLEARANCE_M
 
     def add_ub(coeffs: Dict[int, float], rhs: float):
         row = np.zeros(2 * len(group_ids), dtype=float)
@@ -1348,16 +1351,16 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             src_half = group_half_extents.get(src_gid, np.zeros(2, dtype=np.float64))
             tgt_half = group_half_extents.get(tgt_gid, np.zeros(2, dtype=np.float64))
             if rel_type == "left_of":
-                gap = float(src_half[0] + tgt_half[0])
+                gap = float(src_half[0] + tgt_half[0] + clearance)
                 add_ub({2 * src_i: 1.0, 2 * tgt_j: -1.0}, -gap)
             elif rel_type == "right_of":
-                gap = float(src_half[0] + tgt_half[0])
+                gap = float(src_half[0] + tgt_half[0] + clearance)
                 add_ub({2 * tgt_j: 1.0, 2 * src_i: -1.0}, -gap)
             elif rel_type == "front_of":
-                gap = float(src_half[1] + tgt_half[1])
+                gap = float(src_half[1] + tgt_half[1] + clearance)
                 add_ub({2 * src_i + 1: 1.0, 2 * tgt_j + 1: -1.0}, -gap)
             elif rel_type == "back_of":
-                gap = float(src_half[1] + tgt_half[1])
+                gap = float(src_half[1] + tgt_half[1] + clearance)
                 add_ub({2 * tgt_j + 1: 1.0, 2 * src_i + 1: -1.0}, -gap)
             else:
                 gap = clearance
@@ -1447,7 +1450,7 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
 
     max_rounds = 8
     max_added_pairs = 64
-    collision_margin = 0.02
+    collision_margin = DEFAULT_OBJECT_CLEARANCE_M
 
     seen_pair_keys = set()
     collision_terms_history: List[Dict[str, Any]] = []
