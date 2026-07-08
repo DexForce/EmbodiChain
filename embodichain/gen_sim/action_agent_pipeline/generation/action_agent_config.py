@@ -1434,12 +1434,8 @@ def _build_relative_placement_bundle(
         for placement in spec.placements
         if placement.intent in {"place_relative", "coordinated_pickment"}
     }
-    moved_runtime_uids = {
-        placement.moved_runtime_uid for placement in spec.placements
-    }
-    registered_runtime_uids = sorted(
-        uid for uid in (moved_runtime_uids | reference_runtime_uids) if uid != "table"
-    )
+    moved_runtime_uids = {placement.moved_runtime_uid for placement in spec.placements}
+    registered_runtime_uids = sorted(moved_runtime_uids | reference_runtime_uids)
     dynamic_rigid_objects = [
         obj for obj in scene_objects if obj.source_uid != spec.table_source_uid
     ]
