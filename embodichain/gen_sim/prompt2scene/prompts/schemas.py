@@ -392,7 +392,7 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
             "description": (
                 "Existing scene object ids that should be removed. This includes "
                 "objects removed by delete operations and objects replaced by new "
-                "generated objects."
+                "generated objects. Move operations must not appear here."
             ),
             "items": {"type": "string", "minLength": 1},
         },
@@ -452,12 +452,12 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "type": {
                         "type": "string",
-                        "enum": ["delete", "replace", "add"],
+                            "enum": ["delete", "replace", "add", "move"],
                     },
                     "target_object_id": {
                         "type": "string",
                         "description": (
-                            "Existing object id for delete/replace, or empty "
+                            "Existing object id for delete/replace/move, or empty "
                             "string for pure add."
                         ),
                     },
@@ -465,7 +465,7 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                         "type": "string",
                         "description": (
                             "Generated object temp_id for add/replace, or empty "
-                            "string for delete."
+                            "string for delete/move."
                         ),
                     },
                     "placement": {

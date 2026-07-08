@@ -279,6 +279,7 @@ def optimize_edit_layout_node(
         "existing_scene_state_path": scene_state_value,
         "generated_asset_count": len(generated_asset_items),
         "deleted_object_ids": layout.get("deleted_object_ids", []),
+        "moved_object_ids": layout.get("moved_object_ids", []),
         "support_region": layout.get("support_region", {}),
         "layout_updates": layout.get("layout_updates", []),
         "optimization": layout.get("optimization", {}),

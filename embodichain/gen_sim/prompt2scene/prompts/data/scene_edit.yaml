@@ -3,23 +3,32 @@ intent_system: |
 
   You receive:
   - A user edit prompt.
-  - Existing scene objects. Each object has only id, name, and description.
+  - Existing scene objects. Each object has id, name, description, and when available center_xy.
 
   Your job is to produce a structured edit intent. Do not generate geometry.
 
   Rules:
   - Existing objects must be referenced only by their exact object id.
+  - center_xy uses tabletop XY coordinates in meters.
+  - left means smaller X. right means larger X. front means smaller Y. back means larger Y.
+  - When the user uses positional qualifiers among repeated similar objects, resolve them using center_xy: leftmost/smaller-left = smallest X, rightmost = largest X, frontmost = smallest Y, backmost = largest Y.
+  - When the user says "left side of object A", the new or moved object should be left_of object A. "right side" means right_of, "front side" means front_of, and "back side" means back_of.
+  - If two or more candidate objects remain ambiguous after using name, description, and center_xy, put the ambiguity in unresolved instead of guessing.
   - deleted_object_ids may contain only ids from the existing scene objects.
   - A replacement is represented as deleting the target object and adding one generated object.
+  - A move operation repositions an existing object without generating geometry, deleting it, or changing its id.
   - Every added or replacement object must appear in generated_objects with a temp_id, canonical snake_case name, and standalone detailed description suitable for text-to-geometry simready generation.
+  - Move operations must not appear in generated_objects and must not add the moved object id to deleted_object_ids.
   - For delete operations, identify only the existing object ids to delete.
   - For replacement operations, set type=replace, set target_object_id to the existing object being replaced, create exactly one generated object, and set placement.type=preserve_target unless the user gives an explicit new placement.
   - For add operations, infer placement from the user prompt when possible.
+  - For move operations, set type=move, set target_object_id to the existing object being moved, set new_object_temp_id="", and infer placement from the user prompt when possible.
+  - If the user asks to move an existing object but gives no destination, relation, grid, or direction, set placement.type=random.
   - Layout may be expressed either as a relation to an existing object or as a 9-grid location.
   - A 9-grid location means the object's center or main tabletop footprint should be placed in one of the nine regions of the table support region split in XY: center, front, back, left_center, right_center, left_front, right_front, left_back, right_back. It is not a grid on the object itself.
   - For relative layout, use placement.type=relative_to_object, exact reference_object_id, and one of left_of, right_of, front_of, or back_of.
   - For 9-grid layout, use placement.type=grid and one of: center, front, back, left_center, right_center, left_front, right_front, left_back, right_back.
-  - Do not compute the final relation closure yourself. The program will remove deleted ids, inherit replacement layout, normalize right/back, preserve unaffected relations, add new layout, and compute transitive closure.
+  - Do not compute the final relation closure yourself. The program will remove deleted ids, cancel moved-object old layout constraints, inherit replacement layout, normalize right/back, preserve unaffected relations, add new layout, and compute transitive closure.
   - Do not invent a target object when the prompt is ambiguous. Put the ambiguity in unresolved.
   - If an operation cannot be grounded to an existing target or reference object, keep it unresolved instead of guessing.
   - The top-level key reason is required.
@@ -115,6 +124,127 @@ intent_system: |
     "reason": "Add a new mug at the left_front region of the table support area."
   }
 
+  Example 3:
+  Existing scene objects:
+  [
+    {
+      "id": "interact_plastic_water_bottle_0",
+      "name": "plastic_water_bottle",
+      "description": "A clear plastic water bottle with a white cap.",
+      "center_xy": [-0.18, 0.05]
+    },
+    {
+      "id": "interact_plastic_water_bottle_1",
+      "name": "plastic_water_bottle",
+      "description": "A clear plastic water bottle with a blue cap.",
+      "center_xy": [0.16, 0.04]
+    }
+  ]
+  User prompt:
+  add a red apple on the left side of the left bottle
+  Output:
+  {
+    "deleted_object_ids": [],
+    "generated_objects": [
+      {
+        "temp_id": "new_red_apple_0",
+        "name": "red_apple",
+        "description": "A red apple with smooth glossy skin, a round body, and a short brown stem.",
+        "source_operation": "add"
+      }
+    ],
+    "operations": [
+      {
+        "type": "add",
+        "target_object_id": "",
+        "new_object_temp_id": "new_red_apple_0",
+        "placement": {
+          "type": "relative_to_object",
+          "reference_object_id": "interact_plastic_water_bottle_0",
+          "relation": "left_of",
+          "grid": ""
+        },
+        "reason": "Both bottles have the same name, so the left bottle is the one with the smaller center_xy X value. The apple should be placed on its left side.",
+        "confidence": 0.95
+      }
+    ],
+    "unresolved": [],
+    "reason": "Add a new red apple to the left side of the leftmost bottle."
+  }
+
+  Example 4:
+  Existing scene objects:
+  [
+    {
+      "id": "interact_red_mug_0",
+      "name": "red_mug",
+      "description": "A red ceramic mug with a side handle."
+    },
+    {
+      "id": "interact_spiral_notebook_0",
+      "name": "spiral_notebook",
+      "description": "A spiral-bound notebook with a tan cover and black binding."
+    }
+  ]
+  User prompt:
+  move the red mug next to the notebook
+  Output:
+  {
+    "deleted_object_ids": [],
+    "generated_objects": [],
+    "operations": [
+      {
+        "type": "move",
+        "target_object_id": "interact_red_mug_0",
+        "new_object_temp_id": "",
+        "placement": {
+          "type": "relative_to_object",
+          "reference_object_id": "interact_spiral_notebook_0",
+          "relation": "right_of",
+          "grid": ""
+        },
+        "reason": "The user asks to move the existing red mug next to the notebook without changing the object itself.",
+        "confidence": 0.93
+      }
+    ],
+    "unresolved": [],
+    "reason": "Move the existing red mug to a new placement relative to the notebook."
+  }
+
+  Example 5:
+  Existing scene objects:
+  [
+    {
+      "id": "interact_red_mug_0",
+      "name": "red_mug",
+      "description": "A red ceramic mug with a side handle."
+    }
+  ]
+  User prompt:
+  move the mug
+  Output:
+  {
+    "deleted_object_ids": [],
+    "generated_objects": [],
+    "operations": [
+      {
+        "type": "move",
+        "target_object_id": "interact_red_mug_0",
+        "new_object_temp_id": "",
+        "placement": {
+          "type": "random",
+          "reference_object_id": "",
+          "relation": "",
+          "grid": ""
+        },
+        "reason": "The user asks to move the existing mug but does not specify a destination.",
+        "confidence": 0.9
+      }
+    ],
+    "unresolved": [],
+    "reason": "Move the existing mug to a random valid tabletop position."
+  }
+
 intent_user: |
   User edit prompt:
   ${prompt}
@@ -124,6 +254,7 @@ intent_user: |
 
   Produce the scene edit intent. Remember:
   - deleted_object_ids includes both explicitly deleted objects and replaced old objects.
-  - generated_objects includes every new object needed by add or replace operations.
+  - generated_objects includes every new object needed by add or replace operations, and excludes move operations.
   - operations must contain enough placement information for the program to update relations and 9-grid assignments.
+  - Existing-object movement must use type=move, target_object_id, empty new_object_temp_id, and random placement when no destination is specified.
   - The required keys must all be present, including top-level reason, generated_objects[].source_operation, operations[].reason, operations[].confidence, and unresolved[].reason when unresolved is non-empty.
