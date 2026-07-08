@@ -42,6 +42,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _right_target_text,
     _target_task_description_text,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    DEFAULT_ROBOT_PROFILE_ID,
+    RobotProfile,
+    resolve_robot_profile,
+)
 
 __all__ = [
     "_make_background_config",
@@ -465,7 +470,10 @@ def _joint_pattern_count(pattern: str) -> int:
 def _make_dataset_config(
     project_name: str,
     roles: _BasketTaskRoles,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     left_target_text = _left_target_text(roles)
     right_target_text = _right_target_text(roles)
     target_description = _target_task_description_text(roles)
@@ -475,21 +483,22 @@ def _make_dataset_config(
             "mode": "save",
             "params": {
                 "robot_meta": {
-                    "robot_type": "DualUR5",
+                    "robot_type": profile.robot_meta_type,
                     "control_freq": 25,
                 },
                 "instruction": {
                     "lang": (
-                        f"Use the left UR5 to place the left {left_target_text} into "
+                        f"Use the left arm to place the left {left_target_text} into "
                         f"the {roles.container_runtime_uid}, then use the right "
-                        f"UR5 to place the right {right_target_text} into the "
+                        f"arm to place the right {right_target_text} into the "
                         f"{roles.container_runtime_uid}."
                     ),
                 },
                 "extra": {
                     "scene_type": project_name,
                     "task_description": (
-                        f"Dual UR5 {target_description}-to-container placement"
+                        f"{profile.display_name} {target_description}-to-container "
+                        "placement"
                     ),
                     "data_type": "sim",
                 },
@@ -503,20 +512,23 @@ def _make_relative_dataset_config(
     project_name: str,
     spec: _RelativePlacementSpec,
     *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     relation_phrase: Callable[[str], str],
 ) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     return {
         "lerobot": {
             "func": "LeRobotRecorder",
             "mode": "save",
             "params": {
                 "robot_meta": {
-                    "robot_type": "DualUR5",
+                    "robot_type": profile.robot_meta_type,
                     "control_freq": 25,
                 },
                 "instruction": {
                     "lang": _relative_dataset_instruction(
                         spec,
+                        robot_profile=profile,
                         relation_phrase=relation_phrase,
                     ),
                 },
@@ -534,14 +546,17 @@ def _make_relative_dataset_config(
 def _make_arrangement_dataset_config(
     project_name: str,
     spec: _ArrangementLineSpec,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     return {
         "lerobot": {
             "func": "LeRobotRecorder",
             "mode": "save",
             "params": {
                 "robot_meta": {
-                    "robot_type": "DualUR5",
+                    "robot_type": profile.robot_meta_type,
                     "control_freq": 25,
                 },
                 "instruction": {
@@ -569,18 +584,20 @@ def _arrangement_dataset_instruction(spec: _ArrangementLineSpec) -> str:
 def _relative_dataset_instruction(
     spec: _RelativePlacementSpec,
     *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     relation_phrase: Callable[[str], str],
 ) -> str:
+    profile = resolve_robot_profile(robot_profile)
     if spec.intent == "coordinated_pickment":
         return (
-            "Use both UR5 arms to pick up "
+            f"Use both {profile.display_name} arms to pick up "
             f"{spec.moved_runtime_uid} and move it "
             f"{relation_phrase(spec.relation)} "
             f"{spec.reference_runtime_uid}."
         )
     if spec.intent == "hold_hover":
         return " ".join(
-            f"Use the {placement.active_side} UR5 to pick up "
+            f"Use the {placement.active_side} arm to pick up "
             f"{placement.moved_runtime_uid} and keep it hovering in a closed "
             "gripper."
             for placement in spec.placements
@@ -588,13 +605,13 @@ def _relative_dataset_instruction(
     if len(spec.placements) == 1:
         placement = spec.placements[0]
         return (
-            f"Use the {placement.active_side} UR5 to move "
+            f"Use the {placement.active_side} arm to move "
             f"{placement.moved_runtime_uid} "
             f"{relation_phrase(placement.relation)} "
             f"{placement.reference_runtime_uid}."
         )
     return " ".join(
-        f"Use the {placement.active_side} UR5 to move "
+        f"Use the {placement.active_side} arm to move "
         f"{placement.moved_runtime_uid} "
         f"{relation_phrase(placement.relation)} "
         f"{placement.reference_runtime_uid}."

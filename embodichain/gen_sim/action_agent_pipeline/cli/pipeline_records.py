@@ -196,6 +196,7 @@ def build_pipeline_record(
             repo_root,
         ),
         "pipeline_history_path": _record_path(history_path, repo_root),
+        "robot_profile": getattr(args, "robot_profile", None),
         "target_body_scale": args.target_body_scale,
         "target_body_scale_mode": getattr(args, "target_body_scale_mode", None),
         "inside_container_slot_distance_scale": (

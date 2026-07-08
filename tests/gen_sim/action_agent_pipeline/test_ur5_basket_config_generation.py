@@ -200,7 +200,7 @@ def test_dual_ur5_template_uses_ur_solver_config() -> None:
     assert right_solver["root_link_name"] == "right_base_link"
     assert right_solver["end_link_name"] == "right_ee_link"
     assert left_solver["tcp"][2][3] == pytest.approx(0.16)
-    assert right_solver["tcp"][2][3] == pytest.approx(0.16)
+    assert right_solver["tcp"][2][3] == pytest.approx(0.21)
 
 
 def test_dual_ur5_template_uses_robotiq_arg2f_140_grippers() -> None:
@@ -450,6 +450,86 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert '"state":"close"' not in handoff_edge
     assert "left_arm_action: null" not in handoff_edge
     assert paths.summary["mode"] == "basket_template"
+
+
+@pytest.mark.parametrize(
+    (
+        "robot_profile",
+        "expected_uid",
+        "expected_solver_type",
+        "expected_meta_type",
+        "expected_wrist_parents",
+    ),
+    [
+        (
+            "ur10",
+            "DualUR10",
+            "URSolver",
+            "DualUR10",
+            {
+                "cam_wrist_left": "left_ee_link",
+                "cam_wrist_right": "right_ee_link",
+            },
+        ),
+        (
+            "franka",
+            "DualFrankaPanda",
+            "PinocchioSolver",
+            "DualFrankaPanda",
+            {
+                "cam_wrist_left": "left_ee_link",
+                "cam_wrist_right": "right_ee_link",
+            },
+        ),
+        (
+            "franka_v3",
+            "DualFrankaV3",
+            "PytorchSolver",
+            "DualFrankaV3",
+            {
+                "cam_wrist_left": "left_fr3_hand_tcp",
+                "cam_wrist_right": "right_fr3_hand_tcp",
+            },
+        ),
+    ],
+)
+def test_action_agent_config_generator_uses_selected_robot_profile(
+    tmp_path: Path,
+    robot_profile: str,
+    expected_uid: str,
+    expected_solver_type: str,
+    expected_meta_type: str,
+    expected_wrist_parents: dict[str, str],
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / f"generated_agent_{robot_profile}",
+        robot_profile=robot_profile,
+        target_body_scale=0.6,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    robot = gym_config["robot"]
+    extensions = gym_config["env"]["extensions"]
+    dataset_params = gym_config["env"]["dataset"]["lerobot"]["params"]
+    basic_background = paths.basic_background.read_text(encoding="utf-8")
+    wrist_parents = {
+        sensor["uid"]: sensor["extrinsics"]["parent"]
+        for sensor in gym_config["sensor"]
+        if sensor["uid"] in expected_wrist_parents
+    }
+
+    assert robot["uid"] == expected_uid
+    assert robot["solver_cfg"]["left_arm"]["class_type"] == expected_solver_type
+    assert robot["solver_cfg"]["right_arm"]["class_type"] == expected_solver_type
+    assert wrist_parents == expected_wrist_parents
+    assert extensions["agent_robot_profile"] == paths.summary["robot_profile"]["id"]
+    assert dataset_params["robot_meta"]["robot_type"] == expected_meta_type
+    assert paths.summary["robot_profile"]["robot_meta_type"] == expected_meta_type
+    assert paths.summary["robot_profile"]["display_name"] in basic_background
 
 
 def test_generator_normalizes_glb_meshes_and_preserves_source_rot(

@@ -140,6 +140,7 @@ def _run_pipeline(
             output_dir=args.config_output_dir,
             task_name=args.task_name,
             task_description=task_description,
+            robot_profile=getattr(args, "robot_profile", None),
             target_body_scale=effective_target_body_scale,
             source_scene_body_scale_mode=source_scene_body_scale_mode,
             preserve_source_scene_geometry=uses_prompt2scene_alignment,

@@ -19,15 +19,17 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.generation.arm_binding import (
-    make_dual_ur5_arm_slot_config,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
     _BasketTaskRoles,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
     _StackingSpec,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    DEFAULT_ROBOT_PROFILE_ID,
+    RobotProfile,
+    resolve_robot_profile,
 )
 
 __all__ = [
@@ -43,15 +45,15 @@ __all__ = [
     "_validate_success_uids",
 ]
 
-_ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-_ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
 
-
-def _make_extensions_config(roles: _BasketTaskRoles) -> dict[str, Any]:
+def _make_extensions_config(
+    roles: _BasketTaskRoles,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     return {
-        **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
-        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
+        **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": {
@@ -81,15 +83,19 @@ def _object_in_container_success(object_uid: str, container_uid: str) -> dict[st
     }
 
 
+def _make_dual_ur5_arm_slot_config() -> dict[str, Any]:
+    return resolve_robot_profile("dual_ur5").runtime_extensions()
+
+
 def _make_relative_extensions_config(
     spec: _RelativePlacementSpec,
     *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     extensions = {
-        **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
-        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
+        **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": _make_relative_success_spec(
@@ -103,22 +109,28 @@ def _make_relative_extensions_config(
     return extensions
 
 
-def _make_arrangement_extensions_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
+def _make_arrangement_extensions_config(
+    spec: _ArrangementLineSpec,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     return {
-        **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
-        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
+        **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": _make_arrangement_success_spec(spec),
     }
 
 
-def _make_stacking_extensions_config(spec: _StackingSpec) -> dict[str, Any]:
+def _make_stacking_extensions_config(
+    spec: _StackingSpec,
+    *,
+    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+) -> dict[str, Any]:
+    profile = resolve_robot_profile(robot_profile)
     return {
-        **make_dual_ur5_arm_slot_config(),
-        "gripper_open_state": list(_ROBOTIQ_ARG2F_140_OPEN_QPOS),
-        "gripper_close_state": list(_ROBOTIQ_ARG2F_140_CLOSE_QPOS),
+        **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": "cam_high",
         "agent_success": _make_stacking_success_spec(spec),
@@ -400,8 +412,7 @@ def _validate_bundle(bundle: Mapping[str, Any], roles: _BasketTaskRoles) -> None
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != "AtomicActionsAgent-v3":
         raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
-    if gym_config.get("robot", {}).get("uid") != "DualUR5":
-        raise ValueError("Generated UR5 basket config must use DualUR5.")
+    _validate_robot_control_parts(gym_config)
 
     rigid_uids = {obj["uid"] for obj in gym_config.get("rigid_object", [])}
     background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
@@ -435,8 +446,7 @@ def _validate_relative_bundle(
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != "AtomicActionsAgent-v3":
         raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
-    if gym_config.get("robot", {}).get("uid") != "DualUR5":
-        raise ValueError("Generated relative placement config must use DualUR5.")
+    _validate_robot_control_parts(gym_config)
 
     rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
     if len(rigid_uid_list) != len(set(rigid_uid_list)):
@@ -482,8 +492,7 @@ def _validate_arrangement_bundle(
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != "AtomicActionsAgent-v3":
         raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
-    if gym_config.get("robot", {}).get("uid") != "DualUR5":
-        raise ValueError("Generated arrangement config must use DualUR5.")
+    _validate_robot_control_parts(gym_config)
 
     rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
     if len(rigid_uid_list) != len(set(rigid_uid_list)):
@@ -518,8 +527,7 @@ def _validate_stacking_bundle(
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != "AtomicActionsAgent-v3":
         raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
-    if gym_config.get("robot", {}).get("uid") != "DualUR5":
-        raise ValueError("Generated stacking config must use DualUR5.")
+    _validate_robot_control_parts(gym_config)
 
     rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
     if len(rigid_uid_list) != len(set(rigid_uid_list)):
@@ -545,6 +553,30 @@ def _validate_stacking_bundle(
         raise ValueError(
             f"Stacking config registry missing: {sorted(required - registered)}"
         )
+
+
+def _validate_robot_control_parts(gym_config: Mapping[str, Any]) -> None:
+    robot_config = gym_config.get("robot", {})
+    if not isinstance(robot_config, Mapping):
+        raise ValueError("Generated gym config robot must be a mapping.")
+    control_parts = robot_config.get("control_parts")
+    if not isinstance(control_parts, Mapping):
+        raise ValueError("Generated robot config must define control_parts.")
+    extensions = gym_config.get("env", {}).get("extensions", {})
+    arm_slots = extensions.get("agent_arm_slots", {})
+    if not isinstance(arm_slots, Mapping):
+        raise ValueError("Generated env extensions must define agent_arm_slots.")
+    for side in ("left", "right"):
+        slot = arm_slots.get(side)
+        if not isinstance(slot, Mapping):
+            raise ValueError(f"agent_arm_slots must define {side!r}.")
+        for field_name in ("arm", "eef"):
+            control_part = slot.get(field_name)
+            if control_part not in control_parts:
+                raise ValueError(
+                    f"agent_arm_slots[{side!r}][{field_name!r}] references "
+                    f"unknown control part {control_part!r}."
+                )
 
 
 def _validate_success_uids(

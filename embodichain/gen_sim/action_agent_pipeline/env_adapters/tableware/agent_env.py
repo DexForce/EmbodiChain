@@ -426,6 +426,10 @@ class AgenticGenSimEnv(EmbodiedEnv):
             if key in kwargs:
                 atomic_action_kwargs[key] = kwargs[key]
         compile_kwargs.update(atomic_action_kwargs)
+        grasp_runtime_defaults = getattr(self, "agent_grasp_runtime_defaults", None)
+        if isinstance(grasp_runtime_defaults, Mapping):
+            for key, value in grasp_runtime_defaults.items():
+                compile_kwargs.setdefault(str(key), value)
         with timing_scope(
             "action_agent.execute_compiled_graph",
             metadata={

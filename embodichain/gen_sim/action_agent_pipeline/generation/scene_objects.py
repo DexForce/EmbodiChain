@@ -51,7 +51,7 @@ __all__ = [
 _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
-_DUAL_UR5_SIDE_AXIS_INDEX = 1
+_ROBOT_VIEW_SIDE_AXIS_INDEX = 1
 
 
 def _resolve_gym_config_path(input_path: Path) -> Path:
@@ -148,10 +148,10 @@ def _infer_basket_task_roles(scene_objects: list[_SceneObject]) -> _BasketTaskRo
     ]
     rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
     if not background_objects:
-        raise ValueError("UR5 basket generation requires a table/background object.")
+        raise ValueError("Basket generation requires a table/background object.")
     if len(rigid_objects) < 3:
         raise ValueError(
-            "UR5 basket generation requires at least two target objects and one "
+            "Basket generation requires at least two target objects and one "
             "basket-like container."
         )
 
@@ -249,7 +249,7 @@ def _side_axis_value(obj: _SceneObject) -> float:
 
 
 def _position_side_axis_value(position: list[float]) -> float:
-    return -float(position[_DUAL_UR5_SIDE_AXIS_INDEX])
+    return -float(position[_ROBOT_VIEW_SIDE_AXIS_INDEX])
 
 
 def _arm_side_for_position(position: list[float]) -> str:

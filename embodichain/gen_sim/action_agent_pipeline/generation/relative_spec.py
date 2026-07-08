@@ -301,7 +301,7 @@ def _call_relative_task_llm(
     )
 
     prompt = (
-        "Parse a simple Dual-UR5 tabletop relative-placement task and produce "
+        "Parse a simple dual-arm tabletop relative-placement task and produce "
         "a constrained config-level JSON spec. This JSON is used to generate "
         "task_prompt.txt, basic_background.txt, atom_actions.txt, and "
         "agent_success; a second LLM will later read those prompts to generate "
@@ -351,10 +351,10 @@ def _call_relative_task_llm(
         "- For dual-arm tasks, the placements must use two different moved_object "
         "values and one left arm plus one right arm. Use arm='auto' only when "
         "the user did not specify which arm handles that placement.\n"
-        "- arm selects the single UR5 arm that should manipulate moved_object. "
+        "- arm selects the single robot arm that should manipulate moved_object. "
         "Use arm='left' for explicit left-arm instructions such as 左臂, 左机械臂, "
-        "left arm, or left UR5; use arm='right' for explicit right-arm "
-        "instructions such as 右臂, 右机械臂, right arm, or right UR5; use "
+        "left arm, or left robot arm; use arm='right' for explicit right-arm "
+        "instructions such as 右臂, 右机械臂, right arm, or right robot arm; use "
         "arm='auto' when the task does not specify an arm.\n"
         "- For Chinese/English left/right/front/back, use the relation enums "
         "from the rotated robot-view perspective. front_of means positive "
@@ -424,7 +424,7 @@ def _call_object_manipulation_task_llm(
     )
 
     prompt = (
-        "Parse a simple Dual-UR5 tabletop object-manipulation task and produce "
+        "Parse a simple dual-arm tabletop object-manipulation task and produce "
         "one constrained config-level JSON spec. The generator computes offsets, "
         "robot config, success JSON, and action prompts deterministically.\n\n"
         "Return exactly one JSON object with this schema:\n"
@@ -1230,15 +1230,15 @@ def _default_relative_plan_summary(
         )
     if all(placement.intent == "hold_hover" for placement in placements):
         held = ", ".join(placement.moved_runtime_uid for placement in placements)
-        return f"Use both UR5 arms to pick up and hold hovering objects: {held}."
+        return f"Use both robot arms to pick up and hold hovering objects: {held}."
     placement_text = "; ".join(
-        f"use the {placement.active_side} UR5 to move "
+        f"use the {placement.active_side} arm to move "
         f"`{placement.moved_runtime_uid}` "
         f"{_relative_relation_phrase(placement.relation)} "
         f"`{placement.reference_runtime_uid}`"
         for placement in placements
     )
-    return f"Use both UR5 arms for object manipulation: {placement_text}."
+    return f"Use both robot arms for object manipulation: {placement_text}."
 
 
 def _default_relative_action_sketch(
