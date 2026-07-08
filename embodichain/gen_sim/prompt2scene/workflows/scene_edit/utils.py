@@ -34,6 +34,7 @@ from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
     _bake_glb_bottom_center_to_origin,
     _render_scene_state_topdown,
+    _upright_frame_standardization_for_object,
 )
 from embodichain.gen_sim.prompt2scene.workflows.paths import PipelinePaths
 from embodichain.gen_sim.prompt2scene.agent_tools.tools.spatial_relations import (
@@ -1346,11 +1347,19 @@ def _build_generated_rigid_object(
             scale_factor = 1.0
     if not np.isfinite(scale_factor) or scale_factor <= 0.0:
         scale_factor = 1.0
-    _bake_glb_bottom_center_to_origin(
+    frame_standardization = _upright_frame_standardization_for_object(
+        object_id=object_id,
+        description=str(layout_item.get("description", "")).strip(),
+        mesh_path=simready_path,
+    )
+    frame_standardization_report = _bake_glb_bottom_center_to_origin(
         simready_path,
         object_dst,
         scale_factor=scale_factor,
+        upright_frame_standardization=frame_standardization,
     )
+    if frame_standardization_report is not None:
+        layout_item["mesh_frame_standardization"] = frame_standardization_report
     body_scale = [1.0, 1.0, 1.0]
     init_rot = [0.0, 0.0, 0.0]
     target_center = np.asarray(layout_item.get("center_xy", []), dtype=np.float64)
@@ -1406,7 +1415,7 @@ def _build_scene_state_object(
         center_xy=list(layout_item.get("center_xy", [0.0, 0.0])),
         size_xy=list(layout_item.get("size_xy", [0.0, 0.0])),
     )
-    return {
+    result = {
         "id": object_id,
         "name": str(layout_item.get("name", "")).strip() or object_id,
         "role": "interact",
@@ -1416,6 +1425,10 @@ def _build_scene_state_object(
         "body_scale": body_scale,
         "footprint_2d": footprint_2d,
     }
+    frame_standardization_report = layout_item.get("mesh_frame_standardization")
+    if isinstance(frame_standardization_report, dict):
+        result["mesh_frame_standardization"] = frame_standardization_report
+    return result
 
 
 def _scene_edit_center_xy(scene_object: dict[str, Any] | None) -> np.ndarray | None:

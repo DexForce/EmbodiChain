@@ -2168,8 +2168,13 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     assert sum(abs(value) for value in summary["pickup_upright_direction"]) == 1.0
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
-    extensions = gym_config["env"]["extensions"]
     moved_object = summary["moved_object"]
+    events = gym_config["env"]["events"]
+    registry = events["register_info_to_env"]["params"]["registry"]
+    registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
+    assert {moved_object, "table"}.issubset(registered_uids)
+
+    extensions = gym_config["env"]["extensions"]
     assert (
         extensions["agent_grasp_pose_overrides"][moved_object]["mode"]
         == "upright_bottle_side_grasp"
@@ -2270,6 +2275,11 @@ def test_dual_upright_in_place_supports_cup_like_objects(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    events = gym_config["env"]["events"]
+    registry = events["register_info_to_env"]["params"]["registry"]
+    registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
+    assert {"paper_cup", "soda_can", "table"}.issubset(registered_uids)
+
     extensions = gym_config["env"]["extensions"]
     assert set(extensions["agent_grasp_pose_overrides"]) == {
         "paper_cup",
