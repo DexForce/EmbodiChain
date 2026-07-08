@@ -46,12 +46,17 @@ from embodichain.gen_sim.action_agent_pipeline.cli.prompt2scene_stage import (
 )
 
 __all__ = [
+    "PROMPT2SCENE_PROJECT_MODES",
     "ProjectResolution",
     "resolve_gym_project",
     "resolve_task_description_for_generation",
 ]
 
 _DEFAULT_IMAGE_DIR = DEFAULT_IMAGE.parent
+_PROMPT2SCENE_EXISTING_PROJECT_MODE = "prompt2scene_existing_gym_project"
+PROMPT2SCENE_PROJECT_MODES = frozenset(
+    {"prompt2scene", _PROMPT2SCENE_EXISTING_PROJECT_MODE}
+)
 
 
 @dataclass(frozen=True)
@@ -92,16 +97,28 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
         project_path = Path(args.gym_project).expanduser().resolve()
         if not project_path.exists():
             raise FileNotFoundError(f"gym project not found: {project_path}")
-        if _has_prompt2scene_prompt(args):
-            output_root = _infer_prompt2scene_output_root(project_path)
-            setattr(args, "prompt2scene_output_root", str(output_root))
-            setattr(args, "prompt2scene_existing_gym_project", str(project_path))
-            return ProjectResolution(
-                path=run_prompt2scene_stage(args),
-                mode="prompt2scene",
+        prompt2scene_prompt = str(
+            getattr(args, "prompt2scene_prompt", "") or ""
+        ).strip()
+        if prompt2scene_prompt:
+            raise ValueError(
+                "--prompt2scene-prompt cannot be used with "
+                "--use-existing-gym-project. Use --use-prompt2scene with "
+                "--prompt2scene-output-root for prompt2scene edit/randomization."
             )
+        mode = (
+            _PROMPT2SCENE_EXISTING_PROJECT_MODE
+            if _is_prompt2scene_gym_export(project_path)
+            else "existing_gym_project"
+        )
         print(f"Using existing gym project: {project_path}", flush=True)
-        return ProjectResolution(path=project_path, mode="existing_gym_project")
+        if mode == _PROMPT2SCENE_EXISTING_PROJECT_MODE:
+            print(
+                "Detected prompt2scene gym_export; applying prompt2scene "
+                "action-agent alignment.",
+                flush=True,
+            )
+        return ProjectResolution(path=project_path, mode=mode)
 
     if args.use_image2scene:
         return ProjectResolution(
@@ -155,6 +172,21 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
     )
 
 
+def _is_prompt2scene_gym_export(path: Path) -> bool:
+    """Return true if *path* points at a prompt2scene exported gym project."""
+
+    candidates: list[Path] = []
+    if path.is_file():
+        candidates.append(path.parent)
+    else:
+        candidates.extend([path, path / "gym_export"])
+
+    return any(
+        (candidate / "scene_state" / "result.json").is_file()
+        for candidate in candidates
+    )
+
+
 def _resolve_base_history_entry(args: argparse.Namespace) -> dict[str, Any]:
     if args.base_history_index is not None and args.base_history_index <= 0:
         raise ValueError("--base-history-index must be a positive integer.")
@@ -195,34 +227,6 @@ def _resolve_base_history_entry(args: argparse.Namespace) -> dict[str, Any]:
             f"{args.base_task_name!r} in {history_path}"
         )
     return dict(max(candidates, key=history_entry_index))
-
-
-def _has_prompt2scene_prompt(args: argparse.Namespace) -> bool:
-    return bool(str(getattr(args, "prompt2scene_prompt", "") or "").strip())
-
-
-def _infer_prompt2scene_output_root(path: Path) -> Path:
-    path = path.expanduser().resolve()
-    if path.is_file():
-        if path.name != "gym_config.json" or path.parent.name != "gym_export":
-            raise ValueError(
-                "--gym-project with --prompt2scene-prompt must point to a "
-                "prompt2scene output_root, gym_export directory, or "
-                "gym_export/gym_config.json."
-            )
-        output_root = path.parent.parent
-    elif path.name == "gym_export":
-        output_root = path.parent
-    else:
-        output_root = path
-
-    scene_state = output_root / "gym_export" / "scene_state" / "result.json"
-    if not scene_state.is_file():
-        raise FileNotFoundError(
-            "--gym-project with --prompt2scene-prompt requires prompt2scene "
-            f"scene state: {scene_state}"
-        )
-    return output_root
 
 
 def _resolve_single_image(

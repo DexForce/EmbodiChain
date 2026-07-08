@@ -39,6 +39,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
     _SIDE_RELATIONS,
     _normalize_relative_relation,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    _arm_side_for_position,
+    _position_side_axis_value,
+)
 
 __all__ = [
     "_POSE_SENSITIVE_STAGING_Z_DELTA",
@@ -52,6 +56,7 @@ __all__ = [
     "_with_on_surface_release_offsets",
     "_with_inside_container_slot_offsets",
     "_with_coordinated_side_release_height_offsets",
+    "_with_final_auto_arm_sides",
     "_with_self_relative_absolute_targets",
 ]
 
@@ -154,6 +159,93 @@ def _with_self_relative_absolute_targets(
     )
 
 
+def _with_final_auto_arm_sides(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    if spec.intent == "coordinated_pickment" or not spec.placements:
+        return spec
+
+    placements = list(spec.placements)
+    auto_indices = [
+        index
+        for index, placement in enumerate(placements)
+        if placement.arm_request == "auto"
+        and placement.intent != "coordinated_pickment"
+    ]
+    if not auto_indices:
+        return spec
+
+    if len(placements) == 2 and len(auto_indices) == 1:
+        explicit_side = next(
+            placement.active_side
+            for index, placement in enumerate(placements)
+            if index not in auto_indices
+        )
+        placements[auto_indices[0]] = replace(
+            placements[auto_indices[0]],
+            active_side="right" if explicit_side == "left" else "left",
+        )
+        return _replace_relative_spec_placements(spec, tuple(placements))
+
+    object_positions = _generated_object_positions(gym_config)
+    inferred_sides = {
+        index: _arm_side_for_position(
+            _require_generated_object_position(
+                object_positions,
+                placements[index].moved_runtime_uid,
+            )
+        )
+        for index in auto_indices
+    }
+
+    if len(placements) == 2 and len(auto_indices) == 2:
+        sides = [inferred_sides[index] for index in auto_indices]
+        if set(sides) != {"left", "right"}:
+            side_values = [
+                _position_side_axis_value(
+                    _require_generated_object_position(
+                        object_positions,
+                        placements[index].moved_runtime_uid,
+                    )
+                )
+                for index in auto_indices
+            ]
+            sides = (
+                ["left", "right"]
+                if side_values[0] <= side_values[1]
+                else ["right", "left"]
+            )
+            inferred_sides = dict(zip(auto_indices, sides))
+
+    for index, active_side in inferred_sides.items():
+        placements[index] = replace(placements[index], active_side=active_side)
+    return _replace_relative_spec_placements(spec, tuple(placements))
+
+
+def _generated_object_positions(
+    gym_config: Mapping[str, Any],
+) -> dict[str, list[float]]:
+    return {
+        str(obj.get("uid")): _clean_vector3(obj.get("init_pos", [0.0, 0.0, 0.0]))
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+
+
+def _require_generated_object_position(
+    object_positions: Mapping[str, list[float]],
+    runtime_uid: str,
+) -> list[float]:
+    position = object_positions.get(runtime_uid)
+    if position is None:
+        raise ValueError(
+            "Generated relative config missing moved object "
+            f"{runtime_uid!r} for auto arm assignment."
+        )
+    return position
+
+
 def _with_self_relative_absolute_target(
     placement: _RelativePlacementStepSpec,
     generated_positions: Mapping[str, list[float]],
@@ -242,14 +334,40 @@ def _with_inside_container_slot_offsets(
 def _with_coordinated_side_release_height_offsets(
     spec: _RelativePlacementSpec,
     gym_config: Mapping[str, Any],
+    *,
+    table_reference_mode: str = "include",
 ) -> _RelativePlacementSpec:
     if spec.intent not in {"place_relative", "coordinated_pickment"}:
         return spec
     placements = tuple(
-        _with_coordinated_side_release_height_offset(placement, gym_config)
+        (
+            _with_coordinated_side_release_height_offset(placement, gym_config)
+            if _matches_table_reference_mode(
+                placement,
+                table_source_uid=spec.table_source_uid,
+                table_reference_mode=table_reference_mode,
+            )
+            else placement
+        )
         for placement in spec.placements
     )
     return _replace_relative_spec_placements(spec, placements)
+
+
+def _matches_table_reference_mode(
+    placement: _RelativePlacementStepSpec,
+    *,
+    table_source_uid: str,
+    table_reference_mode: str,
+) -> bool:
+    is_table_reference = placement.reference_source_uid == table_source_uid
+    if table_reference_mode == "include":
+        return True
+    if table_reference_mode == "skip":
+        return not is_table_reference
+    if table_reference_mode == "only":
+        return is_table_reference
+    raise ValueError(f"Unsupported table reference mode: {table_reference_mode!r}.")
 
 
 def _with_coordinated_side_release_height_offset(
@@ -274,7 +392,12 @@ def _with_coordinated_side_release_height_offset(
     release_offset = list(placement.release_offset)
     release_offset[2] = round(float(moved_origin[2] - reference_origin[2]), 6)
     high_offset = list(release_offset)
-    high_offset[2] = round(release_offset[2] + _STAGING_Z_DELTA, 6)
+    staging_z_delta = (
+        _POSE_SENSITIVE_STAGING_Z_DELTA
+        if placement.orientation_goal != "preserve"
+        else _STAGING_Z_DELTA
+    )
+    high_offset[2] = round(release_offset[2] + staging_z_delta, 6)
     return replace(
         placement,
         release_offset=release_offset,

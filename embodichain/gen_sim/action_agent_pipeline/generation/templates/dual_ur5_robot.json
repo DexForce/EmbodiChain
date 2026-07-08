@@ -1,7 +1,7 @@
 {
   "uid": "DualUR5",
   "urdf_cfg": {
-    "fname": "dual_ur5_dh_pgi_basket",
+    "fname": "dual_ur5_robotiq_arg2f_140_basket",
     "name_case": {
       "joint": "lower",
       "link": "lower"
@@ -19,7 +19,7 @@
       },
       {
         "component_type": "left_hand",
-        "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
       },
       {
         "component_type": "right_arm",
@@ -33,7 +33,7 @@
       },
       {
         "component_type": "right_hand",
-        "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
       }
     ]
   },
@@ -50,6 +50,14 @@
     -1.57,
     -1.57,
     -1.57,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
     0.0,
     0.0,
     0.0,
@@ -86,7 +94,14 @@
       "left_joint5",
       "left_joint6"
     ],
-    "left_eef": ["left_gripper_finger[1-2]_joint_1"],
+    "left_eef": [
+      "left_finger_joint",
+      "left_inner_knuckle_joint",
+      "left_inner_finger_joint",
+      "left_right_outer_knuckle_joint",
+      "left_right_inner_knuckle_joint",
+      "left_right_inner_finger_joint"
+    ],
     "right_arm": [
       "right_joint1",
       "right_joint2",
@@ -95,7 +110,14 @@
       "right_joint5",
       "right_joint6"
     ],
-    "right_eef": ["right_gripper_finger[1-2]_joint_1"]
+    "right_eef": [
+      "right_finger_joint",
+      "right_left_inner_knuckle_joint",
+      "right_left_inner_finger_joint",
+      "right_outer_knuckle_joint",
+      "right_inner_knuckle_joint",
+      "right_inner_finger_joint"
+    ]
   },
   "solver_cfg": {
     "left_arm": {
@@ -120,7 +142,7 @@
       "tcp": [
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.16],
+        [0.0, 0.0, 1.0, 0.21],
         [0.0, 0.0, 0.0, 1.0]
       ]
     }

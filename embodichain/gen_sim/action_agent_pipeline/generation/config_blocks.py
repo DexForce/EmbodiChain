@@ -57,6 +57,7 @@ __all__ = [
     "_make_extra_rigid_object_config",
     "_make_observations_config",
     "_make_container_background_config",
+    "_make_container_rigid_object_config",
     "_make_relative_background_object_config",
     "_make_relative_dataset_config",
     "_make_relative_events_config",
@@ -638,6 +639,24 @@ def _make_container_background_config(
     return config
 
 
+def _make_container_rigid_object_config(
+    scene_dir: Path,
+    obj: _SceneObject,
+    runtime_uid: str,
+    body_scale: Any,
+    mesh_normalizer: MeshFrameNormalizer | None,
+) -> dict[str, Any]:
+    config = _make_container_object_config(
+        scene_dir,
+        obj,
+        runtime_uid,
+        body_scale,
+        mesh_normalizer,
+    )
+    config["body_type"] = "dynamic"
+    return config
+
+
 def _make_relative_background_object_config(
     scene_dir: Path,
     obj: _SceneObject,
@@ -664,11 +683,12 @@ def _make_extra_rigid_object_config(
     obj: _SceneObject,
     body_scale: Any,
     mesh_normalizer: MeshFrameNormalizer | None,
+    runtime_uid: str | None = None,
 ) -> dict[str, Any]:
-    return _make_rigid_object_config(
+    config = _make_rigid_object_config(
         scene_dir,
         obj,
-        _normalize_runtime_uid(obj.source_uid),
+        runtime_uid or _normalize_runtime_uid(obj.source_uid),
         body_scale,
         max_convex_hull_num=_role_limited_max_convex_hull_num(
             obj,
@@ -676,6 +696,8 @@ def _make_extra_rigid_object_config(
         ),
         mesh_normalizer=mesh_normalizer,
     )
+    config["body_type"] = "dynamic"
+    return config
 
 
 def _make_relative_rigid_object_config(

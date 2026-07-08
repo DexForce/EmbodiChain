@@ -210,9 +210,9 @@ class _CoordinatedGraspPair:
 class _GraspRuntimeDefaults:
     antipodal_n_sample: int = 10000
     antipodal_max_angle: float = float(np.pi / 12)
-    max_open_length: float = 0.088
+    max_open_length: float = 0.14
     min_open_length: float = 0.003
-    finger_length: float = 0.078
+    finger_length: float = 0.13
     point_sample_dense: float = 0.012
     max_deviation_angle: float = float(np.pi / 6)
     viser_port: int = 11801
@@ -851,6 +851,8 @@ def build_parallel_action_stream(
             return result
         return actions
 
+    _validate_arm_action_slot(env, "left", left_arm_action)
+    _validate_arm_action_slot(env, "right", right_arm_action)
     left_arm_action = _resolve_action_spec(
         left_arm_action,
         env,
@@ -863,6 +865,8 @@ def build_parallel_action_stream(
         runtime_kwargs,
         state=world_states.get("right"),
     )
+    _validate_arm_action_slot(env, "left", left_arm_action)
+    _validate_arm_action_slot(env, "right", right_arm_action)
 
     left_action_np = _as_2d_action(
         _executed_action_array(left_arm_action),
@@ -995,6 +999,43 @@ def _executed_action_array(action):
     if isinstance(action, _ExecutedAtomicAction):
         return action.action
     return action
+
+
+def _validate_arm_action_slot(env, side: str, action) -> None:
+    robot_name = _arm_action_robot_name(action)
+    if _arm_action_control(action) == "coordinated" or robot_name is None:
+        return
+    action_side = resolve_arm_side(env, robot_name)
+    if action_side != side:
+        raise ValueError(
+            f"{side}_arm_action contains robot_name={robot_name!r}, "
+            f"which resolves to {action_side}_arm. Keep the outer graph slot "
+            "consistent with the semantic arm name."
+        )
+
+
+def _arm_action_robot_name(action) -> str | None:
+    if isinstance(action, _ExecutedAtomicAction):
+        return action.robot_name
+    if isinstance(action, AtomicActionSpec):
+        return action.robot_name
+    if isinstance(action, Mapping):
+        value = action.get("robot_name")
+        if value is not None:
+            return str(value)
+    return None
+
+
+def _arm_action_control(action) -> str | None:
+    if isinstance(action, _ExecutedAtomicAction):
+        return action.control
+    if isinstance(action, AtomicActionSpec):
+        return action.control
+    if isinstance(action, Mapping):
+        value = action.get("control")
+        if value is not None:
+            return str(value)
+    return None
 
 
 def _pop_coordinated_edge_action(left_arm_action, right_arm_action):

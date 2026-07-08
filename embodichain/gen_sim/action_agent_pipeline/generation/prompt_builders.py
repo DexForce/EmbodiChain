@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
@@ -195,6 +196,48 @@ def make_agent_config() -> dict[str, Any]:
     }
 
 
+def _format_runtime_object_registry(
+    object_registry: Sequence[Mapping[str, Any]] | None,
+) -> str:
+    if not object_registry:
+        return ""
+
+    lines = []
+    for item in object_registry:
+        runtime_uid = str(item.get("runtime_uid", "")).strip()
+        source_uid = str(item.get("source_uid", "")).strip()
+        if not runtime_uid or not source_uid:
+            continue
+        role = str(item.get("source_role", item.get("role", ""))).strip()
+        description = _one_line_registry_text(item.get("description", ""))
+        role_text = f", role `{role}`" if role else ""
+        description_text = (
+            json.dumps(description, ensure_ascii=False)
+            if description
+            else '"No source description."'
+        )
+        lines.append(
+            f"- runtime_uid `{runtime_uid}` maps to source_uid `{source_uid}`"
+            f"{role_text}; description: {description_text}"
+        )
+    if not lines:
+        return ""
+
+    return (
+        "\nRuntime object registry:\n" + "\n".join(lines) + "\n\nRegistry rules:\n"
+        "- Descriptions are read-only semantic hints for identifying objects.\n"
+        "- In every generated graph action, use only `runtime_uid` values as "
+        "`obj_name`, `align_to`, `support`, `support_uid`, and object pose "
+        "reference ids.\n"
+        "- Do not copy `source_uid`, `description`, or registry metadata into "
+        "the action JSON.\n"
+    )
+
+
+def _one_line_registry_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
 def make_arrangement_task_prompt(
     task_name: str,
     project_name: str,
@@ -203,11 +246,13 @@ def make_arrangement_task_prompt(
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
     resolve_robot_profile(robot_profile)
-    edge_count = len(spec.steps) * 7
-    step_blocks = "\n\n".join(
-        _arrangement_step_prompt_block(index, step)
-        for index, step in enumerate(spec.steps, start=1)
-    )
+    edge_count = sum(_arrangement_step_edge_count(step) for step in spec.steps)
+    edge_index = 1
+    step_blocks_list = []
+    for step in spec.steps:
+        step_blocks_list.append(_arrangement_step_prompt_block(edge_index, step))
+        edge_index += _arrangement_step_edge_count(step)
+    step_blocks = "\n\n".join(step_blocks_list)
     final_order = ", ".join(
         f"`{step.runtime_uid}` at slot {step.slot_index}" for step in spec.steps
     )
@@ -236,21 +281,22 @@ Use only the atomic action class JSON specs shown below. Do not add recovery,
 monitor, search, alignment, or extra lift edges beyond the listed steps. The
 absolute target object poses are collision-aware slots computed by the
 config-stage generator; do not rewrite them. First move each held object to the
-high staging pose with orientation preserved, then use `MoveHeldObject` at the
-same high pose to align its principal axis to the configured world axis, then
-move down to the final release object pose. The final release move includes an
-explicit surface `z_policy`; keep it exactly so the runtime resolver chooses a
-safe release height from the support surface and held-object geometry. Use the
-exact relative-zero release-only `Place` spec shown below, retreat the empty
-hand upward, then return that arm. The arm not listed for a step must remain
-null.
+high staging pose with orientation preserved. If a step has
+`orientation_goal:"preserve"`, move directly down to the final release object
+pose without adding a separate high-orientation/alignment edge. Only steps with
+an explicit non-preserve orientation goal may align at the same high pose before
+moving down. The final release move includes an explicit surface `z_policy`;
+keep it exactly so the runtime resolver chooses a safe release height from the
+support surface and held-object geometry. Use the exact relative-zero
+release-only `Place` spec shown below, retreat the empty hand upward, then
+return that arm. The arm not listed for a step must remain null.
 
 {step_blocks}
 
-Final state: all listed objects must rest near their assigned absolute XY slots
-with their principal axes aligned to the configured arrangement axis. Use the
-exact absolute target_object_pose JSON specs shown above; do not rewrite slot
-placement as object-referenced poses.
+Final state: all listed objects must rest near their assigned absolute XY slots.
+Only steps that explicitly request axis alignment should rotate the held object.
+Use the exact absolute target_object_pose JSON specs shown above; do not rewrite
+slot placement as object-referenced poses.
 """
 
 
@@ -268,9 +314,19 @@ def make_arrangement_task_graph(
 
 
 def _arrangement_world_axis(spec: _ArrangementSpecLike) -> str:
-    if not spec.steps:
-        return "y"
-    return spec.steps[0].orientation_axis
+    if len(spec.steps) >= 2:
+        x_values = [float(step.target_xy[0]) for step in spec.steps]
+        y_values = [float(step.target_xy[1]) for step in spec.steps]
+        x_span = max(x_values) - min(x_values)
+        y_span = max(y_values) - min(y_values)
+        return "x" if x_span >= y_span else "y"
+    if spec.axis == "world_x":
+        return "x"
+    return "y"
+
+
+def _arrangement_step_edge_count(step: _ArrangementStepLike) -> int:
+    return 6 if step.orientation_goal == "preserve" else 7
 
 
 def _arrangement_step_edge_blocks(
@@ -286,13 +342,6 @@ def _arrangement_step_edge_blocks(
         orientation_goal="preserve",
         orientation_axis="none",
     )
-    high_align_spec = _format_pose_absolute_spec(
-        active_arm,
-        step.high_position,
-        sample_interval=45,
-        orientation_goal=step.orientation_goal,
-        orientation_axis=step.orientation_axis,
-    )
     release_move_spec = _format_pose_absolute_spec(
         active_arm,
         step.release_position,
@@ -303,7 +352,7 @@ def _arrangement_step_edge_blocks(
         support="table",
         surface_clearance=_SURFACE_RELEASE_CLEARANCE,
     )
-    return [
+    blocks = [
         (
             f"Pick up `{step.runtime_uid}` for slot {step.slot_index}",
             {
@@ -319,51 +368,73 @@ def _arrangement_step_edge_blocks(
                 inactive_slot: None,
             },
         ),
-        (
-            f"Align `{step.runtime_uid}` at the high staging pose to the "
-            "configured arrangement axis",
-            {
-                active_slot: high_align_spec,
-                inactive_slot: None,
-            },
-        ),
-        (
-            f"Move `{step.runtime_uid}` down to the final release object pose "
-            f"at slot {step.slot_index}",
-            {
-                active_slot: release_move_spec,
-                inactive_slot: None,
-            },
-        ),
-        (
-            f"Release `{step.runtime_uid}` in-place without moving the object pose",
-            {
-                active_slot: _format_release_only_place_spec(active_arm),
-                inactive_slot: None,
-            },
-        ),
-        (
-            f"Retreat `{active_arm}` upward after release",
-            {
-                active_slot: _format_empty_hand_retreat_spec(active_arm),
-                inactive_slot: None,
-            },
-        ),
-        (
-            f"Return `{active_arm}` to its initial pose",
-            {
-                active_slot: _format_initial_qpos_spec(active_arm, sample_interval=30),
-                inactive_slot: None,
-            },
-        ),
     ]
+    if step.orientation_goal != "preserve":
+        blocks.append(
+            (
+                f"Align `{step.runtime_uid}` at the high staging pose to the "
+                "configured arrangement axis",
+                {
+                    active_slot: _format_pose_absolute_spec(
+                        active_arm,
+                        step.high_position,
+                        sample_interval=45,
+                        orientation_goal=step.orientation_goal,
+                        orientation_axis=step.orientation_axis,
+                    ),
+                    inactive_slot: None,
+                },
+            )
+        )
+    release_title = (
+        f"Move `{step.runtime_uid}` down to the final release object pose "
+        f"at slot {step.slot_index}"
+        if step.orientation_goal != "preserve"
+        else f"Move `{step.runtime_uid}` down to the final release object pose "
+        f"at slot {step.slot_index} without changing orientation"
+    )
+    blocks.extend(
+        [
+            (
+                release_title,
+                {
+                    active_slot: release_move_spec,
+                    inactive_slot: None,
+                },
+            ),
+            (
+                f"Release `{step.runtime_uid}` in-place without moving the object pose",
+                {
+                    active_slot: _format_release_only_place_spec(active_arm),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                f"Retreat `{active_arm}` upward after release",
+                {
+                    active_slot: _format_empty_hand_retreat_spec(active_arm),
+                    inactive_slot: None,
+                },
+            ),
+            (
+                f"Return `{active_arm}` to its initial pose",
+                {
+                    active_slot: _format_initial_qpos_spec(
+                        active_arm,
+                        sample_interval=30,
+                    ),
+                    inactive_slot: None,
+                },
+            ),
+        ]
+    )
+    return blocks
 
 
-def _arrangement_step_prompt_block(index: int, step: _ArrangementStepLike) -> str:
-    base_edge = (index - 1) * 7
+def _arrangement_step_prompt_block(start_edge: int, step: _ArrangementStepLike) -> str:
     return _format_indexed_edge_blocks(
         _arrangement_step_edge_blocks(step),
-        start_index=base_edge + 1,
+        start_index=start_edge,
     )
 
 
@@ -391,6 +462,7 @@ def make_arrangement_basic_background(
     spec: _ArrangementSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
@@ -399,6 +471,7 @@ def make_arrangement_basic_background(
     object_lines = "\n".join(
         _arrangement_object_background_line(step) for step in spec.steps
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} multi-object line arrangement
@@ -408,14 +481,16 @@ task generated from a simple natural-language task description.
 
 Interactive task objects and target slots:
 {object_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
 
 The execution-stage LLM should preserve each object's initial orientation while
-lifting to the high staging pose, align the held object to the configured
-arrangement world axis at that safe height, move down to the final object pose,
-release in place, retreat the empty hand upward, and then return the arm to its
+lifting to the high staging pose. For steps with `orientation_goal:"preserve"`,
+move directly down to the final object pose without a separate alignment move.
+Only steps with a non-preserve orientation goal should align at the high pose.
+After release, retreat the empty hand upward and then return the arm to its
 initial pose.
 """
 
@@ -445,8 +520,9 @@ def make_arrangement_atom_actions_prompt(
 
 Use only the native atomic action class JSON specs shown below. Each object is
 moved to an absolute collision-aware slot pose computed by the config-stage
-generator. Align at the high pose before moving down to the final object pose.
-Keep the non-active arm null for each listed object.
+generator. For steps with `orientation_goal:"preserve"`, move directly from the
+high pose to the final object pose without a high alignment move. Keep the
+non-active arm null for each listed object.
 
 {blocks}
 """
@@ -461,13 +537,6 @@ def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
         orientation_goal="preserve",
         orientation_axis="none",
     )
-    high_align_spec = _format_pose_absolute_spec(
-        active_arm,
-        step.high_position,
-        sample_interval=45,
-        orientation_goal=step.orientation_goal,
-        orientation_axis=step.orientation_axis,
-    )
     release_move_spec = _format_pose_absolute_spec(
         active_arm,
         step.release_position,
@@ -477,6 +546,27 @@ def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
         z_policy=_SURFACE_RELEASE_Z_POLICY,
         support="table",
         surface_clearance=_SURFACE_RELEASE_CLEARANCE,
+    )
+    if step.orientation_goal == "preserve":
+        return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
+- Pick up:
+  {_format_pick_up_spec(active_arm, step.runtime_uid)}
+- High staging without orientation change:
+  {high_preserve_spec}
+- Final release object pose without orientation change:
+  {release_move_spec}
+- Release-only Place:
+  {_format_release_only_place_spec(active_arm)}
+- Empty-hand retreat:
+  {_format_empty_hand_retreat_spec(active_arm)}
+- Return:
+  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
+    high_align_spec = _format_pose_absolute_spec(
+        active_arm,
+        step.high_position,
+        sample_interval=45,
+        orientation_goal=step.orientation_goal,
+        orientation_axis=step.orientation_axis,
     )
     return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
 - Pick up:
@@ -749,6 +839,7 @@ def make_stacking_basic_background(
     spec: _StackingSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
@@ -757,6 +848,7 @@ def make_stacking_basic_background(
     object_lines = "\n".join(
         _stacking_object_background_line(step) for step in spec.steps
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} stacking task
@@ -768,6 +860,7 @@ Stack mode: `{spec.stack_mode}` at table-center xy `{list(spec.anchor_xy)}`.
 
 Interactive task objects and stack layers:
 {object_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1807,6 +1900,7 @@ def make_relative_basic_background(
     spec: _RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     if spec.intent == "coordinated_pickment":
@@ -1814,18 +1908,21 @@ def make_relative_basic_background(
             project_name,
             spec,
             robot_profile=profile,
+            object_registry=object_registry,
         )
     if spec.intent == "hold_hover":
         return _make_hold_hover_basic_background(
             project_name,
             spec,
             robot_profile=profile,
+            object_registry=object_registry,
         )
     if len(spec.placements) > 1:
         return _make_dual_relative_basic_background(
             project_name,
             spec,
             robot_profile=profile,
+            object_registry=object_registry,
         )
 
     active_arm = f"{spec.active_side}_arm"
@@ -1833,6 +1930,7 @@ def make_relative_basic_background(
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} relative-placement
@@ -1846,6 +1944,7 @@ The active arm for this task is `{active_arm}`. The inactive arm
 Interactive task objects:
 - {spec.moved_runtime_uid}: moved object from source `{spec.moved_source_uid}`.
 - {_relative_reference_line(spec)}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1864,11 +1963,13 @@ def _make_coordinated_pickment_basic_background(
     spec: _RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} coordinated
@@ -1881,6 +1982,7 @@ place that action in `left_arm_action` and keep `right_arm_action` null.
 
 Interactive task object:
 - {spec.moved_runtime_uid}: shared moved object from source `{spec.moved_source_uid}`.
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1900,6 +2002,7 @@ def _make_dual_relative_basic_background(
     spec: _RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     if spec.intent == "hold_hover":
@@ -1907,6 +2010,7 @@ def _make_dual_relative_basic_background(
             project_name,
             spec,
             robot_profile=profile,
+            object_registry=object_registry,
         )
     notes = spec.basic_background_notes or (
         "No extra scene notes were provided by the config-stage LLM."
@@ -1917,6 +2021,7 @@ def _make_dual_relative_basic_background(
         f"`{placement.reference_runtime_uid}`."
         for placement in spec.placements
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} dual-arm
@@ -1927,6 +2032,7 @@ description.
 
 Both arms participate in the nominal graph:
 {placement_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -1947,6 +2053,7 @@ def _make_hold_hover_basic_background(
     spec: _RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     notes = spec.basic_background_notes or (
@@ -1957,6 +2064,7 @@ def _make_hold_hover_basic_background(
         f"handled by {placement.active_side}_arm, hover_height={placement.hover_height}."
         for placement in spec.placements
     )
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} object-manipulation
@@ -1966,6 +2074,7 @@ hold-hover task generated from a simple natural-language task description.
 
 Hold-hover task objects:
 {object_lines}
+{registry}
 
 Config-stage LLM notes:
 {notes}
@@ -2378,11 +2487,13 @@ def make_basket_basic_background(
     roles: _BasketRolesLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     left_target_text = _left_target_text(roles)
     right_target_text = _right_target_text(roles)
     target_plural = _target_plural_text(roles)
+    registry = _format_runtime_object_registry(object_registry)
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a basket-placement task template. The
@@ -2401,6 +2512,7 @@ The interactive objects are:
   negative-y side (source object {roles.right_target_source_uid}).
 - {roles.container_runtime_uid}: the target container near the center of the
   table (source object {roles.container_source_uid}).
+{registry}
 
 The nominal task starts with simultaneous dual-arm grasping. The left arm must
 grasp {roles.left_target_runtime_uid} while the right arm grasps
@@ -2924,7 +3036,8 @@ def _format_initial_qpos_spec(
 
 
 def _compact_json(value: Mapping[str, Any]) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return re.sub(r'("lift_height":)0\.3(?=}|,)', r"\g<1>0.30", text)
 
 
 def _format_action_sketch(action_sketch: list[str]) -> str:

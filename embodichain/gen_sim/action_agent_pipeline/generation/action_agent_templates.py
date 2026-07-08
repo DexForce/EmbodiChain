@@ -59,7 +59,7 @@ def make_dual_ur_dh_pgi_robot_config(
     ur_type: str,
     robot_init_z: float,
 ) -> dict[str, Any]:
-    """Return a fresh dual-UR + DH_PGI gripper config for the requested UR arm."""
+    """Return a fresh dual-UR + Robotiq gripper config for the requested UR arm."""
     ur_type = str(ur_type).lower()
     if ur_type not in _UR_URDF_DIRS:
         raise ValueError(
@@ -73,7 +73,7 @@ def make_dual_ur_dh_pgi_robot_config(
     display = ur_type.upper().replace("E", "e")
 
     config["uid"] = f"Dual{display}"
-    config["urdf_cfg"]["fname"] = f"dual_{ur_type}_dh_pgi_basket"
+    config["urdf_cfg"]["fname"] = f"dual_{ur_type}_robotiq_arg2f_140_basket"
     config["init_pos"][2] = float(robot_init_z)
 
     for component in config["urdf_cfg"]["components"]:

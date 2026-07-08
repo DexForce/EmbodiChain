@@ -37,6 +37,8 @@ _AGENT_RESERVED_KEYS = frozenset({"task_name", "config_dir"})
 _REQUIRED_AGENT_KWARGS = frozenset({"agent_config", "task_name"})
 _OPTIONAL_AGENT_KWARGS = frozenset({"agent_config_path"})
 _AGENT_KWARGS = _REQUIRED_AGENT_KWARGS | _OPTIONAL_AGENT_KWARGS
+_ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+_ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
 
 
 @register_env("AtomicActionsAgent-v3", max_episode_steps=600)
@@ -161,7 +163,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
             getattr(
                 self,
                 "agent_open_state",
-                getattr(self, "gripper_open_state", [0.05]),
+                getattr(self, "gripper_open_state", _ROBOTIQ_ARG2F_140_OPEN_QPOS),
             ),
             dtype=self.init_qpos.dtype,
             device=self.init_qpos.device,
@@ -170,7 +172,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
             getattr(
                 self,
                 "agent_close_state",
-                getattr(self, "gripper_close_state", [0.0]),
+                getattr(self, "gripper_close_state", _ROBOTIQ_ARG2F_140_CLOSE_QPOS),
             ),
             dtype=self.init_qpos.dtype,
             device=self.init_qpos.device,

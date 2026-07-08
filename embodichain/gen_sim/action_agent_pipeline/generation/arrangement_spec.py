@@ -31,6 +31,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _TABLETOP_OBJECT_CLEARANCE,
     _clean_vector3,
     _iter_generated_scene_object_configs,
+    _mesh_config_has_distinct_xy_axis,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_world_xy_bounds,
     _mesh_config_world_xy_center,
@@ -219,6 +220,7 @@ def _make_arrangement_scene_summary(
             "source_uid": obj.source_uid,
             "role": obj.source_role,
             "object_type": _base_name(obj),
+            "description": str(obj.config.get("description", "")).strip(),
             "mesh": obj.config.get("shape", {}).get("fpath"),
             "init_pos": obj.config.get("init_pos"),
             "body_scale": obj.config.get("body_scale"),
@@ -319,9 +321,15 @@ def _apply_arrangement_task_response(
             round(float(target_xy[1]), 6),
             release_z,
         ]
+        step_orientation_goal, step_orientation_axis = _arrangement_object_orientation(
+            obj,
+            orientation_axis=orientation_axis,
+            scene_dir=scene_dir,
+        )
         high_position = list(release_position)
         high_position[2] = round(
-            high_position[2] + _arrangement_staging_z_delta_for_goal("axis_align"),
+            high_position[2]
+            + _arrangement_staging_z_delta_for_goal(step_orientation_goal),
             6,
         )
         steps.append(
@@ -341,8 +349,8 @@ def _apply_arrangement_task_response(
                 high_position=high_position,
                 size_score=_arrangement_object_size_score(obj, scene_dir=scene_dir),
                 color=_object_color(source_uid, object_attributes),
-                orientation_goal="axis_align",
-                orientation_axis=orientation_axis,
+                orientation_goal=step_orientation_goal,
+                orientation_axis=step_orientation_axis,
             )
         )
 
@@ -647,6 +655,28 @@ def _arrangement_orientation_axis(
     raise ValueError(f"Unsupported arrangement line axis: {line_axis!r}.")
 
 
+def _arrangement_object_orientation(
+    obj: _SceneObject,
+    *,
+    orientation_axis: str,
+    scene_dir: Path,
+) -> tuple[str, str]:
+    return _arrangement_config_orientation(
+        _resolved_mesh_config(obj, scene_dir=scene_dir),
+        orientation_axis=orientation_axis,
+    )
+
+
+def _arrangement_config_orientation(
+    obj_config: Mapping[str, Any],
+    *,
+    orientation_axis: str,
+) -> tuple[str, str]:
+    if _mesh_config_has_distinct_xy_axis(obj_config):
+        return "axis_align", orientation_axis
+    return "preserve", "none"
+
+
 def _with_arrangement_generated_z_targets(
     spec: _ArrangementLineSpec,
     gym_config: Mapping[str, Any],
@@ -716,10 +746,14 @@ def _with_arrangement_generated_pose_targets(
             round(float(target_xy[1]), 6),
             release_z,
         ]
+        step_orientation_goal, step_orientation_axis = _arrangement_config_orientation(
+            config,
+            orientation_axis=orientation_axis,
+        )
         high_position = list(release_position)
         high_position[2] = round(
             high_position[2]
-            + _arrangement_staging_z_delta_for_goal(step.orientation_goal),
+            + _arrangement_staging_z_delta_for_goal(step_orientation_goal),
             6,
         )
         steps.append(
@@ -733,7 +767,8 @@ def _with_arrangement_generated_pose_targets(
                     round(float(target_xy[0]), 6),
                     round(float(target_xy[1]), 6),
                 ],
-                orientation_axis=orientation_axis,
+                orientation_goal=step_orientation_goal,
+                orientation_axis=step_orientation_axis,
                 release_position=release_position,
                 high_position=high_position,
                 size_score=_arrangement_object_size_score(
@@ -1140,7 +1175,10 @@ def _object_color(
 
 
 def _color_hint_for_object(obj: _SceneObject) -> str | None:
-    text = (f"{obj.source_uid} {obj.config.get('shape', {}).get('fpath', '')}").lower()
+    text = (
+        f"{obj.source_uid} {obj.config.get('description', '')} "
+        f"{obj.config.get('shape', {}).get('fpath', '')}"
+    ).lower()
     color_aliases = {
         "red": ("red", "红"),
         "green": ("green", "绿"),

@@ -96,19 +96,16 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_background_config,
     _make_arrangement_dataset_config,
     _make_arrangement_events_config,
-    _make_container_background_config,
+    _make_container_rigid_object_config,
     _make_dataset_config,
     _make_events_config,
-    _make_extra_background_config,
     _make_extra_rigid_object_config,
     _make_observations_config,
-    _make_relative_background_object_config,
     _make_relative_dataset_config,
     _make_relative_events_config,
     _make_relative_rigid_object_config,
     _make_target_object_config,
     _relative_rigid_object_max_convex_hull_num,
-    _relative_static_background_max_convex_hull_num,
     _source_body_scale,
     _target_body_scale_vector,
 )
@@ -131,6 +128,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _relative_release_offset,
     _side_relation_xy_offsets,
     _with_coordinated_side_release_height_offsets,
+    _with_final_auto_arm_sides,
     _with_inside_container_slot_offsets,
     _with_on_surface_release_offsets,
     _with_self_relative_absolute_targets,
@@ -529,6 +527,16 @@ def _build_basket_bundle(
         for obj in scene_objects
         if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
     ]
+    runtime_uids = {
+        roles.table_source_uid: "table",
+        roles.container_source_uid: roles.container_runtime_uid,
+        roles.left_target_source_uid: roles.left_target_runtime_uid,
+        roles.right_target_source_uid: roles.right_target_runtime_uid,
+        **{
+            obj.source_uid: _normalize_runtime_uid(obj.source_uid)
+            for obj in [*extra_background_objects, *extra_rigid_objects]
+        },
+    }
     table_obj = by_uid[roles.table_source_uid]
     table_config = _make_background_config(
         scene_dir,
@@ -564,30 +572,15 @@ def _build_basket_bundle(
         "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
-        "background": [
-            table_config,
-            _make_container_background_config(
+        "background": [table_config],
+        "rigid_object": [
+            _make_container_rigid_object_config(
                 scene_dir,
                 by_uid[roles.container_source_uid],
                 roles.container_runtime_uid,
                 container_scale,
                 mesh_normalizer,
             ),
-            *[
-                _make_extra_background_config(
-                    scene_dir,
-                    obj,
-                    mesh_normalizer,
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                )
-                for obj in extra_background_objects
-            ],
-        ],
-        "rigid_object": [
             _make_target_object_config(
                 scene_dir,
                 by_uid[roles.right_target_source_uid],
@@ -628,23 +621,26 @@ def _build_basket_bundle(
                 )
                 for obj in extra_rigid_objects
             ],
+            *[
+                _make_extra_rigid_object_config(
+                    scene_dir,
+                    obj,
+                    _source_scene_body_scale_override(
+                        obj,
+                        target_body_scale=target_body_scale,
+                        source_scene_body_scale_mode=source_scene_body_scale_mode,
+                    )
+                    or _source_body_scale(obj),
+                    mesh_normalizer,
+                    runtime_uid=runtime_uids[obj.source_uid],
+                )
+                for obj in extra_background_objects
+            ],
         ],
     }
     _maybe_preserve_source_scene_vertical_contacts(
         gym_config,
-        _source_objects_by_runtime_uid(
-            {
-                roles.table_source_uid: "table",
-                roles.container_source_uid: roles.container_runtime_uid,
-                roles.left_target_source_uid: roles.left_target_runtime_uid,
-                roles.right_target_source_uid: roles.right_target_runtime_uid,
-                **{
-                    obj.source_uid: _normalize_runtime_uid(obj.source_uid)
-                    for obj in [*extra_background_objects, *extra_rigid_objects]
-                },
-            },
-            by_uid=by_uid,
-        ),
+        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         robot_profile=robot_profile,
@@ -669,6 +665,7 @@ def _build_basket_bundle(
             project_name,
             roles,
             robot_profile=robot_profile,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
         ),
         "atom_actions": make_basket_atom_actions_prompt(
             roles,
@@ -712,10 +709,6 @@ def _build_arrangement_line_bundle(
     source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
-    background_objects = [
-        obj for obj in scene_objects if obj.source_role == "background"
-    ]
-    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
         scene_objects,
@@ -726,10 +719,7 @@ def _build_arrangement_line_bundle(
         runtime_uids[step.source_uid] = step.runtime_uid
 
     dynamic_rigid_objects = [
-        obj for obj in rigid_objects if obj.source_uid in moved_source_uids
-    ]
-    static_scene_objects = [
-        obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
+        obj for obj in scene_objects if obj.source_uid != spec.table_source_uid
     ]
     table_obj = by_uid[spec.table_source_uid]
     table_config = _make_background_config(
@@ -762,39 +752,7 @@ def _build_arrangement_line_bundle(
         "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
-        "background": [
-            table_config,
-            *[
-                _make_relative_background_object_config(
-                    scene_dir,
-                    obj,
-                    runtime_uids[obj.source_uid],
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                    max_convex_hull_num=1,
-                    mesh_normalizer=mesh_normalizer,
-                )
-                for obj in static_scene_objects
-            ],
-            *[
-                _make_extra_background_config(
-                    scene_dir,
-                    obj,
-                    mesh_normalizer,
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                    runtime_uid=runtime_uids[obj.source_uid],
-                )
-                for obj in background_objects
-                if obj.source_uid != spec.table_source_uid
-            ],
-        ],
+        "background": [table_config],
         "rigid_object": [
             _make_relative_rigid_object_config(
                 scene_dir=scene_dir,
@@ -808,7 +766,9 @@ def _build_arrangement_line_bundle(
                     )
                     or _source_body_scale(obj)
                 ),
-                max_convex_hull_num=16,
+                max_convex_hull_num=(
+                    16 if obj.source_uid in moved_source_uids else 1
+                ),
                 mesh_normalizer=mesh_normalizer,
             )
             for obj in dynamic_rigid_objects
@@ -851,6 +811,7 @@ def _build_arrangement_line_bundle(
             project_name,
             spec,
             robot_profile=robot_profile,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
         ),
         "atom_actions": make_arrangement_atom_actions_prompt(
             spec,
@@ -919,10 +880,6 @@ def _build_stacking_bundle(
     source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
-    background_objects = [
-        obj for obj in scene_objects if obj.source_role == "background"
-    ]
-    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
         scene_objects,
@@ -933,10 +890,7 @@ def _build_stacking_bundle(
         runtime_uids[step.source_uid] = step.runtime_uid
 
     dynamic_rigid_objects = [
-        obj for obj in rigid_objects if obj.source_uid in moved_source_uids
-    ]
-    static_scene_objects = [
-        obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
+        obj for obj in scene_objects if obj.source_uid != spec.table_source_uid
     ]
     table_obj = by_uid[spec.table_source_uid]
     table_config = _make_background_config(
@@ -969,39 +923,7 @@ def _build_stacking_bundle(
         "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
-        "background": [
-            table_config,
-            *[
-                _make_relative_background_object_config(
-                    scene_dir,
-                    obj,
-                    runtime_uids[obj.source_uid],
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                    max_convex_hull_num=1,
-                    mesh_normalizer=mesh_normalizer,
-                )
-                for obj in static_scene_objects
-            ],
-            *[
-                _make_extra_background_config(
-                    scene_dir,
-                    obj,
-                    mesh_normalizer,
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                    runtime_uid=runtime_uids[obj.source_uid],
-                )
-                for obj in background_objects
-                if obj.source_uid != spec.table_source_uid
-            ],
-        ],
+        "background": [table_config],
         "rigid_object": [
             _make_relative_rigid_object_config(
                 scene_dir=scene_dir,
@@ -1015,7 +937,9 @@ def _build_stacking_bundle(
                     )
                     or _source_body_scale(obj)
                 ),
-                max_convex_hull_num=16,
+                max_convex_hull_num=(
+                    16 if obj.source_uid in moved_source_uids else 1
+                ),
                 mesh_normalizer=mesh_normalizer,
             )
             for obj in dynamic_rigid_objects
@@ -1058,6 +982,7 @@ def _build_stacking_bundle(
             project_name,
             spec,
             robot_profile=robot_profile,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
         ),
         "atom_actions": make_stacking_atom_actions_prompt(
             spec,
@@ -1421,6 +1346,30 @@ def _round_pose_value(value: float) -> float:
     return 0.0 if abs(rounded) < 1e-12 else rounded
 
 
+def _runtime_object_registry(
+    runtime_uids_by_source_uid: Mapping[str, str],
+    *,
+    by_uid: Mapping[str, _SceneObject],
+) -> list[dict[str, str]]:
+    entries = []
+    for source_uid, runtime_uid in sorted(
+        runtime_uids_by_source_uid.items(),
+        key=lambda item: item[1],
+    ):
+        obj = by_uid.get(source_uid)
+        if obj is None:
+            continue
+        entries.append(
+            {
+                "runtime_uid": str(runtime_uid),
+                "source_uid": str(source_uid),
+                "source_role": obj.source_role,
+                "description": str(obj.config.get("description", "")).strip(),
+            }
+        )
+    return entries
+
+
 def _validate_source_scene_body_scale_mode(mode: str | None) -> str | None:
     if mode is None:
         return None
@@ -1505,6 +1454,30 @@ def _relative_target_body_scale(
     return _target_body_scale_vector(target_body_scale)
 
 
+def _relative_generated_object_body_scale(
+    obj: _SceneObject,
+    *,
+    moved_source_uids: set[str],
+    target_body_scale: float | list[float] | tuple[float, float, float],
+    preserve_source_target_body_scale: bool,
+    source_target_body_scale_multiplier: float | None,
+    source_scene_body_scale_mode: str | None,
+) -> list[float]:
+    if obj.source_uid in moved_source_uids:
+        return _relative_target_body_scale(
+            obj,
+            target_body_scale=target_body_scale,
+            preserve_source_target_body_scale=preserve_source_target_body_scale,
+            source_target_body_scale_multiplier=source_target_body_scale_multiplier,
+            source_scene_body_scale_mode=source_scene_body_scale_mode,
+        )
+    return _source_scene_body_scale_override(
+        obj,
+        target_body_scale=target_body_scale,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    ) or _source_body_scale(obj)
+
+
 def _build_relative_placement_bundle(
     *,
     scene_dir: Path,
@@ -1525,10 +1498,6 @@ def _build_relative_placement_bundle(
     inside_container_slot_distance_scale: float,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
-    background_objects = [
-        obj for obj in scene_objects if obj.source_role == "background"
-    ]
-    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
         scene_objects,
@@ -1540,14 +1509,14 @@ def _build_relative_placement_bundle(
         for placement in spec.placements
         if placement.intent in {"place_relative", "coordinated_pickment"}
     }
+    moved_runtime_uids = {
+        placement.moved_runtime_uid for placement in spec.placements
+    }
     registered_runtime_uids = sorted(
-        {runtime_uids[obj.source_uid] for obj in rigid_objects} | reference_runtime_uids
+        uid for uid in (moved_runtime_uids | reference_runtime_uids) if uid != "table"
     )
     dynamic_rigid_objects = [
-        obj for obj in rigid_objects if obj.source_uid in moved_source_uids
-    ]
-    static_scene_objects = [
-        obj for obj in rigid_objects if obj.source_uid not in moved_source_uids
+        obj for obj in scene_objects if obj.source_uid != spec.table_source_uid
     ]
     table_obj = by_uid[spec.table_source_uid]
     table_config = _make_background_config(
@@ -1581,49 +1550,15 @@ def _build_relative_placement_bundle(
         "robot": robot_config,
         "sensor": _make_sensor_config(),
         "light": _make_light_config(),
-        "background": [
-            table_config,
-            *[
-                _make_relative_background_object_config(
-                    scene_dir,
-                    obj,
-                    runtime_uids[obj.source_uid],
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                    max_convex_hull_num=_relative_static_background_max_convex_hull_num(
-                        runtime_uids[obj.source_uid],
-                        spec,
-                    ),
-                    mesh_normalizer=mesh_normalizer,
-                )
-                for obj in static_scene_objects
-            ],
-            *[
-                _make_extra_background_config(
-                    scene_dir,
-                    obj,
-                    mesh_normalizer,
-                    body_scale=_source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    ),
-                    runtime_uid=runtime_uids[obj.source_uid],
-                )
-                for obj in background_objects
-                if obj.source_uid != spec.table_source_uid
-            ],
-        ],
+        "background": [table_config],
         "rigid_object": [
             _make_relative_rigid_object_config(
                 scene_dir=scene_dir,
                 obj=obj,
                 runtime_uid=runtime_uids[obj.source_uid],
-                body_scale=_relative_target_body_scale(
+                body_scale=_relative_generated_object_body_scale(
                     obj,
+                    moved_source_uids=moved_source_uids,
                     target_body_scale=target_body_scale,
                     preserve_source_target_body_scale=preserve_source_target_body_scale,
                     source_target_body_scale_multiplier=(
@@ -1647,20 +1582,31 @@ def _build_relative_placement_bundle(
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         robot_profile=robot_profile,
     )
+    if spec.intent in {"place_relative", "coordinated_pickment"}:
+        spec = _with_coordinated_side_release_height_offsets(
+            spec,
+            gym_config,
+            table_reference_mode="skip",
+        )
     _maybe_apply_tabletop_z_placement(
         gym_config,
         table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
+    spec = _with_final_auto_arm_sides(spec, gym_config)
     if spec.intent in {"place_relative", "coordinated_pickment"}:
+        spec = _with_coordinated_side_release_height_offsets(
+            spec,
+            gym_config,
+            table_reference_mode="only",
+        )
         spec = _with_self_relative_absolute_targets(spec, gym_config)
         spec = _with_inside_container_slot_offsets(
             spec,
             gym_config,
             slot_distance_scale=inside_container_slot_distance_scale,
         )
-        spec = _with_coordinated_side_release_height_offsets(spec, gym_config)
         spec = _with_on_surface_release_offsets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
@@ -1687,6 +1633,7 @@ def _build_relative_placement_bundle(
             project_name,
             spec,
             robot_profile=robot_profile,
+            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
         ),
         "atom_actions": make_relative_atom_actions_prompt(
             spec,

@@ -43,6 +43,8 @@ __all__ = [
 
 DEFAULT_ROBOT_PROFILE_ID = "dual_ur5"
 _PI = 3.141592653589793
+_ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+_ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
 
 
 @dataclass(frozen=True)
@@ -165,20 +167,20 @@ def _dual_ur_profile(
                 "eef": "left_eef",
             },
         },
-        gripper_open_state=(0.0,),
-        gripper_close_state=(0.04,),
+        gripper_open_state=_ROBOTIQ_ARG2F_140_OPEN_QPOS,
+        gripper_close_state=_ROBOTIQ_ARG2F_140_CLOSE_QPOS,
         arm_aim_yaw_offset={
             "left": _PI,
             "right": 0.0,
         },
         grasp_runtime_defaults={
-            "grasp_max_open_length": 0.088,
+            "grasp_max_open_length": 0.14,
             "grasp_min_open_length": 0.003,
-            "grasp_finger_length": 0.078,
+            "grasp_finger_length": 0.13,
         },
         prompt_description=(
             f"The robot is a {display_name} composite robot with "
-            "DH_PGI_140_80 parallel grippers."
+            "Robotiq ARG2F-140 large parallel grippers (140 mm stroke)."
         ),
         prompt_slot_description=(
             "- left_arm is the semantic robot-view left slot, mapped to the "
@@ -255,10 +257,16 @@ _ROBOT_PROFILES: dict[str, RobotProfile] = {
 _ROBOT_PROFILE_ALIASES = {
     "ur3": "dual_ur3",
     "dual_ur3_dh_pgi": "dual_ur3",
+    "dual_ur3_robotiq": "dual_ur3",
+    "dual_ur3_robotiq_arg2f_140": "dual_ur3",
     "ur5": "dual_ur5",
     "dual_ur5_dh_pgi": "dual_ur5",
+    "dual_ur5_robotiq": "dual_ur5",
+    "dual_ur5_robotiq_arg2f_140": "dual_ur5",
     "ur10": "dual_ur10",
     "dual_ur10_dh_pgi": "dual_ur10",
+    "dual_ur10_robotiq": "dual_ur10",
+    "dual_ur10_robotiq_arg2f_140": "dual_ur10",
     "franka": "dual_franka",
     "panda": "dual_franka",
     "dual_panda": "dual_franka",

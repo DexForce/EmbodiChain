@@ -62,6 +62,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _mesh_config_world_xy_center,
     _mesh_config_world_z_bounds,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    _arm_side_for_position,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
@@ -160,7 +163,47 @@ def test_dual_ur5_template_uses_ur_solver_config() -> None:
     assert right_solver["root_link_name"] == "right_base_link"
     assert right_solver["end_link_name"] == "right_ee_link"
     assert left_solver["tcp"][2][3] == pytest.approx(0.16)
-    assert right_solver["tcp"][2][3] == pytest.approx(0.16)
+    assert right_solver["tcp"][2][3] == pytest.approx(0.21)
+
+
+def test_dual_ur5_template_uses_robotiq_arg2f_140_grippers() -> None:
+    robot = make_dual_ur5_robot_config(robot_init_z=0.42)
+
+    components = robot["urdf_cfg"]["components"]
+    left_hand = next(
+        component
+        for component in components
+        if component["component_type"] == "left_hand"
+    )
+    right_hand = next(
+        component
+        for component in components
+        if component["component_type"] == "right_hand"
+    )
+
+    assert (
+        left_hand["urdf_path"]
+        == "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+    )
+    assert right_hand["urdf_path"] == left_hand["urdf_path"]
+    assert robot["urdf_cfg"]["fname"] == "dual_ur5_robotiq_arg2f_140_basket"
+    assert robot["control_parts"]["left_eef"] == [
+        "left_finger_joint",
+        "left_inner_knuckle_joint",
+        "left_inner_finger_joint",
+        "left_right_outer_knuckle_joint",
+        "left_right_inner_knuckle_joint",
+        "left_right_inner_finger_joint",
+    ]
+    assert robot["control_parts"]["right_eef"] == [
+        "right_finger_joint",
+        "right_left_inner_knuckle_joint",
+        "right_left_inner_finger_joint",
+        "right_outer_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "right_inner_finger_joint",
+    ]
+    assert len(robot["init_qpos"]) == 24
 
 
 def test_dual_ur5_template_deserializes_to_ur5_solver_cfg() -> None:
@@ -188,12 +231,9 @@ def test_observation_joint_ids_derive_from_dual_ur5_robot_config() -> None:
 
     observations = _make_observations_config(robot)
 
-    assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
-        12,
-        13,
-        14,
-        15,
-    ]
+    assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == list(
+        range(12, 24)
+    )
 
 
 def test_action_agent_config_generator_uses_parallel_handoff(
@@ -212,25 +252,23 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
-    assert set(rigid_objects) == {"left_apple", "right_apple"}
+    assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
     assert rigid_objects["left_apple"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["right_apple"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["left_apple"]["body_type"] == "dynamic"
     assert rigid_objects["right_apple"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
     assert rigid_objects["left_apple"]["convex_decomposition_method"] == "vhacd"
     assert rigid_objects["right_apple"]["convex_decomposition_method"] == "vhacd"
-    assert background_objects["wicker_basket"]["convex_decomposition_method"] == (
-        "vhacd"
-    )
+    assert rigid_objects["wicker_basket"]["convex_decomposition_method"] == "vhacd"
     assert paths.summary["convex_decomposition_method"] == "vhacd"
     assert paths.summary["coacd_cache"][0]["status"] == "skipped"
     _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
-    _assert_normalized_obj_path(background_objects["wicker_basket"]["shape"]["fpath"])
+    _assert_normalized_obj_path(rigid_objects["wicker_basket"]["shape"]["fpath"])
     table_top_z = action_agent_config_generation._mesh_config_world_zmax(
         background_objects["table"]
     )
@@ -424,13 +462,10 @@ def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
 
     assert background_objects["table"]["init_rot"] == [0.0, 0.0, 180.0]
-    assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
+    assert rigid_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
     assert rigid_objects["left_apple"]["init_rot"] == [0.0, 0.0, 140.0]
     assert rigid_objects["right_apple"]["init_rot"] == [0.0, 0.0, 160.0]
-    for obj_config in [
-        background_objects["table"],
-        background_objects["wicker_basket"],
-    ]:
+    for obj_config in [background_objects["table"], rigid_objects["wicker_basket"]]:
         _assert_normalized_obj_path(obj_config["shape"]["fpath"])
     for obj_config in [rigid_objects["right_apple"], rigid_objects["left_apple"]]:
         _assert_body_scaled_obj_path(obj_config["shape"]["fpath"])
@@ -659,11 +694,8 @@ def test_target_replacements_generate_meshes_and_replace_paths(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
 
-    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-
-    assert set(rigid_objects) == {"left_apple", "right_apple"}
-    assert "wicker_basket" in background_objects
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert set(rigid_objects) == {"left_apple", "right_apple", "wicker_basket"}
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     normalized_sources = {
@@ -701,11 +733,8 @@ def test_target_replacements_can_sync_runtime_names(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
 
-    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-
-    assert set(rigid_objects) == {"left_apple", "right_orange"}
-    assert "wicker_basket" in background_objects
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert set(rigid_objects) == {"left_apple", "right_orange", "wicker_basket"}
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     _assert_body_scaled_obj_path(rigid_objects["right_orange"]["shape"]["fpath"])
 
@@ -828,11 +857,10 @@ def test_directory_input_prefers_merged_config_and_preserves_extra_scene_scale(
     assert set(rigid_objects) == {
         "left_apple",
         "right_apple",
+        "wicker_basket",
         "vase_0",
     }
-    background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert "wicker_basket" in background_objects
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert rigid_objects["left_apple"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["right_apple"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["vase_0"]["body_scale"] == [1.0, 1.0, 1.0]
@@ -888,15 +916,16 @@ def test_task_description_generates_relative_left_of_config(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_2"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["apple_2"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["apple_2"]["body_type"] == "dynamic"
-    assert background_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["apple_1"]["body_type"] == "kinematic"
+    assert rigid_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["apple_1"]["body_type"] == "dynamic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
+    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
     assert _body_scaled_meshes_by_uid(paths.summary)["apple_2"]["body_scale"] == [
         0.5,
         0.5,
@@ -979,10 +1008,11 @@ def test_task_description_generates_relative_front_of_config(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_1"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["apple_1"]["body_type"] == "dynamic"
-    assert background_objects["apple_2"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert rigid_objects["apple_2"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
 
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["op"] == "all"
@@ -1409,11 +1439,12 @@ def test_task_description_respects_explicit_left_arm(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_1"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["apple_1"]["body_type"] == "dynamic"
-    assert background_objects["apple_2"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
+    assert rigid_objects["apple_2"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["init_rot"] == [0.0, 0.0, 180.0]
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
     assert paths.summary["active_arm"] == "left_arm"
 
@@ -1454,10 +1485,11 @@ def test_task_description_respects_explicit_right_arm(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_2"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["apple_2"]["body_type"] == "dynamic"
-    assert background_objects["apple_1"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert rigid_objects["apple_1"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
     assert paths.summary["active_arm"] == "right_arm"
 
@@ -1501,13 +1533,14 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"cup"}
+    assert set(rigid_objects) == {"cup", "pad", "fork"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["cup"]["body_type"] == "dynamic"
     assert rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["pad"]["body_type"] == "kinematic"
-    assert background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["fork"]["body_type"] == "kinematic"
-    assert background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["pad"]["body_type"] == "dynamic"
+    assert rigid_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["fork"]["body_type"] == "dynamic"
+    assert rigid_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
     assert body_scaled_meshes["cup"]["body_scale"] == [0.8, 0.8, 0.8]
     assert body_scaled_meshes["pad"]["body_scale"] == [1.2, 1.0, 0.4]
@@ -1577,31 +1610,32 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     rigid_objects = {obj["uid"]: obj for obj in generated["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in generated["background"]}
 
+    assert set(background_objects) == {"table"}
     assert rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".obj"
-    assert Path(background_objects["pad"]["shape"]["fpath"]).suffix == ".obj"
+    assert Path(rigid_objects["pad"]["shape"]["fpath"]).suffix == ".obj"
     assert "mesh_assets/body_scaled" in rigid_objects["cup"]["shape"]["fpath"]
-    assert "mesh_assets/body_scaled" in background_objects["pad"]["shape"]["fpath"]
+    assert "mesh_assets/body_scaled" in rigid_objects["pad"]["shape"]["fpath"]
     body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
     assert body_scaled_meshes["cup"]["body_scale"] == [0.11, 0.12, 0.13]
     assert body_scaled_meshes["table"]["body_scale"] == [1.31, 1.32, 1.0]
     assert body_scaled_meshes["pad"]["body_scale"] == [0.21, 0.22, 0.23]
     assert body_scaled_meshes["fork"]["body_scale"] == [0.31, 0.32, 0.33]
     assert rigid_objects["cup"]["init_pos"][2] == source_cup_z
-    assert background_objects["pad"]["init_pos"][2] == source_pad_z
+    assert rigid_objects["pad"]["init_pos"][2] == source_pad_z
     assert rigid_objects["cup"]["init_pos"] == pytest.approx(
         [source_cup_pos[1], -source_cup_pos[0], source_cup_pos[2]]
     )
-    assert background_objects["pad"]["init_pos"] == pytest.approx(
+    assert rigid_objects["pad"]["init_pos"] == pytest.approx(
         [source_pad_pos[1], -source_pad_pos[0], source_pad_pos[2]]
     )
     assert rigid_objects["cup"]["init_rot"] == pytest.approx(
         [source_cup_rot[0], source_cup_rot[1], source_cup_rot[2] - 90.0]
     )
-    assert background_objects["pad"]["init_rot"] == pytest.approx(
+    assert rigid_objects["pad"]["init_rot"] == pytest.approx(
         [source_pad_rot[0], source_pad_rot[1], source_pad_rot[2] - 90.0]
     )
     assert paths.summary["mode"] == "object_manipulation"
@@ -1635,9 +1669,9 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         obj["uid"]: obj for obj in scaled_generated["background"]
     }
     assert scaled_rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert scaled_rigid_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert scaled_rigid_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     assert scaled_background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert scaled_background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert scaled_background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     scaled_body_meshes = _body_scaled_meshes_by_uid(scaled_paths.summary)
     assert scaled_body_meshes["cup"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.11, 0.12, 0.13]]
@@ -1654,12 +1688,12 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     assert _mesh_config_world_z_bounds(scaled_rigid_objects["cup"])[0] == pytest.approx(
         _mesh_config_world_z_bounds(rigid_objects["cup"])[0]
     )
-    assert _mesh_config_world_z_bounds(scaled_background_objects["pad"])[
-        0
-    ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["pad"])[0])
-    assert _mesh_config_world_z_bounds(scaled_background_objects["fork"])[
-        0
-    ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["fork"])[0])
+    assert _mesh_config_world_z_bounds(scaled_rigid_objects["pad"])[0] == pytest.approx(
+        _mesh_config_world_z_bounds(rigid_objects["pad"])[0]
+    )
+    assert _mesh_config_world_z_bounds(scaled_rigid_objects["fork"])[0] == pytest.approx(
+        _mesh_config_world_z_bounds(rigid_objects["fork"])[0]
+    )
     assert _mesh_config_world_z_bounds(scaled_background_objects["table"])[
         1
     ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["table"])[1])
@@ -1685,9 +1719,9 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         obj["uid"]: obj for obj in absolute_generated["background"]
     }
     assert absolute_rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert absolute_rigid_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert absolute_rigid_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
     assert absolute_background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert absolute_background_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert absolute_background_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
 
 
 def test_apply_scene_z_rotation_rotates_scene_object_poses() -> None:
@@ -1896,7 +1930,7 @@ def test_relative_orientation_upright_does_not_emit_align_to(
     assert paths.summary["orientation_align_to"] is None
 
 
-def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
+def test_relative_cube_preserves_orientation_when_llm_preserves_orientation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1978,7 +2012,7 @@ def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
     )
 
     assert (
-        "Generate one deterministic nominal graph with exactly 7 nominal edges"
+        "Generate one deterministic nominal graph with exactly 6 nominal edges"
         in task_prompt
     )
     for text in (task_prompt, atom_actions):
@@ -1987,22 +2021,19 @@ def test_relative_cube_defaults_to_axis_align_when_llm_preserves_orientation(
             '"orientation_axis":"none"}' in text
         )
         assert (
-            f'"offset":{high_offset_json},"orientation_goal":"axis_align",'
-            '"orientation_axis":"x"}' in text
+            f'"offset":{release_offset_json},"orientation_goal":"preserve",'
+            '"orientation_axis":"none"}' in text
         )
-        assert (
-            f'"offset":{release_offset_json},"orientation_goal":"axis_align",'
-            '"orientation_axis":"x"}' in text
-        )
+        assert '"orientation_goal":"axis_align"' not in text
         assert '"align_to"' not in text
         assert '"atomic_action_class":"Place"' in text
         assert '"atomic_action_class":"MoveEndEffector"' in text
 
     assert summary["moved_object"] == "interact_cube_1"
     assert summary["reference_object"] == "interact_cube_2"
-    assert summary["orientation_goal"] == "axis_align"
-    assert summary["orientation_axis"] == "x"
-    assert summary.get("orientation_align_to") is None
+    assert paths.summary["orientation_goal"] == "preserve"
+    assert paths.summary["orientation_axis"] == "none"
+    assert paths.summary["orientation_align_to"] is None
 
 
 def test_relative_on_table_release_offset_uses_tabletop_surface(
@@ -2518,16 +2549,16 @@ def test_task_description_allows_single_rigid_with_background_reference(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"chip_bag"}
+    assert set(rigid_objects) == {"chip_bag", "pad"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["chip_bag"]["body_type"] == "dynamic"
     assert rigid_objects["chip_bag"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["pad"]["body_type"] == "dynamic"
     assert _body_scaled_meshes_by_uid(paths.summary)["chip_bag"]["body_scale"] == [
         0.5,
         0.5,
         0.5,
     ]
-    assert background_objects["pad"]["body_type"] == "static"
-
     success = gym_config["env"]["extensions"]["agent_success"]
     assert success["type"] == "object_on_object"
     assert success["object"] == "chip_bag"
@@ -2592,10 +2623,11 @@ def test_task_description_generates_dual_arm_relative_config(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_1", "apple_2"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["apple_1"]["body_type"] == "dynamic"
     assert rigid_objects["apple_2"]["body_type"] == "dynamic"
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
 
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -2919,11 +2951,11 @@ def test_arrangement_response_orders_explicit_color_sequence(tmp_path: Path) -> 
         step.target_xy[0] for step in spec.steps
     )
     assert [step.orientation_goal for step in spec.steps] == [
-        "axis_align",
-        "axis_align",
-        "axis_align",
+        "preserve",
+        "preserve",
+        "preserve",
     ]
-    assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x"]
+    assert [step.orientation_axis for step in spec.steps] == ["none", "none", "none"]
 
 
 def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
@@ -3013,7 +3045,82 @@ def test_demo153_like_cans_can_reuse_moved_initial_positions(
     target_y_values = [step.target_xy[1] for step in spec.steps]
     assert target_x_values == sorted(target_x_values)
     assert len({round(value, 6) for value in target_y_values}) == 1
-    assert [step.orientation_axis for step in spec.steps] == ["x", "x", "x", "x"]
+    assert [step.orientation_goal for step in spec.steps] == [
+        "preserve",
+        "preserve",
+        "preserve",
+        "preserve",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == [
+        "none",
+        "none",
+        "none",
+        "none",
+    ]
+
+
+def test_arrangement_keeps_axis_alignment_for_elongated_objects(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_glb(
+        tmp_path / "mesh_assets/table/table_0.glb",
+        [(-0.35, -0.20, 0.0), (0.35, -0.20, 0.0), (0.0, 0.20, 0.0)],
+    )
+    bar_vertices = [(-0.06, -0.01, 0.0), (0.06, -0.01, 0.0), (0.0, 0.01, 0.03)]
+    scene_objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid="table",
+            source_role="background",
+            config=_mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            ),
+        )
+    ]
+    for index, y_value in enumerate([-0.04, 0.04], start=1):
+        uid = f"bar_{index}"
+        _write_minimal_glb(tmp_path / f"mesh_assets/bar/{uid}.glb", bar_vertices)
+        scene_objects.append(
+            action_agent_config_generation._SceneObject(
+                source_uid=uid,
+                source_role="rigid_object",
+                config=_mesh_object(
+                    uid,
+                    f"mesh_assets/bar/{uid}.glb",
+                    [0.0, y_value, 0.76],
+                    [0.0, 0.0, 0.0],
+                ),
+            )
+        )
+
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    spec = _apply_arrangement_task_response(
+        response={
+            "objects": ["bar_1", "bar_2"],
+            "order_by": "explicit",
+            "order_direction": "given",
+            "anchor": "table_center",
+            "line_axis": "world_x",
+            "task_prompt_summary": "Arrange two elongated bars in a row.",
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=rigid_objects,
+        scene_dir=tmp_path,
+        task_description="arrange two elongated bars",
+    )
+
+    assert [step.orientation_goal for step in spec.steps] == [
+        "axis_align",
+        "axis_align",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == ["x", "x"]
+    assert all(
+        step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
+        for step in spec.steps
+    )
 
 
 def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
@@ -3039,11 +3146,22 @@ def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
     )
 
     assert spec.line_origin_xy == pytest.approx([0.0, 0.0])
-    assert [step.orientation_axis for step in spec.steps] == ["y", "y", "y", "y"]
+    assert [step.orientation_goal for step in spec.steps] == [
+        "preserve",
+        "preserve",
+        "preserve",
+        "preserve",
+    ]
+    assert [step.orientation_axis for step in spec.steps] == [
+        "none",
+        "none",
+        "none",
+        "none",
+    ]
     assert len({round(step.target_xy[0], 6) for step in spec.steps}) == 1
     assert spec.steps[0].target_xy[0] == pytest.approx(0.0)
     for step in spec.steps:
-        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
+        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.10)
 
 
 def test_arrangement_static_unmoved_object_blocks_line_layout(
@@ -3211,8 +3329,6 @@ def test_task_description_generates_size_order_arrangement_config(
                 "slot_index": 0,
                 "active_arm": "right_arm",
                 "target_xy": paths.summary["placements"][0]["target_xy"],
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
             },
             {
                 "object": "cube_1",
@@ -3220,8 +3336,6 @@ def test_task_description_generates_size_order_arrangement_config(
                 "slot_index": 1,
                 "active_arm": "left_arm",
                 "target_xy": paths.summary["placements"][1]["target_xy"],
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
             },
             {
                 "object": "cube_3",
@@ -3229,8 +3343,6 @@ def test_task_description_generates_size_order_arrangement_config(
                 "slot_index": 2,
                 "active_arm": "left_arm",
                 "target_xy": paths.summary["placements"][2]["target_xy"],
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
             },
         ],
     }
@@ -3281,17 +3393,17 @@ def test_task_description_generates_size_order_arrangement_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 21 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
         task_prompt
     )
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
     assert task_prompt.count('"lift_height":0.30') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
-    assert task_prompt.count('"reference":"absolute"') >= 9
-    assert task_prompt.count('"orientation_goal":"axis_align"') == 6
-    assert task_prompt.count('"orientation_axis":"x"') == 6
-    assert task_prompt.count('"orientation_goal":"preserve"') == 3
+    assert task_prompt.count('"reference":"absolute"') >= 6
+    assert task_prompt.count('"orientation_goal":"axis_align"') == 0
+    assert task_prompt.count('"orientation_axis":"x"') == 0
+    assert task_prompt.count('"orientation_goal":"preserve"') == 6
     assert task_prompt.count('"target_pose":{"reference":"relative"') == 6
     assert task_prompt.count('"z_policy":"object_on_surface"') == 3
     assert task_prompt.count('"support":"table"') == 3
@@ -3299,8 +3411,9 @@ def test_task_description_generates_size_order_arrangement_config(
     assert "Collision-aware line origin xy" in task_prompt
     assert atom_actions.count('"atomic_action_class":"PickUp"') == 3
     assert atom_actions.count('"lift_height":0.30') == 3
-    assert atom_actions.count('"orientation_goal":"axis_align"') == 6
-    assert atom_actions.count('"orientation_axis":"x"') == 6
+    assert atom_actions.count('"orientation_goal":"axis_align"') == 0
+    assert atom_actions.count('"orientation_axis":"x"') == 0
+    assert atom_actions.count('"orientation_goal":"preserve"') == 6
     assert atom_actions.count('"atomic_action_class":"Place"') == 3
     assert atom_actions.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert atom_actions.count('"z_policy":"object_on_surface"') == 3
@@ -3342,8 +3455,8 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
     assert summary["spacing"] >= 0.07
     assert summary["layout_clearance"] == pytest.approx(0.025)
     assert all(
-        placement["orientation_goal"] == "axis_align"
-        and placement["orientation_axis"] == "x"
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
         for placement in summary["placements"]
     )
     x_values = [placement["target_xy"][0] for placement in summary["placements"]]
@@ -3353,7 +3466,7 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
     _assert_arrangement_slots_avoid_initial_objects(summary, gym_config)
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 42 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 36 nominal edges" in (
         task_prompt
     )
 
@@ -3480,7 +3593,8 @@ def test_arrangement_recomputes_targets_after_scene_rotation_and_scale(
     assert paths.summary["axis"] == "table_long_axis"
     assert paths.summary["line_origin_xy"] == pytest.approx(table_center)
     assert all(
-        placement["orientation_axis"] == "y"
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
         for placement in paths.summary["placements"]
     )
     assert table_bounds is not None
@@ -3559,8 +3673,8 @@ def test_task_description_generates_three_block_stacking_config(
         "green_cube",
     ]
     assert all(
-        placement["orientation_goal"] == "axis_align"
-        and placement["orientation_axis"] == "x"
+        placement["orientation_goal"] == "preserve"
+        and placement["orientation_axis"] == "none"
         for placement in summary["placements"]
     )
     target_xy = [
@@ -3583,14 +3697,15 @@ def test_task_description_generates_three_block_stacking_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 21 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
         task_prompt
     )
     assert "Pick up both" not in task_prompt
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
     assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
-    assert atom_actions.count('"orientation_goal":"axis_align"') == 6
+    assert atom_actions.count('"orientation_goal":"axis_align"') == 0
+    assert atom_actions.count('"orientation_goal":"preserve"') == 6
 
 
 def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
@@ -3630,10 +3745,10 @@ def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
         placement["target_position"][:2] for placement in summary["placements"]
     ] == [summary["anchor_xy"]] * 3
     task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
-    assert task_graph["goal"] == "v21_done"
-    assert task_graph["nodes"][-1]["id"] == "v21_done"
-    assert len(task_graph["edges"]) == 21
-    assert len(task_graph["nodes"]) == 22
+    assert task_graph["goal"] == "v18_done"
+    assert task_graph["nodes"][-1]["id"] == "v18_done"
+    assert len(task_graph["edges"]) == 18
+    assert len(task_graph["nodes"]) == 19
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -3753,7 +3868,7 @@ def test_task_description_generates_two_block_stacking_config(
         for term in success_terms
     )
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert "exactly 14 nominal edges" in task_prompt
+    assert "exactly 12 nominal edges" in task_prompt
     assert "Pick up both" not in task_prompt
 
 
@@ -4107,6 +4222,60 @@ def test_task_description_dual_auto_assigns_complementary_arms(
     assert "agent_grasp_pose_overrides" not in gym_config["env"]["extensions"]
 
 
+def test_task_description_dual_auto_reassigns_after_scene_rotation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    def fake_call_relative_task_llm(**kwargs):
+        return {
+            "placements": [
+                {
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "left_of",
+                    "arm": "auto",
+                },
+                {
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "right_of",
+                    "arm": "auto",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        fake_call_relative_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_dual_auto_rotated_relative_agent",
+        task_description="双臂分别移动两个苹果",
+        source_scene_z_rotation_degrees=-90.0,
+        prewarm_coacd_cache=False,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    manipulations = paths.summary["manipulations"]
+    active_arms = [placement["active_arm"] for placement in manipulations]
+    expected_arms = []
+    for placement in manipulations:
+        moved_object = rigid_objects[placement["moved_object"]]
+        expected_arms.append(
+            f"{_arm_side_for_position(moved_object['init_pos'])}_arm"
+        )
+
+    assert active_arms == expected_arms
+    assert active_arms == ["left_arm", "right_arm"]
+
+
 def test_task_description_on_object_uses_object_on_object_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4138,13 +4307,14 @@ def test_task_description_on_object_uses_object_on_object_success(
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     rigid_objects = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
     background_objects = {obj["uid"]: obj for obj in gym_config["background"]}
-    assert set(rigid_objects) == {"apple_2"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
+    assert set(background_objects) == {"table"}
     assert rigid_objects["apple_2"]["body_scale"] == [1.0, 1.0, 1.0]
     assert rigid_objects["apple_2"]["body_type"] == "dynamic"
-    assert background_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["apple_1"]["body_type"] == "kinematic"
-    assert background_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["wicker_basket"]["body_type"] == "kinematic"
+    assert rigid_objects["apple_1"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["apple_1"]["body_type"] == "dynamic"
+    assert rigid_objects["wicker_basket"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert _body_scaled_meshes_by_uid(paths.summary)["apple_2"]["body_scale"] == [
         0.6,
         0.6,
@@ -4212,7 +4382,7 @@ def test_single_moved_object_on_support_is_not_generated_as_stacking(
 
     assert paths.summary["mode"] == "object_manipulation"
     assert paths.summary["active_arm"] == "left_arm"
-    assert set(rigid_objects) == {"apple_2"}
+    assert set(rigid_objects) == {"apple_1", "apple_2", "wicker_basket"}
     assert success["type"] == "object_on_object"
     assert success["object"] == "apple_2"
     assert success["support"] == "apple_1"
