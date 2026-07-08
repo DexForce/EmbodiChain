@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 
@@ -165,8 +167,8 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             )
             # Joint space trajectory
             target_states = [
-                PlanState(qpos=qpos_start[0], move_type=MoveType.JOINT_MOVE),
-                PlanState(
+                PlanState.single(qpos=qpos_start[0], move_type=MoveType.JOINT_MOVE),
+                PlanState.single(
                     qpos=qpos_end[0],
                     move_type=MoveType.JOINT_MOVE,
                 ),
@@ -175,7 +177,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                 target_states=target_states, options=options
             )
 
-            for qpos_item in plan_result.positions:
+            for qpos_item in plan_result.positions[0]:
                 qpos = torch.as_tensor(
                     qpos_item, dtype=torch.float32, device=self.device
                 )

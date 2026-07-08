@@ -294,6 +294,119 @@ This page lists all available event functors that can be used with the Event Man
     ```
 ```
 
+## Recording
+
+```{list-table} Recording Functors
+:header-rows: 1
+:widths: 25 75
+
+* - Functor Name
+  - Description
+* - {class}`~record.record_camera_data`
+  - Record RGB frames from a dedicated camera and save them as an MP4 video when an episode resets. This is useful for debugging, qualitative evaluation, and demo capture. The functor creates its own camera from the configured pose and intrinsics, captures frames during ``interval`` execution, and writes one video per episode.
+
+    ```json
+    {"func": "record_camera_data", "mode": "interval", "interval_step": 1,
+     "params": {"name": "debug_cam",
+                "resolution": [640, 480],
+                "eye": [1.0, 0.0, 1.2],
+                "target": [0.0, 0.0, 0.5],
+                "up": [0.0, 0.0, 1.0],
+                "save_path": "./outputs/videos"}}
+    ```
+* - {class}`~record.record_camera_data_async`
+  - Record RGB frames for several environments independently, then merge them into a single tiled MP4 once each tracked environment finishes an episode. This variant is useful when you want side-by-side qualitative comparison across vectorized environments.
+
+    ```json
+    {"func": "record_camera_data_async", "mode": "interval", "interval_step": 1,
+     "params": {"name": "overview_async_cam",
+                "resolution": [640, 480],
+                "eye": [1.0, 0.0, 1.2],
+                "target": [0.0, 0.0, 0.5],
+                "up": [0.0, 0.0, 1.0],
+                "save_path": "./outputs/videos"}}
+    ```
+```
+
+### record_camera_data
+
+The ``record_camera_data`` functor lives under the record manager module, but it is configured through the event pipeline because it runs periodically during stepping and flushes video output at episode reset.
+
+```{note}
+This is separate from {doc}`dataset_functors`. Use dataset functors when you need training data such as observations and actions. Use ``record_camera_data`` when you need human-viewable videos for debugging or demos.
+```
+
+#### Typical Usage
+
+- Set ``mode="interval"`` so the camera captures frames during stepping.
+- Use ``interval_step=1`` to record every environment step, or increase it to reduce file size.
+- Choose a fixed third-person camera pose with ``eye``, ``target``, and ``up``.
+- Save output videos with ``save_path``.
+
+#### Parameters
+
+```{list-table} record_camera_data Parameters
+:header-rows: 1
+:widths: 30 70
+
+* - Parameter
+  - Description
+* - ``name``
+  - Camera name used for the internally created sensor and output file naming. Default: ``"default"``.
+* - ``resolution``
+  - Output image size as ``[width, height]``. Default: ``[640, 480]``.
+* - ``eye``
+  - Camera position in world coordinates. Default: ``[0, 0, 2]``.
+* - ``target``
+  - Look-at target in world coordinates. Default: ``[0, 0, 0]``.
+* - ``up``
+  - Up vector for the camera pose. Default: ``[0, 0, 1]``.
+* - ``intrinsics``
+  - Camera intrinsics as ``[fx, fy, cx, cy]``. Defaults to values derived from the configured resolution.
+* - ``max_env_num``
+  - Maximum number of environments to tile into one frame when recording vectorized environments.
+* - ``save_path``
+  - Output directory for generated MP4 files. Default: ``./outputs/videos``.
+```
+
+#### Behavior Notes
+
+- In vectorized environments, frames from multiple environments are tiled into a single composite image before video encoding.
+- Videos are flushed during episode initialization for environments that are resetting, not by the Dataset Manager.
+- If the process exits without another reset, the final episode may not be flushed to disk.
+- This functor captures RGB imagery for visualization. It does not record actions, rewards, or structured training data.
+
+### record_camera_data_async
+
+The ``record_camera_data_async`` functor is the multi-environment variant of ``record_camera_data``. It tracks a small set of environments independently, waits until each one has completed an episode, and then writes a single tiled video that combines them.
+
+#### Typical Usage
+
+- Use this variant when you want one comparison video spanning multiple vectorized environments.
+- Configure it with ``mode="interval"`` just like ``record_camera_data``.
+- Keep the number of tracked environments modest; the current implementation records up to four environments.
+- Use the same camera pose parameters as the single-environment recorder.
+
+#### Parameters
+
+The async recorder accepts the same parameters as ``record_camera_data``:
+
+- ``name``
+- ``resolution``
+- ``eye``
+- ``target``
+- ``up``
+- ``intrinsics``
+- ``max_env_num``
+- ``save_path``
+
+#### Behavior Notes
+
+- Frames are buffered separately for each tracked environment and merged later into one tiled video.
+- The current implementation tracks at most four environments, even if ``num_envs`` is larger.
+- Output is written only after all tracked environments have completed an episode, so video generation may lag behind individual resets.
+- This variant is meant for qualitative inspection and comparison, not structured dataset export.
+
 ## Usage Example
 
 ```python

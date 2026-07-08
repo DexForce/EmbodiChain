@@ -16,8 +16,11 @@ embodichain.lab.sim.atomic_actions
       NamedJointPositionTarget
       GraspTarget
       HeldObjectPoseTarget
+      CoordinatedPickmentTarget
+      CoordinatedPlacementTarget
       Target
       HeldObjectState
+      CoordinatedHeldObjectState
       WorldState
       ActionResult
       ActionCfg
@@ -33,9 +36,30 @@ embodichain.lab.sim.atomic_actions
       MoveHeldObject
       PlaceCfg
       Place
+      PressCfg
+      Press
+      CoordinatedPickmentCfg
+      CoordinatedPickment
+      CoordinatedPlacementCfg
+      CoordinatedPlacement
       AtomicActionEngine
 
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   embodichain.lab.sim.atomic_actions.primitives
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Layout
+------
+
+The public API is exported from ``embodichain.lab.sim.atomic_actions``. Built-in
+primitive implementations live under
+``embodichain.lab.sim.atomic_actions.primitives`` and
+``embodichain.lab.sim.atomic_actions.actions`` remains a compatibility re-export
+for existing imports.
 
 Core
 ----
@@ -76,9 +100,21 @@ Core
     :members:
     :show-inheritance:
 
+.. autoclass:: CoordinatedPickmentTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPlacementTarget
+    :members:
+    :show-inheritance:
+
 .. autodata:: Target
 
 .. autoclass:: HeldObjectState
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CoordinatedHeldObjectState
     :members:
     :show-inheritance:
 
@@ -150,6 +186,33 @@ Actions
     :show-inheritance:
 
 .. autoclass:: Place
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PressCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: Press
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPickmentCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPickment
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPlacementCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict
+    :show-inheritance:
+
+.. autoclass:: CoordinatedPlacement
     :members:
     :show-inheritance:
 

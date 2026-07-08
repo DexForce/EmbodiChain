@@ -5,7 +5,7 @@ Atomic Actions
 
 EmbodiChain's **atomic action** layer provides a high-level, composable interface for common
 manipulation primitives such as *move end-effector*, *move joints*, *pick up*,
-*move held object*, and *place*.  Each action
+*move held object*, *place*, and *press*.  Each action
 encapsulates the full planning pipeline — grasp-pose estimation, IK, trajectory generation, and
 gripper interpolation — behind a single ``execute(target, state)`` call, making it straightforward
 to chain multiple actions together into complex robot behaviours.
@@ -18,13 +18,14 @@ Key Features
   ``GraspTarget`` (wrapping an ``ObjectSemantics``), or ``HeldObjectPoseTarget``. The
   engine checks each step's target against the action's declared ``TargetType`` before running.
 - **Built-in primitives** — ``MoveEndEffector``, ``MoveJoints``, ``PickUp``, ``MoveHeldObject``,
-  and ``Place``
+  ``Place``, ``Press``, ``CoordinatedPickment``, and ``CoordinatedPlacement``
   cover the most common tabletop manipulation workflows out of the box.
   See :doc:`/overview/sim/atomic_actions/index` for configs and target types.
 - **Extensible registry** — custom action *classes* can be registered globally with
   ``register_action``; action *instances* are registered per-engine under a name.
 - **Engine orchestration** — ``AtomicActionEngine.run(steps, state)`` sequences named
-  ``(name, typed_target)`` steps, threads a ``WorldState`` (``last_qpos`` + ``held_object``)
+  ``(name, typed_target)`` steps, threads a ``WorldState`` (``last_qpos`` +
+  ``held_object`` / ``coordinated_held_object``)
   from one action into the next, and returns a single concatenated full-DOF trajectory
   ready to replay in the simulator.
 
@@ -34,7 +35,7 @@ For the full design overview, architecture diagram, and extension guide see
 The Code
 --------
 
-Focused demo scripts are available for the five built-in primitives in the
+Focused demo scripts are available for the built-in primitives in the
 ``scripts/tutorials/atomic_action`` directory:
 
 - ``move_end_effector.py``
@@ -42,6 +43,9 @@ Focused demo scripts are available for the five built-in primitives in the
 - ``pickup.py``
 - ``move_held_object.py``
 - ``place.py``
+- ``press.py``
+- ``coordinated_pickment.py``
+- ``coordinated_placement.py``
 
 Each script supports interactive inspection by default. Add ``--auto_play`` to skip
 keyboard prompts, and combine it with ``--headless --device cpu`` to record an MP4 under
@@ -54,6 +58,15 @@ keyboard prompts, and combine it with ``--headless --device cpu`` to record an M
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/move_held_object.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/place.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/press.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/coordinated_pickment.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/coordinated_placement.py --headless --auto_play --device cpu
+
+The concrete implementations are organized one primitive per module under
+``embodichain/lab/sim/atomic_actions/primitives``. Public imports from
+``embodichain.lab.sim.atomic_actions`` remain the recommended API, and
+``embodichain.lab.sim.atomic_actions.actions`` stays as a compatibility
+re-export surface.
 
 Typical Usage
 -------------
