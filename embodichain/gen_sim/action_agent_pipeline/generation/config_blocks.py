@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 import copy
+import math
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -73,6 +74,9 @@ _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
+_FRONT_VIEW_LABEL = "front"
+_SIDE_VIEW_LABEL = "side"
+_SIDE_VIEW_Z_ROTATION_DEGREES = 90.0
 
 _BACKGROUND_ATTRS = {
     "mass": 10.0,
@@ -110,9 +114,13 @@ def _make_relative_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
+    task_name: str = "UR5BreadBasket",
 ) -> dict[str, Any]:
     return {
-        "record_camera": _record_camera_event_config(sensor_config_factory),
+        **_record_camera_event_configs(
+            sensor_config_factory,
+            task_name=task_name,
+        ),
         "validation_cameras": _validation_cameras_event_config(),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
@@ -151,9 +159,13 @@ def _make_arrangement_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
+    task_name: str = "UR5BreadBasket",
 ) -> dict[str, Any]:
     return {
-        "record_camera": _record_camera_event_config(sensor_config_factory),
+        **_record_camera_event_configs(
+            sensor_config_factory,
+            task_name=task_name,
+        ),
         "validation_cameras": _validation_cameras_event_config(),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
@@ -192,9 +204,13 @@ def _make_events_config(
     roles: _BasketTaskRoles,
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
+    task_name: str = "UR5BreadBasket",
 ) -> dict[str, Any]:
     return {
-        "record_camera": _record_camera_event_config(sensor_config_factory),
+        **_record_camera_event_configs(
+            sensor_config_factory,
+            task_name=task_name,
+        ),
         "validation_cameras": _validation_cameras_event_config(),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
@@ -230,17 +246,45 @@ def _make_events_config(
     }
 
 
-def _record_camera_event_config(
+def _record_camera_event_configs(
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
+    *,
+    task_name: str = "UR5BreadBasket",
 ) -> dict[str, Any]:
     camera = sensor_config_factory()[0]
+    side_camera = copy.deepcopy(camera)
+    side_camera["extrinsics"] = _rotate_camera_extrinsics_around_target_z(
+        camera["extrinsics"],
+        degrees=_SIDE_VIEW_Z_ROTATION_DEGREES,
+    )
+    return {
+        "record_camera": _record_camera_event_config(
+            camera,
+            name="record_cam_front",
+            video_name=_recording_video_name(task_name, _FRONT_VIEW_LABEL),
+        ),
+        "record_camera_side": _record_camera_event_config(
+            side_camera,
+            name="record_cam_side",
+            video_name=_recording_video_name(task_name, _SIDE_VIEW_LABEL),
+        ),
+    }
+
+
+def _record_camera_event_config(
+    camera: Mapping[str, Any],
+    *,
+    name: str,
+    video_name: str,
+) -> dict[str, Any]:
     extrinsics = camera["extrinsics"]
     return {
         "func": "record_camera_data",
         "mode": "interval",
         "interval_step": 1,
         "params": {
-            "name": "record_cam_high",
+            "name": name,
+            "video_name": video_name,
             "resolution": [camera["width"], camera["height"]],
             "intrinsics": camera["intrinsics"],
             "eye": extrinsics["eye"],
@@ -248,6 +292,50 @@ def _record_camera_event_config(
             "up": extrinsics["up"],
         },
     }
+
+
+def _recording_video_name(task_name: str, view_label: str) -> str:
+    return f"{task_name}_{view_label}"
+
+
+def _rotate_camera_extrinsics_around_target_z(
+    extrinsics: Mapping[str, Any],
+    *,
+    degrees: float,
+) -> dict[str, Any]:
+    target = _clean_vector3(extrinsics["target"])
+    eye = _clean_vector3(extrinsics["eye"])
+    relative_eye = [eye[index] - target[index] for index in range(3)]
+    rotated_relative_eye = _rotate_vector_around_z(relative_eye, degrees=degrees)
+    rotated = dict(extrinsics)
+    rotated["eye"] = _clean_near_zero_vector(
+        [target[index] + rotated_relative_eye[index] for index in range(3)]
+    )
+    rotated["target"] = target
+    rotated["up"] = _clean_near_zero_vector(
+        _rotate_vector_around_z(extrinsics.get("up", [0.0, 0.0, 1.0]), degrees=degrees)
+    )
+    return rotated
+
+
+def _rotate_vector_around_z(
+    vector: Sequence[float],
+    *,
+    degrees: float,
+) -> list[float]:
+    x, y, z = _clean_vector3(vector)
+    radians = math.radians(float(degrees))
+    cos_theta = math.cos(radians)
+    sin_theta = math.sin(radians)
+    return [
+        x * cos_theta - y * sin_theta,
+        x * sin_theta + y * cos_theta,
+        z,
+    ]
+
+
+def _clean_near_zero_vector(vector: Sequence[float]) -> list[float]:
+    return [0.0 if abs(float(value)) < 1e-12 else float(value) for value in vector]
 
 
 def _validation_cameras_event_config() -> dict[str, Any]:

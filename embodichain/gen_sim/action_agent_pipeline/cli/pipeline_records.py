@@ -213,6 +213,7 @@ def build_pipeline_record(
         "overwrite_config": args.overwrite_config,
         "regenerate": args.regenerate,
         "skip_run_agent": args.skip_run_agent,
+        "headless": getattr(args, "headless", False),
         "generation_summary": generated_paths.summary,
     }
     if args.task_description:

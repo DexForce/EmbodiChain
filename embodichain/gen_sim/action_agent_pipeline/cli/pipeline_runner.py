@@ -52,6 +52,7 @@ __all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
 PIPELINE_RUNNER_REQUIRED_ARGS = (
     "config_output_dir",
     "convex_decomposition_method",
+    "headless",
     "inside_container_slot_distance_scale",
     "overwrite_config",
     "prewarm_coacd_cache",
@@ -190,6 +191,7 @@ def _run_pipeline(
             gym_config=paths.gym_config,
             agent_config=paths.agent_config,
             regenerate=args.regenerate,
+            headless=getattr(args, "headless", False),
         )
     write_llm_usage_summary(usage_paths)
     return return_code

@@ -33,6 +33,7 @@ def run_agent_command(
     gym_config: Path,
     agent_config: Path,
     regenerate: bool,
+    headless: bool = False,
 ) -> int:
     command = [
         sys.executable,
@@ -45,6 +46,8 @@ def run_agent_command(
         "--agent_config",
         str(agent_config),
     ]
+    if headless:
+        command.append("--headless")
     if regenerate:
         command.append("--regenerate")
 

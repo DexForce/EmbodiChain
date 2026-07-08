@@ -505,6 +505,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop after generating config files instead of launching run_agent.",
     )
     parser.add_argument(
+        "--headless",
+        action="store_true",
+        default=False,
+        help="Pass --headless to run_agent to avoid opening a simulator window.",
+    )
+    parser.add_argument(
         "--llm-usage-output",
         default=None,
         help=(
