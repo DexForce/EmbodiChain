@@ -80,6 +80,40 @@ def test_prompt2scene_prompt_is_independent_from_task_description() -> None:
     assert args.task_description == "put the can into the pot"
 
 
+def test_pipeline_parser_accepts_headless() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+
+    args = build_parser().parse_args(["--headless"])
+
+    assert args.headless is True
+
+
+def test_run_agent_command_passes_headless(monkeypatch, tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import agent_run_stage
+
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(agent_run_stage.subprocess, "run", fake_run)
+
+    return_code = agent_run_stage.run_agent_command(
+        task_name="Demo111",
+        gym_config=tmp_path / "fast_gym_config.json",
+        agent_config=tmp_path / "agent_config.json",
+        regenerate=True,
+        headless=True,
+    )
+
+    assert return_code == 0
+    assert "--headless" in captured["command"]
+    assert "--regenerate" in captured["command"]
+    assert captured["kwargs"]["check"] is False
+
+
 def test_action_agent_python_modules_declare_all() -> None:
     missing_all = []
     for path in sorted(_ACTION_AGENT_PACKAGE_ROOT.rglob("*.py")):
@@ -652,6 +686,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             overwrite_config=True,
             regenerate=True,
             skip_run_agent=False,
+            headless=True,
         ),
         resolution=SimpleNamespace(path=source_config, mode="prompt2scene"),
         generated_paths=SimpleNamespace(
@@ -685,6 +720,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
     assert record["target_body_scale_mode"] == "multiply"
     assert record["convex_decomposition_method"] == "vhacd"
+    assert record["headless"] is True
 
 
 @pytest.mark.parametrize(
@@ -903,6 +939,94 @@ def test_prompt2scene_pipeline_handles_target_scale(
     assert captured["source_mesh_x_rotation_degrees"] == 90.0
     assert captured["target_body_scale"] == expected_target_body_scale
     assert captured["convex_decomposition_method"] == "vhacd"
+
+
+def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import pipeline_runner
+
+    captured = {}
+
+    def fake_resolve_gym_project(args):
+        return SimpleNamespace(
+            path=tmp_path / "gym_config.json",
+            mode="existing_gym_project",
+        )
+
+    class FakeTargetReplacementSpec:
+        pass
+
+    class FakeGeneratedPaths:
+        output_dir = tmp_path / "configs"
+        gym_config = tmp_path / "configs/fast_gym_config.json"
+        agent_config = tmp_path / "configs/agent_config.json"
+        task_prompt = tmp_path / "configs/task_prompt.txt"
+        task_graph = tmp_path / "configs/task_graph.json"
+        basic_background = tmp_path / "configs/basic_background.txt"
+        atom_actions = tmp_path / "configs/atom_actions.txt"
+        summary = {}
+
+    monkeypatch.setattr(
+        pipeline_runner,
+        "resolve_gym_project",
+        fake_resolve_gym_project,
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "resolve_target_replacements",
+        lambda args, spec_cls, path: [],
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "resolve_task_description_for_generation",
+        lambda args: args.task_description,
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "configure_llm_usage_tracking",
+        lambda args: SimpleNamespace(),
+    )
+    monkeypatch.setattr(pipeline_runner, "write_llm_usage_summary", lambda paths: None)
+    monkeypatch.setattr(
+        pipeline_runner, "write_pipeline_manifests", lambda **kwargs: {}
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "run_agent_command",
+        lambda **kwargs: captured.update(kwargs) or 0,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config",
+        SimpleNamespace(
+            TargetReplacementSpec=FakeTargetReplacementSpec,
+            generate_action_agent_config_from_project=lambda **kwargs: FakeGeneratedPaths(),
+        ),
+    )
+
+    result = pipeline_runner.run_pipeline(
+        SimpleNamespace(
+            task_name="Demo111",
+            task_description="move cup",
+            config_output_dir=str(tmp_path / "configs"),
+            target_body_scale=None,
+            target_body_scale_mode=None,
+            inside_container_slot_distance_scale=1.0,
+            prompt2scene_scene_z_rotation_degrees=-90.0,
+            prompt2scene_mesh_x_rotation_degrees=90.0,
+            sync_replacement_names=False,
+            reuse_target_replacements=True,
+            convex_decomposition_method="vhacd",
+            prewarm_coacd_cache=False,
+            overwrite_config=True,
+            skip_run_agent=False,
+            regenerate=True,
+            headless=True,
+        )
+    )
+
+    assert result == 0
+    assert captured["headless"] is True
+    assert captured["task_name"] == "Demo111"
 
 
 def test_batch_new_pipeline_command_preserves_prompt2scene_scale_by_default(
