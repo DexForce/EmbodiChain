@@ -9,9 +9,11 @@ intent_system: |
 
   Rules:
   - Existing objects must be referenced only by their exact object id.
+  - Existing object ids may have any prefix. Do not decide whether an object already exists from its id prefix; use only the provided Existing scene objects list.
+  - New generated object temp_id values must use the same asset id style as interact objects: interact_<canonical_snake_case_name>_<index>. Do not use a new_ prefix.
   - center_xy uses tabletop XY coordinates in meters.
   - left means smaller X. right means larger X. front means smaller Y. back means larger Y.
-  - When the user uses positional qualifiers among repeated similar objects, resolve them using center_xy: leftmost/smaller-left = smallest X, rightmost = largest X, frontmost = smallest Y, backmost = largest Y.
+  - When the user uses positional qualifiers among objects of the same semantic type, even if their names differ, resolve them using center_xy: leftmost/smaller-left = smallest X, rightmost = largest X, frontmost = smallest Y, backmost = largest Y.
   - When the user says "left side of object A", the new or moved object should be left_of object A. "right side" means right_of, "front side" means front_of, and "back side" means back_of.
   - If two or more candidate objects remain ambiguous after using name, description, and center_xy, put the ambiguity in unresolved instead of guessing.
   - deleted_object_ids may contain only ids from the existing scene objects.
@@ -19,7 +21,7 @@ intent_system: |
   - A move operation repositions an existing object without generating geometry, deleting it, or changing its id.
   - Every added or replacement object must appear in generated_objects with a temp_id, canonical snake_case name, and standalone detailed description suitable for text-to-geometry simready generation.
   - Move operations must not appear in generated_objects and must not add the moved object id to deleted_object_ids.
-  - For delete operations, identify only the existing object ids to delete.
+  - For delete operations, identify only the existing object ids to delete, set type=delete, set target_object_id to the deleted existing id, set new_object_temp_id="", and always set placement.type=preserve_target with empty reference_object_id, relation, and grid.
   - For replacement operations, set type=replace, set target_object_id to the existing object being replaced, create exactly one generated object, and set placement.type=preserve_target unless the user gives an explicit new placement.
   - For add operations, infer placement from the user prompt when possible.
   - For move operations, set type=move, set target_object_id to the existing object being moved, set new_object_temp_id="", and infer placement from the user prompt when possible.
@@ -34,7 +36,7 @@ intent_system: |
   - The top-level key reason is required.
   - Every generated object must include source_operation.
   - Every operation must include reason and confidence.
-  - Every unresolved item must include reason.
+  - Every unresolved item must include query, reason, and candidate_object_ids.
   - Output JSON only.
 
   Example 1:
@@ -58,7 +60,7 @@ intent_system: |
     "deleted_object_ids": ["interact_plastic_water_bottle_0"],
     "generated_objects": [
       {
-        "temp_id": "new_red_apple_0",
+        "temp_id": "interact_red_apple_0",
         "name": "red_apple",
         "description": "A large red apple with smooth glossy skin, a round body, and a short brown stem.",
         "source_operation": "replace"
@@ -68,7 +70,7 @@ intent_system: |
       {
         "type": "replace",
         "target_object_id": "interact_plastic_water_bottle_0",
-        "new_object_temp_id": "new_red_apple_0",
+        "new_object_temp_id": "interact_red_apple_0",
         "placement": {
           "type": "preserve_target",
           "reference_object_id": "",
@@ -99,7 +101,7 @@ intent_system: |
     "deleted_object_ids": [],
     "generated_objects": [
       {
-        "temp_id": "new_blue_mug_0",
+        "temp_id": "interact_blue_mug_0",
         "name": "blue_mug",
         "description": "A ceramic blue mug with a glossy finish, a rounded body, and a side handle.",
         "source_operation": "add"
@@ -109,7 +111,7 @@ intent_system: |
       {
         "type": "add",
         "target_object_id": "",
-        "new_object_temp_id": "new_blue_mug_0",
+        "new_object_temp_id": "interact_blue_mug_0",
         "placement": {
           "type": "grid",
           "reference_object_id": "",
@@ -147,7 +149,7 @@ intent_system: |
     "deleted_object_ids": [],
     "generated_objects": [
       {
-        "temp_id": "new_red_apple_0",
+        "temp_id": "interact_red_apple_0",
         "name": "red_apple",
         "description": "A red apple with smooth glossy skin, a round body, and a short brown stem.",
         "source_operation": "add"
@@ -157,7 +159,7 @@ intent_system: |
       {
         "type": "add",
         "target_object_id": "",
-        "new_object_temp_id": "new_red_apple_0",
+        "new_object_temp_id": "interact_red_apple_0",
         "placement": {
           "type": "relative_to_object",
           "reference_object_id": "interact_plastic_water_bottle_0",
@@ -173,6 +175,67 @@ intent_system: |
   }
 
   Example 4:
+  Existing scene objects:
+  [
+    {
+      "id": "interact_orange_bottle_0",
+      "name": "orange_bottle",
+      "description": "An orange plastic bottle with a white cap.",
+      "center_xy": [-0.21, 0.02]
+    },
+    {
+      "id": "interact_american_style_bottle_0",
+      "name": "american_style_bottle",
+      "description": "A tall American-style glass bottle with a narrow neck.",
+      "center_xy": [0.17, 0.03]
+    }
+  ]
+  User prompt:
+  delete the left bottle and add an orange on the right side of the right bottle
+  Output:
+  {
+    "deleted_object_ids": ["interact_orange_bottle_0"],
+    "generated_objects": [
+      {
+        "temp_id": "interact_orange_0",
+        "name": "orange",
+        "description": "A round orange fruit with a bright textured peel, a small navel, and a natural citrus shape.",
+        "source_operation": "add"
+      }
+    ],
+    "operations": [
+      {
+        "type": "delete",
+        "target_object_id": "interact_orange_bottle_0",
+        "new_object_temp_id": "",
+        "placement": {
+          "type": "preserve_target",
+          "reference_object_id": "",
+          "relation": "",
+          "grid": ""
+        },
+        "reason": "Both candidates are bottles by name and description, so the left bottle is the one with the smaller center_xy X value.",
+        "confidence": 0.96
+      },
+      {
+        "type": "add",
+        "target_object_id": "",
+        "new_object_temp_id": "interact_orange_0",
+        "placement": {
+          "type": "relative_to_object",
+          "reference_object_id": "interact_american_style_bottle_0",
+          "relation": "right_of",
+          "grid": ""
+        },
+        "reason": "The right bottle is the bottle with the larger center_xy X value, so the orange should be placed on its right side.",
+        "confidence": 0.95
+      }
+    ],
+    "unresolved": [],
+    "reason": "Delete the left bottle and add an orange to the right side of the right bottle."
+  }
+
+  Example 5:
   Existing scene objects:
   [
     {
@@ -211,7 +274,7 @@ intent_system: |
     "reason": "Move the existing red mug to a new placement relative to the notebook."
   }
 
-  Example 5:
+  Example 6:
   Existing scene objects:
   [
     {
@@ -255,6 +318,8 @@ intent_user: |
   Produce the scene edit intent. Remember:
   - deleted_object_ids includes both explicitly deleted objects and replaced old objects.
   - generated_objects includes every new object needed by add or replace operations, and excludes move operations.
+  - generated_objects[].temp_id and add/replace operations[].new_object_temp_id must use interact_<canonical_snake_case_name>_<index>, not new_.
   - operations must contain enough placement information for the program to update relations and 9-grid assignments.
+  - Delete operations must use placement.type=preserve_target with empty reference_object_id, relation, and grid.
   - Existing-object movement must use type=move, target_object_id, empty new_object_temp_id, and random placement when no destination is specified.
-  - The required keys must all be present, including top-level reason, generated_objects[].source_operation, operations[].reason, operations[].confidence, and unresolved[].reason when unresolved is non-empty.
+  - The required keys must all be present, including top-level reason, generated_objects[].source_operation, operations[].reason, operations[].confidence, and unresolved[].query/reason/candidate_object_ids when unresolved is non-empty.

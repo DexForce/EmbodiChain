@@ -410,8 +410,10 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                         "type": "string",
                         "minLength": 1,
                         "description": (
-                            "Temporary id used by this edit plan, such as "
-                            "new_red_mug_0. It must not collide with existing ids."
+                            "Temporary id used by this edit plan, using "
+                            "interact_<canonical_name>_<index>, such as "
+                            "interact_red_mug_0. Do not use a new_ prefix. "
+                            "It must not collide with existing ids."
                         ),
                     },
                     "name": {
@@ -464,8 +466,8 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                     "new_object_temp_id": {
                         "type": "string",
                         "description": (
-                            "Generated object temp_id for add/replace, or empty "
-                            "string for delete/move."
+                            "Generated object temp_id for add/replace using the "
+                            "interact_ prefix, or empty string for delete/move."
                         ),
                     },
                     "placement": {

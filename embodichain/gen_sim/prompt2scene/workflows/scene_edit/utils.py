@@ -1165,12 +1165,11 @@ def _normalize_scene_edit_intent_ids(
         old_id = str(generated.get("temp_id", "")).strip()
         if not old_id:
             continue
-        new_id = old_id
-        if new_id in reserved or new_id in seen_generated:
-            new_id = _unique_scene_edit_generated_id(
-                base_id=old_id,
-                reserved_ids=reserved | seen_generated,
-            )
+        new_id = _unique_scene_edit_generated_id(
+            base_id=_scene_edit_generated_id_base(generated),
+            reserved_ids=reserved | seen_generated,
+        )
+        if new_id != old_id:
             generated["temp_id"] = new_id
         seen_generated.add(new_id)
         reserved.add(new_id)
@@ -1191,13 +1190,25 @@ def _unique_scene_edit_generated_id(
     base_id: str,
     reserved_ids: set[str],
 ) -> str:
-    base = re.sub(r"_\d+$", "", base_id.strip()) or "new_object"
+    base = re.sub(r"_\d+$", "", base_id.strip()) or "interact_object"
+    if not base.startswith("interact_"):
+        base = f"interact_{base}"
     index = 0
     while True:
         candidate = f"{base}_{index}"
         if candidate not in reserved_ids:
             return candidate
         index += 1
+
+
+def _scene_edit_generated_id_base(generated: dict[str, Any]) -> str:
+    name = str(generated.get("name", "")).strip()
+    fallback_id = str(generated.get("temp_id", "")).strip()
+    raw_base = name or fallback_id or "object"
+    raw_base = re.sub(r"^(?:new|interact)_", "", raw_base)
+    raw_base = re.sub(r"_\d+$", "", raw_base)
+    base = re.sub(r"[^a-zA-Z0-9]+", "_", raw_base.lower()).strip("_")
+    return f"interact_{base or 'object'}"
 
 
 def _map_reference_endpoint(
