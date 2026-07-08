@@ -158,8 +158,8 @@ def test_record_camera_events_generate_front_and_side_view_names() -> None:
 
     assert front_params["name"] == "record_cam_front"
     assert side_params["name"] == "record_cam_side"
-    assert front_params["video_name"] == "Demo111_\u6b63\u89c6"
-    assert side_params["video_name"] == "Demo111_\u4fa7\u89c6"
+    assert front_params["video_name"] == "Demo111_front"
+    assert side_params["video_name"] == "Demo111_side"
     assert front_params["resolution"] == side_params["resolution"]
     assert front_params["intrinsics"] == side_params["intrinsics"]
     assert front_params["eye"] == pytest.approx([-0.6, 0.0, 1.8])
@@ -365,12 +365,8 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
     assert registered_uids == {"left_apple", "right_apple", "wicker_basket"}
     record_events = gym_config["env"]["events"]
-    assert record_events["record_camera"]["params"]["video_name"] == (
-        "Demo111_\u6b63\u89c6"
-    )
-    assert record_events["record_camera_side"]["params"]["video_name"] == (
-        "Demo111_\u4fa7\u89c6"
-    )
+    assert record_events["record_camera"]["params"]["video_name"] == "Demo111_front"
+    assert record_events["record_camera_side"]["params"]["video_name"] == "Demo111_side"
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
