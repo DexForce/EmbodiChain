@@ -46,12 +46,17 @@ from embodichain.gen_sim.action_agent_pipeline.cli.prompt2scene_stage import (
 )
 
 __all__ = [
+    "PROMPT2SCENE_PROJECT_MODES",
     "ProjectResolution",
     "resolve_gym_project",
     "resolve_task_description_for_generation",
 ]
 
 _DEFAULT_IMAGE_DIR = DEFAULT_IMAGE.parent
+_PROMPT2SCENE_EXISTING_PROJECT_MODE = "prompt2scene_existing_gym_project"
+PROMPT2SCENE_PROJECT_MODES = frozenset(
+    {"prompt2scene", _PROMPT2SCENE_EXISTING_PROJECT_MODE}
+)
 
 
 @dataclass(frozen=True)
@@ -101,8 +106,19 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
                 "--use-existing-gym-project. Use --use-prompt2scene with "
                 "--prompt2scene-output-root for prompt2scene edit/randomization."
             )
+        mode = (
+            _PROMPT2SCENE_EXISTING_PROJECT_MODE
+            if _is_prompt2scene_gym_export(project_path)
+            else "existing_gym_project"
+        )
         print(f"Using existing gym project: {project_path}", flush=True)
-        return ProjectResolution(path=project_path, mode="existing_gym_project")
+        if mode == _PROMPT2SCENE_EXISTING_PROJECT_MODE:
+            print(
+                "Detected prompt2scene gym_export; applying prompt2scene "
+                "action-agent alignment.",
+                flush=True,
+            )
+        return ProjectResolution(path=project_path, mode=mode)
 
     if args.use_image2scene:
         return ProjectResolution(
@@ -153,6 +169,21 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
             job_timeout_s=args.job_timeout_s,
         ),
         mode="image2tabletop",
+    )
+
+
+def _is_prompt2scene_gym_export(path: Path) -> bool:
+    """Return true if *path* points at a prompt2scene exported gym project."""
+
+    candidates: list[Path] = []
+    if path.is_file():
+        candidates.append(path.parent)
+    else:
+        candidates.extend([path, path / "gym_export"])
+
+    return any(
+        (candidate / "scene_state" / "result.json").is_file()
+        for candidate in candidates
     )
 
 

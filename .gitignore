@@ -204,3 +204,5 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+gym_project/

@@ -725,6 +725,68 @@ def test_existing_gym_project_rejects_prompt2scene_prompt(
 
 
 @pytest.mark.parametrize(
+    "path_kind",
+    ["output_root", "gym_export", "gym_config"],
+)
+def test_existing_gym_project_detects_prompt2scene_export(
+    tmp_path,
+    path_kind,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import project_resolution
+
+    output_root = tmp_path / "prompt2scene/demo"
+    gym_export = output_root / "gym_export"
+    gym_config = gym_export / "gym_config.json"
+    scene_state = gym_export / "scene_state/result.json"
+    scene_state.parent.mkdir(parents=True)
+    scene_state.write_text("{}", encoding="utf-8")
+    gym_config.write_text("{}", encoding="utf-8")
+    input_path = {
+        "output_root": output_root,
+        "gym_export": gym_export,
+        "gym_config": gym_config,
+    }[path_kind]
+
+    resolution = project_resolution.resolve_gym_project(
+        SimpleNamespace(
+            use_image2scene=False,
+            use_prompt2scene=False,
+            use_existing_gym_project=True,
+            base_task_name=None,
+            base_history_index=None,
+            gym_project=str(input_path),
+            prompt2scene_prompt=None,
+        )
+    )
+
+    assert resolution.path == input_path.resolve()
+    assert resolution.mode == "prompt2scene_existing_gym_project"
+
+
+def test_existing_gym_project_without_scene_state_stays_generic(tmp_path) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import project_resolution
+
+    gym_project = tmp_path / "image2tabletop_project"
+    gym_project.mkdir()
+    (gym_project / "gym_config.json").write_text("{}", encoding="utf-8")
+
+    resolution = project_resolution.resolve_gym_project(
+        SimpleNamespace(
+            use_image2scene=False,
+            use_prompt2scene=False,
+            use_existing_gym_project=True,
+            base_task_name=None,
+            base_history_index=None,
+            gym_project=str(gym_project),
+            prompt2scene_prompt=None,
+        )
+    )
+
+    assert resolution.path == gym_project.resolve()
+    assert resolution.mode == "existing_gym_project"
+
+
+@pytest.mark.parametrize(
     (
         "target_body_scale",
         "target_body_scale_mode",
@@ -738,9 +800,14 @@ def test_existing_gym_project_rejects_prompt2scene_prompt(
         (0.5, "preserve", "preserve", 0.5),
     ],
 )
+@pytest.mark.parametrize(
+    "resolution_mode",
+    ["prompt2scene", "prompt2scene_existing_gym_project"],
+)
 def test_prompt2scene_pipeline_handles_target_scale(
     monkeypatch,
     tmp_path,
+    resolution_mode,
     target_body_scale,
     target_body_scale_mode,
     expected_source_scene_body_scale_mode,
@@ -751,7 +818,10 @@ def test_prompt2scene_pipeline_handles_target_scale(
     captured = {}
 
     def fake_resolve_gym_project(args):
-        return SimpleNamespace(path=tmp_path / "gym_config.json", mode="prompt2scene")
+        return SimpleNamespace(
+            path=tmp_path / "gym_config.json",
+            mode=resolution_mode,
+        )
 
     class FakeTargetReplacementSpec:
         pass

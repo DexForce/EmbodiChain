@@ -40,6 +40,8 @@ __all__ = [
     "write_pipeline_manifests",
 ]
 
+_PROMPT2SCENE_EXISTING_PROJECT_MODE = "prompt2scene_existing_gym_project"
+
 
 def pipeline_history_path(args: argparse.Namespace) -> Path:
     return Path(args.pipeline_history_path).expanduser().resolve()
@@ -332,6 +334,17 @@ def _source_request_record(
             args,
             "prompt2scene_gravity_settle_mode",
             "geometry",
+        )
+        record["prompt2scene_scene_z_rotation_degrees"] = (
+            args.prompt2scene_scene_z_rotation_degrees
+        )
+        record["prompt2scene_mesh_x_rotation_degrees"] = (
+            args.prompt2scene_mesh_x_rotation_degrees
+        )
+    elif resolution.mode == _PROMPT2SCENE_EXISTING_PROJECT_MODE:
+        record["gym_project"] = _record_path(
+            Path(args.gym_project).expanduser(),
+            repo_root,
         )
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees

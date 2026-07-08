@@ -39,6 +39,7 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_usage import (
     write_llm_usage_summary,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.project_resolution import (
+    PROMPT2SCENE_PROJECT_MODES,
     resolve_gym_project,
     resolve_task_description_for_generation,
 )
@@ -112,7 +113,8 @@ def _run_pipeline(
     args.task_description = task_description or ""
     target_body_scale = args.target_body_scale
     target_body_scale_mode = getattr(args, "target_body_scale_mode", None)
-    if resolution.mode == "prompt2scene":
+    uses_prompt2scene_alignment = resolution.mode in PROMPT2SCENE_PROJECT_MODES
+    if uses_prompt2scene_alignment:
         source_scene_body_scale_mode = (
             target_body_scale_mode
             if target_body_scale_mode is not None
@@ -139,15 +141,15 @@ def _run_pipeline(
             task_description=task_description,
             target_body_scale=effective_target_body_scale,
             source_scene_body_scale_mode=source_scene_body_scale_mode,
-            preserve_source_scene_geometry=resolution.mode == "prompt2scene",
+            preserve_source_scene_geometry=uses_prompt2scene_alignment,
             source_scene_z_rotation_degrees=(
                 args.prompt2scene_scene_z_rotation_degrees
-                if resolution.mode == "prompt2scene"
+                if uses_prompt2scene_alignment
                 else 0.0
             ),
             source_mesh_x_rotation_degrees=(
                 args.prompt2scene_mesh_x_rotation_degrees
-                if resolution.mode == "prompt2scene"
+                if uses_prompt2scene_alignment
                 else 0.0
             ),
             inside_container_slot_distance_scale=(
