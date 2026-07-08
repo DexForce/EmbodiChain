@@ -119,6 +119,21 @@ class MeshCfg(ShapeCfg):
     project_direction: List[float] = [1.0, 1.0, 1.0]
     """Direction to project the UV coordinates. Defaults to [1.0, 1.0, 1.0]."""
 
+    max_convex_hull_num: int = 1
+    """The maximum number of convex hulls that will be created for the mesh.
+
+    If set to larger than 1, the mesh will be decomposed into multiple convex hulls
+    using the approximate convex decomposition method specified by :attr:`acd_method`.
+    Reference: https://github.com/SarahWeiii/CoACD
+    """
+
+    acd_method: str = "coacd"
+    """The method used for approximate convex decomposition (ACD) of the mesh.
+
+    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1.
+    """
+
 
 @configclass
 class CubeCfg(ShapeCfg):

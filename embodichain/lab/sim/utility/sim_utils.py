@@ -18,6 +18,7 @@ import os
 import dexsim
 import open3d as o3d
 
+from dataclasses import MISSING
 from typing import List, Union
 
 from dexsim.types import (
@@ -277,7 +278,14 @@ def load_mesh_objects_from_cfg(
         option.smooth = cfg.shape.load_option.smooth
 
         cfg: RigidObjectCfg
-        max_convex_hull_num = cfg.max_convex_hull_num
+        max_convex_hull_num = (
+            cfg.max_convex_hull_num
+            if cfg.max_convex_hull_num is not MISSING
+            else cfg.shape.max_convex_hull_num
+        )
+        acd_method = (
+            cfg.acd_method if cfg.acd_method is not MISSING else cfg.shape.acd_method
+        )
         fpath = cfg.shape.fpath
 
         compute_uv = cfg.shape.compute_uv
@@ -316,7 +324,7 @@ def load_mesh_objects_from_cfg(
                     cache_path=cache_dir,
                     actor_type=body_type,
                     max_convex_hull_num=max_convex_hull_num,
-                    method=cfg.convex_decomposition_method,
+                    method=acd_method,
                 )
             elif cfg.sdf_resolution > 0:
                 obj = env.load_actor(

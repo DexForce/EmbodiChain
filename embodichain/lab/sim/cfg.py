@@ -827,16 +827,16 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
 
-    max_convex_hull_num: int = 1
+    max_convex_hull_num: int = MISSING
     """The maximum number of convex hulls that will be created for the rigid body.
 
-    If `max_convex_hull_num` is set to larger than 1, the rigid body will be decomposed into multiple convex hulls using coacd alogorithm.
-    Reference: https://github.com/SarahWeiii/CoACD
-    """
+    .. deprecated::
+        Use :attr:`MeshCfg.max_convex_hull_num` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
 
-    convex_decomposition_method: str = "coacd"
-    """The method used for convex decomposition of the rigid body.
-    Currently, "coacd" and "vhacd" is supported. If `max_convex_hull_num` is set to larger than 1, the rigid body will be decomposed into multiple convex hulls using the specified method.
+    If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
+    using the approximate convex decomposition method specified by :attr:`acd_method`.
+    Reference: https://github.com/SarahWeiii/CoACD
     """
 
     sdf_resolution: int = 0
