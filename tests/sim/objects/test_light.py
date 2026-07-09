@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import pytest
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -31,7 +33,7 @@ class TestLight:
             "light_type": "point",
             "color": [0.1, 0.1, 0.1],
             "radius": 10.0,
-            "position": [0.0, 0.0, 2.0],
+            "init_pos": [0.0, 0.0, 2.0],
             "uid": "point_light",
         }
         self.light = self.sim.add_light(cfg=LightCfg.from_dict(cfg_dict))
@@ -432,10 +434,12 @@ class TestLightTypes:
             "light_type": "point",
             "color": [0.1, 0.1, 0.1],
             "radius": 10.0,
-            "position": [0.0, 0.0, 2.0],
+            "init_pos": [0.0, 0.0, 2.0],
             "uid": "point_compat",
         }
-        light = self.sim.add_light(cfg=LightCfg.from_dict(cfg_dict))
+        cfg = LightCfg.from_dict(cfg_dict)
+        assert cfg.init_pos == [0.0, 0.0, 2.0]
+        light = self.sim.add_light(cfg=cfg)
         assert light is not None
         assert light.num_instances == 4
 

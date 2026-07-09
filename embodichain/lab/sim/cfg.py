@@ -932,7 +932,8 @@ class LightCfg(ObjectBaseCfg):
     - ``"rect"``: Per-environment rectangular area light with position,
       direction, width, and height. Created as a batched light.
     - ``"mesh"``: Per-environment mesh-based emissive light. Requires a
-      :class:`~dexsim.models.MeshObject` via :meth:`~Light.set_mesh`
+      :class:`~dexsim.models.MeshObject` via
+      :meth:`embodichain.lab.sim.objects.light.Light.set_mesh`
       (not tensor-batched). Created as a batched light.
 
     .. attention::
@@ -1015,7 +1016,8 @@ class LightCfg(ObjectBaseCfg):
 
     mesh_path: str = ""
     """Asset path for mesh-based emissive lights. Only used when ``light_type="mesh"``.
-    The actual mesh assignment is done via :meth:`Light.set_mesh` which accepts a
+    The actual mesh assignment is done via
+    :meth:`embodichain.lab.sim.objects.light.Light.set_mesh` which accepts a
     :class:`dexsim.models.MeshObject`. This field stores the path for reference."""
 
 
@@ -1036,18 +1038,41 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
 
-    max_convex_hull_num: int = 1
+    max_convex_hull_num: int = MISSING
     """The maximum number of convex hulls that will be created for the rigid body.
 
-    If `max_convex_hull_num` is set to larger than 1, the rigid body will be decomposed into multiple convex hulls using coacd alogorithm.
+    .. deprecated::
+        Use :attr:`MeshCfg.max_convex_hull_num` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
+    using the approximate convex decomposition method specified by :attr:`acd_method`.
     Reference: https://github.com/SarahWeiii/CoACD
     """
 
-    sdf_resolution: int = 0
+    acd_method: str = MISSING
+    """The method used for approximate convex decomposition (ACD) of the mesh.
+
+    .. deprecated::
+        Use :attr:`MeshCfg.acd_method` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1.
+    """
+
+    sdf_resolution: int = MISSING
     """Resolution for the signed distance field (SDF) of the rigid body.
-    The spacing of the uniformly sampled SDF is equal to the largest AABB extent of the mesh, divided by the resolution.
-    if `sdf_resolution` is set to larger than 0, a SDF will be generated for collision detection.
-    SDF will increase the accuracy of collision, but also take more time to initialize and simulate."""
+
+    .. deprecated::
+        Use :attr:`MeshCfg.sdf_resolution` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    The spacing of the uniformly sampled SDF is equal to the largest AABB extent
+    of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
+    than 0, an SDF will be generated for collision detection. SDF will increase the
+    accuracy of collision, but also takes more time to initialize and simulate.
+    """
 
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
