@@ -399,15 +399,11 @@ def _apply_cfg_rotation(mesh: trimesh.Trimesh, cfg: Dict[str, Any]) -> trimesh.T
     init_rot = _get_cfg_init_rot(cfg)
     if np.all(np.abs(init_rot) <= 1.0e-8):
         return mesh
-    import trimesh.transformations as tt
+    from scipy.spatial.transform import Rotation as R
 
     rotated = mesh.copy()
-    transform = tt.euler_matrix(
-        float(np.deg2rad(init_rot[0])),
-        float(np.deg2rad(init_rot[1])),
-        float(np.deg2rad(init_rot[2])),
-        axes="sxyz",
-    )
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = R.from_euler("XYZ", np.deg2rad(init_rot)).as_matrix()
     rotated.apply_transform(transform)
     return rotated
 

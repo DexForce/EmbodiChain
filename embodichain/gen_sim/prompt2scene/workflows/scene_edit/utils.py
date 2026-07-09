@@ -32,8 +32,13 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
     generate_text_object_assets,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    export_z_axis_normalized_asset,
+    match_asset_orientation_keyword,
+)
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
     _bake_glb_bottom_center_to_origin,
+    _glb_to_sim_rotation,
     _render_scene_state_topdown,
 )
 from embodichain.gen_sim.prompt2scene.workflows.paths import PipelinePaths
@@ -799,6 +804,7 @@ def export_scene_edit_gym_state(
     generated_assets: list[dict[str, Any]],
     layout_updates: list[dict[str, Any]],
     output_dir: Path,
+    z_axis_align_assets: bool = True,
 ) -> dict[str, Any]:
     """Update gym_export files from scene-edit layout results."""
     paths = PipelinePaths(output_root)
@@ -884,6 +890,7 @@ def export_scene_edit_gym_state(
                 output_root=output_root,
                 mesh_assets_dir=mesh_assets_dir,
                 table_height=table_surface_height + 0.01,
+                z_axis_align_assets=z_axis_align_assets,
             )
             shape = updated_rigid.get("shape")
             if isinstance(shape, dict):
@@ -1319,7 +1326,6 @@ def _infer_scene_edit_table_surface_height(
 ) -> float:
     try:
         import trimesh
-        import trimesh.transformations as tt
     except ImportError:
         return 0.0
 
@@ -1365,13 +1371,10 @@ def _infer_scene_edit_table_surface_height(
 
     init_rot = np.asarray(table.get("init_rot") or [0.0, 0.0, 0.0], dtype=np.float64)
     if init_rot.shape == (3,) and np.any(np.abs(init_rot) > 1.0e-8):
-        rot = tt.euler_matrix(
-            float(np.deg2rad(init_rot[0])),
-            float(np.deg2rad(init_rot[1])),
-            float(np.deg2rad(init_rot[2])),
-            axes="sxyz",
-        )
-        verts = (rot[:3, :3] @ verts.T).T
+        from scipy.spatial.transform import Rotation as R
+
+        rot = R.from_euler("XYZ", np.deg2rad(init_rot)).as_matrix()
+        verts = (rot @ verts.T).T
 
     init_pos = np.asarray(table.get("init_pos") or [0.0, 0.0, 0.0], dtype=np.float64)
     if init_pos.shape != (3,) or not np.all(np.isfinite(init_pos)):
@@ -1412,6 +1415,7 @@ def _build_generated_rigid_object(
     output_root: Path,
     mesh_assets_dir: Path,
     table_height: float,
+    z_axis_align_assets: bool = True,
 ) -> dict[str, Any]:
     simready_path = _resolve_generated_asset_path(generated_asset, output_root=output_root)
     if not simready_path.is_file():
@@ -1430,21 +1434,69 @@ def _build_generated_rigid_object(
             scale_factor = 1.0
     if not np.isfinite(scale_factor) or scale_factor <= 0.0:
         scale_factor = 1.0
-    _bake_glb_bottom_center_to_origin(
-        simready_path,
-        object_dst,
-        scale_factor=scale_factor,
-    )
     body_scale = [1.0, 1.0, 1.0]
-    init_rot = [0.0, 0.0, 0.0]
     target_center = np.asarray(layout_item.get("center_xy", []), dtype=np.float64)
     if target_center.shape != (2,):
         raise ValueError(f"Missing center_xy for generated object: {object_id}")
-    init_pos = [
+    target_pos = [
         float(target_center[0]),
         float(target_center[1]),
         float(table_height),
     ]
+    alignment_keyword = (
+        match_asset_orientation_keyword(
+            object_id=object_id,
+            name=" ".join(
+                [
+                    str(layout_item.get("name", "")).strip(),
+                    str(generated_asset.get("name", "")).strip(),
+                ]
+            ),
+            description=" ".join(
+                [
+                    str(layout_item.get("description", "")).strip(),
+                    str(generated_asset.get("description", "")).strip(),
+                ]
+            ),
+        )
+        if z_axis_align_assets
+        else None
+    )
+    if alignment_keyword is not None:
+        local_baked_path = object_dst.with_name(
+            f".{object_dst.stem}_bottom_center.glb"
+        )
+        try:
+            _bake_glb_bottom_center_to_origin(
+                simready_path,
+                local_baked_path,
+                scale_factor=scale_factor,
+            )
+            alignment_result = export_z_axis_normalized_asset(
+                local_baked_path,
+                object_dst,
+                glb_to_sim_rotation=_glb_to_sim_rotation(),
+            )
+        finally:
+            local_baked_path.unlink(missing_ok=True)
+        init_pos = [
+            float(alignment_result.init_pos[0]) + target_pos[0],
+            float(alignment_result.init_pos[1]) + target_pos[1],
+            float(alignment_result.init_pos[2]) + target_pos[2],
+        ]
+        init_rot = alignment_result.init_rot
+        log_info(
+            "scene_edit z-axis asset normalization applied "
+            f"id={object_id} keyword={alignment_keyword}"
+        )
+    else:
+        _bake_glb_bottom_center_to_origin(
+            simready_path,
+            object_dst,
+            scale_factor=scale_factor,
+        )
+        init_pos = target_pos
+        init_rot = [0.0, 0.0, 0.0]
     return {
         "uid": object_id,
         "description": str(layout_item.get("description", "")).strip(),

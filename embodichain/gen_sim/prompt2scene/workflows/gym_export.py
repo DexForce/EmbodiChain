@@ -25,6 +25,10 @@ from typing import Any
 
 import numpy as np
 
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    export_z_axis_normalized_asset,
+    match_asset_orientation_keyword,
+)
 from embodichain.gen_sim.prompt2scene.workflows.paths import (
     UNIFIED_SCENE_GEN_STEP,
     PipelinePaths,
@@ -134,6 +138,8 @@ def _sim_world_xy_aabb(
             )
         )
     verts = np.asarray(mesh.vertices.copy(), dtype=np.float64)
+    basis = _glb_to_sim_rotation()
+    verts = (basis @ verts.T).T
     if isinstance(scale, Sequence) and not isinstance(scale, (str, bytes)):
         scale_array = np.asarray(list(scale), dtype=np.float64)
         if scale_array.shape != (3,):
@@ -145,12 +151,15 @@ def _sim_world_xy_aabb(
         rot = np.asarray(rotation_matrix, dtype=np.float64)
         if rot.shape == (4, 4):
             rot = rot[:3, :3]
+        if rot.shape != (3, 3):
+            raise ValueError("rotation_matrix must be a 3x3 or 4x4 matrix")
         verts = (rot @ verts.T).T
 
     init = np.asarray(list(init_pos), dtype=np.float64)
     if init.shape != (3,):
         raise ValueError("init_pos must have three components")
-    sim_xy = np.column_stack((verts[:, 0] + init[0], -verts[:, 2] + init[1]))
+    verts = verts + init.reshape(1, 3)
+    sim_xy = verts[:, :2]
     min_xy = sim_xy.min(axis=0)
     max_xy = sim_xy.max(axis=0)
     center_xy = 0.5 * (min_xy + max_xy)
@@ -482,7 +491,8 @@ def _build_object_manifest(
             skipped_no_glb.append(oid)
             continue
 
-        description = str(obj.get("description") or obj.get("name") or "").strip()
+        name = str(obj.get("name") or "").strip()
+        description = str(obj.get("description") or name).strip()
         source = table_fit_item.get("path") or ""
         table_fit_path = _resolve_existing_table_fit_path(
             source,
@@ -497,6 +507,7 @@ def _build_object_manifest(
 
         consolidated[oid] = {
             "id": oid,
+            "name": name,
             "description": description,
             "table_fit_path": table_fit_path,
             "world_aabb_bottom_center": wbc,
@@ -521,11 +532,14 @@ def export_gym_config(
     output_root: Path,
     *,
     export_dir: Path | None = None,
+    z_axis_align_assets: bool = True,
 ) -> Path:
     """Export the unified-scene-gen result as a gym_config.json bundle.
 
     Uses table-fit GLBs baked so their sim-space AABB bottom-centre sits at
-    the local origin. Object pose is then restored with ``init_pos`` only.
+    the local origin. When ``z_axis_align_assets`` is enabled, hardcoded
+    elongated object classes are exported upright and restored with
+    ``init_pos`` plus ``init_rot``.
     """
     output_root = output_root.expanduser().resolve()
     if export_dir is None:
@@ -589,13 +603,37 @@ def export_gym_config(
         obj_dir = mesh_assets_dir / safe_name / oid
         obj_dir.mkdir(parents=True, exist_ok=True)
         object_dst = obj_dir / f"{oid}.glb"
-        _bake_glb_bottom_center_to_origin(om["table_fit_path"], object_dst)
-        wbc = om["world_aabb_bottom_center"]
-        if wbc is not None:
-            init_pos = [float(wbc[0]), float(wbc[1]), float(wbc[2])]
+        alignment_keyword = (
+            match_asset_orientation_keyword(
+                object_id=oid,
+                name=" ".join([safe_name, str(om.get("name", ""))]),
+                description=om["description"],
+            )
+            if z_axis_align_assets
+            else None
+        )
+        footprint_rotation: list[list[float]] | None = None
+        if alignment_keyword is not None:
+            alignment_result = export_z_axis_normalized_asset(
+                om["table_fit_path"],
+                object_dst,
+                glb_to_sim_rotation=_glb_to_sim_rotation(),
+            )
+            init_pos = alignment_result.init_pos
+            init_rot = alignment_result.init_rot
+            footprint_rotation = alignment_result.rotation_matrix
+            pose_source = f"z_axis_align:{alignment_keyword}"
         else:
-            raise ValueError(f"Missing table-fit world_aabb_bottom_center for {oid}")
-        init_rot = [0.0, 0.0, 0.0]
+            _bake_glb_bottom_center_to_origin(om["table_fit_path"], object_dst)
+            wbc = om["world_aabb_bottom_center"]
+            if wbc is not None:
+                init_pos = [float(wbc[0]), float(wbc[1]), float(wbc[2])]
+            else:
+                raise ValueError(
+                    f"Missing table-fit world_aabb_bottom_center for {oid}"
+                )
+            init_rot = [0.0, 0.0, 0.0]
+            pose_source = "wbc"
         body_scale = [1.0, 1.0, 1.0]
 
         rigid_objects.append(
@@ -617,7 +655,7 @@ def export_gym_config(
         )
         footprint_2d = _sim_world_xy_aabb(
             object_dst,
-            None,
+            footprint_rotation,
             1.0,
             init_pos,
         )
@@ -633,10 +671,9 @@ def export_gym_config(
                 "footprint_2d": footprint_2d,
             }
         )
-        wbc_flag = "wbc" if wbc is not None else "missing_wbc"
         print(
             f"  [{idx+1}/{total}] [{oid}] {om['description']}"
-            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src={wbc_flag}"
+            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src={pose_source}"
         )
 
     config = {

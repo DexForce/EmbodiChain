@@ -275,7 +275,10 @@ def _run_prompt2scene_impl(
         log.log_info("step end unified_scene_gen status=ok")
 
         log.log_info("step start gym_export")
-        gym_config_path = export_gym_config(request.output_root)
+        gym_config_path = export_gym_config(
+            request.output_root,
+            z_axis_align_assets=request.z_axis_align_assets,
+        )
         log.log_info(f"step end gym_export status=ok output={gym_config_path}")
         if request.prompt:
             scene_edit_path = _run_timed_workflow(
@@ -322,6 +325,7 @@ def _run_existing_scene_edit_workflow(
             output_root=request.output_root,
             prompt=request.prompt or "",
             gravity_settle_mode=request.gravity_settle_mode,
+            z_axis_align_assets=request.z_axis_align_assets,
         ),
         llm_cfg=llm_cfg,
     )
