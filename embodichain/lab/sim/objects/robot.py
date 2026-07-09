@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import List, Dict, Tuple, Union, Sequence
+from typing import List, Dict, Tuple, Sequence
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
@@ -130,7 +130,7 @@ class Robot(Articulation):
             else [i for i in self._joint_ids[name] if i not in self.mimic_ids]
         )
 
-    def get_link_names(self, name: str | None = None) -> Union[List[str], None]:
+    def get_link_names(self, name: str | None = None) -> List[str] | None:
         """Get the link names of the robot for a specific control part.
 
         If no control part is specified, return all link names.
@@ -272,6 +272,7 @@ class Robot(Articulation):
             joint_ids=resolved_joint_ids,
             env_ids=env_ids,
         )
+        self._sync_solver_limits(name=name)
 
     def set_qvel_limits(
         self,
@@ -1082,11 +1083,31 @@ class Robot(Articulation):
             drive_type=drive_type,
         )
 
-    def init_solver(self, cfg: Union[SolverCfg, Dict[str, SolverCfg]]) -> None:
+    def _sync_solver_limits(self, name: str | None = None) -> None:
+        """Synchronize solver joint limits with the robot's effective qpos limits."""
+        if not self._solvers:
+            return
+
+        if not self.control_parts:
+            solver = self._solvers.get("default")
+            if solver is not None:
+                solver.update_with_robot_limit(self._data.qpos_limits[0])
+            return
+
+        part_names = [name] if name is not None else list(self.control_parts.keys())
+        for part_name in part_names:
+            solver = self._solvers.get(part_name)
+            if solver is None:
+                continue
+            joint_ids = self.get_joint_ids(name=part_name)
+            joint_limits = self._data.qpos_limits[0][joint_ids]
+            solver.update_with_robot_limit(joint_limits)
+
+    def init_solver(self, cfg: SolverCfg | Dict[str, SolverCfg]) -> None:
         """Initialize the kinematic solver for the robot.
 
         Args:
-            cfg (Union[SolverCfg, Dict[str, SolverCfg]]): The configuration for the kinematic solver.
+            cfg (SolverCfg | Dict[str, SolverCfg]): The configuration for the kinematic solver.
         """
         self.cfg: RobotCfg
 

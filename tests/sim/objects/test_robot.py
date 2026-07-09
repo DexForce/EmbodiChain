@@ -445,6 +445,43 @@ class BaseRobotTest:
         # Restore limits to avoid leaking state to later tests.
         self.robot.reset_qpos_limits(name=arm_name)
 
+    def test_user_qpos_limits_update_solver_limits(self):
+        """Test user qpos limit updates are propagated to the control-part solver."""
+        arm_name = "left_arm"
+        solver = self.robot.get_solver(arm_name)
+        assert solver is not None, "FAIL: expected left_arm solver to be initialized"
+
+        self.robot.reset_qpos_limits(name=arm_name)
+        asset_limits = self.robot.get_qpos_limits(name=arm_name).clone()
+        user_limits = asset_limits.clone()
+        margin = 0.05
+        user_limits[..., 0] = torch.clamp(
+            user_limits[..., 0] + margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+        user_limits[..., 1] = torch.clamp(
+            user_limits[..., 1] - margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+
+        self.robot.set_user_qpos_limits(user_limits, name=arm_name)
+
+        solver_limits = solver.get_qpos_limits()
+        assert torch.allclose(
+            torch.tensor(solver_limits["lower_qpos_limits"], device=self.sim.device),
+            user_limits[0, :, 0],
+            atol=1e-5,
+        ), "FAIL: solver lower_qpos_limits did not update with robot user limits"
+        assert torch.allclose(
+            torch.tensor(solver_limits["upper_qpos_limits"], device=self.sim.device),
+            user_limits[0, :, 1],
+            atol=1e-5,
+        ), "FAIL: solver upper_qpos_limits did not update with robot user limits"
+
+        self.robot.reset_qpos_limits(name=arm_name)
+
     def test_robot_cfg_merge(self):
         from copy import deepcopy
         from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
