@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Any
 import math
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,
     raise_if_generated_files_exist as _raise_if_generated_files_exist,
@@ -192,7 +195,9 @@ def generate_action_agent_config_from_project(
     use_llm_roles: bool = False,
     llm_model: str | None = None,
     robot_profile: str | RobotProfile | None = DEFAULT_ROBOT_PROFILE_ID,
-    target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
+    target_body_scale: float | list[float] | tuple[float, float, float] = (
+        DEFAULT_TARGET_BODY_SCALE
+    ),
     preserve_source_target_body_scale: bool = False,
     source_target_body_scale_multiplier: float | None = None,
     source_scene_body_scale_mode: str | None = None,

@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import argparse
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_CONFIG_OUTPUT_DIR,
     DEFAULT_EXISTING_GYM_PROJECT,
@@ -347,11 +350,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-body-scale",
         dest="target_body_scale",
         type=float,
-        default=None,
+        default=DEFAULT_TARGET_BODY_SCALE,
         help=(
-            "Uniform body_scale for generated target objects. In prompt2scene "
-            "mode, omit this option to preserve source body_scale by default. "
-            "Other modes default to 0.8."
+            "Uniform body_scale for generated target objects. Defaults to "
+            f"{DEFAULT_TARGET_BODY_SCALE}. In prompt2scene mode, omitted values "
+            "use source body_scale * this default multiplier."
         ),
     )
     parser.add_argument(
@@ -364,8 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Prompt2scene body_scale policy for source-scene objects. "
             "preserve keeps source body_scale, multiply uses source_scale * "
             "--target_body_scale, and absolute sets objects directly to "
-            "--target_body_scale. Defaults to preserve when --target_body_scale "
-            "is omitted and multiply when it is provided."
+            "--target_body_scale. Defaults to multiply."
         ),
     )
     parser.add_argument(

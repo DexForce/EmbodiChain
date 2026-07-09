@@ -26,6 +26,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
     _require_server,
     wait_for_job,
@@ -114,6 +117,55 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
     assert captured["source_mesh_x_rotation_degrees"] == (
         DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES
     )
+
+
+def test_generate_config_cli_defaults_to_prompt2scene_scale_multiplier(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import (
+        generate_action_agent_config,
+    )
+
+    gym_export = tmp_path / "prompt2scene" / "demo131" / "gym_export"
+    (gym_export / "scene_state").mkdir(parents=True)
+    (gym_export / "scene_state" / "result.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "configs" / "demo131"
+    captured = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return _fake_generated_config_paths(output_dir)
+
+    monkeypatch.setattr(
+        generate_action_agent_config,
+        "generate_action_agent_config_from_project",
+        fake_generate_action_agent_config_from_project,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym_project",
+            str(gym_export),
+            "--output_dir",
+            str(output_dir),
+            "--task_name",
+            "Demo131",
+            "--task_description",
+            "用左臂把倒下的瓶子扶正",
+            "--overwrite",
+        ],
+    )
+
+    generate_action_agent_config.cli()
+
+    assert captured["target_body_scale"] == DEFAULT_TARGET_BODY_SCALE
+    assert captured["source_scene_body_scale_mode"] == "multiply"
 
 
 def test_generate_config_cli_respects_explicit_prompt2scene_alignment_overrides(
@@ -210,6 +262,14 @@ def test_pipeline_parser_accepts_headless() -> None:
     args = build_parser().parse_args(["--headless"])
 
     assert args.headless is True
+
+
+def test_pipeline_parser_defaults_to_target_body_scale() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+
+    args = build_parser().parse_args([])
+
+    assert args.target_body_scale == DEFAULT_TARGET_BODY_SCALE
 
 
 def test_run_agent_command_passes_headless(monkeypatch, tmp_path) -> None:
@@ -954,7 +1014,7 @@ def test_existing_gym_project_without_scene_state_stays_generic(tmp_path) -> Non
         "expected_target_body_scale",
     ),
     [
-        (None, None, "preserve", 1.0),
+        (None, None, "multiply", DEFAULT_TARGET_BODY_SCALE),
         (0.8, None, "multiply", 0.8),
         (1.0, "absolute", "absolute", 1.0),
         (0.5, "preserve", "preserve", 0.5),
@@ -1153,7 +1213,7 @@ def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -
     assert captured["task_name"] == "Demo111"
 
 
-def test_batch_new_pipeline_command_preserves_prompt2scene_scale_by_default(
+def test_batch_new_pipeline_command_uses_pipeline_scale_defaults(
     tmp_path: Path,
 ) -> None:
     module = _load_local_batch_run_action_agent_videos()
