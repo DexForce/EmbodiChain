@@ -710,7 +710,7 @@ class randomize_anchor_height(Functor):
             absolute: If True, set Z to obj.cfg.init_pos[2] + delta_z.
                       If False, add delta_z to the current Z.
         """
-        if hasattr(obj, "num_objects"):
+        if isinstance(obj, RigidObjectGroup):
             if absolute:
                 logger.log_warning(
                     "absolute=True is not supported for RigidObjectGroup; using relative shift."
