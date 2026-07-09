@@ -257,6 +257,7 @@ def test_exclude_uids_are_not_moved():
     functor(env, torch.arange(4))
 
     torch.testing.assert_close(floor._pose[:, 2, 3], torch.zeros(4))
+    torch.testing.assert_close(cube._pose[:, 2, 3], torch.ones(4) * 1.2)
 
 
 def test_articulation_shifted():
@@ -277,3 +278,57 @@ def test_articulation_shifted():
     functor(env, torch.arange(4))
 
     torch.testing.assert_close(cabinet._pose[:, 2], torch.ones(4) * 1.3)
+
+
+def test_asymmetric_delta_range():
+    env = MockEnv(num_envs=100)
+    table = MockRigidObject("table", num_envs=100)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([-0.1], [0.05]),
+        store_key="table_delta",
+    )
+    functor = randomize_anchor_height(cfg, env)
+    env_ids = torch.arange(100)
+    functor(env, env_ids)
+
+    delta = env.table_delta
+    assert delta.shape == (100,)
+    assert (delta >= -0.1).all()
+    assert (delta <= 0.05).all()
+
+
+def test_partial_env_ids():
+    env = MockEnv(num_envs=4)
+    table = MockRigidObject("table", num_envs=4)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cube = MockRigidObject("cube", num_envs=4)
+    cube._pose[:, 2, 3] = 1.1
+    env.sim.add_rigid_object(cube)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([0.1], [0.1]),
+    )
+    functor = randomize_anchor_height(cfg, env)
+
+    # Only apply to envs 0 and 2
+    partial_ids = torch.tensor([0, 2])
+    functor(env, partial_ids)
+
+    # Envs 0 and 2 should be shifted
+    torch.testing.assert_close(table._pose[0, 2, 3], torch.tensor(1.1))
+    torch.testing.assert_close(table._pose[2, 2, 3], torch.tensor(1.1))
+    torch.testing.assert_close(cube._pose[0, 2, 3], torch.tensor(1.2))
+    torch.testing.assert_close(cube._pose[2, 2, 3], torch.tensor(1.2))
+
+    # Envs 1 and 3 should remain unchanged (pose was never set to init_pos)
+    torch.testing.assert_close(table._pose[1, 2, 3], torch.tensor(0.0))
+    torch.testing.assert_close(table._pose[3, 2, 3], torch.tensor(0.0))
+    torch.testing.assert_close(cube._pose[1, 2, 3], torch.tensor(1.1))
+    torch.testing.assert_close(cube._pose[3, 2, 3], torch.tensor(1.1))

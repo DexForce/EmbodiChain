@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import pytest
-import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
 from embodichain.lab.gym.envs.managers import EventCfg
