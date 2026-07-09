@@ -239,11 +239,12 @@ class DexforceW1Cfg(RobotCfg):
         DEFAULT_EEF_GRIPPER_JOINT_NAMES = "(LEFT|RIGHT)_FINGER[1-2]"
         ARM_JOINTS = "(RIGHT|LEFT)_J[0-9]"
         BODY_JOINTS = "(ANKLE|KNEE|BUTTOCK|WAIST)"
+        HEAD_JOINTS = "(NECK1|NECK2)"
 
         joint_params = {
-            "stiffness": {ARM_JOINTS: 1e4, BODY_JOINTS: 1e7},
-            "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4},
-            "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10},
+            "stiffness": {ARM_JOINTS: 1e4, BODY_JOINTS: 1e7, HEAD_JOINTS: 1e4,},
+            "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
+            "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
         drive_pros = JointDrivePropertiesCfg(**joint_params)
 
