@@ -74,9 +74,9 @@ _BACKGROUND_MAX_CONVEX_HULL_NUM = 1
 _TARGET_MAX_CONVEX_HULL_NUM = 16
 _CONTAINER_MAX_CONVEX_HULL_NUM = 8
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
-_FRONT_VIEW_LABEL = "front"
-_SIDE_VIEW_LABEL = "side"
-_SIDE_VIEW_Z_ROTATION_DEGREES = 90.0
+_ROBOT_VIEW_LABEL = "robot_view"
+_AUDIENCE_VIEW_LABEL = "audience_view"
+_AUDIENCE_VIEW_Z_ROTATION_DEGREES = 180.0
 
 _BACKGROUND_ATTRS = {
     "mass": 10.0,
@@ -252,21 +252,21 @@ def _record_camera_event_configs(
     task_name: str = "UR5BreadBasket",
 ) -> dict[str, Any]:
     camera = sensor_config_factory()[0]
-    side_camera = copy.deepcopy(camera)
-    side_camera["extrinsics"] = _rotate_camera_extrinsics_around_target_z(
+    audience_camera = copy.deepcopy(camera)
+    audience_camera["extrinsics"] = _rotate_camera_extrinsics_around_target_z(
         camera["extrinsics"],
-        degrees=_SIDE_VIEW_Z_ROTATION_DEGREES,
+        degrees=_AUDIENCE_VIEW_Z_ROTATION_DEGREES,
     )
     return {
         "record_camera": _record_camera_event_config(
             camera,
-            name="record_cam_front",
-            video_name=_recording_video_name(task_name, _FRONT_VIEW_LABEL),
+            name="record_cam_robot_view",
+            video_name=_recording_video_name(task_name, _ROBOT_VIEW_LABEL),
         ),
-        "record_camera_side": _record_camera_event_config(
-            side_camera,
-            name="record_cam_side",
-            video_name=_recording_video_name(task_name, _SIDE_VIEW_LABEL),
+        "record_camera_audience": _record_camera_event_config(
+            audience_camera,
+            name="record_cam_audience_view",
+            video_name=_recording_video_name(task_name, _AUDIENCE_VIEW_LABEL),
         ),
     }
 
