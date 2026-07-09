@@ -43,6 +43,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
     _position_side_axis_value,
 )
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    match_asset_orientation_keyword,
+)
 
 __all__ = [
     "_POSE_SENSITIVE_STAGING_Z_DELTA",
@@ -524,6 +527,8 @@ def _with_on_surface_release_offset(
 
 
 def _pickup_upright_direction(obj_config: Mapping[str, Any]) -> list[float] | None:
+    if _mesh_config_local_z_is_upright_semantic(obj_config):
+        return [0.0, 0.0, 1.0]
     vertices = _mesh_config_scaled_vertices(obj_config)
     if not vertices:
         return None
@@ -548,11 +553,34 @@ def _upright_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
     if not vertices:
         return None
 
-    rotation = _preview_aware_upright_rotation(
-        vertices,
-        _mesh_config_rotation_basis(obj_config),
-    )
+    preview_rotation = _mesh_config_rotation_basis(obj_config)
+    if _mesh_config_local_z_is_upright_semantic(obj_config):
+        rotation = _semantic_local_z_upright_rotation(preview_rotation)
+    else:
+        rotation = _preview_aware_upright_rotation(
+            vertices,
+            preview_rotation,
+        )
     return min(_matrix_vector_mul(rotation, vertex)[2] for vertex in vertices)
+
+
+def _mesh_config_local_z_is_upright_semantic(obj_config: Mapping[str, Any]) -> bool:
+    uid = str(obj_config.get("uid", ""))
+    description = str(obj_config.get("description", ""))
+    shape = obj_config.get("shape", {})
+    mesh_name = ""
+    if isinstance(shape, Mapping):
+        mesh_path = shape.get("fpath")
+        if isinstance(mesh_path, str):
+            mesh_name = Path(mesh_path).stem
+    return (
+        match_asset_orientation_keyword(
+            object_id=uid,
+            name=" ".join([uid, mesh_name]),
+            description=description,
+        )
+        is not None
+    )
 
 
 def _mesh_config_scaled_vertices(
@@ -620,6 +648,39 @@ def _preview_aware_upright_rotation(
         local_primary=long_axis,
         world_primary=[0.0, 0.0, 1.0],
         local_secondary=axes[2],
+        world_secondary=[1.0, 0.0, 0.0],
+    )
+
+
+def _semantic_local_z_upright_rotation(
+    preview_rotation: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    local_z = [0.0, 0.0, 1.0]
+    secondary_axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    candidates: list[tuple[float, list[list[float]]]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[_scale_vector(axis, -1.0) for axis in secondary_axes],
+    ]:
+        preview_secondary = _matrix_vector_mul(preview_rotation, secondary_axis)
+        world_secondary = [preview_secondary[0], preview_secondary[1], 0.0]
+        if _vector_norm(world_secondary) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=local_z,
+            world_primary=[0.0, 0.0, 1.0],
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, preview_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=local_z,
+        world_primary=[0.0, 0.0, 1.0],
+        local_secondary=[1.0, 0.0, 0.0],
         world_secondary=[1.0, 0.0, 0.0],
     )
 

@@ -88,6 +88,23 @@ def test_dual_ur_robot_templates_switch_arm_variant_without_mutating_ur5() -> No
     }
 
 
+def test_dual_ur_robotiq_tcp_rotates_grasp_x_onto_gripper_y_axis() -> None:
+    robot = make_dual_ur5_robot_config(robot_init_z=0.42)
+
+    assert robot["solver_cfg"]["left_arm"]["tcp"] == [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.16],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    assert robot["solver_cfg"]["right_arm"]["tcp"] == [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.21],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
 def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -> None:
     profile = resolve_robot_profile("franka")
     robot = make_dual_franka_panda_robot_config(robot_init_z=0.45)
