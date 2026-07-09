@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
@@ -256,6 +258,192 @@ class BaseRobotTest:
             torch.min(dummy_qpos, left_qpos_limits[:, :, 1]), left_qpos_limits[:, :, 0]
         )
         self.robot.set_qpos(qpos=dummy_qpos, name="left_arm")
+
+    def test_joint_limit_apis_support_control_parts_and_joint_ids(self):
+        left_arm_joint_ids = self.robot.get_joint_ids("left_arm")
+        selected_joint_ids = left_arm_joint_ids[:2]
+
+        qpos_limits = self.robot.get_qpos_limits(joint_ids=selected_joint_ids)
+        qvel_limits = self.robot.get_qvel_limits(joint_ids=selected_joint_ids)
+        qf_limits = self.robot.get_qf_limits(joint_ids=selected_joint_ids)
+
+        assert qpos_limits.shape == (10, len(selected_joint_ids), 2)
+        assert qvel_limits.shape == (10, len(selected_joint_ids))
+        assert qf_limits.shape == (10, len(selected_joint_ids))
+
+        left_arm_qpos_limits = self.robot.get_qpos_limits(
+            name="left_arm", joint_ids=[0]
+        )
+        left_arm_qvel_limits = self.robot.get_qvel_limits(
+            name="left_arm", joint_ids=[0]
+        )
+        left_arm_qf_limits = self.robot.get_qf_limits(name="left_arm", joint_ids=[0])
+
+        assert left_arm_qpos_limits.shape == (10, len(left_arm_joint_ids), 2)
+        assert left_arm_qvel_limits.shape == (10, len(left_arm_joint_ids))
+        assert left_arm_qf_limits.shape == (10, len(left_arm_joint_ids))
+
+    def test_joint_limit_setters_ignore_joint_ids_when_name_is_provided(self):
+        left_arm_joint_ids = self.robot.get_joint_ids("left_arm")
+        selected_joint_ids = left_arm_joint_ids[:2]
+
+        qpos_limits = self.robot.get_qpos_limits(name="left_arm").clone()
+        qpos_limits[..., 0] = qpos_limits[..., 0] + 0.01
+        qpos_limits[..., 1] = qpos_limits[..., 1] - 0.01
+        self.robot.set_qpos_limits(
+            qpos_limits,
+            name="left_arm",
+            joint_ids=[left_arm_joint_ids[0]],
+        )
+        assert torch.allclose(
+            self.robot.get_qpos_limits(name="left_arm"),
+            qpos_limits,
+            atol=1e-5,
+        )
+
+        qvel_limits = torch.full(
+            (10, len(left_arm_joint_ids)),
+            0.5,
+            device=self.sim.device,
+        )
+        qf_limits = torch.full(
+            (10, len(left_arm_joint_ids)),
+            1.5,
+            device=self.sim.device,
+        )
+        self.robot.set_qvel_limits(
+            qvel_limits,
+            name="left_arm",
+            joint_ids=[left_arm_joint_ids[0]],
+        )
+        self.robot.set_qf_limits(
+            qf_limits,
+            name="left_arm",
+            joint_ids=[left_arm_joint_ids[0]],
+        )
+
+        assert torch.allclose(
+            self.robot.get_qvel_limits(name="left_arm"),
+            qvel_limits,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.robot.get_qf_limits(name="left_arm"),
+            qf_limits,
+            atol=1e-5,
+        )
+
+        joint_qpos_limits = self.robot.get_qpos_limits(
+            joint_ids=selected_joint_ids
+        ).clone()
+        joint_qpos_limits[..., 0] = joint_qpos_limits[..., 0] + 0.02
+        joint_qpos_limits[..., 1] = joint_qpos_limits[..., 1] - 0.02
+        joint_qvel_limits = torch.full(
+            (10, len(selected_joint_ids)),
+            0.65,
+            device=self.sim.device,
+        )
+        joint_qf_limits = torch.full(
+            (10, len(selected_joint_ids)),
+            1.65,
+            device=self.sim.device,
+        )
+        self.robot.set_qpos_limits(joint_qpos_limits, joint_ids=selected_joint_ids)
+        self.robot.set_qvel_limits(joint_qvel_limits, joint_ids=selected_joint_ids)
+        self.robot.set_qf_limits(joint_qf_limits, joint_ids=selected_joint_ids)
+
+        assert torch.allclose(
+            self.robot.get_qpos_limits(joint_ids=selected_joint_ids),
+            joint_qpos_limits,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.robot.get_qvel_limits(joint_ids=selected_joint_ids),
+            joint_qvel_limits,
+            atol=1e-5,
+        )
+        assert torch.allclose(
+            self.robot.get_qf_limits(joint_ids=selected_joint_ids),
+            joint_qf_limits,
+            atol=1e-5,
+        )
+
+    def test_user_qpos_limits_with_control_part(self):
+        """Test user qpos limits on a Robot control part restrict set_qpos."""
+        arm_name = "left_arm"
+        arm_joint_ids = self.robot.get_joint_ids(arm_name)
+        # Reset to a clean baseline in case earlier tests mutated limits.
+        self.robot.reset_qpos_limits(name=arm_name)
+        asset_limits = self.robot.get_qpos_limits(name=arm_name)
+
+        # Tighten limits by 0.05 on each side.
+        user_limits = asset_limits.clone()
+        margin = 0.05
+        user_limits[..., 0] = torch.clamp(
+            user_limits[..., 0] + margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+        user_limits[..., 1] = torch.clamp(
+            user_limits[..., 1] - margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+
+        self.robot.set_user_qpos_limits(user_limits, name=arm_name)
+
+        effective_limits = self.robot.get_qpos_limits(name=arm_name)
+        assert torch.allclose(
+            effective_limits, user_limits, atol=1e-5
+        ), "FAIL: robot effective limits do not match user limits"
+
+        # set_qpos at the asset upper limit should clamp to user upper limit.
+        requested_qpos = asset_limits[..., 1].clone()
+        self.robot.set_qpos(requested_qpos, name=arm_name, target=False)
+        clamped_qpos = self.robot.get_qpos(name=arm_name)
+        assert torch.allclose(
+            clamped_qpos, user_limits[..., 1], atol=1e-5
+        ), f"FAIL: robot qpos did not clamp to user limits: {clamped_qpos.tolist()}"
+
+        # Reset should restore asset limits.
+        self.robot.reset_qpos_limits(name=arm_name)
+        restored_limits = self.robot.get_qpos_limits(name=arm_name)
+        assert torch.allclose(
+            restored_limits, asset_limits, atol=1e-5
+        ), "FAIL: robot reset_qpos_limits did not restore asset limits"
+
+    def test_user_qpos_limits_dict_form(self):
+        """Test user qpos limits can be set via a joint-name dictionary."""
+        arm_name = "left_arm"
+        asset_limits = self.robot.get_qpos_limits(name=arm_name)
+        # Restrict the first two joints of the arm.
+        joint_names = self.robot.get_joint_ids(name=arm_name, remove_mimic=False)
+        first_two_names = [
+            self.robot.joint_names[joint_names[0]],
+            self.robot.joint_names[joint_names[1]],
+        ]
+        user_dict = {name: [-0.1, 0.1] for name in first_two_names}
+
+        self.robot.set_user_qpos_limits(user_dict, name=arm_name)
+        effective_limits = self.robot.get_qpos_limits(name=arm_name)
+
+        # First two joints should be clamped to [-0.1, 0.1].
+        for i in range(2):
+            assert torch.allclose(
+                effective_limits[:, i, :],
+                torch.tensor([-0.1, 0.1], device=self.sim.device),
+                atol=1e-5,
+            ), f"FAIL: dict user limit not applied to joint {first_two_names[i]}"
+
+        # Remaining joints should keep asset limits.
+        remaining_asset = asset_limits[:, 2:, :]
+        remaining_effective = effective_limits[:, 2:, :]
+        assert torch.allclose(
+            remaining_effective, remaining_asset, atol=1e-5
+        ), "FAIL: non-targeted joints changed when setting dict user limits"
+
+        # Restore limits to avoid leaking state to later tests.
+        self.robot.reset_qpos_limits(name=arm_name)
 
     def test_robot_cfg_merge(self):
         from copy import deepcopy

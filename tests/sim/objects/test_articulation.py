@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
@@ -41,6 +43,20 @@ NUM_ARENAS = 10
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:
     return art._entities[env_idx].get_physical_attr(link_name).static_friction
+
+
+class _EntityMethodOverride:
+    """Delegate every entity method except one overridden setter."""
+
+    def __init__(self, entity, method_name: str, override):
+        self._entity = entity
+        self._method_name = method_name
+        self._override = override
+
+    def __getattr__(self, name: str):
+        if name == self._method_name:
+            return self._override
+        return getattr(self._entity, name)
 
 
 class TestRigidBodyAttributesOverride:
@@ -296,6 +312,608 @@ class BaseArticulationTest:
         assert torch.allclose(
             armature, expected_armature, atol=1e-5
         ), "FAIL: armature does not match expected filtered values"
+
+    def test_joint_limit_getters_support_env_and_joint_filters(self):
+        """Test joint limit getters support joint_ids and env_ids filtering."""
+        all_qpos_limits = self.art.body_data.qpos_limits
+        (
+            _stiffness,
+            _damping,
+            all_qf_limits,
+            all_qvel_limits,
+            _friction,
+            _armature,
+        ) = self.art.get_joint_drive()
+
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 2, 4] if NUM_ARENAS >= 5 else [0]
+
+        qpos_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        qvel_limits = self.art.get_qvel_limits(joint_ids=joint_ids, env_ids=env_ids)
+        qf_limits = self.art.get_qf_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        expected_qpos_limits = all_qpos_limits[env_ids][:, joint_ids, :]
+        expected_qvel_limits = all_qvel_limits[env_ids][:, joint_ids]
+        expected_qf_limits = all_qf_limits[env_ids][:, joint_ids]
+
+        expected_qpos_shape = (len(env_ids), len(joint_ids), 2)
+        expected_joint_shape = (len(env_ids), len(joint_ids))
+
+        assert torch.allclose(
+            self.art.body_data.qvel_limits, all_qvel_limits, atol=1e-5
+        ), "FAIL: qvel_limits backing tensor does not match post-init joint drive state"
+        assert torch.allclose(
+            self.art.body_data.qf_limits, all_qf_limits, atol=1e-5
+        ), "FAIL: qf_limits backing tensor does not match post-init joint drive state"
+
+        assert (
+            qpos_limits.shape == expected_qpos_shape
+        ), f"FAIL: Expected qpos_limits shape {expected_qpos_shape}, got {qpos_limits.shape}"
+        assert (
+            qvel_limits.shape == expected_joint_shape
+        ), f"FAIL: Expected qvel_limits shape {expected_joint_shape}, got {qvel_limits.shape}"
+        assert (
+            qf_limits.shape == expected_joint_shape
+        ), f"FAIL: Expected qf_limits shape {expected_joint_shape}, got {qf_limits.shape}"
+
+        assert torch.allclose(
+            qpos_limits, expected_qpos_limits, atol=1e-5
+        ), "FAIL: qpos_limits does not match expected filtered values"
+        assert torch.allclose(
+            qvel_limits, expected_qvel_limits, atol=1e-5
+        ), "FAIL: qvel_limits does not match expected filtered values"
+        assert torch.allclose(
+            qf_limits, expected_qf_limits, atol=1e-5
+        ), "FAIL: qf_limits does not match expected filtered values"
+
+    def test_joint_limit_cache_tracks_set_joint_drive_updates(self):
+        """Test qvel/qf limit caches stay aligned with set_joint_drive writes."""
+        (
+            _stiffness_before,
+            _damping_before,
+            all_qf_limits_before,
+            all_qvel_limits_before,
+            _friction_before,
+            _armature_before,
+        ) = self.art.get_joint_drive()
+
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 2, 4] if NUM_ARENAS >= 5 else [0]
+        env_ids_tensor = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.sim.device
+        )
+        joint_ids_tensor = torch.as_tensor(
+            joint_ids, dtype=torch.long, device=self.sim.device
+        )
+
+        new_qvel_limits = torch.full(
+            (len(env_ids), len(joint_ids)),
+            321.0,
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        new_qf_limits = torch.full(
+            (len(env_ids), len(joint_ids)),
+            654.0,
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+
+        self.art.set_joint_drive(
+            max_effort=new_qf_limits,
+            max_velocity=new_qvel_limits,
+            joint_ids=joint_ids,
+            env_ids=env_ids,
+        )
+
+        (
+            _stiffness_after,
+            _damping_after,
+            all_qf_limits_after,
+            all_qvel_limits_after,
+            _friction_after,
+            _armature_after,
+        ) = self.art.get_joint_drive()
+        qvel_limits = self.art.get_qvel_limits(joint_ids=joint_ids, env_ids=env_ids)
+        qf_limits = self.art.get_qf_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        expected_qvel_limits = all_qvel_limits_before.clone()
+        expected_qvel_limits[env_ids_tensor[:, None], joint_ids_tensor] = (
+            new_qvel_limits
+        )
+        expected_qf_limits = all_qf_limits_before.clone()
+        expected_qf_limits[env_ids_tensor[:, None], joint_ids_tensor] = new_qf_limits
+
+        assert torch.allclose(
+            self.art.body_data.qvel_limits, expected_qvel_limits, atol=1e-5
+        ), "FAIL: qvel_limits backing tensor did not track set_joint_drive max_velocity"
+        assert torch.allclose(
+            self.art.body_data.qf_limits, expected_qf_limits, atol=1e-5
+        ), "FAIL: qf_limits backing tensor did not track set_joint_drive max_effort"
+        assert torch.allclose(
+            all_qvel_limits_after, expected_qvel_limits, atol=1e-5
+        ), "FAIL: live qvel limits did not match expected post-write state"
+        assert torch.allclose(
+            all_qf_limits_after, expected_qf_limits, atol=1e-5
+        ), "FAIL: live qf limits did not match expected post-write state"
+        assert torch.allclose(
+            qvel_limits, new_qvel_limits, atol=1e-5
+        ), "FAIL: filtered qvel_limits did not return the updated max_velocity values"
+        assert torch.allclose(
+            qf_limits, new_qf_limits, atol=1e-5
+        ), "FAIL: filtered qf_limits did not return the updated max_effort values"
+
+    def test_joint_limit_setters_update_selected_envs_and_body_data(self):
+        """Test joint limit setters update selected envs and cached body data."""
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 2] if NUM_ARENAS >= 3 else [0]
+
+        original_qpos_limits = self.art.body_data.qpos_limits.clone()
+        original_qvel_limits = self.art.body_data.qvel_limits.clone()
+        original_qf_limits = self.art.body_data.qf_limits.clone()
+
+        qpos_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        ).clone()
+        scale = torch.arange(
+            1,
+            len(env_ids) * len(joint_ids) + 1,
+            dtype=torch.float32,
+            device=self.sim.device,
+        ).reshape(len(env_ids), len(joint_ids))
+        tighten = torch.minimum(
+            0.001 * scale,
+            0.25 * (qpos_limits[:, :, 1] - qpos_limits[:, :, 0]),
+        )
+        qpos_limits[:, :, 0] += tighten
+        qpos_limits[:, :, 1] -= tighten
+        qvel_limits = 0.5 + 0.05 * scale
+        qf_limits = 1.0 + 0.25 * scale
+
+        self.art.set_qpos_limits(qpos_limits, joint_ids=joint_ids, env_ids=env_ids)
+        self.art.set_qvel_limits(qvel_limits, joint_ids=joint_ids, env_ids=env_ids)
+        self.art.set_qf_limits(qf_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        updated_qpos_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        )
+        updated_qvel_limits = self.art.get_qvel_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        )
+        updated_qf_limits = self.art.get_qf_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        assert torch.allclose(
+            updated_qpos_limits, qpos_limits, atol=1e-5
+        ), "FAIL: filtered qpos_limits did not return the written values"
+        assert torch.allclose(
+            updated_qvel_limits, qvel_limits, atol=1e-5
+        ), "FAIL: filtered qvel_limits did not return the written values"
+        assert torch.allclose(
+            updated_qf_limits, qf_limits, atol=1e-5
+        ), "FAIL: filtered qf_limits did not return the written values"
+        assert torch.allclose(
+            self.art.body_data.qpos_limits[env_ids][:, joint_ids, :],
+            qpos_limits,
+            atol=1e-5,
+        ), "FAIL: body_data qpos_limits cache did not update for the selected slice"
+        assert torch.allclose(
+            self.art.body_data.qvel_limits[env_ids][:, joint_ids],
+            qvel_limits,
+            atol=1e-5,
+        ), "FAIL: body_data qvel_limits cache did not update for the selected slice"
+        assert torch.allclose(
+            self.art.body_data.qf_limits[env_ids][:, joint_ids],
+            qf_limits,
+            atol=1e-5,
+        ), "FAIL: body_data qf_limits cache did not update for the selected slice"
+
+        non_selected_joint_ids = [
+            joint_id for joint_id in range(self.art.dof) if joint_id not in joint_ids
+        ]
+        if non_selected_joint_ids:
+            assert torch.allclose(
+                self.art.body_data.qpos_limits[env_ids][:, non_selected_joint_ids, :],
+                original_qpos_limits[env_ids][:, non_selected_joint_ids, :],
+                atol=1e-5,
+            ), "FAIL: qpos_limits changed for non-selected joints in targeted environments"
+            assert torch.allclose(
+                self.art.body_data.qvel_limits[env_ids][:, non_selected_joint_ids],
+                original_qvel_limits[env_ids][:, non_selected_joint_ids],
+                atol=1e-5,
+            ), "FAIL: qvel_limits changed for non-selected joints in targeted environments"
+            assert torch.allclose(
+                self.art.body_data.qf_limits[env_ids][:, non_selected_joint_ids],
+                original_qf_limits[env_ids][:, non_selected_joint_ids],
+                atol=1e-5,
+            ), "FAIL: qf_limits changed for non-selected joints in targeted environments"
+
+        untouched_env_ids = [
+            env_id for env_id in range(NUM_ARENAS) if env_id not in env_ids
+        ]
+        if untouched_env_ids:
+            assert torch.allclose(
+                self.art.body_data.qpos_limits[untouched_env_ids],
+                original_qpos_limits[untouched_env_ids],
+                atol=1e-5,
+            ), "FAIL: qpos_limits changed for untouched environments"
+            assert torch.allclose(
+                self.art.body_data.qvel_limits[untouched_env_ids],
+                original_qvel_limits[untouched_env_ids],
+                atol=1e-5,
+            ), "FAIL: qvel_limits changed for untouched environments"
+            assert torch.allclose(
+                self.art.body_data.qf_limits[untouched_env_ids],
+                original_qf_limits[untouched_env_ids],
+                atol=1e-5,
+            ), "FAIL: qf_limits changed for untouched environments"
+
+    def test_joint_limit_setters_accept_single_env_convenience_shapes(self):
+        """Test single-env convenience shapes for joint limit setters."""
+        env_ids = [0]
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+
+        original_qpos_limits = self.art.body_data.qpos_limits.clone()
+        original_qvel_limits = self.art.body_data.qvel_limits.clone()
+        original_qf_limits = self.art.body_data.qf_limits.clone()
+
+        qpos_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)[
+            0
+        ].clone()
+        scale = torch.arange(
+            1,
+            len(joint_ids) + 1,
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        tighten = torch.minimum(
+            0.001 * scale,
+            0.25 * (qpos_limits[:, 1] - qpos_limits[:, 0]),
+        )
+        qpos_limits[:, 0] += tighten
+        qpos_limits[:, 1] -= tighten
+        qvel_limits = 0.6 + 0.05 * scale
+        qf_limits = 1.5 + 0.1 * scale
+
+        self.art.set_qpos_limits(qpos_limits, joint_ids=joint_ids, env_ids=env_ids)
+        self.art.set_qvel_limits(qvel_limits, joint_ids=joint_ids, env_ids=env_ids)
+        self.art.set_qf_limits(qf_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        assert torch.allclose(
+            self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids),
+            qpos_limits.unsqueeze(0),
+            atol=1e-5,
+        ), "FAIL: single-env qpos convenience shape did not write expected values"
+        assert torch.allclose(
+            self.art.get_qvel_limits(joint_ids=joint_ids, env_ids=env_ids),
+            qvel_limits.unsqueeze(0),
+            atol=1e-5,
+        ), "FAIL: single-env qvel convenience shape did not write expected values"
+        assert torch.allclose(
+            self.art.get_qf_limits(joint_ids=joint_ids, env_ids=env_ids),
+            qf_limits.unsqueeze(0),
+            atol=1e-5,
+        ), "FAIL: single-env qf convenience shape did not write expected values"
+
+        non_selected_joint_ids = [
+            joint_id for joint_id in range(self.art.dof) if joint_id not in joint_ids
+        ]
+        if non_selected_joint_ids:
+            assert torch.allclose(
+                self.art.body_data.qpos_limits[env_ids][:, non_selected_joint_ids, :],
+                original_qpos_limits[env_ids][:, non_selected_joint_ids, :],
+                atol=1e-5,
+            ), "FAIL: single-env qpos write changed non-selected joints"
+            assert torch.allclose(
+                self.art.body_data.qvel_limits[env_ids][:, non_selected_joint_ids],
+                original_qvel_limits[env_ids][:, non_selected_joint_ids],
+                atol=1e-5,
+            ), "FAIL: single-env qvel write changed non-selected joints"
+            assert torch.allclose(
+                self.art.body_data.qf_limits[env_ids][:, non_selected_joint_ids],
+                original_qf_limits[env_ids][:, non_selected_joint_ids],
+                atol=1e-5,
+            ), "FAIL: single-env qf write changed non-selected joints"
+
+        untouched_env_ids = [
+            env_id for env_id in range(NUM_ARENAS) if env_id not in env_ids
+        ]
+        if untouched_env_ids:
+            assert torch.allclose(
+                self.art.body_data.qpos_limits[untouched_env_ids],
+                original_qpos_limits[untouched_env_ids],
+                atol=1e-5,
+            ), "FAIL: single-env qpos write changed untouched environments"
+            assert torch.allclose(
+                self.art.body_data.qvel_limits[untouched_env_ids],
+                original_qvel_limits[untouched_env_ids],
+                atol=1e-5,
+            ), "FAIL: single-env qvel write changed untouched environments"
+            assert torch.allclose(
+                self.art.body_data.qf_limits[untouched_env_ids],
+                original_qf_limits[untouched_env_ids],
+                atol=1e-5,
+            ), "FAIL: single-env qf write changed untouched environments"
+
+    def test_set_qpos_limits_failure_does_not_update_cache(self):
+        """Test a failed DexSim qpos limit write leaves the Python cache unchanged."""
+        env_ids = [0]
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        original_qpos_limits = self.art.body_data.qpos_limits.clone()
+
+        qpos_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        ).clone()
+        scale = torch.arange(
+            1,
+            len(joint_ids) + 1,
+            dtype=torch.float32,
+            device=self.sim.device,
+        ).unsqueeze(0)
+        tighten = torch.minimum(
+            0.001 * scale,
+            0.25 * (qpos_limits[:, :, 1] - qpos_limits[:, :, 0]),
+        )
+        qpos_limits[:, :, 0] += tighten
+        qpos_limits[:, :, 1] -= tighten
+
+        original_entity = self.art._entities[0]
+
+        def _fail_set_joint_limits(_limits, _joint_ids):
+            return -1
+
+        self.art._entities[0] = _EntityMethodOverride(
+            original_entity,
+            "set_joint_position_limits",
+            _fail_set_joint_limits,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="set_joint_position_limits failed"):
+                self.art.set_qpos_limits(
+                    qpos_limits, joint_ids=joint_ids, env_ids=env_ids
+                )
+        finally:
+            self.art._entities[0] = original_entity
+
+        assert torch.allclose(
+            self.art.body_data.qpos_limits,
+            original_qpos_limits,
+            atol=1e-5,
+        ), "FAIL: qpos_limits cache changed after a failed DexSim write"
+
+    def test_set_qpos_clamps_against_updated_qpos_limits(self):
+        """Test set_qpos clamps to the selected environments' exact updated limits."""
+        env_ids = [0, 1] if NUM_ARENAS >= 2 else [0]
+        joint_ids = [0]
+        if len(env_ids) == 2:
+            qpos_limits = torch.tensor(
+                [[[-0.02, 0.02]], [[-0.05, 0.01]]],
+                dtype=torch.float32,
+                device=self.sim.device,
+            )
+            requested_qpos = torch.tensor(
+                [[0.5], [-0.5]],
+                dtype=torch.float32,
+                device=self.sim.device,
+            )
+            expected_qpos = torch.tensor(
+                [[0.02], [-0.05]],
+                dtype=torch.float32,
+                device=self.sim.device,
+            )
+        else:
+            qpos_limits = torch.tensor(
+                [[[-0.02, 0.02]]],
+                dtype=torch.float32,
+                device=self.sim.device,
+            )
+            requested_qpos = torch.tensor(
+                [[0.5]],
+                dtype=torch.float32,
+                device=self.sim.device,
+            )
+            expected_qpos = torch.tensor(
+                [[0.02]],
+                dtype=torch.float32,
+                device=self.sim.device,
+            )
+
+        self.art.set_qpos_limits(qpos_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        self.art.set_qpos(
+            requested_qpos,
+            joint_ids=joint_ids,
+            env_ids=env_ids,
+            target=False,
+        )
+
+        clamped_qpos = self.art.get_qpos()[env_ids][:, joint_ids]
+
+        assert torch.allclose(
+            clamped_qpos, expected_qpos, atol=1e-5
+        ), f"FAIL: qpos did not clamp to the per-env updated limits: {clamped_qpos.tolist()}"
+
+    def test_user_qpos_limits_restrict_set_qpos(self):
+        """Test user qpos limits further restrict the asset limits."""
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 1] if NUM_ARENAS >= 2 else [0]
+
+        asset_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        # Tighten the limits by 0.05 on each side (clamped to asset range).
+        user_limits = asset_limits.clone()
+        margin = 0.05
+        user_limits[..., 0] = torch.clamp(
+            user_limits[..., 0] + margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+        user_limits[..., 1] = torch.clamp(
+            user_limits[..., 1] - margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+
+        self.art.set_user_qpos_limits(user_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        effective_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        )
+        assert torch.allclose(
+            effective_limits, user_limits, atol=1e-5
+        ), "FAIL: effective limits do not match user limits"
+
+        # Requested qpos exceeds user limits but is within asset limits.
+        requested_qpos = asset_limits[..., 1].clone()
+        self.art.set_qpos(
+            requested_qpos,
+            joint_ids=joint_ids,
+            env_ids=env_ids,
+            target=False,
+        )
+        clamped_qpos = self.art.get_qpos()[env_ids][:, joint_ids]
+        assert torch.allclose(
+            clamped_qpos, user_limits[..., 1], atol=1e-5
+        ), f"FAIL: qpos did not clamp to user upper limits: {clamped_qpos.tolist()}"
+
+    def test_user_qpos_limits_cannot_exceed_asset_limits(self):
+        """Test user qpos limits are clamped to the asset limits."""
+        joint_ids = [0]
+        env_ids = [0]
+        asset_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        # User limits wider than asset limits should be clamped.
+        user_limits = asset_limits.clone()
+        user_limits[..., 0] -= 1.0
+        user_limits[..., 1] += 1.0
+
+        self.art.set_user_qpos_limits(user_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        effective_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        )
+        assert torch.allclose(
+            effective_limits, asset_limits, atol=1e-5
+        ), "FAIL: user limits wider than asset limits were not clamped"
+
+    def test_reset_qpos_limits_restores_asset_limits(self):
+        """Test reset_qpos_limits restores the original asset limits."""
+        joint_ids = [0]
+        env_ids = [0]
+        asset_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        ).clone()
+
+        user_limits = asset_limits.clone()
+        user_limits[..., 0] += 0.02
+        user_limits[..., 1] -= 0.02
+        self.art.set_user_qpos_limits(user_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        self.art.reset_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        restored_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        assert torch.allclose(
+            restored_limits, asset_limits, atol=1e-5
+        ), "FAIL: reset_qpos_limits did not restore asset limits"
+
+    def test_user_qpos_limits_from_cfg(self):
+        """Test user qpos limits can be set from ArticulationCfg."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        cfg = ArticulationCfg(
+            uid="drawer_user_limits",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            user_qpos_limits={".*": [-0.05, 0.05]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        limits = art.get_qpos_limits()
+        assert torch.all(
+            limits[..., 0] >= -0.0501
+        ), "FAIL: cfg user_qpos_limits lower bound not applied"
+        assert torch.all(
+            limits[..., 1] <= 0.0501
+        ), "FAIL: cfg user_qpos_limits upper bound not applied"
+
+    def test_qpos_limits_from_cfg_can_expand(self):
+        """Test qpos_limits from ArticulationCfg can expand joint limits."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        joint_name = self.art.joint_names[0]
+        asset_limits = self.art.get_qpos_limits()[:, 0, :]
+        expanded_lower = asset_limits[:, 0].min().item() - 0.1
+        expanded_upper = asset_limits[:, 1].max().item() + 0.1
+
+        cfg = ArticulationCfg(
+            uid="drawer_expanded_limits",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            qpos_limits={joint_name: [expanded_lower, expanded_upper]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        limits = art.get_qpos_limits()[:, 0, :]
+        assert torch.allclose(
+            limits,
+            torch.tensor(
+                [expanded_lower, expanded_upper],
+                device=self.sim.device,
+                dtype=torch.float32,
+            ),
+            atol=1e-4,
+        ), f"FAIL: cfg qpos_limits not applied: {limits.tolist()}"
+
+        # set_qpos should clamp to the expanded limits, not the asset limits.
+        requested_qpos = torch.full(
+            (NUM_ARENAS, 1), expanded_upper, device=self.sim.device
+        )
+        art.set_qpos(requested_qpos, joint_ids=[0], target=False)
+        actual_qpos = art.get_qpos()[:, 0]
+        assert torch.allclose(
+            actual_qpos,
+            torch.full_like(actual_qpos, expanded_upper),
+            atol=1e-4,
+        ), f"FAIL: set_qpos did not use expanded limits: {actual_qpos.tolist()}"
+
+    def test_qpos_limits_and_user_qpos_limits_from_cfg(self):
+        """Test qpos_limits baseline and user_qpos_limits restriction both work."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        joint_name = self.art.joint_names[0]
+        cfg = ArticulationCfg(
+            uid="drawer_baseline_and_user",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            qpos_limits={joint_name: [-0.5, 0.5]},
+            user_qpos_limits={joint_name: [-0.1, 0.1]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        limits = art.get_qpos_limits()[:, 0, :]
+        assert torch.allclose(
+            limits,
+            torch.tensor([-0.1, 0.1], device=self.sim.device, dtype=torch.float32),
+            atol=1e-4,
+        ), f"FAIL: user_qpos_limits did not restrict cfg baseline: {limits.tolist()}"
+
+    def test_reset_qpos_limits_restores_cfg_baseline(self):
+        """Test reset_qpos_limits restores limits to cfg.qpos_limits baseline."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        joint_name = self.art.joint_names[0]
+        cfg = ArticulationCfg(
+            uid="drawer_cfg_baseline",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            qpos_limits={joint_name: [-0.5, 0.5]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        cfg_baseline = art.get_qpos_limits()[:, 0, :].clone()
+
+        art.set_user_qpos_limits({joint_name: [-0.1, 0.1]})
+        assert not torch.allclose(
+            art.get_qpos_limits()[:, 0, :], cfg_baseline, atol=1e-5
+        ), "FAIL: user_qpos_limits did not change effective limits"
+
+        art.reset_qpos_limits(joint_ids=[0])
+        assert torch.allclose(
+            art.get_qpos_limits()[:, 0, :], cfg_baseline, atol=1e-5
+        ), f"FAIL: reset_qpos_limits did not restore cfg baseline: {art.get_qpos_limits()[:, 0, :].tolist()}"
 
     def teardown_method(self):
         """Clean up resources after each test method."""

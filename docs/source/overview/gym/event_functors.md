@@ -204,6 +204,15 @@ This page lists all available event functors that can be used with the Event Man
      "params": {"grid_origin": [0.5, -0.3], "grid_size": [0.4, 0.6],
                 "grid_res": [4, 6], "entity_cfg": {"uid": "objects"}}}
     ```
+* - {class}`~randomization.spatial.randomize_anchor_height`
+  - Randomize the height of an anchor object and shift other objects by the same delta. Implemented as a Functor class. Samples a per-environment height delta (uniform range or discrete candidates), moves the anchor object relative to its configured initial position, and adds the same delta to the Z component of every other included object while preserving XY and rotation.
+
+    ```json
+    {"func": "randomize_anchor_height", "mode": "reset",
+     "params": {"anchor_uid": "table",
+                "height_delta_range": [[-0.05], [0.05]],
+                "exclude_uids": ["floor"]}}
+    ```
 ```
 
 ## Geometry Randomization
