@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import configclass
@@ -68,7 +68,7 @@ class ObjectSemantics:
 
 @dataclass(frozen=True)
 class EndEffectorPoseTarget:
-    """End-effector pose target. Used by MoveEndEffector and Place."""
+    """End-effector pose target. Used by MoveEndEffector, Place, and Press."""
 
     xpos: torch.Tensor
     """Target end-effector homogeneous transform.
@@ -77,8 +77,24 @@ class EndEffectorPoseTarget:
 
     - ``(4, 4)`` or ``(n_envs, 4, 4)`` — a single waypoint.
     - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory; waypoints
-      are visited in order. (Only consumed as multi-waypoint by MoveEndEffector.)
+      are visited in order. (Consumed as multi-waypoint by MoveEndEffector and
+      Place.)
     """
+
+    tcp_symmetry: Literal["none", "z_roll_180"] = "none"
+    """Optional TCP-frame symmetry allowed by the target semantics.
+
+    ``"none"`` preserves the pose exactly. ``"z_roll_180"`` lets supporting
+    actions choose between the pose and its TCP z-roll 180 equivalent, which
+    flips TCP x/y while preserving TCP z and translation.
+    """
+
+    def __post_init__(self) -> None:
+        if self.tcp_symmetry not in ("none", "z_roll_180"):
+            raise ValueError(
+                "tcp_symmetry must be one of 'none' or 'z_roll_180', "
+                f"but got {self.tcp_symmetry!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -233,14 +249,32 @@ class WorldState:
 class ActionResult:
     """Return value of every AtomicAction.execute call."""
 
-    success: bool
-    """Whether the action produced a valid full-DoF trajectory."""
+    success: bool | torch.Tensor
+    """Whether the action produced a valid full-DoF trajectory.
+    Can be a bool or a per-environment boolean tensor of shape (n_envs,)."""
 
     trajectory: torch.Tensor
     """Full-robot trajectory, shape (n_envs, n_waypoints, robot.dof)."""
 
     next_state: WorldState
     """World state to feed into the next action."""
+
+    @property
+    def success_all(self) -> bool:
+        """True only if all environments succeeded."""
+        if isinstance(self.success, torch.Tensor):
+            return bool(torch.all(self.success).item())
+        return bool(self.success)
+
+    def __bool__(self) -> bool:
+        import warnings as _w
+
+        _w.warn(
+            "ActionResult bool() is deprecated; use .success_all",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.success_all
 
 
 # =============================================================================
@@ -257,6 +291,12 @@ class ActionCfg:
     interpolation_type: str = "linear"
     velocity_limit: float | None = None
     acceleration_limit: float | None = None
+    motion_source: str = "ik_interp"
+    """Trajectory source: 'ik_interp' (default, batched IK + linear interp)
+    or 'motion_gen' (batched MotionGenerator)."""
+    planner_type: str | None = None
+    """Planner type for motion_source='motion_gen': 'toppra' | 'neural'.
+    Required when motion_source='motion_gen'."""
 
 
 # =============================================================================

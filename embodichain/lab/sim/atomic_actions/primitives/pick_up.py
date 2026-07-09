@@ -25,10 +25,10 @@ import torch
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import (
-    matrix_from_quat,
     pose_inv,
     quat_error_magnitude,
     quat_from_matrix,
+    axis_angle_to_rotation_matrix,
 )
 
 from ._helpers import arm_qpos_from_state
@@ -74,6 +74,12 @@ class PickUpCfg(ActionCfg):
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
     """Approach direction in the object local frame."""
 
+    obj_upright_direction: torch.Tensor | None = None
+    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
+
+    rotate_upright: float | None = None
+    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
+
 
 class PickUp(AtomicAction):
     """Approach a grasp pose, close the gripper, lift."""
@@ -116,15 +122,32 @@ class PickUp(AtomicAction):
             logger.log_error(
                 "PickUp requires an entity on the target semantics.", ValueError
             )
-
         start_arm_qpos = self.builder.resolve_start_qpos(
             arm_qpos_from_state(state, self.arm_joint_ids),
             n_envs=self.n_envs,
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-
         is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
+
+        # apply grasp yr rotation offset if specified
+        if self.cfg.rotate_upright is not None:
+            if self.cfg.obj_upright_direction is None:
+                upright_direction = torch.tensor([0, 0, 1], device=self.device)
+            else:
+                upright_direction = self.cfg.obj_upright_direction.to(self.device)
+            obj_pose = sem.entity.get_local_pose(to_matrix=True)
+            obj_upright = (upright_direction * obj_pose[:, :3, :3]).sum(axis=2)
+            grasp_ry = grasp_xpos[:, :3, 1]
+            dot_result = (grasp_ry * obj_upright).sum(axis=1)
+            # revert flag is -1 if the dot product is negative, 1 if positive
+            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+            grasp_rx = grasp_xpos[:, :3, 0]
+            rota_axis_angle = self.cfg.rotate_upright * revert_flag * grasp_rx
+            rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
+            upright_grasp_rota = torch.bmm(rota_offset, grasp_xpos[:, :3, :3])
+            grasp_xpos[:, :3, :3] = upright_grasp_rota
+
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
@@ -148,16 +171,14 @@ class PickUp(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        ok, approach_arm = self.builder.plan_arm_traj(
+        approach_success, approach_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_approach,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("PickUp failed to plan the approach trajectory.")
-            return self._fail(state)
 
         grasp_arm_qpos = approach_arm[:, -1, :]
         lift_xpos = self.builder.apply_local_offset(
@@ -168,16 +189,15 @@ class PickUp(AtomicAction):
             [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, lift_arm = self.builder.plan_arm_traj(
+        lift_success, lift_arm = self.builder.plan_arm_traj(
             target_states_list,
             grasp_arm_qpos,
             n_lift,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("PickUp failed to plan the lift trajectory.")
-            return self._fail(state)
+        success = approach_success & lift_success
 
         hand_close_path = self.builder.interpolate_hand_qpos(
             self.hand_open_qpos, self.hand_close_qpos, n_waypoints=n_close
@@ -206,7 +226,7 @@ class PickUp(AtomicAction):
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -217,7 +237,7 @@ class PickUp(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,

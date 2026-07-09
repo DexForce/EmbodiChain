@@ -24,6 +24,7 @@ import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from ._helpers import arm_qpos_from_state
 from ..core import (
@@ -100,7 +101,6 @@ class Place(AtomicAction):
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
-        n_waypoint = place_xpos.shape[1]
 
         start_arm_qpos = self.builder.resolve_start_qpos(
             arm_qpos_from_state(state, self.arm_joint_ids),
@@ -108,6 +108,11 @@ class Place(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
+        if target.tcp_symmetry == "z_roll_180":
+            place_xpos = self._select_tcp_symmetric_place_variant(
+                place_xpos, start_arm_qpos
+            )
+        n_waypoint = place_xpos.shape[1]
         n_down, n_open, n_back = self.builder.split_three_phase(
             self.cfg.sample_interval,
             self.cfg.hand_interp_steps,
@@ -127,30 +132,29 @@ class Place(AtomicAction):
             ]
             for i in range(self.n_envs)
         ]
-        ok, down_arm = self.builder.plan_arm_traj(
+        down_success, down_arm = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             n_down,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
         reach_arm_qpos = down_arm[:, -1, :]
 
         target_states_list = [
             [PlanState(xpos=retract_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, back_arm = self.builder.plan_arm_traj(
+        back_success, back_arm = self.builder.plan_arm_traj(
             target_states_list,
             reach_arm_qpos,
             n_back,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            return self._fail(state)
+        success = down_success & back_success
 
         hand_open_path = self.builder.interpolate_hand_qpos(
             self.hand_close_qpos, self.hand_open_qpos, n_waypoints=n_open
@@ -172,7 +176,7 @@ class Place(AtomicAction):
         full[:, n_down + n_open :, self.hand_joint_ids] = self.hand_open_qpos
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -183,7 +187,7 @@ class Place(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,
@@ -191,6 +195,37 @@ class Place(AtomicAction):
             ),
             next_state=state,
         )
+
+    def _select_tcp_symmetric_place_variant(
+        self, place_xpos: torch.Tensor, start_qpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Choose the closest TCP z-roll variant for an opt-in place target."""
+        mirrored_place_xpos = place_xpos.clone()
+        mirrored_place_xpos[..., :3, 0] = -mirrored_place_xpos[..., :3, 0]
+        mirrored_place_xpos[..., :3, 1] = -mirrored_place_xpos[..., :3, 1]
+        place_variants = torch.stack([place_xpos, mirrored_place_xpos], dim=2)
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=self.cfg.control_part,
+            to_matrix=True,
+        )
+        start_quat = quat_from_matrix(start_xpos[:, :3, :3])
+        first_waypoint_quat = quat_from_matrix(place_variants[:, 0, :, :3, :3])
+        start_quat = start_quat[:, None, :].expand_as(first_waypoint_quat)
+        rotation_error = quat_error_magnitude(
+            first_waypoint_quat.reshape(-1, 4),
+            start_quat.reshape(-1, 4),
+        ).reshape(self.n_envs, 2)
+        best_variant_idx = rotation_error.argmin(dim=1)
+
+        env_idx = torch.arange(self.n_envs, device=self.device)[:, None]
+        waypoint_idx = torch.arange(place_xpos.shape[1], device=self.device)[None, :]
+        return place_variants[
+            env_idx,
+            waypoint_idx,
+            best_variant_idx[:, None],
+        ]
 
 
 __all__ = ["Place", "PlaceCfg"]

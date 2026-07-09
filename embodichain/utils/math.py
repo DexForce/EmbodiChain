@@ -540,6 +540,61 @@ def _axis_angle_rotation(
     return torch.stack(R_flat, -1).reshape(angle.shape + (3, 3))
 
 
+def axis_angle_to_rotation_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
+    """Convert axis-angle representation to rotation matrix.
+
+    Args:
+        axis_angle: Axis-angle representation, radian * axis. Shape is (N, 3).
+
+    Returns:
+        Rotation matrices. Shape is (N, 3, 3).
+    """
+    if axis_angle.dim() == 0 or axis_angle.shape[-1] != 3:
+        raise ValueError(
+            f"Invalid axis-angle shape {axis_angle.shape}, expected (..., 3)."
+        )
+
+    # Rodrigues formula with stable Taylor fallback near zero angle.
+    theta2 = torch.sum(axis_angle * axis_angle, dim=-1, keepdim=True)
+    theta = torch.sqrt(theta2)
+    eps = 1.0e-8
+
+    sin_over_theta = torch.where(
+        theta2 > eps,
+        torch.sin(theta) / theta,
+        1.0 - theta2 / 6.0 + theta2 * theta2 / 120.0,
+    )
+    one_minus_cos_over_theta2 = torch.where(
+        theta2 > eps,
+        (1.0 - torch.cos(theta)) / theta2,
+        0.5 - theta2 / 24.0 + theta2 * theta2 / 720.0,
+    )
+
+    wx, wy, wz = torch.unbind(axis_angle, dim=-1)
+    skew = torch.zeros(
+        axis_angle.shape[:-1] + (3, 3),
+        dtype=axis_angle.dtype,
+        device=axis_angle.device,
+    )
+    skew[..., 0, 1] = -wz
+    skew[..., 0, 2] = wy
+    skew[..., 1, 0] = wz
+    skew[..., 1, 2] = -wx
+    skew[..., 2, 0] = -wy
+    skew[..., 2, 1] = wx
+
+    eye = torch.eye(3, dtype=axis_angle.dtype, device=axis_angle.device).expand(
+        axis_angle.shape[:-1] + (3, 3)
+    )
+    skew2 = torch.matmul(skew, skew)
+
+    return (
+        eye
+        + sin_over_theta.unsqueeze(-1) * skew
+        + one_minus_cos_over_theta2.unsqueeze(-1) * skew2
+    )
+
+
 def matrix_from_euler(
     euler_angles: torch.Tensor, convention: str = "XYZ"
 ) -> torch.Tensor:

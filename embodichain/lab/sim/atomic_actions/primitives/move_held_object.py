@@ -33,6 +33,9 @@ from ..core import (
     HeldObjectPoseTarget,
     WorldState,
 )
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+)
 from ..trajectory import TrajectoryBuilder
 
 
@@ -49,6 +52,12 @@ class MoveHeldObjectCfg(ActionCfg):
 
     hand_close_qpos: torch.Tensor | None = None
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+
+    obj_upright_direction: torch.Tensor | None = None
+    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
+
+    pick_rotate_upright: float | None = None
+    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
 
 
 class MoveHeldObject(AtomicAction):
@@ -84,6 +93,37 @@ class MoveHeldObject(AtomicAction):
         object_target_pose = resolve_object_target(
             target.object_target_pose, n_envs=self.n_envs, device=self.device
         )
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            arm_qpos_from_state(state, self.arm_joint_ids),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+        if self.cfg.pick_rotate_upright is not None:
+            held_eef_xpos = self.robot.compute_fk(
+                qpos=start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+            )
+            held_obj_xpos = state.held_object.semantics.entity.get_local_pose(
+                to_matrix=True
+            )
+            if self.cfg.obj_upright_direction is None:
+                upright_direction = torch.tensor([0, 0, 1], device=self.device)
+            else:
+                upright_direction = self.cfg.obj_upright_direction.to(self.device)
+            obj_upright = (upright_direction * held_obj_xpos[:, :3, :3]).sum(axis=2)
+
+            grasp_ry = held_eef_xpos[:, :3, 1]
+            dot_result = (grasp_ry * obj_upright).sum(axis=1)
+            # revert flag is -1 if the dot product is negative, 1 if positive
+            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+            grasp_rx = held_eef_xpos[:, :3, 0]
+            # rotate util upright
+            rota_axis_angle = -0.5 * torch.pi * revert_flag * grasp_rx
+            gripper_rotate_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
+            # modified target xpos rotation
+            object_target_pose[:, :3, :3] = torch.bmm(
+                gripper_rotate_offset, held_obj_xpos[:, :3, :3]
+            )
         object_to_eef = state.held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
@@ -91,27 +131,18 @@ class MoveHeldObject(AtomicAction):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
-        )
-
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
             for i in range(self.n_envs)
         ]
-        ok, arm_traj = self.builder.plan_arm_traj(
+        success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
             self.cfg.sample_interval,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
+            cfg=self.cfg,
         )
-        if not ok:
-            logger.log_warning("MoveHeldObject failed to plan trajectory.")
-            return self._fail(state)
 
         full = torch.empty(
             (self.n_envs, arm_traj.shape[1], self.robot_dof),
@@ -123,7 +154,7 @@ class MoveHeldObject(AtomicAction):
         full[:, :, self.hand_joint_ids] = self.hand_close_qpos
 
         return ActionResult(
-            success=True,
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),
@@ -134,7 +165,7 @@ class MoveHeldObject(AtomicAction):
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(
-            success=False,
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
             trajectory=torch.empty(
                 (self.n_envs, 0, self.robot_dof),
                 dtype=torch.float32,

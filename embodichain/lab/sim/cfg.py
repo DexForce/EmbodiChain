@@ -155,7 +155,7 @@ class MarkerCfg:
     marker_type: Literal["axis", "line", "point"] = "axis"
     """Type of marker to display. Can be 'axis' (3D coordinate frame), 'line', or 'point'. (only axis supported now)"""
 
-    axis_xpos: List[np.ndarray] = None
+    axis_xpos: torch.Tensor | None = None
     """List of 4x4 transformation matrices defining the position and orientation of each axis marker."""
 
     axis_size: float = 0.002
@@ -300,6 +300,8 @@ class RigidBodyAttributesCfg:
         attr.sleep_threshold = self.sleep_threshold
         attr.restitution = self.restitution
         attr.enable_ccd = self.enable_ccd
+        attr.max_linear_velocity = self.max_linear_velocity
+        attr.max_angular_velocity = self.max_angular_velocity
         attr.max_depenetration_velocity = self.max_depenetration_velocity
         attr.min_position_iters = self.min_position_iters
         attr.min_velocity_iters = self.min_velocity_iters
@@ -795,19 +797,108 @@ class ObjectBaseCfg:
 class LightCfg(ObjectBaseCfg):
     """Configuration for a light asset in the simulation.
 
-    This class extends the base asset configuration to include specific properties for lights,
+    Supports six light types matching the dexsim rendering backend:
+
+    - ``"point"``: Per-environment omnidirectional point light with position
+      and falloff radius. Created as a batched light (one per environment).
+    - ``"sun"``: Global directional sun light (infinite distance). Created as
+      a single scene-level instance. Uses direction only; position is ignored.
+      Sun-specific fields (``angular_radius``, ``halo_size``, ``halo_falloff``)
+      are reserved for future backend support.
+    - ``"direction"``: Global pure directional light at infinite distance.
+      Created as a single scene-level instance. Direction only; no position.
+    - ``"spot"``: Per-environment spotlight with position, direction, and
+      inner/outer cone angles. Created as a batched light.
+    - ``"rect"``: Per-environment rectangular area light with position,
+      direction, width, and height. Created as a batched light.
+    - ``"mesh"``: Per-environment mesh-based emissive light. Requires a
+      :class:`~dexsim.models.MeshObject` via
+      :meth:`embodichain.lab.sim.objects.light.Light.set_mesh`
+      (not tensor-batched). Created as a batched light.
+
+    .. attention::
+        The ``angular_radius``, ``halo_size``, and ``halo_falloff`` fields are
+        reserved for future use. The dexsim Python bindings do not yet expose
+        setters for these sun-specific properties.
     """
 
-    # TODO: to be added more light type, such as spot, sun, etc.
-    light_type: Literal["point"] = "point"
+    light_type: Literal["point", "sun", "direction", "spot", "rect", "mesh"] = "point"
+    """Light type. Supported: ``"point"``, ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``."""
+
+    # ------------------------------------------------------------------
+    # Universal properties (apply to all light types)
+    # ------------------------------------------------------------------
 
     color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    """RGB color of the light source. Defaults to white ``(1.0, 1.0, 1.0)``."""
 
-    intensity: float = 50.0
-    """Intensity of the light source with unit of watts/m^2."""
+    intensity: float = 30.0
+    """Intensity of the light source in watts/m^2. Defaults to ``30.0``."""
 
-    radius: float = 1e2
-    """Falloff of the light, only used for point light."""
+    enable_shadow: bool = True
+    """Whether the light casts shadows. Defaults to ``True``."""
+
+    # ------------------------------------------------------------------
+    # Point light
+    # ------------------------------------------------------------------
+
+    radius: float = 10.0
+    """Falloff radius for point lights. Only used when ``light_type="point"``. Defaults to ``10.0``."""
+
+    # ------------------------------------------------------------------
+    # Directional properties (sun, direction, spot, rect, mesh)
+    # ------------------------------------------------------------------
+
+    direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    """Direction vector for directional, spot, rect, and mesh lights.
+    Defaults to ``(0.0, 0.0, -1.0)`` (pointing down along -Z)."""
+
+    # ------------------------------------------------------------------
+    # Sun light (reserved — Python bindings not yet available)
+    # ------------------------------------------------------------------
+
+    angular_radius: float = 0.5
+    """Angular radius of the sun disc in degrees. Reserved for future use."""
+
+    halo_size: float = 10.0
+    """Halo size for sun light. Reserved for future use."""
+
+    halo_falloff: float = 3.0
+    """Halo falloff for sun light. Reserved for future use."""
+
+    # ------------------------------------------------------------------
+    # Spot light
+    # ------------------------------------------------------------------
+
+    spot_angle_inner: float = 30.0
+    """Inner cone angle of the spotlight in degrees. Only used when ``light_type="spot"``.
+    Defaults to ``30.0``."""
+
+    spot_angle_outer: float = 45.0
+    """Outer cone angle of the spotlight in degrees. Only used when ``light_type="spot"``.
+    Defaults to ``45.0``."""
+
+    # ------------------------------------------------------------------
+    # Rect light
+    # ------------------------------------------------------------------
+
+    rect_width: float = 1.0
+    """Width of the rectangular area light. Only used when ``light_type="rect"``.
+    Defaults to ``1.0``."""
+
+    rect_height: float = 1.0
+    """Height of the rectangular area light. Only used when ``light_type="rect"``.
+    Defaults to ``1.0``."""
+
+    # ------------------------------------------------------------------
+    # Mesh light
+    # ------------------------------------------------------------------
+
+    mesh_path: str = ""
+    """Asset path for mesh-based emissive lights. Only used when ``light_type="mesh"``.
+    The actual mesh assignment is done via
+    :meth:`embodichain.lab.sim.objects.light.Light.set_mesh` which accepts a
+    :class:`dexsim.models.MeshObject`. This field stores the path for reference."""
 
 
 @configclass
@@ -827,18 +918,41 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
 
-    max_convex_hull_num: int = 1
+    max_convex_hull_num: int = MISSING
     """The maximum number of convex hulls that will be created for the rigid body.
 
-    If `max_convex_hull_num` is set to larger than 1, the rigid body will be decomposed into multiple convex hulls using coacd alogorithm.
+    .. deprecated::
+        Use :attr:`MeshCfg.max_convex_hull_num` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
+    using the approximate convex decomposition method specified by :attr:`acd_method`.
     Reference: https://github.com/SarahWeiii/CoACD
     """
 
-    sdf_resolution: int = 0
+    acd_method: str = MISSING
+    """The method used for approximate convex decomposition (ACD) of the mesh.
+
+    .. deprecated::
+        Use :attr:`MeshCfg.acd_method` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1.
+    """
+
+    sdf_resolution: int = MISSING
     """Resolution for the signed distance field (SDF) of the rigid body.
-    The spacing of the uniformly sampled SDF is equal to the largest AABB extent of the mesh, divided by the resolution.
-    if `sdf_resolution` is set to larger than 0, a SDF will be generated for collision detection.
-    SDF will increase the accuracy of collision, but also take more time to initialize and simulate."""
+
+    .. deprecated::
+        Use :attr:`MeshCfg.sdf_resolution` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    The spacing of the uniformly sampled SDF is equal to the largest AABB extent
+    of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
+    than 0, an SDF will be generated for collision detection. SDF will increase the
+    accuracy of collision, but also takes more time to initialize and simulate.
+    """
 
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""

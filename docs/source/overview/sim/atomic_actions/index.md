@@ -64,7 +64,7 @@ and every action declares the target type, or tuple of target types, it accepts 
 
 | Target | Constructor | Used by |
 |---|---|---|
-| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos)` | `MoveEndEffector`, `Place`, `Press` |
+| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget` | `JointPositionTarget(qpos)` | `MoveJoints` |
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
 | `GraspTarget` | `GraspTarget(semantics)` | `PickUp` |
@@ -103,7 +103,7 @@ action's `TargetType` before calling `execute`:
 
 | Target | Holds | Accepted by |
 |---|---|---|
-| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)` | `MoveEndEffector`, `Place`, `Press` |
+| `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)`; `Place` may opt into TCP z-roll 180 equivalence | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)` | `MoveJoints` |
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
 | `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
