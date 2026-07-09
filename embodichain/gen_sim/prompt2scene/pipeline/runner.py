@@ -596,9 +596,7 @@ def _update_timing_totals(timings: dict[str, Any]) -> None:
             6,
         ),
         "components": {
-            SCENE_EDIT_STEP: _elapsed_from_timing_entry(
-                workflows.get(SCENE_EDIT_STEP)
-            ),
+            SCENE_EDIT_STEP: _elapsed_from_timing_entry(workflows.get(SCENE_EDIT_STEP)),
             SCENE_RANDOMIZATION_STEP: _elapsed_from_timing_entry(
                 workflows.get(SCENE_RANDOMIZATION_STEP)
             ),

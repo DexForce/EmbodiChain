@@ -22,7 +22,6 @@ python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent_pipeline \
     --task_description "Pick up the target object and place it in the basket." \
     --config-output-dir "gym_project/action_agent_pipeline/configs/demo1_text" \
     --task_name "Demo1_Text" \
-    --target_body_scale 0.8 \
     --regenerate
 ```
 
@@ -36,7 +35,6 @@ python -m embodichain.gen_sim.action_agent_pipeline.cli.generate_action_agent_co
     --output_dir "gym_project/action_agent_pipeline/configs/demo_text" \
     --task_name "Demo_Text" \
     --task_description "Pick up the target object and place it in the basket." \
-    --target_body_scale 0.8 \
     --overwrite
 ```
 

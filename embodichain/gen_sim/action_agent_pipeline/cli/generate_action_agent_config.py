@@ -19,6 +19,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
@@ -112,10 +115,11 @@ def cli() -> None:
     parser.add_argument(
         "--target_body_scale",
         type=float,
-        default=0.7,
+        default=DEFAULT_TARGET_BODY_SCALE,
         help=(
             "Uniform body_scale for generated target objects. Basket-like "
-            "containers keep their source body_scale."
+            "containers keep their source body_scale. Defaults to "
+            f"{DEFAULT_TARGET_BODY_SCALE}."
         ),
     )
     parser.add_argument(
@@ -139,7 +143,8 @@ def cli() -> None:
             "Optional source-scene body_scale policy for prompt2scene-style "
             "exports. preserve keeps source scales, multiply uses "
             "source_scale * --target_body_scale, and absolute sets every "
-            "source-scene object to --target_body_scale."
+            "source-scene object to --target_body_scale. Defaults to multiply "
+            "for prompt2scene gym_export inputs."
         ),
     )
     parser.add_argument(
@@ -287,6 +292,7 @@ def cli() -> None:
     task_description = _resolve_task_description(args)
     target_replacements = _resolve_target_replacements(args)
     alignment = _resolve_source_alignment(args)
+    source_scene_body_scale_mode = _resolve_source_scene_body_scale_mode(args)
 
     paths = generate_action_agent_config_from_project(
         gym_project=args.gym_project,
@@ -298,7 +304,7 @@ def cli() -> None:
         robot_profile=args.robot_profile,
         target_body_scale=args.target_body_scale,
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
-        source_scene_body_scale_mode=args.source_scene_body_scale_mode,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
         preserve_source_scene_geometry=alignment["preserve_source_scene_geometry"],
         source_scene_z_rotation_degrees=alignment["source_scene_z_rotation_degrees"],
         source_mesh_x_rotation_degrees=alignment["source_mesh_x_rotation_degrees"],
@@ -349,6 +355,16 @@ def _resolve_target_replacements(
     return resolve_target_replacements(
         args, TargetReplacementSpec, Path(args.gym_project)
     )
+
+
+def _resolve_source_scene_body_scale_mode(args: argparse.Namespace) -> str | None:
+    if args.source_scene_body_scale_mode is not None:
+        return args.source_scene_body_scale_mode
+    if args.preserve_source_target_body_scale:
+        return None
+    if is_prompt2scene_gym_export(Path(args.gym_project).expanduser().resolve()):
+        return "multiply"
+    return None
 
 
 def _resolve_source_alignment(args: argparse.Namespace) -> dict[str, float | bool]:

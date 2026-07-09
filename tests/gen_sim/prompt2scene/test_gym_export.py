@@ -21,75 +21,73 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    export_z_axis_normalized_asset,
+    match_asset_orientation_keyword,
+)
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
-    _BOTTLE_FRAME_STANDARDIZATION,
-    _CAN_FRAME_STANDARDIZATION,
-    _CUP_FRAME_STANDARDIZATION,
-    _bake_glb_bottom_center_to_origin,
     _glb_to_sim_rotation,
     _load_mesh_as_trimesh,
-    _upright_frame_standardization_for_object,
 )
 
 
-def test_upright_frame_standardization_detects_cup_bottle_and_can() -> None:
-    cup = _upright_frame_standardization_for_object(
-        object_id="paper_cup_1",
-        description="white paper cup",
-        mesh_path=Path("mesh_assets/paper_cup/paper_cup_1.glb"),
-    )
-    bottle = _upright_frame_standardization_for_object(
+def test_z_axis_normalization_keyword_detects_bottle_and_can() -> None:
+    bottle = match_asset_orientation_keyword(
         object_id="interact_bottle_1",
+        name="bottle",
         description="clear plastic bottle",
-        mesh_path=Path("mesh_assets/bottle/bottle_1.glb"),
     )
-    can = _upright_frame_standardization_for_object(
+    can = match_asset_orientation_keyword(
         object_id="soda_can_1",
+        name="soda can",
         description="red soda can",
-        mesh_path=Path("mesh_assets/soda_can/soda_can_1.glb"),
     )
-    apple = _upright_frame_standardization_for_object(
+    apple = match_asset_orientation_keyword(
         object_id="apple_1",
+        name="apple",
         description="red apple",
-        mesh_path=Path("mesh_assets/apple/apple_1.glb"),
     )
 
-    assert cup == _CUP_FRAME_STANDARDIZATION
-    assert cup.is_upper_larger is True
-    assert bottle == _BOTTLE_FRAME_STANDARDIZATION
-    assert bottle.is_upper_larger is False
-    assert can == _CAN_FRAME_STANDARDIZATION
-    assert can.is_upper_larger is False
+    assert bottle == "bottle"
+    assert can == "can"
     assert apple is None
 
 
 @pytest.mark.parametrize(
-    ("profile", "lower_radius", "upper_radius", "upper_should_be_larger"),
+    (
+        "name",
+        "is_upper_larger",
+        "lower_radius",
+        "upper_radius",
+        "upper_should_be_larger",
+    ),
     [
-        (_BOTTLE_FRAME_STANDARDIZATION, 0.09, 0.03, False),
-        (_CUP_FRAME_STANDARDIZATION, 0.03, 0.09, True),
-        (_CAN_FRAME_STANDARDIZATION, 0.09, 0.03, False),
+        ("bottle", False, 0.06, 0.02, False),
+        ("cup", True, 0.02, 0.06, True),
+        ("can", False, 0.06, 0.02, False),
     ],
 )
-def test_bake_glb_standardizes_upright_axis_and_keeps_bottom_at_origin(
+def test_export_z_axis_normalized_asset_keeps_bottom_at_origin(
     tmp_path: Path,
-    profile,
+    name: str,
+    is_upper_larger: bool,
     lower_radius: float,
     upper_radius: float,
     upper_should_be_larger: bool,
 ) -> None:
-    source_path = tmp_path / f"{profile.name}_lying.glb"
-    output_path = tmp_path / f"{profile.name}_standard.glb"
+    source_path = tmp_path / f"{name}_lying.glb"
+    output_path = tmp_path / f"{name}_standard.glb"
     _write_frustum_glb(
         source_path,
         lower_radius=lower_radius,
         upper_radius=upper_radius,
     )
 
-    report = _bake_glb_bottom_center_to_origin(
+    result = export_z_axis_normalized_asset(
         source_path,
         output_path,
-        upright_frame_standardization=profile,
+        glb_to_sim_rotation=_glb_to_sim_rotation(),
+        is_upper_larger=is_upper_larger,
     )
 
     vertices = _load_sim_vertices(output_path)
@@ -97,9 +95,8 @@ def test_bake_glb_standardizes_upright_axis_and_keeps_bottom_at_origin(
     lower_extent = _slice_xy_extent(vertices, upper=False)
     upper_extent = _slice_xy_extent(vertices, upper=True)
 
-    assert report is not None
-    assert report["profile"] == profile.name
-    assert report["status"] == "applied"
+    assert len(result.init_pos) == 3
+    assert len(result.init_rot) == 3
     assert vertices[:, 2].min() == pytest.approx(0.0, abs=1e-6)
     assert extents[2] > extents[:2].max() * 4.0
     if upper_should_be_larger:

@@ -32,6 +32,7 @@ def cli_prompt2scene(
     output_root: str,
     llm_config_path: str | None = None,
     gravity_settle_mode: str = "geometry",
+    z_axis_align_assets: bool = True,
 ) -> None:
     """Run prompt2scene from normalized CLI argument values.
 
@@ -46,6 +47,7 @@ def cli_prompt2scene(
         prompt=prompt,
         output_root=Path(output_root),
         gravity_settle_mode=gravity_settle_mode,
+        z_axis_align_assets=z_axis_align_assets,
     )
     llm_cfg = load_llm_config(
         Path(llm_config_path) if llm_config_path is not None else None
@@ -95,6 +97,21 @@ def main() -> None:
             "bottom center is at world origin; 'physics' runs simulation."
         ),
     )
+    parser.add_argument(
+        "--z_axis_align_assets",
+        action="store_true",
+        default=True,
+        help=(
+            "Export bottle/can mesh assets upright along local Z and restore "
+            "their original scene pose with init_rot."
+        ),
+    )
+    parser.add_argument(
+        "--no_z_axis_align_assets",
+        action="store_false",
+        dest="z_axis_align_assets",
+        help="Disable upright local-Z export normalization for bottle/can assets.",
+    )
 
     args = parser.parse_args()
 
@@ -104,6 +121,7 @@ def main() -> None:
         args.output_root,
         args.llm_config,
         args.gravity_settle_mode,
+        args.z_axis_align_assets,
     )
 
 

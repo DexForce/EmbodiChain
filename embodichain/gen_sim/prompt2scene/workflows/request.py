@@ -41,6 +41,7 @@ class Prompt2SceneInput:
     image_path: Path | None = None
     prompt: str | None = None
     gravity_settle_mode: str = "geometry"
+    z_axis_align_assets: bool = True
 
     @classmethod
     def from_cli_args(
@@ -50,6 +51,7 @@ class Prompt2SceneInput:
         prompt: str | None,
         output_root: Path,
         gravity_settle_mode: str = "geometry",
+        z_axis_align_assets: bool = True,
     ) -> "Prompt2SceneInput":
         """Create a prompt2scene input from CLI arguments.
 
@@ -80,6 +82,7 @@ class Prompt2SceneInput:
                 output_root=output_root,
                 prompt=prompt_text,
                 gravity_settle_mode=gravity_settle_mode,
+                z_axis_align_assets=bool(z_axis_align_assets),
             )
 
         return cls(
@@ -87,14 +90,16 @@ class Prompt2SceneInput:
             output_root=output_root,
             prompt=cls._validate_edit_only_prompt(prompt_text, output_root),
             gravity_settle_mode=gravity_settle_mode,
+            z_axis_align_assets=bool(z_axis_align_assets),
         )
 
-    def to_manifest(self) -> dict[str, str]:
+    def to_manifest(self) -> dict[str, object]:
         """Convert the input to a JSON-serializable manifest."""
-        manifest: dict[str, str] = {
+        manifest: dict[str, object] = {
             "input_kind": self.input_kind.value,
             "output_root": str(self.output_root),
             "gravity_settle_mode": self.gravity_settle_mode,
+            "z_axis_align_assets": self.z_axis_align_assets,
         }
         if self.input_kind == InputKind.IMAGE:
             image_path = self.image_path

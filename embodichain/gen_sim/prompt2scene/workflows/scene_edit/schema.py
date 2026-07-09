@@ -32,6 +32,7 @@ class SceneEditRequest:
     cleanup_scene_edit_dir: bool = False
     optimize_new_objects_only: bool = True
     gravity_settle_mode: str = "geometry"
+    z_axis_align_assets: bool = True
 
 
 @dataclass(frozen=True)

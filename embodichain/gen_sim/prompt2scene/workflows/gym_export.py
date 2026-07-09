@@ -17,17 +17,18 @@
 from __future__ import annotations
 
 import json
-import math
-import re
 import shutil
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    export_z_axis_normalized_asset,
+    match_asset_orientation_keyword,
+)
 from embodichain.gen_sim.prompt2scene.workflows.paths import (
     UNIFIED_SCENE_GEN_STEP,
     PipelinePaths,
@@ -54,38 +55,6 @@ _DEFAULT_TABLE_ATTRS: dict[str, Any] = {
 
 _DEFAULT_OBJECT_MAX_CONVEX_HULL_NUM = 16
 _DEFAULT_TABLE_MAX_CONVEX_HULL_NUM = 16
-_DEFAULT_CONVEX_DECOMPOSITION_METHOD = "vhacd"
-
-
-@dataclass(frozen=True)
-class _UprightFrameStandardizationProfile:
-    name: str
-    is_upper_larger: bool
-
-
-_BOTTLE_FRAME_STANDARDIZATION = _UprightFrameStandardizationProfile(
-    name="bottle",
-    is_upper_larger=False,
-)
-_CUP_FRAME_STANDARDIZATION = _UprightFrameStandardizationProfile(
-    name="cup",
-    is_upper_larger=True,
-)
-_CAN_FRAME_STANDARDIZATION = _UprightFrameStandardizationProfile(
-    name="can",
-    is_upper_larger=False,
-)
-_FRAME_STANDARDIZATION_KEYWORDS = (
-    (_CUP_FRAME_STANDARDIZATION, ("cup", "cups", "paper_cup", "纸杯", "杯子")),
-    (
-        _BOTTLE_FRAME_STANDARDIZATION,
-        ("bottle", "bottles", "water_bottle", "soda_bottle", "瓶子", "瓶"),
-    ),
-    (
-        _CAN_FRAME_STANDARDIZATION,
-        ("can", "cans", "soda_can", "tin_can", "罐头", "易拉罐", "罐"),
-    ),
-)
 
 
 def _resolve_path(value: str, output_root: Path) -> Path:
@@ -149,14 +118,6 @@ def _glb_to_sim_rotation() -> np.ndarray:
     )
 
 
-def _glb_scale_to_sim(scale: Sequence[float]) -> list[float]:
-    """Convert GLB-axis scale components to sim-axis body_scale components."""
-    values = [float(v) for v in scale]
-    if len(values) != 3:
-        raise ValueError("scale must have three components")
-    return [values[0], values[2], values[1]]
-
-
 def _sim_world_xy_aabb(
     glb_path: Path,
     rotation_matrix: list[list[float]] | None,
@@ -179,6 +140,8 @@ def _sim_world_xy_aabb(
             )
         )
     verts = np.asarray(mesh.vertices.copy(), dtype=np.float64)
+    basis = _glb_to_sim_rotation()
+    verts = (basis @ verts.T).T
     if isinstance(scale, Sequence) and not isinstance(scale, (str, bytes)):
         scale_array = np.asarray(list(scale), dtype=np.float64)
         if scale_array.shape != (3,):
@@ -190,12 +153,15 @@ def _sim_world_xy_aabb(
         rot = np.asarray(rotation_matrix, dtype=np.float64)
         if rot.shape == (4, 4):
             rot = rot[:3, :3]
+        if rot.shape != (3, 3):
+            raise ValueError("rotation_matrix must be a 3x3 or 4x4 matrix")
         verts = (rot @ verts.T).T
 
     init = np.asarray(list(init_pos), dtype=np.float64)
     if init.shape != (3,):
         raise ValueError("init_pos must have three components")
-    sim_xy = np.column_stack((verts[:, 0] + init[0], -verts[:, 2] + init[1]))
+    verts = verts + init.reshape(1, 3)
+    sim_xy = verts[:, :2]
     min_xy = sim_xy.min(axis=0)
     max_xy = sim_xy.max(axis=0)
     center_xy = 0.5 * (min_xy + max_xy)
@@ -440,73 +406,22 @@ def _load_mesh_as_trimesh(glb_path: Path) -> Any:
     return trimesh.util.concatenate(meshes)
 
 
-def _upright_frame_standardization_for_object(
-    *,
-    object_id: str,
-    description: str,
-    mesh_path: Path,
-) -> _UprightFrameStandardizationProfile | None:
-    text = " ".join(
-        [
-            object_id,
-            description,
-            mesh_path.stem,
-            *(part for part in mesh_path.parts[-5:-1]),
-        ]
-    )
-    normalized = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", text).lower()
-    tokens = set(normalized.split())
-    compact = normalized.replace(" ", "")
-    for profile, keywords in _FRAME_STANDARDIZATION_KEYWORDS:
-        for keyword in keywords:
-            key = keyword.lower()
-            if any("\u4e00" <= char <= "\u9fff" for char in key):
-                if key in compact:
-                    return profile
-                continue
-            if "_" in key:
-                if key.replace("_", "") in compact:
-                    return profile
-                continue
-            if key in tokens:
-                return profile
-    return None
-
-
 def _bake_glb_bottom_center_to_origin(
     source_path: Path,
     output_path: Path,
     *,
     scale_factor: float = 1.0,
-    upright_frame_standardization: _UprightFrameStandardizationProfile | None = None,
-) -> dict[str, Any] | None:
+) -> None:
+    import trimesh
+
     mesh = _load_mesh_as_trimesh(source_path)
     verts = np.asarray(mesh.vertices, dtype=np.float64)
     scale = float(scale_factor)
     if not np.isfinite(scale) or scale <= 0.0:
         scale = 1.0
     basis = _glb_to_sim_rotation()
-    sample_points = _sample_mesh_points(mesh)
     verts_sim = (basis @ verts.T).T
     verts_sim *= scale
-    sample_points_sim = (basis @ sample_points.T).T
-    sample_points_sim *= scale
-    standardization_report = None
-    if upright_frame_standardization is not None:
-        # Work in sim coordinates so the object mouth/opening maps to runtime +Z.
-        try:
-            verts_sim, standardization_report = _standardize_upright_sim_vertices(
-                vertices=verts_sim,
-                sample_points=sample_points_sim,
-                profile=upright_frame_standardization,
-            )
-        except (np.linalg.LinAlgError, ValueError) as exc:
-            standardization_report = {
-                "profile": upright_frame_standardization.name,
-                "axis": "sim_z",
-                "status": "skipped",
-                "reason": str(exc),
-            }
     bounds = np.asarray(
         np.vstack((verts_sim.min(axis=0), verts_sim.max(axis=0))),
         dtype=np.float64,
@@ -524,158 +439,6 @@ def _bake_glb_bottom_center_to_origin(
     baked.vertices = (basis.T @ verts_sim.T).T
     output_path.parent.mkdir(parents=True, exist_ok=True)
     baked.export(output_path)
-    return standardization_report
-
-
-def _sample_mesh_points(mesh: Any) -> np.ndarray:
-    vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    faces = getattr(mesh, "faces", None)
-    if faces is None or len(faces) == 0:
-        return vertices
-    faces_array = np.asarray(faces, dtype=np.int64)
-    if faces_array.ndim != 2 or faces_array.shape[1] != 3:
-        return vertices
-    try:
-        triangles = vertices[faces_array]
-    except IndexError:
-        return vertices
-    centers = triangles.mean(axis=1)
-    edge_midpoints = np.vstack(
-        (
-            (triangles[:, 0, :] + triangles[:, 1, :]) * 0.5,
-            (triangles[:, 1, :] + triangles[:, 2, :]) * 0.5,
-            (triangles[:, 2, :] + triangles[:, 0, :]) * 0.5,
-        )
-    )
-    near_vertices = np.vstack(
-        (
-            triangles[:, 0, :] * 0.9
-            + triangles[:, 1, :] * 0.05
-            + triangles[:, 2, :] * 0.05,
-            triangles[:, 1, :] * 0.9
-            + triangles[:, 0, :] * 0.05
-            + triangles[:, 2, :] * 0.05,
-            triangles[:, 2, :] * 0.9
-            + triangles[:, 0, :] * 0.05
-            + triangles[:, 1, :] * 0.05,
-        )
-    )
-    points = np.vstack((vertices, centers, edge_midpoints, near_vertices))
-    return points if len(points) >= 4 else vertices
-
-
-def _standardize_upright_sim_vertices(
-    *,
-    vertices: np.ndarray,
-    sample_points: np.ndarray,
-    profile: _UprightFrameStandardizationProfile,
-) -> tuple[np.ndarray, dict[str, Any]]:
-    sample_points = np.asarray(sample_points, dtype=np.float64)
-    vertices = np.asarray(vertices, dtype=np.float64)
-    if sample_points.ndim != 2 or sample_points.shape[1] != 3:
-        raise ValueError(
-            f"sample_points must have shape (N, 3), got {sample_points.shape}"
-        )
-    if vertices.ndim != 2 or vertices.shape[1] != 3:
-        raise ValueError(f"vertices must have shape (N, 3), got {vertices.shape}")
-    if len(sample_points) < 4 or len(vertices) < 4:
-        raise ValueError("at least 4 points are required")
-    if not np.all(np.isfinite(sample_points)) or not np.all(np.isfinite(vertices)):
-        raise ValueError("mesh points must be finite")
-
-    center = sample_points.mean(axis=0)
-    centered_sample = sample_points - center
-    if np.linalg.matrix_rank(centered_sample) < 3:
-        raise ValueError("mesh points do not span a 3D volume")
-    _, _, vt = np.linalg.svd(centered_sample, full_matrices=False)
-    if np.linalg.det(vt) < 0:
-        vt[2, :] = -vt[2, :]
-
-    rotation = _rotation_y_matrix3(90.0) @ vt
-    standardized_sample = centered_sample @ rotation.T
-    standardized_vertices = (vertices - center) @ rotation.T
-
-    upper_volume, lower_volume = _upper_lower_convex_hull_volumes(standardized_sample)
-    flip = (
-        upper_volume < lower_volume
-        if profile.is_upper_larger
-        else upper_volume > lower_volume
-    )
-    if flip:
-        flip_rotation = _rotation_x_matrix3(180.0)
-        standardized_sample = standardized_sample @ flip_rotation.T
-        standardized_vertices = standardized_vertices @ flip_rotation.T
-        upper_volume, lower_volume = lower_volume, upper_volume
-
-    return standardized_vertices, {
-        "profile": profile.name,
-        "axis": "sim_z",
-        "status": "applied",
-        "is_upper_larger": profile.is_upper_larger,
-        "flip_applied": bool(flip),
-        "upper_volume": float(upper_volume),
-        "lower_volume": float(lower_volume),
-    }
-
-
-def _upper_lower_convex_hull_volumes(points: np.ndarray) -> tuple[float, float]:
-    axis_values = points[:, 2]
-    axis_min = float(axis_values.min())
-    axis_max = float(axis_values.max())
-    axis_span = axis_max - axis_min
-    if axis_span <= 1e-9:
-        raise ValueError("standardized mesh has no height along sim Z")
-    upper_th = axis_min + axis_span * 0.8
-    lower_th = axis_min + axis_span * 0.2
-    upper = points[axis_values > upper_th]
-    lower = points[axis_values < lower_th]
-    return _convex_hull_volume(upper), _convex_hull_volume(lower)
-
-
-def _convex_hull_volume(points: np.ndarray) -> float:
-    if len(points) < 4:
-        raise ValueError("at least 4 points are required for convex hull volume")
-    try:
-        from scipy.spatial import ConvexHull, QhullError
-    except ImportError:
-        return _aabb_volume(points)
-    try:
-        return float(ConvexHull(points).volume)
-    except QhullError:
-        return _aabb_volume(points)
-
-
-def _aabb_volume(points: np.ndarray) -> float:
-    extents = np.ptp(points, axis=0)
-    return float(max(extents[0], 0.0) * max(extents[1], 0.0) * max(extents[2], 0.0))
-
-
-def _rotation_x_matrix3(degrees: float) -> np.ndarray:
-    radians = math.radians(degrees)
-    cos_value = math.cos(radians)
-    sin_value = math.sin(radians)
-    return np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, cos_value, -sin_value],
-            [0.0, sin_value, cos_value],
-        ],
-        dtype=np.float64,
-    )
-
-
-def _rotation_y_matrix3(degrees: float) -> np.ndarray:
-    radians = math.radians(degrees)
-    cos_value = math.cos(radians)
-    sin_value = math.sin(radians)
-    return np.array(
-        [
-            [cos_value, 0.0, sin_value],
-            [0.0, 1.0, 0.0],
-            [-sin_value, 0.0, cos_value],
-        ],
-        dtype=np.float64,
-    )
 
 
 def _ensure_file(path: Path, *, label: str) -> None:
@@ -746,7 +509,8 @@ def _build_object_manifest(
             skipped_no_glb.append(oid)
             continue
 
-        description = str(obj.get("description") or obj.get("name") or "").strip()
+        name = str(obj.get("name") or "").strip()
+        description = str(obj.get("description") or name).strip()
         source = table_fit_item.get("path") or ""
         table_fit_path = _resolve_existing_table_fit_path(
             source,
@@ -761,6 +525,7 @@ def _build_object_manifest(
 
         consolidated[oid] = {
             "id": oid,
+            "name": name,
             "description": description,
             "table_fit_path": table_fit_path,
             "world_aabb_bottom_center": wbc,
@@ -785,11 +550,14 @@ def export_gym_config(
     output_root: Path,
     *,
     export_dir: Path | None = None,
+    z_axis_align_assets: bool = True,
 ) -> Path:
     """Export the unified-scene-gen result as a gym_config.json bundle.
 
     Uses table-fit GLBs baked so their sim-space AABB bottom-centre sits at
-    the local origin. Object pose is then restored with ``init_pos`` only.
+    the local origin. When ``z_axis_align_assets`` is enabled, hardcoded
+    elongated object classes are exported upright and restored with
+    ``init_pos`` plus ``init_rot``.
     """
     output_root = output_root.expanduser().resolve()
     if export_dir is None:
@@ -853,22 +621,37 @@ def export_gym_config(
         obj_dir = mesh_assets_dir / safe_name / oid
         obj_dir.mkdir(parents=True, exist_ok=True)
         object_dst = obj_dir / f"{oid}.glb"
-        frame_standardization = _upright_frame_standardization_for_object(
-            object_id=oid,
-            description=om["description"],
-            mesh_path=om["table_fit_path"],
+        alignment_keyword = (
+            match_asset_orientation_keyword(
+                object_id=oid,
+                name=" ".join([safe_name, str(om.get("name", ""))]),
+                description=om["description"],
+            )
+            if z_axis_align_assets
+            else None
         )
-        frame_standardization_report = _bake_glb_bottom_center_to_origin(
-            om["table_fit_path"],
-            object_dst,
-            upright_frame_standardization=frame_standardization,
-        )
-        wbc = om["world_aabb_bottom_center"]
-        if wbc is not None:
-            init_pos = [float(wbc[0]), float(wbc[1]), float(wbc[2])]
+        footprint_rotation: list[list[float]] | None = None
+        if alignment_keyword is not None:
+            alignment_result = export_z_axis_normalized_asset(
+                om["table_fit_path"],
+                object_dst,
+                glb_to_sim_rotation=_glb_to_sim_rotation(),
+            )
+            init_pos = alignment_result.init_pos
+            init_rot = alignment_result.init_rot
+            footprint_rotation = alignment_result.rotation_matrix
+            pose_source = f"z_axis_align:{alignment_keyword}"
         else:
-            raise ValueError(f"Missing table-fit world_aabb_bottom_center for {oid}")
-        init_rot = [0.0, 0.0, 0.0]
+            _bake_glb_bottom_center_to_origin(om["table_fit_path"], object_dst)
+            wbc = om["world_aabb_bottom_center"]
+            if wbc is not None:
+                init_pos = [float(wbc[0]), float(wbc[1]), float(wbc[2])]
+            else:
+                raise ValueError(
+                    f"Missing table-fit world_aabb_bottom_center for {oid}"
+                )
+            init_rot = [0.0, 0.0, 0.0]
+            pose_source = "wbc"
         body_scale = [1.0, 1.0, 1.0]
 
         rigid_objects.append(
@@ -886,39 +669,29 @@ def export_gym_config(
                 "init_rot": init_rot,
                 "body_scale": body_scale,
                 "max_convex_hull_num": _DEFAULT_OBJECT_MAX_CONVEX_HULL_NUM,
-                "convex_decomposition_method": _DEFAULT_CONVEX_DECOMPOSITION_METHOD,
             }
         )
         footprint_2d = _sim_world_xy_aabb(
             object_dst,
-            None,
+            footprint_rotation,
             1.0,
             init_pos,
         )
-        object_state = {
-            "id": oid,
-            "name": safe_name,
-            "role": "interact",
-            "description": om["description"],
-            "init_pos": init_pos,
-            "init_rot": init_rot,
-            "body_scale": body_scale,
-            "footprint_2d": footprint_2d,
-        }
-        if frame_standardization_report is not None:
-            object_state["mesh_frame_standardization"] = frame_standardization_report
-        object_states.append(object_state)
-        wbc_flag = "wbc" if wbc is not None else "missing_wbc"
-        frame_flag = (
-            f"  frame={frame_standardization_report['profile']}"
-            if frame_standardization_report is not None
-            and frame_standardization_report.get("status") == "applied"
-            else ""
+        object_states.append(
+            {
+                "id": oid,
+                "name": safe_name,
+                "role": "interact",
+                "description": om["description"],
+                "init_pos": init_pos,
+                "init_rot": init_rot,
+                "body_scale": body_scale,
+                "footprint_2d": footprint_2d,
+            }
         )
         print(
             f"  [{idx+1}/{total}] [{oid}] {om['description']}"
-            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}"
-            f"  src={wbc_flag}{frame_flag}"
+            f"  pos={init_pos}  rot={init_rot}  scale={body_scale}  src={pose_source}"
         )
 
     config = {

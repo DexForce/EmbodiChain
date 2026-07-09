@@ -19,6 +19,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.cli.agent_run_stage import (
     run_agent_command,
 )
@@ -119,17 +122,22 @@ def _run_pipeline(
         source_scene_body_scale_mode = (
             target_body_scale_mode
             if target_body_scale_mode is not None
-            else ("preserve" if target_body_scale is None else "multiply")
+            else "multiply"
         )
         effective_target_body_scale = (
-            1.0 if target_body_scale is None else target_body_scale
+            DEFAULT_TARGET_BODY_SCALE
+            if target_body_scale is None
+            else target_body_scale
         )
         args.target_body_scale_mode = source_scene_body_scale_mode
     else:
         source_scene_body_scale_mode = None
         effective_target_body_scale = (
-            0.8 if target_body_scale is None else target_body_scale
+            DEFAULT_TARGET_BODY_SCALE
+            if target_body_scale is None
+            else target_body_scale
         )
+    args.target_body_scale = effective_target_body_scale
 
     with timing_scope(
         "pipeline.generate_action_agent_config",

@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Any
 import math
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,
     raise_if_generated_files_exist as _raise_if_generated_files_exist,
@@ -192,7 +195,9 @@ def generate_action_agent_config_from_project(
     use_llm_roles: bool = False,
     llm_model: str | None = None,
     robot_profile: str | RobotProfile | None = DEFAULT_ROBOT_PROFILE_ID,
-    target_body_scale: float | list[float] | tuple[float, float, float] = 0.7,
+    target_body_scale: float | list[float] | tuple[float, float, float] = (
+        DEFAULT_TARGET_BODY_SCALE
+    ),
     preserve_source_target_body_scale: bool = False,
     source_target_body_scale_multiplier: float | None = None,
     source_scene_body_scale_mode: str | None = None,
@@ -682,9 +687,17 @@ def _build_basket_bundle(
             ],
         ],
     }
+    source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
+        runtime_uids, by_uid=by_uid
+    )
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        source_objects_by_runtime_uid,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_preserve_source_scene_vertical_contacts(
         gym_config,
-        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        source_objects_by_runtime_uid,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         robot_profile=robot_profile,
@@ -820,9 +833,17 @@ def _build_arrangement_line_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
+    source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
+        runtime_uids, by_uid=by_uid
+    )
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        source_objects_by_runtime_uid,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_preserve_source_scene_vertical_contacts(
         gym_config,
-        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        source_objects_by_runtime_uid,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         robot_profile=robot_profile,
@@ -993,9 +1014,17 @@ def _build_stacking_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
+    source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
+        runtime_uids, by_uid=by_uid
+    )
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        source_objects_by_runtime_uid,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_preserve_source_scene_vertical_contacts(
         gym_config,
-        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        source_objects_by_runtime_uid,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         robot_profile=robot_profile,
@@ -1243,6 +1272,69 @@ def _source_objects_by_runtime_uid(
         for source_uid, runtime_uid in runtime_uids_by_source_uid.items()
         if source_uid in by_uid
     }
+
+
+def _maybe_apply_source_scene_xy_scale(
+    gym_config: dict[str, Any],
+    source_objects_by_runtime_uid: Mapping[str, _SceneObject],
+    *,
+    source_scene_body_scale_mode: str | None,
+) -> None:
+    if source_scene_body_scale_mode in {None, "preserve"}:
+        return
+
+    anchor_xy = _scene_xy_scale_anchor(gym_config)
+    for obj_config in _iter_scene_pose_configs(gym_config):
+        runtime_uid = str(obj_config.get("uid", ""))
+        source_obj = source_objects_by_runtime_uid.get(runtime_uid)
+        if source_obj is None:
+            continue
+        _scale_scene_init_pos_xy_about_anchor(obj_config, source_obj, anchor_xy)
+
+
+def _scene_xy_scale_anchor(gym_config: Mapping[str, Any]) -> list[float]:
+    table_config = next(
+        (
+            obj_config
+            for obj_config in _iter_scene_pose_configs(gym_config)
+            if obj_config.get("uid") == "table"
+        ),
+        None,
+    )
+    if table_config is None:
+        return [0.0, 0.0]
+    init_pos = _clean_vector3(table_config.get("init_pos", [0.0, 0.0, 0.0]))
+    return [init_pos[0], init_pos[1]]
+
+
+def _scale_scene_init_pos_xy_about_anchor(
+    obj_config: dict[str, Any],
+    source_obj: _SceneObject,
+    anchor_xy: Sequence[float],
+) -> None:
+    source_scale = _source_body_scale(source_obj)
+    current_scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    ratio_x = _scale_ratio(current_scale[0], source_scale[0])
+    ratio_y = _scale_ratio(current_scale[1], source_scale[1])
+    if math.isclose(ratio_x, 1.0, rel_tol=0.0, abs_tol=1e-12) and math.isclose(
+        ratio_y, 1.0, rel_tol=0.0, abs_tol=1e-12
+    ):
+        return
+
+    init_pos = _clean_vector3(obj_config.get("init_pos", [0.0, 0.0, 0.0]))
+    new_x = float(anchor_xy[0]) + (init_pos[0] - anchor_xy[0]) * ratio_x
+    new_y = float(anchor_xy[1]) + (init_pos[1] - anchor_xy[1]) * ratio_y
+    obj_config["init_pos"] = [
+        _round_pose_value(new_x),
+        _round_pose_value(new_y),
+        _round_pose_value(init_pos[2]),
+    ]
+
+
+def _scale_ratio(current: float, source: float) -> float:
+    if math.isclose(float(source), 0.0, rel_tol=0.0, abs_tol=1e-12):
+        return 1.0
+    return float(current) / float(source)
 
 
 def _maybe_preserve_source_scene_vertical_contacts(
@@ -1621,9 +1713,17 @@ def _build_relative_placement_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
+    source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
+        runtime_uids, by_uid=by_uid
+    )
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        source_objects_by_runtime_uid,
+        source_scene_body_scale_mode=source_scene_body_scale_mode,
+    )
     _maybe_preserve_source_scene_vertical_contacts(
         gym_config,
-        _source_objects_by_runtime_uid(runtime_uids, by_uid=by_uid),
+        source_objects_by_runtime_uid,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         robot_profile=robot_profile,
