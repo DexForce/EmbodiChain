@@ -239,6 +239,103 @@ def test_action_agent_config_generation_imports() -> None:
     )
 
 
+def test_source_scene_xy_positions_track_body_scale_multiplier() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+        _maybe_apply_source_scene_xy_scale,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+        _SceneObject,
+    )
+
+    table_anchor = [0.1, -0.2, 0.5]
+    gym_config = {
+        "background": [
+            {
+                "uid": "table",
+                "init_pos": list(table_anchor),
+                "body_scale": [1.3, 1.3, 1.3],
+            }
+        ],
+        "rigid_object": [
+            {
+                "uid": "cup",
+                "init_pos": [0.4, 0.0, 0.9],
+                "body_scale": [1.3, 1.3, 1.3],
+            },
+            {
+                "uid": "wide",
+                "init_pos": [-0.2, 0.2, 0.8],
+                "body_scale": [2.0, 0.5, 1.0],
+            },
+        ],
+    }
+    source_objects_by_runtime_uid = {
+        "table": _SceneObject(
+            source_uid="table_0",
+            source_role="background",
+            config={"body_scale": [1.0, 1.0, 1.0]},
+        ),
+        "cup": _SceneObject(
+            source_uid="cup_0",
+            source_role="rigid_object",
+            config={"body_scale": [1.0, 1.0, 1.0]},
+        ),
+        "wide": _SceneObject(
+            source_uid="wide_0",
+            source_role="rigid_object",
+            config={"body_scale": [1.0, 1.0, 1.0]},
+        ),
+    }
+
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        source_objects_by_runtime_uid,
+        source_scene_body_scale_mode="multiply",
+    )
+
+    assert gym_config["background"][0]["init_pos"] == pytest.approx(table_anchor)
+    assert gym_config["rigid_object"][0]["init_pos"] == pytest.approx(
+        [0.49, 0.06, 0.9]
+    )
+    assert gym_config["rigid_object"][1]["init_pos"] == pytest.approx(
+        [-0.5, 0.0, 0.8]
+    )
+
+
+def test_source_scene_xy_positions_preserve_mode_stays_unchanged() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+        _maybe_apply_source_scene_xy_scale,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+        _SceneObject,
+    )
+
+    original_position = [0.4, 0.0, 0.9]
+    gym_config = {
+        "rigid_object": [
+            {
+                "uid": "cup",
+                "init_pos": list(original_position),
+                "body_scale": [1.3, 1.3, 1.3],
+            }
+        ]
+    }
+
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        {
+            "cup": _SceneObject(
+                source_uid="cup_0",
+                source_role="rigid_object",
+                config={"body_scale": [1.0, 1.0, 1.0]},
+            )
+        },
+        source_scene_body_scale_mode="preserve",
+    )
+
+    assert gym_config["rigid_object"][0]["init_pos"] == original_position
+
+
 def test_prompt2scene_prompt_is_independent_from_task_description() -> None:
     from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
 
