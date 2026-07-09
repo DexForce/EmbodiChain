@@ -18,7 +18,7 @@ import torch
 import dexsim
 import numpy as np
 
-from dataclasses import dataclass
+from dataclasses import dataclass, MISSING
 from typing import List, Sequence, Union
 from functools import cached_property
 
@@ -26,6 +26,7 @@ from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
 from dexsim.engine import CudaArray, PhysicsScene
 from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
+from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
     VisualMaterial,
     VisualMaterialInst,
@@ -301,9 +302,15 @@ class RigidObject(BatchEntity):
 
     def __str__(self) -> str:
         parent_str = super().__str__()
+        max_hull = self.cfg.max_convex_hull_num
+        if max_hull is MISSING:
+            if isinstance(self.cfg.shape, MeshCfg):
+                max_hull = self.cfg.shape.max_convex_hull_num
+            else:
+                max_hull = 1
         return (
             parent_str
-            + f" | body type: {self.body_type} | max_convex_hull_num: {self.cfg.max_convex_hull_num}"
+            + f" | body type: {self.body_type} | max_convex_hull_num: {max_hull}"
         )
 
     @cached_property

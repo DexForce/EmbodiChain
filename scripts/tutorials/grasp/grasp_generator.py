@@ -157,6 +157,7 @@ def create_mug(sim: SimulationManager):
             static_friction=0.99,
         ),
         max_convex_hull_num=16,
+        acd_method="vhacd",
         init_pos=[0.55, 0.0, 0.01],
         init_rot=[0.0, 0.0, -90],
         body_scale=(4, 4, 4),
