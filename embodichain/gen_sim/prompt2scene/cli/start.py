@@ -102,15 +102,18 @@ def main() -> None:
         action="store_true",
         default=True,
         help=(
-            "Export bottle/can mesh assets upright along local Z and restore "
-            "their original scene pose with init_rot."
+            "Export bottle/can/cup-like mesh assets upright along local Z and "
+            "restore their original scene pose with init_rot."
         ),
     )
     parser.add_argument(
         "--no_z_axis_align_assets",
         action="store_false",
         dest="z_axis_align_assets",
-        help="Disable upright local-Z export normalization for bottle/can assets.",
+        help=(
+            "Disable upright local-Z export normalization for bottle/can/cup-like "
+            "assets."
+        ),
     )
 
     args = parser.parse_args()
