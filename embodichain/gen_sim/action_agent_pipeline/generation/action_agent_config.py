@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from typing import Any
 import math
@@ -1156,7 +1156,11 @@ def _apply_convex_decomposition_method(
     for obj in _iter_generated_mesh_objects(gym_config):
         max_convex_hull_num = int(obj.get("max_convex_hull_num", 1))
         if max_convex_hull_num > 1:
+            obj["acd_method"] = method
             obj["convex_decomposition_method"] = method
+            shape = obj.get("shape")
+            if isinstance(shape, MutableMapping):
+                shape["acd_method"] = method
 
 
 def _iter_generated_mesh_objects(

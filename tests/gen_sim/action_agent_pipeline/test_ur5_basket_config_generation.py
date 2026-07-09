@@ -136,7 +136,7 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
 
     first_robot["control_parts"]["left_arm"].append("MUTATED_JOINT")
     first_sensors[0]["uid"] = "mutated_camera"
-    first_lights["direct"][0]["uid"] = "mutated_light"
+    first_lights["direct"].append({"uid": "mutated_light"})
 
     assert second_robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.84])
     assert first_robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.42])
@@ -144,28 +144,21 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
         f"left_joint{i}" for i in range(1, 7)
     ]
     assert second_sensors[0]["uid"] == "cam_high"
-    assert second_lights["direct"][0]["uid"] == "main_light"
-    assert len(second_lights["direct"]) == 1
+    assert second_lights["direct"] == []
 
 
-def test_record_camera_events_generate_robot_and_audience_view_names() -> None:
+def test_record_camera_events_generate_audience_view_name() -> None:
     events = _record_camera_event_configs(make_sensor_config, task_name="Demo111")
 
-    assert set(events) == {"record_camera", "record_camera_audience"}
+    assert set(events) == {"record_camera"}
 
-    robot_params = events["record_camera"]["params"]
-    audience_params = events["record_camera_audience"]["params"]
+    params = events["record_camera"]["params"]
 
-    assert robot_params["name"] == "record_cam_robot_view"
-    assert audience_params["name"] == "record_cam_audience_view"
-    assert robot_params["video_name"] == "Demo111_robot_view"
-    assert audience_params["video_name"] == "Demo111_audience_view"
-    assert robot_params["resolution"] == audience_params["resolution"]
-    assert robot_params["intrinsics"] == audience_params["intrinsics"]
-    assert robot_params["eye"] == pytest.approx([-0.6, 0.0, 1.8])
-    assert audience_params["eye"] == pytest.approx([0.6, 0.0, 1.8])
-    assert audience_params["target"] == pytest.approx([0.0, 0.0, 0.75])
-    assert audience_params["up"] == pytest.approx([-1.0, 0.0, 0.0])
+    assert params["name"] == "record_cam_audience_view"
+    assert params["video_name"] == "Demo111_audience_view"
+    assert params["eye"] == pytest.approx([0.6, 0.0, 1.8])
+    assert params["target"] == pytest.approx([0.0, 0.0, 0.75])
+    assert params["up"] == pytest.approx([-1.0, 0.0, 0.0])
 
 
 def test_camera_rotation_preserves_target_and_height() -> None:
@@ -363,12 +356,10 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert registered_uids == {"left_apple", "right_apple", "wicker_basket"}
     record_events = gym_config["env"]["events"]
     assert (
-        record_events["record_camera"]["params"]["video_name"] == "Demo111_robot_view"
-    )
-    assert (
-        record_events["record_camera_audience"]["params"]["video_name"]
+        record_events["record_camera"]["params"]["video_name"]
         == "Demo111_audience_view"
     )
+    assert "record_camera_audience" not in record_events
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))

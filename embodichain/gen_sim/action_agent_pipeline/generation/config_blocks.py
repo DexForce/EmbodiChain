@@ -259,15 +259,10 @@ def _record_camera_event_configs(
     )
     return {
         "record_camera": _record_camera_event_config(
-            camera,
-            name="record_cam_robot_view",
-            video_name=_recording_video_name(task_name, _ROBOT_VIEW_LABEL),
-        ),
-        "record_camera_audience": _record_camera_event_config(
             audience_camera,
             name="record_cam_audience_view",
             video_name=_recording_video_name(task_name, _AUDIENCE_VIEW_LABEL),
-        ),
+        )
     }
 
 
