@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -31,10 +32,14 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
     generate_text_object_assets,
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    export_z_axis_normalized_asset,
+    match_asset_orientation_keyword,
+)
 from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
     _bake_glb_bottom_center_to_origin,
+    _glb_to_sim_rotation,
     _render_scene_state_topdown,
-    _upright_frame_standardization_for_object,
 )
 from embodichain.gen_sim.prompt2scene.workflows.paths import PipelinePaths
 from embodichain.gen_sim.prompt2scene.agent_tools.tools.spatial_relations import (
@@ -75,23 +80,36 @@ def load_json_object(path: Path) -> dict[str, Any]:
     return data
 
 
-def extract_scene_objects(scene_state: dict[str, Any]) -> list[dict[str, str]]:
-    """Return the minimal object view used by the edit-intent LLM."""
-    objects: list[dict[str, str]] = []
+def extract_scene_objects(scene_state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the object view used by the edit-intent LLM."""
+    objects: list[dict[str, Any]] = []
     for obj in scene_state.get("objects", []) or []:
         if not isinstance(obj, dict):
             continue
         object_id = str(obj.get("id", "")).strip()
         if not object_id:
             continue
-        objects.append(
-            {
-                "id": object_id,
-                "name": str(obj.get("name", "")).strip(),
-                "description": str(obj.get("description", "")).strip(),
-            }
-        )
+        scene_object = {
+            "id": object_id,
+            "name": str(obj.get("name", "")).strip(),
+            "description": str(obj.get("description", "")).strip(),
+        }
+        footprint = obj.get("footprint_2d")
+        if isinstance(footprint, dict):
+            center_xy = _coerce_xy_list(footprint.get("center_xy"))
+            if center_xy is not None:
+                scene_object["center_xy"] = center_xy
+        objects.append(scene_object)
     return objects
+
+
+def _coerce_xy_list(value: Any) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    try:
+        return [float(value[0]), float(value[1])]
+    except (TypeError, ValueError):
+        return None
 
 
 def extract_scene_object_footprints(
@@ -246,7 +264,7 @@ def extract_current_grids(
 def resolve_scene_edit_intent(
     *,
     intent: dict[str, Any],
-    scene_objects: list[dict[str, str]],
+    scene_objects: list[dict[str, Any]],
     current_relations: list[dict[str, str]],
     current_grids: dict[str, str],
 ) -> dict[str, Any]:
@@ -270,6 +288,12 @@ def resolve_scene_edit_intent(
         if str(obj.get("temp_id", "")).strip()
     }
     deleted_ids = _string_set(intent.get("deleted_object_ids"), "deleted_object_ids")
+    moved_ids = {
+        str(operation.get("target_object_id", "")).strip()
+        for operation in operations
+        if str(operation.get("type", "")).strip() == "move"
+        and str(operation.get("target_object_id", "")).strip()
+    }
 
     replacement_map: dict[str, str] = {}
     replacement_inherits: set[str] = set()
@@ -295,6 +319,8 @@ def resolve_scene_edit_intent(
         subject = str(relation.get("subject", "")).strip()
         object_id = str(relation.get("object", "")).strip()
         relation_name = str(relation.get("relation", "")).strip()
+        if subject in moved_ids or object_id in moved_ids:
+            continue
         mapped_subject = _map_relation_endpoint(
             object_id=subject,
             deleted_ids=deleted_ids,
@@ -331,14 +357,21 @@ def resolve_scene_edit_intent(
             if replacement_id and object_id in replacement_inherits:
                 updated_grids[replacement_id] = grid
             continue
+        if object_id in moved_ids:
+            continue
         updated_grids[object_id] = grid
 
     for operation in operations:
         op_type = str(operation.get("type", "")).strip()
-        if op_type not in {"add", "replace"}:
-            continue
+        target_id = str(operation.get("target_object_id", "")).strip()
         new_id = str(operation.get("new_object_temp_id", "")).strip()
-        if new_id not in generated_ids:
+        if op_type in {"add", "replace"}:
+            layout_object_id = new_id if new_id in generated_ids else ""
+        elif op_type == "move":
+            layout_object_id = target_id if target_id in moved_ids else ""
+        else:
+            layout_object_id = ""
+        if not layout_object_id:
             continue
         placement = operation.get("placement")
         if not isinstance(placement, dict):
@@ -347,7 +380,7 @@ def resolve_scene_edit_intent(
         if placement_type == "grid":
             grid = str(placement.get("grid", "")).strip()
             if grid:
-                updated_grids[new_id] = grid
+                updated_grids[layout_object_id] = grid
         elif placement_type == "relative_to_object":
             reference_id = _map_reference_endpoint(
                 object_id=str(placement.get("reference_object_id", "")).strip(),
@@ -355,15 +388,23 @@ def resolve_scene_edit_intent(
                 replacement_map=replacement_map,
             )
             relation = _placement_relation_to_canonical(
-                new_object_id=new_id,
+                new_object_id=layout_object_id,
                 relation=str(placement.get("relation", "")).strip(),
                 reference_object_id=reference_id or "",
             )
             if relation is not None:
-                direct_relations.append({**relation, "source": "new_prompt"})
+                direct_relations.append(
+                    {
+                        **relation,
+                        "source": (
+                            "moved_prompt" if op_type == "move" else "new_prompt"
+                        ),
+                    }
+                )
 
     return {
         "deleted_object_ids": sorted(deleted_ids),
+        "moved_object_ids": sorted(moved_ids),
         "generated_objects": generated_objects,
         "operations": operations,
         "updated_relations": _close_relations_with_sources(direct_relations),
@@ -505,20 +546,22 @@ def build_scene_edit_layout(
     }
 
     replacement_target_by_new_id: dict[str, str] = {}
-    placement_by_new_id: dict[str, dict[str, Any]] = {}
+    placement_by_object_id: dict[str, dict[str, Any]] = {}
     added_ids: list[str] = []
     replaced_ids: list[str] = []
+    moved_ids: list[str] = []
     explicit_reposition_replace_ids: set[str] = set()
     for operation in operations:
         op_type = str(operation.get("type", "")).strip()
         new_id = str(operation.get("new_object_temp_id", "")).strip()
-        if not new_id:
-            continue
+        target_id = str(operation.get("target_object_id", "")).strip()
         placement = operation.get("placement")
-        if isinstance(placement, dict):
-            placement_by_new_id[new_id] = placement
+        layout_object_id = new_id if op_type in {"add", "replace"} else target_id
+        if isinstance(placement, dict) and layout_object_id:
+            placement_by_object_id[layout_object_id] = placement
         if op_type == "replace":
-            target_id = str(operation.get("target_object_id", "")).strip()
+            if not new_id:
+                continue
             if target_id:
                 replacement_target_by_new_id[new_id] = target_id
                 replaced_ids.append(new_id)
@@ -530,7 +573,12 @@ def build_scene_edit_layout(
                 if placement_type not in {"", "preserve_target"}:
                     explicit_reposition_replace_ids.add(new_id)
         elif op_type == "add":
+            if not new_id:
+                continue
             added_ids.append(new_id)
+        elif op_type == "move":
+            if target_id:
+                moved_ids.append(target_id)
 
     final_items: dict[str, dict[str, Any]] = {}
     for object_id, obj in old_objects_by_id.items():
@@ -550,20 +598,23 @@ def build_scene_edit_layout(
             "source": "previous_scene",
         }
 
+    moved_ids = sorted(set(moved_ids) & set(final_items))
     generated_ids = sorted(generated_asset_by_id)
-    if not generated_ids:
+    if not generated_ids and not moved_ids:
         return {
             "status": "ok",
             "support_region": support_region,
             "deleted_object_ids": sorted(deleted_ids),
+            "moved_object_ids": [],
             "layout_updates": sorted(final_items.values(), key=lambda item: item["id"]),
             "optimization": {
                 "method": "reuse_previous_scene",
                 "generated_object_count": 0,
+                "moved_object_count": 0,
             },
         }
 
-    xy_sizes = {
+    xy_sizes: dict[str, np.ndarray] = {
         object_id: np.asarray(
             LayoutManager.compute_simready_glb_xy_size(
                 glb_path=_resolve_generated_asset_path(
@@ -576,6 +627,11 @@ def build_scene_edit_layout(
         )
         for object_id in generated_ids
     }
+    for object_id in moved_ids:
+        xy_sizes[object_id] = np.asarray(
+            final_items[object_id]["size_xy"],
+            dtype=np.float64,
+        )
     fixed_ids = set(replaced_ids)
 
     for object_id in replaced_ids:
@@ -612,7 +668,7 @@ def build_scene_edit_layout(
         added_ids=[
             object_id for object_id in added_ids if object_id in generated_asset_by_id
         ],
-        placement_by_new_id=placement_by_new_id,
+        placement_by_object_id=placement_by_object_id,
         updated_grids=updated_grids,
         updated_relations=updated_relations,
         stable_items=final_items,
@@ -644,6 +700,33 @@ def build_scene_edit_layout(
             or asset.get("mesh_path"),
         }
 
+    initialized_moved_centers = _initialize_added_object_centers(
+        added_ids=moved_ids,
+        placement_by_object_id=placement_by_object_id,
+        updated_grids=updated_grids,
+        updated_relations=updated_relations,
+        stable_items={
+            object_id: item
+            for object_id, item in final_items.items()
+            if object_id not in moved_ids
+        },
+        support_region=support_region,
+        xy_sizes=xy_sizes,
+    )
+    for object_id, center in initialized_moved_centers.items():
+        item = final_items.get(object_id)
+        if item is None:
+            continue
+        center_xy = center.tolist()
+        size_xy = item["size_xy"]
+        item["action"] = "move"
+        item["center_xy"] = center_xy
+        item["footprint_2d"] = LayoutManager.build_xy_footprint(
+            center_xy=center_xy,
+            size_xy=size_xy,
+        )
+        item["source"] = "previous_scene_repositioned"
+
     initial_centers_all = {
         object_id: np.asarray(item["center_xy"], dtype=np.float64)
         for object_id, item in final_items.items()
@@ -656,7 +739,9 @@ def build_scene_edit_layout(
     if all_object_ids:
         fixed_object_ids: list[str] = []
         if optimize_new_objects_only:
-            movable_ids = set(added_ids) | explicit_reposition_replace_ids
+            movable_ids = (
+                set(added_ids) | set(moved_ids) | explicit_reposition_replace_ids
+            )
             fixed_object_ids = [
                 object_id
                 for object_id in all_object_ids
@@ -710,6 +795,7 @@ def build_scene_edit_layout(
         "status": "ok",
         "support_region": support_region,
         "deleted_object_ids": sorted(deleted_ids),
+        "moved_object_ids": moved_ids,
         "layout_updates": sorted(final_items.values(), key=lambda item: item["id"]),
         "optimization": {
             "method": "delete_then_replace_then_add_initialize_then_optimize",
@@ -718,6 +804,8 @@ def build_scene_edit_layout(
             "replaced_object_count": len(replaced_ids),
             "added_object_count": len(initialized_added_centers),
             "initialized_added_object_count": len(initialized_added_centers),
+            "moved_object_count": len(moved_ids),
+            "initialized_moved_object_count": len(initialized_moved_centers),
             "optimized_object_count": len(all_object_ids),
             "optimize_new_objects_only": optimize_new_objects_only,
             "added_layout_optimization": optimization_metadata,
@@ -732,6 +820,7 @@ def export_scene_edit_gym_state(
     generated_assets: list[dict[str, Any]],
     layout_updates: list[dict[str, Any]],
     output_dir: Path,
+    z_axis_align_assets: bool = True,
 ) -> dict[str, Any]:
     """Update gym_export files from scene-edit layout results."""
     paths = PipelinePaths(output_root)
@@ -796,10 +885,10 @@ def export_scene_edit_gym_state(
             continue
         old_rigid = rigid_by_id.get(object_id)
         old_scene_obj = scene_by_id.get(object_id)
-        if action == "keep" and old_rigid is None:
+        if action in {"keep", "move"} and old_rigid is None:
             continue
 
-        if action == "keep":
+        if action in {"keep", "move"}:
             updated_rigid = _update_existing_rigid_object(
                 object_id=object_id,
                 rigid_object=old_rigid,
@@ -819,6 +908,7 @@ def export_scene_edit_gym_state(
                 output_root=output_root,
                 mesh_assets_dir=mesh_assets_dir,
                 table_height=table_surface_height + 0.01,
+                z_axis_align_assets=z_axis_align_assets,
             )
             shape = updated_rigid.get("shape")
             if isinstance(shape, dict):
@@ -881,7 +971,7 @@ def export_scene_edit_gym_state(
 def validate_scene_edit_intent(
     *,
     intent: dict[str, Any],
-    scene_objects: list[dict[str, str]],
+    scene_objects: list[dict[str, Any]],
 ) -> None:
     """Validate that an edit intent only references legal object ids."""
     existing_ids = {obj["id"] for obj in scene_objects if obj.get("id")}
@@ -921,11 +1011,22 @@ def validate_scene_edit_intent(
         op_type = str(operation.get("type", "")).strip()
         target_id = str(operation.get("target_object_id", "")).strip()
         new_temp_id = str(operation.get("new_object_temp_id", "")).strip()
-        if op_type in {"delete", "replace"} and target_id not in existing_ids:
+        if op_type in {"delete", "replace", "move"} and target_id not in existing_ids:
             raise ValueError(
                 f"Scene edit {op_type} operation targets unknown object id: "
                 f"{target_id}"
             )
+        if op_type == "move":
+            if target_id in deleted_ids:
+                raise ValueError(
+                    "Scene edit move target must not be in deleted_object_ids: "
+                    f"{target_id}"
+                )
+            if new_temp_id:
+                raise ValueError(
+                    "Scene edit move operation must not reference a generated "
+                    f"temp_id: {new_temp_id}"
+                )
         if op_type == "delete" and target_id not in deleted_ids:
             raise ValueError(
                 f"Scene edit delete target is missing from deleted_object_ids: "
@@ -1033,7 +1134,7 @@ def _normalize_generated_objects(
 def _normalize_scene_edit_intent_ids(
     *,
     intent: dict[str, Any],
-    scene_objects: list[dict[str, str]],
+    scene_objects: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Make generated temp ids internally consistent and unique for this scene."""
     normalized = json.loads(json.dumps(intent))
@@ -1086,12 +1187,11 @@ def _normalize_scene_edit_intent_ids(
         old_id = str(generated.get("temp_id", "")).strip()
         if not old_id:
             continue
-        new_id = old_id
-        if new_id in reserved or new_id in seen_generated:
-            new_id = _unique_scene_edit_generated_id(
-                base_id=old_id,
-                reserved_ids=reserved | seen_generated,
-            )
+        new_id = _unique_scene_edit_generated_id(
+            base_id=_scene_edit_generated_id_base(generated),
+            reserved_ids=reserved | seen_generated,
+        )
+        if new_id != old_id:
             generated["temp_id"] = new_id
         seen_generated.add(new_id)
         reserved.add(new_id)
@@ -1112,13 +1212,25 @@ def _unique_scene_edit_generated_id(
     base_id: str,
     reserved_ids: set[str],
 ) -> str:
-    base = re.sub(r"_\d+$", "", base_id.strip()) or "new_object"
+    base = re.sub(r"_\d+$", "", base_id.strip()) or "interact_object"
+    if not base.startswith("interact_"):
+        base = f"interact_{base}"
     index = 0
     while True:
         candidate = f"{base}_{index}"
         if candidate not in reserved_ids:
             return candidate
         index += 1
+
+
+def _scene_edit_generated_id_base(generated: dict[str, Any]) -> str:
+    name = str(generated.get("name", "")).strip()
+    fallback_id = str(generated.get("temp_id", "")).strip()
+    raw_base = name or fallback_id or "object"
+    raw_base = re.sub(r"^(?:new|interact)_", "", raw_base)
+    raw_base = re.sub(r"_\d+$", "", raw_base)
+    base = re.sub(r"[^a-zA-Z0-9]+", "_", raw_base.lower()).strip("_")
+    return f"interact_{base or 'object'}"
 
 
 def _map_reference_endpoint(
@@ -1229,7 +1341,6 @@ def _infer_scene_edit_table_surface_height(
 ) -> float:
     try:
         import trimesh
-        import trimesh.transformations as tt
     except ImportError:
         return 0.0
 
@@ -1279,13 +1390,10 @@ def _infer_scene_edit_table_surface_height(
 
     init_rot = np.asarray(table.get("init_rot") or [0.0, 0.0, 0.0], dtype=np.float64)
     if init_rot.shape == (3,) and np.any(np.abs(init_rot) > 1.0e-8):
-        rot = tt.euler_matrix(
-            float(np.deg2rad(init_rot[0])),
-            float(np.deg2rad(init_rot[1])),
-            float(np.deg2rad(init_rot[2])),
-            axes="sxyz",
-        )
-        verts = (rot[:3, :3] @ verts.T).T
+        from scipy.spatial.transform import Rotation as R
+
+        rot = R.from_euler("XYZ", np.deg2rad(init_rot)).as_matrix()
+        verts = (rot @ verts.T).T
 
     init_pos = np.asarray(table.get("init_pos") or [0.0, 0.0, 0.0], dtype=np.float64)
     if init_pos.shape != (3,) or not np.all(np.isfinite(init_pos)):
@@ -1327,6 +1435,7 @@ def _build_generated_rigid_object(
     output_root: Path,
     mesh_assets_dir: Path,
     table_height: float,
+    z_axis_align_assets: bool = True,
 ) -> dict[str, Any]:
     simready_path = _resolve_generated_asset_path(
         generated_asset, output_root=output_root
@@ -1347,29 +1456,67 @@ def _build_generated_rigid_object(
             scale_factor = 1.0
     if not np.isfinite(scale_factor) or scale_factor <= 0.0:
         scale_factor = 1.0
-    frame_standardization = _upright_frame_standardization_for_object(
-        object_id=object_id,
-        description=str(layout_item.get("description", "")).strip(),
-        mesh_path=simready_path,
-    )
-    frame_standardization_report = _bake_glb_bottom_center_to_origin(
-        simready_path,
-        object_dst,
-        scale_factor=scale_factor,
-        upright_frame_standardization=frame_standardization,
-    )
-    if frame_standardization_report is not None:
-        layout_item["mesh_frame_standardization"] = frame_standardization_report
     body_scale = [1.0, 1.0, 1.0]
-    init_rot = [0.0, 0.0, 0.0]
     target_center = np.asarray(layout_item.get("center_xy", []), dtype=np.float64)
     if target_center.shape != (2,):
         raise ValueError(f"Missing center_xy for generated object: {object_id}")
-    init_pos = [
+    target_pos = [
         float(target_center[0]),
         float(target_center[1]),
         float(table_height),
     ]
+    alignment_keyword = (
+        match_asset_orientation_keyword(
+            object_id=object_id,
+            name=" ".join(
+                [
+                    str(layout_item.get("name", "")).strip(),
+                    str(generated_asset.get("name", "")).strip(),
+                ]
+            ),
+            description=" ".join(
+                [
+                    str(layout_item.get("description", "")).strip(),
+                    str(generated_asset.get("description", "")).strip(),
+                ]
+            ),
+        )
+        if z_axis_align_assets
+        else None
+    )
+    if alignment_keyword is not None:
+        local_baked_path = object_dst.with_name(f".{object_dst.stem}_bottom_center.glb")
+        try:
+            _bake_glb_bottom_center_to_origin(
+                simready_path,
+                local_baked_path,
+                scale_factor=scale_factor,
+            )
+            alignment_result = export_z_axis_normalized_asset(
+                local_baked_path,
+                object_dst,
+                glb_to_sim_rotation=_glb_to_sim_rotation(),
+            )
+        finally:
+            local_baked_path.unlink(missing_ok=True)
+        init_pos = [
+            float(alignment_result.init_pos[0]) + target_pos[0],
+            float(alignment_result.init_pos[1]) + target_pos[1],
+            float(alignment_result.init_pos[2]) + target_pos[2],
+        ]
+        init_rot = alignment_result.init_rot
+        log_info(
+            "scene_edit z-axis asset normalization applied "
+            f"id={object_id} keyword={alignment_keyword}"
+        )
+    else:
+        _bake_glb_bottom_center_to_origin(
+            simready_path,
+            object_dst,
+            scale_factor=scale_factor,
+        )
+        init_pos = target_pos
+        init_rot = [0.0, 0.0, 0.0]
     return {
         "uid": object_id,
         "description": str(layout_item.get("description", "")).strip(),
@@ -1415,7 +1562,7 @@ def _build_scene_state_object(
         center_xy=list(layout_item.get("center_xy", [0.0, 0.0])),
         size_xy=list(layout_item.get("size_xy", [0.0, 0.0])),
     )
-    result = {
+    return {
         "id": object_id,
         "name": str(layout_item.get("name", "")).strip() or object_id,
         "role": "interact",
@@ -1425,10 +1572,6 @@ def _build_scene_state_object(
         "body_scale": body_scale,
         "footprint_2d": footprint_2d,
     }
-    frame_standardization_report = layout_item.get("mesh_frame_standardization")
-    if isinstance(frame_standardization_report, dict):
-        result["mesh_frame_standardization"] = frame_standardization_report
-    return result
 
 
 def _scene_edit_center_xy(scene_object: dict[str, Any] | None) -> np.ndarray | None:
@@ -1447,7 +1590,7 @@ def _compute_anchor_targets(
     *,
     generated_ids: list[str],
     replacement_target_by_new_id: dict[str, str],
-    placement_by_new_id: dict[str, dict[str, Any]],
+    placement_by_object_id: dict[str, dict[str, Any]],
     updated_grids: dict[str, str],
     old_footprints: dict[str, dict[str, Any]],
     support_region: dict[str, Any],
@@ -1471,7 +1614,7 @@ def _compute_anchor_targets(
                 progressed = True
                 continue
 
-            placement = placement_by_new_id.get(object_id, {})
+            placement = placement_by_object_id.get(object_id, {})
             placement_type = str(placement.get("type", "")).strip()
             if placement_type == "relative_to_object":
                 reference_id = str(placement.get("reference_object_id", "")).strip()
@@ -1517,7 +1660,7 @@ def _compute_anchor_targets(
 def _initialize_added_object_centers(
     *,
     added_ids: list[str],
-    placement_by_new_id: dict[str, dict[str, Any]],
+    placement_by_object_id: dict[str, dict[str, Any]],
     updated_grids: dict[str, str],
     updated_relations: list[dict[str, Any]],
     stable_items: dict[str, dict[str, Any]],
@@ -1539,9 +1682,14 @@ def _initialize_added_object_centers(
                 grid_name=grid_name,
             )
         else:
-            placement = placement_by_new_id.get(object_id, {})
+            placement = placement_by_object_id.get(object_id, {})
             placement_type = str(placement.get("type", "")).strip()
-            if placement_type == "relative_to_object":
+            if placement_type == "random":
+                seed_center = _deterministic_random_support_center(
+                    object_id=object_id,
+                    support_region=support_region,
+                )
+            elif placement_type == "relative_to_object":
                 reference_id = str(placement.get("reference_object_id", "")).strip()
                 stable_item = stable_items.get(reference_id)
                 if stable_item is not None:
@@ -1560,6 +1708,42 @@ def _initialize_added_object_centers(
             dtype=np.float64,
         )
     return results
+
+
+def _deterministic_random_support_center(
+    *,
+    object_id: str,
+    support_region: dict[str, Any],
+) -> np.ndarray:
+    aabb_xy = support_region.get("aabb_xy")
+    if not (
+        isinstance(aabb_xy, list)
+        and len(aabb_xy) == 2
+        and all(isinstance(item, list) and len(item) == 2 for item in aabb_xy)
+    ):
+        return LayoutManager.support_region_default_center(
+            support_region=support_region
+        )
+    support_min = np.asarray(aabb_xy[0], dtype=np.float64)
+    support_max = np.asarray(aabb_xy[1], dtype=np.float64)
+    if support_min.shape != (2,) or support_max.shape != (2,):
+        return LayoutManager.support_region_default_center(
+            support_region=support_region
+        )
+    if not np.all(np.isfinite(support_min)) or not np.all(np.isfinite(support_max)):
+        return LayoutManager.support_region_default_center(
+            support_region=support_region
+        )
+    span = np.maximum(support_max - support_min, 1.0e-6)
+    digest = hashlib.sha256(object_id.encode("utf-8")).digest()
+    fractions = np.asarray(
+        [
+            int.from_bytes(digest[:8], "big") / float(2**64 - 1),
+            int.from_bytes(digest[8:16], "big") / float(2**64 - 1),
+        ],
+        dtype=np.float64,
+    )
+    return support_min + span * (0.15 + 0.7 * fractions)
 
 
 def _offset_center_by_relation(

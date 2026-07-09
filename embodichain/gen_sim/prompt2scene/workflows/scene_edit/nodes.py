@@ -276,6 +276,7 @@ def optimize_edit_layout_node(
         "existing_scene_state_path": scene_state_value,
         "generated_asset_count": len(generated_asset_items),
         "deleted_object_ids": layout.get("deleted_object_ids", []),
+        "moved_object_ids": layout.get("moved_object_ids", []),
         "support_region": layout.get("support_region", {}),
         "layout_updates": layout.get("layout_updates", []),
         "optimization": layout.get("optimization", {}),
@@ -289,6 +290,7 @@ def optimize_edit_layout_node(
 
 def update_scene_files_node(
     *,
+    request: SceneEditRequest,
     intent_analysis: dict[str, Any],
     generated_assets: dict[str, Any],
     layout_result: dict[str, Any],
@@ -309,6 +311,7 @@ def update_scene_files_node(
         generated_assets=generated_asset_items,
         layout_updates=layout_updates,
         output_dir=output_dir,
+        z_axis_align_assets=request.z_axis_align_assets,
     )
     return {
         "status": export_result.get("status", "ok"),

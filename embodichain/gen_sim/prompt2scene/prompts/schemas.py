@@ -392,7 +392,7 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
             "description": (
                 "Existing scene object ids that should be removed. This includes "
                 "objects removed by delete operations and objects replaced by new "
-                "generated objects."
+                "generated objects. Move operations must not appear here."
             ),
             "items": {"type": "string", "minLength": 1},
         },
@@ -410,8 +410,10 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                         "type": "string",
                         "minLength": 1,
                         "description": (
-                            "Temporary id used by this edit plan, such as "
-                            "new_red_mug_0. It must not collide with existing ids."
+                            "Temporary id used by this edit plan, using "
+                            "interact_<canonical_name>_<index>, such as "
+                            "interact_red_mug_0. Do not use a new_ prefix. "
+                            "It must not collide with existing ids."
                         ),
                     },
                     "name": {
@@ -452,20 +454,20 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "type": {
                         "type": "string",
-                        "enum": ["delete", "replace", "add"],
+                        "enum": ["delete", "replace", "add", "move"],
                     },
                     "target_object_id": {
                         "type": "string",
                         "description": (
-                            "Existing object id for delete/replace, or empty "
+                            "Existing object id for delete/replace/move, or empty "
                             "string for pure add."
                         ),
                     },
                     "new_object_temp_id": {
                         "type": "string",
                         "description": (
-                            "Generated object temp_id for add/replace, or empty "
-                            "string for delete."
+                            "Generated object temp_id for add/replace using the "
+                            "interact_ prefix, or empty string for delete/move."
                         ),
                     },
                     "placement": {

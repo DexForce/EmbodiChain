@@ -80,6 +80,7 @@ def run_scene_edit(
         output_dir=output_dir,
     )
     file_updates = update_scene_files_node(
+        request=request,
         intent_analysis=intent_analysis,
         generated_assets=generated_assets,
         layout_result=layout_result,
