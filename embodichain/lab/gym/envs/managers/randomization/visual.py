@@ -272,6 +272,7 @@ def randomize_light(
     position_range: tuple[list[float], list[float]] | None = None,
     color_range: tuple[list[float], list[float]] | None = None,
     intensity_range: tuple[float, float] | None = None,
+    direction_range: tuple[list[float], list[float]] | None = None,
 ) -> None:
     """Randomize light properties by adding, scaling, or setting random values.
 
@@ -289,9 +290,16 @@ def randomize_light(
         position_range is the x, y, z value added into light's cfg.init_pos.
         color_range is the absolute r, g, b value set to the light object.
         intensity_range is the value added into light's cfg.intensity.
+        direction_range is the x, y, z value added into light's cfg.direction.
+        (Only applicable for ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, and ``"mesh"`` light types.)
 
     .. tip::
         This function uses CPU tensors to assign light properties.
+
+    .. warning::
+        ``position_range`` is ignored for global scene lights (``"sun"``, ``"direction"``)
+        because they are infinite-distance lights with no meaningful position.
+        Use ``direction_range`` instead for these light types.
 
     Args:
         env (EmbodiedEnv): The environment instance.
@@ -300,25 +308,45 @@ def randomize_light(
         position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
         color_range (tuple[list[float], list[float]] | None): The range for the color randomization.
         intensity_range (tuple[float, float] | None): The range for the intensity randomization.
+        direction_range (tuple[list[float], list[float]] | None): The range for the direction randomization.
+            Only applicable for directional light types (``"sun"``, ``"direction"``, ``"spot"``,
+            ``"rect"``, ``"mesh"``).
     """
 
     light: Light = env.sim.get_light(entity_cfg.uid)
-    num_instance = len(env_ids)
+    if light is None:
+        return
+
+    is_global = light.is_global if hasattr(light, "is_global") else False
+
+    # For global lights, normalize env_ids to avoid index-out-of-range
+    if is_global or light.num_instances == 1:
+        num_instance = 1
+        effective_env_ids = None
+    else:
+        num_instance = len(env_ids)
+        effective_env_ids = env_ids
 
     if position_range:
-        init_pos = light.cfg.init_pos
-        new_pos = (
-            torch.tensor(init_pos, dtype=torch.float32)
-            .unsqueeze_(0)
-            .repeat(num_instance, 1)
-        )
-        random_value = sample_uniform(
-            lower=torch.tensor(position_range[0]),
-            upper=torch.tensor(position_range[1]),
-            size=new_pos.shape,
-        )
-        new_pos += random_value
-        light.set_local_pose(new_pos, env_ids=env_ids)
+        if is_global:
+            logger.log_warning(
+                f"position_range ignored for global light '{entity_cfg.uid}' "
+                f"(type='{light.cfg.light_type}'). Use direction_range instead."
+            )
+        else:
+            init_pos = light.cfg.init_pos
+            new_pos = (
+                torch.tensor(init_pos, dtype=torch.float32)
+                .unsqueeze_(0)
+                .repeat(num_instance, 1)
+            )
+            random_value = sample_uniform(
+                lower=torch.tensor(position_range[0]),
+                upper=torch.tensor(position_range[1]),
+                size=new_pos.shape,
+            )
+            new_pos += random_value
+            light.set_local_pose(new_pos, env_ids=effective_env_ids)
 
     if color_range:
         color = torch.zeros((num_instance, 3), dtype=torch.float32)
@@ -328,7 +356,7 @@ def randomize_light(
             size=color.shape,
         )
         color += random_value
-        light.set_color(color, env_ids=env_ids)
+        light.set_color(color, env_ids=effective_env_ids)
 
     if intensity_range:
         init_intensity = light.cfg.intensity
@@ -344,7 +372,31 @@ def randomize_light(
         )
         new_intensity += random_value
         new_intensity.squeeze_(1)
-        light.set_intensity(new_intensity, env_ids=env_ids)
+        light.set_intensity(new_intensity, env_ids=effective_env_ids)
+
+    if direction_range:
+        light_type = light.cfg.light_type
+        if light_type not in ("sun", "direction", "spot", "rect", "mesh"):
+            logger.log_warning(
+                f"direction_range ignored for light '{entity_cfg.uid}' "
+                f"(type='{light_type}'). Direction only applicable to "
+                f"'sun', 'direction', 'spot', 'rect', and 'mesh' types."
+            )
+            return
+
+        init_dir = light.cfg.direction
+        new_dir = (
+            torch.tensor(init_dir, dtype=torch.float32)
+            .unsqueeze_(0)
+            .repeat(num_instance, 1)
+        )
+        random_value = sample_uniform(
+            lower=torch.tensor(direction_range[0]),
+            upper=torch.tensor(direction_range[1]),
+            size=new_dir.shape,
+        )
+        new_dir += random_value
+        light.set_direction(new_dir, env_ids=effective_env_ids)
 
 
 def randomize_emission_light(

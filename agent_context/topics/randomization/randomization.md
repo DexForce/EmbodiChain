@@ -42,13 +42,16 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 | `randomize_visual_material` | Random material properties | (varies) |
 | `randomize_camera_extrinsics` | Camera pose | `pos_range`, `euler_range` (attach mode) or `eye_range`, `target_range`, `up_range` (look-at mode) |
 | `randomize_camera_intrinsics` | Camera intrinsic params | (varies) |
-| `randomize_light` | Light pos/color/intensity | `position_range`, `color_range`, `intensity_range` |
+| `randomize_light` | Light pos/color/intensity/direction | `position_range`, `color_range`, `intensity_range`, `direction_range` |
 | `randomize_emission_light` | Emission light props | (varies) |
 | `randomize_indirect_lighting` | Indirect lighting | (varies) |
 
 - Camera extrinsics auto-detect mode: if `extrinsics.parent` is set → attach mode (pos/euler perturbation via `set_local_pose`); if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`).
 - `set_rigid_object_visual_material` is deterministic (not random) but uses the same functor mechanism for fixed material assignment at reset.
 - Light randomization applies the **same values across all envs** (documented limitation).
+- ``position_range`` is ignored for global scene lights (``"sun"``, ``"direction"``). Use ``direction_range`` instead.
+- ``direction_range`` is only applicable for directional light types (``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``).
+- Global lights (``"sun"``, ``"direction"``) have ``num_instances == 1``; all other types are batched per environment.
 
 ### Spatial (`spatial.py`)
 

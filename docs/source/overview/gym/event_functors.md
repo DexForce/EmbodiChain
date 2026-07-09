@@ -64,7 +64,15 @@ This page lists all available event functors that can be used with the Event Man
                 "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]}}
     ```
 * - {func}`~randomization.visual.randomize_light`
-  - Vary light position, color, and intensity within specified ranges.
+  - Vary light position, color, intensity, and direction within specified ranges.
+
+    .. note::
+        ``position_range`` is ignored for global scene lights (``"sun"``, ``"direction"``).
+        Use ``direction_range`` instead for these types.
+
+    .. note::
+        ``direction_range`` is only applicable for directional light types
+        (``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``).
 
     ```json
     {"func": "randomize_light",
@@ -72,7 +80,8 @@ This page lists all available event functors that can be used with the Event Man
      "params": {"entity_cfg": {"uid": "light_1"},
                 "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
                 "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
-                "intensity_range": [50.0, 100.0]}}
+                "intensity_range": [50.0, 100.0],
+                "direction_range": [[-0.1, -0.1, -0.1], [0.1, 0.1, 0.1]]}}
     ```
 * - {func}`~randomization.visual.randomize_emission_light`
   - Randomize global emission light color and intensity. Applies the same emission light properties across all environments.

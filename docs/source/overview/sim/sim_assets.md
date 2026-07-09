@@ -112,14 +112,27 @@ For Rigid Object tutorial, please refer to the [Create Scene](https://dexforce.g
 
 ### Lights
 
-Configured via `LightCfg`.
+Configured via `LightCfg`. Supports six light types matching the dexsim rendering backend.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `light_type` | `Literal` | `"point"` | Type of light (currently only "point"). |
-| `color` | `tuple` | `(1.0, 1.0, 1.0)` | RGB color. |
-| `intensity` | `float` | `50.0` | Intensity in watts/m^2. |
-| `radius` | `float` | `1e2` | Falloff radius. |
+| `light_type` | `Literal` | `"point"` | Light type: ``"point"``, ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, or ``"mesh"``. |
+| `color` | `tuple` | `(1.0, 1.0, 1.0)` | RGB color of the light source. |
+| `intensity` | `float` | `30.0` | Intensity of the light source in watts/m^2. |
+| `enable_shadow` | `bool` | `True` | Whether the light casts shadows. |
+| `radius` | `float` | `10.0` | Falloff radius (only for ``"point"``). |
+| `direction` | `tuple` | `(0.0, 0.0, -1.0)` | Direction vector for directional types (``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``). |
+| `spot_angle_inner` | `float` | `30.0` | Inner cone angle in degrees (only for ``"spot"``). |
+| `spot_angle_outer` | `float` | `45.0` | Outer cone angle in degrees (only for ``"spot"``). |
+| `rect_width` | `float` | `1.0` | Width of rectangular area light (only for ``"rect"``). |
+| `rect_height` | `float` | `1.0` | Height of rectangular area light (only for ``"rect"``). |
+| `mesh_path` | `str` | `""` | Asset path for mesh-based emissive lights (only for ``"mesh"``). |
+
+.. attention::
+    ``"sun"`` and ``"direction"`` are **global scene lights** (infinite-distance directional light
+    sources). They are created as a single instance on the root environment, not batched per
+    environment. Use :meth:`Light.set_direction` instead of :meth:`Light.set_local_pose` for
+    these types.
 
 
 ```{toctree}

@@ -306,6 +306,7 @@ class SimulationManager:
 
         self._create_default_plane()
         self.set_default_background()
+        self.set_default_global_lighting()
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
@@ -701,6 +702,28 @@ class SimulationManager:
 
         # TODO: add default physics attributes for the plane.
 
+    def set_default_global_lighting(self) -> None:
+        """Set default global lighting for the scene.
+
+        Configures both the environment emission (ambient) light and a
+        directional light to provide default scene illumination. The
+        directional light is a global scene light (infinite distance)
+        pointing downward along the -Z axis.
+        """
+        # Environment emission light
+        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
+
+        # Directional light as global scene light
+        dir_light_cfg = LightCfg(
+            uid="default_global_light",
+            light_type="sun",
+            intensity=8.0,
+            direction=(0.0, 0.0, -1.0),
+            color=(1.0, 0.95, 0.85),
+            enable_shadow=True,
+        )
+        self.add_light(dir_light_cfg)
+
     def set_default_background(self) -> None:
         """Set default background."""
 
@@ -714,11 +737,9 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
-                roughness=0.7,
+                roughness=1.0,
             )
         )
-
-        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
 
         self._default_plane.set_material(mat.get_instance("plane_mat").mat)
         self._visual_materials[mat_name] = mat
@@ -797,14 +818,42 @@ class SimulationManager:
         logger.log_warning(f"Asset {uid} not found.")
         return None
 
+    # Light type string → dexsim LightType enum mapping
+    _LIGHT_TYPE_MAP: dict[str, LightType] = {
+        "point": LightType.POINT,
+        "sun": LightType.SUN,
+        "direction": LightType.DIRECTION,
+        "spot": LightType.SPOT,
+        "rect": LightType.RECT,
+        "mesh": LightType.MESH,
+    }
+
+    # Light types that are created as a single global scene light (not per-environment).
+    _GLOBAL_LIGHT_TYPES: tuple[str, ...] = ("sun", "direction")
+
     def add_light(self, cfg: LightCfg) -> Light:
         """Create a light in the scene.
 
+        Supports six light types: ``"point"``, ``"sun"``, ``"direction"``,
+        ``"spot"``, ``"rect"``, and ``"mesh"``. See :class:`LightCfg` for
+        type-specific configuration fields.
+
+        .. attention::
+            ``"sun"`` and ``"direction"`` lights are global scene lights
+            (infinite-distance directional light sources). They are created
+            as a single instance on the root environment, not batched per
+            environment. All other types are created as per-environment
+            batched lights.
+
         Args:
-            cfg (LightCfg): Configuration for the light, including type, color, intensity, and radius.
+            cfg (LightCfg): Configuration for the light, including type, color,
+                intensity, and type-specific properties.
 
         Returns:
             Light: The created light instance.
+
+        Raises:
+            RuntimeError: If ``cfg.light_type`` is not one of the supported types.
         """
         if cfg.uid is None:
             uid = "light"
@@ -815,22 +864,42 @@ class SimulationManager:
         if uid in self._lights:
             logger.log_error(f"Light {uid} already exists.")
 
-        light_type = cfg.light_type
-        if light_type == "point":
-            light_type = LightType.POINT
-        else:
+        light_type_str = cfg.light_type
+        light_type = self._LIGHT_TYPE_MAP.get(light_type_str)
+        if light_type is None:
+            supported = ", ".join(self._LIGHT_TYPE_MAP.keys())
             logger.log_error(
-                f"Unsupported light type: {light_type}. Supported types: point."
+                f"Unsupported light type: '{light_type_str}'. "
+                f"Supported types: {supported}."
             )
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        light_list = []
-        for i, env in enumerate(env_list):
-            light_name = f"{uid}_{i}"
-            light = env.create_light(light_name, light_type)
-            light_list.append(light)
+        # Validation warnings for type-specific constraints
+        if light_type_str == "mesh" and not cfg.mesh_path:
+            logger.log_warning(
+                f"Mesh light '{uid}' has no mesh_path set. "
+                f"Use set_mesh() to assign a MeshObject."
+            )
+        if light_type_str == "rect" and (cfg.rect_width <= 0 or cfg.rect_height <= 0):
+            logger.log_warning(
+                f"Rect light '{uid}' has zero or negative dimensions "
+                f"(width={cfg.rect_width}, height={cfg.rect_height})."
+            )
 
-        batch_lights = Light(cfg=cfg, entities=light_list)
+        if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
+            # Global scene light: create a single instance on the root
+            # environment. Infinite-distance lights (sun, direction) are
+            # physically scene-global and should not be duplicated per arena.
+            light = self._env.create_light(uid, light_type)
+            batch_lights = Light(cfg=cfg, entities=[light])
+        else:
+            # Per-environment batched light: one instance per arena.
+            env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+            light_list = []
+            for i, env in enumerate(env_list):
+                light_name = f"{uid}_{i}"
+                light = env.create_light(light_name, light_type)
+                light_list.append(light)
+            batch_lights = Light(cfg=cfg, entities=light_list)
 
         self._lights[uid] = batch_lights
 
