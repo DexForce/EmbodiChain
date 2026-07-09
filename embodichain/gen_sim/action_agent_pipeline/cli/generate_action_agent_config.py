@@ -19,6 +19,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
+    DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
+    DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.project_resolution import (
+    is_prompt2scene_gym_export,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
     generate_action_agent_config_from_project,
@@ -138,31 +145,32 @@ def cli() -> None:
     parser.add_argument(
         "--preserve_source_scene_geometry",
         "--preserve-source-scene-geometry",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help=(
             "Keep source z placement instead of re-snapping objects to the "
-            "tabletop. GLBs are still normalized to OBJ."
+            "tabletop. GLBs are still normalized to OBJ. Defaults to true for "
+            "prompt2scene gym_export inputs and false otherwise."
         ),
     )
     parser.add_argument(
         "--source_scene_z_rotation_degrees",
         "--source-scene-z-rotation-degrees",
         type=float,
-        default=0.0,
+        default=None,
         help=(
             "World-frame Z rotation applied to generated scene object poses. "
-            "Use -90 for prompt2scene exports that need action-agent alignment."
+            "Defaults to -90 for prompt2scene gym_export inputs and 0 otherwise."
         ),
     )
     parser.add_argument(
         "--source_mesh_x_rotation_degrees",
         "--source-mesh-x-rotation-degrees",
         type=float,
-        default=0.0,
+        default=None,
         help=(
             "Local X-axis rotation baked into normalized GLB/GLTF meshes. "
-            "Use 90 for prompt2scene exports that need mesh-frame alignment."
+            "Defaults to 90 for prompt2scene gym_export inputs and 0 otherwise."
         ),
     )
     parser.add_argument(
@@ -278,6 +286,7 @@ def cli() -> None:
     args = parser.parse_args()
     task_description = _resolve_task_description(args)
     target_replacements = _resolve_target_replacements(args)
+    alignment = _resolve_source_alignment(args)
 
     paths = generate_action_agent_config_from_project(
         gym_project=args.gym_project,
@@ -290,9 +299,9 @@ def cli() -> None:
         target_body_scale=args.target_body_scale,
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
         source_scene_body_scale_mode=args.source_scene_body_scale_mode,
-        preserve_source_scene_geometry=args.preserve_source_scene_geometry,
-        source_scene_z_rotation_degrees=args.source_scene_z_rotation_degrees,
-        source_mesh_x_rotation_degrees=args.source_mesh_x_rotation_degrees,
+        preserve_source_scene_geometry=alignment["preserve_source_scene_geometry"],
+        source_scene_z_rotation_degrees=alignment["source_scene_z_rotation_degrees"],
+        source_mesh_x_rotation_degrees=alignment["source_mesh_x_rotation_degrees"],
         inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
@@ -340,6 +349,44 @@ def _resolve_target_replacements(
     return resolve_target_replacements(
         args, TargetReplacementSpec, Path(args.gym_project)
     )
+
+
+def _resolve_source_alignment(args: argparse.Namespace) -> dict[str, float | bool]:
+    is_prompt2scene = is_prompt2scene_gym_export(
+        Path(args.gym_project).expanduser().resolve()
+    )
+    if is_prompt2scene:
+        print(
+            "Detected prompt2scene gym_export; resolving prompt2scene "
+            "action-agent alignment.",
+            flush=True,
+        )
+
+    preserve_source_scene_geometry = args.preserve_source_scene_geometry
+    if preserve_source_scene_geometry is None:
+        preserve_source_scene_geometry = is_prompt2scene
+
+    source_scene_z_rotation_degrees = args.source_scene_z_rotation_degrees
+    if source_scene_z_rotation_degrees is None:
+        source_scene_z_rotation_degrees = (
+            DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES
+            if is_prompt2scene
+            else 0.0
+        )
+
+    source_mesh_x_rotation_degrees = args.source_mesh_x_rotation_degrees
+    if source_mesh_x_rotation_degrees is None:
+        source_mesh_x_rotation_degrees = (
+            DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES
+            if is_prompt2scene
+            else 0.0
+        )
+
+    return {
+        "preserve_source_scene_geometry": preserve_source_scene_geometry,
+        "source_scene_z_rotation_degrees": source_scene_z_rotation_degrees,
+        "source_mesh_x_rotation_degrees": source_mesh_x_rotation_degrees,
+    }
 
 
 if __name__ == "__main__":

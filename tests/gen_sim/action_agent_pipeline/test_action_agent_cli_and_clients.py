@@ -54,6 +54,130 @@ def test_action_agent_config_cli_imports() -> None:
     assert callable(generate_action_agent_config.cli)
 
 
+def test_generate_config_cli_auto_applies_prompt2scene_alignment(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import (
+        generate_action_agent_config,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
+        DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
+        DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
+    )
+
+    gym_export = tmp_path / "prompt2scene" / "demo111" / "gym_export"
+    (gym_export / "scene_state").mkdir(parents=True)
+    (gym_export / "scene_state" / "result.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "configs" / "demo111"
+    captured = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return _fake_generated_config_paths(output_dir)
+
+    monkeypatch.setattr(
+        generate_action_agent_config,
+        "generate_action_agent_config_from_project",
+        fake_generate_action_agent_config_from_project,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym_project",
+            str(gym_export),
+            "--output_dir",
+            str(output_dir),
+            "--task_name",
+            "Demo111",
+            "--task_description",
+            "用双臂把两边的东西放到篮子里",
+            "--robot-profile",
+            "franka_v3",
+            "--target_body_scale",
+            "1.0",
+            "--overwrite",
+        ],
+    )
+
+    generate_action_agent_config.cli()
+
+    assert captured["preserve_source_scene_geometry"] is True
+    assert captured["source_scene_z_rotation_degrees"] == (
+        DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES
+    )
+    assert captured["source_mesh_x_rotation_degrees"] == (
+        DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES
+    )
+
+
+def test_generate_config_cli_respects_explicit_prompt2scene_alignment_overrides(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import (
+        generate_action_agent_config,
+    )
+
+    gym_export = tmp_path / "prompt2scene" / "demo111" / "gym_export"
+    (gym_export / "scene_state").mkdir(parents=True)
+    (gym_export / "scene_state" / "result.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "configs" / "demo111"
+    captured = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return _fake_generated_config_paths(output_dir)
+
+    monkeypatch.setattr(
+        generate_action_agent_config,
+        "generate_action_agent_config_from_project",
+        fake_generate_action_agent_config_from_project,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym_project",
+            str(gym_export),
+            "--output_dir",
+            str(output_dir),
+            "--source_scene_z_rotation_degrees",
+            "0",
+            "--source_mesh_x_rotation_degrees",
+            "0",
+            "--no-preserve-source-scene-geometry",
+        ],
+    )
+
+    generate_action_agent_config.cli()
+
+    assert captured["preserve_source_scene_geometry"] is False
+    assert captured["source_scene_z_rotation_degrees"] == 0.0
+    assert captured["source_mesh_x_rotation_degrees"] == 0.0
+
+
+def _fake_generated_config_paths(output_dir: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        gym_config=output_dir / "fast_gym_config.json",
+        agent_config=output_dir / "agent_config.json",
+        task_prompt=output_dir / "task_prompt.txt",
+        task_graph=output_dir / "task_graph.json",
+        basic_background=output_dir / "basic_background.txt",
+        atom_actions=output_dir / "atom_actions.txt",
+        summary=None,
+    )
+
+
 def test_action_agent_config_generation_imports() -> None:
     from embodichain.gen_sim.action_agent_pipeline.generation import action_agent_config
 

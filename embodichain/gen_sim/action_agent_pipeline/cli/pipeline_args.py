@@ -30,8 +30,10 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_IMAGE2SCENE_ROOT,
     DEFAULT_JOB_TIMEOUT_S,
     DEFAULT_PIPELINE_HISTORY,
+    DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_LLM_CONFIG,
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
+    DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
     DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
@@ -226,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt2scene_scene_z_rotation_degrees",
         dest="prompt2scene_scene_z_rotation_degrees",
         type=float,
-        default=-90.0,
+        default=DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
         help=(
             "World-frame Z rotation applied when converting prompt2scene "
             "exports into action-agent configs. Defaults to -90."
@@ -237,7 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt2scene_mesh_x_rotation_degrees",
         dest="prompt2scene_mesh_x_rotation_degrees",
         type=float,
-        default=90.0,
+        default=DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
         help=(
             "Local X-axis rotation baked into prompt2scene GLB meshes during "
             "action-agent OBJ normalization. Defaults to 90."
