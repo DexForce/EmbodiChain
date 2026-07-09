@@ -357,7 +357,6 @@ class Franka(EmbodiChainDataset):
         Franka/
             Panda/
                 Panda.urdf
-                PandaHand.urdf
                 PandaWithHand.urdf
             FR3/
                 fr3.urdf
@@ -373,9 +372,9 @@ class Franka(EmbodiChainDataset):
     """
 
     def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV2.zip"),
-            "f0675b9da98126bc3d4e18c98ef5e06c",
+        data_descriptor = o3d.data.DataDescriptor(            
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV3.zip"),
+            "ec53536615ddc1c44660f2d66fdf82ae",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

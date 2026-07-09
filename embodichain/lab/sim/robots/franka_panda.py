@@ -57,22 +57,6 @@ _FRANKA_DEFAULT_INIT_QPOS = [
 ]
 
 
-def _franka_tcp() -> list[list[float]]:
-    """Build the Franka Panda TCP as a 4x4 homogeneous matrix.
-
-    The TCP applies a 45-degree rotation about Z and a 0.1034 m Z-offset,
-    matching the standard Franka hand geometry.
-    """
-    c = math.cos(-math.pi / 4)
-    s = math.sin(-math.pi / 4)
-    return [
-        [c, -s, 0.0, 0.0],
-        [s, c, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.1034],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-
-
 @configclass
 class FrankaPandaCfg(RobotCfg):
     """Configuration for the Franka Emika Panda robot with Panda hand.
@@ -139,31 +123,36 @@ class FrankaPandaCfg(RobotCfg):
         )
 
         self.control_parts = {
-            "arm": [f"Joint{i}" for i in range(1, 8)],
-            "hand": ["finger_joint1", "finger_joint2"],
+            "arm": [f"fr3_joint{i}" for i in range(1, 8)],
+            "hand": ["fr3_finger_joint1", "fr3_finger_joint2"],
         }
 
         self.solver_cfg = {
             "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=_franka_tcp(),
+                end_link_name="fr3_hand_tcp",
+                root_link_name="base",
+                tcp=[
+                    [1, 0, 0.0, 0.0],
+                    [0, 1, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
                 num_samples=30,
             ),
         }
 
         self.drive_pros = JointDrivePropertiesCfg(
             stiffness={
-                "Joint[1-7]": 1e4,
-                "finger_joint[1-2]": 1e3,
+                "fr3_joint[1-7]": 1e4,
+                "fr3_finger_joint[1-2]": 1e3,
             },
             damping={
-                "Joint[1-7]": 1e3,
-                "finger_joint[1-2]": 1e2,
+                "fr3_joint[1-7]": 1e3,
+                "fr3_finger_joint[1-2]": 1e2,
             },
             max_effort={
-                "Joint[1-7]": 1e5,
-                "finger_joint[1-2]": 1e4,
+                "fr3_joint[1-7]": 1e5,
+                "fr3_finger_joint[1-2]": 1e4,
             },
         )
 
@@ -192,8 +181,8 @@ class FrankaPandaCfg(RobotCfg):
         chain = create_pk_serial_chain(
             urdf_path=self._pk_urdf_path,
             device=device,
-            end_link_name="ee_link",
-            root_link_name="base_link",
+            end_link_name="fr3_hand_tcp",
+            root_link_name="base",
         )
         return {"arm": chain}
 

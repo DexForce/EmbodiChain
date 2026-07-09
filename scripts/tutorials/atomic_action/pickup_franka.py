@@ -73,9 +73,9 @@ GRIPPER_Y_THICKNESS = 0.030
 GRIPPER_X_THICKNESS = 0.020
 
 # Cap the closing qpos so the fingers do not close tighter than this value.
-OBJECT_MIN_HAND_CLOSE_QPOS = -0.02
+OBJECT_MIN_HAND_CLOSE_QPOS = 0.00
 # Fully-open finger joint value for the Panda hand.
-FRANKA_FINGER_OPEN_QPOS = 0.040
+FRANKA_FINGER_OPEN_QPOS = 0.04
 
 OBJECT_XY = (0.42, 0.08)
 
@@ -354,6 +354,7 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     sim = initialize_simulation(args)
     robot = create_robot(sim)
+    print("**********tcp xpos:\n", robot._solvers["arm"].tcp_xpos)
     obj = create_pick_object(sim, args.object)
 
     # ------------------------------------------------------------------ #
