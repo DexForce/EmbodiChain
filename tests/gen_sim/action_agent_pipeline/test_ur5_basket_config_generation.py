@@ -34,6 +34,7 @@ from embodichain.gen_sim.action_agent_pipeline.cli import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation import (
     action_agent_config as action_agent_config_generation,
+    relative_geometry,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
     make_dual_ur5_robot_config,
@@ -2125,6 +2126,7 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
         (0.0, 0.4, 0.36),
     ]
     bottle_half_height = 0.08
+    bottle_semantic_z_half_height = 0.01
     bottle_vertices = [
         (-0.02, -bottle_half_height, -0.01),
         (0.02, -bottle_half_height, -0.01),
@@ -2187,7 +2189,9 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     )
 
     summary = _stable_summary(paths.summary)
-    expected_release_offset_z = 0.36 + 0.003 + bottle_half_height * target_body_scale
+    expected_release_offset_z = (
+        0.36 + 0.003 + bottle_semantic_z_half_height * target_body_scale
+    )
     expected_release_position = [
         0.05,
         0.05,
@@ -2340,6 +2344,37 @@ def test_dual_upright_in_place_supports_cup_like_objects(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     assert task_prompt.count('"orientation_goal":"upright"') >= 2
     assert '"obj_name":"table"' not in task_prompt
+
+
+def test_generation_upright_known_z_normalized_asset_uses_local_z(
+    tmp_path: Path,
+) -> None:
+    mesh_path = tmp_path / "wide_soda_can.obj"
+    mesh_path.write_text(
+        "\n".join(
+            [
+                "v -0.15 -0.12 0.00",
+                "v 0.15 -0.12 0.00",
+                "v -0.15 0.12 0.00",
+                "v 0.15 0.12 0.00",
+                "v -0.15 -0.12 0.08",
+                "v 0.15 -0.12 0.08",
+                "v -0.15 0.12 0.08",
+                "v 0.15 0.12 0.08",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    obj_config = {
+        "uid": "soda_can",
+        "shape": {"shape_type": "Mesh", "fpath": str(mesh_path)},
+        "body_scale": [1.0, 1.0, 1.0],
+        "init_pos": [0.0, 0.0, 0.0],
+        "init_rot": [90.0, 0.0, 0.0],
+    }
+
+    assert relative_geometry._pickup_upright_direction(obj_config) == [0.0, 0.0, 1.0]
+    assert relative_geometry._upright_local_zmin(obj_config) == pytest.approx(0.0)
 
 
 def test_relative_on_preserve_uses_object_pose_release(

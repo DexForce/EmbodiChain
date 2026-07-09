@@ -34,6 +34,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import
     GraspCollisionCachePreparationError,
     ensure_grasp_collision_cache_from_env_coacd,
 )
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    match_asset_orientation_keyword,
+)
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     CoordinatedPickment,
@@ -2754,6 +2757,8 @@ def _resolve_object_orientation(
     long_axis = local_axes[:, 0]
     up_axis = local_axes[:, 2]
     if orientation_goal == "upright":
+        if _held_object_local_z_is_upright_semantic(state):
+            return _semantic_local_z_upright_rotation(current_rotation)
         if _is_bottle_like_held_object(state, mesh_vertices):
             return _preview_aware_upright_rotation(
                 local_axes=local_axes,
@@ -2934,6 +2939,21 @@ def _is_bottle_like_held_object(state: WorldState, vertices: torch.Tensor) -> bo
     )
 
 
+def _held_object_local_z_is_upright_semantic(state: WorldState) -> bool:
+    held = state.held_object
+    if held is None:
+        return False
+    label = str(getattr(held.semantics, "label", ""))
+    return (
+        match_asset_orientation_keyword(
+            object_id=label,
+            name=label,
+            description="",
+        )
+        is not None
+    )
+
+
 def _has_bottle_like_keyword(text: str) -> bool:
     tokens = (
         text.replace("_", " ").replace("-", " ").replace("/", " ").replace(".", " ")
@@ -2941,6 +2961,42 @@ def _has_bottle_like_keyword(text: str) -> bool:
     return any(
         keyword in tokens if keyword in _SHORT_BOTTLE_LIKE_KEYWORDS else keyword in text
         for keyword in _BOTTLE_LIKE_KEYWORDS
+    )
+
+
+def _semantic_local_z_upright_rotation(current_rotation: torch.Tensor) -> torch.Tensor:
+    device = current_rotation.device
+    local_z = torch.tensor([0.0, 0.0, 1.0], device=device)
+    secondary_axes = [
+        torch.tensor([1.0, 0.0, 0.0], device=device),
+        torch.tensor([0.0, 1.0, 0.0], device=device),
+    ]
+    candidates: list[tuple[float, torch.Tensor]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[-axis for axis in secondary_axes],
+    ]:
+        preview_secondary = current_rotation @ secondary_axis
+        world_secondary = preview_secondary.clone()
+        world_secondary[2] = 0.0
+        if float(torch.linalg.norm(world_secondary)) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=local_z,
+            world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, current_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=local_z,
+        world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
+        local_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
+        world_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
     )
 
 

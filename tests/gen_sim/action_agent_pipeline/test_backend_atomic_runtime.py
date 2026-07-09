@@ -1605,6 +1605,7 @@ def _held_state_with_yaw(
     yaw_degrees: float,
     *,
     mesh_extents=(0.3, 0.1, 0.05),
+    object_label: str = "apple",
 ) -> WorldState:
     yaw = torch.deg2rad(torch.tensor(float(yaw_degrees)))
     current_pose = torch.eye(4)
@@ -1617,6 +1618,7 @@ def _held_state_with_yaw(
         {"obj_name": "apple", "affordance": "antipodal"},
         {"allow_grasp_annotation": True},
     )
+    semantics.label = object_label
     x, y, z = mesh_extents
     semantics.geometry["mesh_vertices"] = torch.tensor(
         [
@@ -1687,6 +1689,30 @@ def test_surface_z_policy_places_held_object_above_support_top() -> None:
 
     assert torch.allclose(target[:2, 3], torch.tensor([0.25, -0.15]))
     assert target[2, 3] == pytest.approx(0.215)
+
+
+def test_upright_known_z_normalized_assets_trust_local_z_axis() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(
+        env,
+        37.0,
+        mesh_extents=(0.30, 0.24, 0.08),
+        object_label="soda_can",
+    )
+
+    target = _resolved_held_object_pose(
+        env,
+        state,
+        {
+            "reference": "relative",
+            "offset": [0.0, 0.0, 0.1],
+            "frame": "world",
+            "orientation_goal": "upright",
+            "orientation_axis": "none",
+        },
+    )
+
+    assert torch.allclose(target[:3, 2], torch.tensor([0.0, 0.0, 1.0]))
 
 
 def test_surface_z_policy_defaults_object_reference_to_support() -> None:
