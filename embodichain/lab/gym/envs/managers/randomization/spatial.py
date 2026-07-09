@@ -691,10 +691,12 @@ class randomize_anchor_height(Functor):
 
         # Build affected UID list
         self._affected_uids = self._resolve_affected_uids(
-            env, cfg.anchor_uid, cfg.exclude_uids
+            cfg.anchor_uid, cfg.exclude_uids
         )
 
-    def _get_object(self, uid: str):
+    def _get_object(
+        self, uid: str
+    ) -> RigidObject | Articulation | RigidObjectGroup | None:
         """Get a rigid object, articulation, or rigid object group by UID."""
         if uid in self._env.sim.get_rigid_object_uid_list():
             return self._env.sim.get_rigid_object(uid)
@@ -708,17 +710,17 @@ class randomize_anchor_height(Functor):
         return None
 
     def _resolve_affected_uids(
-        self, env: EmbodiedEnv, anchor_uid: str, exclude_uids: list[str]
+        self, anchor_uid: str, exclude_uids: list[str]
     ) -> list[str]:
         """Resolve the list of UIDs that should be shifted."""
         uids: set[str] = set()
         if any(g in self._include_groups for g in ("background", "rigid_object")):
-            uids.update(env.sim.get_rigid_object_uid_list())
+            uids.update(self._env.sim.get_rigid_object_uid_list())
         if "rigid_object_group" in self._include_groups:
-            if hasattr(env.sim, "get_rigid_object_group_uid_list"):
-                uids.update(env.sim.get_rigid_object_group_uid_list())
+            if hasattr(self._env.sim, "get_rigid_object_group_uid_list"):
+                uids.update(self._env.sim.get_rigid_object_group_uid_list())
         if "articulation" in self._include_groups:
-            uids.update(env.sim.get_articulation_uid_list())
+            uids.update(self._env.sim.get_articulation_uid_list())
 
         exclude = set(exclude_uids) | {anchor_uid}
         return sorted(uids - exclude)
@@ -741,7 +743,11 @@ class randomize_anchor_height(Functor):
         return candidates[indices]
 
     def _move_object_z(
-        self, obj, delta_z: torch.Tensor, env_ids: torch.Tensor, absolute: bool = False
+        self,
+        obj: RigidObject | Articulation | RigidObjectGroup,
+        delta_z: torch.Tensor,
+        env_ids: torch.Tensor,
+        absolute: bool = False,
     ) -> None:
         """Move an object in Z by delta_z.
 
@@ -754,9 +760,14 @@ class randomize_anchor_height(Functor):
         """
         if isinstance(obj, RigidObjectGroup):
             # RigidObjectGroup does not have a single init_pos; always shift relative to current pose.
+            if absolute:
+                logger.log_warning(
+                    "absolute=True is not supported for RigidObjectGroup; using relative shift."
+                )
             pose = obj.get_local_pose(to_matrix=True)  # (N, M, 4, 4)
             pose[env_ids, :, 2, 3] += delta_z.unsqueeze(-1)
             obj.set_local_pose(pose[env_ids], env_ids=env_ids)
+            obj.clear_dynamics(env_ids=env_ids)
             return
 
         pose = obj.get_local_pose()
