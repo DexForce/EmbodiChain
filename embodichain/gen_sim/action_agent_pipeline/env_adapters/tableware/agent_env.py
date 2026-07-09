@@ -147,13 +147,8 @@ class AgenticGenSimEnv(EmbodiedEnv):
         return filtered
 
     def get_states(self) -> None:
-        if int(getattr(self, "num_envs", 1)) != 1:
-            raise ValueError(
-                "AgenticGenSimEnv currently supports num_envs=1 only, got "
-                f"{getattr(self, 'num_envs', None)}."
-            )
-        # store robot states in each env.reset
-        self.init_qpos = self.robot.get_qpos().squeeze(0)
+        # store robot states in each env.reset; keep the leading env dimension
+        self.init_qpos = self.robot.get_qpos()
 
         self._agent_arm_slots = self._resolve_agent_arm_slots()
         for side in ("left", "right"):
@@ -243,27 +238,33 @@ class AgenticGenSimEnv(EmbodiedEnv):
         setattr(self, f"{side}_arm_joints", arm_joints)
         setattr(self, f"{side}_eef_joints", eef_joints)
 
+        num_envs = int(getattr(self, "num_envs", 1))
+
         if arm_name is None or not arm_joints:
-            setattr(self, f"{side}_arm_init_qpos", self.init_qpos.new_empty(0))
+            setattr(
+                self,
+                f"{side}_arm_init_qpos",
+                self.init_qpos.new_empty(num_envs, 0),
+            )
             setattr(self, f"{side}_arm_init_xpos", None)
             setattr(self, f"{side}_arm_base_pose", None)
-            setattr(self, f"{side}_arm_current_qpos", self.init_qpos.new_empty(0))
+            setattr(
+                self,
+                f"{side}_arm_current_qpos",
+                self.init_qpos.new_empty(num_envs, 0),
+            )
             setattr(self, f"{side}_arm_current_xpos", None)
             return
 
-        init_qpos = self.init_qpos[arm_joints]
-        init_xpos = self.robot.compute_fk(
-            init_qpos, name=arm_name, to_matrix=True
-        ).squeeze(0)
-        base_pose = self.robot.get_control_part_base_pose(
-            arm_name, to_matrix=True
-        ).squeeze(0)
+        init_qpos = self.init_qpos[:, arm_joints]
+        init_xpos = self.robot.compute_fk(init_qpos, name=arm_name, to_matrix=True)
+        base_pose = self.robot.get_control_part_base_pose(arm_name, to_matrix=True)
 
         setattr(self, f"{side}_arm_init_qpos", init_qpos)
         setattr(self, f"{side}_arm_init_xpos", init_xpos)
         setattr(self, f"{side}_arm_base_pose", base_pose)
-        setattr(self, f"{side}_arm_current_qpos", init_qpos)
-        setattr(self, f"{side}_arm_current_xpos", init_xpos)
+        setattr(self, f"{side}_arm_current_qpos", init_qpos.clone())
+        setattr(self, f"{side}_arm_current_xpos", init_xpos.clone())
 
     def _get_control_part_joint_ids(self, control_part: str | None) -> list[int]:
         if control_part is None:
@@ -275,24 +276,28 @@ class AgenticGenSimEnv(EmbodiedEnv):
     def _initial_gripper_state(self, side: str) -> torch.Tensor:
         if len(getattr(self, f"{side}_eef_joints", []) or []) == 0:
             return self.open_state.new_empty(0)
-        return self.open_state
+        num_envs = int(getattr(self, "num_envs", 1))
+        if num_envs <= 1:
+            return self.open_state
+        return self.open_state.unsqueeze(0).repeat(num_envs, 1)
 
     def update_obj_info(self):
-        # store some useful obj information
+        # store some useful obj information; keep the leading env dimension
         obj_info = getattr(self, "obj_info", {})
         obj_uids = self.sim.get_rigid_object_uid_list()
         for obj_name in obj_uids:
             obj = self.sim.get_rigid_object(obj_name)
-            obj_pose = obj.get_local_pose(to_matrix=True).squeeze(0)
+            obj_pose = obj.get_local_pose(to_matrix=True)
 
             if obj_name not in obj_info:
-                obj_height = obj_pose[2, 3]  # Extract the height (z-coordinate)
+                obj_height = obj_pose[:, 2, 3]  # Extract the height per env
                 obj_info[obj_name] = {
-                    "pose": obj_pose,  # Store the full pose (4x4 matrix)
-                    "height": obj_height,  # Store the initial height (z-coordinate)
+                    "pose": obj_pose,  # (n_envs, 4, 4)
+                    "height": obj_height,  # (n_envs,)
                 }
             else:
                 obj_info[obj_name]["pose"] = obj_pose
+                obj_info[obj_name]["height"] = obj_pose[:, 2, 3]
 
         self.obj_info = obj_info
 
@@ -300,12 +305,21 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     def get_obs_for_agent(self):
         obs = self.get_obs()
-        rgb = obs["sensor"]["cam_high"]["color"].squeeze(0)
+        rgb = obs["sensor"]["cam_high"]["color"]
+        if rgb.ndim == 4 and rgb.shape[0] > 1:
+            rgb = rgb[0]
+        else:
+            rgb = rgb.squeeze(0)
 
-        # Get validation camera data
+        # Get validation camera data; use env 0 for the agent observation
         camera_data = self.event_manager.get_functor("validation_cameras")(self, None)
         result = {"rgb": rgb}
-        result.update({k: v.squeeze(0) for k, v in camera_data.items()})
+        result.update(
+            {
+                k: (v[0] if v.ndim > 3 and v.shape[0] > 1 else v.squeeze(0))
+                for k, v in camera_data.items()
+            }
+        )
         return result
 
     def get_current_qpos_agent(self):
@@ -341,14 +355,20 @@ class AgenticGenSimEnv(EmbodiedEnv):
         ret, qpos = self.robot.compute_ik(
             name=control_part, pose=target_xpos, joint_seed=qpos_seed
         )
-        return ret.all().item(), qpos.squeeze(0)
+        if isinstance(ret, torch.Tensor):
+            success = bool(torch.all(ret).item())
+        else:
+            success = bool(ret)
+        if qpos.ndim >= 2 and qpos.shape[0] == 1:
+            qpos = qpos.squeeze(0)
+        return success, qpos
 
     def get_arm_fk(self, qpos, is_left):
         control_part = self.get_agent_arm_control_part(is_left)
         xpos = self.robot.compute_fk(
             name=control_part, qpos=torch.as_tensor(qpos), to_matrix=True
         )
-        return xpos.squeeze(0)
+        return xpos
 
     def get_agent_arm_control_part(self, is_left: bool) -> str:
         return self._get_agent_control_part(is_left=is_left, key="arm")

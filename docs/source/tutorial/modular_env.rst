@@ -129,11 +129,12 @@ Configures a stereo camera system using :class:`StereoCameraCfg`:
    :language: python
    :lines: 120-130
 
-Defines scene illumination with controllable point lights:
+Defines scene illumination with configurable lights:
 
-- **Type**: Point light for realistic shadows
-- **Properties**: Configurable color, intensity, and position
-- **UID**: Named reference for event system manipulation
+- **Types**: Supports ``"point"``, ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, and ``"mesh"``.
+- **Global lights**: ``"sun"`` and ``"direction"`` are global scene lights (single instance, infinite distance).
+- **Properties**: Configurable color, intensity, position, and direction.
+- **UID**: Named reference for event system manipulation.
 
 **Rigid Objects**
 

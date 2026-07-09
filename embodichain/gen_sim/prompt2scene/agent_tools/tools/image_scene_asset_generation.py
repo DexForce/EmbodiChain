@@ -349,11 +349,13 @@ def generate_image_scene_assets(
                             )
                         )
                     )
-                    incomplete_raw_result = geometry_manager.generate_single_object_mesh(
-                        GeometryGenerationRequest(
-                            image_path=Path(incomplete_rgba),
-                            output_path=incomplete_debug_dir
-                            / f"{incomplete_table_id}_complete_raw.glb",
+                    incomplete_raw_result = (
+                        geometry_manager.generate_single_object_mesh(
+                            GeometryGenerationRequest(
+                                image_path=Path(incomplete_rgba),
+                                output_path=incomplete_debug_dir
+                                / f"{incomplete_table_id}_complete_raw.glb",
+                            )
                         )
                     )
                     incomplete_raw_glb = str(incomplete_raw_result.output_path)

@@ -218,10 +218,7 @@ def test_dual_ur5_template_uses_robotiq_arg2f_140_grippers() -> None:
         if component["component_type"] == "right_hand"
     )
 
-    assert (
-        left_hand["urdf_path"]
-        == "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
-    )
+    assert left_hand["urdf_path"] == "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
     assert right_hand["urdf_path"] == left_hand["urdf_path"]
     assert robot["urdf_cfg"]["fname"] == "dual_ur5_robotiq_arg2f_140_basket"
     assert robot["control_parts"]["left_eef"] == [
@@ -1778,9 +1775,9 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     assert _mesh_config_world_z_bounds(scaled_rigid_objects["pad"])[0] == pytest.approx(
         _mesh_config_world_z_bounds(rigid_objects["pad"])[0]
     )
-    assert _mesh_config_world_z_bounds(scaled_rigid_objects["fork"])[0] == pytest.approx(
-        _mesh_config_world_z_bounds(rigid_objects["fork"])[0]
-    )
+    assert _mesh_config_world_z_bounds(scaled_rigid_objects["fork"])[
+        0
+    ] == pytest.approx(_mesh_config_world_z_bounds(rigid_objects["fork"])[0])
     assert _mesh_config_world_z_bounds(scaled_background_objects["table"])[
         1
     ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["table"])[1])
@@ -4365,9 +4362,7 @@ def test_task_description_dual_auto_reassigns_after_scene_rotation(
     expected_arms = []
     for placement in manipulations:
         moved_object = rigid_objects[placement["moved_object"]]
-        expected_arms.append(
-            f"{_arm_side_for_position(moved_object['init_pos'])}_arm"
-        )
+        expected_arms.append(f"{_arm_side_for_position(moved_object['init_pos'])}_arm")
 
     assert active_arms == expected_arms
     assert active_arms == ["left_arm", "right_arm"]

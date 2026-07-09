@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from math import log
 from functools import wraps
 import os
@@ -653,7 +655,7 @@ class EmbodiedEnv(BaseEnv):
         if action_list is None:
             return None
 
-        expected_dim = int(np.prod(self.action_space.shape))
+        expected_dim = int(np.prod(self.single_action_space.shape))
 
         if isinstance(action_list, torch.Tensor):
             return self._normalize_demo_action_tensor(action_list, expected_dim)
@@ -673,10 +675,10 @@ class EmbodiedEnv(BaseEnv):
     def _normalize_demo_action_tensor(
         self, action: EnvAction | torch.Tensor, expected_dim: int
     ) -> EnvAction | torch.Tensor:
-        """Normalize one action tensor to the expected action dimension.
+        """Normalize one action tensor to the expected single-env action dimension.
 
         Conversion rule:
-        - If last-dim equals action-space dim, keep as-is.
+        - If last-dim equals single action-space dim, keep as-is.
         - If last-dim is larger, slice with ``active_joint_ids``.
         - If last-dim is smaller, raise ``ValueError``.
         """
@@ -699,7 +701,7 @@ class EmbodiedEnv(BaseEnv):
             return action
         if action_dim < expected_dim:
             raise ValueError(
-                "Demo action dim is smaller than action space dim and cannot be auto-converted. "
+                "Demo action dim is smaller than single action space dim and cannot be auto-converted. "
                 f"Got action dim={action_dim}, expected={expected_dim}."
             )
         return self._slice_action_with_active_joint_ids(
@@ -724,7 +726,7 @@ class EmbodiedEnv(BaseEnv):
                 continue
             if action_dim < expected_dim:
                 raise ValueError(
-                    f"Demo action TensorDict['{key}'] dim={action_dim} is smaller than expected action dim={expected_dim}."
+                    f"Demo action TensorDict['{key}'] dim={action_dim} is smaller than expected single action dim={expected_dim}."
                 )
             converted_action[key] = self._slice_action_with_active_joint_ids(
                 value, action_dim, expected_dim
@@ -741,7 +743,7 @@ class EmbodiedEnv(BaseEnv):
         """
         if len(self.active_joint_ids) != expected_dim:
             raise ValueError(
-                "Cannot convert demo action by active_joint_ids because their length does not match the action space dim. "
+                "Cannot convert demo action by active_joint_ids because their length does not match the single action space dim. "
                 f"len(active_joint_ids)={len(self.active_joint_ids)}, expected={expected_dim}."
             )
 

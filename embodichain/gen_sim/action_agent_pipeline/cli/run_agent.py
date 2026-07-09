@@ -70,10 +70,6 @@ def cli() -> None:
 
     args = parser.parse_args()
 
-    if args.num_envs != 1:
-        log_error(f"Currently only support num_envs=1, but got {args.num_envs}.")
-        raise SystemExit(1)
-
     env_cfg, gym_config, _ = build_env_cfg_from_args(args)
     agent_config = load_config(args.agent_config)
 
@@ -178,10 +174,17 @@ def _log_task_success(env: gymnasium.Env) -> bool | None:
         return None
 
     if isinstance(success, torch.Tensor):
-        success_value = bool(success.detach().cpu().flatten().all().item())
+        success_bool = success.detach().cpu().flatten().bool()
+        n_success = int(success_bool.sum().item())
+        n_total = int(success_bool.numel())
+        log_info(
+            f"Task success after execution: {n_success}/{n_total} environments succeeded.",
+            color="green",
+        )
+        success_value = bool(success_bool.all().item())
     else:
         success_value = bool(np.asarray(success).flatten().all())
-    log_info(f"Task success after execution: {success_value}", color="green")
+        log_info(f"Task success after execution: {success_value}", color="green")
     return success_value
 
 

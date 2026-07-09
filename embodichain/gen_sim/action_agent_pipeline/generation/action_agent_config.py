@@ -825,9 +825,7 @@ def _build_arrangement_line_bundle(
                     )
                     or _source_body_scale(obj)
                 ),
-                max_convex_hull_num=(
-                    16 if obj.source_uid in moved_source_uids else 1
-                ),
+                max_convex_hull_num=(16 if obj.source_uid in moved_source_uids else 1),
                 mesh_normalizer=mesh_normalizer,
             )
             for obj in dynamic_rigid_objects
@@ -1006,9 +1004,7 @@ def _build_stacking_bundle(
                     )
                     or _source_body_scale(obj)
                 ),
-                max_convex_hull_num=(
-                    16 if obj.source_uid in moved_source_uids else 1
-                ),
+                max_convex_hull_num=(16 if obj.source_uid in moved_source_uids else 1),
                 mesh_normalizer=mesh_normalizer,
             )
             for obj in dynamic_rigid_objects
