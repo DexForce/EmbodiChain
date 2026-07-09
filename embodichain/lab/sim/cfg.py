@@ -1583,10 +1583,40 @@ class ArticulationCfg(ObjectBaseCfg):
     """Whether to enable or disable self-collisions."""
 
     init_qpos: Union[torch.Tensor, np.ndarray, Sequence[float]] = None
-    """Initial joint positions of the articulation. 
-    
+    """Initial joint positions of the articulation.
+
     If None, the joint positions will be set to zero.
     If provided, it should be a array of shape (num_joints,).
+    """
+
+    qpos_limits: Union[
+        torch.Tensor, np.ndarray, Sequence[float], Dict[str, List[float]], None
+    ] = None
+    """Override joint position limits of the articulation.
+
+    If None, the joint position limits from the asset file (URDF/USD) are used.
+    If provided as a tensor/array of shape (num_joints, 2), it is applied to all
+    joints in the order of ``joint_names``.
+    If provided as a dictionary, keys are joint names or regular expressions and
+    values are ``[min, max]`` limits.
+
+    Unlike :attr:`user_qpos_limits`, this field replaces the asset limits and
+    can be used to expand the allowed range. When both are provided,
+    ``qpos_limits`` is applied first to set the baseline and ``user_qpos_limits``
+    further restricts that baseline.
+    """
+
+    user_qpos_limits: Union[
+        torch.Tensor, np.ndarray, Sequence[float], Dict[str, List[float]], None
+    ] = None
+    """User-defined joint position limits of the articulation.
+
+    If None, the joint position limits from the asset file (URDF/USD) are used.
+    If provided as a tensor/array of shape (num_joints, 2), it is applied to all
+    joints in the order of ``joint_names``.
+    If provided as a dictionary, keys are joint names or regular expressions and
+    values are ``[min, max]`` limits. The user limits are intersected with the
+    current baseline limits, so they can only further restrict the allowed range.
     """
 
     sleep_threshold: float = 0.005

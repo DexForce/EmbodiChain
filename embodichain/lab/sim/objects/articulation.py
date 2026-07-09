@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -38,7 +40,10 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesOverrideCfg,
 )
 from dexsim.types import PhysicalAttr
-from embodichain.utils.string import resolve_matching_names
+from embodichain.utils.string import (
+    resolve_matching_names,
+    resolve_matching_names_values,
+)
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -157,6 +162,9 @@ class ArticulationData:
             dtype=torch.float32,
             device=self.device,
         )
+        # Keep a copy of the asset limits so user limits can be reset later.
+        self._original_qpos_limits = self._qpos_limits.clone()
+        self._user_qpos_limits = self._qpos_limits.clone()
         self._qvel_limits = torch.as_tensor(
             np.array([entity.get_joint_velocity_limit() for entity in self.entities]),
             dtype=torch.float32,
@@ -513,6 +521,37 @@ class ArticulationData:
         """
         return self._qpos_limits
 
+    def _recompute_qpos_limits(self) -> torch.Tensor:
+        """Recompute effective qpos limits by intersecting user limits with asset limits.
+
+        The user limits are clamped to the asset limits and then intersected with them.
+        Inverted user ranges (lower > upper) are swapped with a warning.
+
+        Returns:
+            torch.Tensor: The updated effective qpos limits with shape (N, dof, 2).
+        """
+        lower = torch.clamp(
+            self._user_qpos_limits[..., 0],
+            self._original_qpos_limits[..., 0],
+            self._original_qpos_limits[..., 1],
+        )
+        upper = torch.clamp(
+            self._user_qpos_limits[..., 1],
+            self._original_qpos_limits[..., 0],
+            self._original_qpos_limits[..., 1],
+        )
+        invalid = lower > upper
+        if invalid.any():
+            logger.log_warning(
+                f"User qpos limits contain inverted ranges for "
+                f"{invalid.sum().item()} (env, joint) entries; swapping min/max."
+            )
+            new_lower = torch.where(invalid, upper, lower)
+            new_upper = torch.where(invalid, lower, upper)
+            lower, upper = new_lower, new_upper
+        self._qpos_limits = torch.stack((lower, upper), dim=-1)
+        return self._qpos_limits
+
     @property
     def qvel_limits(self) -> torch.Tensor:
         """Get the joint velocity limits of the articulation.
@@ -670,6 +709,39 @@ class Articulation(BatchEntity):
             usd_drive_pros.max_velocity = (
                 self.default_joint_max_velocity[0].cpu().numpy().tolist()
             )
+
+        # Apply configured qpos limits if provided. This replaces the asset
+        # limits as the baseline and allows expanding the allowed range.
+        if self.cfg.qpos_limits is not None:
+            if isinstance(self.cfg.qpos_limits, dict):
+                indices, _, values = resolve_matching_names_values(
+                    self.cfg.qpos_limits, self.joint_names
+                )
+                local_joint_ids = torch.as_tensor(
+                    indices, dtype=torch.long, device=self.device
+                )
+                values_tensor = torch.as_tensor(
+                    values, dtype=torch.float32, device=self.device
+                ).unsqueeze(0)
+                values_tensor = values_tensor.expand(self.num_instances, -1, -1)
+                self.set_qpos_limits(values_tensor, joint_ids=local_joint_ids)
+            else:
+                qpos_limits = torch.as_tensor(
+                    self.cfg.qpos_limits, dtype=torch.float32, device=self.device
+                )
+                if qpos_limits.dim() == 2:
+                    qpos_limits = qpos_limits.unsqueeze(0).expand(
+                        self.num_instances, -1, -1
+                    )
+                self.set_qpos_limits(qpos_limits)
+            # Treat the configured limits as the new baseline so that user
+            # limits and reset operate relative to them.
+            self.body_data._original_qpos_limits = self.body_data.qpos_limits.clone()
+            self.body_data._user_qpos_limits = self.body_data.qpos_limits.clone()
+
+        # Apply user-defined qpos limits if provided in the configuration.
+        if self.cfg.user_qpos_limits is not None:
+            self.set_user_qpos_limits(self.cfg.user_qpos_limits)
 
         self.pk_chain = None
         if self.cfg.build_pk_chain:
@@ -1069,7 +1141,16 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Get joint position limits for selected environments and joints."""
+        """Get joint position limits for selected environments and joints.
+
+        Args:
+            joint_ids: Joint indices to query. If None, all joints are queried.
+            env_ids: Environment indices to query. If None, all environments are
+                queried.
+
+        Returns:
+            torch.Tensor: Joint position limits with shape (num_envs, num_joints, 2).
+        """
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         return self.body_data.qpos_limits[local_env_ids][:, local_joint_ids, :]
@@ -1115,7 +1196,14 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set joint position limits for selected environments and joints."""
+        """Set joint position limits for selected environments and joints.
+
+        Args:
+            qpos_limits: Joint position limits with shape (num_envs, num_joints, 2).
+                When a single environment is selected, a (num_joints, 2) tensor is also accepted.
+            joint_ids: Joint indices to update. If None, all joints are updated.
+            env_ids: Environment indices to update. If None, all environments are updated.
+        """
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         qpos_limits = self._coerce_pair_limit_batch(
@@ -1125,16 +1213,21 @@ class Articulation(BatchEntity):
             local_joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
         )
 
+        failed_envs = []
         for i, env_idx in enumerate(local_env_ids.detach().cpu().tolist()):
             result = self._entities[env_idx].set_joint_position_limits(
                 qpos_limits[i].detach().cpu().numpy(),
                 joint_ids_np,
             )
             if result == -1:
-                logger.log_error(
-                    f"set_joint_position_limits failed for env {env_idx} and joint_ids {joint_ids_np.tolist()}."
-                )
+                failed_envs.append(env_idx)
+                continue
             self.body_data.qpos_limits[env_idx, local_joint_ids, :] = qpos_limits[i]
+
+        if failed_envs:
+            logger.log_error(
+                f"set_joint_position_limits failed for envs {failed_envs} and joint_ids {joint_ids_np.tolist()}."
+            )
 
     def set_qvel_limits(
         self,
@@ -1142,7 +1235,14 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set joint velocity limits for selected environments and joints."""
+        """Set joint velocity limits for selected environments and joints.
+
+        Args:
+            qvel_limits: Joint velocity limits with shape (num_envs, num_joints).
+                When a single environment is selected, a (num_joints,) tensor is also accepted.
+            joint_ids: Joint indices to update. If None, all joints are updated.
+            env_ids: Environment indices to update. If None, all environments are updated.
+        """
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         qvel_limits = self._coerce_scalar_limit_batch(
@@ -1152,16 +1252,21 @@ class Articulation(BatchEntity):
             local_joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
         )
 
+        failed_envs = []
         for i, env_idx in enumerate(local_env_ids.detach().cpu().tolist()):
             result = self._entities[env_idx].set_joint_velocity_limit(
                 qvel_limits[i].detach().cpu().numpy(),
                 joint_ids_np,
             )
             if result == -1:
-                logger.log_error(
-                    f"set_joint_velocity_limit failed for env {env_idx} and joint_ids {joint_ids_np.tolist()}."
-                )
+                failed_envs.append(env_idx)
+                continue
             self.body_data.qvel_limits[env_idx, local_joint_ids] = qvel_limits[i]
+
+        if failed_envs:
+            logger.log_error(
+                f"set_joint_velocity_limit failed for envs {failed_envs} and joint_ids {joint_ids_np.tolist()}."
+            )
 
     def set_qf_limits(
         self,
@@ -1169,7 +1274,14 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set joint effort limits for selected environments and joints."""
+        """Set joint effort limits for selected environments and joints.
+
+        Args:
+            qf_limits: Joint effort limits with shape (num_envs, num_joints).
+                When a single environment is selected, a (num_joints,) tensor is also accepted.
+            joint_ids: Joint indices to update. If None, all joints are updated.
+            env_ids: Environment indices to update. If None, all environments are updated.
+        """
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         qf_limits = self._coerce_scalar_limit_batch(
@@ -1179,16 +1291,131 @@ class Articulation(BatchEntity):
             local_joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
         )
 
+        failed_envs = []
         for i, env_idx in enumerate(local_env_ids.detach().cpu().tolist()):
             result = self._entities[env_idx].set_joint_effort_limit(
                 qf_limits[i].detach().cpu().numpy(),
                 joint_ids_np,
             )
             if result == -1:
-                logger.log_error(
-                    f"set_joint_effort_limit failed for env {env_idx} and joint_ids {joint_ids_np.tolist()}."
-                )
+                failed_envs.append(env_idx)
+                continue
             self.body_data.qf_limits[env_idx, local_joint_ids] = qf_limits[i]
+
+        if failed_envs:
+            logger.log_error(
+                f"set_joint_effort_limit failed for envs {failed_envs} and joint_ids {joint_ids_np.tolist()}."
+            )
+
+    def set_user_qpos_limits(
+        self,
+        qpos_limits: (
+            torch.Tensor | np.ndarray | Sequence[float] | Dict[str, List[float]]
+        ),
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set user-defined joint position limits.
+
+        The user limits are intersected with the current baseline limits (asset
+        limits by default, or :attr:`ArticulationCfg.qpos_limits` when that field
+        is provided), so they can only further restrict the allowed range.
+        Inverted ranges are swapped with a warning.
+
+        Args:
+            qpos_limits: Joint position limits. Accepted forms:
+                - Tensor/array of shape (num_envs, num_joints, 2) or
+                  (num_joints, 2) for a single environment.
+                - Dictionary mapping joint names or regex patterns to
+                  ``[min, max]`` limits.
+            joint_ids: Joint indices to update. If None, all joints are updated.
+                Ignored when ``qpos_limits`` is a dictionary.
+            env_ids: Environment indices to update. If None, all environments are
+                updated.
+        """
+        local_env_ids = self._resolve_env_ids(env_ids)
+
+        if isinstance(qpos_limits, dict):
+            if joint_ids is not None:
+                logger.log_warning(
+                    "`joint_ids` is ignored when `qpos_limits` is a dictionary."
+                )
+            indices, _, values = resolve_matching_names_values(
+                qpos_limits, self.joint_names
+            )
+            values_tensor = torch.as_tensor(
+                values, dtype=torch.float32, device=self.device
+            )
+            local_joint_ids = torch.as_tensor(
+                indices, dtype=torch.long, device=self.device
+            )
+            self.body_data._user_qpos_limits[
+                local_env_ids[:, None], local_joint_ids, :
+            ] = values_tensor.unsqueeze(0)
+        else:
+            local_joint_ids = self._resolve_joint_ids(joint_ids)
+            qpos_limits = self._coerce_pair_limit_batch(
+                qpos_limits, local_env_ids, local_joint_ids
+            )
+            self.body_data._user_qpos_limits[
+                local_env_ids[:, None], local_joint_ids, :
+            ] = qpos_limits
+
+        self.body_data._recompute_qpos_limits()
+        self.set_qpos_limits(
+            self.body_data.qpos_limits[local_env_ids][:, local_joint_ids, :],
+            joint_ids=local_joint_ids,
+            env_ids=local_env_ids,
+        )
+
+    def get_user_qpos_limits(
+        self,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get the user-defined joint position limits.
+
+        Args:
+            joint_ids: Joint indices to query. If None, all joints are queried.
+            env_ids: Environment indices to query. If None, all environments are
+                queried.
+
+        Returns:
+            torch.Tensor: User qpos limits with shape (num_envs, num_joints, 2).
+        """
+        local_env_ids = self._resolve_env_ids(env_ids)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
+        return self.body_data._user_qpos_limits[local_env_ids][:, local_joint_ids, :]
+
+    def reset_qpos_limits(
+        self,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Reset joint position limits to the original baseline limits.
+
+        The baseline is the asset limits by default, or
+        :attr:`ArticulationCfg.qpos_limits` when that field is provided.
+
+        Args:
+            joint_ids: Joint indices to reset. If None, all joints are reset.
+            env_ids: Environment indices to reset. If None, all environments are
+                reset.
+        """
+        local_env_ids = self._resolve_env_ids(env_ids)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
+        original_limits = self.body_data._original_qpos_limits[local_env_ids][
+            :, local_joint_ids, :
+        ]
+        self.body_data._user_qpos_limits[local_env_ids[:, None], local_joint_ids, :] = (
+            original_limits
+        )
+        self.body_data._recompute_qpos_limits()
+        self.set_qpos_limits(
+            original_limits,
+            joint_ids=local_joint_ids,
+            env_ids=local_env_ids,
+        )
 
     def set_qpos(
         self,
@@ -1255,15 +1482,8 @@ class Articulation(BatchEntity):
             )
 
             # Always fetch the latest data to avoid stale values
-            if target:
-                qpos_set = self.body_data._target_qpos
-            else:
-                qpos_set = self.body_data._qpos
+            qpos_set = self.body_data._target_qpos if target else self.body_data._qpos
 
-            if not isinstance(local_env_ids, torch.Tensor):
-                local_env_ids = torch.as_tensor(
-                    local_env_ids, dtype=torch.long, device=self.device
-                )
             indices = self.body_data.gpu_indices[local_env_ids]
             qpos_set[local_env_ids[:, None], local_joint_ids] = qpos
             self._ps.gpu_apply_joint_data(
@@ -1288,7 +1508,16 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Get joint velocity limits for selected environments and joints."""
+        """Get joint velocity limits for selected environments and joints.
+
+        Args:
+            joint_ids: Joint indices to query. If None, all joints are queried.
+            env_ids: Environment indices to query. If None, all environments are
+                queried.
+
+        Returns:
+            torch.Tensor: Joint velocity limits with shape (num_envs, num_joints).
+        """
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         return self.body_data.qvel_limits[local_env_ids][:, local_joint_ids]
@@ -1407,7 +1636,16 @@ class Articulation(BatchEntity):
         joint_ids: Sequence[int] | torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Get joint effort limits for selected environments and joints."""
+        """Get joint effort limits for selected environments and joints.
+
+        Args:
+            joint_ids: Joint indices to query. If None, all joints are queried.
+            env_ids: Environment indices to query. If None, all environments are
+                queried.
+
+        Returns:
+            torch.Tensor: Joint effort limits with shape (num_envs, num_joints).
+        """
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         return self.body_data.qf_limits[local_env_ids][:, local_joint_ids]
@@ -2224,3 +2462,6 @@ class Articulation(BatchEntity):
             arenas = [env]
         for i, entity in enumerate(self._entities):
             arenas[i].remove_articulation(entity)
+
+
+__all__ = ["ArticulationData", "Articulation"]

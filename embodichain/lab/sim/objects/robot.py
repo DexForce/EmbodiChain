@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 
@@ -172,8 +174,9 @@ class Robot(Articulation):
     def get_qpos_limits(
         self,
         name: str | None = None,
-        joint_ids: Sequence[int] | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the joint position limits (qpos) of the robot for a specific control part.
 
@@ -181,8 +184,9 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qpos limits for.
-            joint_ids (Sequence[int] | None): Joint indices to get the qpos limits for.
-            env_ids (Sequence[int] | None): The environment ids to get the qpos limits for. If None, all environments are used.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to get the qpos limits for. If None, all environments are used.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to get the qpos limits for.
+                Must be passed as a keyword argument.
 
         Returns:
             torch.Tensor: Joint position limits with shape (N, dof, 2), where N is the number of environments.
@@ -196,8 +200,9 @@ class Robot(Articulation):
     def get_qvel_limits(
         self,
         name: str | None = None,
-        joint_ids: Sequence[int] | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the joint velocity limits (qvel) of the robot for a specific control part.
 
@@ -205,8 +210,9 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qvel limits for.
-            joint_ids (Sequence[int] | None): Joint indices to get the qvel limits for.
-            env_ids (Sequence[int] | None): The environment ids to get the qvel limits for. If None, all environments are used.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to get the qvel limits for. If None, all environments are used.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to get the qvel limits for.
+                Must be passed as a keyword argument.
 
         Returns:
             torch.Tensor: Joint velocity limits with shape (N, dof), where N is the number of environments.
@@ -220,8 +226,9 @@ class Robot(Articulation):
     def get_qf_limits(
         self,
         name: str | None = None,
-        joint_ids: Sequence[int] | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the joint effort limits (qf) of the robot for a specific control part.
 
@@ -229,8 +236,9 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qf limits for.
-            joint_ids (Sequence[int] | None): Joint indices to get the qf limits for.
-            env_ids (Sequence[int] | None): The environment ids to get the qf limits for. If None, all environments are used.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to get the qf limits for. If None, all environments are used.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to get the qf limits for.
+                Must be passed as a keyword argument.
 
         Returns:
             torch.Tensor: Joint effort limits with shape (N, dof), where N is the number of environments.
@@ -245,10 +253,19 @@ class Robot(Articulation):
         self,
         qpos_limits: torch.Tensor,
         name: str | None = None,
-        joint_ids: Sequence[int] | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set the joint position limits (qpos) of the robot."""
+        """Set the joint position limits (qpos) of the robot.
+
+        Args:
+            qpos_limits: Joint position limits with shape (N, num_joints, 2).
+            name (str | None): The name of the control part to set the qpos limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to set the qpos limits for.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to set the qpos limits for.
+                Must be passed as a keyword argument; ignored when ``name`` is provided.
+        """
         resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
         super().set_qpos_limits(
             qpos_limits=qpos_limits,
@@ -260,10 +277,19 @@ class Robot(Articulation):
         self,
         qvel_limits: torch.Tensor,
         name: str | None = None,
-        joint_ids: Sequence[int] | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set the joint velocity limits (qvel) of the robot."""
+        """Set the joint velocity limits (qvel) of the robot.
+
+        Args:
+            qvel_limits: Joint velocity limits with shape (N, num_joints).
+            name (str | None): The name of the control part to set the qvel limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to set the qvel limits for.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to set the qvel limits for.
+                Must be passed as a keyword argument; ignored when ``name`` is provided.
+        """
         resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
         super().set_qvel_limits(
             qvel_limits=qvel_limits,
@@ -275,13 +301,108 @@ class Robot(Articulation):
         self,
         qf_limits: torch.Tensor,
         name: str | None = None,
-        joint_ids: Sequence[int] | None = None,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set the joint effort limits (qf) of the robot."""
+        """Set the joint effort limits (qf) of the robot.
+
+        Args:
+            qf_limits: Joint effort limits with shape (N, num_joints).
+            name (str | None): The name of the control part to set the qf limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to set the qf limits for.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to set the qf limits for.
+                Must be passed as a keyword argument; ignored when ``name`` is provided.
+        """
         resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
         super().set_qf_limits(
             qf_limits=qf_limits,
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
+
+    def set_user_qpos_limits(
+        self,
+        qpos_limits: (
+            torch.Tensor | np.ndarray | Sequence[float] | Dict[str, List[float]]
+        ),
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set user-defined joint position limits for the robot.
+
+        The user limits are intersected with the asset limits, so they can only
+        further restrict the allowed range.
+
+        Args:
+            qpos_limits: Joint position limits. Accepted forms:
+                - Tensor/array of shape (num_envs, num_joints, 2) or
+                  (num_joints, 2) for a single environment.
+                - Dictionary mapping joint names or regex patterns to
+                  ``[min, max]`` limits.
+            name (str | None): The name of the control part to set the user qpos
+                limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to
+                update.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to
+                update. Must be passed as a keyword argument; ignored when
+                ``name`` is provided.
+        """
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        super().set_user_qpos_limits(
+            qpos_limits=qpos_limits,
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
+
+    def get_user_qpos_limits(
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Get the user-defined joint position limits for the robot.
+
+        Args:
+            name (str | None): The name of the control part to get the user qpos
+                limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to
+                query.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to
+                query. Must be passed as a keyword argument; ignored when
+                ``name`` is provided.
+
+        Returns:
+            torch.Tensor: User qpos limits with shape (num_envs, num_joints, 2).
+        """
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        return super().get_user_qpos_limits(
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
+
+    def reset_qpos_limits(
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Reset joint position limits to the original asset limits.
+
+        Args:
+            name (str | None): The name of the control part to reset.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to
+                reset.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to
+                reset. Must be passed as a keyword argument; ignored when
+                ``name`` is provided.
+        """
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        super().reset_qpos_limits(
             joint_ids=resolved_joint_ids,
             env_ids=env_ids,
         )
@@ -1169,3 +1290,6 @@ class Robot(Articulation):
 
     def destroy(self) -> None:
         return super().destroy()
+
+
+__all__ = ["ControlGroup", "Robot"]

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
@@ -729,6 +731,189 @@ class BaseArticulationTest:
         assert torch.allclose(
             clamped_qpos, expected_qpos, atol=1e-5
         ), f"FAIL: qpos did not clamp to the per-env updated limits: {clamped_qpos.tolist()}"
+
+    def test_user_qpos_limits_restrict_set_qpos(self):
+        """Test user qpos limits further restrict the asset limits."""
+        joint_ids = [0, self.art.dof - 1] if self.art.dof >= 2 else [0]
+        env_ids = [0, 1] if NUM_ARENAS >= 2 else [0]
+
+        asset_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        # Tighten the limits by 0.05 on each side (clamped to asset range).
+        user_limits = asset_limits.clone()
+        margin = 0.05
+        user_limits[..., 0] = torch.clamp(
+            user_limits[..., 0] + margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+        user_limits[..., 1] = torch.clamp(
+            user_limits[..., 1] - margin,
+            asset_limits[..., 0],
+            asset_limits[..., 1],
+        )
+
+        self.art.set_user_qpos_limits(user_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        effective_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        )
+        assert torch.allclose(
+            effective_limits, user_limits, atol=1e-5
+        ), "FAIL: effective limits do not match user limits"
+
+        # Requested qpos exceeds user limits but is within asset limits.
+        requested_qpos = asset_limits[..., 1].clone()
+        self.art.set_qpos(
+            requested_qpos,
+            joint_ids=joint_ids,
+            env_ids=env_ids,
+            target=False,
+        )
+        clamped_qpos = self.art.get_qpos()[env_ids][:, joint_ids]
+        assert torch.allclose(
+            clamped_qpos, user_limits[..., 1], atol=1e-5
+        ), f"FAIL: qpos did not clamp to user upper limits: {clamped_qpos.tolist()}"
+
+    def test_user_qpos_limits_cannot_exceed_asset_limits(self):
+        """Test user qpos limits are clamped to the asset limits."""
+        joint_ids = [0]
+        env_ids = [0]
+        asset_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+
+        # User limits wider than asset limits should be clamped.
+        user_limits = asset_limits.clone()
+        user_limits[..., 0] -= 1.0
+        user_limits[..., 1] += 1.0
+
+        self.art.set_user_qpos_limits(user_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        effective_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        )
+        assert torch.allclose(
+            effective_limits, asset_limits, atol=1e-5
+        ), "FAIL: user limits wider than asset limits were not clamped"
+
+    def test_reset_qpos_limits_restores_asset_limits(self):
+        """Test reset_qpos_limits restores the original asset limits."""
+        joint_ids = [0]
+        env_ids = [0]
+        asset_limits = self.art.get_qpos_limits(
+            joint_ids=joint_ids, env_ids=env_ids
+        ).clone()
+
+        user_limits = asset_limits.clone()
+        user_limits[..., 0] += 0.02
+        user_limits[..., 1] -= 0.02
+        self.art.set_user_qpos_limits(user_limits, joint_ids=joint_ids, env_ids=env_ids)
+
+        self.art.reset_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        restored_limits = self.art.get_qpos_limits(joint_ids=joint_ids, env_ids=env_ids)
+        assert torch.allclose(
+            restored_limits, asset_limits, atol=1e-5
+        ), "FAIL: reset_qpos_limits did not restore asset limits"
+
+    def test_user_qpos_limits_from_cfg(self):
+        """Test user qpos limits can be set from ArticulationCfg."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        cfg = ArticulationCfg(
+            uid="drawer_user_limits",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            user_qpos_limits={".*": [-0.05, 0.05]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        limits = art.get_qpos_limits()
+        assert torch.all(
+            limits[..., 0] >= -0.0501
+        ), "FAIL: cfg user_qpos_limits lower bound not applied"
+        assert torch.all(
+            limits[..., 1] <= 0.0501
+        ), "FAIL: cfg user_qpos_limits upper bound not applied"
+
+    def test_qpos_limits_from_cfg_can_expand(self):
+        """Test qpos_limits from ArticulationCfg can expand joint limits."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        joint_name = self.art.joint_names[0]
+        asset_limits = self.art.get_qpos_limits()[:, 0, :]
+        expanded_lower = asset_limits[:, 0].min().item() - 0.1
+        expanded_upper = asset_limits[:, 1].max().item() + 0.1
+
+        cfg = ArticulationCfg(
+            uid="drawer_expanded_limits",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            qpos_limits={joint_name: [expanded_lower, expanded_upper]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        limits = art.get_qpos_limits()[:, 0, :]
+        assert torch.allclose(
+            limits,
+            torch.tensor(
+                [expanded_lower, expanded_upper],
+                device=self.sim.device,
+                dtype=torch.float32,
+            ),
+            atol=1e-4,
+        ), f"FAIL: cfg qpos_limits not applied: {limits.tolist()}"
+
+        # set_qpos should clamp to the expanded limits, not the asset limits.
+        requested_qpos = torch.full(
+            (NUM_ARENAS, 1), expanded_upper, device=self.sim.device
+        )
+        art.set_qpos(requested_qpos, joint_ids=[0], target=False)
+        actual_qpos = art.get_qpos()[:, 0]
+        assert torch.allclose(
+            actual_qpos,
+            torch.full_like(actual_qpos, expanded_upper),
+            atol=1e-4,
+        ), f"FAIL: set_qpos did not use expanded limits: {actual_qpos.tolist()}"
+
+    def test_qpos_limits_and_user_qpos_limits_from_cfg(self):
+        """Test qpos_limits baseline and user_qpos_limits restriction both work."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        joint_name = self.art.joint_names[0]
+        cfg = ArticulationCfg(
+            uid="drawer_baseline_and_user",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            qpos_limits={joint_name: [-0.5, 0.5]},
+            user_qpos_limits={joint_name: [-0.1, 0.1]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        limits = art.get_qpos_limits()[:, 0, :]
+        assert torch.allclose(
+            limits,
+            torch.tensor([-0.1, 0.1], device=self.sim.device, dtype=torch.float32),
+            atol=1e-4,
+        ), f"FAIL: user_qpos_limits did not restrict cfg baseline: {limits.tolist()}"
+
+    def test_reset_qpos_limits_restores_cfg_baseline(self):
+        """Test reset_qpos_limits restores limits to cfg.qpos_limits baseline."""
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        joint_name = self.art.joint_names[0]
+        cfg = ArticulationCfg(
+            uid="drawer_cfg_baseline",
+            fpath=get_data_path(ART_PATH),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+            qpos_limits={joint_name: [-0.5, 0.5]},
+        )
+        art: Articulation = self.sim.add_articulation(cfg=cfg)
+        cfg_baseline = art.get_qpos_limits()[:, 0, :].clone()
+
+        art.set_user_qpos_limits({joint_name: [-0.1, 0.1]})
+        assert not torch.allclose(
+            art.get_qpos_limits()[:, 0, :], cfg_baseline, atol=1e-5
+        ), "FAIL: user_qpos_limits did not change effective limits"
+
+        art.reset_qpos_limits(joint_ids=[0])
+        assert torch.allclose(
+            art.get_qpos_limits()[:, 0, :], cfg_baseline, atol=1e-5
+        ), f"FAIL: reset_qpos_limits did not restore cfg baseline: {art.get_qpos_limits()[:, 0, :].tolist()}"
 
     def teardown_method(self):
         """Clean up resources after each test method."""
