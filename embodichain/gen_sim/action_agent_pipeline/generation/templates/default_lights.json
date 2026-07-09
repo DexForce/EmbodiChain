@@ -1,12 +1,4 @@
 {
   "direct": [
-    {
-      "uid": "main_light",
-      "light_type": "point",
-      "color": [1.0, 1.0, 1.0],
-      "intensity": 40.0,
-      "init_pos": [0.0, -0.4, 2.2],
-      "radius": 10.0
-    }
   ]
 }
