@@ -731,14 +731,34 @@ def _execute_atomic_action_result(
         target=target,
         state=state,
     )
-    success = result.success
-    if isinstance(success, torch.Tensor):
-        success = bool(torch.all(success).item())
-    if not success:
-        raise RuntimeError(
-            f"Atomic action failed: atomic_action_class={spec.atomic_action_class}, "
-            f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
-        )
+    failed_mask = _failed_env_mask(result.success, result.trajectory.shape[0])
+    if failed_mask is not None:
+        n_failed = int(failed_mask.sum().item())
+        n_total = result.trajectory.shape[0]
+        if n_failed == n_total:
+            raise RuntimeError(
+                f"Atomic action failed in all environments: "
+                f"atomic_action_class={spec.atomic_action_class}, "
+                f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
+            )
+        if n_failed > 0:
+            log_warning(
+                f"Atomic action failed in {n_failed}/{n_total} environment(s): "
+                f"atomic_action_class={spec.atomic_action_class}, "
+                f"robot_name={spec.robot_name}, target={_target_summary(spec)}. "
+                "Padding failed environment trajectories with initial joint positions."
+            )
+            full_joint_ids = list(range(state.last_qpos.shape[-1]))
+            result.trajectory = _pad_failed_trajectory_with_init_qpos(
+                result.trajectory, state, full_joint_ids, failed_mask
+            )
+            result.next_state.last_qpos = result.next_state.last_qpos.clone()
+            device = result.next_state.last_qpos.device
+            failed_on_device = failed_mask.to(device=device)
+            result.next_state.last_qpos[failed_on_device] = state.last_qpos[
+                failed_on_device
+            ]
+
     if spec.atomic_action_class == "CoordinatedPickment":
         return _executed_coordinated_atomic_action(env, spec, result)
     if spec.atomic_action_class == "MoveJoints":
@@ -3520,6 +3540,83 @@ def _stabilize_affordance_object(
         env.sim.update(step=update_steps)
     if hasattr(target_obj, "clear_dynamics"):
         target_obj.clear_dynamics()
+
+
+def _failed_env_mask(
+    success: bool | torch.Tensor | np.ndarray, n_envs: int
+) -> torch.Tensor | None:
+    """Return a boolean mask of failed environments, or None if all succeeded.
+
+    Args:
+        success: Per-action success flag. May be a scalar bool or a per-environment
+            boolean tensor/array of shape ``(n_envs,)``.
+        n_envs: Number of environments in the batched action.
+
+    Returns:
+        ``None`` when every environment succeeded. Otherwise a boolean tensor of
+        shape ``(n_envs,)`` with ``True`` entries for failed environments.
+    """
+    if isinstance(success, torch.Tensor):
+        if success.ndim == 0:
+            success = bool(success.item())
+        else:
+            if success.shape[0] != n_envs:
+                raise ValueError(
+                    f"success tensor has {success.shape[0]} entries but "
+                    f"trajectory has {n_envs} environments."
+                )
+            return ~success.bool()
+    if isinstance(success, np.ndarray):
+        if success.ndim == 0:
+            success = bool(success.item())
+        else:
+            if success.shape[0] != n_envs:
+                raise ValueError(
+                    f"success array has {success.shape[0]} entries but "
+                    f"trajectory has {n_envs} environments."
+                )
+            return torch.from_numpy(~success.astype(bool))
+    return None if bool(success) else torch.ones(n_envs, dtype=torch.bool)
+
+
+def _pad_failed_trajectory_with_init_qpos(
+    trajectory: torch.Tensor,
+    state: WorldState,
+    joint_ids: list[int],
+    failed_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Replace failed-environment trajectories with their initial joint positions.
+
+    Args:
+        trajectory: Batched trajectory tensor of shape ``(n_envs, T, D)``.
+        state: World state whose ``last_qpos`` field supplies the initial positions.
+        joint_ids: Indices into ``state.last_qpos`` that correspond to the ``D``
+            trajectory columns.
+        failed_mask: Boolean mask of shape ``(n_envs,)`` with ``True`` for failed
+            environments.
+
+    Returns:
+        A cloned trajectory where failed environments are replaced by a constant
+        sequence of their initial joint positions.
+    """
+    if not failed_mask.any():
+        return trajectory
+    device = trajectory.device
+    joint_ids_t = torch.as_tensor(joint_ids, dtype=torch.long, device=device)
+    init_qpos = state.last_qpos[:, joint_ids_t].to(
+        device=device, dtype=trajectory.dtype
+    )
+    n_failed = int(failed_mask.sum().item())
+    padded = trajectory.clone()
+    failed_on_device = failed_mask.to(device=device)
+    padded[failed_on_device] = (
+        init_qpos[failed_on_device].unsqueeze(1).repeat(1, trajectory.shape[1], 1)
+    )
+    log_info(
+        f"Padded {n_failed} failed environment(s) with initial joint positions.",
+        color="yellow",
+    )
+    return padded
 
 
 def _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids):

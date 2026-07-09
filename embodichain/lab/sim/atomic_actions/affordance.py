@@ -237,9 +237,7 @@ class AntipodalAffordance(Affordance):
         obj_pose = obj_pose.to(device=device, dtype=torch.float32)
         centers_world = grasp_poses[:, :3, 3]
         centers_local = (centers_world - obj_pose[:3, 3]) @ obj_pose[:3, :3]
-        height_fraction = (
-            centers_local[:, long_axis_index] - axis_min
-        ) / long_extent
+        height_fraction = (centers_local[:, long_axis_index] - axis_min) / long_extent
 
         lower, upper = _preferred_height_fraction(grasp_pose_bias)
         interval = max(float(upper - lower), 1e-6)
@@ -267,18 +265,13 @@ class AntipodalAffordance(Affordance):
 
 def _is_upright_bottle_side_grasp_bias(value: Any) -> bool:
     return (
-        isinstance(value, Mapping)
-        and value.get("mode") == "upright_bottle_side_grasp"
+        isinstance(value, Mapping) and value.get("mode") == "upright_bottle_side_grasp"
     )
 
 
 def _preferred_height_fraction(value: Mapping[str, Any]) -> tuple[float, float]:
     raw = value.get("preferred_height_fraction", [0.35, 0.75])
-    if (
-        isinstance(raw, (str, bytes))
-        or not isinstance(raw, Sequence)
-        or len(raw) != 2
-    ):
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence) or len(raw) != 2:
         return 0.35, 0.75
     lower = min(max(float(raw[0]), 0.0), 1.0)
     upper = min(max(float(raw[1]), 0.0), 1.0)

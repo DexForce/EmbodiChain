@@ -254,9 +254,9 @@ def _objects_collinear(env, spec: Mapping[str, Any]) -> torch.Tensor:
         raise ValueError("objects_collinear axis must be 'x' or 'y'.")
     perpendicular_axis = 1 - line_axis
     perpendicular_values = positions[:, :, perpendicular_axis]
-    spread = perpendicular_values.max(dim=1).values - perpendicular_values.min(
-        dim=1
-    ).values
+    spread = (
+        perpendicular_values.max(dim=1).values - perpendicular_values.min(dim=1).values
+    )
     return spread <= float(spec.get("tolerance", 0.02))
 
 
@@ -276,9 +276,7 @@ def _objects_ordered(env, spec: Mapping[str, Any]) -> torch.Tensor:
         return torch.all(diffs >= -tolerance, dim=1)
     if direction == "descending":
         return torch.all(diffs <= tolerance, dim=1)
-    raise ValueError(
-        "objects_ordered direction must be 'ascending' or 'descending'."
-    )
+    raise ValueError("objects_ordered direction must be 'ascending' or 'descending'.")
 
 
 def _object_lifted(env, spec: Mapping[str, Any]) -> torch.Tensor:

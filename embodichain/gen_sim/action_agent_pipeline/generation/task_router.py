@@ -80,8 +80,7 @@ _SINGLE_OBJECT_ON_SUPPORT_PATTERNS = (
     ),
     re.compile(r"\bon\s+top\s+of\b", re.IGNORECASE),
     re.compile(
-        r"把.+(?:放到|放在|放置到|放置在|移到|移动到|摆到|摆在)"
-        r".+(?:上|上方|顶部)"
+        r"把.+(?:放到|放在|放置到|放置在|移到|移动到|摆到|摆在)" r".+(?:上|上方|顶部)"
     ),
 )
 _GLOBAL_STACKING_PATTERNS = (
@@ -90,9 +89,7 @@ _GLOBAL_STACKING_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(r"\b(?:nested|nesting|vertical stack)\b", re.IGNORECASE),
-    re.compile(
-        r"(?:叠放|堆叠|叠成|堆成|摞成|叠起来|堆起来|摞起来|堆叠起来)"
-    ),
+    re.compile(r"(?:叠放|堆叠|叠成|堆成|摞成|叠起来|堆起来|摞起来|堆叠起来)"),
 )
 
 
@@ -251,9 +248,8 @@ def _normalize_task_route_response(
     reason = str(response.get("reason", "")).strip()
     candidate_objects = tuple(_string_list(response.get("candidate_objects")))
     warnings = tuple(_string_list(response.get("warnings")))
-    if (
-        route == _TASK_ROUTE_STACKING
-        and _is_single_object_on_support_task(task_description)
+    if route == _TASK_ROUTE_STACKING and _is_single_object_on_support_task(
+        task_description
     ):
         route = _TASK_ROUTE_OBJECT_MANIPULATION
         warnings = (*warnings, _STACKING_DOWNGRADE_WARNING)

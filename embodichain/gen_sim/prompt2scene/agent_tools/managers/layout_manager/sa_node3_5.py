@@ -1022,7 +1022,9 @@ def _detect_collision_pairs(
     mesh_dict: Dict[str, trimesh.Trimesh],
     pose_dict: Dict[str, np.ndarray],
     object_to_group: Dict[str, str],
-    relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]] = None,
+    relation_direction_map: Optional[
+        Dict[Tuple[str, str], List[Dict[str, Any]]]
+    ] = None,
     separation_margin: float = DEFAULT_OBJECT_CLEARANCE_M,
 ):
     results = []

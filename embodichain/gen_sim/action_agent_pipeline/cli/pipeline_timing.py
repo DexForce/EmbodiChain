@@ -81,8 +81,7 @@ def write_pipeline_timing_summary(
     )
     total = summary["total"]
     print(
-        "Local timing total: "
-        f"calls={total['calls']}, total={total['total_s']:.3f}s",
+        "Local timing total: " f"calls={total['calls']}, total={total['total_s']:.3f}s",
         flush=True,
     )
     for stage_name, bucket in _top_stages(summary, limit=5):
