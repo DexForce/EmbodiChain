@@ -373,8 +373,8 @@ class Franka(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV3.zip"),
-            "6902070c8d1a9d2e5859fe18bb845b9c",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV5.zip"),
+            "ea42744c1017eed7a3854dbba19e2777",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
