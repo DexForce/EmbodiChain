@@ -242,7 +242,11 @@ class DexforceW1Cfg(RobotCfg):
         HEAD_JOINTS = "(NECK1|NECK2)"
 
         joint_params = {
-            "stiffness": {ARM_JOINTS: 1e4, BODY_JOINTS: 1e7, HEAD_JOINTS: 1e4,},
+            "stiffness": {
+                ARM_JOINTS: 1e4,
+                BODY_JOINTS: 1e7,
+                HEAD_JOINTS: 1e4,
+            },
             "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
