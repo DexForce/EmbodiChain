@@ -142,3 +142,138 @@ def test_empty_candidates_raises():
     )
     with pytest.raises(ValueError):
         randomize_anchor_height(cfg, env)
+
+
+def test_range_sampling_within_bounds():
+    env = MockEnv(num_envs=100)
+    table = MockRigidObject("table", num_envs=100)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cube = MockRigidObject("cube", num_envs=100)
+    cube._pose[:, 2, 3] = 1.1
+    env.sim.add_rigid_object(cube)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([-0.05], [0.05]),
+        store_key="table_delta",
+    )
+    functor = randomize_anchor_height(cfg, env)
+    env_ids = torch.arange(100)
+    functor(env, env_ids)
+
+    delta = env.table_delta
+    assert delta.shape == (100,)
+    assert (delta >= -0.05).all()
+    assert (delta <= 0.05).all()
+
+
+def test_discrete_sampling_only_candidates():
+    env = MockEnv(num_envs=50)
+    table = MockRigidObject("table", num_envs=50)
+    env.sim.add_rigid_object(table)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_candidates=[-0.05, 0.0, 0.05],
+        store_key="table_delta",
+    )
+    functor = randomize_anchor_height(cfg, env)
+    functor(env, torch.arange(50))
+
+    candidates = torch.tensor([-0.05, 0.0, 0.05])
+    for val in env.table_delta:
+        assert torch.any(torch.isclose(val, candidates)), f"{val} not in {candidates}"
+
+
+def test_anchor_and_objects_shifted_by_same_delta():
+    env = MockEnv(num_envs=4)
+    table = MockRigidObject("table", num_envs=4)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cube = MockRigidObject("cube", num_envs=4)
+    cube.cfg.init_pos = [0.0, 0.0, 1.1]
+    cube._pose[:, 2, 3] = 1.1
+    env.sim.add_rigid_object(cube)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([0.05], [0.05]),
+    )
+    functor = randomize_anchor_height(cfg, env)
+    functor(env, torch.arange(4))
+
+    torch.testing.assert_close(table._pose[:, 2, 3], torch.ones(4) * 1.05)
+    torch.testing.assert_close(cube._pose[:, 2, 3], torch.ones(4) * 1.15)
+
+
+def test_xy_and_rotation_unchanged():
+    env = MockEnv(num_envs=4)
+    table = MockRigidObject("table", num_envs=4)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cube = MockRigidObject("cube", num_envs=4)
+    cube._pose[:, 0, 3] = 0.5
+    cube._pose[:, 1, 3] = -0.3
+    env.sim.add_rigid_object(cube)
+
+    original_xy = cube._pose[:, :2, 3].clone()
+    original_rot = cube._pose[:, :3, :3].clone()
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([0.1], [0.1]),
+    )
+    functor = randomize_anchor_height(cfg, env)
+    functor(env, torch.arange(4))
+
+    torch.testing.assert_close(cube._pose[:, :2, 3], original_xy)
+    torch.testing.assert_close(cube._pose[:, :3, :3], original_rot)
+
+
+def test_exclude_uids_are_not_moved():
+    env = MockEnv(num_envs=4)
+    table = MockRigidObject("table", num_envs=4)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cube = MockRigidObject("cube", num_envs=4)
+    cube._pose[:, 2, 3] = 1.1
+    env.sim.add_rigid_object(cube)
+
+    floor = MockRigidObject("floor", num_envs=4)
+    floor._pose[:, 2, 3] = 0.0
+    env.sim.add_rigid_object(floor)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([0.1], [0.1]),
+        exclude_uids=["floor"],
+    )
+    functor = randomize_anchor_height(cfg, env)
+    functor(env, torch.arange(4))
+
+    torch.testing.assert_close(floor._pose[:, 2, 3], torch.zeros(4))
+
+
+def test_articulation_shifted():
+    env = MockEnv(num_envs=4)
+    table = MockRigidObject("table", num_envs=4)
+    table.cfg.init_pos = [0.0, 0.0, 1.0]
+    env.sim.add_rigid_object(table)
+
+    cabinet = MockArticulation("cabinet", num_envs=4)
+    cabinet._pose[:, 2] = 1.2
+    env.sim.add_articulation(cabinet)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([0.1], [0.1]),
+    )
+    functor = randomize_anchor_height(cfg, env)
+    functor(env, torch.arange(4))
+
+    torch.testing.assert_close(cabinet._pose[:, 2], torch.ones(4) * 1.3)
