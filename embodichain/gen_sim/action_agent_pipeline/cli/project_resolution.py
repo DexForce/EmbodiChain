@@ -48,6 +48,7 @@ from embodichain.gen_sim.action_agent_pipeline.cli.prompt2scene_stage import (
 __all__ = [
     "PROMPT2SCENE_PROJECT_MODES",
     "ProjectResolution",
+    "is_prompt2scene_gym_export",
     "resolve_gym_project",
     "resolve_task_description_for_generation",
 ]
@@ -108,7 +109,7 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
             )
         mode = (
             _PROMPT2SCENE_EXISTING_PROJECT_MODE
-            if _is_prompt2scene_gym_export(project_path)
+            if is_prompt2scene_gym_export(project_path)
             else "existing_gym_project"
         )
         print(f"Using existing gym project: {project_path}", flush=True)
@@ -172,7 +173,7 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
     )
 
 
-def _is_prompt2scene_gym_export(path: Path) -> bool:
+def is_prompt2scene_gym_export(path: Path) -> bool:
     """Return true if *path* points at a prompt2scene exported gym project."""
 
     candidates: list[Path] = []

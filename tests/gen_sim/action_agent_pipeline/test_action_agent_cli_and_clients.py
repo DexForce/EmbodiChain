@@ -26,6 +26,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
     _require_server,
     wait_for_job,
@@ -54,6 +57,179 @@ def test_action_agent_config_cli_imports() -> None:
     assert callable(generate_action_agent_config.cli)
 
 
+def test_generate_config_cli_auto_applies_prompt2scene_alignment(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import (
+        generate_action_agent_config,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
+        DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
+        DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
+    )
+
+    gym_export = tmp_path / "prompt2scene" / "demo111" / "gym_export"
+    (gym_export / "scene_state").mkdir(parents=True)
+    (gym_export / "scene_state" / "result.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "configs" / "demo111"
+    captured = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return _fake_generated_config_paths(output_dir)
+
+    monkeypatch.setattr(
+        generate_action_agent_config,
+        "generate_action_agent_config_from_project",
+        fake_generate_action_agent_config_from_project,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym_project",
+            str(gym_export),
+            "--output_dir",
+            str(output_dir),
+            "--task_name",
+            "Demo111",
+            "--task_description",
+            "用双臂把两边的东西放到篮子里",
+            "--robot-profile",
+            "franka_v3",
+            "--target_body_scale",
+            "1.0",
+            "--overwrite",
+        ],
+    )
+
+    generate_action_agent_config.cli()
+
+    assert captured["preserve_source_scene_geometry"] is True
+    assert captured["source_scene_z_rotation_degrees"] == (
+        DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES
+    )
+    assert captured["source_mesh_x_rotation_degrees"] == (
+        DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES
+    )
+
+
+def test_generate_config_cli_defaults_to_prompt2scene_scale_multiplier(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import (
+        generate_action_agent_config,
+    )
+
+    gym_export = tmp_path / "prompt2scene" / "demo131" / "gym_export"
+    (gym_export / "scene_state").mkdir(parents=True)
+    (gym_export / "scene_state" / "result.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "configs" / "demo131"
+    captured = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return _fake_generated_config_paths(output_dir)
+
+    monkeypatch.setattr(
+        generate_action_agent_config,
+        "generate_action_agent_config_from_project",
+        fake_generate_action_agent_config_from_project,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym_project",
+            str(gym_export),
+            "--output_dir",
+            str(output_dir),
+            "--task_name",
+            "Demo131",
+            "--task_description",
+            "用左臂把倒下的瓶子扶正",
+            "--overwrite",
+        ],
+    )
+
+    generate_action_agent_config.cli()
+
+    assert captured["target_body_scale"] == DEFAULT_TARGET_BODY_SCALE
+    assert captured["source_scene_body_scale_mode"] == "multiply"
+
+
+def test_generate_config_cli_respects_explicit_prompt2scene_alignment_overrides(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import (
+        generate_action_agent_config,
+    )
+
+    gym_export = tmp_path / "prompt2scene" / "demo111" / "gym_export"
+    (gym_export / "scene_state").mkdir(parents=True)
+    (gym_export / "scene_state" / "result.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "configs" / "demo111"
+    captured = {}
+
+    def fake_generate_action_agent_config_from_project(**kwargs):
+        captured.update(kwargs)
+        return _fake_generated_config_paths(output_dir)
+
+    monkeypatch.setattr(
+        generate_action_agent_config,
+        "generate_action_agent_config_from_project",
+        fake_generate_action_agent_config_from_project,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_action_agent_config",
+            "--gym_project",
+            str(gym_export),
+            "--output_dir",
+            str(output_dir),
+            "--source_scene_z_rotation_degrees",
+            "0",
+            "--source_mesh_x_rotation_degrees",
+            "0",
+            "--no-preserve-source-scene-geometry",
+        ],
+    )
+
+    generate_action_agent_config.cli()
+
+    assert captured["preserve_source_scene_geometry"] is False
+    assert captured["source_scene_z_rotation_degrees"] == 0.0
+    assert captured["source_mesh_x_rotation_degrees"] == 0.0
+
+
+def _fake_generated_config_paths(output_dir: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        gym_config=output_dir / "fast_gym_config.json",
+        agent_config=output_dir / "agent_config.json",
+        task_prompt=output_dir / "task_prompt.txt",
+        task_graph=output_dir / "task_graph.json",
+        basic_background=output_dir / "basic_background.txt",
+        atom_actions=output_dir / "atom_actions.txt",
+        summary=None,
+    )
+
+
 def test_action_agent_config_generation_imports() -> None:
     from embodichain.gen_sim.action_agent_pipeline.generation import action_agent_config
 
@@ -61,6 +237,103 @@ def test_action_agent_config_generation_imports() -> None:
     assert action_agent_config.GeneratedActionAgentConfigPaths.__name__ == (
         "GeneratedActionAgentConfigPaths"
     )
+
+
+def test_source_scene_xy_positions_track_body_scale_multiplier() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+        _maybe_apply_source_scene_xy_scale,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+        _SceneObject,
+    )
+
+    table_anchor = [0.1, -0.2, 0.5]
+    gym_config = {
+        "background": [
+            {
+                "uid": "table",
+                "init_pos": list(table_anchor),
+                "body_scale": [1.3, 1.3, 1.3],
+            }
+        ],
+        "rigid_object": [
+            {
+                "uid": "cup",
+                "init_pos": [0.4, 0.0, 0.9],
+                "body_scale": [1.3, 1.3, 1.3],
+            },
+            {
+                "uid": "wide",
+                "init_pos": [-0.2, 0.2, 0.8],
+                "body_scale": [2.0, 0.5, 1.0],
+            },
+        ],
+    }
+    source_objects_by_runtime_uid = {
+        "table": _SceneObject(
+            source_uid="table_0",
+            source_role="background",
+            config={"body_scale": [1.0, 1.0, 1.0]},
+        ),
+        "cup": _SceneObject(
+            source_uid="cup_0",
+            source_role="rigid_object",
+            config={"body_scale": [1.0, 1.0, 1.0]},
+        ),
+        "wide": _SceneObject(
+            source_uid="wide_0",
+            source_role="rigid_object",
+            config={"body_scale": [1.0, 1.0, 1.0]},
+        ),
+    }
+
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        source_objects_by_runtime_uid,
+        source_scene_body_scale_mode="multiply",
+    )
+
+    assert gym_config["background"][0]["init_pos"] == pytest.approx(table_anchor)
+    assert gym_config["rigid_object"][0]["init_pos"] == pytest.approx(
+        [0.49, 0.06, 0.9]
+    )
+    assert gym_config["rigid_object"][1]["init_pos"] == pytest.approx(
+        [-0.5, 0.0, 0.8]
+    )
+
+
+def test_source_scene_xy_positions_preserve_mode_stays_unchanged() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+        _maybe_apply_source_scene_xy_scale,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+        _SceneObject,
+    )
+
+    original_position = [0.4, 0.0, 0.9]
+    gym_config = {
+        "rigid_object": [
+            {
+                "uid": "cup",
+                "init_pos": list(original_position),
+                "body_scale": [1.3, 1.3, 1.3],
+            }
+        ]
+    }
+
+    _maybe_apply_source_scene_xy_scale(
+        gym_config,
+        {
+            "cup": _SceneObject(
+                source_uid="cup_0",
+                source_role="rigid_object",
+                config={"body_scale": [1.0, 1.0, 1.0]},
+            )
+        },
+        source_scene_body_scale_mode="preserve",
+    )
+
+    assert gym_config["rigid_object"][0]["init_pos"] == original_position
 
 
 def test_prompt2scene_prompt_is_independent_from_task_description() -> None:
@@ -86,6 +359,14 @@ def test_pipeline_parser_accepts_headless() -> None:
     args = build_parser().parse_args(["--headless"])
 
     assert args.headless is True
+
+
+def test_pipeline_parser_defaults_to_target_body_scale() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+
+    args = build_parser().parse_args([])
+
+    assert args.target_body_scale == DEFAULT_TARGET_BODY_SCALE
 
 
 def test_run_agent_command_passes_headless(monkeypatch, tmp_path) -> None:
@@ -830,7 +1111,7 @@ def test_existing_gym_project_without_scene_state_stays_generic(tmp_path) -> Non
         "expected_target_body_scale",
     ),
     [
-        (None, None, "preserve", 1.0),
+        (None, None, "multiply", DEFAULT_TARGET_BODY_SCALE),
         (0.8, None, "multiply", 0.8),
         (1.0, "absolute", "absolute", 1.0),
         (0.5, "preserve", "preserve", 0.5),
@@ -1029,7 +1310,7 @@ def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -
     assert captured["task_name"] == "Demo111"
 
 
-def test_batch_new_pipeline_command_preserves_prompt2scene_scale_by_default(
+def test_batch_new_pipeline_command_uses_pipeline_scale_defaults(
     tmp_path: Path,
 ) -> None:
     module = _load_local_batch_run_action_agent_videos()

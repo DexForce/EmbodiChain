@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import argparse
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TARGET_BODY_SCALE,
+)
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_CONFIG_OUTPUT_DIR,
     DEFAULT_EXISTING_GYM_PROJECT,
@@ -30,8 +33,10 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_IMAGE2SCENE_ROOT,
     DEFAULT_JOB_TIMEOUT_S,
     DEFAULT_PIPELINE_HISTORY,
+    DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_LLM_CONFIG,
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
+    DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
     DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
@@ -226,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt2scene_scene_z_rotation_degrees",
         dest="prompt2scene_scene_z_rotation_degrees",
         type=float,
-        default=-90.0,
+        default=DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
         help=(
             "World-frame Z rotation applied when converting prompt2scene "
             "exports into action-agent configs. Defaults to -90."
@@ -237,7 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompt2scene_mesh_x_rotation_degrees",
         dest="prompt2scene_mesh_x_rotation_degrees",
         type=float,
-        default=90.0,
+        default=DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
         help=(
             "Local X-axis rotation baked into prompt2scene GLB meshes during "
             "action-agent OBJ normalization. Defaults to 90."
@@ -345,11 +350,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-body-scale",
         dest="target_body_scale",
         type=float,
-        default=None,
+        default=DEFAULT_TARGET_BODY_SCALE,
         help=(
-            "Uniform body_scale for generated target objects. In prompt2scene "
-            "mode, omit this option to preserve source body_scale by default. "
-            "Other modes default to 0.8."
+            "Uniform body_scale for generated target objects. Defaults to "
+            f"{DEFAULT_TARGET_BODY_SCALE}. In prompt2scene mode, omitted values "
+            "use source body_scale * this default multiplier."
         ),
     )
     parser.add_argument(
@@ -362,8 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Prompt2scene body_scale policy for source-scene objects. "
             "preserve keeps source body_scale, multiply uses source_scale * "
             "--target_body_scale, and absolute sets objects directly to "
-            "--target_body_scale. Defaults to preserve when --target_body_scale "
-            "is omitted and multiply when it is provided."
+            "--target_body_scale. Defaults to multiply."
         ),
     )
     parser.add_argument(
