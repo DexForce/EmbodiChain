@@ -20,10 +20,17 @@ import pytest
 import torch
 from unittest.mock import MagicMock
 
+from embodichain.lab.gym.envs.managers import EventCfg
 from embodichain.lab.gym.envs.managers.randomization.spatial import (
     randomize_anchor_height,
-    randomize_anchor_height_cfg,
 )
+
+
+def _make_functor(env):
+    """Create a randomize_anchor_height functor wired like the event manager."""
+    return randomize_anchor_height(
+        EventCfg(func=randomize_anchor_height, mode="reset"), env
+    )
 
 
 class MockRigidObject:
@@ -168,29 +175,39 @@ class MockEnv:
 
 def test_missing_anchor_uid_raises():
     env = MockEnv()
-    cfg = randomize_anchor_height_cfg(
-        anchor_uid="missing_table",
-        height_delta_range=([-0.05], [0.05]),
-    )
+    functor = _make_functor(env)
     with pytest.raises(ValueError):
-        randomize_anchor_height(cfg, env)
+        functor(
+            env,
+            torch.arange(4),
+            anchor_uid="missing_table",
+            height_delta_range=([-0.05], [0.05]),
+        )
 
 
 def test_missing_sampling_fields_raises():
     env = MockEnv()
-    cfg = randomize_anchor_height_cfg(anchor_uid="table")
+    table = MockRigidObject("table", num_envs=4)
+    env.sim.add_rigid_object(table)
+
+    functor = _make_functor(env)
     with pytest.raises(ValueError):
-        randomize_anchor_height(cfg, env)
+        functor(env, torch.arange(4), anchor_uid="table")
 
 
 def test_empty_candidates_raises():
     env = MockEnv()
-    cfg = randomize_anchor_height_cfg(
-        anchor_uid="table",
-        height_delta_candidates=[],
-    )
+    table = MockRigidObject("table", num_envs=4)
+    env.sim.add_rigid_object(table)
+
+    functor = _make_functor(env)
     with pytest.raises(ValueError):
-        randomize_anchor_height(cfg, env)
+        functor(
+            env,
+            torch.arange(4),
+            anchor_uid="table",
+            height_delta_candidates=[],
+        )
 
 
 def test_invalid_include_groups_raises():
@@ -198,13 +215,15 @@ def test_invalid_include_groups_raises():
     table = MockRigidObject("table", num_envs=4)
     env.sim.add_rigid_object(table)
 
-    cfg = randomize_anchor_height_cfg(
-        anchor_uid="table",
-        height_delta_range=([-0.05], [0.05]),
-        include_groups=["invalid_group", "rigid_object"],
-    )
+    functor = _make_functor(env)
     with pytest.raises(ValueError, match="Invalid include_groups"):
-        randomize_anchor_height(cfg, env)
+        functor(
+            env,
+            torch.arange(4),
+            anchor_uid="table",
+            height_delta_range=([-0.05], [0.05]),
+            include_groups=["invalid_group", "rigid_object"],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -222,14 +241,15 @@ def test_range_sampling_within_bounds():
     cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    env_ids = torch.arange(100)
+    functor(
+        env,
+        env_ids,
         anchor_uid="table",
         height_delta_range=([-0.05], [0.05]),
         store_key="table_delta",
     )
-    functor = randomize_anchor_height(cfg, env)
-    env_ids = torch.arange(100)
-    functor(env, env_ids)
 
     delta = env.table_delta
     assert delta.shape == (100,)
@@ -242,13 +262,14 @@ def test_discrete_sampling_only_candidates():
     table = MockRigidObject("table", num_envs=50)
     env.sim.add_rigid_object(table)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    functor(
+        env,
+        torch.arange(50),
         anchor_uid="table",
         height_delta_candidates=[-0.05, 0.0, 0.05],
         store_key="table_delta",
     )
-    functor = randomize_anchor_height(cfg, env)
-    functor(env, torch.arange(50))
 
     candidates = torch.tensor([-0.05, 0.0, 0.05])
     for val in env.table_delta:
@@ -271,16 +292,17 @@ def test_anchor_and_objects_shifted_by_same_delta():
     cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    functor(
+        env,
+        torch.arange(4),
         anchor_uid="table",
         height_delta_range=([0.05], [0.05]),
     )
-    functor = randomize_anchor_height(cfg, env)
-    functor(env, torch.arange(4))
 
-    # Anchor: absolute mode → init_pos[2] + delta = 1.0 + 0.05 = 1.05
+    # Anchor: absolute mode -> init_pos[2] + delta = 1.0 + 0.05 = 1.05
     torch.testing.assert_close(table._pose[:, 2], torch.ones(4) * 1.05)
-    # Affected: relative mode → current_z + delta = 1.1 + 0.05 = 1.15
+    # Affected: relative mode -> current_z + delta = 1.1 + 0.05 = 1.15
     torch.testing.assert_close(cube._pose[:, 2], torch.ones(4) * 1.15)
 
 
@@ -298,12 +320,13 @@ def test_xy_and_rotation_unchanged():
     original_xy = cube._pose[:, :2].clone()
     original_rot = cube._pose[:, 3:7].clone()
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    functor(
+        env,
+        torch.arange(4),
         anchor_uid="table",
         height_delta_range=([0.1], [0.1]),
     )
-    functor = randomize_anchor_height(cfg, env)
-    functor(env, torch.arange(4))
 
     torch.testing.assert_close(cube._pose[:, :2], original_xy)
     torch.testing.assert_close(cube._pose[:, 3:7], original_rot)
@@ -323,13 +346,14 @@ def test_exclude_uids_are_not_moved():
     floor._pose[:, 2] = 0.0
     env.sim.add_rigid_object(floor)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    functor(
+        env,
+        torch.arange(4),
         anchor_uid="table",
         height_delta_range=([0.1], [0.1]),
         exclude_uids=["floor"],
     )
-    functor = randomize_anchor_height(cfg, env)
-    functor(env, torch.arange(4))
 
     torch.testing.assert_close(floor._pose[:, 2], torch.zeros(4))
     torch.testing.assert_close(cube._pose[:, 2], torch.ones(4) * 1.2)
@@ -345,12 +369,13 @@ def test_articulation_shifted():
     cabinet._pose[:, 2] = 1.2
     env.sim.add_articulation(cabinet)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    functor(
+        env,
+        torch.arange(4),
         anchor_uid="table",
         height_delta_range=([0.1], [0.1]),
     )
-    functor = randomize_anchor_height(cfg, env)
-    functor(env, torch.arange(4))
 
     torch.testing.assert_close(cabinet._pose[:, 2], torch.ones(4) * 1.3)
 
@@ -361,14 +386,15 @@ def test_asymmetric_delta_range():
     table.cfg.init_pos = [0.0, 0.0, 1.0]
     env.sim.add_rigid_object(table)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    env_ids = torch.arange(100)
+    functor(
+        env,
+        env_ids,
         anchor_uid="table",
         height_delta_range=([-0.1], [0.05]),
         store_key="table_delta",
     )
-    functor = randomize_anchor_height(cfg, env)
-    env_ids = torch.arange(100)
-    functor(env, env_ids)
 
     delta = env.table_delta
     assert delta.shape == (100,)
@@ -391,15 +417,16 @@ def test_partial_env_ids():
     cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
-    cfg = randomize_anchor_height_cfg(
-        anchor_uid="table",
-        height_delta_range=([0.1], [0.1]),
-    )
-    functor = randomize_anchor_height(cfg, env)
+    functor = _make_functor(env)
 
     # Only apply to envs 0 and 2
     partial_ids = torch.tensor([0, 2])
-    functor(env, partial_ids)
+    functor(
+        env,
+        partial_ids,
+        anchor_uid="table",
+        height_delta_range=([0.1], [0.1]),
+    )
 
     # Envs 0 and 2 should be shifted
     torch.testing.assert_close(table._pose[0, 2], torch.tensor(1.1))
@@ -445,18 +472,18 @@ def test_rigid_object_group_anchor_absolute_warning(caplog):
     cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
-    cfg = randomize_anchor_height_cfg(
+    functor = _make_functor(env)
+    functor(
+        env,
+        torch.arange(4),
         anchor_uid="group",
         height_delta_range=([0.1], [0.1]),
     )
-    functor = randomize_anchor_height(cfg, env)
-
-    functor(env, torch.arange(4))
 
     # Verify that the warning log message was emitted
     assert "absolute=True is not supported for RigidObjectGroup" in caplog.text
 
-    # Group: relative shift applied → 1.0 + 0.1 = 1.1
+    # Group: relative shift applied -> 1.0 + 0.1 = 1.1
     torch.testing.assert_close(group._pose[:, :, 2, 3], torch.ones(4, 2) * 1.1)
-    # Cube: relative shift → 1.1 + 0.1 = 1.2
+    # Cube: relative shift -> 1.1 + 0.1 = 1.2
     torch.testing.assert_close(cube._pose[:, 2], torch.ones(4) * 1.2)

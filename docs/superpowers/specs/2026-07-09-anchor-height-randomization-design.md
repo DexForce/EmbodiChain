@@ -17,13 +17,13 @@ This document specifies a new randomization functor, `randomize_anchor_height`, 
 5. Support configurable object inclusion/exclusion.
 6. Expose the sampled delta so downstream observations, rewards, or functors can use it.
 7. Use lowercase-with-underscores naming consistent with existing class-style functors such as `planner_grid_cell_sampler`.
+8. Do **not** introduce a dedicated config class; receive parameters through `FunctorCfg.params`, matching `planner_grid_cell_sampler`.
 
 ## 2. Architecture
 
 ### 2.1 Component placement
 
 - **Implementation file:** `embodichain/lab/gym/envs/managers/randomization/spatial.py`
-- **Config class:** `randomize_anchor_height_cfg` in the same file
 - **Base class:** `Functor` from `embodichain.lab.gym.envs.managers.manager_base`
 - **Registration:** Wired through `EventCfg` in task configs, e.g.:
 
@@ -46,31 +46,17 @@ The functor must be declared **after** all pose randomization events in the same
 
 ## 3. Configuration Interface
 
-```python
-@configclass
-class randomize_anchor_height_cfg(FunctorCfg):
-    """Configuration for randomize_anchor_height."""
+The functor does **not** define a dedicated config class. It follows the same convention as `planner_grid_cell_sampler`: it inherits from `Functor`, accepts a generic `FunctorCfg` (or `EventCfg`) in `__init__`, and receives all runtime parameters as keyword arguments to `__call__` from `FunctorCfg.params`.
 
-    anchor_uid: str = MISSING
-    height_delta_range: tuple[list[float], list[float]] | None = None
-    height_delta_candidates: list[float] | None = None
-    include_groups: list[str] | None = None
-    exclude_uids: list[str] = []
-    mode: str = "reset"
-    physics_update_step: int = 0
-    store_key: str = "anchor_height_delta"
-```
+### Parameters
 
-### Field semantics
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `anchor_uid` | `str` | `MISSING` | Exact UID of the anchor object (e.g., `"table"`). |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `anchor_uid` | `str` | — (required) | Exact UID of the anchor object (e.g., `"table"`). |
 | `height_delta_range` | `tuple[list[float], list[float]] \| None` | `None` | Uniform sampling range `[min_z], [max_z]`. |
 | `height_delta_candidates` | `list[float] \| None` | `None` | Discrete set of allowed delta values. |
 | `include_groups` | `list[str] \| None` | `None` | Object groups to shift; `None` means all (`background`, `rigid_object`, `rigid_object_group`, `articulation`). The anchor UID is always excluded. |
-| `exclude_uids` | `list[str]` | `[]` | Additional UIDs to skip beyond the anchor. |
-| `mode` | `str` | `"reset"` | Event mode (`"reset"`, `"interval"`, etc.). |
+| `exclude_uids` | `list[str] \| None` | `None` | Additional UIDs to skip beyond the anchor. |
 | `physics_update_step` | `int` | `0` | Sim steps to run after moving objects. |
 | `store_key` | `str` | `"anchor_height_delta"` | Attribute name on `env` where the sampled delta is stored. |
 
@@ -78,7 +64,7 @@ class randomize_anchor_height_cfg(FunctorCfg):
 
 - If `height_delta_range` is provided, sample uniformly from it.
 - Else if `height_delta_candidates` is provided, sample uniformly from the candidate list.
-- If neither is provided, raise `ValueError` at init time.
+- If neither is provided, raise `ValueError` at call time.
 - If both are provided, use `height_delta_range` and log a warning.
 
 ### Inclusion semantics
@@ -91,31 +77,34 @@ class randomize_anchor_height_cfg(FunctorCfg):
 
 ### 4.1 `__init__(self, cfg, env)`
 
-1. Validate that at least one sampling field is provided; if both are provided, prefer `height_delta_range` and log a warning.
-2. Resolve `include_groups` to the default set if `None`.
-3. Build the affected UID list:
-   - Collect UIDs from the requested groups.
-   - Remove `cfg.anchor_uid`.
-   - Remove all UIDs in `cfg.exclude_uids`.
-4. Confirm the anchor object exists in the scene; raise `ValueError` if not.
-5. Cache the resolved target UIDs.
+Store the configuration and environment via `super().__init__(cfg, env)`. No scene-dependent resolution is performed at init time.
 
-### 4.2 `__call__(self, env, env_ids)`
+### 4.2 `__call__(self, env, env_ids, anchor_uid, ...)`
 
 1. If `env_ids` is `None`, target all environments.
-2. Sample `delta_z` per environment:
+2. Validate sampling configuration:
+   - At least one of `height_delta_range` or `height_delta_candidates` is provided.
+   - `height_delta_candidates` is non-empty if provided.
+   - If both are provided, prefer `height_delta_range` and log a warning.
+3. Resolve `include_groups` to the default set if `None`.
+4. Build the affected UID list:
+   - Collect UIDs from the requested groups.
+   - Remove `anchor_uid`.
+   - Remove all UIDs in `exclude_uids`.
+5. Confirm the anchor object exists in the scene; raise `ValueError` if not.
+6. Sample `delta_z` per environment:
    - Range mode: `sample_uniform(low, high, size=(N,), device=env.device)`
    - Discrete mode: random choice from candidates, converted to a tensor of shape `(N,)`
-3. Move the anchor object:
+7. Move the anchor object:
    - Read current pose.
    - Compute `anchor_target_z = anchor.cfg.init_pos[2] + delta_z`.
    - Write pose preserving XY/rotation.
-4. For each affected object:
+8. For each affected object:
    - Read current pose.
    - Add `delta_z` to the Z component.
-   - Write pose and call `clear_dynamics()`.
-5. If `cfg.physics_update_step > 0`, call `env.sim.update(step=cfg.physics_update_step)`.
-6. Store `delta_z` on `env` under `cfg.store_key`.
+   - Write pose and call `clear_dynamics(env_ids=env_ids)`.
+9. If `physics_update_step > 0`, call `env.sim.update(step=physics_update_step)`.
+10. Store `delta_z` on `env` under `store_key`.
 
 ### 4.3 Pose representation
 
@@ -123,10 +112,11 @@ class randomize_anchor_height_cfg(FunctorCfg):
 - Modify only index `2` (Z).
 - Write poses via `rigid_object.set_local_pose(pose, env_ids=env_ids)`.
 - For articulations, use the equivalent root-state APIs.
+- For `RigidObjectGroup`, pose is `(N, M, 4, 4)`; shift Z in matrix form and use relative mode.
 
 ## 5. Error Handling
 
-### Init-time validation
+### Call-time validation
 
 - `anchor_uid` not found → `ValueError`.
 - Neither `height_delta_range` nor `height_delta_candidates` provided → `ValueError`.
