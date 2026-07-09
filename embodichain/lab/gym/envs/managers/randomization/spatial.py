@@ -17,8 +17,7 @@
 from __future__ import annotations
 
 import torch
-from dataclasses import MISSING
-from typing import TYPE_CHECKING, Union, List
+from typing import TYPE_CHECKING, List
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -28,7 +27,6 @@ from embodichain.lab.sim.objects import (
 )
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
-from embodichain.utils import configclass
 from embodichain.utils.math import sample_uniform, matrix_from_euler, matrix_from_quat
 from embodichain.utils import logger
 
@@ -44,7 +42,6 @@ __all__ = [
     "randomize_target_pose",
     "planner_grid_cell_sampler",
     "randomize_anchor_height",
-    "randomize_anchor_height_cfg",
 ]
 
 
@@ -604,52 +601,21 @@ class planner_grid_cell_sampler(Functor):
             env.sim.update(step=physics_update_step)
 
 
-@configclass
-class randomize_anchor_height_cfg(FunctorCfg):
-    """Configuration for the randomize_anchor_height functor.
-
-    This functor randomizes the Z height of an anchor object (e.g., a table) and
-    applies the same height delta to all other included scene objects, preserving
-    their XY position and rotation.
-    """
-
-    anchor_uid: str = MISSING
-    """Exact UID of the anchor object whose height is randomized."""
-
-    height_delta_range: tuple[list[float], list[float]] | None = None
-    """Uniform sampling range for the height delta: ([z_min], [z_max])."""
-
-    height_delta_candidates: list[float] | None = None
-    """Discrete set of allowed height delta values."""
-
-    include_groups: list[str] | None = None
-    """Object groups to shift. ``None`` means all groups are included."""
-
-    exclude_uids: list[str] = []
-    """Additional UIDs to skip beyond the anchor object."""
-
-    mode: str = "reset"
-    """Event mode (``startup``, ``interval``, or ``reset``)."""
-
-    physics_update_step: int = 0
-    """Number of physics update steps to apply after moving objects."""
-
-    store_key: str = "anchor_height_delta"
-    """Attribute name on ``env`` where the sampled delta is stored."""
-
-
 class randomize_anchor_height(Functor):
     """Randomize the height of an anchor object and shift other objects by the same delta.
 
-    The functor samples a per-environment height delta, moves the anchor object
+    This functor samples a per-environment height delta, moves the anchor object
     relative to its configured initial position, and adds the same delta to the
     Z component of every other included object while preserving XY and rotation.
+
+    The functor is configured through :class:`FunctorCfg` parameters, following the
+    same pattern as :class:`planner_grid_cell_sampler`.
     """
 
     _VALID_GROUPS = {"background", "rigid_object", "rigid_object_group", "articulation"}
 
-    def __init__(self, cfg: randomize_anchor_height_cfg, env: EmbodiedEnv):
-        """Initialize the functor and resolve affected object UIDs.
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        """Initialize the functor.
 
         Args:
             cfg: The functor configuration.
@@ -657,27 +623,29 @@ class randomize_anchor_height(Functor):
         """
         super().__init__(cfg, env)
 
-        # Validate sampling configuration
-        if cfg.height_delta_range is None and cfg.height_delta_candidates is None:
-            raise ValueError(
-                "Either 'height_delta_range' or 'height_delta_candidates' must be provided."
-            )
+    def _get_object(
+        self, env: EmbodiedEnv, uid: str
+    ) -> RigidObject | Articulation | RigidObjectGroup | None:
+        """Get a rigid object, articulation, or rigid object group by UID."""
+        if uid in env.sim.get_rigid_object_uid_list():
+            return env.sim.get_rigid_object(uid)
+        if uid in env.sim.get_articulation_uid_list():
+            return env.sim.get_articulation(uid)
         if (
-            cfg.height_delta_candidates is not None
-            and len(cfg.height_delta_candidates) == 0
+            hasattr(env.sim, "get_rigid_object_group_uid_list")
+            and uid in env.sim.get_rigid_object_group_uid_list()
         ):
-            raise ValueError("'height_delta_candidates' must not be empty.")
-        if (
-            cfg.height_delta_range is not None
-            and cfg.height_delta_candidates is not None
-        ):
-            logger.log_warning(
-                "Both 'height_delta_range' and 'height_delta_candidates' provided; "
-                "using 'height_delta_range'."
-            )
+            return env.sim.get_rigid_object_group(uid)
+        return None
 
-        # Resolve include groups
-        include_groups = cfg.include_groups
+    def _resolve_affected_uids(
+        self,
+        env: EmbodiedEnv,
+        anchor_uid: str,
+        include_groups: list[str] | None,
+        exclude_uids: list[str],
+    ) -> list[str]:
+        """Resolve the list of UIDs that should be shifted."""
         if include_groups is None:
             include_groups = [
                 "background",
@@ -685,72 +653,44 @@ class randomize_anchor_height(Functor):
                 "rigid_object_group",
                 "articulation",
             ]
+
         invalid_groups = set(include_groups) - self._VALID_GROUPS
         if invalid_groups:
             raise ValueError(
                 f"Invalid include_groups: {sorted(invalid_groups)}. "
                 f"Valid options are: {sorted(self._VALID_GROUPS)}."
             )
-        self._include_groups = include_groups
 
-        # Confirm anchor exists
-        anchor = self._get_object(cfg.anchor_uid)
-        if anchor is None:
-            raise ValueError(
-                f"Anchor object with uid '{cfg.anchor_uid}' not found in the scene."
-            )
-        self._anchor = anchor
-
-        # Build affected UID list
-        self._affected_uids = self._resolve_affected_uids(
-            cfg.anchor_uid, cfg.exclude_uids
-        )
-
-    def _get_object(
-        self, uid: str
-    ) -> RigidObject | Articulation | RigidObjectGroup | None:
-        """Get a rigid object, articulation, or rigid object group by UID."""
-        if uid in self._env.sim.get_rigid_object_uid_list():
-            return self._env.sim.get_rigid_object(uid)
-        if uid in self._env.sim.get_articulation_uid_list():
-            return self._env.sim.get_articulation(uid)
-        if (
-            hasattr(self._env.sim, "get_rigid_object_group_uid_list")
-            and uid in self._env.sim.get_rigid_object_group_uid_list()
-        ):
-            return self._env.sim.get_rigid_object_group(uid)
-        return None
-
-    def _resolve_affected_uids(
-        self, anchor_uid: str, exclude_uids: list[str]
-    ) -> list[str]:
-        """Resolve the list of UIDs that should be shifted."""
         uids: set[str] = set()
-        if any(g in self._include_groups for g in ("background", "rigid_object")):
-            uids.update(self._env.sim.get_rigid_object_uid_list())
-        if "rigid_object_group" in self._include_groups:
-            if hasattr(self._env.sim, "get_rigid_object_group_uid_list"):
-                uids.update(self._env.sim.get_rigid_object_group_uid_list())
-        if "articulation" in self._include_groups:
-            uids.update(self._env.sim.get_articulation_uid_list())
+        if any(g in include_groups for g in ("background", "rigid_object")):
+            uids.update(env.sim.get_rigid_object_uid_list())
+        if "rigid_object_group" in include_groups:
+            if hasattr(env.sim, "get_rigid_object_group_uid_list"):
+                uids.update(env.sim.get_rigid_object_group_uid_list())
+        if "articulation" in include_groups:
+            uids.update(env.sim.get_articulation_uid_list())
 
         exclude = set(exclude_uids) | {anchor_uid}
         return sorted(uids - exclude)
 
-    def _sample_delta(self, num_envs: int) -> torch.Tensor:
+    def _sample_delta(
+        self,
+        num_envs: int,
+        height_delta_range: tuple[list[float], list[float]] | None,
+        height_delta_candidates: list[float] | None,
+    ) -> torch.Tensor:
         """Sample a height delta for each environment."""
-        cfg = self.cfg
         device = self._env.device
 
-        if cfg.height_delta_range is not None:
-            low = torch.tensor(cfg.height_delta_range[0], device=device)
-            high = torch.tensor(cfg.height_delta_range[1], device=device)
+        if height_delta_range is not None:
+            low = torch.tensor(height_delta_range[0], device=device)
+            high = torch.tensor(height_delta_range[1], device=device)
             return sample_uniform(
                 lower=low, upper=high, size=(num_envs, 1), device=device
             ).squeeze(-1)
 
         # Discrete sampling
-        candidates = torch.tensor(cfg.height_delta_candidates, device=device)
+        candidates = torch.tensor(height_delta_candidates, device=device)
         indices = torch.randint(0, len(candidates), (num_envs,), device=device)
         return candidates[indices]
 
@@ -771,8 +711,6 @@ class randomize_anchor_height(Functor):
                       If False, add delta_z to the current Z.
         """
         if hasattr(obj, "num_objects"):
-            # RigidObjectGroup (identified by num_objects attribute) does not have
-            # a single init_pos; always shift relative to current pose.
             if absolute:
                 logger.log_warning(
                     "absolute=True is not supported for RigidObjectGroup; using relative shift."
@@ -799,28 +737,78 @@ class randomize_anchor_height(Functor):
         obj.set_local_pose(pose[env_ids], env_ids=env_ids)
         obj.clear_dynamics(env_ids=env_ids)
 
-    def __call__(self, env: EmbodiedEnv, env_ids: torch.Tensor | None) -> None:
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: torch.Tensor | None,
+        anchor_uid: str,
+        height_delta_range: tuple[list[float], list[float]] | None = None,
+        height_delta_candidates: list[float] | None = None,
+        include_groups: list[str] | None = None,
+        exclude_uids: list[str] | None = None,
+        physics_update_step: int = 0,
+        store_key: str = "anchor_height_delta",
+    ) -> None:
         """Apply the height randomization.
 
         Args:
             env: The environment instance.
             env_ids: Target environment IDs. If None, all environments are targeted.
+            anchor_uid: Exact UID of the anchor object whose height is randomized.
+            height_delta_range: Uniform sampling range for the height delta.
+            height_delta_candidates: Discrete set of allowed height delta values.
+            include_groups: Object groups to shift. ``None`` means all groups.
+            exclude_uids: Additional UIDs to skip beyond the anchor object.
+            physics_update_step: Number of physics update steps to apply after moving objects.
+            store_key: Attribute name on ``env`` where the sampled delta is stored.
         """
         if env_ids is None:
             env_ids = torch.arange(env.num_envs, device=env.device)
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.tensor(env_ids, device=env.device)
 
         if len(env_ids) == 0:
             return
 
+        # Validate sampling configuration
+        if height_delta_range is None and height_delta_candidates is None:
+            raise ValueError(
+                "Either 'height_delta_range' or 'height_delta_candidates' must be provided."
+            )
+        if height_delta_candidates is not None and len(height_delta_candidates) == 0:
+            raise ValueError("'height_delta_candidates' must not be empty.")
+        if height_delta_range is not None and height_delta_candidates is not None:
+            logger.log_warning(
+                "Both 'height_delta_range' and 'height_delta_candidates' provided; "
+                "using 'height_delta_range'."
+            )
+
+        if exclude_uids is None:
+            exclude_uids = []
+
+        # Confirm anchor exists
+        anchor = self._get_object(env, anchor_uid)
+        if anchor is None:
+            raise ValueError(
+                f"Anchor object with uid '{anchor_uid}' not found in the scene."
+            )
+
+        # Build affected UID list
+        affected_uids = self._resolve_affected_uids(
+            env, anchor_uid, include_groups, exclude_uids
+        )
+
         num_envs = len(env_ids)
-        delta_z = self._sample_delta(num_envs)
+        delta_z = self._sample_delta(
+            num_envs, height_delta_range, height_delta_candidates
+        )
 
         # Move anchor relative to its initial pose
-        self._move_object_z(self._anchor, delta_z, env_ids, absolute=True)
+        self._move_object_z(anchor, delta_z, env_ids, absolute=True)
 
         # Move affected objects relative to their current pose
-        for uid in self._affected_uids:
-            obj = self._get_object(uid)
+        for uid in affected_uids:
+            obj = self._get_object(env, uid)
             if obj is None:
                 logger.log_warning(
                     f"Affected object '{uid}' no longer exists; skipping height shift."
@@ -829,9 +817,9 @@ class randomize_anchor_height(Functor):
             self._move_object_z(obj, delta_z, env_ids, absolute=False)
 
         # Physics settle
-        if self.cfg.physics_update_step > 0:
-            env.sim.update(step=self.cfg.physics_update_step)
+        if physics_update_step > 0:
+            env.sim.update(step=physics_update_step)
 
         # Store delta for downstream use
-        if self.cfg.store_key:
-            setattr(env, self.cfg.store_key, delta_z)
+        if store_key:
+            setattr(env, store_key, delta_z)
