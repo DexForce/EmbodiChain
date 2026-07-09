@@ -35,6 +35,18 @@ from embodichain.utils import logger
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
+__all__ = [
+    "get_random_pose",
+    "randomize_rigid_object_pose",
+    "randomize_robot_eef_pose",
+    "randomize_robot_qpos",
+    "randomize_articulation_root_pose",
+    "randomize_target_pose",
+    "planner_grid_cell_sampler",
+    "randomize_anchor_height",
+    "randomize_anchor_height_cfg",
+]
+
 
 def get_random_pose(
     init_pos: torch.Tensor,
@@ -758,8 +770,9 @@ class randomize_anchor_height(Functor):
             absolute: If True, set Z to obj.cfg.init_pos[2] + delta_z.
                       If False, add delta_z to the current Z.
         """
-        if isinstance(obj, RigidObjectGroup):
-            # RigidObjectGroup does not have a single init_pos; always shift relative to current pose.
+        if hasattr(obj, "num_objects"):
+            # RigidObjectGroup (identified by num_objects attribute) does not have
+            # a single init_pos; always shift relative to current pose.
             if absolute:
                 logger.log_warning(
                     "absolute=True is not supported for RigidObjectGroup; using relative shift."
@@ -770,36 +783,21 @@ class randomize_anchor_height(Functor):
             obj.clear_dynamics(env_ids=env_ids)
             return
 
-        pose = obj.get_local_pose()
-        if pose.ndim == 3:
-            # (N, 4, 4) matrix form from RigidObject
-            current_z = pose[env_ids, 2, 3]
-            if absolute:
-                init_z = torch.tensor(
-                    obj.cfg.init_pos[2], dtype=torch.float32, device=obj.device
-                )
-                new_z = init_z + delta_z
-            else:
-                new_z = current_z + delta_z
-            pose[env_ids, 2, 3] = new_z
+        # Both RigidObject and Articulation return (N, 7) by default:
+        # (x, y, z, qw, qx, qy, qz)
+        pose = obj.get_local_pose()  # (N, 7)
+        current_z = pose[env_ids, 2]
+        if absolute:
+            init_z = torch.tensor(
+                obj.cfg.init_pos[2], dtype=torch.float32, device=obj.device
+            )
+            new_z = init_z + delta_z
         else:
-            # (N, 7) vector form from Articulation: (x, y, z, qw, qx, qy, qz)
-            current_z = pose[env_ids, 2]
-            if absolute:
-                init_z = torch.tensor(
-                    obj.cfg.init_pos[2], dtype=torch.float32, device=obj.device
-                )
-                new_z = init_z + delta_z
-            else:
-                new_z = current_z + delta_z
-            pose[env_ids, 2] = new_z
+            new_z = current_z + delta_z
+        pose[env_ids, 2] = new_z
 
         obj.set_local_pose(pose[env_ids], env_ids=env_ids)
-        if hasattr(obj, "clear_dynamics"):
-            if isinstance(obj, Articulation):
-                obj.clear_dynamics(env_ids=env_ids)
-            else:
-                obj.clear_dynamics()
+        obj.clear_dynamics(env_ids=env_ids)
 
     def __call__(self, env: EmbodiedEnv, env_ids: torch.Tensor | None) -> None:
         """Apply the height randomization.
