@@ -731,7 +731,10 @@ def _execute_atomic_action_result(
         target=target,
         state=state,
     )
-    if not result.success:
+    success = result.success
+    if isinstance(success, torch.Tensor):
+        success = bool(torch.all(success).item())
+    if not success:
         raise RuntimeError(
             f"Atomic action failed: atomic_action_class={spec.atomic_action_class}, "
             f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
@@ -882,18 +885,19 @@ def build_parallel_action_stream(
         raise ValueError("At least one atomic arm action must be provided.")
 
     action_len = max(
-        len(action) for action in arm_actions.values() if action is not None
+        action.shape[1] for action in arm_actions.values() if action is not None
     )
     for side, action in arm_actions.items():
-        if action is not None and len(action) < action_len:
-            diff = action_len - len(action)
-            padding = np.repeat(action[-1:], diff, axis=0)
-            arm_actions[side] = np.concatenate([action, padding], axis=0)
+        if action is not None and action.shape[1] < action_len:
+            diff = action_len - action.shape[1]
+            padding = np.repeat(action[:, -1:, :], diff, axis=1)
+            arm_actions[side] = np.concatenate([action, padding], axis=1)
 
-    current_qpos = (
-        env.robot.get_qpos().squeeze(0).detach().cpu().numpy().astype(np.float32)
-    )
-    actions = np.repeat(current_qpos[None, :], action_len, axis=0)
+    num_envs = int(getattr(env, "num_envs", 1))
+    current_qpos = env.robot.get_qpos().detach().cpu().numpy().astype(np.float32)
+    if current_qpos.ndim == 1:
+        current_qpos = current_qpos[None, :]
+    actions = np.repeat(current_qpos[:, None, :], action_len, axis=1)
 
     for side, action in arm_actions.items():
         if action is None:
@@ -912,10 +916,15 @@ def build_parallel_action_stream(
                 f"{side}_arm_action width {action.shape[-1]} does not match "
                 f"{side}_arm joints plus eef joints ({len(arm_index)})."
             )
-        actions[:, arm_index] = action
+        if action.shape[0] != num_envs:
+            raise ValueError(
+                f"{side}_arm_action has {action.shape[0]} environments but "
+                f"env.num_envs={num_envs}."
+            )
+        actions[:, :, arm_index] = action
 
-    actions = torch.from_numpy(actions).to(dtype=torch.float32).unsqueeze(1)
-    actions = list(actions.unbind(dim=0))
+    actions = torch.from_numpy(actions).to(dtype=torch.float32)
+    actions = list(actions.unbind(dim=1))
     if not return_result:
         return actions
     next_world_states = dict(world_states)
@@ -1124,6 +1133,14 @@ def _released_coordinated_world_state(
     final_qpos = torch.as_tensor(final_action, dtype=torch.float32)
     if final_qpos.dim() == 1:
         final_qpos = final_qpos.unsqueeze(0)
+    elif final_qpos.dim() == 2:
+        # (n_envs, robot_dof) already batched
+        pass
+    else:
+        raise ValueError(
+            "Final coordinated action must have shape (robot_dof,) or "
+            f"(n_envs, robot_dof), got {final_qpos.shape}."
+        )
     return WorldState(
         last_qpos=final_qpos.clone(),
         held_object=held_object,
@@ -1141,9 +1158,9 @@ def _executed_coordinated_atomic_action(
         trajectory = trajectory.detach()
     else:
         trajectory = torch.as_tensor(trajectory)
-    if trajectory.dim() == 3:
-        trajectory = trajectory[0]
-    if trajectory.dim() != 2 or trajectory.shape[0] == 0:
+    if trajectory.dim() == 3 and trajectory.shape[0] == 1:
+        trajectory = trajectory.squeeze(0)
+    if trajectory.dim() not in (2, 3) or trajectory.shape[-2] == 0:
         raise ValueError(
             "Coordinated atomic action trajectory must have shape (T, D) or "
             f"(N, T, D), got {trajectory.shape}."
@@ -1157,7 +1174,7 @@ def _executed_coordinated_atomic_action(
     log_info(
         "Using coordinated atomic action: "
         f"atomic_action_class={spec.atomic_action_class}, "
-        f"target={_target_summary(spec)}, steps={len(action_np)}.",
+        f"target={_target_summary(spec)}, steps={action_np.shape[-2]}.",
         color="green",
     )
     return _ExecutedAtomicAction(
@@ -1170,13 +1187,15 @@ def _executed_coordinated_atomic_action(
 
 def _full_robot_action_array_to_steps(action_np: np.ndarray) -> list[torch.Tensor]:
     action_np = np.asarray(action_np, dtype=np.float32)
-    if action_np.ndim != 2 or action_np.shape[0] == 0:
+    if action_np.ndim == 2:
+        action_np = action_np[None, :, :]
+    if action_np.ndim != 3 or action_np.shape[1] == 0:
         raise ValueError(
-            "Coordinated action stream must have shape (T, robot_dof), "
-            f"got {action_np.shape}."
+            "Coordinated action stream must have shape (T, robot_dof) or "
+            f"(N, T, robot_dof), got {action_np.shape}."
         )
-    actions = torch.from_numpy(action_np).to(dtype=torch.float32).unsqueeze(1)
-    return list(actions.unbind(dim=0))
+    actions = torch.from_numpy(action_np).to(dtype=torch.float32)
+    return list(actions.unbind(dim=1))
 
 
 def _sync_agent_states_from_parallel_actions(
@@ -1281,23 +1300,30 @@ def _state_with_current_agent_qpos(
         return _coordinated_state_with_current_agent_qpos(env, state)
 
     qpos = state.last_qpos.clone()
+    num_envs = qpos.shape[0]
     _, _, current_arm_qpos, _, current_gripper_state = get_arm_states(
         env,
         spec.robot_name,
     )
     _, _, _, arm_joints, eef_joints = _select_arm_parts(env, spec.robot_name)
     if arm_joints:
-        qpos[:, arm_joints] = torch.as_tensor(
+        arm_qpos = torch.as_tensor(
             current_arm_qpos,
             dtype=torch.float32,
             device=qpos.device,
-        ).reshape(1, len(arm_joints))
+        )
+        if arm_qpos.ndim == 1:
+            arm_qpos = arm_qpos.unsqueeze(0).repeat(num_envs, 1)
+        qpos[:, arm_joints] = arm_qpos
     if eef_joints:
-        qpos[:, eef_joints] = _state_to_hand_qpos(
+        hand_qpos = _state_to_hand_qpos(
             current_gripper_state,
             len(eef_joints),
             qpos.device,
-        ).reshape(1, len(eef_joints))
+        )
+        if hand_qpos.ndim == 1:
+            hand_qpos = hand_qpos.unsqueeze(0).repeat(num_envs, 1)
+        qpos[:, eef_joints] = hand_qpos
     return WorldState(
         last_qpos=qpos,
         held_object=state.held_object,
@@ -1310,6 +1336,7 @@ def _coordinated_state_with_current_agent_qpos(
     state: WorldState,
 ) -> WorldState:
     qpos = state.last_qpos.clone()
+    num_envs = qpos.shape[0]
     for robot_name in ("left_arm", "right_arm"):
         _, _, current_arm_qpos, _, current_gripper_state = get_arm_states(
             env,
@@ -1317,17 +1344,23 @@ def _coordinated_state_with_current_agent_qpos(
         )
         _, _, _, arm_joints, eef_joints = _select_arm_parts(env, robot_name)
         if arm_joints:
-            qpos[:, arm_joints] = torch.as_tensor(
+            arm_qpos = torch.as_tensor(
                 current_arm_qpos,
                 dtype=torch.float32,
                 device=qpos.device,
-            ).reshape(1, len(arm_joints))
+            )
+            if arm_qpos.ndim == 1:
+                arm_qpos = arm_qpos.unsqueeze(0).repeat(num_envs, 1)
+            qpos[:, arm_joints] = arm_qpos
         if eef_joints:
-            qpos[:, eef_joints] = _state_to_hand_qpos(
+            hand_qpos = _state_to_hand_qpos(
                 current_gripper_state,
                 len(eef_joints),
                 qpos.device,
-            ).reshape(1, len(eef_joints))
+            )
+            if hand_qpos.ndim == 1:
+                hand_qpos = hand_qpos.unsqueeze(0).repeat(num_envs, 1)
+            qpos[:, eef_joints] = hand_qpos
     return WorldState(
         last_qpos=qpos,
         held_object=state.held_object,
@@ -1576,10 +1609,11 @@ def _resolve_coordinated_pickment_target(
         semantics,
         state,
     )
-    object_initial_pose = _ensure_pose_tensor(
+    object_initial_pose = _ensure_batched_pose_tensor(
         semantics.entity.get_local_pose(to_matrix=True),
         env.robot.device,
     )
+    num_envs = object_initial_pose.shape[0]
     left_object_to_eef, right_object_to_eef = _default_coordinated_object_to_eef(
         semantics,
         env.robot.device,
@@ -1590,6 +1624,10 @@ def _resolve_coordinated_pickment_target(
         lift_height=float(spec.cfg.get("lift_height", 0.08)),
         env=env,
     )
+    if left_object_to_eef.ndim == 2:
+        left_object_to_eef = left_object_to_eef.unsqueeze(0).repeat(num_envs, 1, 1)
+    if right_object_to_eef.ndim == 2:
+        right_object_to_eef = right_object_to_eef.unsqueeze(0).repeat(num_envs, 1, 1)
     return CoordinatedPickmentTarget(
         object_target_pose=object_target_pose,
         object_semantics=semantics,
@@ -1606,7 +1644,7 @@ def _resolve_coordinated_object_pose_target(
     state: WorldState | None,
 ) -> torch.Tensor:
     target_pose_spec = spec.target_object_pose
-    current_object_pose = _ensure_pose_tensor(
+    current_object_pose = _ensure_batched_pose_tensor(
         semantics.entity.get_local_pose(to_matrix=True),
         env.robot.device,
     )
@@ -1626,7 +1664,7 @@ def _resolve_coordinated_object_pose_target(
             ),
             coordinated_held_object=orientation_state.coordinated_held_object,
         )
-    target_pose[:3, :3] = _resolve_object_orientation(
+    target_pose[..., :3, :3] = _resolve_object_orientation(
         env,
         target_pose_spec,
         current_object_pose,
@@ -1648,25 +1686,29 @@ def _resolve_object_target_pose_like(
 ) -> torch.Tensor:
     reference = target_pose_spec["reference"]
     target_pose = current_object_pose.clone()
+    is_batched = target_pose.ndim == 3
     if reference == "absolute":
         position = target_pose_spec.get("position")
         if not isinstance(position, list) or len(position) != 3:
             raise ValueError("absolute target_object_pose requires position.")
         for index, value in enumerate(position):
             if value is not None:
-                target_pose[index, 3] = float(value)
+                if is_batched:
+                    target_pose[:, index, 3] = float(value)
+                else:
+                    target_pose[index, 3] = float(value)
         return target_pose
     if reference == "object":
         obj_name = target_pose_spec.get("obj_name")
         target_obj = env.sim.get_rigid_object(obj_name)
         if target_obj is None:
             raise ValueError(f"No rigid object found for {obj_name}.")
-        target_pose = _ensure_pose_tensor(
+        target_pose = _ensure_batched_pose_tensor(
             target_obj.get_local_pose(to_matrix=True),
             env.robot.device,
         )
         offset = _xyz(target_pose_spec.get("offset", [0.0, 0.0, 0.0]), "offset")
-        target_pose[:3, 3] += torch.tensor(
+        target_pose[..., :3, 3] += torch.tensor(
             offset,
             dtype=torch.float32,
             device=env.robot.device,
@@ -1676,9 +1718,17 @@ def _resolve_object_target_pose_like(
         offset = _xyz(target_pose_spec.get("offset", [0.0, 0.0, 0.0]), "offset")
         frame = target_pose_spec.get("frame", "world")
         mode = "extrinsic" if frame == "world" else "intrinsic"
-        target_pose = get_offset_pose(target_pose, offset[0], "x", mode)
-        target_pose = get_offset_pose(target_pose, offset[1], "y", mode)
-        target_pose = get_offset_pose(target_pose, offset[2], "z", mode)
+
+        def _apply_offsets(pose):
+            result = pose.clone()
+            for offset_value, direction in zip(offset, ("x", "y", "z")):
+                result = get_offset_pose(result, offset_value, direction, mode)
+            return result
+
+        if is_batched:
+            target_pose = torch.stack([_apply_offsets(pose) for pose in target_pose])
+        else:
+            target_pose = _apply_offsets(target_pose)
         return torch.as_tensor(
             target_pose,
             dtype=torch.float32,
@@ -1692,11 +1742,17 @@ def _semantics_as_held_object_state(
     object_pose: torch.Tensor,
     device,
 ):
-    identity = torch.eye(4, dtype=torch.float32, device=device).unsqueeze(0)
+    object_pose = _ensure_batched_pose_tensor(object_pose, device)
+    n_envs = object_pose.shape[0]
+    identity = (
+        torch.eye(4, dtype=torch.float32, device=device)
+        .unsqueeze(0)
+        .repeat(n_envs, 1, 1)
+    )
     return HeldObjectState(
         semantics=semantics,
         object_to_eef=identity,
-        grasp_xpos=object_pose.unsqueeze(0),
+        grasp_xpos=object_pose,
     )
 
 
@@ -1717,17 +1773,26 @@ def _default_coordinated_object_to_eef(
     vertices = torch.as_tensor(vertices, dtype=torch.float32, device=device)
     if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
         raise ValueError("CoordinatedPickment mesh_vertices must have shape (N, 3).")
+    # Coordinated grasp selection is performed on a representative single env.
+    representative_initial_pose = (
+        object_initial_pose[0] if object_initial_pose.ndim == 3 else object_initial_pose
+    )
+    representative_target_pose = (
+        object_target_pose[0]
+        if object_target_pose is not None and object_target_pose.ndim == 3
+        else object_target_pose
+    )
     candidates = _coordinated_grasp_pair_candidates(
         vertices=vertices,
-        object_initial_pose=object_initial_pose,
+        object_initial_pose=representative_initial_pose,
         object_label=object_label,
         env=env,
         device=device,
     )
     selected = _select_ik_feasible_coordinated_grasp_pair(
         candidates,
-        object_initial_pose=object_initial_pose,
-        object_target_pose=object_target_pose,
+        object_initial_pose=representative_initial_pose,
+        object_target_pose=representative_target_pose,
         pre_grasp_distance=pre_grasp_distance,
         lift_height=lift_height,
         env=env,
@@ -2555,10 +2620,17 @@ def _current_coordinated_arm_qpos(
         left_qpos, right_qpos = env.get_current_qpos_agent()
     except Exception:
         return None, None
-    return (
-        torch.as_tensor(left_qpos, dtype=torch.float32, device=device).reshape(1, -1),
-        torch.as_tensor(right_qpos, dtype=torch.float32, device=device).reshape(1, -1),
-    )
+    left_qpos = torch.as_tensor(left_qpos, dtype=torch.float32, device=device)
+    right_qpos = torch.as_tensor(right_qpos, dtype=torch.float32, device=device)
+    if left_qpos.ndim == 1:
+        left_qpos = left_qpos.unsqueeze(0)
+    else:
+        left_qpos = left_qpos[0:1]
+    if right_qpos.ndim == 1:
+        right_qpos = right_qpos.unsqueeze(0)
+    else:
+        right_qpos = right_qpos[0:1]
+    return left_qpos, right_qpos
 
 
 def _transform_local_point(object_pose: torch.Tensor, local_point: torch.Tensor):
@@ -2576,11 +2648,11 @@ def _current_arm_positions(env, device) -> tuple[torch.Tensor, torch.Tensor] | N
         return None
     try:
         left_pose, right_pose = env.get_current_xpos_agent()
-        left_pose = _ensure_pose_tensor(left_pose, device)
-        right_pose = _ensure_pose_tensor(right_pose, device)
+        left_pose = _ensure_batched_pose_tensor(left_pose, device)
+        right_pose = _ensure_batched_pose_tensor(right_pose, device)
     except Exception:
         return None
-    return left_pose[:3, 3], right_pose[:3, 3]
+    return left_pose[0, :3, 3], right_pose[0, :3, 3]
 
 
 def _resolve_pose_target(env, spec: AtomicActionSpec):
@@ -2617,9 +2689,11 @@ def _resolve_held_object_pose_target(
         cfg={},
     )
     target_pose = _resolve_pose_target(env, pose_spec)
-    target_pose = _ensure_pose_tensor(target_pose, env.robot.device)
     current_object_pose = _held_object_current_pose(state, env.robot.device)
-    target_pose[:3, :3] = _resolve_object_orientation(
+    num_envs = current_object_pose.shape[0]
+    if target_pose.ndim == 2:
+        target_pose = target_pose.unsqueeze(0).repeat(num_envs, 1, 1)
+    target_pose[..., :3, :3] = _resolve_object_orientation(
         env,
         target_pose_spec,
         current_object_pose,
@@ -2635,8 +2709,9 @@ def _held_object_current_pose(state: WorldState, device) -> torch.Tensor:
         raise ValueError("Held object state is required.")
     entity = held.semantics.entity
     if entity is not None and hasattr(entity, "get_local_pose"):
-        return _ensure_pose_tensor(entity.get_local_pose(to_matrix=True), device)
-    return held.grasp_xpos.to(device=device, dtype=torch.float32).squeeze(0)
+        pose = entity.get_local_pose(to_matrix=True)
+        return _ensure_batched_pose_tensor(pose, device)
+    return held.grasp_xpos.to(device=device, dtype=torch.float32)
 
 
 def _resolve_object_orientation(
@@ -2646,9 +2721,13 @@ def _resolve_object_orientation(
     state: WorldState,
 ) -> torch.Tensor:
     orientation_goal = target_pose_spec.get("orientation_goal", "preserve")
-    current_rotation = current_object_pose[:3, :3].clone()
+    current_rotation = current_object_pose[..., :3, :3].clone()
     if orientation_goal == "preserve":
         return current_rotation
+    # Non-preserve orientation goals are computed from a single representative env
+    # and broadcast to all envs.
+    if current_rotation.ndim == 3:
+        current_rotation = current_rotation[0]
 
     mesh_vertices = _held_object_mesh_vertices(state, env.robot.device)
     local_axes = _principal_local_axes(mesh_vertices)
@@ -2712,13 +2791,13 @@ def _apply_surface_z_policy(
     mesh_vertices = _held_object_mesh_vertices(state, env.robot.device)
     target_local_zmin = _target_local_zmin_after_rotation(
         mesh_vertices,
-        target_pose[:3, :3],
+        target_pose[..., :3, :3],
     )
     resolved_pose = target_pose.clone()
-    resolved_pose[2, 3] = (
+    resolved_pose[..., 2, 3] = (
         float(support_top_z)
         + _surface_release_clearance(target_pose_spec)
-        - float(target_local_zmin)
+        - target_local_zmin
     )
     return resolved_pose
 
@@ -2761,8 +2840,8 @@ def _surface_support_top_z(env, support_uid: str, device) -> float:
 
 def _object_world_vertices(obj, device) -> torch.Tensor:
     vertices = _object_mesh_vertices(obj, device)
-    pose = _ensure_pose_tensor(obj.get_local_pose(to_matrix=True), device)
-    return (pose[:3, :3] @ vertices.T).T + pose[:3, 3]
+    pose = _ensure_batched_pose_tensor(obj.get_local_pose(to_matrix=True), device)
+    return (pose[0, :3, :3] @ vertices.T).T + pose[0, :3, 3]
 
 
 def _object_mesh_vertices(obj, device) -> torch.Tensor:
@@ -2780,9 +2859,19 @@ def _object_mesh_vertices(obj, device) -> torch.Tensor:
 def _target_local_zmin_after_rotation(
     mesh_vertices: torch.Tensor,
     target_rotation: torch.Tensor,
-) -> float:
-    rotated_vertices = (target_rotation @ mesh_vertices.T).T
-    return float(rotated_vertices[:, 2].min())
+) -> torch.Tensor:
+    if target_rotation.ndim == 2:
+        rotated_vertices = (target_rotation @ mesh_vertices.T).T
+        return torch.as_tensor(
+            rotated_vertices[:, 2].min(),
+            dtype=torch.float32,
+            device=target_rotation.device,
+        )
+    rotated_vertices = torch.matmul(
+        target_rotation,
+        mesh_vertices.T.unsqueeze(0).expand(target_rotation.shape[0], -1, -1),
+    )
+    return rotated_vertices[..., 2, :].min(dim=-1).values
 
 
 def _held_object_mesh_vertices(state: WorldState, device) -> torch.Tensor:
@@ -2949,8 +3038,10 @@ def _reference_object_axis_direction(
     axis_index = 0 if extents[0] >= extents[1] else 1
     if orientation_axis == "short_axis":
         axis_index = 1 - axis_index
-    pose = _ensure_pose_tensor(target_obj.get_local_pose(to_matrix=True), device)
-    direction = pose[:3, axis_index].clone()
+    pose = _ensure_batched_pose_tensor(
+        target_obj.get_local_pose(to_matrix=True), device
+    )
+    direction = pose[0, :3, axis_index].clone()
     direction[2] = 0.0
     norm = torch.linalg.norm(direction)
     if float(norm) < 1e-6:
@@ -3063,6 +3154,19 @@ def _ensure_pose_tensor(pose, device) -> torch.Tensor:
     return pose.clone()
 
 
+def _ensure_batched_pose_tensor(pose, device) -> torch.Tensor:
+    """Ensure a pose tensor has shape (n_envs, 4, 4)."""
+    pose = torch.as_tensor(pose, dtype=torch.float32, device=device)
+    if pose.ndim == 2:
+        pose = pose.unsqueeze(0)
+    if pose.ndim != 3 or pose.shape[-2:] != (4, 4):
+        raise ValueError(
+            "Batched pose target must have shape (4, 4) or (n_envs, 4, 4), "
+            f"got {tuple(pose.shape)}."
+        )
+    return pose.clone()
+
+
 def _resolve_qpos_target(env, spec: AtomicActionSpec):
     source = spec.target_qpos["source"]
     if source == "initial":
@@ -3082,11 +3186,17 @@ def _resolve_object_pose_target(env, spec: AtomicActionSpec):
     offset = _xyz(spec.target_pose.get("offset", [0.0, 0.0, 0.0]), "offset")
     _, _, _, current_pose, _ = get_arm_states(env, spec.robot_name)
     target_pose = deepcopy(current_pose)
-    target_obj_pose = target_obj.get_local_pose(to_matrix=True).squeeze(0)
-    target_pose[:3, 3] = target_obj_pose[:3, 3]
-    target_pose[0, 3] += offset[0]
-    target_pose[1, 3] += offset[1]
-    target_pose[2, 3] += offset[2]
+    target_obj_pose = target_obj.get_local_pose(to_matrix=True)
+    if target_pose.ndim == 2:
+        target_pose[:3, 3] = target_obj_pose[:3, 3]
+        target_pose[0, 3] += offset[0]
+        target_pose[1, 3] += offset[1]
+        target_pose[2, 3] += offset[2]
+    else:
+        target_pose[:, :3, 3] = target_obj_pose[:, :3, 3]
+        target_pose[:, 0, 3] += offset[0]
+        target_pose[:, 1, 3] += offset[1]
+        target_pose[:, 2, 3] += offset[2]
     return torch.as_tensor(target_pose, dtype=torch.float32, device=env.robot.device)
 
 
@@ -3096,9 +3206,14 @@ def _resolve_absolute_pose_target(env, spec: AtomicActionSpec):
         raise ValueError("absolute target_pose requires position with three entries.")
     _, _, _, current_pose, _ = get_arm_states(env, spec.robot_name)
     target_pose = deepcopy(current_pose)
-    for index, value in enumerate(position):
-        if value is not None:
-            target_pose[index, 3] = float(value)
+    if target_pose.ndim == 2:
+        for index, value in enumerate(position):
+            if value is not None:
+                target_pose[index, 3] = float(value)
+    else:
+        for index, value in enumerate(position):
+            if value is not None:
+                target_pose[:, index, 3] = float(value)
     return torch.as_tensor(target_pose, dtype=torch.float32, device=env.robot.device)
 
 
@@ -3109,11 +3224,21 @@ def _resolve_relative_pose_target(env, spec: AtomicActionSpec):
         raise ValueError("relative target_pose frame must be 'world' or 'eef'.")
     mode = "extrinsic" if frame == "world" else "intrinsic"
     _, _, _, current_pose, _ = get_arm_states(env, spec.robot_name)
-    target_pose = deepcopy(current_pose)
-    target_pose = get_offset_pose(target_pose, offset[0], "x", mode)
-    target_pose = get_offset_pose(target_pose, offset[1], "y", mode)
-    target_pose = get_offset_pose(target_pose, offset[2], "z", mode)
-    return torch.as_tensor(target_pose, dtype=torch.float32, device=env.robot.device)
+    current_pose = torch.as_tensor(
+        current_pose, dtype=torch.float32, device=env.robot.device
+    )
+
+    def _apply_offsets(pose):
+        target_pose = pose.clone()
+        for offset_value, direction in zip(offset, ("x", "y", "z")):
+            target_pose = get_offset_pose(target_pose, offset_value, direction, mode)
+        return target_pose
+
+    if current_pose.ndim == 2:
+        target_pose = _apply_offsets(current_pose)
+    else:
+        target_pose = torch.stack([_apply_offsets(pose) for pose in current_pose])
+    return target_pose
 
 
 def _resolve_initial_qpos_target(env, spec: AtomicActionSpec):
@@ -3149,9 +3274,14 @@ def _resolve_joint_delta_qpos_target(env, spec: AtomicActionSpec):
         dtype=torch.float32,
         device=env.robot.device,
     ).clone()
-    if joint_index < 0 or joint_index >= target_qpos.numel():
-        raise ValueError(f"joint_index {joint_index} is out of range.")
-    target_qpos[joint_index] += float(np.deg2rad(delta_degrees))
+    if target_qpos.ndim == 1:
+        if joint_index < 0 or joint_index >= target_qpos.numel():
+            raise ValueError(f"joint_index {joint_index} is out of range.")
+        target_qpos[joint_index] += float(np.deg2rad(delta_degrees))
+    else:
+        if joint_index < 0 or joint_index >= target_qpos.shape[-1]:
+            raise ValueError(f"joint_index {joint_index} is out of range.")
+        target_qpos[:, joint_index] += float(np.deg2rad(delta_degrees))
     return target_qpos
 
 
@@ -3402,36 +3532,65 @@ def _trajectory_to_agent_action(env, robot_name, trajectory, joint_ids):
         trajectory = torch.as_tensor(trajectory)
 
     if trajectory.dim() == 3:
-        trajectory = trajectory[0]
-    if trajectory.dim() != 2 or trajectory.shape[0] == 0:
+        n_envs, T, dof = trajectory.shape
+    elif trajectory.dim() == 2:
+        n_envs, T, dof = 1, trajectory.shape[0], trajectory.shape[1]
+    else:
         raise ValueError(
             "Atomic action trajectory must have shape (T, D) or (N, T, D), "
             f"got {trajectory.shape}."
         )
+    if T == 0:
+        raise ValueError("Atomic action trajectory must have at least one step.")
 
     joint_ids = [int(joint_id) for joint_id in joint_ids]
-    if len(joint_ids) != trajectory.shape[-1]:
+    if len(joint_ids) != dof:
         raise ValueError(
             f"Atomic action joint_ids length {len(joint_ids)} does not match "
-            f"trajectory width {trajectory.shape[-1]}."
+            f"trajectory width {dof}."
         )
 
     device = trajectory.device
-    agent_action = torch.cat(
-        [
-            torch.as_tensor(
-                current_arm_qpos, dtype=torch.float32, device=device
-            ).flatten(),
-            _state_to_hand_qpos(current_gripper_state, len(eef_joints), device),
-        ],
-        dim=0,
+    current_arm_qpos = torch.as_tensor(
+        current_arm_qpos, dtype=torch.float32, device=device
     )
-    agent_action = agent_action.unsqueeze(0).repeat(trajectory.shape[0], 1)
+    current_gripper_state = torch.as_tensor(
+        current_gripper_state, dtype=torch.float32, device=device
+    )
+
+    arm_dof = len(arm_joints)
+    eef_dof = len(eef_joints)
+
+    if current_arm_qpos.ndim == 1:
+        current_arm_qpos = current_arm_qpos.unsqueeze(0).repeat(n_envs, 1)
+    if current_gripper_state.ndim == 1:
+        hand_qpos = _state_to_hand_qpos(current_gripper_state, eef_dof, device)
+        hand_qpos = hand_qpos.unsqueeze(0).repeat(n_envs, 1)
+    else:
+        if current_gripper_state.shape[-1] == eef_dof:
+            hand_qpos = current_gripper_state
+        else:
+            hand_qpos = torch.stack(
+                [
+                    _state_to_hand_qpos(state, eef_dof, device)
+                    for state in current_gripper_state
+                ]
+            )
+
+    agent_action = torch.cat([current_arm_qpos, hand_qpos], dim=-1)
+    agent_action = agent_action.unsqueeze(1).repeat(1, T, 1)
 
     joint_id_to_col = {joint_id: col for col, joint_id in enumerate(joint_ids)}
     for out_col, joint_id in enumerate(arm_joints + eef_joints):
         if joint_id in joint_id_to_col:
-            agent_action[:, out_col] = trajectory[:, joint_id_to_col[joint_id]]
+            traj_col = joint_id_to_col[joint_id]
+            if n_envs == 1:
+                agent_action[0, :, out_col] = trajectory[0, :, traj_col]
+            else:
+                agent_action[:, :, out_col] = trajectory[:, :, traj_col]
+
+    if n_envs == 1:
+        agent_action = agent_action.squeeze(0)
 
     return agent_action.detach().cpu().numpy().astype(np.float32)
 
@@ -3440,13 +3599,25 @@ def _sync_agent_state_from_atomic_action(env, robot_name, action_np, control):
     if action_np is None or len(action_np) == 0:
         raise ValueError("Atomic action is empty; cannot sync agent state.")
 
+    action_np = np.asarray(action_np, dtype=np.float32)
+    if action_np.ndim == 2:
+        n_envs = 1
+        final_action = action_np[-1]
+    elif action_np.ndim == 3:
+        n_envs = action_np.shape[0]
+        final_action = action_np[:, -1, :]
+    else:
+        raise ValueError(
+            "Atomic action must have shape (T, D) or (N, T, D), "
+            f"got {action_np.shape}."
+        )
+
     is_left, _, _, arm_joints, eef_joints = _select_arm_parts(env, robot_name)
-    final_action = np.asarray(action_np[-1], dtype=np.float32)
     arm_dof = len(arm_joints)
 
-    if control == "arm":
+    if control == "arm" and arm_dof > 0:
         arm_qpos = torch.as_tensor(
-            final_action[:arm_dof],
+            final_action[..., :arm_dof],
             dtype=torch.float32,
             device=env.robot.device,
         )
@@ -3460,14 +3631,22 @@ def _sync_agent_state_from_atomic_action(env, robot_name, action_np, control):
         return
 
     _, _, _, _, current_gripper_state = get_arm_states(env, robot_name)
-    eef_qpos = final_action[arm_dof : arm_dof + len(eef_joints)]
-    state_dof = max(int(torch.as_tensor(current_gripper_state).numel()), 1)
-    if len(eef_qpos) >= state_dof:
-        gripper_qpos = eef_qpos[:state_dof]
-    else:
-        gripper_qpos = np.resize(eef_qpos, state_dof)
+    eef_qpos = final_action[..., arm_dof : arm_dof + len(eef_joints)]
 
-    current_gripper_state = torch.as_tensor(current_gripper_state)
+    current_gripper_state = torch.as_tensor(
+        current_gripper_state, dtype=torch.float32, device=env.robot.device
+    )
+    if current_gripper_state.ndim == 1:
+        state_dof = max(int(current_gripper_state.numel()), 1)
+    else:
+        state_dof = max(int(current_gripper_state.shape[-1]), 1)
+
+    if eef_qpos.shape[-1] >= state_dof:
+        gripper_qpos = eef_qpos[..., :state_dof]
+    else:
+        repeats = int(np.ceil(state_dof / eef_qpos.shape[-1]))
+        gripper_qpos = np.tile(eef_qpos, repeats)[..., :state_dof]
+
     env.set_current_gripper_state_agent(
         torch.as_tensor(
             gripper_qpos,
@@ -3481,13 +3660,22 @@ def _sync_agent_state_from_atomic_action(env, robot_name, action_np, control):
 def _sync_agent_states_from_coordinated_action(env, action_np) -> None:
     if action_np is None or len(action_np) == 0:
         raise ValueError("Coordinated atomic action is empty; cannot sync state.")
-    final_qpos = np.asarray(action_np[-1], dtype=np.float32)
+    action_np = np.asarray(action_np, dtype=np.float32)
+    if action_np.ndim == 2:
+        final_qpos = action_np[-1]
+    elif action_np.ndim == 3:
+        final_qpos = action_np[:, -1, :]
+    else:
+        raise ValueError(
+            "Coordinated atomic action must have shape (T, D) or (N, T, D), "
+            f"got {action_np.shape}."
+        )
     for side, is_left in (("left", True), ("right", False)):
         arm_joints = list(getattr(env, f"{side}_arm_joints", []) or [])
         eef_joints = list(getattr(env, f"{side}_eef_joints", []) or [])
         if arm_joints:
             arm_qpos = torch.as_tensor(
-                final_qpos[arm_joints],
+                final_qpos[..., arm_joints],
                 dtype=torch.float32,
                 device=env.robot.device,
             )
@@ -3499,7 +3687,7 @@ def _sync_agent_states_from_coordinated_action(env, action_np) -> None:
         if eef_joints:
             env.set_current_gripper_state_agent(
                 torch.as_tensor(
-                    final_qpos[eef_joints],
+                    final_qpos[..., eef_joints],
                     dtype=torch.float32,
                     device=env.robot.device,
                 ),
@@ -3509,20 +3697,29 @@ def _sync_agent_states_from_coordinated_action(env, action_np) -> None:
 
 def _current_arm_qpos(env, is_left: bool, arm_joints: list[int]) -> torch.Tensor:
     source = env.left_arm_current_qpos if is_left else env.right_arm_current_qpos
-    return torch.as_tensor(
+    qpos = torch.as_tensor(
         source,
         dtype=torch.float32,
         device=env.robot.device,
-    ).reshape(1, len(arm_joints))
+    )
+    if qpos.ndim == 1:
+        qpos = qpos.unsqueeze(0)
+    return qpos
 
 
 def _state_to_hand_qpos(state, hand_dof: int, device):
     if hand_dof <= 0:
         return torch.empty(0, dtype=torch.float32, device=device)
 
-    state = torch.as_tensor(state, dtype=torch.float32, device=device).flatten()
+    state = torch.as_tensor(state, dtype=torch.float32, device=device)
     if state.numel() == 0:
         return torch.zeros(hand_dof, dtype=torch.float32, device=device)
+
+    # If already a batched hand state with the right dof, return as-is.
+    if state.ndim == 2 and state.shape[-1] == hand_dof:
+        return state
+
+    state = state.flatten()
     if state.numel() == hand_dof:
         return state
     if state.numel() == 1:
@@ -3535,16 +3732,20 @@ def _state_to_hand_qpos(state, hand_dof: int, device):
 
 
 def _as_2d_action(action, action_name: str):
+    """Normalize an action array to shape (n_envs, T, D)."""
     if action is None:
         return None
     if isinstance(action, torch.Tensor):
         action = action.detach().cpu().numpy()
     action = np.asarray(action, dtype=np.float32)
     if action.ndim == 1:
-        action = action[None, :]
-    if action.ndim != 2 or len(action) == 0:
+        action = action[None, None, :]
+    elif action.ndim == 2:
+        action = action[None, :, :]
+    if action.ndim != 3 or action.shape[1] == 0:
         raise ValueError(
-            f"{action_name} must have shape (T, D) with T > 0, got {action.shape}."
+            f"{action_name} must have shape (T, D) or (N, T, D) with T > 0, "
+            f"got {action.shape}."
         )
     return action
 
@@ -3556,11 +3757,21 @@ def _append_hold_steps(action_np, hold_steps: int, log_name: str):
     if action_np is None or len(action_np) == 0:
         raise ValueError(f"{log_name} action is empty; cannot append hold steps.")
 
-    hold_actions = np.repeat(action_np[-1:], hold_steps, axis=0)
-    action_np = np.concatenate([action_np, hold_actions], axis=0)
+    action_np = np.asarray(action_np, dtype=np.float32)
+    if action_np.ndim == 2:
+        hold_actions = np.repeat(action_np[-1:], hold_steps, axis=0)
+        action_np = np.concatenate([action_np, hold_actions], axis=0)
+    elif action_np.ndim == 3:
+        hold_actions = np.repeat(action_np[:, -1:, :], hold_steps, axis=1)
+        action_np = np.concatenate([action_np, hold_actions], axis=1)
+    else:
+        raise ValueError(
+            f"{log_name} action must have shape (T, D) or (N, T, D), "
+            f"got {action_np.shape}."
+        )
     log_info(
         f"Append {hold_steps} hold steps after {log_name}; "
-        f"total trajectory length is {len(action_np)}.",
+        f"total trajectory length is {action_np.shape[-2]}.",
         color="green",
     )
     return action_np
