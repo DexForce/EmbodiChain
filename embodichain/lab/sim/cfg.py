@@ -300,6 +300,8 @@ class RigidBodyAttributesCfg:
         attr.sleep_threshold = self.sleep_threshold
         attr.restitution = self.restitution
         attr.enable_ccd = self.enable_ccd
+        attr.max_linear_velocity = self.max_linear_velocity
+        attr.max_angular_velocity = self.max_angular_velocity
         attr.max_depenetration_velocity = self.max_depenetration_velocity
         attr.min_position_iters = self.min_position_iters
         attr.min_velocity_iters = self.min_velocity_iters
