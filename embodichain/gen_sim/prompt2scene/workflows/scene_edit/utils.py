@@ -33,6 +33,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    asset_orientation_is_upper_larger,
     export_z_axis_normalized_asset,
     match_asset_orientation_keyword,
 )
@@ -1496,6 +1497,7 @@ def _build_generated_rigid_object(
                 local_baked_path,
                 object_dst,
                 glb_to_sim_rotation=_glb_to_sim_rotation(),
+                is_upper_larger=asset_orientation_is_upper_larger(alignment_keyword),
             )
         finally:
             local_baked_path.unlink(missing_ok=True)
