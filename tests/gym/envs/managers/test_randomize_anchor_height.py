@@ -33,19 +33,32 @@ class MockRigidObject:
         self.device = torch.device("cpu")
         self.cfg = MagicMock()
         self.cfg.init_pos = [0.0, 0.0, 0.0]
-        self._pose = torch.eye(4).unsqueeze(0).repeat(num_envs, 1, 1)
+        # (x, y, z, qw, qx, qy, qz)
+        self._pose = torch.zeros(num_envs, 7)
+        self._pose[:, 3] = 1.0  # identity quaternion
         self._cleared = False
+        self._cleared_env_ids = None
 
-    def get_local_pose(self, to_matrix: bool = True):
+    def get_local_pose(self, to_matrix: bool = False):
+        if to_matrix:
+            mat = torch.eye(4).unsqueeze(0).repeat(self.num_envs, 1, 1)
+            mat[:, :3, 3] = self._pose[:, :3]
+            return mat
         return self._pose.clone()
 
     def set_local_pose(self, pose, env_ids=None):
         if env_ids is None:
             env_ids = torch.arange(self.num_envs)
-        self._pose[env_ids] = pose
+        if pose.ndim == 3:
+            # (N, 4, 4) matrix form
+            self._pose[env_ids, :3] = pose[:, :3, 3]
+        else:
+            # (N, 7) vector form
+            self._pose[env_ids] = pose
 
-    def clear_dynamics(self):
+    def clear_dynamics(self, env_ids=None):
         self._cleared = True
+        self._cleared_env_ids = env_ids
 
 
 class MockArticulation:
@@ -55,9 +68,11 @@ class MockArticulation:
         self.device = torch.device("cpu")
         self.cfg = MagicMock()
         self.cfg.init_pos = [0.0, 0.0, 0.0]
+        # (x, y, z, qw, qx, qy, qz)
         self._pose = torch.zeros(num_envs, 7)
-        self._pose[:, 0] = 1.0  # qw = 1
+        self._pose[:, 3] = 1.0  # identity quaternion
         self._cleared = False
+        self._cleared_env_ids = None
 
     def get_local_pose(self):
         return self._pose.clone()
@@ -69,6 +84,35 @@ class MockArticulation:
 
     def clear_dynamics(self, env_ids=None):
         self._cleared = True
+        self._cleared_env_ids = env_ids
+
+
+class MockRigidObjectGroup:
+    def __init__(self, uid: str, num_envs: int = 4, num_objects: int = 2):
+        self.uid = uid
+        self.num_envs = num_envs
+        self.num_objects = num_objects
+        self.device = torch.device("cpu")
+        self.cfg = MagicMock()
+        self.cfg.init_pos = [0.0, 0.0, 0.0]
+        # (num_instances, num_objects, 4, 4)
+        self._pose = (
+            torch.eye(4).unsqueeze(0).unsqueeze(0).repeat(num_envs, num_objects, 1, 1)
+        )
+        self._cleared = False
+        self._cleared_env_ids = None
+
+    def get_local_pose(self, to_matrix: bool = False):
+        return self._pose.clone()
+
+    def set_local_pose(self, pose, env_ids=None):
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs)
+        self._pose[env_ids] = pose
+
+    def clear_dynamics(self, env_ids=None):
+        self._cleared = True
+        self._cleared_env_ids = env_ids
 
 
 class MockSim:
@@ -77,7 +121,7 @@ class MockSim:
         self.device = torch.device("cpu")
         self._rigid_objects: dict[str, MockRigidObject] = {}
         self._articulations: dict[str, MockArticulation] = {}
-        self._rigid_object_groups: dict[str, object] = {}
+        self._rigid_object_groups: dict[str, MockRigidObjectGroup] = {}
 
     def get_rigid_object(self, uid: str):
         return self._rigid_objects.get(uid)
@@ -117,6 +161,11 @@ class MockEnv:
         self.sim = MockSim(num_envs)
 
 
+# ---------------------------------------------------------------------------
+# Validation tests
+# ---------------------------------------------------------------------------
+
+
 def test_missing_anchor_uid_raises():
     env = MockEnv()
     cfg = randomize_anchor_height_cfg(
@@ -144,6 +193,25 @@ def test_empty_candidates_raises():
         randomize_anchor_height(cfg, env)
 
 
+def test_invalid_include_groups_raises():
+    env = MockEnv()
+    table = MockRigidObject("table", num_envs=4)
+    env.sim.add_rigid_object(table)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="table",
+        height_delta_range=([-0.05], [0.05]),
+        include_groups=["invalid_group", "rigid_object"],
+    )
+    with pytest.raises(ValueError, match="Invalid include_groups"):
+        randomize_anchor_height(cfg, env)
+
+
+# ---------------------------------------------------------------------------
+# Sampling tests
+# ---------------------------------------------------------------------------
+
+
 def test_range_sampling_within_bounds():
     env = MockEnv(num_envs=100)
     table = MockRigidObject("table", num_envs=100)
@@ -151,7 +219,7 @@ def test_range_sampling_within_bounds():
     env.sim.add_rigid_object(table)
 
     cube = MockRigidObject("cube", num_envs=100)
-    cube._pose[:, 2, 3] = 1.1
+    cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
     cfg = randomize_anchor_height_cfg(
@@ -187,6 +255,11 @@ def test_discrete_sampling_only_candidates():
         assert torch.any(torch.isclose(val, candidates)), f"{val} not in {candidates}"
 
 
+# ---------------------------------------------------------------------------
+# Shift correctness tests
+# ---------------------------------------------------------------------------
+
+
 def test_anchor_and_objects_shifted_by_same_delta():
     env = MockEnv(num_envs=4)
     table = MockRigidObject("table", num_envs=4)
@@ -195,7 +268,7 @@ def test_anchor_and_objects_shifted_by_same_delta():
 
     cube = MockRigidObject("cube", num_envs=4)
     cube.cfg.init_pos = [0.0, 0.0, 1.1]
-    cube._pose[:, 2, 3] = 1.1
+    cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
     cfg = randomize_anchor_height_cfg(
@@ -205,8 +278,10 @@ def test_anchor_and_objects_shifted_by_same_delta():
     functor = randomize_anchor_height(cfg, env)
     functor(env, torch.arange(4))
 
-    torch.testing.assert_close(table._pose[:, 2, 3], torch.ones(4) * 1.05)
-    torch.testing.assert_close(cube._pose[:, 2, 3], torch.ones(4) * 1.15)
+    # Anchor: absolute mode → init_pos[2] + delta = 1.0 + 0.05 = 1.05
+    torch.testing.assert_close(table._pose[:, 2], torch.ones(4) * 1.05)
+    # Affected: relative mode → current_z + delta = 1.1 + 0.05 = 1.15
+    torch.testing.assert_close(cube._pose[:, 2], torch.ones(4) * 1.15)
 
 
 def test_xy_and_rotation_unchanged():
@@ -216,12 +291,12 @@ def test_xy_and_rotation_unchanged():
     env.sim.add_rigid_object(table)
 
     cube = MockRigidObject("cube", num_envs=4)
-    cube._pose[:, 0, 3] = 0.5
-    cube._pose[:, 1, 3] = -0.3
+    cube._pose[:, 0] = 0.5
+    cube._pose[:, 1] = -0.3
     env.sim.add_rigid_object(cube)
 
-    original_xy = cube._pose[:, :2, 3].clone()
-    original_rot = cube._pose[:, :3, :3].clone()
+    original_xy = cube._pose[:, :2].clone()
+    original_rot = cube._pose[:, 3:7].clone()
 
     cfg = randomize_anchor_height_cfg(
         anchor_uid="table",
@@ -230,8 +305,8 @@ def test_xy_and_rotation_unchanged():
     functor = randomize_anchor_height(cfg, env)
     functor(env, torch.arange(4))
 
-    torch.testing.assert_close(cube._pose[:, :2, 3], original_xy)
-    torch.testing.assert_close(cube._pose[:, :3, :3], original_rot)
+    torch.testing.assert_close(cube._pose[:, :2], original_xy)
+    torch.testing.assert_close(cube._pose[:, 3:7], original_rot)
 
 
 def test_exclude_uids_are_not_moved():
@@ -241,11 +316,11 @@ def test_exclude_uids_are_not_moved():
     env.sim.add_rigid_object(table)
 
     cube = MockRigidObject("cube", num_envs=4)
-    cube._pose[:, 2, 3] = 1.1
+    cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
     floor = MockRigidObject("floor", num_envs=4)
-    floor._pose[:, 2, 3] = 0.0
+    floor._pose[:, 2] = 0.0
     env.sim.add_rigid_object(floor)
 
     cfg = randomize_anchor_height_cfg(
@@ -256,8 +331,8 @@ def test_exclude_uids_are_not_moved():
     functor = randomize_anchor_height(cfg, env)
     functor(env, torch.arange(4))
 
-    torch.testing.assert_close(floor._pose[:, 2, 3], torch.zeros(4))
-    torch.testing.assert_close(cube._pose[:, 2, 3], torch.ones(4) * 1.2)
+    torch.testing.assert_close(floor._pose[:, 2], torch.zeros(4))
+    torch.testing.assert_close(cube._pose[:, 2], torch.ones(4) * 1.2)
 
 
 def test_articulation_shifted():
@@ -301,6 +376,11 @@ def test_asymmetric_delta_range():
     assert (delta <= 0.05).all()
 
 
+# ---------------------------------------------------------------------------
+# Partial env_ids and clear_dynamics tests
+# ---------------------------------------------------------------------------
+
+
 def test_partial_env_ids():
     env = MockEnv(num_envs=4)
     table = MockRigidObject("table", num_envs=4)
@@ -308,7 +388,7 @@ def test_partial_env_ids():
     env.sim.add_rigid_object(table)
 
     cube = MockRigidObject("cube", num_envs=4)
-    cube._pose[:, 2, 3] = 1.1
+    cube._pose[:, 2] = 1.1
     env.sim.add_rigid_object(cube)
 
     cfg = randomize_anchor_height_cfg(
@@ -322,13 +402,61 @@ def test_partial_env_ids():
     functor(env, partial_ids)
 
     # Envs 0 and 2 should be shifted
-    torch.testing.assert_close(table._pose[0, 2, 3], torch.tensor(1.1))
-    torch.testing.assert_close(table._pose[2, 2, 3], torch.tensor(1.1))
-    torch.testing.assert_close(cube._pose[0, 2, 3], torch.tensor(1.2))
-    torch.testing.assert_close(cube._pose[2, 2, 3], torch.tensor(1.2))
+    torch.testing.assert_close(table._pose[0, 2], torch.tensor(1.1))
+    torch.testing.assert_close(table._pose[2, 2], torch.tensor(1.1))
+    torch.testing.assert_close(cube._pose[0, 2], torch.tensor(1.2))
+    torch.testing.assert_close(cube._pose[2, 2], torch.tensor(1.2))
 
-    # Envs 1 and 3 should remain unchanged (pose was never set to init_pos)
-    torch.testing.assert_close(table._pose[1, 2, 3], torch.tensor(0.0))
-    torch.testing.assert_close(table._pose[3, 2, 3], torch.tensor(0.0))
-    torch.testing.assert_close(cube._pose[1, 2, 3], torch.tensor(1.1))
-    torch.testing.assert_close(cube._pose[3, 2, 3], torch.tensor(1.1))
+    # Envs 1 and 3 should remain unchanged
+    torch.testing.assert_close(table._pose[1, 2], torch.tensor(0.0))
+    torch.testing.assert_close(table._pose[3, 2], torch.tensor(0.0))
+    torch.testing.assert_close(cube._pose[1, 2], torch.tensor(1.1))
+    torch.testing.assert_close(cube._pose[3, 2], torch.tensor(1.1))
+
+    # clear_dynamics should have been called only for the targeted env_ids
+    assert table._cleared
+    assert table._cleared_env_ids is not None
+    torch.testing.assert_close(
+        table._cleared_env_ids, partial_ids
+    ), "clear_dynamics should receive the targeted env_ids"
+
+    assert cube._cleared
+    assert cube._cleared_env_ids is not None
+    torch.testing.assert_close(
+        cube._cleared_env_ids, partial_ids
+    ), "clear_dynamics should receive the targeted env_ids"
+
+
+# ---------------------------------------------------------------------------
+# RigidObjectGroup anchor tests
+# ---------------------------------------------------------------------------
+
+
+def test_rigid_object_group_anchor_absolute_warning(caplog):
+    """When the anchor is a RigidObjectGroup and absolute=True, a warning is
+    emitted and the relative shift is applied.
+    """
+    env = MockEnv(num_envs=4)
+    group = MockRigidObjectGroup("group", num_envs=4, num_objects=2)
+    group._pose[:, :, 2, 3] = 1.0  # set initial Z to 1.0
+    env.sim.add_rigid_object_group(group)
+
+    cube = MockRigidObject("cube", num_envs=4)
+    cube._pose[:, 2] = 1.1
+    env.sim.add_rigid_object(cube)
+
+    cfg = randomize_anchor_height_cfg(
+        anchor_uid="group",
+        height_delta_range=([0.1], [0.1]),
+    )
+    functor = randomize_anchor_height(cfg, env)
+
+    functor(env, torch.arange(4))
+
+    # Verify that the warning log message was emitted
+    assert "absolute=True is not supported for RigidObjectGroup" in caplog.text
+
+    # Group: relative shift applied → 1.0 + 0.1 = 1.1
+    torch.testing.assert_close(group._pose[:, :, 2, 3], torch.ones(4, 2) * 1.1)
+    # Cube: relative shift → 1.1 + 0.1 = 1.2
+    torch.testing.assert_close(cube._pose[:, 2], torch.ones(4) * 1.2)
