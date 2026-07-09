@@ -286,6 +286,11 @@ def load_mesh_objects_from_cfg(
         acd_method = (
             cfg.acd_method if cfg.acd_method is not MISSING else cfg.shape.acd_method
         )
+        sdf_resolution = (
+            cfg.sdf_resolution
+            if cfg.sdf_resolution is not MISSING
+            else cfg.shape.sdf_resolution
+        )
         fpath = cfg.shape.fpath
 
         compute_uv = cfg.shape.compute_uv
@@ -326,12 +331,12 @@ def load_mesh_objects_from_cfg(
                     max_convex_hull_num=max_convex_hull_num,
                     method=acd_method,
                 )
-            elif cfg.sdf_resolution > 0:
+            elif sdf_resolution > 0:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
                 sdf_cfg = SDFConfig()
-                sdf_cfg.resolution = cfg.sdf_resolution
+                sdf_cfg.resolution = sdf_resolution
                 obj.add_physical_body(
                     body_type,
                     RigidBodyShape.SDF,

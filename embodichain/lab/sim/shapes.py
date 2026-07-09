@@ -134,6 +134,15 @@ class MeshCfg(ShapeCfg):
     :attr:`max_convex_hull_num` is set to larger than 1.
     """
 
+    sdf_resolution: int = 0
+    """Resolution for the signed distance field (SDF) of the mesh.
+
+    The spacing of the uniformly sampled SDF is equal to the largest AABB extent
+    of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
+    than 0, an SDF will be generated for collision detection. SDF increases the
+    accuracy of collision, but also takes more time to initialize and simulate.
+    """
+
 
 @configclass
 class CubeCfg(ShapeCfg):

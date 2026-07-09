@@ -839,11 +839,29 @@ class RigidObjectCfg(ObjectBaseCfg):
     Reference: https://github.com/SarahWeiii/CoACD
     """
 
-    sdf_resolution: int = 0
+    acd_method: str = MISSING
+    """The method used for approximate convex decomposition (ACD) of the mesh.
+
+    .. deprecated::
+        Use :attr:`MeshCfg.acd_method` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1.
+    """
+
+    sdf_resolution: int = MISSING
     """Resolution for the signed distance field (SDF) of the rigid body.
-    The spacing of the uniformly sampled SDF is equal to the largest AABB extent of the mesh, divided by the resolution.
-    if `sdf_resolution` is set to larger than 0, a SDF will be generated for collision detection.
-    SDF will increase the accuracy of collision, but also take more time to initialize and simulate."""
+
+    .. deprecated::
+        Use :attr:`MeshCfg.sdf_resolution` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    The spacing of the uniformly sampled SDF is equal to the largest AABB extent
+    of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
+    than 0, an SDF will be generated for collision detection. SDF will increase the
+    accuracy of collision, but also takes more time to initialize and simulate.
+    """
 
     body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
