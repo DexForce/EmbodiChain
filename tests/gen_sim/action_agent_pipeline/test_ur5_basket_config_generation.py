@@ -289,10 +289,11 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert rigid_objects["right_apple"]["body_type"] == "dynamic"
     assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert rigid_objects["left_apple"]["convex_decomposition_method"] == "vhacd"
-    assert rigid_objects["right_apple"]["convex_decomposition_method"] == "vhacd"
-    assert rigid_objects["wicker_basket"]["convex_decomposition_method"] == "vhacd"
-    assert paths.summary["convex_decomposition_method"] == "vhacd"
+    for obj in rigid_objects.values():
+        assert obj["acd_method"] == "vhacd"
+        assert obj["shape"]["acd_method"] == "vhacd"
+        assert "convex_decomposition_method" not in obj
+    assert paths.summary["acd_method"] == "vhacd"
     assert paths.summary["coacd_cache"][0]["status"] == "skipped"
     _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
@@ -5454,6 +5455,7 @@ def _stable_summary(summary: dict) -> dict:
             "normalized_meshes",
             "body_scaled_meshes",
             "coacd_cache",
+            "acd_method",
             "convex_decomposition_method",
             "task_route",
         }

@@ -280,9 +280,10 @@ def generate_action_agent_config_from_project(
         reuse_target_replacements: If true, reuse an existing replacement GLB
             at the expected output path when it matches the requested prompt.
         convex_decomposition_method: Convex decomposition backend written to
-            generated mesh objects whose ``max_convex_hull_num`` is larger than
-            one. ``"vhacd"`` is the action-agent default; ``"visacd"`` is
-            accepted as an alias for ``"vhacd"``.
+            generated mesh objects as ``acd_method`` when
+            ``max_convex_hull_num`` is larger than one. ``"vhacd"`` is the
+            action-agent default; ``"visacd"`` is accepted as an alias for
+            ``"vhacd"``.
         prewarm_coacd_cache: If true, precompute environment-side CoACD cache
             files referenced by the generated gym config before writing it.
         overwrite: If false, fail when generated files already exist.
@@ -1126,9 +1127,9 @@ def _finalize_and_write_bundle(
     )
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
     _attach_body_scale_bake_summary(bundle, output_dir)
-    bundle.setdefault("summary", {})[
-        "convex_decomposition_method"
-    ] = convex_decomposition_method
+    summary = bundle.setdefault("summary", {})
+    summary["acd_method"] = convex_decomposition_method
+    summary.pop("convex_decomposition_method", None)
     if prewarm_coacd_cache and convex_decomposition_method == "coacd":
         _attach_coacd_cache_summary(bundle, repo_root=repo_root)
     elif prewarm_coacd_cache:
@@ -1160,11 +1161,14 @@ def _apply_convex_decomposition_method(
     method: str,
 ) -> None:
     for obj in _iter_generated_mesh_objects(gym_config):
+        obj.pop("convex_decomposition_method", None)
+        shape = obj.get("shape")
+        if isinstance(shape, MutableMapping):
+            shape.pop("convex_decomposition_method", None)
+
         max_convex_hull_num = int(obj.get("max_convex_hull_num", 1))
         if max_convex_hull_num > 1:
             obj["acd_method"] = method
-            obj["convex_decomposition_method"] = method
-            shape = obj.get("shape")
             if isinstance(shape, MutableMapping):
                 shape["acd_method"] = method
 
@@ -1202,7 +1206,7 @@ def _attach_skipped_coacd_cache_summary(
             {
                 "status": "skipped",
                 "reason": (
-                    "convex_decomposition_method="
+                    "acd_method="
                     f"{convex_decomposition_method}; environment loading uses ACD "
                     "without CoACD prewarm"
                 ),

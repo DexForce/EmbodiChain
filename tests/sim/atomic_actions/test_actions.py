@@ -979,6 +979,51 @@ class TestCoordinatedPickmentAction:
         )
         assert result.next_state.held_object is None
 
+    def test_execute_preserves_batched_object_to_eef_transforms(self):
+        cfg = CoordinatedPickmentCfg(
+            left_hand_open_qpos=_hand_open(),
+            left_hand_close_qpos=_hand_close(),
+            right_hand_open_qpos=_hand_open(),
+            right_hand_close_qpos=_hand_close(),
+            sample_interval=30,
+            hand_interp_steps=4,
+            hold_steps=2,
+            object_motion_keyframes=3,
+        )
+        action = CoordinatedPickment(self.mg, cfg)
+        semantics = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="pencil"
+        )
+        left_object_to_eef = torch.stack(
+            [_z_rotation_pose(math.pi / 6.0), _z_rotation_pose(-math.pi / 4.0)]
+        )
+        right_object_to_eef = torch.stack(
+            [_z_rotation_pose(-math.pi / 3.0), _z_rotation_pose(math.pi / 8.0)]
+        )
+        expected_left_object_to_eef = left_object_to_eef.clone()
+        expected_right_object_to_eef = right_object_to_eef.clone()
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF))
+
+        result = action.execute(
+            CoordinatedPickmentTarget(
+                object_target_pose=torch.eye(4),
+                object_semantics=semantics,
+                left_object_to_eef=left_object_to_eef,
+                right_object_to_eef=right_object_to_eef,
+                object_initial_pose=torch.eye(4),
+            ),
+            state,
+        )
+
+        held_object = result.next_state.coordinated_held_object
+        assert isinstance(held_object, CoordinatedHeldObjectState)
+        assert torch.allclose(
+            held_object.left_object_to_eef, expected_left_object_to_eef
+        )
+        assert torch.allclose(
+            held_object.right_object_to_eef, expected_right_object_to_eef
+        )
+
 
 # ---------------------------------------------------------------------------
 # CoordinatedPlacement

@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import Any, Mapping
 
 import numpy as np
@@ -4214,12 +4214,17 @@ def _max_decomposition_hulls(target_obj, runtime_kwargs: Mapping[str, Any]) -> i
     if "grasp_max_decomposition_hulls" in runtime_kwargs:
         return int(runtime_kwargs["grasp_max_decomposition_hulls"])
 
-    max_convex_hull_num = getattr(
-        getattr(target_obj, "cfg", None),
-        "max_convex_hull_num",
-        None,
-    )
-    if max_convex_hull_num is not None and int(max_convex_hull_num) > 1:
+    cfg = getattr(target_obj, "cfg", None)
+    max_convex_hull_num = getattr(cfg, "max_convex_hull_num", MISSING)
+    if max_convex_hull_num is MISSING or max_convex_hull_num is None:
+        max_convex_hull_num = getattr(
+            getattr(cfg, "shape", None),
+            "max_convex_hull_num",
+            1,
+        )
+    if max_convex_hull_num is MISSING or max_convex_hull_num is None:
+        max_convex_hull_num = 1
+    if int(max_convex_hull_num) > 1:
         return int(max_convex_hull_num)
     return 8
 
@@ -4232,11 +4237,14 @@ def _grasp_convex_decomposition_method(
             runtime_kwargs["grasp_convex_decomposition_method"]
         )
 
-    method = getattr(
-        getattr(target_obj, "cfg", None),
-        "convex_decomposition_method",
-        "vhacd",
-    )
+    cfg = getattr(target_obj, "cfg", None)
+    method = getattr(cfg, "acd_method", MISSING)
+    if method is MISSING or method is None:
+        method = getattr(getattr(cfg, "shape", None), "acd_method", MISSING)
+    if method is MISSING or method is None:
+        method = getattr(cfg, "convex_decomposition_method", "vhacd")
+    if method is MISSING or method is None:
+        method = "vhacd"
     return _normalize_convex_decomposition_method(method)
 
 
