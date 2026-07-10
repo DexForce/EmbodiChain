@@ -37,6 +37,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation import (
     relative_geometry,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
+    make_dual_franka_panda_robot_config,
     make_dual_ur5_robot_config,
     make_light_config,
     make_sensor_config,
@@ -89,6 +90,27 @@ from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success im
     evaluate_configured_success,
 )
 
+_DUAL_FRANKA_HOME_QPOS = [
+    0.0,
+    0.0,
+    -0.569,
+    -0.569,
+    0.0,
+    0.0,
+    -2.810,
+    -2.810,
+    0.0,
+    0.0,
+    3.037,
+    3.037,
+    0.741,
+    0.741,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+]
+
 
 @pytest.fixture(autouse=True)
 def _patch_task_router_for_config_generation_tests(
@@ -130,12 +152,15 @@ def _patch_task_router_for_config_generation_tests(
 def test_action_agent_templates_load_fresh_json_copies() -> None:
     first_robot = make_dual_ur5_robot_config(robot_init_z=0.42)
     second_robot = make_dual_ur5_robot_config(robot_init_z=0.84)
+    first_franka = make_dual_franka_panda_robot_config(robot_init_z=0.45)
+    second_franka = make_dual_franka_panda_robot_config(robot_init_z=0.85)
     first_sensors = make_sensor_config()
     second_sensors = make_sensor_config()
     first_lights = make_light_config()
     second_lights = make_light_config()
 
     first_robot["control_parts"]["left_arm"].append("MUTATED_JOINT")
+    first_franka["init_qpos"][0] = 99.0
     first_sensors[0]["uid"] = "mutated_camera"
     first_lights["direct"].append({"uid": "mutated_light"})
 
@@ -144,6 +169,9 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
     assert second_robot["control_parts"]["left_arm"] == [
         f"left_joint{i}" for i in range(1, 7)
     ]
+    assert first_franka["init_pos"] == pytest.approx([1.0, 0.0, 0.45])
+    assert second_franka["init_pos"] == pytest.approx([1.0, 0.0, 0.85])
+    assert second_franka["init_qpos"] == pytest.approx(_DUAL_FRANKA_HOME_QPOS)
     assert second_sensors[0]["uid"] == "cam_high"
     assert second_lights["direct"] == []
 
@@ -450,6 +478,8 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         "expected_solver_type",
         "expected_meta_type",
         "expected_wrist_parents",
+        "expected_eef_joint_ids",
+        "expected_init_qpos",
     ),
     [
         (
@@ -461,26 +491,20 @@ def test_action_agent_config_generator_uses_parallel_handoff(
                 "cam_wrist_left": "left_ee_link",
                 "cam_wrist_right": "right_ee_link",
             },
+            list(range(12, 24)),
+            None,
         ),
         (
             "franka",
             "DualFrankaPanda",
-            "PinocchioSolver",
-            "DualFrankaPanda",
-            {
-                "cam_wrist_left": "left_ee_link",
-                "cam_wrist_right": "right_ee_link",
-            },
-        ),
-        (
-            "franka_v3",
-            "DualFrankaV3",
             "PytorchSolver",
-            "DualFrankaV3",
+            "DualFrankaPanda",
             {
                 "cam_wrist_left": "left_fr3_hand_tcp",
                 "cam_wrist_right": "right_fr3_hand_tcp",
             },
+            [14, 15, 16, 17],
+            _DUAL_FRANKA_HOME_QPOS,
         ),
     ],
 )
@@ -491,6 +515,8 @@ def test_action_agent_config_generator_uses_selected_robot_profile(
     expected_solver_type: str,
     expected_meta_type: str,
     expected_wrist_parents: dict[str, str],
+    expected_eef_joint_ids: list[int],
+    expected_init_qpos: list[float] | None,
 ) -> None:
     project_dir = tmp_path / "1790000000_gym_project"
     _write_project(project_dir)
@@ -516,6 +542,12 @@ def test_action_agent_config_generator_uses_selected_robot_profile(
     assert robot["uid"] == expected_uid
     assert robot["solver_cfg"]["left_arm"]["class_type"] == expected_solver_type
     assert robot["solver_cfg"]["right_arm"]["class_type"] == expected_solver_type
+    assert (
+        gym_config["env"]["observations"]["norm_robot_eef_joint"]["params"]["joint_ids"]
+        == expected_eef_joint_ids
+    )
+    if expected_init_qpos is not None:
+        assert robot["init_qpos"] == pytest.approx(expected_init_qpos)
     assert wrist_parents == expected_wrist_parents
     assert extensions["agent_robot_profile"] == paths.summary["robot_profile"]["id"]
     assert dataset_params["robot_meta"]["robot_type"] == expected_meta_type

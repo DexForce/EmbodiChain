@@ -22,8 +22,6 @@ import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
-    make_dual_franka_panda_robot_config,
-    make_dual_franka_v3_robot_config,
     make_dual_ur5_robot_config,
     make_dual_ur_dh_pgi_robot_config,
 )
@@ -40,6 +38,27 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
     resolve_robot_profile,
 )
 
+_DUAL_FRANKA_HOME_QPOS = [
+    0.0,
+    0.0,
+    -0.569,
+    -0.569,
+    0.0,
+    0.0,
+    -2.810,
+    -2.810,
+    0.0,
+    0.0,
+    3.037,
+    3.037,
+    0.741,
+    0.741,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+]
+
 
 def test_robot_profile_registry_exposes_default_and_switchable_profiles() -> None:
     assert DEFAULT_ROBOT_PROFILE_ID == "dual_ur5"
@@ -48,17 +67,17 @@ def test_robot_profile_registry_exposes_default_and_switchable_profiles() -> Non
         "dual_ur5",
         "dual_ur10",
         "dual_franka",
-        "dual_franka_v3",
     }
     assert "franka" in available_robot_profile_choices()
-    assert "franka_v3" in available_robot_profile_choices()
+    assert "franka_v3" not in available_robot_profile_choices()
     assert resolve_robot_profile(None).id == "dual_ur5"
     assert resolve_robot_profile("ur10").id == "dual_ur10"
     assert resolve_robot_profile("panda").id == "dual_franka"
-    assert resolve_robot_profile("fr3").id == "dual_franka_v3"
 
     with pytest.raises(ValueError, match="Unknown robot profile"):
         resolve_robot_profile("dual_unknown")
+    with pytest.raises(ValueError, match="Unknown robot profile"):
+        resolve_robot_profile("franka_v3")
 
 
 def test_dual_ur_robot_templates_switch_arm_variant_without_mutating_ur5() -> None:
@@ -107,41 +126,14 @@ def test_dual_ur_robotiq_tcp_rotates_grasp_x_onto_gripper_y_axis() -> None:
 
 def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -> None:
     profile = resolve_robot_profile("franka")
-    robot = make_dual_franka_panda_robot_config(robot_init_z=0.45)
+    robot = profile.robot_config_factory(0.45)
     extensions = profile.runtime_extensions()
     observations = _make_observations_config(robot)
 
     assert robot["uid"] == "DualFrankaPanda"
-    assert robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.45])
-    assert robot["solver_cfg"]["left_arm"]["class_type"] == "PinocchioSolver"
-    assert robot["solver_cfg"]["right_arm"]["class_type"] == "PinocchioSolver"
-    assert len(robot["control_parts"]["left_arm"]) == 7
-    assert len(robot["control_parts"]["right_arm"]) == 7
-    assert robot["control_parts"]["left_eef"] == ["left_finger_joint[1-2]"]
-    assert robot["control_parts"]["right_eef"] == ["right_finger_joint[1-2]"]
-    assert len(robot["init_qpos"]) == 18
-    assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
-        7,
-        8,
-        16,
-        17,
-    ]
-    assert extensions["agent_robot_profile"] == "dual_franka"
-    assert extensions["gripper_open_state"] == [0.04, 0.04]
-    assert extensions["gripper_close_state"] == [0.0, 0.0]
-    assert extensions["agent_grasp_runtime_defaults"]["grasp_finger_length"] == (
-        pytest.approx(0.058)
-    )
-
-
-def test_dual_franka_v3_profile_matches_fr3_asset_naming() -> None:
-    profile = resolve_robot_profile("franka_v3")
-    robot = make_dual_franka_v3_robot_config(robot_init_z=0.45)
-    extensions = profile.runtime_extensions()
-    observations = _make_observations_config(robot)
-
-    assert robot["uid"] == "DualFrankaV3"
-    assert robot["init_pos"] == pytest.approx([-2.0, 0.0, 0.45])
+    assert robot["init_pos"] == pytest.approx([1.0, 0.0, 0.45])
+    assert _arm_urdf_paths(robot) == {"Franka/Panda/PandaWithHand.urdf"}
+    assert robot["init_qpos"] == pytest.approx(_DUAL_FRANKA_HOME_QPOS)
     assert robot["control_parts"]["left_arm"] == [
         "left_fr3_joint1",
         "left_fr3_joint2",
@@ -169,14 +161,17 @@ def test_dual_franka_v3_profile_matches_fr3_asset_naming() -> None:
     assert robot["solver_cfg"]["right_arm"]["root_link_name"] == "right_base"
     assert robot["solver_cfg"]["right_arm"]["end_link_name"] == "right_fr3_hand_tcp"
     assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
-        7,
-        8,
+        14,
+        15,
         16,
         17,
     ]
-    assert extensions["agent_robot_profile"] == "dual_franka_v3"
+    assert extensions["agent_robot_profile"] == "dual_franka"
     assert extensions["gripper_open_state"] == [0.04, 0.04]
     assert extensions["gripper_close_state"] == [0.0, 0.0]
+    assert extensions["agent_grasp_runtime_defaults"]["grasp_finger_length"] == (
+        pytest.approx(0.058)
+    )
 
 
 def test_prompts_and_cli_accept_robot_profile_aliases() -> None:
@@ -190,16 +185,6 @@ def test_prompts_and_cli_accept_robot_profile_aliases() -> None:
     assert args.robot_profile == "franka"
     assert "Dual Franka Panda" in prompt
     assert "dual-UR5" not in prompt
-
-    v3_args = build_parser().parse_args(["--robot-profile", "franka_v3"])
-    v3_prompt = make_basket_basic_background(
-        "demo_project",
-        _basket_roles(),
-        robot_profile=v3_args.robot_profile,
-    )
-
-    assert v3_args.robot_profile == "franka_v3"
-    assert "Dual Franka V3" in v3_prompt
 
 
 def _arm_urdf_paths(robot_config: dict) -> set[str]:
