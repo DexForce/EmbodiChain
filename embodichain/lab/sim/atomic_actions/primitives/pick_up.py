@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import ClassVar
 
 import torch
@@ -74,6 +75,12 @@ class PickUpCfg(ActionCfg):
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
     """World-frame direction from the pre-grasp pose to the grasp pose."""
 
+    approach_alignment_max_angle: float | None = float(math.pi / 36)
+    """Maximum TCP z-axis deviation from approach for standard pickups."""
+
+    downstream_object_target_poses: tuple[torch.Tensor, ...] = ()
+    """Future object poses that must be reachable with the selected grasp."""
+
     obj_upright_direction: torch.Tensor | None = None
     """Optional object local direction used to choose the upright grasp rotation."""
 
@@ -116,6 +123,13 @@ class PickUp(AtomicAction):
         if approach_norm <= 1.0e-6:
             logger.log_error("approach_direction must be non-zero.", ValueError)
         self.approach_direction = self.approach_direction / approach_norm
+        if self.cfg.approach_alignment_max_angle is not None and not (
+            0.0 <= self.cfg.approach_alignment_max_angle <= math.pi / 2
+        ):
+            logger.log_error(
+                "approach_alignment_max_angle must be in [0, pi / 2].",
+                ValueError,
+            )
 
     def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
         sem = target.semantics
@@ -139,8 +153,6 @@ class PickUp(AtomicAction):
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
-        self._apply_upright_rotation(sem, grasp_xpos)
-
         pre_grasp_xpos = self.builder.apply_local_offset(
             grasp_xpos, -self.approach_direction * self.cfg.pre_grasp_distance
         )
@@ -238,8 +250,15 @@ class PickUp(AtomicAction):
         self, semantics: ObjectSemantics, start_qpos: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
+        alignment_angle = (
+            None
+            if self.cfg.rotate_upright is not None
+            else self.cfg.approach_alignment_max_angle
+        )
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
-            obj_poses=obj_poses, approach_direction=self.approach_direction
+            obj_poses=obj_poses,
+            approach_direction=self.approach_direction,
+            max_approach_alignment_angle=alignment_angle,
         )
         n_envs = obj_poses.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
@@ -264,8 +283,8 @@ class PickUp(AtomicAction):
             grasp_cost_padding[i, :n_pose] = grasp_costs
             grasp_xpos_padding[i, n_pose:] = grasp_poses[0]
             grasp_cost_padding[i, n_pose:] = grasp_costs[0]
-        grasp_xpos_padding, ik_success = self._select_symmetric_grasp_variants(
-            grasp_xpos_padding, start_qpos
+        grasp_xpos_padding, ik_success = self._select_feasible_grasp_variants(
+            semantics, grasp_xpos_padding, start_qpos, obj_poses
         )
         grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
         best_cost, best_idx = grasp_cost_masked.min(dim=1)
@@ -275,15 +294,86 @@ class PickUp(AtomicAction):
         ]
         return is_success, best_grasp_xpos
 
-    def _select_symmetric_grasp_variants(
-        self, grasp_xpos: torch.Tensor, start_qpos: torch.Tensor
+    def _select_feasible_grasp_variants(
+        self,
+        semantics: ObjectSemantics,
+        grasp_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        object_poses: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Choose the closest TCP z-roll variant, then validate reachability."""
+        """Choose a TCP-roll variant with a feasible pickup and transport path."""
         n_envs, n_pose = grasp_xpos.shape[:2]
         mirrored_grasp_xpos = grasp_xpos.clone()
         mirrored_grasp_xpos[..., :3, 0] = -mirrored_grasp_xpos[..., :3, 0]
         mirrored_grasp_xpos[..., :3, 1] = -mirrored_grasp_xpos[..., :3, 1]
-        grasp_variants = torch.stack([grasp_xpos, mirrored_grasp_xpos], dim=2)
+        selection_variants = torch.stack([grasp_xpos, mirrored_grasp_xpos], dim=2)
+        grasp_variants = self._upright_adjusted_grasp_poses(
+            semantics, selection_variants
+        )
+
+        pre_grasp_variants = grasp_variants.clone()
+        pre_grasp_variants[..., :3, 3] -= (
+            self.approach_direction * self.cfg.pre_grasp_distance
+        )
+        lift_variants = grasp_variants.clone()
+        lift_variants[..., :3, 3] += torch.tensor(
+            [0.0, 0.0, self.cfg.lift_height],
+            dtype=grasp_variants.dtype,
+            device=self.device,
+        )
+
+        pre_grasp_success, pre_grasp_qpos = self._compute_batch_candidate_ik(
+            pre_grasp_variants, start_qpos
+        )
+        grasp_success, grasp_qpos = self._compute_batch_candidate_ik(
+            grasp_variants, pre_grasp_qpos
+        )
+        lift_success, lift_qpos = self._compute_batch_candidate_ik(
+            lift_variants, grasp_qpos
+        )
+        alignment_success = self._approach_alignment_mask(grasp_variants)
+        pickup_success = (
+            alignment_success & pre_grasp_success & grasp_success & lift_success
+        )
+        downstream_success_counts: list[list[int]] = []
+        object_to_eef_variants = torch.matmul(
+            pose_inv(object_poses)[:, None, None], grasp_variants
+        )
+        # MoveHeldObject begins after the lift, so screen its target from the
+        # same joint state that the execution stream will use.
+        downstream_seed = lift_qpos
+        for object_target_pose in self.cfg.downstream_object_target_poses:
+            object_target_pose = object_target_pose.to(
+                device=self.device, dtype=torch.float32
+            )
+            if object_target_pose.shape == (4, 4):
+                object_target_pose = object_target_pose.unsqueeze(0).repeat(
+                    n_envs, 1, 1
+                )
+            if object_target_pose.shape != (n_envs, 4, 4):
+                logger.log_error(
+                    "downstream_object_target_poses entries must have shape "
+                    f"(4, 4) or ({n_envs}, 4, 4), but got "
+                    f"{object_target_pose.shape}.",
+                    ValueError,
+                )
+            downstream_eef_variants = torch.matmul(
+                object_target_pose[:, None, None], object_to_eef_variants
+            )
+            downstream_success, downstream_seed = self._compute_batch_candidate_ik(
+                downstream_eef_variants, downstream_seed
+            )
+            pickup_success &= downstream_success
+            downstream_success_counts.append(pickup_success.sum(dim=(1, 2)).tolist())
+        if not pickup_success.any(dim=(1, 2)).all():
+            logger.log_warning(
+                "PickUp found no candidate with a feasible vertical pickup path: "
+                f"aligned={alignment_success.sum(dim=(1, 2)).tolist()}, "
+                f"pre_grasp={pre_grasp_success.sum(dim=(1, 2)).tolist()}, "
+                f"grasp={(pre_grasp_success & grasp_success).sum(dim=(1, 2)).tolist()}, "
+                f"lift={(pre_grasp_success & grasp_success & lift_success).sum(dim=(1, 2)).tolist()}, "
+                f"downstream={downstream_success_counts}."
+            )
 
         start_xpos = self.robot.compute_fk(
             qpos=start_qpos,
@@ -291,31 +381,69 @@ class PickUp(AtomicAction):
             to_matrix=True,
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
-        variant_quat = quat_from_matrix(grasp_variants[..., :3, :3])
+        # Preserve the established preference between symmetric roll variants;
+        # use the upright-adjusted pose only for feasibility and execution.
+        variant_quat = quat_from_matrix(selection_variants[..., :3, :3])
         start_quat = start_quat[:, None, None, :].expand_as(variant_quat)
         rotation_error = quat_error_magnitude(
             variant_quat.reshape(-1, 4),
             start_quat.reshape(-1, 4),
         ).reshape(n_envs, n_pose, 2)
-        best_variant_idx = rotation_error.argmin(dim=2)
+        feasible_rotation_error = torch.where(
+            pickup_success,
+            rotation_error,
+            torch.full_like(rotation_error, torch.inf),
+        )
+        best_variant_idx = feasible_rotation_error.argmin(dim=2)
 
         env_idx = torch.arange(n_envs, device=self.device)[:, None]
         pose_idx = torch.arange(n_pose, device=self.device)[None, :]
         selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
-        start_qpos_repeat = start_qpos[:, None, :].repeat(1, n_pose, 1)
-        ik_success, _ = self.robot.compute_batch_ik(
-            pose=selected_grasp_xpos,
-            name=self.cfg.control_part,
-            joint_seed=start_qpos_repeat,
-        )
+        ik_success = pickup_success[env_idx, pose_idx, best_variant_idx]
         return selected_grasp_xpos, ik_success
+
+    def _approach_alignment_mask(self, grasp_poses: torch.Tensor) -> torch.Tensor:
+        """Return candidates whose final TCP z-axis follows the approach direction."""
+        max_angle = self.cfg.approach_alignment_max_angle
+        if self.cfg.rotate_upright is not None or max_angle is None:
+            return torch.ones(
+                grasp_poses.shape[:3], dtype=torch.bool, device=grasp_poses.device
+            )
+        grasp_z = torch.nn.functional.normalize(grasp_poses[..., :3, 2], dim=-1)
+        alignment = torch.sum(grasp_z * self.approach_direction, dim=-1)
+        return alignment >= math.cos(float(max_angle))
+
+    def _compute_batch_candidate_ik(
+        self, poses: torch.Tensor, joint_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve candidate IK poses while preserving the candidate dimensions."""
+        n_envs, n_pose, n_variant = poses.shape[:3]
+        flat_poses = poses.reshape(n_envs, n_pose * n_variant, 4, 4)
+        if joint_seed.dim() == 2:
+            joint_seed = joint_seed[:, None, None, :].expand(-1, n_pose, n_variant, -1)
+        flat_seed = joint_seed.reshape(n_envs, n_pose * n_variant, self.arm_dof)
+        is_success, qpos = self.robot.compute_batch_ik(
+            pose=flat_poses,
+            name=self.cfg.control_part,
+            joint_seed=flat_seed,
+        )
+        return (
+            is_success.reshape(n_envs, n_pose, n_variant),
+            qpos.reshape(n_envs, n_pose, n_variant, self.arm_dof),
+        )
 
     def _apply_upright_rotation(
         self, semantics: ObjectSemantics, grasp_xpos: torch.Tensor
     ) -> None:
         """Apply the WAIC upright-in-place grasp roll adjustment in place."""
+        grasp_xpos.copy_(self._upright_adjusted_grasp_poses(semantics, grasp_xpos))
+
+    def _upright_adjusted_grasp_poses(
+        self, semantics: ObjectSemantics, grasp_xpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Return grasp poses after the optional upright-in-place roll adjustment."""
         if self.cfg.rotate_upright is None:
-            return
+            return grasp_xpos
 
         if self.cfg.obj_upright_direction is None:
             upright_direction = torch.tensor(
@@ -327,13 +455,22 @@ class PickUp(AtomicAction):
             )
         obj_pose = semantics.entity.get_local_pose(to_matrix=True)
         obj_upright = torch.matmul(obj_pose[:, :3, :3], upright_direction)
-        grasp_ry = grasp_xpos[:, :3, 1]
-        dot_result = (grasp_ry * obj_upright).sum(axis=1)
+        adjusted_grasp_xpos = grasp_xpos.clone()
+        grasp_ry = adjusted_grasp_xpos[..., :3, 1]
+        object_axes = obj_upright.reshape(
+            obj_upright.shape[0], *([1] * (grasp_ry.ndim - 2)), 3
+        )
+        dot_result = (grasp_ry * object_axes).sum(dim=-1)
         revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
-        grasp_rx = grasp_xpos[:, :3, 0]
-        rota_axis_angle = self.cfg.rotate_upright * revert_flag[:, None] * grasp_rx
-        rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
-        grasp_xpos[:, :3, :3] = torch.bmm(grasp_xpos[:, :3, :3], rota_offset)
+        grasp_rx = adjusted_grasp_xpos[..., :3, 0]
+        rota_axis_angle = self.cfg.rotate_upright * revert_flag[..., None] * grasp_rx
+        rota_offset = axis_angle_to_rotation_matrix(
+            rota_axis_angle.reshape(-1, 3)
+        ).reshape(*rota_axis_angle.shape[:-1], 3, 3)
+        adjusted_grasp_xpos[..., :3, :3] = torch.matmul(
+            adjusted_grasp_xpos[..., :3, :3], rota_offset
+        )
+        return adjusted_grasp_xpos
 
 
 __all__ = ["PickUp", "PickUpCfg"]

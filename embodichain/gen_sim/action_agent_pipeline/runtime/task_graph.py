@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -127,6 +127,9 @@ class AgentTaskGraph:
                 world_states=world_states,
                 failed_env_mask=failed_env_mask,
                 return_result=True,
+                pickup_downstream_object_target_specs=self._pickup_downstream_targets(
+                    edge
+                ),
                 **kwargs,
             )
             actions = result["actions"]
@@ -136,6 +139,55 @@ class AgentTaskGraph:
             current = edge.target
 
         return ExecutedActionList(executed_actions)
+
+    def _pickup_downstream_targets(
+        self, edge: AgentGraphEdge
+    ) -> dict[str, tuple[dict[str, Any], ...]]:
+        """Collect future object targets needed to choose a feasible pickup grasp."""
+        targets: dict[str, tuple[dict[str, Any], ...]] = {}
+        for action in (edge.left_arm_action, edge.right_arm_action):
+            if (
+                not isinstance(action, Mapping)
+                or action.get("atomic_action_class") != "PickUp"
+            ):
+                continue
+            robot_name = action.get("robot_name")
+            if not isinstance(robot_name, str):
+                continue
+            targets[robot_name] = self._future_move_held_object_targets(
+                edge.target, robot_name
+            )
+        return targets
+
+    def _future_move_held_object_targets(
+        self, node_id: str, robot_name: str
+    ) -> tuple[dict[str, Any], ...]:
+        """Return the held-object targets before this arm next releases or regraspes."""
+        targets: list[dict[str, Any]] = []
+        while node_id != self.goal:
+            edge = self.edges[self._next_edge(node_id)]
+            action = self._action_for_robot(edge, robot_name)
+            if isinstance(action, Mapping):
+                action_class = action.get("atomic_action_class")
+                if action_class == "MoveHeldObject":
+                    target = action.get("target_object_pose")
+                    # Relative targets depend on the runtime EEF pose after the
+                    # preceding action and cannot be screened during PickUp.
+                    if isinstance(target, Mapping) and target.get(
+                        "reference", "object"
+                    ) in {"object", "absolute"}:
+                        targets.append(dict(target))
+                elif action_class in {"PickUp", "Place"}:
+                    break
+            node_id = edge.target
+        return tuple(targets)
+
+    @staticmethod
+    def _action_for_robot(edge: AgentGraphEdge, robot_name: str) -> Any:
+        for action in (edge.left_arm_action, edge.right_arm_action):
+            if isinstance(action, Mapping) and action.get("robot_name") == robot_name:
+                return action
+        return None
 
     def _next_edge(self, node_id: str) -> str:
         outgoing_edges = self.outgoing[node_id]

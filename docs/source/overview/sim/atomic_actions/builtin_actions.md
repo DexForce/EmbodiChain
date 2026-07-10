@@ -65,7 +65,8 @@ Three-phase grasp motion: *approach → close gripper → lift*.
 
 | Config field | Default | Description |
 |---|---|---|
-| `approach_direction` | `[0, 0, -1]` | Gripper approach direction in object frame |
+| `approach_direction` | `[0, 0, -1]` | Gripper approach direction in world frame |
+| `approach_alignment_max_angle` | `5 deg` | Maximum TCP z-axis deviation for standard pickups; skipped for upright-adjusted grasps |
 | `pre_grasp_distance` | `0.15` | Hover distance before descending (m) |
 | `lift_height` | `0.10` | Lift height after grasping (m) |
 | `hand_open_qpos` | `None` | **Required.** Gripper open joint positions |

@@ -18,10 +18,56 @@
 
 from __future__ import annotations
 
+import math
+from unittest.mock import Mock
+
+import torch
+
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    GraspGenerator,
     GraspGeneratorCfg,
 )
 
 
 def test_default_grasp_generator_uses_only_requested_approach_direction() -> None:
     assert GraspGeneratorCfg().n_deviated_approach_directions == 1
+
+
+def test_grasp_generator_filters_closing_axes_by_approach_alignment() -> None:
+    generator = object.__new__(GraspGenerator)
+    generator.device = torch.device("cpu")
+    generator.vertices = torch.tensor(
+        [[-0.2, -0.1, -0.1], [0.2, 0.1, 0.1]], dtype=torch.float32
+    )
+    generator.cfg = GraspGeneratorCfg(n_deviated_approach_directions=1)
+    horizontal_pair = torch.tensor(
+        [[-0.05, 0.0, 0.0], [0.05, 0.0, 0.0]], dtype=torch.float32
+    )
+    tilt_angle = math.radians(20.0)
+    tilted_axis = torch.tensor(
+        [math.cos(tilt_angle), 0.0, math.sin(tilt_angle)], dtype=torch.float32
+    )
+    tilted_pair = torch.stack(
+        [
+            torch.tensor([0.1, 0.0, 0.0]),
+            torch.tensor([0.1, 0.0, 0.0]) + tilted_axis * 0.1,
+        ]
+    )
+    generator._hit_point_pairs = torch.stack([horizontal_pair, tilted_pair])
+    generator._collision_checker = Mock()
+    generator._collision_checker.query.side_effect = (
+        lambda object_pose, poses, open_lengths, **kwargs: (
+            torch.zeros(poses.shape[0], dtype=torch.bool),
+            torch.zeros(poses.shape[0]),
+        )
+    )
+
+    success, grasp_poses, _, _ = generator.get_valid_grasp_poses(
+        torch.eye(4),
+        torch.tensor([0.0, 0.0, -1.0]),
+        max_approach_alignment_angle=math.radians(5.0),
+    )
+
+    assert success is True
+    assert grasp_poses.shape[0] == 1
+    assert torch.allclose(grasp_poses[0, :3, 2], torch.tensor([0.0, 0.0, -1.0]))
