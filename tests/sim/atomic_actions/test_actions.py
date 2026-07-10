@@ -937,6 +937,17 @@ class TestPlaceAction:
     def test_target_type_is_pose_target(self):
         assert Place.TargetType is EndEffectorPoseTarget
 
+    def test_rejects_non_positive_cartesian_waypoint_count(self):
+        with pytest.raises(Exception, match="cartesian_waypoint_count"):
+            Place(
+                self.mg,
+                PlaceCfg(
+                    hand_open_qpos=_hand_open(),
+                    hand_close_qpos=_hand_close(),
+                    cartesian_waypoint_count=0,
+                ),
+            )
+
     def test_execute_clears_held_object(self):
         cfg = PlaceCfg(
             hand_open_qpos=_hand_open(),
@@ -1035,6 +1046,48 @@ class TestPlaceAction:
         )
         # start prepended to the 3 down-phase IK solutions -> 4 keyframes.
         assert captured["down_keyframes"].shape == (NUM_ENVS, 4, ARM_DOF)
+
+    def test_cartesian_waypoints_hold_target_rotation_during_translation(self):
+        waypoint_count = 3
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=24,
+            hand_interp_steps=4,
+            lift_height=0.1,
+            cartesian_waypoint_count=waypoint_count,
+        )
+        action = Place(self.mg, cfg)
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        target = torch.eye(4)
+        target[:3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        target[:3, 3] = torch.tensor([0.3, 0.0, 0.2])
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: trajectory[
+                :, -1:, :
+            ].repeat(1, interp_num, 1),
+        ):
+            result = action.execute(EndEffectorPoseTarget(xpos=target), state)
+
+        assert result.success.all()
+        expected_rotation = target[:3, :3]
+        expected_down_targets = 2 * waypoint_count
+        assert len(seen_poses) == expected_down_targets + waypoint_count
+        for pose in seen_poses:
+            assert torch.allclose(
+                pose[:, :3, :3], expected_rotation.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+            )
 
     def test_execute_preserves_release_pose_without_tcp_symmetry(self):
         cfg = PlaceCfg(
@@ -1144,6 +1197,7 @@ class TestPressAction:
             sample_interval=12,
             hand_interp_steps=4,
         )
+
         action = Press(self.mg, cfg)
         sem = ObjectSemantics(
             affordance=AntipodalAffordance(), geometry={}, label="mug"

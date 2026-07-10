@@ -169,7 +169,7 @@ class AgentTaskGraph:
             action = self._action_for_robot(edge, robot_name)
             if isinstance(action, Mapping):
                 action_class = action.get("atomic_action_class")
-                if action_class == "MoveHeldObject":
+                if action_class in {"MoveHeldObject", "Place"}:
                     target = action.get("target_object_pose")
                     # Relative targets depend on the runtime EEF pose after the
                     # preceding action and cannot be screened during PickUp.
@@ -177,7 +177,9 @@ class AgentTaskGraph:
                         "reference", "object"
                     ) in {"object", "absolute"}:
                         targets.append(dict(target))
-                elif action_class in {"PickUp", "Place"}:
+                    if action_class == "Place":
+                        break
+                elif action_class == "PickUp":
                     break
             node_id = edge.target
         return tuple(targets)

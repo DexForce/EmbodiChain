@@ -1024,13 +1024,16 @@ def test_task_description_generates_relative_left_of_config(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     assert "Move apple_2 to the left of basket_3." in task_prompt
     assert (
-        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        "Generate one deterministic nominal graph with exactly 3 nominal edges"
         in task_prompt
     )
     assert '"atomic_action_class":"PickUp","robot_name":"right_arm"' in task_prompt
     assert '"offset":[0.0,0.16,0.01]' in task_prompt
     assert '"atomic_action_class":"Place","robot_name":"right_arm"' in task_prompt
-    assert '"target_pose":{"reference":"relative","offset":[0.0,0.0,0.0]' in task_prompt
+    assert '"target_object_pose":{"reference":"object"' in task_prompt
+    assert '"orientation_goal":"preserve"' in task_prompt
+    assert '"cartesian_waypoint_count":4' in task_prompt
+    assert '"atomic_action_class":"MoveHeldObject"' not in task_prompt
     assert '"obj_name":"apple_2"' in task_prompt
     assert "left_arm_action: null" in task_prompt
     assert "Generate exactly 10 nominal edges" not in task_prompt
@@ -2079,32 +2082,25 @@ def test_relative_cube_preserves_orientation_when_llm_preserves_orientation(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     summary = _stable_summary(paths.summary)
-    high_offset = list(summary["release_offset"])
-    high_offset[2] = round(float(high_offset[2]) + 0.25, 6)
-    high_offset_json = json.dumps(
-        high_offset, ensure_ascii=False, separators=(",", ":")
-    )
     release_offset_json = json.dumps(
         summary["release_offset"], ensure_ascii=False, separators=(",", ":")
     )
 
     assert (
-        "Generate one deterministic nominal graph with exactly 6 nominal edges"
+        "Generate one deterministic nominal graph with exactly 3 nominal edges"
         in task_prompt
     )
     for text in (task_prompt, atom_actions):
         assert (
-            f'"offset":{high_offset_json},"orientation_goal":"preserve",'
-            '"orientation_axis":"none"}' in text
-        )
-        assert (
             f'"offset":{release_offset_json},"orientation_goal":"preserve",'
             '"orientation_axis":"none"}' in text
         )
+        assert '"target_object_pose":{"reference":"object"' in text
+        assert '"cartesian_waypoint_count":4' in text
+        assert '"atomic_action_class":"MoveHeldObject"' not in text
         assert '"orientation_goal":"axis_align"' not in text
         assert '"align_to"' not in text
         assert '"atomic_action_class":"Place"' in text
-        assert '"atomic_action_class":"MoveEndEffector"' in text
 
     assert summary["moved_object"] == "interact_cube_1"
     assert summary["reference_object"] == "interact_cube_2"
