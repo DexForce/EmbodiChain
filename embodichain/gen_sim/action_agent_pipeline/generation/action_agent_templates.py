@@ -123,7 +123,7 @@ def make_dual_franka_panda_robot_config(*, robot_init_z: float) -> dict[str, Any
                 },
             ],
         },
-        "init_pos": [1.0, 0.0, float(robot_init_z)],
+        "init_pos": [0.7, 0.0, float(robot_init_z)],
         "init_rot": [0.0, 0.0, -90.0],
         "init_qpos": [
             0.0,  # Joint1
