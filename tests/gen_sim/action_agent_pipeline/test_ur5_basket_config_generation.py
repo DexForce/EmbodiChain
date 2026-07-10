@@ -76,6 +76,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config im
     generate_action_agent_config_from_project,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
+    make_relative_atom_actions_prompt,
+    make_relative_task_graph,
     make_relative_task_prompt,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
@@ -2903,7 +2905,7 @@ def test_task_description_generates_dual_arm_relative_config(
     assert '"obj_name":"apple_1"' in atom_actions
 
 
-def test_dual_upright_prompt_preserves_before_orientation_adjustment() -> None:
+def test_dual_upright_prompt_uses_one_final_move_per_arm() -> None:
     rotate_upright = 0.7853981633974483
     left = _RelativePlacementStepSpec(
         intent="place_relative",
@@ -2968,23 +2970,38 @@ def test_dual_upright_prompt_preserves_before_orientation_adjustment() -> None:
 
     prompt = make_relative_task_prompt("DemoUpright", "demo_project", spec)
 
-    assert "Generate one deterministic nominal graph with exactly 12 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 9 nominal edges" in (
         prompt
     )
     assert '"obj_upright_direction":[1.0,0.0,0.0]' in prompt
     assert '"obj_upright_direction":[0.0,1.0,0.0]' in prompt
     assert f'"rotate_upright":{rotate_upright}' in prompt
-    left_high_preserve = (
-        '"position":[0.1,0.2,0.55],'
-        '"orientation_goal":"preserve","orientation_axis":"none"'
-    )
-    left_high_upright = (
-        '"position":[0.1,0.2,0.55],'
+    left_final_upright = (
+        '"position":[0.1,0.2,0.3],'
         '"orientation_goal":"upright","orientation_axis":"none"'
     )
-    assert left_high_preserve in prompt
-    assert left_high_upright in prompt
-    assert prompt.index(left_high_preserve) < prompt.index(left_high_upright)
+    assert left_final_upright in prompt
+    assert '"position":[0.1,0.2,0.55]' not in prompt
+    assert prompt.count('"atomic_action_class":"MoveHeldObject"') == 2
+
+    atom_actions = make_relative_atom_actions_prompt(spec)
+    assert atom_actions.count('"atomic_action_class":"MoveHeldObject"') == 2
+    assert '"position":[0.1,0.2,0.55]' not in atom_actions
+
+    task_graph = make_relative_task_graph("DemoUpright", spec)
+    move_held_actions = [
+        action
+        for edge in task_graph["edges"]
+        for action in (edge["left_arm_action"], edge["right_arm_action"])
+        if action is not None and action["atomic_action_class"] == "MoveHeldObject"
+    ]
+    assert len(move_held_actions) == 2
+    assert {
+        action["target_object_pose"]["orientation_goal"] for action in move_held_actions
+    } == {"upright"}
+    assert {
+        tuple(action["target_object_pose"]["position"]) for action in move_held_actions
+    } == {(0.1, 0.2, 0.3), (0.1, -0.2, 0.3)}
 
 
 def test_task_description_generates_dual_hold_hover_config(
