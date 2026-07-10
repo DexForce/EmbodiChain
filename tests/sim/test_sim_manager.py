@@ -183,3 +183,90 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
     assert save_call["frame_count"] == 1
     assert save_call["save_kwargs"] == {"fps": 5}
     assert sim._window_record_save_threads == []
+
+
+def test_format_window_camera_pose_as_look_at() -> None:
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = (1.0, 2.0, 3.0)
+    pose[:3, 1] = (0.0, -1.0, 0.0)
+    pose[:3, 2] = (0.0, 0.0, -1.0)
+
+    snippet = SimulationManager._format_window_camera_pose(pose)
+
+    assert "window.set_look_at(" in snippet
+    assert "eye=np.array([1.0, 2.0, 3.0]" in snippet
+    assert "look_at=np.array([1.0, 2.0, 4.0]" in snippet
+    assert "up=np.array([0.0, -1.0, 0.0]" in snippet
+
+
+def test_window_camera_pose_look_at_conversion_round_trips() -> None:
+    eye = np.array([2.845114, 0.15252542, 2.8951859], dtype=np.float32)
+    target = np.array([2.1446962, 0.11497631, 2.1824413], dtype=np.float32)
+    up = np.array([0.71172267, 0.038155168, -0.70142359], dtype=np.float32)
+
+    forward = target - eye
+    forward /= np.linalg.norm(forward)
+    right = np.cross(forward, up)
+    right /= np.linalg.norm(right)
+    camera_up = np.cross(right, forward)
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 0] = right
+    pose[:3, 1] = camera_up
+    pose[:3, 2] = -forward
+    pose[:3, 3] = eye
+
+    converted_eye, converted_target, converted_up = (
+        SimulationManager._window_camera_pose_to_look_at(pose)
+    )
+    reconstructed_forward = converted_target - converted_eye
+    reconstructed_forward /= np.linalg.norm(reconstructed_forward)
+    reconstructed_right = np.cross(reconstructed_forward, converted_up)
+    reconstructed_right /= np.linalg.norm(reconstructed_right)
+    reconstructed_up = np.cross(reconstructed_right, reconstructed_forward)
+    reconstructed_pose = np.eye(4, dtype=np.float32)
+    reconstructed_pose[:3, 0] = reconstructed_right
+    reconstructed_pose[:3, 1] = reconstructed_up
+    reconstructed_pose[:3, 2] = -reconstructed_forward
+    reconstructed_pose[:3, 3] = converted_eye
+
+    np.testing.assert_allclose(reconstructed_pose, pose, atol=1e-6)
+
+
+def test_print_window_camera_pose_uses_raw_matrix_when_requested(capsys) -> None:
+    pose = np.eye(4, dtype=np.float32)
+    sim = _make_sim_manager(window=SimpleNamespace(get_pose_matrix=lambda: pose))
+
+    snippet = sim.print_window_camera_pose(convert_to_look_at=False)
+
+    assert snippet is not None
+    assert snippet.startswith("window_pose = np.array([")
+    assert "window.set_look_at" not in capsys.readouterr().out
+
+
+def test_window_camera_pose_hotkey_registers_p_control(monkeypatch) -> None:
+    class FakeWindow:
+        def __init__(self) -> None:
+            self.controls: list[object] = []
+
+        def add_input_control(self, control: object) -> None:
+            self.controls.append(control)
+
+    window = FakeWindow()
+    sim = _make_sim_manager(window=window)
+    sim._window_camera_pose_input_control = None
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        sim,
+        "print_window_camera_pose",
+        lambda convert_to_look_at=True: calls.append(convert_to_look_at),
+    )
+
+    assert sim.enable_window_camera_pose_hotkey() is True
+    assert len(window.controls) == 1
+
+    from dexsim.types import InputKey
+
+    control = window.controls[0]
+    control.on_key_down(InputKey.SCANCODE_P.value)
+    control.on_key_down(InputKey.SCANCODE_O.value)
+    assert calls == [True]
