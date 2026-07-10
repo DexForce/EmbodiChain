@@ -136,5 +136,8 @@
         [0.0, 0.0, 0.0, 1.0]
       ]
     }
+  },
+  "qpos_limits": {
+      "(left|right)_fr3_finger_joint[1-2]": [0.00, 0.06]
   }
 }
