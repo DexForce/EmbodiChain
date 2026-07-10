@@ -78,8 +78,12 @@ class GraspGeneratorCfg:
     deviate more than this threshold from perpendicular to the approach are
     discarded during grasp pose computation."""
 
-    n_deviated_approach_directions: int = 4
-    """Number of approach directions with evenly deviated angles when sampling grasp poses."""
+    n_deviated_approach_directions: int = 1
+    """Number of approach directions sampled per grasp axis.
+
+    The default keeps only the requested approach direction. Values greater than
+    one add randomized deviations up to ``max_deviation_angle``.
+    """
 
     n_top_grasps: int = 50
     """Number of top-ranked grasp poses to return based on the scoring cost."""
