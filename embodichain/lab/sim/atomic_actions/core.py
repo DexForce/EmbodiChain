@@ -122,9 +122,18 @@ class NamedJointPositionTarget:
 
 @dataclass(frozen=True)
 class GraspTarget:
-    """Pickup target. The grasp pose is solved from the affordance + entity at execute time."""
+    """Pickup target with an affordance-selected or explicitly supplied grasp pose."""
 
     semantics: ObjectSemantics
+
+    grasp_xpos: torch.Tensor | None = None
+    """Optional end-effector grasp pose.
+
+    When omitted, :class:`PickUp` selects a grasp from the target affordance.
+    Supplying a pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)`` skips grasp
+    sampling, which is useful when perception or task geometry has already
+    selected a grasp.
+    """
 
 
 @dataclass(frozen=True)

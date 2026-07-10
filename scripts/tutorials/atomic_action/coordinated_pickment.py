@@ -38,26 +38,23 @@ import numpy as np
 import torch
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    AtomicActionEngine,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
     CoordinatedPickmentTarget,
     ObjectSemantics,
-    WorldState,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
-    LightCfg,
-    RenderCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
     RobotCfg,
     URDFCfg,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator, ToppraPlannerCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
@@ -65,12 +62,11 @@ from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
+    create_toppra_motion_generator,
+    create_tutorial_simulation,
     draw_axis_marker,
-    get_tutorial_window_size,
-    should_open_tutorial_window,
-    should_wait_for_tutorial_input,
-    start_auto_play_recording,
-    stop_auto_play_recording,
+    prepare_tutorial_scene,
+    replay_trajectory,
 )
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
@@ -235,32 +231,6 @@ def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
     transform[:3, :3] = rotation_z(yaw)
     transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
     return transform
-
-
-def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
-    """Create the simulation manager and a light."""
-    width, height = get_tutorial_window_size(args)
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            width=width,
-            height=height,
-            headless=True,
-            num_envs=args.num_envs,
-            sim_device=args.device,
-            render_cfg=RenderCfg(renderer=args.renderer),
-            physics_dt=1.0 / 100.0,
-            arena_space=3.0,
-        )
-    )
-    sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=(0.0, -0.4, 3.0),
-        )
-    )
-    return sim
 
 
 def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
@@ -670,24 +640,6 @@ def log_execution_state(
     )
 
 
-def execute_trajectory(
-    sim: SimulationManager,
-    robot: Robot,
-    traj: torch.Tensor,
-    obj: RigidObject,
-    debug_state: bool,
-) -> None:
-    """Play a planned trajectory in simulation."""
-    total_steps = traj.shape[1]
-    log_stride = max(1, total_steps // 10)
-    for i in range(total_steps):
-        robot.set_qpos(traj[:, i, :])
-        sim.update(step=TRAJECTORY_SIM_STEPS)
-        if debug_state and (i % log_stride == 0 or i == total_steps - 1):
-            log_execution_state(robot, obj, i, total_steps)
-        time.sleep(1e-2)
-
-
 def run_coordinated_pickment_demo(
     args: argparse.Namespace,
     sim: SimulationManager,
@@ -704,9 +656,7 @@ def run_coordinated_pickment_demo(
     n_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
     object_semantics = create_object_semantics(obj, preset.label)
-    motion_gen = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
-    )
+    motion_gen = create_toppra_motion_generator(robot)
 
     left_open, left_close = get_hand_open_close_qpos(
         robot, "left_hand", sim.device, preset.hand_close_qpos
@@ -734,6 +684,8 @@ def run_coordinated_pickment_demo(
             object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
         ),
     )
+    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine.register(pickment_action)
 
     left_grasp_pose, right_grasp_pose = build_object_grasp_poses(
         object_pose,
@@ -779,24 +731,18 @@ def run_coordinated_pickment_demo(
         object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
     )
 
-    wait_for_user = should_wait_for_tutorial_input(args)
-    if should_open_tutorial_window(args):
-        sim.open_window()
-    if wait_for_user and not args.diagnose_plan:
-        input("Inspect the scene, then press Enter to plan pickment...")
+    wait_for_user = prepare_tutorial_scene(
+        sim, args, "Inspect the scene, then press Enter to plan pickment..."
+    )
 
     start_time = time.time()
-    result = pickment_action.execute(
-        pickment_target,
-        WorldState(last_qpos=robot.get_qpos().clone()),
-    )
+    success, traj, _ = engine.run([("coordinated_pickment", pickment_target)])
     logger.log_info(
         f"Plan coordinated pickment cost time: {time.time() - start_time:.2f} seconds"
     )
-    if not result.success:
+    if not success.all():
         logger.log_warning("Failed to plan coordinated pickment trajectory.")
         return
-    traj = result.trajectory
     joint_ids = list(range(robot.dof))
     log_action_plan(
         robot,
@@ -811,22 +757,24 @@ def run_coordinated_pickment_demo(
 
     if wait_for_user:
         input("Press Enter to execute coordinated pickment...")
-    recording_started = start_auto_play_recording(
+
+    def log_execution(step_idx: int, total_steps: int) -> None:
+        if args.debug_state and (
+            step_idx % max(1, total_steps // 10) == 0 or step_idx == total_steps - 1
+        ):
+            log_execution_state(robot, obj, step_idx, total_steps)
+
+    replay_trajectory(
         sim,
+        robot,
+        traj,
         args,
         video_prefix=f"coordinated_pickment_{args.object}_auto_play",
+        hold_steps=0,
+        trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+        on_trajectory_step=log_execution,
         look_at=PICKMENT_RECORD_LOOK_AT,
     )
-    try:
-        execute_trajectory(
-            sim,
-            robot,
-            traj,
-            obj,
-            args.debug_state,
-        )
-    finally:
-        stop_auto_play_recording(sim, recording_started)
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 
@@ -834,7 +782,11 @@ def run_coordinated_pickment_demo(
 def main() -> None:
     """Run the coordinated pickment demo."""
     args = parse_arguments()
-    sim = initialize_simulation(args)
+    sim = create_tutorial_simulation(
+        args,
+        arena_space=3.0,
+        light_pos=(0.0, -0.4, 3.0),
+    )
     robot = create_dual_ur5_robot(sim)
     run_coordinated_pickment_demo(args, sim, robot)
 

@@ -30,7 +30,7 @@ the `next_state` of each action as the input state of the next, then concatenate
 trajectories into one contiguous sequence:
 
 ```
-GraspTarget(semantics) ──► AtomicAction.execute(target, state)
+GraspTarget(semantics, grasp_xpos=None) ──► AtomicAction.execute(target, state)
 EndEffectorPoseTarget(xpos)                │
 JointPositionTarget(qpos)                  ├─ IK solve when pose-based
 NamedJointPositionTarget(name)             ├─ Motion plan / interpolation
@@ -67,7 +67,7 @@ and every action declares the target type, or tuple of target types, it accepts 
 | `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget` | `JointPositionTarget(qpos)` | `MoveJoints` |
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
-| `GraspTarget` | `GraspTarget(semantics)` | `PickUp` |
+| `GraspTarget` | `GraspTarget(semantics, grasp_xpos=None)` | `PickUp` |
 | `HeldObjectPoseTarget` | `HeldObjectPoseTarget(object_target_pose)` | `MoveHeldObject` |
 | `CoordinatedPickmentTarget` | `CoordinatedPickmentTarget(...)` | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget` | `CoordinatedPlacementTarget(...)` | `CoordinatedPlacement` |
@@ -106,7 +106,7 @@ action's `TargetType` before calling `execute`:
 | `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)`; `Place` may opt into TCP z-roll 180 equivalence | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)` | `MoveJoints` |
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
-| `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
+| `GraspTarget(semantics, grasp_xpos=None)` | `ObjectSemantics` plus an optional preselected TCP grasp pose | `PickUp` |
 | `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
 | `CoordinatedPickmentTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget(...)` | Two held-object states plus object-centric placing/support target poses | `CoordinatedPlacement` |

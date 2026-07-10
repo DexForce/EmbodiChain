@@ -28,6 +28,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
+    create_antipodal_semantics,
     should_wait_for_tutorial_input,
 )
 
@@ -112,6 +113,29 @@ def test_clone_local_pose_from_first_env_sets_shared_pose() -> None:
     assert torch.allclose(shared, expected)
     entity.set_local_pose.assert_called_once()
     assert torch.allclose(entity.set_local_pose.call_args.args[0], expected)
+
+
+def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
+    vertices = torch.tensor([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]])
+    triangles = torch.tensor([[0, 1, 1]])
+    obj = MagicMock()
+    obj.get_vertices.return_value = vertices.unsqueeze(0)
+    obj.get_triangles.return_value = triangles.unsqueeze(0)
+
+    semantics = create_antipodal_semantics(
+        obj,
+        label="cube",
+        n_sample=64,
+        force_reannotate=True,
+    )
+
+    assert semantics.entity is obj
+    assert semantics.label == "cube"
+    assert semantics.geometry == {}
+    assert torch.equal(semantics.affordance.mesh_vertices, vertices)
+    assert torch.equal(semantics.affordance.mesh_triangles, triangles)
+    assert semantics.affordance.force_reannotate is True
+    assert semantics.affordance.generator_cfg.antipodal_sampler_cfg.n_sample == 64
 
 
 def test_broadcast_pose_batch_rejects_wrong_env_count() -> None:
