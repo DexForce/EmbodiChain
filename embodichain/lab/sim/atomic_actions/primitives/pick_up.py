@@ -29,7 +29,6 @@ from embodichain.utils.math import (
     pose_inv,
     quat_error_magnitude,
     quat_from_matrix,
-    axis_angle_to_rotation_matrix,
 )
 
 from ._helpers import arm_qpos_from_state
@@ -76,10 +75,10 @@ class PickUpCfg(ActionCfg):
     """Approach direction in the object local frame."""
 
     obj_upright_direction: torch.Tensor | None = None
-    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
+    """Optional object local direction used to choose the upright grasp rotation."""
 
     rotate_upright: float | None = None
-    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
+    """Optional rotation (radians) about the grasp x-axis to apply after grasp selection."""
 
 
 class PickUp(AtomicAction):
@@ -130,24 +129,6 @@ class PickUp(AtomicAction):
             control_part=self.cfg.control_part,
         )
         is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
-
-        # apply grasp yr rotation offset if specified
-        if self.cfg.rotate_upright is not None:
-            if self.cfg.obj_upright_direction is None:
-                upright_direction = torch.tensor([0, 0, 1], device=self.device)
-            else:
-                upright_direction = self.cfg.obj_upright_direction.to(self.device)
-            obj_pose = sem.entity.get_local_pose(to_matrix=True)
-            obj_upright = (upright_direction * obj_pose[:, :3, :3]).sum(axis=2)
-            grasp_ry = grasp_xpos[:, :3, 1]
-            dot_result = (grasp_ry * obj_upright).sum(axis=1)
-            # revert flag is -1 if the dot product is negative, 1 if positive
-            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
-            grasp_rx = grasp_xpos[:, :3, 0]
-            rota_axis_angle = self.cfg.rotate_upright * revert_flag * grasp_rx
-            rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
-            upright_grasp_rota = torch.bmm(rota_offset, grasp_xpos[:, :3, :3])
-            grasp_xpos[:, :3, :3] = upright_grasp_rota
 
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")

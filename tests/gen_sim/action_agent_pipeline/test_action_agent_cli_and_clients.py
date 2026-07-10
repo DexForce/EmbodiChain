@@ -295,12 +295,8 @@ def test_source_scene_xy_positions_track_body_scale_multiplier() -> None:
     )
 
     assert gym_config["background"][0]["init_pos"] == pytest.approx(table_anchor)
-    assert gym_config["rigid_object"][0]["init_pos"] == pytest.approx(
-        [0.49, 0.06, 0.9]
-    )
-    assert gym_config["rigid_object"][1]["init_pos"] == pytest.approx(
-        [-0.5, 0.0, 0.8]
-    )
+    assert gym_config["rigid_object"][0]["init_pos"] == pytest.approx([0.49, 0.06, 0.9])
+    assert gym_config["rigid_object"][1]["init_pos"] == pytest.approx([-0.5, 0.0, 0.8])
 
 
 def test_source_scene_xy_positions_preserve_mode_stays_unchanged() -> None:

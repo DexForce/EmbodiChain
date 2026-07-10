@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import MISSING
 from types import SimpleNamespace
 
 import pytest
@@ -1712,7 +1713,7 @@ def test_upright_known_z_normalized_assets_trust_local_z_axis() -> None:
         },
     )
 
-    assert torch.allclose(target[:3, 2], torch.tensor([0.0, 0.0, 1.0]))
+    assert torch.allclose(target[0, :3, 2], torch.tensor([0.0, 0.0, 1.0]))
 
 
 def test_surface_z_policy_defaults_object_reference_to_support() -> None:
@@ -2120,7 +2121,41 @@ def test_vhacd_grasp_collision_path_skips_env_coacd_bridge(monkeypatch) -> None:
     )
 
 
-def test_grasp_convex_decomposition_method_uses_vhacd_alias() -> None:
+def test_grasp_convex_decomposition_method_uses_acd_method() -> None:
+    target_obj = SimpleNamespace(cfg=SimpleNamespace(acd_method="coacd"))
+
+    method = atom_actions._grasp_convex_decomposition_method(target_obj, {})
+
+    assert method == "coacd"
+
+
+def test_grasp_convex_decomposition_method_uses_shape_acd_method() -> None:
+    target_obj = SimpleNamespace(
+        cfg=SimpleNamespace(
+            acd_method=MISSING,
+            shape=SimpleNamespace(acd_method="coacd"),
+        )
+    )
+
+    method = atom_actions._grasp_convex_decomposition_method(target_obj, {})
+
+    assert method == "coacd"
+
+
+def test_max_decomposition_hulls_uses_shape_config() -> None:
+    target_obj = SimpleNamespace(
+        cfg=SimpleNamespace(
+            max_convex_hull_num=MISSING,
+            shape=SimpleNamespace(max_convex_hull_num=12),
+        )
+    )
+
+    max_hulls = atom_actions._max_decomposition_hulls(target_obj, {})
+
+    assert max_hulls == 12
+
+
+def test_grasp_convex_decomposition_method_keeps_legacy_vhacd_alias() -> None:
     target_obj = SimpleNamespace(
         cfg=SimpleNamespace(convex_decomposition_method="visacd")
     )

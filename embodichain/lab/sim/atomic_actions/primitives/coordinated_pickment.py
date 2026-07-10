@@ -489,17 +489,9 @@ class CoordinatedPickment(AtomicAction):
         left_object_to_eef = self._resolve_pose(
             target.left_object_to_eef, "left_object_to_eef"
         )
-        # rotate  90 degrees
-        left_object_to_eef_rx = left_object_to_eef[:, :3, 0].clone()
-        left_object_to_eef[:, :3, 0] = -left_object_to_eef[:, :3, 1]
-        left_object_to_eef[:, :3, 1] = left_object_to_eef_rx
         right_object_to_eef = self._resolve_pose(
             target.right_object_to_eef, "right_object_to_eef"
         )
-        # rotate  90 degrees
-        right_object_to_eef_rx = right_object_to_eef[:, :3, 0].clone()
-        right_object_to_eef[:, :3, 0] = -right_object_to_eef[:, :3, 1]
-        right_object_to_eef[:, :3, 1] = right_object_to_eef_rx
 
         left_grasp_xpos = torch.bmm(object_initial_pose, left_object_to_eef)
         right_grasp_xpos = torch.bmm(object_initial_pose, right_object_to_eef)

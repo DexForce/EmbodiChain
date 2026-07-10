@@ -122,9 +122,7 @@ def _run_pipeline(
     uses_prompt2scene_alignment = resolution.mode in PROMPT2SCENE_PROJECT_MODES
     if uses_prompt2scene_alignment:
         source_scene_body_scale_mode = (
-            target_body_scale_mode
-            if target_body_scale_mode is not None
-            else "multiply"
+            target_body_scale_mode if target_body_scale_mode is not None else "multiply"
         )
         effective_target_body_scale = (
             DEFAULT_TARGET_BODY_SCALE
