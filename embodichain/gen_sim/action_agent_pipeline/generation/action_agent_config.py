@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 import math
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
@@ -205,6 +207,7 @@ def generate_action_agent_config_from_project(
     source_scene_z_rotation_degrees: float = 0.0,
     source_mesh_x_rotation_degrees: float = 0.0,
     inside_container_slot_distance_scale: float = 1.0,
+    surface_release_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
@@ -266,6 +269,8 @@ def generate_action_agent_config_from_project(
             generated inside-container slot offsets when multiple moved objects
             share one container. Values below ``1`` place release points closer
             to the container center.
+        surface_release_clearance: Final object-bottom clearance above support
+            surfaces for ``object_on_surface`` release moves.
         target_replacements: Optional prompt-generated GLB replacements for
             selected default basket target objects. Each replacement writes to
             ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
@@ -426,6 +431,7 @@ def generate_action_agent_config_from_project(
             preserve_source_scene_geometry=preserve_source_scene_geometry,
             source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             inside_container_slot_distance_scale=inside_container_slot_distance_scale,
+            surface_release_clearance=surface_release_clearance,
         )
         _validate_relative_bundle(bundle, spec)
         return _finalize_and_write_bundle(
@@ -1520,6 +1526,39 @@ def _validate_source_scene_body_scale_mode(mode: str | None) -> str | None:
     return normalized
 
 
+def _validate_surface_release_clearance(surface_release_clearance: float) -> float:
+    if isinstance(surface_release_clearance, bool):
+        raise ValueError(
+            "surface_release_clearance must be a finite non-negative number."
+        )
+    try:
+        clearance = float(surface_release_clearance)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "surface_release_clearance must be a finite non-negative number."
+        ) from exc
+    if not math.isfinite(clearance) or clearance < 0.0:
+        raise ValueError(
+            "surface_release_clearance must be a finite non-negative number."
+        )
+    return clearance
+
+
+def _with_relative_surface_release_clearance(
+    spec: _RelativePlacementSpec,
+    surface_release_clearance: float,
+) -> _RelativePlacementSpec:
+    placements = tuple(
+        replace(placement, surface_clearance=surface_release_clearance)
+        for placement in spec.placements
+    )
+    return replace(
+        spec,
+        placements=placements,
+        surface_clearance=surface_release_clearance,
+    )
+
+
 def _source_scene_body_scale(
     obj: _SceneObject,
     *,
@@ -1636,7 +1675,12 @@ def _build_relative_placement_bundle(
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
     inside_container_slot_distance_scale: float,
+    surface_release_clearance: float,
 ) -> dict[str, Any]:
+    spec = _with_relative_surface_release_clearance(
+        spec,
+        _validate_surface_release_clearance(surface_release_clearance),
+    )
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(

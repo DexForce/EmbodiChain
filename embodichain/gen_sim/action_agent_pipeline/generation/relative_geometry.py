@@ -73,7 +73,6 @@ _CONTAINER_SLOT_AXIS_TIE_RATIO = 0.10
 _STAGING_Z_DELTA = 0.10
 _POSE_SENSITIVE_STAGING_Z_DELTA = 0.25
 _ON_RELEASE_Z_OFFSET = 0.2
-_ON_SURFACE_RELEASE_CLEARANCE = 0.003
 _PICKUP_UPRIGHT_ROTATE_RADIANS = math.pi / 4.0
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
@@ -159,6 +158,7 @@ def _with_self_relative_absolute_targets(
         upright_in_place=primary.upright_in_place,
         pickup_upright_direction=primary.pickup_upright_direction,
         pickup_rotate_upright=primary.pickup_rotate_upright,
+        surface_clearance=primary.surface_clearance,
     )
 
 
@@ -448,6 +448,7 @@ def _replace_relative_spec_placements(
         upright_in_place=primary.upright_in_place,
         pickup_upright_direction=primary.pickup_upright_direction,
         pickup_rotate_upright=primary.pickup_rotate_upright,
+        surface_clearance=primary.surface_clearance,
     )
 
 
@@ -496,7 +497,7 @@ def _with_on_surface_release_offset(
     release_offset[2] = round(
         float(reference_top_z)
         - float(reference_origin[2])
-        + _ON_SURFACE_RELEASE_CLEARANCE
+        + float(placement.surface_clearance)
         - float(moved_bottom_offset),
         6,
     )
@@ -975,7 +976,7 @@ def _offset_position(
 
 def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
     if spec.intent == "coordinated_pickment":
-        return {
+        summary = {
             "mode": "coordinated_pickment",
             "intent": spec.intent,
             "moved_object": spec.moved_runtime_uid,
@@ -988,6 +989,9 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
             "orientation_axis": spec.orientation_axis,
             "orientation_align_to": spec.orientation_align_to_runtime_uid,
         }
+        if spec.relation == "on" and not spec.reference_is_initial_pose:
+            summary["surface_clearance"] = spec.surface_clearance
+        return summary
     if len(spec.placements) == 1:
         summary = {
             "mode": "object_manipulation",
@@ -1002,6 +1006,8 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
             "orientation_axis": spec.orientation_axis,
             "orientation_align_to": spec.orientation_align_to_runtime_uid,
         }
+        if spec.relation == "on" and not spec.reference_is_initial_pose:
+            summary["surface_clearance"] = spec.surface_clearance
         if spec.upright_in_place:
             summary["upright_in_place"] = True
         if spec.pickup_upright_direction is not None:
@@ -1032,6 +1038,8 @@ def _relative_placement_summary(
         "orientation_axis": placement.orientation_axis,
         "orientation_align_to": placement.orientation_align_to_runtime_uid,
     }
+    if placement.relation == "on" and not placement.reference_is_initial_pose:
+        summary["surface_clearance"] = placement.surface_clearance
     if placement.upright_in_place:
         summary["upright_in_place"] = True
     if placement.pickup_upright_direction is not None:

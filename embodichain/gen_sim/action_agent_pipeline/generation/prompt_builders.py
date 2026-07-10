@@ -23,6 +23,9 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
     NominalGraphStep,
     build_nominal_task_graph,
@@ -60,7 +63,7 @@ _PLACE_LIFT_HEIGHT = 0.10
 _RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = 10
 _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = 30
 _SURFACE_RELEASE_Z_POLICY = "object_on_surface"
-_SURFACE_RELEASE_CLEARANCE = 0.015
+_SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _USE_PLACEMENT_ALIGN_TO = object()
 _RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
 - `left_of` means positive world y relative to the reference object.
@@ -107,6 +110,7 @@ class _RelativePlacementLike(Protocol):
     upright_in_place: bool
     pickup_upright_direction: Sequence[float] | None
     pickup_rotate_upright: float | None
+    surface_clearance: float
 
 
 class _RelativeSpecLike(_RelativePlacementLike, Protocol):
@@ -2688,7 +2692,7 @@ def _format_coordinated_pickment_spec(
             target_object_pose,
             z_policy=_SURFACE_RELEASE_Z_POLICY,
             support=placement.reference_runtime_uid,
-            surface_clearance=_SURFACE_RELEASE_CLEARANCE,
+            surface_clearance=_surface_release_clearance(placement),
         )
     return _compact_json(
         {
@@ -2815,7 +2819,9 @@ def _format_relative_pose_spec(
             z_policy=surface_z_policy,
             support=surface_support,
             surface_clearance=(
-                _SURFACE_RELEASE_CLEARANCE if surface_z_policy is not None else None
+                _surface_release_clearance(placement)
+                if surface_z_policy is not None
+                else None
             ),
         )
 
@@ -2831,9 +2837,15 @@ def _format_relative_pose_spec(
         z_policy=surface_z_policy,
         support=surface_support,
         surface_clearance=(
-            _SURFACE_RELEASE_CLEARANCE if surface_z_policy is not None else None
+            _surface_release_clearance(placement)
+            if surface_z_policy is not None
+            else None
         ),
     )
+
+
+def _surface_release_clearance(placement: _RelativePlacementLike) -> float:
+    return float(getattr(placement, "surface_clearance", _SURFACE_RELEASE_CLEARANCE))
 
 
 def _relative_surface_support(

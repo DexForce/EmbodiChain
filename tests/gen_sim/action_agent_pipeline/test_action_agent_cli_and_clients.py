@@ -27,6 +27,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.gym_project_api.image2tabletop_client import (
@@ -363,6 +364,15 @@ def test_pipeline_parser_defaults_to_target_body_scale() -> None:
     args = build_parser().parse_args([])
 
     assert args.target_body_scale == DEFAULT_TARGET_BODY_SCALE
+    assert args.surface_release_clearance == DEFAULT_SURFACE_RELEASE_CLEARANCE
+
+
+def test_pipeline_parser_accepts_surface_release_clearance() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+
+    args = build_parser().parse_args(["--surface-release-clearance", "0.05"])
+
+    assert args.surface_release_clearance == pytest.approx(0.05)
 
 
 def test_run_agent_command_passes_headless(monkeypatch, tmp_path) -> None:
@@ -954,6 +964,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             target_body_scale=0.8,
             target_body_scale_mode="multiply",
             inside_container_slot_distance_scale=1.0,
+            surface_release_clearance=0.05,
             target_replacement1=None,
             target_replacement2=None,
             sync_replacement_names=False,
@@ -996,6 +1007,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
     assert record["target_body_scale_mode"] == "multiply"
+    assert record["surface_release_clearance"] == pytest.approx(0.05)
     assert record["convex_decomposition_method"] == "vhacd"
     assert record["headless"] is True
 
@@ -1195,6 +1207,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
             target_body_scale=target_body_scale,
             target_body_scale_mode=target_body_scale_mode,
             inside_container_slot_distance_scale=1.0,
+            surface_release_clearance=0.05,
             prompt2scene_scene_z_rotation_degrees=-90.0,
             prompt2scene_mesh_x_rotation_degrees=90.0,
             sync_replacement_names=False,
@@ -1215,6 +1228,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
     assert captured["source_scene_z_rotation_degrees"] == -90.0
     assert captured["source_mesh_x_rotation_degrees"] == 90.0
     assert captured["target_body_scale"] == expected_target_body_scale
+    assert captured["surface_release_clearance"] == pytest.approx(0.05)
     assert captured["convex_decomposition_method"] == "vhacd"
 
 

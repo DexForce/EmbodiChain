@@ -2179,28 +2179,33 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
     )
 
     target_body_scale = 0.8
+    surface_release_clearance = 0.05
     paths = generate_action_agent_config_from_project(
         project_dir,
         tmp_path / "generated_bottle_on_table_agent",
         task_name="Demo43",
         task_description="用左臂把瓶子扶正放到桌面上",
         target_body_scale=target_body_scale,
+        surface_release_clearance=surface_release_clearance,
         prewarm_coacd_cache=False,
     )
 
     summary = _stable_summary(paths.summary)
     expected_release_offset_z = (
-        0.36 + 0.003 + bottle_semantic_z_half_height * target_body_scale
+        0.36
+        + surface_release_clearance
+        + bottle_semantic_z_half_height * target_body_scale
     )
     expected_release_position = [
         0.05,
         0.05,
-        -0.02 + expected_release_offset_z,
+        round(-0.02 + expected_release_offset_z, 6),
     ]
     expected_release_offset = [0.05, 0.05, expected_release_offset_z]
     assert summary["upright_in_place"] is True
     assert summary["release_offset"][2] == pytest.approx(expected_release_offset_z)
     assert summary["release_offset"] == pytest.approx(expected_release_offset)
+    assert summary["surface_clearance"] == pytest.approx(surface_release_clearance)
     assert summary["reference_object"] == "table"
     assert summary["pickup_rotate_upright"] == pytest.approx(0.7853981633974483)
     assert sum(abs(value) for value in summary["pickup_upright_direction"]) == 1.0
@@ -2245,6 +2250,7 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
         f'"position":{release_position_json},"orientation_goal":"upright"'
         in task_prompt
     )
+    assert f'"surface_clearance":{surface_release_clearance}' in task_prompt
     assert '"reference":"object","obj_name":"table"' not in task_prompt
     assert '"offset":[0.0,0.0,0.2]' not in task_prompt
 

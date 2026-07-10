@@ -20,6 +20,7 @@ import argparse
 from pathlib import Path
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
@@ -190,6 +191,18 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--surface_release_clearance",
+        "--surface-release-clearance",
+        type=float,
+        default=DEFAULT_SURFACE_RELEASE_CLEARANCE,
+        help=(
+            "Final object-bottom clearance above support surfaces for "
+            "object_on_surface release moves. Increase this when release poses "
+            "are too close to the table. Defaults to "
+            f"{DEFAULT_SURFACE_RELEASE_CLEARANCE}."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement",
         "--target-replacement",
         dest="target_replacement",
@@ -309,6 +322,7 @@ def cli() -> None:
         source_scene_z_rotation_degrees=alignment["source_scene_z_rotation_degrees"],
         source_mesh_x_rotation_degrees=alignment["source_mesh_x_rotation_degrees"],
         inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
+        surface_release_clearance=args.surface_release_clearance,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
