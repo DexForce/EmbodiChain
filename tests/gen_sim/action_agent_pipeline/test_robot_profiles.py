@@ -131,7 +131,7 @@ def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -
     observations = _make_observations_config(robot)
 
     assert robot["uid"] == "DualFrankaPanda"
-    assert robot["init_pos"] == pytest.approx([1.0, 0.0, 0.45])
+    assert robot["init_pos"] == pytest.approx([0.7, 0.0, 0.45])
     assert _arm_urdf_paths(robot) == {"Franka/Panda/PandaWithHand.urdf"}
     assert robot["init_qpos"] == pytest.approx(_DUAL_FRANKA_HOME_QPOS)
     assert robot["control_parts"]["left_arm"] == [

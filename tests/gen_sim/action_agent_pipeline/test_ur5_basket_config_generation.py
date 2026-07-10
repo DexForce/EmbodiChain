@@ -169,8 +169,8 @@ def test_action_agent_templates_load_fresh_json_copies() -> None:
     assert second_robot["control_parts"]["left_arm"] == [
         f"left_joint{i}" for i in range(1, 7)
     ]
-    assert first_franka["init_pos"] == pytest.approx([1.0, 0.0, 0.45])
-    assert second_franka["init_pos"] == pytest.approx([1.0, 0.0, 0.85])
+    assert first_franka["init_pos"] == pytest.approx([0.7, 0.0, 0.45])
+    assert second_franka["init_pos"] == pytest.approx([0.7, 0.0, 0.85])
     assert second_franka["init_qpos"] == pytest.approx(_DUAL_FRANKA_HOME_QPOS)
     assert second_sensors[0]["uid"] == "cam_high"
     assert second_lights["direct"] == []
