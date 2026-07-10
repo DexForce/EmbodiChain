@@ -102,7 +102,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
             "--task_description",
             "用双臂把两边的东西放到篮子里",
             "--robot-profile",
-            "franka_v3",
+            "franka",
             "--target_body_scale",
             "1.0",
             "--overwrite",
@@ -111,6 +111,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
 
     generate_action_agent_config.cli()
 
+    assert captured["robot_profile"] == "franka"
     assert captured["preserve_source_scene_geometry"] is True
     assert captured["source_scene_z_rotation_degrees"] == (
         DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES
