@@ -1,19 +1,19 @@
 {
     "sam3_segmentation": {
-      "base_url": "http://10.7.7.32:5024",
+      "base_url": "http://10.7.7.32:5014",
       "timeout_s": 1200,
       "health_path": "/health",
       "segment_single_object_path": "/predict"
     },
     "sam3d_generation": {
-      "base_url": "http://10.7.7.32:5029",
+      "base_url": "http://10.7.7.32:5019",
       "timeout_s": 1800,
       "health_path": "/health",
       "generate_multiple_objects_path": "/generate_multiple_objects",
       "generate_single_object_path": "/generate_single_object"
     },
     "zimage": {
-       "base_url": "http://10.7.7.32:5023",
+       "base_url": "http://10.7.7.32:5013",
        "timeout_s": 120,
        "health_path": "/health",
        "generate_single_object_path": "/generate.png"
