@@ -72,7 +72,7 @@ class PickUpCfg(ActionCfg):
     """Distance to offset back from the grasp pose along the approach direction."""
 
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
-    """Approach direction in the object local frame."""
+    """World-frame direction from the pre-grasp pose to the grasp pose."""
 
     obj_upright_direction: torch.Tensor | None = None
     """Optional object local direction used to choose the upright grasp rotation."""
@@ -109,7 +109,13 @@ class PickUp(AtomicAction):
             )
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
-        self.approach_direction = self.cfg.approach_direction.to(self.device)
+        self.approach_direction = self.cfg.approach_direction.to(
+            device=self.device, dtype=torch.float32
+        )
+        approach_norm = torch.linalg.vector_norm(self.approach_direction)
+        if approach_norm <= 1.0e-6:
+            logger.log_error("approach_direction must be non-zero.", ValueError)
+        self.approach_direction = self.approach_direction / approach_norm
 
     def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
         sem = target.semantics
@@ -135,9 +141,8 @@ class PickUp(AtomicAction):
             return self._fail(state)
         self._apply_upright_rotation(sem, grasp_xpos)
 
-        grasp_z = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = self.builder.apply_local_offset(
-            grasp_xpos, -grasp_z * self.cfg.pre_grasp_distance
+            grasp_xpos, -self.approach_direction * self.cfg.pre_grasp_distance
         )
 
         n_approach, n_close, n_lift = self.builder.split_three_phase(

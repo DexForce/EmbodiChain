@@ -562,6 +562,67 @@ class TestPickUpAction:
             atol=1.0e-6,
         )
 
+    def test_execute_keeps_world_approach_direction_after_upright_rotation(self):
+        pre_grasp_distance = 0.15
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            pre_grasp_distance=pre_grasp_distance,
+            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+            obj_upright_direction=torch.tensor([0.0, 1.0, 0.0]),
+            rotate_upright=math.pi / 4.0,
+        )
+        action = PickUp(self.mg, cfg)
+        grasp_pose = torch.eye(4)
+        grasp_pose[:3, 3] = torch.tensor([0.2, -0.1, 0.3])
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (grasp_pose.unsqueeze(0), torch.tensor([0.5])) for _ in range(NUM_ENVS)
+            ]
+        )
+        entity = Mock()
+        entity.get_local_pose = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="bottle",
+            entity=entity,
+        )
+        planned_target_states = []
+
+        def plan_arm_traj(target_states, start_qpos, n_waypoints, **kwargs):
+            planned_target_states.append(target_states)
+            return (
+                torch.ones(NUM_ENVS, dtype=torch.bool),
+                torch.zeros(NUM_ENVS, n_waypoints, ARM_DOF),
+            )
+
+        action.builder.plan_arm_traj = plan_arm_traj
+        result = action.execute(
+            GraspTarget(semantics=sem),
+            WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+        )
+
+        assert result.success.all()
+        approach_targets = planned_target_states[0]
+        pre_grasp_position = torch.stack(
+            [states[0].xpos[:3, 3] for states in approach_targets]
+        )
+        grasp_position = torch.stack(
+            [states[1].xpos[:3, 3] for states in approach_targets]
+        )
+        expected_displacement = torch.tensor([0.0, 0.0, -pre_grasp_distance]).repeat(
+            NUM_ENVS, 1
+        )
+        assert torch.allclose(
+            grasp_position - pre_grasp_position, expected_displacement
+        )
+
     def test_execute_applies_upright_rotation_from_object_local_frame(self):
         cfg = PickUpCfg(
             hand_open_qpos=_hand_open(),
