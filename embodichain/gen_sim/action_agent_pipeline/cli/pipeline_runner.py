@@ -20,6 +20,7 @@ import argparse
 import sys
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.agent_run_stage import (
@@ -64,6 +65,7 @@ PIPELINE_RUNNER_REQUIRED_ARGS = (
     "regenerate",
     "reuse_target_replacements",
     "skip_run_agent",
+    "surface_release_clearance",
     "sync_replacement_names",
     "target_body_scale",
     "target_body_scale_mode",
@@ -164,6 +166,11 @@ def _run_pipeline(
             ),
             inside_container_slot_distance_scale=(
                 args.inside_container_slot_distance_scale
+            ),
+            surface_release_clearance=getattr(
+                args,
+                "surface_release_clearance",
+                DEFAULT_SURFACE_RELEASE_CLEARANCE,
             ),
             target_replacements=target_replacements,
             sync_replacement_names=args.sync_replacement_names,

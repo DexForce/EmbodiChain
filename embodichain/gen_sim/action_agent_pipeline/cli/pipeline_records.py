@@ -26,6 +26,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+)
+
 __all__ = [
     "append_pipeline_history",
     "build_pipeline_record",
@@ -201,6 +205,11 @@ def build_pipeline_record(
         "target_body_scale_mode": getattr(args, "target_body_scale_mode", None),
         "inside_container_slot_distance_scale": (
             args.inside_container_slot_distance_scale
+        ),
+        "surface_release_clearance": getattr(
+            args,
+            "surface_release_clearance",
+            DEFAULT_SURFACE_RELEASE_CLEARANCE,
         ),
         "target_replacements": _target_replacement_records(
             args,

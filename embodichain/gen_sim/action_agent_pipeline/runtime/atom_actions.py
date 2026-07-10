@@ -26,6 +26,9 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
     get_arm_states,
     resolve_arm_side,
@@ -139,7 +142,7 @@ ATOMIC_ACTION_REGISTRY = {
 }
 
 
-_DEFAULT_SURFACE_RELEASE_CLEARANCE = 0.015
+_DEFAULT_SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _DEFAULT_PICKUP_LIFT_HEIGHT = 0.16
 
 

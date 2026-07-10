@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
@@ -381,6 +382,19 @@ def build_parser() -> argparse.ArgumentParser:
             "when multiple objects are placed into one container. Values below "
             "1.0 move release points closer to the container center. Defaults "
             "to 1.0."
+        ),
+    )
+    parser.add_argument(
+        "--surface-release-clearance",
+        "--surface_release_clearance",
+        dest="surface_release_clearance",
+        type=float,
+        default=DEFAULT_SURFACE_RELEASE_CLEARANCE,
+        help=(
+            "Final object-bottom clearance above support surfaces for "
+            "object_on_surface release moves. Increase this when release poses "
+            "are too close to the table. Defaults to "
+            f"{DEFAULT_SURFACE_RELEASE_CLEARANCE}."
         ),
     )
     parser.add_argument(
