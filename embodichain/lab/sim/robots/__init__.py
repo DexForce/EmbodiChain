@@ -16,12 +16,14 @@
 
 from .dexforce_w1 import *
 from .cobotmagic import CobotMagicCfg
+from .franka_panda import FrankaPandaCfg
 from .ur_robot import URRobotCfg
 from .dual_arm import DualArmRobotCfg, build_dual_arm_cfg
 
 __all__ = [
     "DexforceW1Cfg",
     "CobotMagicCfg",
+    "FrankaPandaCfg",
     "URRobotCfg",
     "DualArmRobotCfg",
     "build_dual_arm_cfg",
