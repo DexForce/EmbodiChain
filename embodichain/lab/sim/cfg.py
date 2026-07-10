@@ -780,7 +780,7 @@ class ObjectBaseCfg:
 
             T = np.eye(4)
             T[:3, 3] = np.array(cfg.init_pos)
-            T[:3, :3] = R.from_euler("xyz", np.deg2rad(cfg.init_rot)).as_matrix()
+            T[:3, :3] = R.from_euler("XYZ", np.deg2rad(cfg.init_rot)).as_matrix()
             cfg.init_local_pose = T
         else:
             # If only init_local_pose is provided, extract init_pos and init_rot
@@ -788,7 +788,7 @@ class ObjectBaseCfg:
 
             T = np.array(cfg.init_local_pose)
             cfg.init_pos = tuple(T[:3, 3])
-            cfg.init_rot = tuple(R.from_matrix(T[:3, :3]).as_euler("xyz", degrees=True))
+            cfg.init_rot = tuple(R.from_matrix(T[:3, :3]).as_euler("XYZ", degrees=True))
 
         return cfg
 
@@ -927,7 +927,7 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
     using the approximate convex decomposition method specified by :attr:`acd_method`.
-    Reference: https://github.com/SarahWeiii/CoACD
+    The action-agent pipeline uses V-HACD.
     """
 
     acd_method: str = MISSING
@@ -937,8 +937,8 @@ class RigidObjectCfg(ObjectBaseCfg):
         Use :attr:`MeshCfg.acd_method` instead. This field is kept for
         backward compatibility and overrides the shape-level value when explicitly set.
 
-    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
-    :attr:`max_convex_hull_num` is set to larger than 1.
+    The action-agent pipeline writes ``"vhacd"``. Only used when
+    :attr:`max_convex_hull_num` is larger than one.
     """
 
     sdf_resolution: int = MISSING
@@ -1655,14 +1655,14 @@ class ArticulationCfg(ObjectBaseCfg):
 
             T = np.eye(4)
             T[:3, 3] = np.array(cfg.init_pos)
-            T[:3, :3] = R.from_euler("xyz", np.deg2rad(cfg.init_rot)).as_matrix()
+            T[:3, :3] = R.from_euler("XYZ", np.deg2rad(cfg.init_rot)).as_matrix()
             cfg.init_local_pose = T
         else:
             from scipy.spatial.transform import Rotation as R
 
             cfg.init_pos = tuple(cfg.init_local_pose[:3, 3])
             cfg.init_rot = tuple(
-                R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)
+                R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("XYZ", degrees=True)
             )
 
         return cfg

@@ -113,6 +113,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
 
     assert captured["robot_profile"] == "franka"
     assert captured["preserve_source_scene_geometry"] is True
+    assert captured["load_source_meshes_directly"] is True
     assert captured["source_scene_z_rotation_degrees"] == (
         DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES
     )
@@ -210,12 +211,14 @@ def test_generate_config_cli_respects_explicit_prompt2scene_alignment_overrides(
             "--source_mesh_x_rotation_degrees",
             "0",
             "--no-preserve-source-scene-geometry",
+            "--no-load-source-meshes-directly",
         ],
     )
 
     generate_action_agent_config.cli()
 
     assert captured["preserve_source_scene_geometry"] is False
+    assert captured["load_source_meshes_directly"] is False
     assert captured["source_scene_z_rotation_degrees"] == 0.0
     assert captured["source_mesh_x_rotation_degrees"] == 0.0
 
@@ -961,7 +964,6 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             prompt2scene_prompt="move the bread left",
             prompt2scene_gravity_settle_mode="physics",
             prompt2scene_scene_z_rotation_degrees=-90.0,
-            prompt2scene_mesh_x_rotation_degrees=90.0,
             target_body_scale=0.8,
             target_body_scale_mode="multiply",
             inside_container_slot_distance_scale=1.0,
@@ -970,8 +972,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             target_replacement2=None,
             sync_replacement_names=False,
             reuse_target_replacements=True,
-            convex_decomposition_method="vhacd",
-            prewarm_coacd_cache=True,
+            acd_method="vhacd",
             overwrite_config=True,
             regenerate=True,
             skip_run_agent=False,
@@ -1006,10 +1007,10 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert "prompt2scene_existing_gym_project" not in record
     assert record["prompt2scene_gravity_settle_mode"] == "physics"
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
-    assert record["prompt2scene_mesh_x_rotation_degrees"] == 90.0
+    assert "prompt2scene_mesh_x_rotation_degrees" not in record
     assert record["target_body_scale_mode"] == "multiply"
     assert record["surface_release_clearance"] == pytest.approx(0.05)
-    assert record["convex_decomposition_method"] == "vhacd"
+    assert record["acd_method"] == "vhacd"
     assert record["headless"] is True
 
 
@@ -1210,11 +1211,9 @@ def test_prompt2scene_pipeline_handles_target_scale(
             inside_container_slot_distance_scale=1.0,
             surface_release_clearance=0.05,
             prompt2scene_scene_z_rotation_degrees=-90.0,
-            prompt2scene_mesh_x_rotation_degrees=90.0,
             sync_replacement_names=False,
             reuse_target_replacements=True,
-            convex_decomposition_method="vhacd",
-            prewarm_coacd_cache=False,
+            acd_method="vhacd",
             overwrite_config=True,
             skip_run_agent=True,
             regenerate=True,
@@ -1226,11 +1225,12 @@ def test_prompt2scene_pipeline_handles_target_scale(
         expected_source_scene_body_scale_mode
     )
     assert captured["preserve_source_scene_geometry"] is True
+    assert captured["load_source_meshes_directly"] is True
     assert captured["source_scene_z_rotation_degrees"] == -90.0
-    assert captured["source_mesh_x_rotation_degrees"] == 90.0
+    assert "source_mesh_x_rotation_degrees" not in captured
     assert captured["target_body_scale"] == expected_target_body_scale
     assert captured["surface_release_clearance"] == pytest.approx(0.05)
-    assert captured["convex_decomposition_method"] == "vhacd"
+    assert captured["acd_method"] == "vhacd"
 
 
 def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -> None:
@@ -1304,11 +1304,9 @@ def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -
             target_body_scale_mode=None,
             inside_container_slot_distance_scale=1.0,
             prompt2scene_scene_z_rotation_degrees=-90.0,
-            prompt2scene_mesh_x_rotation_degrees=90.0,
             sync_replacement_names=False,
             reuse_target_replacements=True,
-            convex_decomposition_method="vhacd",
-            prewarm_coacd_cache=False,
+            acd_method="vhacd",
             overwrite_config=True,
             skip_run_agent=False,
             regenerate=True,

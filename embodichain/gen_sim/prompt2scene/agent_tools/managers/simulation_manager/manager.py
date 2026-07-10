@@ -92,12 +92,14 @@ class SimulationManager:
         obj = sim.add_rigid_object(
             RigidObjectCfg(
                 uid="dropped_asset",
-                shape=MeshCfg(fpath=str(glb_path)),
+                shape=MeshCfg(
+                    fpath=str(glb_path),
+                    max_convex_hull_num=request.max_convex_hull_num,
+                    acd_method=request.acd_method,
+                ),
                 init_pos=(0.0, 0.0, initial_height),
                 init_rot=(0.0, 0.0, 0.0),
                 body_type="dynamic",
-                max_convex_hull_num=request.max_convex_hull_num,
-                convex_decomposition_method=request.convex_decomposition_method,
             )
         )
         sim.update(step=300)

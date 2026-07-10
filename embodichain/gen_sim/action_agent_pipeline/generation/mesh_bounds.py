@@ -29,6 +29,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 
 __all__ = [
+    "_GLTF_TO_SIM_FRAME_KEY",
     "_apply_tabletop_z_placement",
     "_clean_vector3",
     "_dual_ur5_init_z_from_table_top",
@@ -42,6 +43,8 @@ __all__ = [
     "_resolve_table_mesh_world_zmax",
     "_vector3",
 ]
+
+_GLTF_TO_SIM_FRAME_KEY = "_gltf_to_sim_frame"
 
 _DUAL_UR5_LEGACY_INIT_Z = 0.5
 _DUAL_UR5_ARM_COMPONENT_Z = 0.4
@@ -160,7 +163,10 @@ def _mesh_config_scaled_xy_extents(
     mesh_path = shape.get("fpath")
     if not isinstance(mesh_path, str):
         return None
-    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    vertices = _load_mesh_vertices(
+        Path(mesh_path).expanduser().resolve(),
+        gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
+    )
     if not vertices:
         return None
 
@@ -195,7 +201,10 @@ def _mesh_config_world_xy_bounds(
     mesh_path = shape.get("fpath")
     if not isinstance(mesh_path, str):
         return None
-    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    vertices = _load_mesh_vertices(
+        Path(mesh_path).expanduser().resolve(),
+        gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
+    )
     if not vertices:
         return None
 
@@ -218,7 +227,10 @@ def _mesh_config_local_zmin_after_rotation(
     mesh_path = shape.get("fpath")
     if not isinstance(mesh_path, str):
         return None
-    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    vertices = _load_mesh_vertices(
+        Path(mesh_path).expanduser().resolve(),
+        gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
+    )
     if not vertices:
         return None
 
@@ -238,7 +250,10 @@ def _mesh_config_world_z_bounds(
     mesh_path = shape.get("fpath")
     if not isinstance(mesh_path, str):
         return None
-    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    vertices = _load_mesh_vertices(
+        Path(mesh_path).expanduser().resolve(),
+        gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
+    )
     if not vertices:
         return None
 
@@ -280,7 +295,10 @@ def _resolve_table_mesh_world_zmax(
 
     mesh_path = _source_asset_path(scene_dir, str(shape["fpath"]))
     try:
-        vertices = _load_mesh_vertices(mesh_path)
+        vertices = _load_mesh_vertices(
+            mesh_path,
+            gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
+        )
     except (
         OSError,
         ValueError,
@@ -311,10 +329,14 @@ def _source_asset_path(scene_dir: Path, fpath: str) -> Path:
     return scene_candidate
 
 
-def _load_mesh_vertices(mesh_path: Path) -> list[tuple[float, float, float]] | None:
+def _load_mesh_vertices(
+    mesh_path: Path,
+    *,
+    gltf_to_sim_frame: bool = False,
+) -> list[tuple[float, float, float]] | None:
     if mesh_path.suffix.lower() == ".glb":
         try:
-            return list(_iter_glb_world_position_vertices(mesh_path))
+            vertices = list(_iter_glb_world_position_vertices(mesh_path))
         except (
             OSError,
             ValueError,
@@ -322,12 +344,31 @@ def _load_mesh_vertices(mesh_path: Path) -> list[tuple[float, float, float]] | N
             UnicodeDecodeError,
             struct.error,
         ):
-            return _load_mesh_vertices_with_trimesh(mesh_path)
+            vertices = _load_mesh_vertices_with_trimesh(mesh_path)
+        return _maybe_convert_gltf_vertices_to_sim_frame(
+            vertices,
+            enabled=gltf_to_sim_frame,
+        )
+    if mesh_path.suffix.lower() == ".gltf":
+        return _maybe_convert_gltf_vertices_to_sim_frame(
+            _load_mesh_vertices_with_trimesh(mesh_path),
+            enabled=gltf_to_sim_frame,
+        )
     if mesh_path.suffix.lower() == ".obj":
         vertices = _load_obj_position_vertices(mesh_path)
         if vertices is not None:
             return vertices
     return _load_mesh_vertices_with_trimesh(mesh_path)
+
+
+def _maybe_convert_gltf_vertices_to_sim_frame(
+    vertices: list[tuple[float, float, float]] | None,
+    *,
+    enabled: bool,
+) -> list[tuple[float, float, float]] | None:
+    if not enabled or vertices is None:
+        return vertices
+    return [(x, -z, y) for x, y, z in vertices]
 
 
 def _load_obj_position_vertices(
@@ -550,7 +591,8 @@ def _euler_xyz_degrees_matrix(
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0],
     ]
-    matrix = _matrix_multiply(_matrix_multiply(rot_z, rot_y), rot_x)
+    # Match RigidObject.reset and Prompt2Scene's intrinsic XYZ convention.
+    matrix = _matrix_multiply(_matrix_multiply(rot_x, rot_y), rot_z)
     matrix[0][3] = float(translation[0])
     matrix[1][3] = float(translation[1])
     matrix[2][3] = float(translation[2])

@@ -27,12 +27,17 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager im
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager.schemas import (
     GravityDropRequest,
 )
+from embodichain.lab.sim.shapes import MeshCfg
+
+
+def test_mesh_cfg_defaults_to_vhacd() -> None:
+    assert MeshCfg().acd_method == "vhacd"
 
 
 def test_gravity_drop_request_defaults_to_vhacd() -> None:
     request = GravityDropRequest(glb_path=Path("object.glb"))
 
-    assert request.convex_decomposition_method == "vhacd"
+    assert request.acd_method == "vhacd"
 
 
 def test_prompt2scene_gravity_manager_passes_vhacd_to_rigid_object_cfg(
@@ -82,7 +87,7 @@ def test_prompt2scene_gravity_manager_passes_vhacd_to_rigid_object_cfg(
     )
 
     cfg = captured["rigid_object_cfg"]
-    assert cfg.max_convex_hull_num == 32
-    assert cfg.convex_decomposition_method == "vhacd"
+    assert cfg.shape.max_convex_hull_num == 32
+    assert cfg.shape.acd_method == "vhacd"
     assert captured["step"] == 300
     assert captured["destroyed"] is True
