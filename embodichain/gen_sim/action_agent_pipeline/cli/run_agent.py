@@ -41,6 +41,10 @@ __all__ = ["cli"]
 _SHOW_PHYSICAL_COLLISION_ENV = "EMBODICHAIN_SHOW_PHYSICAL_COLLISION"
 _PHYSICAL_COLLISION_RGBA = (0.0, 1.0, 0.0, 0.85)
 _FALSE_ENV_VALUES = {"", "0", "false", "no", "off"}
+# hard-coded param for waic demo.
+_RIGID_OBJECT_POSITION_RANGE = [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]]
+_RIGID_OBJECT_ROTATION_RANGE = [[0.0, 0.0, -45.0], [0.0, 0.0, 45.0]]
+_TABLE_HEIGHT_DELTA_RANGE = [[-0.05], [0.05]]
 
 
 def cli() -> None:
@@ -70,7 +74,10 @@ def cli() -> None:
 
     args = parser.parse_args()
 
-    env_cfg, gym_config, _ = build_env_cfg_from_args(args)
+    env_cfg, gym_config, _ = build_env_cfg_from_args(
+        args,
+        gym_config_modifier=_add_vectorized_reset_randomization,
+    )
     agent_config = load_config(args.agent_config)
 
     with timing_scope(
@@ -92,6 +99,65 @@ def cli() -> None:
     if args.headless:
         with timing_scope("run_agent.final_reset"):
             _reset_env_with_physical_collision(env, options={"final": True})
+
+
+def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
+    """Add default reset randomization for parallel action-agent environments.
+
+    A pose randomizer is added for every configured rigid object. The table-height
+    randomizer runs after those pose randomizers so all randomized objects are
+    shifted together with the table.
+
+    Args:
+        gym_config: Merged gym configuration that will be parsed into the
+            environment configuration.
+    """
+    if gym_config.get("num_envs", 1) <= 1:
+        return
+
+    events = gym_config.setdefault("env", {}).setdefault("events", {})
+    for rigid_object in gym_config.get("rigid_object", []):
+        uid = rigid_object.get("uid")
+        if not isinstance(uid, str) or not uid:
+            log_warning(
+                "Skipping reset pose randomization for a rigid object without a UID."
+            )
+            continue
+
+        events.setdefault(
+            f"init_{uid}_pose",
+            {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": uid},
+                    "position_range": [
+                        list(_RIGID_OBJECT_POSITION_RANGE[0]),
+                        list(_RIGID_OBJECT_POSITION_RANGE[1]),
+                    ],
+                    "rotation_range": [
+                        list(_RIGID_OBJECT_ROTATION_RANGE[0]),
+                        list(_RIGID_OBJECT_ROTATION_RANGE[1]),
+                    ],
+                    "relative_position": True,
+                },
+            },
+        )
+
+    events.setdefault(
+        "random_table_height",
+        {
+            "func": "randomize_anchor_height",
+            "mode": "reset",
+            "params": {
+                "anchor_uid": "table",
+                "height_delta_range": [
+                    list(_TABLE_HEIGHT_DELTA_RANGE[0]),
+                    list(_TABLE_HEIGHT_DELTA_RANGE[1]),
+                ],
+            },
+        },
+    )
 
 
 def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: dict):
