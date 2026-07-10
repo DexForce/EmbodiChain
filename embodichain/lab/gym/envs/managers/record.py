@@ -135,7 +135,7 @@ class record_camera_data(Functor):
         """
         if len(self._frames) > 0:
             video_name = self._resolve_video_name()
-            images_to_video(self._frames, self._save_path, video_name, fps=20)
+            images_to_video(self._frames, self._save_path, video_name, fps=25)
 
             self._current_episode += 1
             self._frames = []
@@ -256,7 +256,7 @@ class record_camera_data_async(record_camera_data):
                 )
                 big_frames.append(big_frame)
             video_name = f"ep{self._ep_idx[0]-1}_{self._name}_allenvs"
-            images_to_video(big_frames, save_path, video_name, fps=20)
+            images_to_video(big_frames, save_path, video_name, fps=25)
             self._pending_env_episodes.clear()
 
 

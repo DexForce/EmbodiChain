@@ -58,6 +58,46 @@ def test_action_agent_config_cli_imports() -> None:
     assert callable(generate_action_agent_config.cli)
 
 
+def test_run_agent_reset_randomization_is_disabled_for_single_env() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
+
+    gym_config = {"num_envs": 1, "rigid_object": [{"uid": "apple"}]}
+
+    run_agent._add_vectorized_reset_randomization(gym_config)
+
+    assert "env" not in gym_config
+
+
+def test_run_agent_reset_randomization_configures_parallel_envs() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
+
+    gym_config = {
+        "num_envs": 4,
+        "rigid_object": [{"uid": "apple"}],
+        "env": {
+            "dataset": {
+                "recorder": {"func": "record_camera_data", "params": {}},
+                "metadata": {"task": "demo"},
+            }
+        },
+    }
+
+    run_agent._add_vectorized_reset_randomization(gym_config)
+
+    assert gym_config["env"]["dataset"] == {"metadata": {"task": "demo"}}
+    events = gym_config["env"]["events"]
+    assert events["init_apple_pose"]["params"] == {
+        "entity_cfg": {"uid": "apple"},
+        "position_range": [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]],
+        "rotation_range": [[0.0, 0.0, -45.0], [0.0, 0.0, 45.0]],
+        "relative_position": True,
+    }
+    assert events["random_table_height"]["params"] == {
+        "anchor_uid": "table",
+        "height_delta_range": [[-0.05], [0.05]],
+    }
+
+
 def test_generate_config_cli_auto_applies_prompt2scene_alignment(
     monkeypatch,
     tmp_path,

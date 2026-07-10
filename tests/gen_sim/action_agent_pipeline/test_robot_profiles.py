@@ -160,6 +160,18 @@ def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -
     assert robot["solver_cfg"]["right_arm"]["class_type"] == "PytorchSolver"
     assert robot["solver_cfg"]["right_arm"]["root_link_name"] == "right_base"
     assert robot["solver_cfg"]["right_arm"]["end_link_name"] == "right_fr3_hand_tcp"
+    expected_tcp = [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    assert robot["solver_cfg"]["left_arm"]["tcp"] == expected_tcp
+    assert robot["solver_cfg"]["right_arm"]["tcp"] == expected_tcp
+    assert robot["qpos_limits"]["(left|right)_fr3_finger_joint[1-2]"] == [
+        0.0,
+        0.06,
+    ]
     assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
         14,
         15,
@@ -167,7 +179,7 @@ def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -
         17,
     ]
     assert extensions["agent_robot_profile"] == "dual_franka"
-    assert extensions["gripper_open_state"] == [0.04, 0.04]
+    assert extensions["gripper_open_state"] == [0.06, 0.06]
     assert extensions["gripper_close_state"] == [0.0, 0.0]
     assert extensions["agent_grasp_runtime_defaults"]["grasp_finger_length"] == (
         pytest.approx(0.058)
