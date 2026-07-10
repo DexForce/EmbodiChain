@@ -182,9 +182,17 @@ def test_dual_arm_from_dict_explicit_base_robot():
     assert cfg.solver_cfg["left_arm"].ur_type == "ur5"
 
 
+def test_dual_arm_from_dict_franka_base_robot():
+    cfg = DualArmRobotCfg.from_dict(
+        {"base_robot": "franka", "mount": {"preset": "side_by_side", "separation": 0.6}}
+    )
+    assert set(["left_arm", "right_arm", "dual_arm"]).issubset(cfg.control_parts.keys())
+    assert set(["left_hand", "right_hand"]).issubset(cfg.control_parts.keys())
+
+
 def test_dual_arm_unknown_base_robot_raises():
     with pytest.raises(ValueError):
-        DualArmRobotCfg.from_dict({"base_robot": "franka"})
+        DualArmRobotCfg.from_dict({"base_robot": "telepathic"})
 
 
 def test_dual_arm_roundtrip():

@@ -79,12 +79,14 @@ class Robot(Articulation):
 
         self._control_groups: Dict[str, ControlGroup] = {}
 
+        # Articulation initialization may apply configured qpos limits through
+        # Robot.set_qpos_limits(), which synchronizes this registry.
+        self._solvers: Dict[str, BaseSolver] = {}
+
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
 
         super().__init__(cfg, entities, device)
-
-        self._solvers = {}
 
         if self.cfg.solver_cfg:
             self.init_solver(self.cfg.solver_cfg)
