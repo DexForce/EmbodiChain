@@ -224,7 +224,7 @@ class _GraspRuntimeDefaults:
     min_open_length: float = 0.003
     finger_length: float = 0.13
     point_sample_dense: float = 0.012
-    max_deviation_angle: float = float(np.pi / 6)
+    max_deviation_angle: float = float(np.pi / 12)
     viser_port: int = 11801
 
 
