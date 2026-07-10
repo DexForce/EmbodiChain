@@ -114,9 +114,11 @@ class PickUp(AtomicAction):
 
     def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
         sem = target.semantics
-        if not isinstance(sem.affordance, AntipodalAffordance):
+        if target.grasp_xpos is None and not isinstance(
+            sem.affordance, AntipodalAffordance
+        ):
             logger.log_error(
-                "PickUp requires an AntipodalAffordance on the target semantics.",
+                "PickUp requires an AntipodalAffordance when grasp_xpos is not set.",
                 ValueError,
             )
         if sem.entity is None:
@@ -129,7 +131,13 @@ class PickUp(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-        is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
+        if target.grasp_xpos is None:
+            is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
+        else:
+            grasp_xpos = self.builder.resolve_pose_target(
+                target.grasp_xpos, n_envs=self.n_envs
+            )
+            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
 
         # apply grasp yr rotation offset if specified
         if self.cfg.rotate_upright is not None:
