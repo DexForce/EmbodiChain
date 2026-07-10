@@ -402,6 +402,35 @@ class BaseRobotTest:
             atol=1e-5,
         ), "FAIL: solver upper_qpos_limits did not update with robot qpos limits"
 
+    def test_configured_qpos_limits_sync_to_solver_after_initialization(self):
+        """Test configured robot limits sync to the solver after it is created."""
+        configured_limits = [-0.05, 0.05]
+        cfg = DexforceW1Cfg.from_dict(
+            {
+                "uid": "dexforce_w1_solver_limit_sync",
+                "version": "v021",
+                "arm_kind": "anthropomorphic",
+                "qpos_limits": {"LEFT_J[1-7]": configured_limits},
+            }
+        )
+        robot: Robot = self.sim.add_robot(cfg=cfg)
+
+        solver = robot.get_solver("left_arm")
+        assert solver is not None, "FAIL: expected left_arm solver to be initialized"
+
+        solver_limits = solver.get_qpos_limits()
+        expected_limits = robot.get_qpos_limits(name="left_arm")[0]
+        assert torch.allclose(
+            torch.tensor(solver_limits["lower_qpos_limits"], device=self.sim.device),
+            expected_limits[:, 0],
+            atol=1e-5,
+        ), "FAIL: solver lower_qpos_limits did not sync configured robot limits"
+        assert torch.allclose(
+            torch.tensor(solver_limits["upper_qpos_limits"], device=self.sim.device),
+            expected_limits[:, 1],
+            atol=1e-5,
+        ), "FAIL: solver upper_qpos_limits did not sync configured robot limits"
+
     def test_robot_cfg_merge(self):
         from copy import deepcopy
         from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
