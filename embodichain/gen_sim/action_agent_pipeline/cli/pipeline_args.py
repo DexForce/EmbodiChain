@@ -34,7 +34,6 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_IMAGE2SCENE_ROOT,
     DEFAULT_JOB_TIMEOUT_S,
     DEFAULT_PIPELINE_HISTORY,
-    DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_LLM_CONFIG,
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
@@ -236,17 +235,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "World-frame Z rotation applied when converting prompt2scene "
             "exports into action-agent configs. Defaults to -90."
-        ),
-    )
-    parser.add_argument(
-        "--prompt2scene-mesh-x-rotation-degrees",
-        "--prompt2scene_mesh_x_rotation_degrees",
-        dest="prompt2scene_mesh_x_rotation_degrees",
-        type=float,
-        default=DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
-        help=(
-            "Local X-axis rotation baked into prompt2scene GLB meshes during "
-            "action-agent OBJ normalization. Defaults to 90."
         ),
     )
     parser.add_argument(
@@ -458,25 +446,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--prewarm-coacd-cache",
-        "--prewarm_coacd_cache",
-        dest="prewarm_coacd_cache",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Precompute environment CoACD cache files during config generation. "
-            "Defaults to true."
-        ),
-    )
-    parser.add_argument(
+        "--acd-method",
+        "--acd_method",
         "--convex-decomposition-method",
         "--convex_decomposition_method",
-        choices=("vhacd", "visacd", "coacd"),
+        dest="acd_method",
+        choices=("vhacd",),
         default="vhacd",
-        help=(
-            "Convex decomposition backend written to generated mesh objects. "
-            "'visacd' is accepted as an alias for 'vhacd'. Defaults to vhacd."
-        ),
+        help="ACD backend written as acd_method. Only vhacd is supported.",
     )
     parser.add_argument(
         "--poll-interval",

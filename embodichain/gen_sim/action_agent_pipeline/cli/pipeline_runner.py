@@ -54,13 +54,11 @@ from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
 __all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
 
 PIPELINE_RUNNER_REQUIRED_ARGS = (
+    "acd_method",
     "config_output_dir",
-    "convex_decomposition_method",
     "headless",
     "inside_container_slot_distance_scale",
     "overwrite_config",
-    "prewarm_coacd_cache",
-    "prompt2scene_mesh_x_rotation_degrees",
     "prompt2scene_scene_z_rotation_degrees",
     "regenerate",
     "reuse_target_replacements",
@@ -152,13 +150,9 @@ def _run_pipeline(
             target_body_scale=effective_target_body_scale,
             source_scene_body_scale_mode=source_scene_body_scale_mode,
             preserve_source_scene_geometry=uses_prompt2scene_alignment,
+            load_source_meshes_directly=uses_prompt2scene_alignment,
             source_scene_z_rotation_degrees=(
                 args.prompt2scene_scene_z_rotation_degrees
-                if uses_prompt2scene_alignment
-                else 0.0
-            ),
-            source_mesh_x_rotation_degrees=(
-                args.prompt2scene_mesh_x_rotation_degrees
                 if uses_prompt2scene_alignment
                 else 0.0
             ),
@@ -173,8 +167,7 @@ def _run_pipeline(
             target_replacements=target_replacements,
             sync_replacement_names=args.sync_replacement_names,
             reuse_target_replacements=args.reuse_target_replacements,
-            convex_decomposition_method=args.convex_decomposition_method,
-            prewarm_coacd_cache=args.prewarm_coacd_cache,
+            acd_method=args.acd_method,
             overwrite=args.overwrite_config,
         )
     with timing_scope("pipeline.write_manifests"):

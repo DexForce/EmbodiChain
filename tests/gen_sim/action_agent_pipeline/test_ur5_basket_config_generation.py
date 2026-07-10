@@ -60,7 +60,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _RelativePlacementStepSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _GLTF_TO_SIM_FRAME_KEY,
     _TABLETOP_OBJECT_CLEARANCE,
+    _euler_xyz_degrees_matrix,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_world_xy_bounds,
     _mesh_config_world_xy_center,
@@ -109,6 +111,12 @@ _DUAL_FRANKA_HOME_QPOS = [
     0.04,
     0.04,
     0.04,
+]
+
+# Multi-axis poses exported by Prompt2Scene for the two Task2 bottles.
+_TASK2_BOTTLE_ROTATIONS = [
+    [-90.90896677042683, 73.57655092846173, 167.87141992536286],
+    [-90.6602035843214, -30.21726446876021, -62.3895184993064],
 ]
 
 
@@ -322,7 +330,7 @@ def test_action_agent_config_generator_uses_parallel_handoff(
         assert obj["shape"]["acd_method"] == "vhacd"
         assert "convex_decomposition_method" not in obj
     assert paths.summary["acd_method"] == "vhacd"
-    assert paths.summary["coacd_cache"][0]["status"] == "skipped"
+    assert "coacd_cache" not in paths.summary
     _assert_body_scaled_obj_path(rigid_objects["left_apple"]["shape"]["fpath"])
     _assert_body_scaled_obj_path(rigid_objects["right_apple"]["shape"]["fpath"])
     _assert_normalized_obj_path(background_objects["table"]["shape"]["fpath"])
@@ -1019,7 +1027,6 @@ def test_task_description_generates_relative_left_of_config(
         task_name="AppleLeftOfBasket",
         task_description="把 apple_2 放到 basket_3 左边",
         target_body_scale=0.5,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1114,7 +1121,6 @@ def test_task_description_generates_relative_front_of_config(
         tmp_path / "generated_front_relative_agent",
         task_name="AppleFrontOfApple",
         task_description="用右臂把 apple_1 放到 apple_2 前边",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1190,7 +1196,6 @@ def test_task_description_generates_coordinated_pickment_config(
         tmp_path / "generated_coordinated_pickment_agent",
         task_name="MoveAppleForwardWithBothArms",
         task_description="用双臂将 apple_1 往前移动",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1268,7 +1273,6 @@ def test_coordinated_pickment_side_relation_preserves_object_height(
         tmp_path / "generated_coordinated_pickment_right_agent",
         task_name="MoveAppleRightWithBothArms",
         task_description="用双臂将 apple_1 往右移动",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1346,7 +1350,6 @@ def test_task_description_generates_self_relative_front_left_config(
         tmp_path / "generated_self_relative_agent",
         task_description="用左臂把薯片袋子往左前移动",
         target_body_scale=0.5,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1413,7 +1416,6 @@ def test_task_description_generates_relative_front_right_config(
         project_dir,
         tmp_path / "generated_front_right_relative_agent",
         task_description="用右臂把 apple_1 放到 basket_3 右前",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1639,7 +1641,6 @@ def test_demo3_relative_placement_uses_role_aware_scene_partition(
         tmp_path / "generated_demo3_relative_agent",
         task_description="用右臂把咖啡杯子放到垫子上",
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1683,6 +1684,9 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     gym_config["rigid_object"][0]["body_scale"] = [0.11, 0.12, 0.13]
     gym_config["rigid_object"][1]["body_scale"] = [0.21, 0.22, 0.23]
     gym_config["rigid_object"][2]["body_scale"] = [0.31, 0.32, 0.33]
+    for obj in [*gym_config["background"], *gym_config["rigid_object"]]:
+        obj["convex_decomposition_method"] = "vhacd"
+        obj["shape"]["convex_decomposition_method"] = "vhacd"
     source_cup_pos = list(gym_config["rigid_object"][0]["init_pos"])
     source_pad_pos = list(gym_config["rigid_object"][1]["init_pos"])
     source_cup_rot = list(gym_config["rigid_object"][0]["init_rot"])
@@ -1713,9 +1717,8 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         target_body_scale=0.8,
         source_scene_body_scale_mode="preserve",
         preserve_source_scene_geometry=True,
+        load_source_meshes_directly=True,
         source_scene_z_rotation_degrees=-90.0,
-        source_mesh_x_rotation_degrees=90.0,
-        prewarm_coacd_cache=False,
     )
 
     generated = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -1723,19 +1726,14 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     background_objects = {obj["uid"]: obj for obj in generated["background"]}
 
     assert set(background_objects) == {"table"}
-    assert rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert rigid_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert rigid_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".obj"
-    assert Path(rigid_objects["pad"]["shape"]["fpath"]).suffix == ".obj"
-    assert "mesh_assets/body_scaled" in rigid_objects["cup"]["shape"]["fpath"]
-    assert "mesh_assets/body_scaled" in rigid_objects["pad"]["shape"]["fpath"]
-    body_scaled_meshes = _body_scaled_meshes_by_uid(paths.summary)
-    assert body_scaled_meshes["cup"]["body_scale"] == [0.11, 0.12, 0.13]
-    assert body_scaled_meshes["table"]["body_scale"] == [1.31, 1.32, 1.0]
-    assert body_scaled_meshes["pad"]["body_scale"] == [0.21, 0.22, 0.23]
-    assert body_scaled_meshes["fork"]["body_scale"] == [0.31, 0.32, 0.33]
+    assert rigid_objects["cup"]["body_scale"] == [0.11, 0.12, 0.13]
+    assert rigid_objects["pad"]["body_scale"] == [0.21, 0.22, 0.23]
+    assert rigid_objects["fork"]["body_scale"] == [0.31, 0.32, 0.33]
+    assert background_objects["table"]["body_scale"] == [1.31, 1.32, 1.0]
+    assert Path(rigid_objects["cup"]["shape"]["fpath"]).suffix == ".glb"
+    assert Path(rigid_objects["pad"]["shape"]["fpath"]).suffix == ".glb"
+    assert "mesh_assets/normalized" not in rigid_objects["cup"]["shape"]["fpath"]
+    assert "mesh_assets/body_scaled" not in rigid_objects["cup"]["shape"]["fpath"]
     assert rigid_objects["cup"]["init_pos"][2] == source_cup_z
     assert rigid_objects["pad"]["init_pos"][2] == source_pad_z
     assert rigid_objects["cup"]["init_pos"] == pytest.approx(
@@ -1744,25 +1742,30 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
     assert rigid_objects["pad"]["init_pos"] == pytest.approx(
         [source_pad_pos[1], -source_pad_pos[0], source_pad_pos[2]]
     )
-    assert rigid_objects["cup"]["init_rot"] == pytest.approx(
-        [source_cup_rot[0], source_cup_rot[1], source_cup_rot[2] - 90.0]
+    _assert_world_z_rotated_intrinsic_xyz(
+        source_cup_rot,
+        rigid_objects["cup"]["init_rot"],
+        -90.0,
     )
-    assert rigid_objects["pad"]["init_rot"] == pytest.approx(
-        [source_pad_rot[0], source_pad_rot[1], source_pad_rot[2] - 90.0]
+    _assert_world_z_rotated_intrinsic_xyz(
+        source_pad_rot,
+        rigid_objects["pad"]["init_rot"],
+        -90.0,
     )
     assert paths.summary["mode"] == "object_manipulation"
-    assert "normalized_meshes" in paths.summary
-    for entry in paths.summary["normalized_meshes"]:
-        assert _flatten_matrix(entry["transform"]) == pytest.approx(
-            _flatten_matrix(
-                [
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, -1.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            )
-        )
+    assert paths.summary["mesh_loading_mode"] == "direct_source"
+    assert "normalized_meshes" not in paths.summary
+    assert "body_scaled_meshes" not in paths.summary
+    for obj in [*background_objects.values(), *rigid_objects.values()]:
+        assert "_gltf_to_sim_frame" not in obj["shape"]
+        if obj["max_convex_hull_num"] > 1:
+            assert obj["acd_method"] == "vhacd"
+            assert obj["shape"]["acd_method"] == "vhacd"
+        else:
+            assert "acd_method" not in obj
+            assert "acd_method" not in obj["shape"]
+        assert "convex_decomposition_method" not in obj
+        assert "convex_decomposition_method" not in obj["shape"]
 
     scaled_paths = generate_action_agent_config_from_project(
         gym_config_path,
@@ -1771,44 +1774,27 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         target_body_scale=0.8,
         source_scene_body_scale_mode="multiply",
         preserve_source_scene_geometry=True,
+        load_source_meshes_directly=True,
         source_scene_z_rotation_degrees=-90.0,
-        source_mesh_x_rotation_degrees=90.0,
-        prewarm_coacd_cache=False,
     )
     scaled_generated = json.loads(scaled_paths.gym_config.read_text(encoding="utf-8"))
     scaled_rigid_objects = {obj["uid"]: obj for obj in scaled_generated["rigid_object"]}
     scaled_background_objects = {
         obj["uid"]: obj for obj in scaled_generated["background"]
     }
-    assert scaled_rigid_objects["cup"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert scaled_rigid_objects["pad"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert scaled_rigid_objects["fork"]["body_scale"] == [1.0, 1.0, 1.0]
-    assert scaled_background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
-    scaled_body_meshes = _body_scaled_meshes_by_uid(scaled_paths.summary)
-    assert scaled_body_meshes["cup"]["body_scale"] == pytest.approx(
+    assert scaled_rigid_objects["cup"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.11, 0.12, 0.13]]
     )
-    assert scaled_body_meshes["table"]["body_scale"] == pytest.approx(
+    assert scaled_background_objects["table"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [1.31, 1.32, 1.0]]
     )
-    assert scaled_body_meshes["pad"]["body_scale"] == pytest.approx(
+    assert scaled_rigid_objects["pad"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.21, 0.22, 0.23]]
     )
-    assert scaled_body_meshes["fork"]["body_scale"] == pytest.approx(
+    assert scaled_rigid_objects["fork"]["body_scale"] == pytest.approx(
         [value * 0.8 for value in [0.31, 0.32, 0.33]]
     )
-    assert _mesh_config_world_z_bounds(scaled_rigid_objects["cup"])[0] == pytest.approx(
-        _mesh_config_world_z_bounds(rigid_objects["cup"])[0]
-    )
-    assert _mesh_config_world_z_bounds(scaled_rigid_objects["pad"])[0] == pytest.approx(
-        _mesh_config_world_z_bounds(rigid_objects["pad"])[0]
-    )
-    assert _mesh_config_world_z_bounds(scaled_rigid_objects["fork"])[
-        0
-    ] == pytest.approx(_mesh_config_world_z_bounds(rigid_objects["fork"])[0])
-    assert _mesh_config_world_z_bounds(scaled_background_objects["table"])[
-        1
-    ] == pytest.approx(_mesh_config_world_z_bounds(background_objects["table"])[1])
+    assert scaled_paths.summary["mesh_loading_mode"] == "direct_source"
 
     absolute_paths = generate_action_agent_config_from_project(
         gym_config_path,
@@ -1817,9 +1803,8 @@ def test_prompt2scene_relative_placement_preserves_metric_source_scale(
         target_body_scale=1.0,
         source_scene_body_scale_mode="absolute",
         preserve_source_scene_geometry=True,
+        load_source_meshes_directly=True,
         source_scene_z_rotation_degrees=-90.0,
-        source_mesh_x_rotation_degrees=90.0,
-        prewarm_coacd_cache=False,
     )
     absolute_generated = json.loads(
         absolute_paths.gym_config.read_text(encoding="utf-8")
@@ -1859,13 +1844,86 @@ def test_apply_scene_z_rotation_rotates_scene_object_poses() -> None:
     action_agent_config_generation._apply_scene_z_rotation(gym_config, 90.0)
 
     assert gym_config["background"][0]["init_pos"] == pytest.approx([0.3, 0.2, 0.4])
-    expected_table_rot = (
-        Rotation.from_euler("z", 90.0, degrees=True)
-        * Rotation.from_euler("xyz", [10.0, 20.0, 30.0], degrees=True)
-    ).as_euler("xyz", degrees=True)
-    assert gym_config["background"][0]["init_rot"] == pytest.approx(expected_table_rot)
+    expected_table_rot = Rotation.from_euler("Z", 90.0, degrees=True) * (
+        Rotation.from_euler("XYZ", [10.0, 20.0, 30.0], degrees=True)
+    )
+    actual_table_rot = Rotation.from_euler(
+        "XYZ",
+        gym_config["background"][0]["init_rot"],
+        degrees=True,
+    )
+    assert actual_table_rot.as_matrix() == pytest.approx(expected_table_rot.as_matrix())
     assert gym_config["rigid_object"][0]["init_pos"] == pytest.approx([-0.5, -0.1, 0.7])
     assert gym_config["rigid_object"][0]["init_rot"] == pytest.approx([0.0, 0.0, 45.0])
+
+
+@pytest.mark.parametrize(
+    "source_rotation",
+    [*_TASK2_BOTTLE_ROTATIONS, [90.0, 89.999, -47.0], [90.0, 90.0, -47.0]],
+    ids=("plastic_bottle", "water_bottle", "near_gimbal_lock", "gimbal_lock"),
+)
+def test_scene_z_rotation_preserves_intrinsic_xyz_runtime_contract(
+    source_rotation: list[float],
+) -> None:
+    gym_config = {
+        "rigid_object": [
+            {
+                "uid": "pose_sensitive_object",
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": list(source_rotation),
+            }
+        ]
+    }
+
+    action_agent_config_generation._apply_scene_z_rotation(gym_config, -90.0)
+
+    generated_rotation = gym_config["rigid_object"][0]["init_rot"]
+    _assert_world_z_rotated_intrinsic_xyz(
+        source_rotation,
+        generated_rotation,
+        -90.0,
+    )
+
+
+def test_mesh_bounds_rotation_matches_intrinsic_xyz_runtime_contract() -> None:
+    from scipy.spatial.transform import Rotation
+
+    rotation = [31.0, -47.0, 123.0]
+    translation = [0.2, -0.3, 0.4]
+
+    matrix = _euler_xyz_degrees_matrix(rotation, translation)
+    expected_rotation = Rotation.from_euler(
+        "XYZ",
+        rotation,
+        degrees=True,
+    ).as_matrix()
+
+    assert [row[:3] for row in matrix[:3]] == pytest.approx(expected_rotation)
+    assert [matrix[index][3] for index in range(3)] == pytest.approx(translation)
+
+
+def test_direct_gltf_bounds_match_dexsim_simulation_frame(tmp_path: Path) -> None:
+    mesh_path = tmp_path / "asymmetric.glb"
+    _write_minimal_glb(
+        mesh_path,
+        [
+            (0.0, 2.0, -10.0),
+            (1.0, 3.0, 5.0),
+            (-1.0, 2.5, 1.0),
+        ],
+    )
+    config = {
+        "shape": {
+            "shape_type": "Mesh",
+            "fpath": mesh_path.as_posix(),
+            _GLTF_TO_SIM_FRAME_KEY: True,
+        },
+        "init_pos": [0.0, 0.0, 1.0],
+        "init_rot": [0.0, 0.0, 0.0],
+        "body_scale": [1.0, 1.0, 2.0],
+    }
+
+    assert _mesh_config_world_z_bounds(config) == pytest.approx((5.0, 7.0))
 
 
 def test_relative_orientation_intent_generates_axis_align_move_held_object(
@@ -1939,7 +1997,6 @@ def test_relative_orientation_intent_generates_axis_align_move_held_object(
         task_name="Demo3_Text",
         task_description="使用合适的机械臂将订书机水平摆正到彩色垫子上。",
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
@@ -2018,7 +2075,6 @@ def test_relative_orientation_upright_does_not_emit_align_to(
         project_dir,
         tmp_path / "generated_upright_relative_agent",
         task_description="把 apple_2 扶正后放到 basket_3 左边",
-        prewarm_coacd_cache=False,
     )
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
@@ -2108,7 +2164,6 @@ def test_relative_cube_preserves_orientation_when_llm_preserves_orientation(
         task_name="Demo21",
         task_description="将一个方块移动到另一个方块右边",
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
@@ -2216,7 +2271,6 @@ def test_relative_on_table_release_offset_uses_tabletop_surface(
         task_description="用左臂把瓶子扶正放到桌面上",
         target_body_scale=target_body_scale,
         surface_release_clearance=surface_release_clearance,
-        prewarm_coacd_cache=False,
     )
 
     summary = _stable_summary(paths.summary)
@@ -2326,7 +2380,6 @@ def test_dual_upright_in_place_supports_cup_like_objects(
         task_name="Demo44",
         task_description="左臂扶正纸杯放回桌面，右臂扶正罐头放回桌面",
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     assert paths.summary["mode"] == "dual_arm_object_manipulation"
@@ -2490,7 +2543,6 @@ def test_relative_on_preserve_uses_object_pose_release(
         task_name="Demo02",
         task_description="桌上有一把锤子和一个方块，用机械臂抓住锤子放到方块上",
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
@@ -2561,7 +2613,6 @@ def test_relative_orientation_rejects_invalid_enum(
             project_dir,
             tmp_path / "generated_invalid_orientation_agent",
             task_description="把 apple_2 斜着放到 basket_3 左边",
-            prewarm_coacd_cache=False,
         )
 
 
@@ -2594,7 +2645,6 @@ def test_relative_orientation_rejects_invalid_reference_axis_pairing(
             project_dir,
             tmp_path / "generated_invalid_axis_pairing_agent",
             task_description="把 apple_2 水平摆正到 basket_3 左边",
-            prewarm_coacd_cache=False,
         )
 
 
@@ -2627,7 +2677,6 @@ def test_relative_orientation_rejects_legacy_horizontal_goal(
             project_dir,
             tmp_path / "generated_legacy_horizontal_agent",
             task_description="把 apple_2 水平摆正到 basket_3 左边",
-            prewarm_coacd_cache=False,
         )
 
 
@@ -2698,7 +2747,6 @@ def test_task_description_allows_single_rigid_with_background_reference(
         tmp_path / "generated_single_rigid_agent",
         task_description="用左臂抓薯片袋子放到垫子上",
         target_body_scale=0.5,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -2772,7 +2820,6 @@ def test_task_description_generates_dual_arm_relative_config(
             "左臂把 apple_2 放到 basket_3 左边，右臂把 apple_1 放到 basket_3 右边"
         ),
         target_body_scale=0.7,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -2983,7 +3030,6 @@ def test_task_description_generates_dual_hold_hover_config(
             "用一只机械臂拿起一个瓶子悬空，并用另一只机械臂拿起另一个瓶子也悬空。"
         ),
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3400,7 +3446,6 @@ def test_task_router_routes_chinese_row_task_to_arrangement_config(
         tmp_path / "generated_arrangement_agent",
         task_name="BlocksRow",
         task_description="将三个方块摆成一排",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3459,7 +3504,6 @@ def test_task_description_generates_size_order_arrangement_config(
         tmp_path / "generated_arrangement_agent",
         task_name="BlocksRankingSize",
         task_description="桌上有三个颜色随机的方块，将它们移动到桌子中央，并按从左到右由大到小排列。",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3601,7 +3645,6 @@ def test_arrangement_collision_aware_layout_scales_to_six_objects(
         project_dir,
         tmp_path / "generated_six_arrangement_agent",
         task_description="把六个方块从左到右排成一行",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3660,7 +3703,6 @@ def test_arrangement_layout_fails_when_row_cannot_fit(
             project_dir,
             tmp_path / "generated_crowded_arrangement_agent",
             task_description="把六个大方块从左到右排成一行",
-            prewarm_coacd_cache=False,
         )
 
 
@@ -3691,7 +3733,6 @@ def test_arrangement_uses_table_mesh_bounds_center_when_table_origin_is_offset(
         project_dir,
         tmp_path / "generated_offset_table_arrangement_agent",
         task_description="把三个方块摆成一排",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3735,7 +3776,6 @@ def test_arrangement_recomputes_targets_after_scene_rotation_and_scale(
         source_scene_body_scale_mode="multiply",
         preserve_source_scene_geometry=True,
         source_scene_z_rotation_degrees=-90.0,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3814,7 +3854,6 @@ def test_task_description_generates_three_block_stacking_config(
         task_description=(
             "桌上有红、绿、蓝三个方块，将它们移动到桌子中央，并把蓝色方块叠到绿色方块上、绿色方块叠到红色方块上。"
         ),
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -3890,7 +3929,6 @@ def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
         project_dir,
         tmp_path / "generated_offset_table_stacking_agent",
         task_description="把三个方块叠放到桌面中央",
-        prewarm_coacd_cache=False,
     )
 
     summary = paths.summary
@@ -3947,7 +3985,6 @@ def test_stacking_recomputes_anchor_after_scene_rotation_and_scale(
         source_scene_body_scale_mode="multiply",
         preserve_source_scene_geometry=True,
         source_scene_z_rotation_degrees=-90.0,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -4008,7 +4045,6 @@ def test_task_description_generates_two_block_stacking_config(
         tmp_path / "generated_two_block_stacking_agent",
         task_name="Demo45",
         task_description="桌上有红、绿两个方块，将它们移动到桌子中央，并把绿色方块叠到红色方块上。",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -4055,7 +4091,6 @@ def test_task_description_generates_nested_bowl_stacking_by_size(
         tmp_path / "generated_three_bowl_stacking_agent",
         task_name="Demo46",
         task_description="将三个碗相互叠放。",
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -4136,7 +4171,6 @@ def test_dual_inside_same_container_uses_container_long_axis_slots(
         project_dir,
         tmp_path / "generated_dual_inside_agent",
         task_description="双臂把两个 apple 放进 basket_3",
-        prewarm_coacd_cache=False,
     )
 
     assert _stable_summary(paths.summary) == {
@@ -4237,7 +4271,6 @@ def test_dual_inside_y_axis_slots_keep_each_arm_on_its_container_side(
         tmp_path / "generated_y_axis_dual_inside_agent",
         task_description="左臂把左边苹果放进篮子，右臂把右边苹果放进篮子",
         inside_container_slot_distance_scale=0.5,
-        prewarm_coacd_cache=False,
     )
 
     assert _stable_summary(paths.summary) == {
@@ -4365,7 +4398,6 @@ def test_task_description_dual_auto_assigns_complementary_arms(
         project_dir,
         tmp_path / "generated_dual_auto_relative_agent",
         task_description="双臂分别移动两个苹果",
-        prewarm_coacd_cache=False,
     )
 
     active_arms = [
@@ -4413,7 +4445,6 @@ def test_task_description_dual_auto_reassigns_after_scene_rotation(
         tmp_path / "generated_dual_auto_rotated_relative_agent",
         task_description="双臂分别移动两个苹果",
         source_scene_z_rotation_degrees=-90.0,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -4526,7 +4557,6 @@ def test_single_moved_object_on_support_is_not_generated_as_stacking(
         tmp_path / "generated_single_object_on_support_agent",
         task_description="用左臂把 apple_2 放到 apple_1 上方",
         target_body_scale=0.6,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -4623,7 +4653,6 @@ def test_tabletop_z_placement_uses_normalized_mesh_bounds(
         project_dir,
         tmp_path / "generated_z_agent",
         target_body_scale=0.8,
-        prewarm_coacd_cache=False,
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
@@ -5485,6 +5514,7 @@ def _stable_summary(summary: dict) -> dict:
             "coacd_cache",
             "acd_method",
             "convex_decomposition_method",
+            "mesh_loading_mode",
             "task_route",
         }
     }
@@ -5597,6 +5627,20 @@ def _obj_header_json_value(obj_text: str, key: str):
         if line.startswith(prefix):
             return json.loads(line[len(prefix) :])
     raise AssertionError(f"Missing OBJ header key: {key}")
+
+
+def _assert_world_z_rotated_intrinsic_xyz(
+    source_rotation: list[float],
+    generated_rotation: list[float],
+    world_z_degrees: float,
+) -> None:
+    from scipy.spatial.transform import Rotation
+
+    expected = Rotation.from_euler("Z", world_z_degrees, degrees=True) * (
+        Rotation.from_euler("XYZ", source_rotation, degrees=True)
+    )
+    actual = Rotation.from_euler("XYZ", generated_rotation, degrees=True)
+    assert actual.as_matrix() == pytest.approx(expected.as_matrix(), abs=1e-9)
 
 
 def _flatten_matrix(matrix: list[list[float]]) -> list[float]:

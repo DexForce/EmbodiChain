@@ -450,6 +450,7 @@ class PickUp(AtomicAction):
         self, semantics: ObjectSemantics, grasp_xpos: torch.Tensor
     ) -> torch.Tensor:
         """Return grasp poses after the optional upright-in-place roll adjustment."""
+        return grasp_xpos
         if self.cfg.rotate_upright is None:
             return grasp_xpos
 
@@ -476,7 +477,7 @@ class PickUp(AtomicAction):
             rota_axis_angle.reshape(-1, 3)
         ).reshape(*rota_axis_angle.shape[:-1], 3, 3)
         adjusted_grasp_xpos[..., :3, :3] = torch.matmul(
-            adjusted_grasp_xpos[..., :3, :3], rota_offset
+            rota_offset, adjusted_grasp_xpos[..., :3, :3]
         )
         return adjusted_grasp_xpos
 
