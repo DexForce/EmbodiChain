@@ -385,17 +385,13 @@ def _resolve_source_alignment(args: argparse.Namespace) -> dict[str, float | boo
     source_scene_z_rotation_degrees = args.source_scene_z_rotation_degrees
     if source_scene_z_rotation_degrees is None:
         source_scene_z_rotation_degrees = (
-            DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES
-            if is_prompt2scene
-            else 0.0
+            DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES if is_prompt2scene else 0.0
         )
 
     source_mesh_x_rotation_degrees = args.source_mesh_x_rotation_degrees
     if source_mesh_x_rotation_degrees is None:
         source_mesh_x_rotation_degrees = (
-            DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES
-            if is_prompt2scene
-            else 0.0
+            DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES if is_prompt2scene else 0.0
         )
 
     return {
