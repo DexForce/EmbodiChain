@@ -211,7 +211,7 @@ def _dual_franka_profile() -> RobotProfile:
                 "eef": "left_eef",
             },
         },
-        gripper_open_state=(0.04, 0.04),
+        gripper_open_state=(0.06, 0.06),
         gripper_close_state=(0.0, 0.0),
         arm_aim_yaw_offset={
             "left": _PI,
