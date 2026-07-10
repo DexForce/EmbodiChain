@@ -33,7 +33,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
 )
-from embodichain.utils.logger import log_error, log_info, log_warning
+from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.utility import load_config
 
 __all__ = ["cli"]
@@ -104,6 +104,10 @@ def cli() -> None:
 def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
     """Add default reset randomization for parallel action-agent environments.
 
+    Dataset functors are removed because dataset recorders are not supported for
+    vectorized action-agent execution. Plain dataset configuration is retained
+    for consumers that use it as metadata.
+
     A pose randomizer is added for every configured rigid object. The table-height
     randomizer runs after those pose randomizers so all randomized objects are
     shifted together with the table.
@@ -115,7 +119,18 @@ def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
     if gym_config.get("num_envs", 1) <= 1:
         return
 
-    events = gym_config.setdefault("env", {}).setdefault("events", {})
+    env_config = gym_config.setdefault("env", {})
+    dataset_config = env_config.get("dataset")
+    if isinstance(dataset_config, dict):
+        dataset_functor_names = [
+            dataset_name
+            for dataset_name, dataset_params in dataset_config.items()
+            if isinstance(dataset_params, dict) and "func" in dataset_params
+        ]
+        for dataset_name in dataset_functor_names:
+            del dataset_config[dataset_name]
+
+    events = env_config.setdefault("events", {})
     for rigid_object in gym_config.get("rigid_object", []):
         uid = rigid_object.get("uid")
         if not isinstance(uid, str) or not uid:
