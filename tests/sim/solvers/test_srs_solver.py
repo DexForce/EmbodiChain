@@ -116,6 +116,75 @@ class BaseSolverTest:
             fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3
         ), f"FK and IK results do not match for {solver_key}"
 
+    def test_update_with_robot_limit_intersects_existing_solver_limits(self):
+        """Test robot limit sync only tightens solver limits and never widens them."""
+        solver_key = next(iter(self.solver))
+        solver = self.solver[solver_key]
+        solver_limits = solver.get_qpos_limits()
+
+        configured_lower = torch.tensor(
+            solver_limits["lower_qpos_limits"],
+            dtype=torch.float32,
+            device=solver.device,
+        )
+        configured_upper = torch.tensor(
+            solver_limits["upper_qpos_limits"],
+            dtype=torch.float32,
+            device=solver.device,
+        )
+
+        looser_robot_limits = torch.stack(
+            (configured_lower - 0.1, configured_upper + 0.1), dim=-1
+        )
+        solver.update_with_robot_limit(looser_robot_limits)
+        looser_sync_limits = solver.get_qpos_limits()
+        assert torch.allclose(
+            torch.tensor(
+                looser_sync_limits["lower_qpos_limits"],
+                dtype=torch.float32,
+                device=solver.device,
+            ),
+            configured_lower,
+            atol=1e-5,
+        ), "FAIL: robot sync widened solver lower_qpos_limits"
+        assert torch.allclose(
+            torch.tensor(
+                looser_sync_limits["upper_qpos_limits"],
+                dtype=torch.float32,
+                device=solver.device,
+            ),
+            configured_upper,
+            atol=1e-5,
+        ), "FAIL: robot sync widened solver upper_qpos_limits"
+
+        margin = torch.minimum(
+            torch.full_like(configured_lower, 0.05),
+            0.25 * (configured_upper - configured_lower),
+        )
+        tighter_robot_limits = torch.stack(
+            (configured_lower + margin, configured_upper - margin), dim=-1
+        )
+        solver.update_with_robot_limit(tighter_robot_limits)
+        tighter_sync_limits = solver.get_qpos_limits()
+        assert torch.allclose(
+            torch.tensor(
+                tighter_sync_limits["lower_qpos_limits"],
+                dtype=torch.float32,
+                device=solver.device,
+            ),
+            tighter_robot_limits[:, 0],
+            atol=1e-5,
+        ), "FAIL: robot sync did not tighten solver lower_qpos_limits"
+        assert torch.allclose(
+            torch.tensor(
+                tighter_sync_limits["upper_qpos_limits"],
+                dtype=torch.float32,
+                device=solver.device,
+            ),
+            tighter_robot_limits[:, 1],
+            atol=1e-5,
+        ), "FAIL: robot sync did not tighten solver upper_qpos_limits"
+
     @classmethod
     def teardown_class(cls):
         if cls.solver is not None:
