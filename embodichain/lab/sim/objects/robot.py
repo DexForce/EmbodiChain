@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import List, Dict, Tuple, Union, Sequence
+from typing import List, Dict, Tuple, Sequence
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
@@ -130,7 +130,7 @@ class Robot(Articulation):
             else [i for i in self._joint_ids[name] if i not in self.mimic_ids]
         )
 
-    def get_link_names(self, name: str | None = None) -> Union[List[str], None]:
+    def get_link_names(self, name: str | None = None) -> List[str] | None:
         """Get the link names of the robot for a specific control part.
 
         If no control part is specified, return all link names.
@@ -272,6 +272,7 @@ class Robot(Articulation):
             joint_ids=resolved_joint_ids,
             env_ids=env_ids,
         )
+        self._sync_solver_limits(name=name)
 
     def set_qvel_limits(
         self,
@@ -317,92 +318,6 @@ class Robot(Articulation):
         resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
         super().set_qf_limits(
             qf_limits=qf_limits,
-            joint_ids=resolved_joint_ids,
-            env_ids=env_ids,
-        )
-
-    def set_user_qpos_limits(
-        self,
-        qpos_limits: (
-            torch.Tensor | np.ndarray | Sequence[float] | Dict[str, List[float]]
-        ),
-        name: str | None = None,
-        env_ids: Sequence[int] | torch.Tensor | None = None,
-        *,
-        joint_ids: Sequence[int] | torch.Tensor | None = None,
-    ) -> None:
-        """Set user-defined joint position limits for the robot.
-
-        The user limits are intersected with the asset limits, so they can only
-        further restrict the allowed range.
-
-        Args:
-            qpos_limits: Joint position limits. Accepted forms:
-                - Tensor/array of shape (num_envs, num_joints, 2) or
-                  (num_joints, 2) for a single environment.
-                - Dictionary mapping joint names or regex patterns to
-                  ``[min, max]`` limits.
-            name (str | None): The name of the control part to set the user qpos
-                limits for.
-            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to
-                update.
-            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to
-                update. Must be passed as a keyword argument; ignored when
-                ``name`` is provided.
-        """
-        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
-        super().set_user_qpos_limits(
-            qpos_limits=qpos_limits,
-            joint_ids=resolved_joint_ids,
-            env_ids=env_ids,
-        )
-
-    def get_user_qpos_limits(
-        self,
-        name: str | None = None,
-        env_ids: Sequence[int] | torch.Tensor | None = None,
-        *,
-        joint_ids: Sequence[int] | torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Get the user-defined joint position limits for the robot.
-
-        Args:
-            name (str | None): The name of the control part to get the user qpos
-                limits for.
-            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to
-                query.
-            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to
-                query. Must be passed as a keyword argument; ignored when
-                ``name`` is provided.
-
-        Returns:
-            torch.Tensor: User qpos limits with shape (num_envs, num_joints, 2).
-        """
-        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
-        return super().get_user_qpos_limits(
-            joint_ids=resolved_joint_ids,
-            env_ids=env_ids,
-        )
-
-    def reset_qpos_limits(
-        self,
-        name: str | None = None,
-        env_ids: Sequence[int] | torch.Tensor | None = None,
-        *,
-        joint_ids: Sequence[int] | torch.Tensor | None = None,
-    ) -> None:
-        """Reset joint position limits to the original asset limits.
-
-        Args:
-            name (str | None): The name of the control part to reset.
-            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to
-                reset.
-            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to
-                reset. Must be passed as a keyword argument; ignored when
-                ``name`` is provided.
-        """
-        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
-        super().reset_qpos_limits(
             joint_ids=resolved_joint_ids,
             env_ids=env_ids,
         )
@@ -1082,11 +997,31 @@ class Robot(Articulation):
             drive_type=drive_type,
         )
 
-    def init_solver(self, cfg: Union[SolverCfg, Dict[str, SolverCfg]]) -> None:
+    def _sync_solver_limits(self, name: str | None = None) -> None:
+        """Synchronize solver joint limits with the robot's effective qpos limits."""
+        if not self._solvers:
+            return
+
+        if not self.control_parts:
+            solver = self._solvers.get("default")
+            if solver is not None:
+                solver.update_with_robot_limit(self._data.qpos_limits[0])
+            return
+
+        part_names = [name] if name is not None else list(self.control_parts.keys())
+        for part_name in part_names:
+            solver = self._solvers.get(part_name)
+            if solver is None:
+                continue
+            joint_ids = self.get_joint_ids(name=part_name)
+            joint_limits = self._data.qpos_limits[0][joint_ids]
+            solver.update_with_robot_limit(joint_limits)
+
+    def init_solver(self, cfg: SolverCfg | Dict[str, SolverCfg]) -> None:
         """Initialize the kinematic solver for the robot.
 
         Args:
-            cfg (Union[SolverCfg, Dict[str, SolverCfg]]): The configuration for the kinematic solver.
+            cfg (SolverCfg | Dict[str, SolverCfg]): The configuration for the kinematic solver.
         """
         self.cfg: RobotCfg
 
@@ -1099,6 +1034,7 @@ class Robot(Articulation):
             if cfg.urdf_path is None:
                 cfg.urdf_path = self.cfg.fpath
             self._solvers["default"] = cfg.init_solver(device=self.device)
+            self._sync_solver_limits()
         elif isinstance(cfg, Dict):
             if isinstance(self.cfg.control_parts, Dict) is False:
                 logger.log_error(
@@ -1118,10 +1054,10 @@ class Robot(Articulation):
                         or solver_cfg.joint_names is None
                     ):
                         solver_cfg.joint_names = self.cfg.control_parts[part_name]
-                    self._solvers[name] = solver_cfg.init_solver(device=self.device)
-                    joint_ids = self.get_joint_ids(name=part_name)
-                    joint_limits = self._data.qpos_limits[0][joint_ids]
-                    self._solvers[name].update_with_robot_limit(joint_limits)
+                    self._solvers[part_name] = solver_cfg.init_solver(
+                        device=self.device
+                    )
+            self._sync_solver_limits()
 
     def get_solver(self, name: str | None = None) -> BaseSolver | None:
         """Get the kinematic solver for a specific control part.

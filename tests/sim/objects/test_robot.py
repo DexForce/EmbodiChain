@@ -368,82 +368,39 @@ class BaseRobotTest:
             atol=1e-5,
         )
 
-    def test_user_qpos_limits_with_control_part(self):
-        """Test user qpos limits on a Robot control part restrict set_qpos."""
+    def test_qpos_limits_update_solver_limits(self):
+        """Test qpos limit updates are propagated to the control-part solver."""
         arm_name = "left_arm"
-        arm_joint_ids = self.robot.get_joint_ids(arm_name)
-        # Reset to a clean baseline in case earlier tests mutated limits.
-        self.robot.reset_qpos_limits(name=arm_name)
-        asset_limits = self.robot.get_qpos_limits(name=arm_name)
+        solver = self.robot.get_solver(arm_name)
+        assert solver is not None, "FAIL: expected left_arm solver to be initialized"
 
-        # Tighten limits by 0.05 on each side.
-        user_limits = asset_limits.clone()
+        asset_limits = self.robot.get_qpos_limits(name=arm_name).clone()
+        updated_limits = asset_limits.clone()
         margin = 0.05
-        user_limits[..., 0] = torch.clamp(
-            user_limits[..., 0] + margin,
+        updated_limits[..., 0] = torch.clamp(
+            updated_limits[..., 0] + margin,
             asset_limits[..., 0],
             asset_limits[..., 1],
         )
-        user_limits[..., 1] = torch.clamp(
-            user_limits[..., 1] - margin,
+        updated_limits[..., 1] = torch.clamp(
+            updated_limits[..., 1] - margin,
             asset_limits[..., 0],
             asset_limits[..., 1],
         )
 
-        self.robot.set_user_qpos_limits(user_limits, name=arm_name)
+        self.robot.set_qpos_limits(updated_limits, name=arm_name)
 
-        effective_limits = self.robot.get_qpos_limits(name=arm_name)
+        solver_limits = solver.get_qpos_limits()
         assert torch.allclose(
-            effective_limits, user_limits, atol=1e-5
-        ), "FAIL: robot effective limits do not match user limits"
-
-        # set_qpos at the asset upper limit should clamp to user upper limit.
-        requested_qpos = asset_limits[..., 1].clone()
-        self.robot.set_qpos(requested_qpos, name=arm_name, target=False)
-        clamped_qpos = self.robot.get_qpos(name=arm_name)
+            torch.tensor(solver_limits["lower_qpos_limits"], device=self.sim.device),
+            updated_limits[0, :, 0],
+            atol=1e-5,
+        ), "FAIL: solver lower_qpos_limits did not update with robot qpos limits"
         assert torch.allclose(
-            clamped_qpos, user_limits[..., 1], atol=1e-5
-        ), f"FAIL: robot qpos did not clamp to user limits: {clamped_qpos.tolist()}"
-
-        # Reset should restore asset limits.
-        self.robot.reset_qpos_limits(name=arm_name)
-        restored_limits = self.robot.get_qpos_limits(name=arm_name)
-        assert torch.allclose(
-            restored_limits, asset_limits, atol=1e-5
-        ), "FAIL: robot reset_qpos_limits did not restore asset limits"
-
-    def test_user_qpos_limits_dict_form(self):
-        """Test user qpos limits can be set via a joint-name dictionary."""
-        arm_name = "left_arm"
-        asset_limits = self.robot.get_qpos_limits(name=arm_name)
-        # Restrict the first two joints of the arm.
-        joint_names = self.robot.get_joint_ids(name=arm_name, remove_mimic=False)
-        first_two_names = [
-            self.robot.joint_names[joint_names[0]],
-            self.robot.joint_names[joint_names[1]],
-        ]
-        user_dict = {name: [-0.1, 0.1] for name in first_two_names}
-
-        self.robot.set_user_qpos_limits(user_dict, name=arm_name)
-        effective_limits = self.robot.get_qpos_limits(name=arm_name)
-
-        # First two joints should be clamped to [-0.1, 0.1].
-        for i in range(2):
-            assert torch.allclose(
-                effective_limits[:, i, :],
-                torch.tensor([-0.1, 0.1], device=self.sim.device),
-                atol=1e-5,
-            ), f"FAIL: dict user limit not applied to joint {first_two_names[i]}"
-
-        # Remaining joints should keep asset limits.
-        remaining_asset = asset_limits[:, 2:, :]
-        remaining_effective = effective_limits[:, 2:, :]
-        assert torch.allclose(
-            remaining_effective, remaining_asset, atol=1e-5
-        ), "FAIL: non-targeted joints changed when setting dict user limits"
-
-        # Restore limits to avoid leaking state to later tests.
-        self.robot.reset_qpos_limits(name=arm_name)
+            torch.tensor(solver_limits["upper_qpos_limits"], device=self.sim.device),
+            updated_limits[0, :, 1],
+            atol=1e-5,
+        ), "FAIL: solver upper_qpos_limits did not update with robot qpos limits"
 
     def test_robot_cfg_merge(self):
         from copy import deepcopy

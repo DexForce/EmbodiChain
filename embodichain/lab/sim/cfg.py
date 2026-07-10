@@ -21,7 +21,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any, Optional
+from typing import Sequence, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -309,7 +309,7 @@ class RigidBodyAttributesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int]]
+        cls, init_dict: Dict[str, str | float | int]
     ) -> RigidBodyAttributesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -362,7 +362,7 @@ class RigidBodyAttributesOverrideCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int, bool]]
+        cls, init_dict: Dict[str, str | float | int | bool]
     ) -> RigidBodyAttributesOverrideCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -680,7 +680,7 @@ class JointDrivePropertiesCfg:
     If the drive type is "none", then no force will be applied to joint.
     """
 
-    stiffness: Union[Dict[str, float], float] = 1e4
+    stiffness: Dict[str, float] | float = 1e4
     """Stiffness of the joint drive.
 
     The unit depends on the joint model:
@@ -689,7 +689,7 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s^2/rad (N-m/rad).
     """
 
-    damping: Union[Dict[str, float], float] = 1e3
+    damping: Dict[str, float] | float = 1e3
     """Damping of the joint drive.
 
     The unit depends on the joint model:
@@ -698,20 +698,20 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
     """
 
-    max_effort: Union[Dict[str, float], float] = 1e10
+    max_effort: Dict[str, float] | float = 1e10
     """Maximum effort that can be applied to the joint (in kg-m^2/s^2)."""
 
-    max_velocity: Union[Dict[str, float], float] = 1e10
+    max_velocity: Dict[str, float] | float = 1e10
     """Maximum velocity that the joint can reach (in rad/s or m/s).
 
     For linear joints, this is the maximum linear velocity with unit m/s.
     For angular joints, this is the maximum angular velocity with unit rad/s.
     """
 
-    friction: Union[Dict[str, float], float] = 0.0
+    friction: Dict[str, float] | float = 0.0
     """Friction coefficient of the joint"""
 
-    armature: Union[Dict[str, float], float] = 0.0
+    armature: Dict[str, float] | float = 0.0
     """Joint armature added to joint-space spatial inertia.
 
     Units depend on the joint model:
@@ -722,7 +722,7 @@ class JointDrivePropertiesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int]]
+        cls, init_dict: Dict[str, str | float | int]
     ) -> JointDrivePropertiesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -744,7 +744,7 @@ class ObjectBaseCfg:
     It is used as a base class for specific asset configurations.
     """
 
-    uid: Union[str, None] = None
+    uid: str | None = None
 
     init_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0)."""
@@ -756,7 +756,7 @@ class ObjectBaseCfg:
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
     @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, tuple]]) -> ObjectBaseCfg:
+    def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
@@ -954,7 +954,7 @@ class RigidObjectCfg(ObjectBaseCfg):
     accuracy of collision, but also takes more time to initialize and simulate.
     """
 
-    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
     use_usd_properties: bool = False
@@ -1036,7 +1036,7 @@ class RigidObjectGroupCfg:
     )
     """
 
-    uid: Union[str, None] = None
+    uid: str | None = None
 
     rigid_objects: Dict[str, RigidObjectCfg] = MISSING
     """Configuration for the rigid objects in the group."""
@@ -1167,12 +1167,12 @@ class RigidConstraintCfg:
 class URDFCfg:
     """Standalone configuration class for URDF assembly."""
 
-    components: Dict[str, Dict[str, Union[str, Dict, np.ndarray]]] = field(
+    components: Dict[str, Dict[str, str | Dict | np.ndarray]] = field(
         default_factory=dict
     )
     """Dictionary of robot components to be assembled."""
 
-    sensors: Dict[str, Dict[str, Union[str, np.ndarray]]] = field(default_factory=dict)
+    sensors: Dict[str, Dict[str, str | np.ndarray]] = field(default_factory=dict)
     """Dictionary of sensors to be attached to the robot."""
 
     use_signature_check: bool = True
@@ -1190,7 +1190,7 @@ class URDFCfg:
     fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
     """Output directory prefix for the assembled URDF file."""
 
-    component_prefix: List[tuple[str, Union[str, None]]] = field(
+    component_prefix: List[tuple[str, str | None]] = field(
         default_factory=lambda: [
             ("chassis", None),
             ("legs", None),
@@ -1557,7 +1557,7 @@ class ArticulationCfg(ObjectBaseCfg):
     drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="none")
     """Properties to define the drive mechanism of a joint."""
 
-    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the articulation in the simulation world frame."""
 
     attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
@@ -1582,16 +1582,16 @@ class ArticulationCfg(ObjectBaseCfg):
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
 
-    init_qpos: Union[torch.Tensor, np.ndarray, Sequence[float]] = None
+    init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
     """Initial joint positions of the articulation.
 
     If None, the joint positions will be set to zero.
     If provided, it should be a array of shape (num_joints,).
     """
 
-    qpos_limits: Union[
-        torch.Tensor, np.ndarray, Sequence[float], Dict[str, List[float]], None
-    ] = None
+    qpos_limits: (
+        torch.Tensor | np.ndarray | Sequence[float] | Dict[str, List[float]] | None
+    ) = None
     """Override joint position limits of the articulation.
 
     If None, the joint position limits from the asset file (URDF/USD) are used.
@@ -1600,23 +1600,8 @@ class ArticulationCfg(ObjectBaseCfg):
     If provided as a dictionary, keys are joint names or regular expressions and
     values are ``[min, max]`` limits.
 
-    Unlike :attr:`user_qpos_limits`, this field replaces the asset limits and
-    can be used to expand the allowed range. When both are provided,
-    ``qpos_limits`` is applied first to set the baseline and ``user_qpos_limits``
-    further restricts that baseline.
-    """
-
-    user_qpos_limits: Union[
-        torch.Tensor, np.ndarray, Sequence[float], Dict[str, List[float]], None
-    ] = None
-    """User-defined joint position limits of the articulation.
-
-    If None, the joint position limits from the asset file (URDF/USD) are used.
-    If provided as a tensor/array of shape (num_joints, 2), it is applied to all
-    joints in the order of ``joint_names``.
-    If provided as a dictionary, keys are joint names or regular expressions and
-    values are ``[min, max]`` limits. The user limits are intersected with the
-    current baseline limits, so they can only further restrict the allowed range.
+    This field replaces the asset limits for the articulation and can be used to
+    either tighten or expand the allowed range.
     """
 
     sleep_threshold: float = 0.005
@@ -1647,7 +1632,7 @@ class ArticulationCfg(ObjectBaseCfg):
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, tuple, dict]]
+        cls, init_dict: Dict[str, str | float | tuple | dict]
     ) -> ArticulationCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -1714,12 +1699,12 @@ class RobotCfg(ArticulationCfg):
     """
 
     # TODO: how to support one solver for multiple parts?
-    solver_cfg: Union[SolverCfg, Dict[str, SolverCfg], None] = None
+    solver_cfg: SolverCfg | Dict[str, SolverCfg] | None = None
     """Solver is used to compute forward and inverse kinematics for the robot.
     """
 
     @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, tuple]]) -> RobotCfg:
+    def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
         if isinstance(init_dict, cls):
             return init_dict
