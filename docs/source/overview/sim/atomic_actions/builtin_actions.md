@@ -119,6 +119,7 @@ down to the target pose. On success, the returned `WorldState` clears `held_obje
 | Config field | Default | Description |
 |---|---|---|
 | `lift_height` | `0.10` | Retract height after opening the gripper (m) |
+| `cartesian_waypoint_count` | `1` | Fixed-orientation Cartesian keyframes per translation segment; values above 1 reduce wrist rotation during transport |
 | `hand_open_qpos` | `None` | **Required.** Gripper open joint positions |
 | `hand_close_qpos` | `None` | **Required.** Gripper closed joint positions |
 | `hand_control_part` | `"hand"` | Robot control part for the gripper |

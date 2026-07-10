@@ -558,6 +558,71 @@ def test_move_held_object_defaults_orientation_axis_to_none() -> None:
     assert target.get("orientation_axis", "none") == "none"
 
 
+def test_place_accepts_preserve_object_pose_target() -> None:
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "Place",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "absolute",
+                "position": [0.2, 0.1, 0.3],
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"cartesian_waypoint_count": 4},
+        }
+    )
+
+    assert normalized["target_object_pose"]["position"] == [0.2, 0.1, 0.3]
+    assert normalized["cfg"]["cartesian_waypoint_count"] == 4
+
+
+def test_place_rejects_object_pose_target_that_rotates_in_air() -> None:
+    with pytest.raises(ValueError, match="only supports orientation_goal='preserve'"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "Place",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object_pose": {
+                    "reference": "absolute",
+                    "position": [0.2, 0.1, 0.3],
+                    "orientation_goal": "upright",
+                    "orientation_axis": "none",
+                },
+                "cfg": {},
+            }
+        )
+
+
+def test_place_object_pose_target_keeps_grasp_offset_in_tcp_target() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 0.0)
+    object_to_eef = torch.eye(4).unsqueeze(0)
+    object_to_eef[:, 0, 3] = 0.05
+    state.held_object.object_to_eef = object_to_eef
+    state.held_object.grasp_xpos = object_to_eef.clone()
+    spec = atom_actions.AtomicActionSpec(
+        atomic_action_class="Place",
+        robot_name="left_arm",
+        control="arm",
+        target_object_pose={
+            "reference": "absolute",
+            "position": [0.2, 0.1, 0.3],
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+        },
+        cfg={},
+    )
+
+    target = atom_actions._resolve_place_target(env, spec, state)
+
+    assert target.shape == (1, 4, 4)
+    assert torch.allclose(target[0, :3, 3], torch.tensor([0.25, 0.1, 0.3]))
+    assert torch.allclose(target[0, :3, :3], torch.eye(3))
+
+
 def test_move_held_object_rejects_legacy_horizontal_orientation_goal() -> None:
     with pytest.raises(ValueError, match="orientation_goal"):
         normalize_atomic_action_spec(
@@ -910,6 +975,40 @@ def test_agent_task_graph_collects_absolute_held_object_targets_for_pickup() -> 
                 "orientation_goal": "preserve",
             },
         )
+    }
+
+
+def test_agent_task_graph_collects_object_aware_place_target_for_pickup() -> None:
+    graph = AgentTaskGraph(start="v0", goal="v2")
+    graph.add_node("v0").add_node("v1").add_node("v2")
+    graph.add_edge(
+        "e01",
+        "v0",
+        "v1",
+        left_arm_action={
+            "atomic_action_class": "PickUp",
+            "robot_name": "left_arm",
+        },
+    )
+    target = {
+        "reference": "absolute",
+        "position": [0.2, 0.1, 0.3],
+        "orientation_goal": "preserve",
+        "orientation_axis": "none",
+    }
+    graph.add_edge(
+        "e12",
+        "v1",
+        "v2",
+        left_arm_action={
+            "atomic_action_class": "Place",
+            "robot_name": "left_arm",
+            "target_object_pose": target,
+        },
+    )
+
+    assert graph._pickup_downstream_targets(graph.edges["e01"]) == {
+        "left_arm": (target,)
     }
 
 

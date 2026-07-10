@@ -131,6 +131,7 @@ SUPPORTED_CFG_KEYS = {
     "obj_upright_direction",
     "rotate_upright",
     "approach_alignment_max_angle",
+    "cartesian_waypoint_count",
 }
 
 
@@ -419,9 +420,22 @@ def _normalize_action_target(
         return {target_field: target_spec}
 
     if atomic_action_class == "Place":
-        if control != "arm" or target_field != "target_pose":
-            raise ValueError("Place requires control='arm' and target_pose.")
-        _validate_target_pose(target_spec)
+        if control != "arm" or target_field not in {
+            "target_pose",
+            "target_object_pose",
+        }:
+            raise ValueError(
+                "Place requires control='arm' and target_pose or target_object_pose."
+            )
+        if target_field == "target_pose":
+            _validate_target_pose(target_spec)
+        else:
+            _validate_target_object_pose(target_spec)
+            if target_spec.get("orientation_goal", "preserve") != "preserve":
+                raise ValueError(
+                    "Place target_object_pose only supports orientation_goal='preserve'; "
+                    "use MoveHeldObject for explicit in-air rotation."
+                )
         return {target_field: target_spec}
 
     if atomic_action_class == "MoveEndEffector":
@@ -1546,6 +1560,10 @@ def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
                 "approach_alignment_max_angle must be a numeric value in "
                 "[0, pi / 2] radians or null."
             )
+    if "cartesian_waypoint_count" in cfg:
+        value = cfg["cartesian_waypoint_count"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError("cartesian_waypoint_count must be an integer >= 1.")
 
 
 def _normalize_pickup_cfg_values(cfg_values: dict[str, Any], device) -> None:
@@ -1587,7 +1605,7 @@ def _resolve_target(
     if spec.atomic_action_class == "MoveHeldObject":
         return _resolve_move_held_object_target(env, spec, state)
     if spec.atomic_action_class == "Place":
-        return _resolve_place_target(env, spec)
+        return _resolve_place_target(env, spec, state)
     if spec.atomic_action_class == "CoordinatedPickment":
         return _resolve_coordinated_pickment_target(env, spec, runtime_kwargs, state)
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
@@ -1664,10 +1682,30 @@ def _resolve_move_held_object_target(
     return _resolve_held_object_pose_target(env, spec, state)
 
 
-def _resolve_place_target(env, spec: AtomicActionSpec):
-    if not spec.target_pose:
-        raise ValueError("Place requires target_pose.")
-    return _resolve_pose_target(env, spec)
+def _resolve_place_target(
+    env,
+    spec: AtomicActionSpec,
+    state: WorldState | None,
+) -> torch.Tensor:
+    if spec.target_pose:
+        return _resolve_pose_target(env, spec)
+    if not spec.target_object_pose:
+        raise ValueError("Place requires target_pose or target_object_pose.")
+    if state is None or state.held_object is None:
+        raise ValueError(
+            "Place with target_object_pose requires a held object from a prior PickUp."
+        )
+
+    object_target_pose = _resolve_held_object_pose_target(env, spec, state)
+    object_to_eef = state.held_object.object_to_eef.to(
+        device=env.robot.device,
+        dtype=torch.float32,
+    )
+    if object_to_eef.shape == (4, 4):
+        object_to_eef = object_to_eef.unsqueeze(0).repeat(
+            object_target_pose.shape[0], 1, 1
+        )
+    return torch.bmm(object_target_pose, object_to_eef)
 
 
 def _resolve_coordinated_pickment_target(
@@ -2801,7 +2839,19 @@ def _resolve_object_orientation(
     orientation_goal = target_pose_spec.get("orientation_goal", "preserve")
     current_rotation = current_object_pose[..., :3, :3].clone()
     if orientation_goal == "preserve":
-        return current_rotation
+        held = state.held_object
+        if held is None:
+            return current_rotation
+        pickup_object_pose = torch.matmul(
+            held.grasp_xpos.to(device=env.robot.device, dtype=torch.float32),
+            pose_inv(
+                held.object_to_eef.to(
+                    device=env.robot.device,
+                    dtype=torch.float32,
+                )
+            ),
+        )
+        return pickup_object_pose[..., :3, :3]
     # Non-preserve orientation goals are computed from a single representative env
     # and broadcast to all envs.
     if current_rotation.ndim == 3:
