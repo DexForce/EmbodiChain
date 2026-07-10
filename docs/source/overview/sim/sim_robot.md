@@ -104,19 +104,19 @@ The Robot class overrides standard Articulation methods to support the name argu
 | `set_qf(..., name="part")` | Set joint efforts for a specific part. |
 | `get_qpos(name="part")` | Get joint positions of a specific part. |
 | `get_qvel(name="part")` | Get joint velocities of a specific part. |
-| `set_user_qpos_limits(..., name="part")` | Set user-defined position limits for a specific part. |
-| `get_user_qpos_limits(..., name="part")` | Get user-defined position limits for a specific part. |
-| `reset_qpos_limits(..., name="part")` | Reset position limits to asset limits for a specific part. |
+| `set_qpos_limits(..., name="part")` | Set physical joint position limits for a specific part. |
+| `get_qpos_limits(name="part")` | Get physical joint position limits of a specific part. |
 
 ```python
-# Restrict the left arm to a smaller workspace
+# Tighten the left arm physical workspace
 left_arm_limits = robot.get_qpos_limits(name="left_arm")
 left_arm_limits[..., 0] += 0.05  # tighten lower bound
 left_arm_limits[..., 1] -= 0.05  # tighten upper bound
-robot.set_user_qpos_limits(left_arm_limits, name="left_arm")
-
-# Restore original limits later
-robot.reset_qpos_limits(name="left_arm")
+robot.set_qpos_limits(left_arm_limits, name="left_arm")
 ```
+
+For solver-only planning limits, configure `SolverCfg.user_qpos_limits` on the
+robot's solver config. Robot solver synchronization will intersect those solver
+limits with the robot's current effective `qpos_limits`.
 
 For more API details, refer to the {class}`~objects.Robot` documentation.

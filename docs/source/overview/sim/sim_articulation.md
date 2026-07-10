@@ -16,8 +16,7 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
 | `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
-| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and can expand the range. |
-| `user_qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | User-defined joint position limits. Intersected with the current baseline; can only further restrict the range. |
+| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
 | `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
 | `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
@@ -72,25 +71,15 @@ The `drive_props` parameter controls the joint physics behavior. It is defined u
 
 ### Joint Position Limits
 
-There are two configuration fields for controlling joint position limits:
-
-- `qpos_limits`: Replaces the limits defined in the asset file. Use this when you
-  need to **expand** the allowed range or set a different baseline.
-- `user_qpos_limits`: Restricts the current baseline limits. User limits are
-  **intersected** with the baseline, so they can only shrink the valid range.
-  The baseline is the asset limits by default, or `qpos_limits` when that field
-  is provided.
-
-#### Expanding limits (`qpos_limits`)
-
-Use `qpos_limits` to override the asset limits. This is useful when the URDF/USD
-limits are more conservative than the physical hardware limits you want to use.
+Use `qpos_limits` to override the limits defined in the asset file. This is the
+articulation's effective physical limit in simulation, so it is also the range
+used when `set_qpos(...)` clamps requested joint positions.
 
 ```python
 from embodichain.lab.sim.cfg import ArticulationCfg
 import torch
 
-# Expand specific joints by name or regex at initialization.
+# Override specific joints by name or regex at initialization.
 art_cfg = ArticulationCfg(
     fpath="assets/robots/franka/franka.urdf",
     qpos_limits={
@@ -107,47 +96,21 @@ art_cfg = ArticulationCfg(
 )
 ```
 
-#### Restricting limits (`user_qpos_limits`)
-
-Use `user_qpos_limits` to restrict the allowed joint range on top of the current
-baseline. User limits are **intersected** with the baseline limits, so they can
-only shrink the valid range.
-
-```python
-from embodichain.lab.sim.cfg import ArticulationCfg
-import torch
-
-# Restrict specific joints by name or regex at initialization.
-art_cfg = ArticulationCfg(
-    fpath="assets/robots/franka/franka.urdf",
-    user_qpos_limits={
-        "panda_joint1": [-0.2, 0.2],
-        "panda_joint[2-4]": [-0.5, 0.5],
-    },
-)
-
-# Or provide a (dof, 2) tensor/array.
-dof = 7
-art_cfg = ArticulationCfg(
-    fpath="assets/robots/franka/franka.urdf",
-    user_qpos_limits=torch.tensor([[-0.5, 0.5]] * dof),
-)
-```
-
-You can also set and reset user limits at runtime:
+You can also change the active limits at runtime:
 
 ```python
 # Tighten limits for joints 0 and 1 on all environments.
 new_limits = torch.tensor([[-0.1, 0.1], [-0.2, 0.2]], device=device)
-articulation.set_user_qpos_limits(new_limits, joint_ids=[0, 1])
+articulation.set_qpos_limits(new_limits, joint_ids=[0, 1])
 
-# Query the user-defined limits.
-user_limits = articulation.get_user_qpos_limits(joint_ids=[0, 1])
-
-# Restore the original baseline limits (asset limits by default, or the
-# configured qpos_limits when provided).
-articulation.reset_qpos_limits(joint_ids=[0, 1])
+# Query the effective limits.
+effective_limits = articulation.get_qpos_limits(joint_ids=[0, 1])
 ```
+
+If you need solver-only planning limits that are tighter than the physical
+articulation limits, configure them on the solver with
+`SolverCfg.user_qpos_limits`; that behavior lives in the solver layer, not the
+articulation layer.
 
 ### Setup & Initialization
 
