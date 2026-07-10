@@ -464,6 +464,47 @@ class TestPickUpAction:
         assert isinstance(result.next_state.held_object, HeldObjectState)
         assert result.next_state.held_object.semantics is sem
 
+    def test_execute_accepts_an_explicit_grasp_pose(self):
+        action = PickUp(
+            self.mg,
+            PickUpCfg(
+                hand_open_qpos=_hand_open(),
+                hand_close_qpos=_hand_close(),
+                sample_interval=12,
+                hand_interp_steps=4,
+            ),
+        )
+        entity = Mock()
+        entity.get_local_pose.return_value = (
+            torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        affordance = Mock()
+        grasp_xpos = torch.eye(4)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=torch.zeros(NUM_ENVS, 4, ARM_DOF),
+        ):
+            result = action.execute(
+                GraspTarget(
+                    semantics=ObjectSemantics(
+                        affordance=affordance,
+                        geometry={},
+                        entity=entity,
+                    ),
+                    grasp_xpos=grasp_xpos,
+                ),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+
+        assert result.success.all()
+        assert result.next_state.held_object is not None
+        assert torch.allclose(
+            result.next_state.held_object.grasp_xpos,
+            grasp_xpos.unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        affordance.get_valid_grasp_poses.assert_not_called()
+
     def test_execute_chooses_symmetric_grasp_variant_closest_to_start_pose(self):
         cfg = PickUpCfg(
             hand_open_qpos=_hand_open(),
