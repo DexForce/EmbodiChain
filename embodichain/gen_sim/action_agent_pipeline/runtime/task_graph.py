@@ -112,6 +112,7 @@ class AgentTaskGraph:
         executed_actions: list[Any] = []
         transitions = 0
         world_states = init_parallel_world_states(env)
+        failed_env_mask = None
 
         while current != self.goal:
             transitions += 1
@@ -124,6 +125,7 @@ class AgentTaskGraph:
                 right_arm_action=edge.right_arm_action,
                 env=env,
                 world_states=world_states,
+                failed_env_mask=failed_env_mask,
                 return_result=True,
                 pickup_downstream_object_target_specs=self._pickup_downstream_targets(
                     edge
@@ -132,6 +134,7 @@ class AgentTaskGraph:
             )
             actions = result["actions"]
             world_states = result["world_states"]
+            failed_env_mask = result["failed_env_mask"]
             executed_actions.extend(actions)
             current = edge.target
 

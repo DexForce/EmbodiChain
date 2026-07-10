@@ -20,7 +20,7 @@ import dexsim
 import argparse
 import gymnasium
 
-from typing import Dict, Any, List, Tuple, Union, Sequence
+from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
 from tensordict import TensorDict
@@ -853,15 +853,18 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
 
 def build_env_cfg_from_args(
     args: argparse.Namespace,
+    gym_config_modifier: Callable[[dict], None] | None = None,
 ) -> tuple["EmbodiedEnvCfg", dict, dict]:
     """Build environment configuration from command-line arguments.
 
     Args:
         args (argparse.Namespace): The parsed command-line arguments.
+        gym_config_modifier: Optional callback that mutates the merged gym configuration
+            before it is parsed into an environment configuration.
 
     Returns:
         tuple[EmbodiedEnvCfg, dict, dict]: A tuple containing the environment configuration object,
-            the original gym configuration dictionary, and the action configuration dictionary.
+            the merged gym configuration dictionary, and the action configuration dictionary.
     """
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
@@ -870,6 +873,8 @@ def build_env_cfg_from_args(
 
     gym_config = load_config(args.gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
+    if gym_config_modifier is not None:
+        gym_config_modifier(gym_config)
 
     cfg: EmbodiedEnvCfg = config_to_cfg(
         gym_config, manager_modules=DEFAULT_MANAGER_MODULES
