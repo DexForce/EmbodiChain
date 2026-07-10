@@ -478,6 +478,7 @@ def test_pickup_upright_cfg_is_normalized_for_typed_cfg() -> None:
                 "sample_interval": 45,
                 "obj_upright_direction": [1.0, 0.0, 0.0],
                 "rotate_upright": rotate_upright,
+                "approach_alignment_max_angle": 0.1,
             },
         }
     )
@@ -497,6 +498,7 @@ def test_pickup_upright_cfg_is_normalized_for_typed_cfg() -> None:
         torch.tensor([1.0, 0.0, 0.0]),
     )
     assert cfg.rotate_upright == pytest.approx(rotate_upright)
+    assert cfg.approach_alignment_max_angle == pytest.approx(0.1)
 
 
 def test_pickup_upright_cfg_rejects_invalid_direction() -> None:
@@ -867,6 +869,48 @@ def test_agent_task_graph_threads_world_state_between_edges(monkeypatch) -> None
     assert capture[0]["state"].held_object is None
     assert capture[1]["state"].held_object is not None
     assert capture[2]["state"].held_object is not None
+
+
+def test_agent_task_graph_collects_absolute_held_object_targets_for_pickup() -> None:
+    graph = AgentTaskGraph(start="v0", goal="v2")
+    graph.add_node("v0").add_node("v1").add_node("v2")
+    graph.add_edge(
+        "e01",
+        "v0",
+        "v1",
+        left_arm_action={
+            "atomic_action_class": "PickUp",
+            "robot_name": "left_arm",
+        },
+    )
+    graph.add_edge(
+        "e12",
+        "v1",
+        "v2",
+        left_arm_action={
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": "left_arm",
+            "target_object_pose": {
+                "reference": "object",
+                "offset": [0.0, 0.0, 0.2],
+                "frame": "world",
+                "orientation_goal": "preserve",
+            },
+        },
+    )
+
+    targets = graph._pickup_downstream_targets(graph.edges["e01"])
+
+    assert targets == {
+        "left_arm": (
+            {
+                "reference": "object",
+                "offset": [0.0, 0.0, 0.2],
+                "frame": "world",
+                "orientation_goal": "preserve",
+            },
+        )
+    }
 
 
 def test_resolve_arm_side_rejects_unavailable_requested_arm() -> None:

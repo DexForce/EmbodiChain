@@ -97,6 +97,27 @@ class TestAntipodalAffordance:
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
 
+    def test_valid_grasp_poses_forwards_approach_alignment_angle(self):
+        aff = AntipodalAffordance()
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        generator.get_valid_grasp_poses.return_value = (
+            True,
+            torch.eye(4).unsqueeze(0),
+            0.0,
+            torch.zeros(1),
+        )
+        aff._generator = generator
+
+        aff.get_valid_grasp_poses(
+            torch.eye(4).unsqueeze(0),
+            max_approach_alignment_angle=0.1,
+        )
+
+        assert generator.get_valid_grasp_poses.call_args.kwargs == {
+            "max_approach_alignment_angle": 0.1
+        }
+
     def test_best_grasp_poses_casts_approach_direction_to_generator_device(self):
         aff = AntipodalAffordance()
         generator = Mock()

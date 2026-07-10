@@ -199,6 +199,12 @@ def _z_rotation_pose(angle: float) -> torch.Tensor:
     return pose
 
 
+def _top_down_grasp_pose() -> torch.Tensor:
+    pose = torch.eye(4, dtype=torch.float32)
+    pose[:3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    return pose
+
+
 # ---------------------------------------------------------------------------
 # MoveEndEffector
 # ---------------------------------------------------------------------------
@@ -426,7 +432,7 @@ class TestPickUpAction:
         affordance = AntipodalAffordance()
         affordance.get_valid_grasp_poses = Mock(
             return_value=[
-                (torch.eye(4).unsqueeze(0), torch.tensor([0.5]))
+                (_top_down_grasp_pose().unsqueeze(0), torch.tensor([0.5]))
                 for _ in range(NUM_ENVS)
             ]
         )
@@ -469,8 +475,9 @@ class TestPickUpAction:
         compute_batch_ik = self.mg.robot.compute_batch_ik
         self.mg.robot.compute_batch_ik = Mock(side_effect=compute_batch_ik)
 
-        rz_pi_grasp = torch.eye(4)
-        rz_pi_grasp[:3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        rz_pi_grasp = _top_down_grasp_pose()
+        rz_pi_grasp[:3, 0] = -rz_pi_grasp[:3, 0]
+        rz_pi_grasp[:3, 1] = -rz_pi_grasp[:3, 1]
         affordance = AntipodalAffordance()
         affordance.get_valid_grasp_poses = Mock(
             return_value=[
@@ -488,6 +495,9 @@ class TestPickUpAction:
             label="mug",
             entity=entity,
         )
+        self.mg.robot.compute_fk = Mock(
+            return_value=_top_down_grasp_pose().unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
 
         with patch(
             "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
@@ -501,13 +511,196 @@ class TestPickUpAction:
         assert result.success.all()
         assert result.success.shape == (NUM_ENVS,)
         assert isinstance(result.next_state.held_object, HeldObjectState)
-        expected_grasp = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        expected_grasp = _top_down_grasp_pose().unsqueeze(0).repeat(NUM_ENVS, 1, 1)
         assert torch.allclose(result.next_state.held_object.grasp_xpos, expected_grasp)
-        self.mg.robot.compute_batch_ik.assert_called_once()
-        ik_kwargs = self.mg.robot.compute_batch_ik.call_args.kwargs
-        assert ik_kwargs["pose"].shape == (NUM_ENVS, 1, 4, 4)
-        assert torch.allclose(ik_kwargs["pose"][:, 0], expected_grasp)
-        assert ik_kwargs["joint_seed"].shape == (NUM_ENVS, 1, ARM_DOF)
+        assert self.mg.robot.compute_batch_ik.call_count == 3
+        for call in self.mg.robot.compute_batch_ik.call_args_list:
+            assert call.kwargs["pose"].shape == (NUM_ENVS, 2, 4, 4)
+            assert call.kwargs["joint_seed"].shape == (NUM_ENVS, 2, ARM_DOF)
+
+    def test_execute_selects_candidate_with_feasible_vertical_pickup_path(self):
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+        )
+        action = PickUp(self.mg, cfg)
+        unreachable_pre_grasp = _top_down_grasp_pose()
+        unreachable_pre_grasp[:3, 3] = torch.tensor([-0.1, 0.0, 0.2])
+        reachable_grasp = _top_down_grasp_pose()
+        reachable_grasp[:3, 3] = torch.tensor([0.1, 0.0, 0.2])
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (
+                    torch.stack([unreachable_pre_grasp, reachable_grasp]),
+                    torch.tensor([0.1, 0.2]),
+                )
+                for _ in range(NUM_ENVS)
+            ]
+        )
+        entity = Mock()
+        entity.get_local_pose = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="apple",
+            entity=entity,
+        )
+        ik_call_count = 0
+
+        def compute_batch_ik(pose=None, name=None, joint_seed=None):
+            nonlocal ik_call_count
+            is_success = torch.ones(joint_seed.shape[:2], dtype=torch.bool)
+            if ik_call_count == 0:
+                is_success[:, :2] = False
+            ik_call_count += 1
+            return is_success, joint_seed.clone()
+
+        self.mg.robot.compute_batch_ik = Mock(side_effect=compute_batch_ik)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            result = action.execute(
+                GraspTarget(semantics=sem),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+
+        assert result.success.all()
+        assert torch.allclose(
+            result.next_state.held_object.grasp_xpos[:, :3, 3],
+            reachable_grasp[:3, 3].unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
+
+    def test_execute_prefers_approach_aligned_grasp_over_lower_cost_tilt(self):
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            approach_alignment_max_angle=math.radians(5.0),
+        )
+        action = PickUp(self.mg, cfg)
+        tilted_grasp = _top_down_grasp_pose()
+        tilt_angle = math.radians(20.0)
+        tilt = torch.tensor(
+            [
+                [math.cos(tilt_angle), 0.0, math.sin(tilt_angle)],
+                [0.0, 1.0, 0.0],
+                [-math.sin(tilt_angle), 0.0, math.cos(tilt_angle)],
+            ],
+            dtype=torch.float32,
+        )
+        tilted_grasp[:3, :3] = tilt @ tilted_grasp[:3, :3]
+        tilted_grasp[:3, 3] = torch.tensor([-0.1, 0.0, 0.2])
+        aligned_grasp = _top_down_grasp_pose()
+        aligned_grasp[:3, 3] = torch.tensor([0.1, 0.0, 0.2])
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (
+                    torch.stack([tilted_grasp, aligned_grasp]),
+                    torch.tensor([0.1, 0.2]),
+                )
+                for _ in range(NUM_ENVS)
+            ]
+        )
+        entity = Mock()
+        entity.get_local_pose = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="apple",
+            entity=entity,
+        )
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            result = action.execute(
+                GraspTarget(semantics=sem),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+
+        assert result.success.all()
+        assert torch.allclose(
+            result.next_state.held_object.grasp_xpos[:, :3, 3],
+            aligned_grasp[:3, 3].unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
+
+    def test_execute_selects_candidate_reachable_at_downstream_object_target(self):
+        cfg = PickUpCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            downstream_object_target_poses=(torch.eye(4),),
+        )
+        action = PickUp(self.mg, cfg)
+        unreachable_downstream = _top_down_grasp_pose()
+        unreachable_downstream[:3, 3] = torch.tensor([-0.1, 0.0, 0.2])
+        reachable_grasp = _top_down_grasp_pose()
+        reachable_grasp[:3, 3] = torch.tensor([0.1, 0.0, 0.2])
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (
+                    torch.stack([unreachable_downstream, reachable_grasp]),
+                    torch.tensor([0.1, 0.2]),
+                )
+                for _ in range(NUM_ENVS)
+            ]
+        )
+        entity = Mock()
+        entity.get_local_pose = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        sem = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="apple",
+            entity=entity,
+        )
+        ik_call_count = 0
+
+        def compute_batch_ik(pose=None, name=None, joint_seed=None):
+            nonlocal ik_call_count
+            is_success = torch.ones(joint_seed.shape[:2], dtype=torch.bool)
+            if ik_call_count == 3:
+                is_success[:, :2] = False
+            ik_call_count += 1
+            return is_success, joint_seed.clone()
+
+        self.mg.robot.compute_batch_ik = Mock(side_effect=compute_batch_ik)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            result = action.execute(
+                GraspTarget(semantics=sem),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+
+        assert result.success.all()
+        assert torch.allclose(
+            result.next_state.held_object.grasp_xpos[:, :3, 3],
+            reachable_grasp[:3, 3].unsqueeze(0).repeat(NUM_ENVS, 1),
+        )
 
     def test_execute_applies_upright_rotation_after_grasp_selection(self):
         rotate_upright = math.pi / 2.0
@@ -575,7 +768,7 @@ class TestPickUpAction:
             rotate_upright=math.pi / 4.0,
         )
         action = PickUp(self.mg, cfg)
-        grasp_pose = torch.eye(4)
+        grasp_pose = _top_down_grasp_pose()
         grasp_pose[:3, 3] = torch.tensor([0.2, -0.1, 0.3])
         affordance = AntipodalAffordance()
         affordance.get_valid_grasp_poses = Mock(

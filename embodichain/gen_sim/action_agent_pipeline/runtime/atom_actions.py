@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import MISSING, dataclass, field
 from typing import Any, Mapping
@@ -129,6 +130,7 @@ SUPPORTED_CFG_KEYS = {
     "post_hold_steps",
     "obj_upright_direction",
     "rotate_upright",
+    "approach_alignment_max_angle",
 }
 
 
@@ -724,6 +726,10 @@ def _execute_atomic_action_result(
         env, spec.robot_name
     )
     cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
+    if spec.atomic_action_class == "PickUp":
+        cfg.downstream_object_target_poses = _resolve_pickup_downstream_object_targets(
+            env, spec, target, runtime_kwargs
+        )
     target = _build_typed_target(spec, target)
     if state is None:
         state = WorldState(last_qpos=env.robot.get_qpos().clone())
@@ -1531,6 +1537,15 @@ def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
         value = cfg["rotate_upright"]
         if value is not None and not isinstance(value, int | float):
             raise ValueError("rotate_upright must be a numeric value in radians.")
+    if "approach_alignment_max_angle" in cfg:
+        value = cfg["approach_alignment_max_angle"]
+        if value is not None and (
+            not isinstance(value, int | float) or not 0.0 <= float(value) <= np.pi / 2
+        ):
+            raise ValueError(
+                "approach_alignment_max_angle must be a numeric value in "
+                "[0, pi / 2] radians or null."
+            )
 
 
 def _normalize_pickup_cfg_values(cfg_values: dict[str, Any], device) -> None:
@@ -1586,6 +1601,43 @@ def _resolve_pickup_target(
     if not spec.target_object:
         raise ValueError("PickUp requires target_object.")
     return _build_object_semantics(env, spec.target_object, runtime_kwargs)
+
+
+def _resolve_pickup_downstream_object_targets(
+    env,
+    spec: AtomicActionSpec,
+    semantics: ObjectSemantics,
+    runtime_kwargs: Mapping[str, Any],
+) -> tuple[torch.Tensor, ...]:
+    """Resolve graph-provided held-object targets before selecting a grasp pose."""
+    target_specs_by_robot = runtime_kwargs.get(
+        "pickup_downstream_object_target_specs", {}
+    )
+    if not isinstance(target_specs_by_robot, Mapping):
+        return ()
+    target_specs = target_specs_by_robot.get(spec.robot_name, ())
+    if not isinstance(target_specs, Sequence):
+        return ()
+
+    object_pose = _ensure_batched_pose_tensor(
+        semantics.entity.get_local_pose(to_matrix=True), env.robot.device
+    )
+    state = WorldState(
+        last_qpos=env.robot.get_qpos().clone(),
+        held_object=_semantics_as_held_object_state(
+            semantics, object_pose, env.robot.device
+        ),
+    )
+    targets: list[torch.Tensor] = []
+    for target_spec in target_specs:
+        if not isinstance(target_spec, Mapping):
+            continue
+        target_pose = _resolve_object_target_pose_like(env, target_spec, object_pose)
+        target_pose[..., :3, :3] = _resolve_object_orientation(
+            env, target_spec, object_pose, state
+        )
+        targets.append(_apply_surface_z_policy(env, target_spec, target_pose, state))
+    return tuple(targets)
 
 
 def _resolve_move_end_effector_target(env, spec: AtomicActionSpec):

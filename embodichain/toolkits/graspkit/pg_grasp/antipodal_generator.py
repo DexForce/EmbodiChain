@@ -615,6 +615,7 @@ class GraspGenerator:
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         visualize_collision: bool = False,
+        max_approach_alignment_angle: float | None = None,
     ):
         if self._hit_point_pairs is None:
             logger.log_warning(
@@ -640,9 +641,14 @@ class GraspGenerator:
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
         cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
         positive_angle = torch.abs(torch.acos(cos_angle))
-        valid_mask = (
-            positive_angle - torch.pi / 2
-        ).abs() <= self.cfg.max_deviation_angle
+        alignment_angle = (
+            self.cfg.max_deviation_angle
+            if max_approach_alignment_angle is None
+            else float(max_approach_alignment_angle)
+        )
+        if alignment_angle < 0.0 or alignment_angle > float(torch.pi / 2):
+            raise ValueError("max_approach_alignment_angle must be in [0, pi / 2].")
+        valid_mask = (positive_angle - torch.pi / 2).abs() <= alignment_angle
         if valid_mask.sum() == 0:
             logger.log_warning("No valid antipodal pairs after angle filtering.")
             return (
