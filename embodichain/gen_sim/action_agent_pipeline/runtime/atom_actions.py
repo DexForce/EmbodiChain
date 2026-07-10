@@ -196,6 +196,7 @@ class _ExecutedAtomicAction:
     next_state: WorldState | None
     robot_name: str | None
     control: str | None
+    failed_env_mask: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -731,36 +732,35 @@ def _execute_atomic_action_result(
         target=target,
         state=state,
     )
-    failed_mask = _failed_env_mask(result.success, result.trajectory.shape[0])
-    if failed_mask is not None:
-        n_failed = int(failed_mask.sum().item())
+    failed_env_mask = _failed_env_mask(result.success, result.trajectory.shape[0])
+    if failed_env_mask is not None and bool(failed_env_mask.any()):
+        n_failed = int(failed_env_mask.sum().item())
         n_total = result.trajectory.shape[0]
-        if n_failed == n_total:
-            raise RuntimeError(
-                f"Atomic action failed in all environments: "
-                f"atomic_action_class={spec.atomic_action_class}, "
-                f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
-            )
-        if n_failed > 0:
-            log_warning(
-                f"Atomic action failed in {n_failed}/{n_total} environment(s): "
-                f"atomic_action_class={spec.atomic_action_class}, "
-                f"robot_name={spec.robot_name}, target={_target_summary(spec)}. "
-                "Padding failed environment trajectories with initial joint positions."
-            )
-            full_joint_ids = list(range(state.last_qpos.shape[-1]))
-            result.trajectory = _pad_failed_trajectory_with_init_qpos(
-                result.trajectory, state, full_joint_ids, failed_mask
-            )
-            result.next_state.last_qpos = result.next_state.last_qpos.clone()
-            device = result.next_state.last_qpos.device
-            failed_on_device = failed_mask.to(device=device)
-            result.next_state.last_qpos[failed_on_device] = state.last_qpos[
-                failed_on_device
-            ]
+        log_warning(
+            f"Atomic action failed in {n_failed}/{n_total} environment(s): "
+            f"atomic_action_class={spec.atomic_action_class}, "
+            f"robot_name={spec.robot_name}, target={_target_summary(spec)}. "
+            "Holding failed environments at their current joint positions."
+        )
+        result.trajectory = _ensure_failure_hold_step(result.trajectory, state)
+        full_joint_ids = list(range(state.last_qpos.shape[-1]))
+        result.trajectory = _pad_failed_trajectory_with_init_qpos(
+            result.trajectory, state, full_joint_ids, failed_env_mask
+        )
+        result.next_state.last_qpos = result.next_state.last_qpos.clone()
+        device = result.next_state.last_qpos.device
+        failed_on_device = failed_env_mask.to(device=device)
+        result.next_state.last_qpos[failed_on_device] = state.last_qpos[
+            failed_on_device
+        ]
 
     if spec.atomic_action_class == "CoordinatedPickment":
-        return _executed_coordinated_atomic_action(env, spec, result)
+        return _executed_coordinated_atomic_action(
+            env,
+            spec,
+            result,
+            failed_env_mask=failed_env_mask,
+        )
     if spec.atomic_action_class == "MoveJoints":
         joint_ids = arm_joints if spec.control == "arm" else eef_joints
     else:
@@ -797,6 +797,7 @@ def _execute_atomic_action_result(
         next_state=next_state,
         robot_name=spec.robot_name,
         control=spec.control,
+        failed_env_mask=failed_env_mask,
     )
 
 
@@ -806,21 +807,32 @@ def execute_parallel_atomic_actions(
     *,
     env: Any,
     world_states: dict[str, WorldState] | None = None,
+    failed_env_mask: torch.Tensor | np.ndarray | None = None,
     return_result: bool = False,
     **runtime_kwargs: Any,
 ) -> list[torch.Tensor] | dict[str, Any]:
-    """Execute left/right atomic action specs as one synchronized stream."""
+    """Execute left/right atomic action specs as one synchronized stream.
+
+    ``failed_env_mask`` carries failures from earlier graph edges. Failed
+    environments receive a full-robot hold command and remain failed in the
+    returned result.
+    """
     result = build_parallel_action_stream(
         left_arm_action=left_arm_action,
         right_arm_action=right_arm_action,
         env=env,
         world_states=world_states,
+        failed_env_mask=failed_env_mask,
         return_result=True,
         **runtime_kwargs,
     )
     actions = result["actions"]
     step_env_with_actions(env, actions)
-    _sync_agent_states_from_parallel_actions(env, result["arm_actions"])
+    _sync_agent_states_from_parallel_actions(
+        env,
+        result["arm_actions"],
+        failed_env_mask=result["failed_env_mask"],
+    )
     if return_result:
         return result
     return actions
@@ -832,14 +844,35 @@ def build_parallel_action_stream(
     *,
     env: Any,
     world_states: dict[str, WorldState] | None = None,
+    failed_env_mask: torch.Tensor | np.ndarray | None = None,
     return_result: bool = False,
     **runtime_kwargs: Any,
 ) -> list[torch.Tensor] | dict[str, Any]:
-    """Build a synchronized left/right atomic action stream without stepping env."""
+    """Build a synchronized left/right atomic action stream without stepping env.
+
+    ``failed_env_mask`` carries failures from earlier graph edges. Failed
+    environments receive a full-robot hold command and remain failed in the
+    returned result.
+    """
     if env is None:
         raise ValueError("env is required to build parallel atomic actions.")
     if world_states is None:
         world_states = init_parallel_world_states(env)
+    num_envs = int(getattr(env, "num_envs", 1))
+    upstream_failed_env_mask = _normalize_failed_env_mask(
+        failed_env_mask,
+        num_envs,
+        name="failed_env_mask",
+    )
+    if bool(upstream_failed_env_mask.all()):
+        result = _failed_parallel_hold_result(
+            env,
+            world_states,
+            upstream_failed_env_mask,
+        )
+        if return_result:
+            return result
+        return result["actions"]
     raw_left_arm_action = left_arm_action
     raw_right_arm_action = right_arm_action
     coordinated_action = _pop_coordinated_edge_action(left_arm_action, right_arm_action)
@@ -857,18 +890,30 @@ def build_parallel_action_stream(
             "coordinated_action",
         )
         actions = _full_robot_action_array_to_steps(action_np)
+        node_failed_env_mask = _merge_failed_env_masks(
+            num_envs,
+            upstream_failed_env_mask,
+            executed.failed_env_mask,
+        )
+        actions = _hold_failed_action_steps(env, actions, node_failed_env_mask)
+        next_state = _hold_failed_world_state_qpos(
+            executed.next_state,
+            _current_robot_qpos(env, num_envs),
+            node_failed_env_mask,
+        )
         result = {
             "actions": actions,
             "world_states": {
                 **world_states,
-                "coordinated": executed.next_state,
-                "left": executed.next_state,
-                "right": executed.next_state,
+                "coordinated": next_state,
+                "left": next_state,
+                "right": next_state,
             },
             "arm_actions": {
                 "left": executed,
                 "right": None,
             },
+            "failed_env_mask": node_failed_env_mask,
         }
         if return_result:
             return result
@@ -913,10 +958,7 @@ def build_parallel_action_stream(
             padding = np.repeat(action[:, -1:, :], diff, axis=1)
             arm_actions[side] = np.concatenate([action, padding], axis=1)
 
-    num_envs = int(getattr(env, "num_envs", 1))
-    current_qpos = env.robot.get_qpos().detach().cpu().numpy().astype(np.float32)
-    if current_qpos.ndim == 1:
-        current_qpos = current_qpos[None, :]
+    current_qpos = _current_robot_qpos(env, num_envs)
     actions = np.repeat(current_qpos[:, None, :], action_len, axis=1)
 
     for side, action in arm_actions.items():
@@ -943,6 +985,16 @@ def build_parallel_action_stream(
             )
         actions[:, :, arm_index] = action
 
+    node_failed_env_mask = _merge_failed_env_masks(
+        num_envs,
+        upstream_failed_env_mask,
+        _action_failed_env_mask(left_arm_action),
+        _action_failed_env_mask(right_arm_action),
+    )
+    if bool(node_failed_env_mask.any()):
+        failed_indices = node_failed_env_mask.detach().cpu().numpy()
+        actions[failed_indices] = current_qpos[failed_indices, None, :]
+
     actions = torch.from_numpy(actions).to(dtype=torch.float32)
     actions = list(actions.unbind(dim=1))
     if not return_result:
@@ -957,6 +1009,15 @@ def build_parallel_action_stream(
             and executed.next_state is not None
         ):
             next_world_states[side] = executed.next_state
+    if bool(node_failed_env_mask.any()):
+        next_world_states = {
+            side: _hold_failed_world_state_qpos(
+                state,
+                current_qpos,
+                node_failed_env_mask,
+            )
+            for side, state in next_world_states.items()
+        }
     if _is_dual_coordinated_release_edge(
         raw_left_arm_action,
         raw_right_arm_action,
@@ -975,6 +1036,7 @@ def build_parallel_action_stream(
             "left": left_arm_action,
             "right": right_arm_action,
         },
+        "failed_env_mask": node_failed_env_mask,
     }
 
 
@@ -985,6 +1047,131 @@ def init_parallel_world_states(env: Any) -> dict[str, WorldState]:
         "coordinated": WorldState(last_qpos=qpos.clone()),
         "left": WorldState(last_qpos=qpos.clone()),
         "right": WorldState(last_qpos=qpos.clone()),
+    }
+
+
+def _normalize_failed_env_mask(
+    failed_env_mask: torch.Tensor | np.ndarray | None,
+    num_envs: int,
+    *,
+    name: str,
+) -> torch.Tensor:
+    """Return a CPU boolean failure mask with one entry per environment."""
+    if failed_env_mask is None:
+        return torch.zeros(num_envs, dtype=torch.bool)
+    mask = torch.as_tensor(failed_env_mask, dtype=torch.bool).detach().cpu()
+    if mask.ndim != 1 or mask.shape[0] != num_envs:
+        raise ValueError(
+            f"{name} must have shape ({num_envs},), got {tuple(mask.shape)}."
+        )
+    return mask
+
+
+def _merge_failed_env_masks(
+    num_envs: int,
+    *masks: torch.Tensor | np.ndarray | None,
+) -> torch.Tensor:
+    """Combine per-environment failures from a graph edge and its ancestors."""
+    merged = torch.zeros(num_envs, dtype=torch.bool)
+    for index, mask in enumerate(masks):
+        merged |= _normalize_failed_env_mask(
+            mask,
+            num_envs,
+            name=f"failed environment mask {index}",
+        )
+    return merged
+
+
+def _action_failed_env_mask(action: Any) -> torch.Tensor | None:
+    """Read the per-environment failure mask from an executed atomic action."""
+    if isinstance(action, _ExecutedAtomicAction):
+        return action.failed_env_mask
+    return None
+
+
+def _current_robot_qpos(env: Any, num_envs: int) -> np.ndarray:
+    """Read the current batched robot configuration as an action array."""
+    qpos = env.robot.get_qpos()
+    if isinstance(qpos, torch.Tensor):
+        qpos = qpos.detach().cpu().numpy()
+    qpos = np.asarray(qpos, dtype=np.float32)
+    if qpos.ndim == 1:
+        qpos = qpos[None, :]
+    if qpos.ndim != 2 or qpos.shape[0] != num_envs:
+        raise ValueError(
+            "Robot qpos must have shape (num_envs, robot_dof), got "
+            f"{qpos.shape} for num_envs={num_envs}."
+        )
+    return qpos
+
+
+def _hold_failed_action_steps(
+    env: Any,
+    actions: list[torch.Tensor],
+    failed_env_mask: torch.Tensor,
+) -> list[torch.Tensor]:
+    """Replace failed environments' commands with their current robot qpos."""
+    if not bool(failed_env_mask.any()):
+        return actions
+    current_qpos = torch.as_tensor(
+        _current_robot_qpos(env, len(failed_env_mask)),
+        dtype=torch.float32,
+    )
+    held_actions = []
+    for action in actions:
+        held_action = action.clone()
+        failed_on_device = failed_env_mask.to(device=held_action.device)
+        held_action[failed_on_device] = current_qpos.to(
+            device=held_action.device,
+            dtype=held_action.dtype,
+        )[failed_on_device]
+        held_actions.append(held_action)
+    return held_actions
+
+
+def _hold_failed_world_state_qpos(
+    state: WorldState | None,
+    current_qpos: np.ndarray,
+    failed_env_mask: torch.Tensor,
+) -> WorldState | None:
+    """Keep failed environments' next state at the qpos actually commanded."""
+    if state is None or not bool(failed_env_mask.any()):
+        return state
+    last_qpos = state.last_qpos.clone()
+    failed_on_device = failed_env_mask.to(device=last_qpos.device)
+    current_qpos_t = torch.as_tensor(
+        current_qpos,
+        dtype=last_qpos.dtype,
+        device=last_qpos.device,
+    )
+    last_qpos[failed_on_device] = current_qpos_t[failed_on_device]
+    return WorldState(
+        last_qpos=last_qpos,
+        held_object=state.held_object,
+        coordinated_held_object=state.coordinated_held_object,
+    )
+
+
+def _failed_parallel_hold_result(
+    env: Any,
+    world_states: Mapping[str, WorldState],
+    failed_env_mask: torch.Tensor,
+) -> dict[str, Any]:
+    """Build one full-robot hold step when every graph environment has failed."""
+    current_qpos = _current_robot_qpos(env, len(failed_env_mask))
+    hold_step = torch.as_tensor(current_qpos, dtype=torch.float32)
+    return {
+        "actions": [hold_step],
+        "world_states": {
+            side: _hold_failed_world_state_qpos(
+                state,
+                current_qpos,
+                failed_env_mask,
+            )
+            for side, state in world_states.items()
+        },
+        "arm_actions": {"left": None, "right": None},
+        "failed_env_mask": failed_env_mask,
     }
 
 
@@ -1172,6 +1359,8 @@ def _executed_coordinated_atomic_action(
     env,
     spec: AtomicActionSpec,
     result,
+    *,
+    failed_env_mask: torch.Tensor | None = None,
 ) -> _ExecutedAtomicAction:
     trajectory = result.trajectory
     if isinstance(trajectory, torch.Tensor):
@@ -1202,6 +1391,7 @@ def _executed_coordinated_atomic_action(
         next_state=result.next_state,
         robot_name=None,
         control="coordinated",
+        failed_env_mask=failed_env_mask,
     )
 
 
@@ -1221,19 +1411,58 @@ def _full_robot_action_array_to_steps(action_np: np.ndarray) -> list[torch.Tenso
 def _sync_agent_states_from_parallel_actions(
     env,
     arm_actions: Mapping[str, Any],
+    *,
+    failed_env_mask: torch.Tensor | None = None,
 ) -> None:
     for executed in arm_actions.values():
         if not isinstance(executed, _ExecutedAtomicAction):
             continue
+        action_np = _hold_failed_atomic_action_for_state_sync(
+            env,
+            executed,
+            failed_env_mask,
+        )
         if executed.control == "coordinated":
-            _sync_agent_states_from_coordinated_action(env, executed.action)
+            _sync_agent_states_from_coordinated_action(env, action_np)
             continue
         _sync_agent_state_from_atomic_action(
             env,
             executed.robot_name,
-            executed.action,
+            action_np,
             executed.control,
         )
+
+
+def _hold_failed_atomic_action_for_state_sync(
+    env: Any,
+    executed: _ExecutedAtomicAction,
+    failed_env_mask: torch.Tensor | None,
+) -> np.ndarray:
+    """Mask cached arm state updates to the same qpos sent to failed envs."""
+    action_np = np.asarray(executed.action, dtype=np.float32)
+    if failed_env_mask is None or not bool(failed_env_mask.any()):
+        return action_np
+
+    num_envs = len(failed_env_mask)
+    action_is_unbatched = action_np.ndim == 2
+    action_batched = _as_2d_action(action_np, "atomic action")
+    if action_batched.shape[0] != num_envs:
+        raise ValueError(
+            "Atomic action state-sync batch size does not match failed_env_mask: "
+            f"{action_batched.shape[0]} != {num_envs}."
+        )
+    current_qpos = _current_robot_qpos(env, num_envs)
+    if executed.control == "coordinated":
+        hold_qpos = current_qpos
+    else:
+        _, _, _, arm_joints, eef_joints = _select_arm_parts(env, executed.robot_name)
+        hold_qpos = current_qpos[:, arm_joints + eef_joints]
+    action_batched = action_batched.copy()
+    failed_indices = failed_env_mask.detach().cpu().numpy()
+    action_batched[failed_indices] = hold_qpos[failed_indices, None, :]
+    if action_is_unbatched:
+        return action_batched.squeeze(0)
+    return action_batched
 
 
 def _select_arm_parts(env, robot_name: str):
@@ -3577,6 +3806,29 @@ def _failed_env_mask(
                 )
             return torch.from_numpy(~success.astype(bool))
     return None if bool(success) else torch.ones(n_envs, dtype=torch.bool)
+
+
+def _ensure_failure_hold_step(
+    trajectory: torch.Tensor,
+    state: WorldState,
+) -> torch.Tensor:
+    """Give a failed empty trajectory one no-op waypoint at its start qpos."""
+    if trajectory.ndim != 3:
+        raise ValueError(
+            "Atomic action trajectory must have shape (n_envs, T, robot_dof), "
+            f"got {trajectory.shape}."
+        )
+    if trajectory.shape[1] > 0:
+        return trajectory
+    if trajectory.shape[0] != state.last_qpos.shape[0]:
+        raise ValueError(
+            "Failed action trajectory environment count does not match WorldState: "
+            f"{trajectory.shape[0]} != {state.last_qpos.shape[0]}."
+        )
+    return state.last_qpos.to(
+        device=trajectory.device,
+        dtype=trajectory.dtype,
+    ).unsqueeze(1)
 
 
 def _pad_failed_trajectory_with_init_qpos(
