@@ -273,10 +273,9 @@ def _require_curobo() -> "Any":
             naming NVIDIA's CUDA-matched extras.
     """
     try:
-        planner_mod = importlib.import_module("curobo.planner")
-        state_mod = importlib.import_module("curobo.types.state")
-        math_mod = importlib.import_module("curobo.types.math")
-        goal_mod = importlib.import_module("curobo.types.goal")
+        planner_mod = importlib.import_module("curobo.motion_planner")
+        batch_mod = importlib.import_module("curobo.batch_motion_planner")
+        types_mod = importlib.import_module("curobo.types")
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
@@ -288,10 +287,10 @@ def _require_curobo() -> "Any":
     return SimpleNamespace(
         MotionPlanner=planner_mod.MotionPlanner,
         MotionPlannerCfg=planner_mod.MotionPlannerCfg,
-        BatchMotionPlanner=planner_mod.BatchMotionPlanner,
-        JointState=state_mod.JointState,
-        Pose=math_mod.Pose,
-        GoalToolPose=goal_mod.GoalToolPose,
+        BatchMotionPlanner=batch_mod.BatchMotionPlanner,
+        JointState=types_mod.JointState,
+        Pose=types_mod.Pose,
+        GoalToolPose=types_mod.GoalToolPose,
     )
 
 
@@ -449,7 +448,7 @@ class CuroboPlanner(BasePlanner):
             dict(world_cfg.collision_cache) if world_cfg.collision_cache else None
         )
         planner_cfg = self._bindings.MotionPlannerCfg.create(
-            robot_config_path=profile.robot_config_path,
+            robot=profile.robot_config_path,
             scene_model=world_cfg.world_config_path,
             collision_cache=collision_cache,
             max_batch_size=int(batch_size),
@@ -461,9 +460,7 @@ class CuroboPlanner(BasePlanner):
         if batch_size == 1:
             planner = self._bindings.MotionPlanner(planner_cfg)
         else:
-            planner = self._bindings.BatchMotionPlanner(
-                planner_cfg, max_batch_size=int(batch_size)
-            )
+            planner = self._bindings.BatchMotionPlanner(planner_cfg)
 
         if profile.active_joint_names is not None:
             expected = list(profile.active_joint_names)

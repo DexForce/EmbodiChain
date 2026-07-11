@@ -30,6 +30,9 @@ from embodichain.lab.sim.planners import (
     NeuralPlanner,
     NeuralPlannerCfg,
     NeuralPlanOptions,
+    CuroboPlanner,
+    CuroboPlannerCfg,
+    CuroboPlanOptions,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 from embodichain.utils import logger, configclass
@@ -101,6 +104,7 @@ class MotionGenerator:
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
+        "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
 
     def __init__(self, cfg: MotionGenCfg) -> None:
