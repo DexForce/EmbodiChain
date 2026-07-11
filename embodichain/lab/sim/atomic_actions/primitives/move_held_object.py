@@ -126,7 +126,6 @@ class MoveHeldObject(AtomicAction):
         dot_z = torch.sum(end_arm_rx * cross_z, dim=-1)
         revert_flag = torch.where(dot_z < 0, -1.0, 1.0)
         if (angle_diff > 0.5).any():
-            print(f"inside")
             rota_axis_angle = revert_flag * torch.pi * 0.5 * end_arm_rx
             rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
             eef_rotation = torch.bmm(rota_offset, end_arm_xpos[:, :3, :3])
