@@ -29,6 +29,12 @@ from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (  # noqa: F401
     AgenticGenSimEnv,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+    apply_robot_profile_to_gym_config,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    available_robot_profile_choices,
+)
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -36,7 +42,7 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.utility import load_config
 
-__all__ = ["cli"]
+__all__ = ["build_parser", "cli"]
 
 _SHOW_PHYSICAL_COLLISION_ENV = "EMBODICHAIN_SHOW_PHYSICAL_COLLISION"
 _PHYSICAL_COLLISION_RGBA = (0.0, 1.0, 0.0, 0.85)
@@ -51,32 +57,15 @@ def cli() -> None:
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    parser = argparse.ArgumentParser()
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--task_name",
-        type=str,
-        help="Name of the task.",
-        required=True,
-    )
-    parser.add_argument(
-        "--agent_config",
-        type=str,
-        help="Path to the agent configuration file.",
-        required=True,
-    )
-    parser.add_argument(
-        "--regenerate",
-        action="store_true",
-        help="Whether to regenerate code if already existed.",
-        default=False,
-    )
-
+    parser = build_parser()
     args = parser.parse_args()
 
     env_cfg, gym_config, _ = build_env_cfg_from_args(
         args,
-        gym_config_modifier=_add_vectorized_reset_randomization,
+        gym_config_modifier=lambda gym_config: _modify_gym_config_for_run_agent(
+            gym_config,
+            robot_profile=args.robot_profile,
+        ),
     )
     agent_config = load_config(args.agent_config)
 
@@ -99,6 +88,52 @@ def cli() -> None:
     if args.headless:
         with timing_scope("run_agent.final_reset"):
             _reset_env_with_physical_collision(env, options={"final": True})
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the action-agent runner argument parser."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--task_name",
+        type=str,
+        help="Name of the task.",
+        required=True,
+    )
+    parser.add_argument(
+        "--agent_config",
+        type=str,
+        help="Path to the agent configuration file.",
+        required=True,
+    )
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="Whether to regenerate code if already existed.",
+        default=False,
+    )
+    parser.add_argument(
+        "--robot-profile",
+        "--robot_profile",
+        dest="robot_profile",
+        choices=available_robot_profile_choices(),
+        default=None,
+        help=(
+            "Override the action-agent robot profile for this run. If omitted, "
+            "use the robot profile already stored in the gym config."
+        ),
+    )
+    return parser
+
+
+def _modify_gym_config_for_run_agent(
+    gym_config: dict[str, Any],
+    *,
+    robot_profile: str | None,
+) -> None:
+    if robot_profile is not None:
+        apply_robot_profile_to_gym_config(gym_config, robot_profile=robot_profile)
+    _add_vectorized_reset_randomization(gym_config)
 
 
 def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:

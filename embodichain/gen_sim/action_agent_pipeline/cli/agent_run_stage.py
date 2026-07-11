@@ -34,6 +34,7 @@ def run_agent_command(
     agent_config: Path,
     regenerate: bool,
     headless: bool = False,
+    robot_profile: str | None = None,
 ) -> int:
     command = [
         sys.executable,
@@ -50,6 +51,8 @@ def run_agent_command(
         command.append("--headless")
     if regenerate:
         command.append("--regenerate")
+    if robot_profile is not None:
+        command.extend(["--robot-profile", robot_profile])
 
     env = os.environ.copy()
     if env.get("EMBODICHAIN_LLM_USAGE_PATH"):

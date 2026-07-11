@@ -198,6 +198,7 @@ def _run_pipeline(
             agent_config=paths.agent_config,
             regenerate=args.regenerate,
             headless=getattr(args, "headless", False),
+            robot_profile=getattr(args, "robot_profile", None),
         )
     write_llm_usage_summary(usage_paths)
     return return_code
