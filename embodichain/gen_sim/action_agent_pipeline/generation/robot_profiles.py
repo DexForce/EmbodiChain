@@ -174,7 +174,7 @@ def _dual_ur_profile(
             "right": 0.0,
         },
         grasp_runtime_defaults={
-            "grasp_max_open_length": 0.14,
+            "grasp_max_open_length": 0.1,
             "grasp_min_open_length": 0.003,
             "grasp_finger_length": 0.13,
         },

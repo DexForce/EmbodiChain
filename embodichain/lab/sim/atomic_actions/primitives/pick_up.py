@@ -150,14 +150,7 @@ class PickUp(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-        if target.grasp_xpos is None:
-            is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
-        else:
-            grasp_xpos = self.builder.resolve_pose_target(
-                target.grasp_xpos, n_envs=self.n_envs
-            )
-            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
-
+        is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self._fail(state)
@@ -450,7 +443,6 @@ class PickUp(AtomicAction):
         self, semantics: ObjectSemantics, grasp_xpos: torch.Tensor
     ) -> torch.Tensor:
         """Return grasp poses after the optional upright-in-place roll adjustment."""
-        return grasp_xpos
         if self.cfg.rotate_upright is None:
             return grasp_xpos
 
@@ -470,7 +462,7 @@ class PickUp(AtomicAction):
             obj_upright.shape[0], *([1] * (grasp_ry.ndim - 2)), 3
         )
         dot_result = (grasp_ry * object_axes).sum(dim=-1)
-        revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+        revert_flag = torch.where(dot_result < 0, -1.0, 1.0)
         grasp_rx = adjusted_grasp_xpos[..., :3, 0]
         rota_axis_angle = self.cfg.rotate_upright * revert_flag[..., None] * grasp_rx
         rota_offset = axis_angle_to_rotation_matrix(
