@@ -49,7 +49,7 @@ _PHYSICAL_COLLISION_RGBA = (0.0, 1.0, 0.0, 0.85)
 _FALSE_ENV_VALUES = {"", "0", "false", "no", "off"}
 # hard-coded param for waic demo.
 _RIGID_OBJECT_POSITION_RANGE = [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]]
-_RIGID_OBJECT_ROTATION_RANGE = [[0.0, 0.0, -45.0], [0.0, 0.0, 45.0]]
+_RIGID_OBJECT_ROTATION_RANGE = [[0.0, 0.0, -30.0], [0.0, 0.0, 30.0]]
 _TABLE_HEIGHT_DELTA_RANGE = [[-0.05], [0.05]]
 
 
@@ -190,6 +190,7 @@ def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
                         list(_RIGID_OBJECT_ROTATION_RANGE[1]),
                     ],
                     "relative_position": True,
+                    "relative_rotation": True,
                 },
             },
         )
