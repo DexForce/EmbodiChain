@@ -1,0 +1,11 @@
+# cuRobo V2 static collision scene for the Franka Panda demo.
+#
+# A single cuboid obstacle placed in front of the robot. The same geometry is
+# mirrored in DexSim (CubeCfg) by the demo and end-to-end test so that the
+# planner's collision world and the simulator stay consistent.
+#
+# Pose convention: [x, y, z, qw, qx, qy, qz].
+cuboid:
+  - name: demo_block
+    dims: [0.18, 0.40, 0.36]
+    pose: [0.45, 0.0, 0.18, 1.0, 0.0, 0.0, 0.0]
