@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import ast
+from contextlib import nullcontext
 import importlib.util
 import json
 import os
@@ -841,10 +842,6 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     gym_config = output_root / "gym_export/gym_config.json"
     captured = {}
 
-    def fake_load_llm_config(path):
-        captured["llm_config_path"] = path
-        return "llm-cfg"
-
     def fake_run_prompt2scene(request, *, llm_cfg):
         captured["request"] = request
         captured["llm_cfg"] = llm_cfg
@@ -865,7 +862,22 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     monkeypatch.setattr(
         prompt2scene_stage,
         "_load_prompt2scene_components",
-        lambda: (fake_load_llm_config, fake_run_prompt2scene, FakePrompt2SceneInput),
+        lambda: (fake_run_prompt2scene, FakePrompt2SceneInput),
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "build_prompt2scene_llm_config",
+        lambda path: captured.update(llm_config_path=path) or "llm-cfg",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "write_prompt2scene_client_config",
+        lambda _: tmp_path / "prompt2scene_client_config.json",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "use_prompt2scene_client_config",
+        lambda _: nullcontext(),
     )
 
     result = prompt2scene_stage.run_prompt2scene_stage(
@@ -901,10 +913,6 @@ def test_prompt2scene_stage_edit_only_does_not_use_default_image(
     gym_config.write_text("{}", encoding="utf-8")
     captured = {}
 
-    def fake_load_llm_config(path):
-        captured["llm_config_path"] = path
-        return "llm-cfg"
-
     def fake_run_prompt2scene(request, *, llm_cfg):
         captured["request"] = request
         captured["llm_cfg"] = llm_cfg
@@ -923,7 +931,22 @@ def test_prompt2scene_stage_edit_only_does_not_use_default_image(
     monkeypatch.setattr(
         prompt2scene_stage,
         "_load_prompt2scene_components",
-        lambda: (fake_load_llm_config, fake_run_prompt2scene, FakePrompt2SceneInput),
+        lambda: (fake_run_prompt2scene, FakePrompt2SceneInput),
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "build_prompt2scene_llm_config",
+        lambda path: captured.update(llm_config_path=path) or "llm-cfg",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "write_prompt2scene_client_config",
+        lambda _: tmp_path / "prompt2scene_client_config.json",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "use_prompt2scene_client_config",
+        lambda _: nullcontext(),
     )
 
     result = prompt2scene_stage.run_prompt2scene_stage(
