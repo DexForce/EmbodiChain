@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import MISSING
 from types import SimpleNamespace
 
 import pytest
@@ -177,8 +178,8 @@ class _FakeEnv:
         self.right_arm_current_qpos = torch.tensor([0.3, 0.4])
         self.left_arm_init_qpos = torch.tensor([-0.1, -0.2])
         self.right_arm_init_qpos = torch.tensor([-0.3, -0.4])
-        self.left_arm_current_xpos = torch.eye(4)
-        self.right_arm_current_xpos = torch.eye(4)
+        self.left_arm_current_xpos = torch.eye(4).unsqueeze(0)
+        self.right_arm_current_xpos = torch.eye(4).unsqueeze(0)
         self.left_arm_current_gripper_state = torch.tensor([0.0])
         self.right_arm_current_gripper_state = torch.tensor([0.0])
         self.open_state = torch.tensor([0.05])
@@ -225,6 +226,11 @@ class _FakeEnv:
         return pose
 
 
+def _single_env_pose(pose: torch.Tensor) -> torch.Tensor:
+    assert pose.shape == (1, 4, 4)
+    return pose[0]
+
+
 class _FakeBackendAction:
     capture: list | None = None
 
@@ -254,8 +260,8 @@ class _FakeBackendAction:
             )
             coordinated = CoordinatedHeldObjectState(
                 semantics=target.object_semantics,
-                left_object_to_eef=target.left_object_to_eef.unsqueeze(0),
-                right_object_to_eef=target.right_object_to_eef.unsqueeze(0),
+                left_object_to_eef=target.left_object_to_eef.clone(),
+                right_object_to_eef=target.right_object_to_eef.clone(),
                 left_grasp_xpos=torch.eye(4).unsqueeze(0),
                 right_grasp_xpos=torch.eye(4).unsqueeze(0),
             )
@@ -477,6 +483,7 @@ def test_pickup_upright_cfg_is_normalized_for_typed_cfg() -> None:
                 "sample_interval": 45,
                 "obj_upright_direction": [1.0, 0.0, 0.0],
                 "rotate_upright": rotate_upright,
+                "approach_alignment_max_angle": 0.1,
             },
         }
     )
@@ -496,6 +503,7 @@ def test_pickup_upright_cfg_is_normalized_for_typed_cfg() -> None:
         torch.tensor([1.0, 0.0, 0.0]),
     )
     assert cfg.rotate_upright == pytest.approx(rotate_upright)
+    assert cfg.approach_alignment_max_angle == pytest.approx(0.1)
 
 
 def test_pickup_upright_cfg_rejects_invalid_direction() -> None:
@@ -553,6 +561,71 @@ def test_move_held_object_defaults_orientation_axis_to_none() -> None:
     target = normalized["target_object_pose"]
     assert target.get("orientation_goal", "preserve") == "preserve"
     assert target.get("orientation_axis", "none") == "none"
+
+
+def test_place_accepts_preserve_object_pose_target() -> None:
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "Place",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_object_pose": {
+                "reference": "absolute",
+                "position": [0.2, 0.1, 0.3],
+                "orientation_goal": "preserve",
+                "orientation_axis": "none",
+            },
+            "cfg": {"cartesian_waypoint_count": 4},
+        }
+    )
+
+    assert normalized["target_object_pose"]["position"] == [0.2, 0.1, 0.3]
+    assert normalized["cfg"]["cartesian_waypoint_count"] == 4
+
+
+def test_place_rejects_object_pose_target_that_rotates_in_air() -> None:
+    with pytest.raises(ValueError, match="only supports orientation_goal='preserve'"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "Place",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_object_pose": {
+                    "reference": "absolute",
+                    "position": [0.2, 0.1, 0.3],
+                    "orientation_goal": "upright",
+                    "orientation_axis": "none",
+                },
+                "cfg": {},
+            }
+        )
+
+
+def test_place_object_pose_target_keeps_grasp_offset_in_tcp_target() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(env, 0.0)
+    object_to_eef = torch.eye(4).unsqueeze(0)
+    object_to_eef[:, 0, 3] = 0.05
+    state.held_object.object_to_eef = object_to_eef
+    state.held_object.grasp_xpos = object_to_eef.clone()
+    spec = atom_actions.AtomicActionSpec(
+        atomic_action_class="Place",
+        robot_name="left_arm",
+        control="arm",
+        target_object_pose={
+            "reference": "absolute",
+            "position": [0.2, 0.1, 0.3],
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+        },
+        cfg={},
+    )
+
+    target = atom_actions._resolve_place_target(env, spec, state)
+
+    assert target.shape == (1, 4, 4)
+    assert torch.allclose(target[0, :3, 3], torch.tensor([0.25, 0.1, 0.3]))
+    assert torch.allclose(target[0, :3, :3], torch.eye(3))
 
 
 def test_move_held_object_rejects_legacy_horizontal_orientation_goal() -> None:
@@ -868,6 +941,82 @@ def test_agent_task_graph_threads_world_state_between_edges(monkeypatch) -> None
     assert capture[2]["state"].held_object is not None
 
 
+def test_agent_task_graph_collects_absolute_held_object_targets_for_pickup() -> None:
+    graph = AgentTaskGraph(start="v0", goal="v2")
+    graph.add_node("v0").add_node("v1").add_node("v2")
+    graph.add_edge(
+        "e01",
+        "v0",
+        "v1",
+        left_arm_action={
+            "atomic_action_class": "PickUp",
+            "robot_name": "left_arm",
+        },
+    )
+    graph.add_edge(
+        "e12",
+        "v1",
+        "v2",
+        left_arm_action={
+            "atomic_action_class": "MoveHeldObject",
+            "robot_name": "left_arm",
+            "target_object_pose": {
+                "reference": "object",
+                "offset": [0.0, 0.0, 0.2],
+                "frame": "world",
+                "orientation_goal": "preserve",
+            },
+        },
+    )
+
+    targets = graph._pickup_downstream_targets(graph.edges["e01"])
+
+    assert targets == {
+        "left_arm": (
+            {
+                "reference": "object",
+                "offset": [0.0, 0.0, 0.2],
+                "frame": "world",
+                "orientation_goal": "preserve",
+            },
+        )
+    }
+
+
+def test_agent_task_graph_collects_object_aware_place_target_for_pickup() -> None:
+    graph = AgentTaskGraph(start="v0", goal="v2")
+    graph.add_node("v0").add_node("v1").add_node("v2")
+    graph.add_edge(
+        "e01",
+        "v0",
+        "v1",
+        left_arm_action={
+            "atomic_action_class": "PickUp",
+            "robot_name": "left_arm",
+        },
+    )
+    target = {
+        "reference": "absolute",
+        "position": [0.2, 0.1, 0.3],
+        "orientation_goal": "preserve",
+        "orientation_axis": "none",
+    }
+    graph.add_edge(
+        "e12",
+        "v1",
+        "v2",
+        left_arm_action={
+            "atomic_action_class": "Place",
+            "robot_name": "left_arm",
+            "target_object_pose": target,
+        },
+    )
+
+    assert graph._pickup_downstream_targets(graph.edges["e01"]) == {
+        "left_arm": (target,)
+    }
+
+
 def test_resolve_arm_side_rejects_unavailable_requested_arm() -> None:
     env = _FakeEnv()
     env.right_arm_joints = []
@@ -935,7 +1084,8 @@ def test_object_referenced_pose_builds_move_cfg_and_pose_target(monkeypatch) -> 
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].sample_interval == 12
     assert isinstance(capture[0]["target"], EndEffectorPoseTarget)
-    assert capture[0]["target"].xpos[:3, 3].tolist() == pytest.approx([0.5, 0.0, 0.4])
+    target_pose = _single_env_pose(capture[0]["target"].xpos)
+    assert target_pose[:3, 3].tolist() == pytest.approx([0.5, 0.0, 0.4])
 
 
 def test_gripper_state_qpos_target_uses_move_joints(monkeypatch) -> None:
@@ -1107,16 +1257,14 @@ def test_coordinated_pickment_builds_full_robot_stream(monkeypatch) -> None:
     assert env.robot._joint_ids["dual_arm"] == [0, 1, 3, 4]
     assert capture[0]["cfg"].left_arm_control_part == "left_arm"
     assert capture[0]["cfg"].right_arm_control_part == "right_arm"
-    assert isinstance(capture[0]["target"], CoordinatedPickmentTarget)
-    assert capture[0]["target"].object_target_pose[:3, 3].tolist() == pytest.approx(
-        [0.56, -0.2, 0.1]
-    )
-    assert capture[0]["target"].left_object_to_eef[:3, 2].tolist() == pytest.approx(
-        [0.0, 0.0, -1.0]
-    )
-    assert capture[0]["target"].right_object_to_eef[:3, 2].tolist() == pytest.approx(
-        [0.0, 0.0, -1.0]
-    )
+    target = capture[0]["target"]
+    assert isinstance(target, CoordinatedPickmentTarget)
+    object_target_pose = _single_env_pose(target.object_target_pose)
+    left_object_to_eef = _single_env_pose(target.left_object_to_eef)
+    right_object_to_eef = _single_env_pose(target.right_object_to_eef)
+    assert object_target_pose[:3, 3].tolist() == pytest.approx([0.56, -0.2, 0.1])
+    assert left_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert right_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert env.left_arm_current_qpos.tolist() == pytest.approx([0.4, 0.5])
     assert env.right_arm_current_qpos.tolist() == pytest.approx([0.6, 0.7])
     assert env.left_arm_current_gripper_state.tolist() == pytest.approx([0.04])
@@ -1202,10 +1350,10 @@ def test_coordinated_pickment_prefers_yawed_top_down_grasps(
     monkeypatch,
 ) -> None:
     env = _FakeEnv()
-    env.left_arm_current_xpos = torch.eye(4)
-    env.left_arm_current_xpos[:3, 3] = torch.tensor([0.4, 0.3, 0.04])
-    env.right_arm_current_xpos = torch.eye(4)
-    env.right_arm_current_xpos[:3, 3] = torch.tensor([0.3, -0.3, 0.04])
+    env.left_arm_current_xpos = torch.eye(4).unsqueeze(0)
+    env.left_arm_current_xpos[0, :3, 3] = torch.tensor([0.4, 0.3, 0.04])
+    env.right_arm_current_xpos = torch.eye(4).unsqueeze(0)
+    env.right_arm_current_xpos[0, :3, 3] = torch.tensor([0.3, -0.3, 0.04])
     capture = []
     _FakeBackendAction.capture = capture
 
@@ -1246,13 +1394,15 @@ def test_coordinated_pickment_prefers_yawed_top_down_grasps(
     target = capture[0]["target"]
     assert isinstance(target, CoordinatedPickmentTarget)
     obj_pose = env.sim.get_rigid_object("pad_y").get_local_pose(to_matrix=True)[0]
-    left_world = obj_pose @ target.left_object_to_eef
-    right_world = obj_pose @ target.right_object_to_eef
+    left_object_to_eef = _single_env_pose(target.left_object_to_eef)
+    right_object_to_eef = _single_env_pose(target.right_object_to_eef)
+    left_world = obj_pose @ left_object_to_eef
+    right_world = obj_pose @ right_object_to_eef
     assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert {
-        round(float(target.left_object_to_eef[0, 3]), 3),
-        round(float(target.right_object_to_eef[0, 3]), 3),
+        round(float(left_object_to_eef[0, 3]), 3),
+        round(float(right_object_to_eef[0, 3]), 3),
     } == {
         0.14,
         0.26,
@@ -1312,8 +1462,8 @@ def test_coordinated_pickment_aligns_gripper_to_baked_diagonal_mesh(
     obj_pose = env.sim.get_rigid_object("pad_baked_diag").get_local_pose(
         to_matrix=True
     )[0]
-    left_world = obj_pose @ target.left_object_to_eef
-    right_world = obj_pose @ target.right_object_to_eef
+    left_world = obj_pose @ _single_env_pose(target.left_object_to_eef)
+    right_world = obj_pose @ _single_env_pose(target.right_object_to_eef)
     hand_delta = left_world[:3, 3] - right_world[:3, 3]
     hand_delta[2] = 0.0
     hand_axis = hand_delta / torch.linalg.norm(hand_delta)
@@ -1374,11 +1524,13 @@ def test_coordinated_pickment_prefers_closer_long_axis_grasps_for_slender_object
 
     target = capture[0]["target"]
     assert isinstance(target, CoordinatedPickmentTarget)
-    assert target.left_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
-    assert target.right_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    left_object_to_eef = _single_env_pose(target.left_object_to_eef)
+    right_object_to_eef = _single_env_pose(target.right_object_to_eef)
+    assert left_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
+    assert right_object_to_eef[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert {
-        round(float(target.left_object_to_eef[0, 3]), 3),
-        round(float(target.right_object_to_eef[0, 3]), 3),
+        round(float(left_object_to_eef[0, 3]), 3),
+        round(float(right_object_to_eef[0, 3]), 3),
     } == {
         0.28,
         0.52,
@@ -1428,8 +1580,8 @@ def test_coordinated_pickment_prefers_outer_edge_top_down_for_pot(
 
     target = capture[0]["target"]
     obj_pose = env.sim.get_rigid_object("cooking_pot").get_local_pose(to_matrix=True)[0]
-    left_world = obj_pose @ target.left_object_to_eef
-    right_world = obj_pose @ target.right_object_to_eef
+    left_world = obj_pose @ _single_env_pose(target.left_object_to_eef)
+    right_world = obj_pose @ _single_env_pose(target.right_object_to_eef)
     assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert {round(float(left_world[0, 3]), 3), round(float(right_world[0, 3]), 3)} == {
@@ -1489,8 +1641,8 @@ def test_coordinated_pickment_treats_named_tray_as_container_not_rod(
     obj_pose = env.sim.get_rigid_object("serving_tray").get_local_pose(to_matrix=True)[
         0
     ]
-    left_world = obj_pose @ target.left_object_to_eef
-    right_world = obj_pose @ target.right_object_to_eef
+    left_world = obj_pose @ _single_env_pose(target.left_object_to_eef)
+    right_world = obj_pose @ _single_env_pose(target.right_object_to_eef)
     assert left_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert right_world[:3, 2].tolist() == pytest.approx([0.0, 0.0, -1.0])
     assert {round(float(left_world[0, 3]), 3), round(float(right_world[0, 3]), 3)} == {
@@ -1555,8 +1707,8 @@ def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> No
     )
 
     target = capture[0]["target"]
-    left_local = target.left_object_to_eef[:3, 3]
-    right_local = target.right_object_to_eef[:3, 3]
+    left_local = _single_env_pose(target.left_object_to_eef)[:3, 3]
+    right_local = _single_env_pose(target.right_object_to_eef)[:3, 3]
     assert {round(float(left_local[0]), 3), round(float(right_local[0]), 3)} == {
         0.12,
         0.28,
@@ -1605,6 +1757,7 @@ def _held_state_with_yaw(
     yaw_degrees: float,
     *,
     mesh_extents=(0.3, 0.1, 0.05),
+    object_label: str = "apple",
 ) -> WorldState:
     yaw = torch.deg2rad(torch.tensor(float(yaw_degrees)))
     current_pose = torch.eye(4)
@@ -1617,6 +1770,7 @@ def _held_state_with_yaw(
         {"obj_name": "apple", "affordance": "antipodal"},
         {"allow_grasp_annotation": True},
     )
+    semantics.label = object_label
     x, y, z = mesh_extents
     semantics.geometry["mesh_vertices"] = torch.tensor(
         [
@@ -1654,16 +1808,18 @@ def _resolved_held_object_pose(
     state: WorldState,
     target_object_pose: dict,
 ) -> torch.Tensor:
-    return atom_actions._resolve_held_object_pose_target(
-        env,
-        atom_actions.AtomicActionSpec(
-            atomic_action_class="MoveHeldObject",
-            robot_name="left_arm",
-            control="arm",
-            target_object_pose=target_object_pose,
-            cfg={},
-        ),
-        state,
+    return _single_env_pose(
+        atom_actions._resolve_held_object_pose_target(
+            env,
+            atom_actions.AtomicActionSpec(
+                atomic_action_class="MoveHeldObject",
+                robot_name="left_arm",
+                control="arm",
+                target_object_pose=target_object_pose,
+                cfg={},
+            ),
+            state,
+        )
     )
 
 
@@ -1687,6 +1843,30 @@ def test_surface_z_policy_places_held_object_above_support_top() -> None:
 
     assert torch.allclose(target[:2, 3], torch.tensor([0.25, -0.15]))
     assert target[2, 3] == pytest.approx(0.215)
+
+
+def test_upright_known_z_normalized_assets_trust_local_z_axis() -> None:
+    env = _FakeEnv()
+    state = _held_state_with_yaw(
+        env,
+        37.0,
+        mesh_extents=(0.30, 0.24, 0.08),
+        object_label="soda_can",
+    )
+
+    target = _resolved_held_object_pose(
+        env,
+        state,
+        {
+            "reference": "relative",
+            "offset": [0.0, 0.0, 0.1],
+            "frame": "world",
+            "orientation_goal": "upright",
+            "orientation_axis": "none",
+        },
+    )
+
+    assert torch.allclose(target[:3, 2], torch.tensor([0.0, 0.0, 1.0]))
 
 
 def test_surface_z_policy_defaults_object_reference_to_support() -> None:
@@ -1820,22 +2000,24 @@ def test_axis_align_upright_object_uses_horizontal_fallback_axis() -> None:
     env = _FakeEnv()
     state = _held_state_with_yaw(env, 37.0, mesh_extents=(0.05, 0.05, 0.30))
 
-    target = atom_actions._resolve_held_object_pose_target(
-        env,
-        atom_actions.AtomicActionSpec(
-            atomic_action_class="MoveHeldObject",
-            robot_name="left_arm",
-            control="arm",
-            target_object_pose={
-                "reference": "relative",
-                "offset": [0.0, 0.0, 0.1],
-                "frame": "world",
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
-            },
-            cfg={},
-        ),
-        state,
+    target = _single_env_pose(
+        atom_actions._resolve_held_object_pose_target(
+            env,
+            atom_actions.AtomicActionSpec(
+                atomic_action_class="MoveHeldObject",
+                robot_name="left_arm",
+                control="arm",
+                target_object_pose={
+                    "reference": "relative",
+                    "offset": [0.0, 0.0, 0.1],
+                    "frame": "world",
+                    "orientation_goal": "axis_align",
+                    "orientation_axis": "x",
+                },
+                cfg={},
+            ),
+            state,
+        )
     )
     target_axis = torch.tensor([1.0, 0.0, 0.0])
     horizontal_alignments = []
@@ -1893,22 +2075,24 @@ def test_axis_align_selects_smallest_equivalent_yaw() -> None:
     env = _FakeEnv()
     state = _held_state_with_yaw(env, 170.0)
 
-    target = atom_actions._resolve_held_object_pose_target(
-        env,
-        atom_actions.AtomicActionSpec(
-            atomic_action_class="MoveHeldObject",
-            robot_name="left_arm",
-            control="arm",
-            target_object_pose={
-                "reference": "relative",
-                "offset": [0.0, 0.0, 0.1],
-                "frame": "world",
-                "orientation_goal": "axis_align",
-                "orientation_axis": "x",
-            },
-            cfg={},
-        ),
-        state,
+    target = _single_env_pose(
+        atom_actions._resolve_held_object_pose_target(
+            env,
+            atom_actions.AtomicActionSpec(
+                atomic_action_class="MoveHeldObject",
+                robot_name="left_arm",
+                control="arm",
+                target_object_pose={
+                    "reference": "relative",
+                    "offset": [0.0, 0.0, 0.1],
+                    "frame": "world",
+                    "orientation_goal": "axis_align",
+                    "orientation_axis": "x",
+                },
+                cfg={},
+            ),
+            state,
+        )
     )
     final_yaw = torch.rad2deg(torch.atan2(target[1, 0], target[0, 0]))
 
@@ -1966,9 +2150,8 @@ def test_move_held_object_builds_cfg_and_object_pose_target(monkeypatch) -> None
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].hand_control_part == "left_eef"
     assert isinstance(capture[0]["target"], HeldObjectPoseTarget)
-    assert capture[0]["target"].object_target_pose[:3, 3].tolist() == pytest.approx(
-        [0.4, -0.2, 0.3]
-    )
+    object_target_pose = _single_env_pose(capture[0]["target"].object_target_pose)
+    assert object_target_pose[:3, 3].tolist() == pytest.approx([0.4, -0.2, 0.3])
 
 
 def test_move_held_object_requires_prior_pickup() -> None:
@@ -2094,7 +2277,41 @@ def test_vhacd_grasp_collision_path_skips_env_coacd_bridge(monkeypatch) -> None:
     )
 
 
-def test_grasp_convex_decomposition_method_uses_vhacd_alias() -> None:
+def test_grasp_convex_decomposition_method_uses_acd_method() -> None:
+    target_obj = SimpleNamespace(cfg=SimpleNamespace(acd_method="coacd"))
+
+    method = atom_actions._grasp_convex_decomposition_method(target_obj, {})
+
+    assert method == "coacd"
+
+
+def test_grasp_convex_decomposition_method_uses_shape_acd_method() -> None:
+    target_obj = SimpleNamespace(
+        cfg=SimpleNamespace(
+            acd_method=MISSING,
+            shape=SimpleNamespace(acd_method="coacd"),
+        )
+    )
+
+    method = atom_actions._grasp_convex_decomposition_method(target_obj, {})
+
+    assert method == "coacd"
+
+
+def test_max_decomposition_hulls_uses_shape_config() -> None:
+    target_obj = SimpleNamespace(
+        cfg=SimpleNamespace(
+            max_convex_hull_num=MISSING,
+            shape=SimpleNamespace(max_convex_hull_num=12),
+        )
+    )
+
+    max_hulls = atom_actions._max_decomposition_hulls(target_obj, {})
+
+    assert max_hulls == 12
+
+
+def test_grasp_convex_decomposition_method_keeps_legacy_vhacd_alias() -> None:
     target_obj = SimpleNamespace(
         cfg=SimpleNamespace(convex_decomposition_method="visacd")
     )

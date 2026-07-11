@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+)
+
 __all__ = [
     "_ArrangementLineSpec",
     "_ArrangementLineStepSpec",
@@ -114,6 +118,7 @@ class _RelativePlacementStepSpec:
     upright_in_place: bool = False
     pickup_upright_direction: list[float] | None = None
     pickup_rotate_upright: float | None = None
+    surface_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE
 
 
 @dataclass(frozen=True)
@@ -143,6 +148,7 @@ class _RelativePlacementSpec:
     upright_in_place: bool = False
     pickup_upright_direction: list[float] | None = None
     pickup_rotate_upright: float | None = None
+    surface_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE
 
 
 _ObjectManipulationStepSpec = _RelativePlacementStepSpec

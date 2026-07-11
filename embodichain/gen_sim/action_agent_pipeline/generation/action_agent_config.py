@@ -17,11 +17,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 import math
+import warnings
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
@@ -115,6 +118,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _DUAL_UR5_ARM_COMPONENT_Z,
     _DUAL_UR5_TABLETOP_CLEARANCE,
+    _GLTF_TO_SIM_FRAME_KEY,
     _TABLETOP_OBJECT_CLEARANCE,
     _apply_tabletop_z_placement,
     _mesh_config_world_z_bounds,
@@ -202,14 +206,15 @@ def generate_action_agent_config_from_project(
     source_target_body_scale_multiplier: float | None = None,
     source_scene_body_scale_mode: str | None = None,
     preserve_source_scene_geometry: bool = False,
+    load_source_meshes_directly: bool = False,
     source_scene_z_rotation_degrees: float = 0.0,
     source_mesh_x_rotation_degrees: float = 0.0,
     inside_container_slot_distance_scale: float = 1.0,
+    surface_release_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
-    convex_decomposition_method: str = "vhacd",
-    prewarm_coacd_cache: bool = True,
+    acd_method: str = "vhacd",
     overwrite: bool = False,
     max_episodes: int = 1,
     max_episode_steps: int = 1000,
@@ -253,19 +258,22 @@ def generate_action_agent_config_from_project(
             behavior is preserved.
         preserve_source_scene_geometry: If true, generated scene objects keep
             source z placement instead of re-snapping objects to the tabletop.
-            GLB/GLTF meshes are still normalized to OBJ for consistent
-            action-agent runtime loading.
+        load_source_meshes_directly: If true, keep source GLB/GLTF paths in the
+            generated config and let DexSim perform its native GLTF Y-up to
+            simulation-frame conversion. Runtime ``body_scale`` is preserved
+            instead of being baked into OBJ vertices.
         source_scene_z_rotation_degrees: World-frame Z rotation applied to
             generated scene object poses after config generation. Mesh paths and
             scales are unchanged.
         source_mesh_x_rotation_degrees: Local X-axis rotation baked into
-            normalized GLB/GLTF meshes. Keep this at ``0`` for the legacy
-            image2scene path; prompt2scene uses ``90`` to match the action-agent
-            runtime mesh frame.
+            normalized GLB/GLTF meshes. This is ignored when
+            ``load_source_meshes_directly`` is true.
         inside_container_slot_distance_scale: Multiplier for automatically
             generated inside-container slot offsets when multiple moved objects
             share one container. Values below ``1`` place release points closer
             to the container center.
+        surface_release_clearance: Final object-bottom clearance above support
+            surfaces for ``object_on_surface`` release moves.
         target_replacements: Optional prompt-generated GLB replacements for
             selected default basket target objects. Each replacement writes to
             ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
@@ -274,12 +282,8 @@ def generate_action_agent_config_from_project(
             from the replacement prompts. If false, only mesh paths are replaced.
         reuse_target_replacements: If true, reuse an existing replacement GLB
             at the expected output path when it matches the requested prompt.
-        convex_decomposition_method: Convex decomposition backend written to
-            generated mesh objects whose ``max_convex_hull_num`` is larger than
-            one. ``"vhacd"`` is the action-agent default; ``"visacd"`` is
-            accepted as an alias for ``"vhacd"``.
-        prewarm_coacd_cache: If true, precompute environment-side CoACD cache
-            files referenced by the generated gym config before writing it.
+        acd_method: Convex decomposition backend written to generated mesh
+            objects. Only ``"vhacd"`` is supported.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -295,19 +299,22 @@ def generate_action_agent_config_from_project(
     input_path = Path(gym_project).expanduser().resolve()
     gym_config_path = _resolve_gym_config_path(input_path)
     scene_dir = gym_config_path.parent
-    repo_root = _repo_root_from_gym_config_path(gym_config_path)
     source_config = _read_json(gym_config_path)
+    if load_source_meshes_directly:
+        _mark_direct_gltf_meshes(source_config)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
     source_scene_body_scale_mode = _validate_source_scene_body_scale_mode(
         source_scene_body_scale_mode
     )
-    convex_decomposition_method = _normalize_convex_decomposition_method(
-        convex_decomposition_method
-    )
-    mesh_normalizer = MeshFrameNormalizer(
-        output_dir=output_dir_path / "mesh_assets" / "normalized",
-        local_x_correction_degrees=source_mesh_x_rotation_degrees,
+    acd_method = _validate_acd_method(acd_method)
+    mesh_normalizer = (
+        None
+        if load_source_meshes_directly
+        else MeshFrameNormalizer(
+            output_dir=output_dir_path / "mesh_assets" / "normalized",
+            local_x_correction_degrees=source_mesh_x_rotation_degrees,
+        )
     )
 
     scene_objects = _collect_scene_objects(source_config)
@@ -353,9 +360,8 @@ def generate_action_agent_config_from_project(
                 _with_task_route_summary(bundle, task_route),
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
-                repo_root=repo_root,
-                convex_decomposition_method=convex_decomposition_method,
-                prewarm_coacd_cache=prewarm_coacd_cache,
+                load_source_meshes_directly=load_source_meshes_directly,
+                acd_method=acd_method,
                 overwrite=overwrite,
             )
         if task_route.route == _TASK_ROUTE_ARRANGEMENT_LINE:
@@ -387,9 +393,8 @@ def generate_action_agent_config_from_project(
                 _with_task_route_summary(bundle, task_route),
                 output_dir=output_dir_path,
                 mesh_normalizer=mesh_normalizer,
-                repo_root=repo_root,
-                convex_decomposition_method=convex_decomposition_method,
-                prewarm_coacd_cache=prewarm_coacd_cache,
+                load_source_meshes_directly=load_source_meshes_directly,
+                acd_method=acd_method,
                 overwrite=overwrite,
             )
         if task_route.route == _TASK_ROUTE_UNSUPPORTED:
@@ -426,15 +431,15 @@ def generate_action_agent_config_from_project(
             preserve_source_scene_geometry=preserve_source_scene_geometry,
             source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             inside_container_slot_distance_scale=inside_container_slot_distance_scale,
+            surface_release_clearance=surface_release_clearance,
         )
         _validate_relative_bundle(bundle, spec)
         return _finalize_and_write_bundle(
             _with_task_route_summary(bundle, task_route),
             output_dir=output_dir_path,
             mesh_normalizer=mesh_normalizer,
-            repo_root=repo_root,
-            convex_decomposition_method=convex_decomposition_method,
-            prewarm_coacd_cache=prewarm_coacd_cache,
+            load_source_meshes_directly=load_source_meshes_directly,
+            acd_method=acd_method,
             overwrite=overwrite,
         )
 
@@ -481,9 +486,8 @@ def generate_action_agent_config_from_project(
         bundle,
         output_dir=output_dir_path,
         mesh_normalizer=mesh_normalizer,
-        repo_root=repo_root,
-        convex_decomposition_method=convex_decomposition_method,
-        prewarm_coacd_cache=prewarm_coacd_cache,
+        load_source_meshes_directly=load_source_meshes_directly,
+        acd_method=acd_method,
         overwrite=overwrite,
     )
 
@@ -1106,30 +1110,25 @@ def _finalize_and_write_bundle(
     *,
     output_dir: Path,
     mesh_normalizer: MeshFrameNormalizer | None,
-    repo_root: Path | None = None,
-    convex_decomposition_method: str,
-    prewarm_coacd_cache: bool,
+    load_source_meshes_directly: bool,
+    acd_method: str,
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
-    convex_decomposition_method = _normalize_convex_decomposition_method(
-        convex_decomposition_method
-    )
-    _apply_convex_decomposition_method(
+    acd_method = _validate_acd_method(acd_method)
+    _apply_acd_method(
         bundle["gym_config"],
-        method=convex_decomposition_method,
+        method=acd_method,
     )
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
-    _attach_body_scale_bake_summary(bundle, output_dir)
-    bundle.setdefault("summary", {})[
-        "convex_decomposition_method"
-    ] = convex_decomposition_method
-    if prewarm_coacd_cache and convex_decomposition_method == "coacd":
-        _attach_coacd_cache_summary(bundle, repo_root=repo_root)
-    elif prewarm_coacd_cache:
-        _attach_skipped_coacd_cache_summary(
-            bundle,
-            convex_decomposition_method=convex_decomposition_method,
-        )
+    if not load_source_meshes_directly:
+        _attach_body_scale_bake_summary(bundle, output_dir)
+    _strip_generation_mesh_metadata(bundle["gym_config"])
+    summary = bundle.setdefault("summary", {})
+    summary["mesh_loading_mode"] = (
+        "direct_source" if load_source_meshes_directly else "normalized_obj"
+    )
+    summary["acd_method"] = acd_method
+    summary.pop("convex_decomposition_method", None)
     return _write_config_bundle(
         output_dir=output_dir,
         bundle=bundle,
@@ -1137,28 +1136,29 @@ def _finalize_and_write_bundle(
     )
 
 
-def _normalize_convex_decomposition_method(method: str) -> str:
+def _validate_acd_method(method: str) -> str:
     normalized = str(method).strip().lower()
-    if normalized == "visacd":
-        normalized = "vhacd"
-    if normalized not in {"coacd", "vhacd"}:
-        raise ValueError(
-            "convex_decomposition_method must be one of: 'vhacd', 'visacd', 'coacd'"
-        )
+    if normalized != "vhacd":
+        raise ValueError("acd_method must be 'vhacd'")
     return normalized
 
 
-def _apply_convex_decomposition_method(
+def _apply_acd_method(
     gym_config: dict[str, Any],
     *,
     method: str,
 ) -> None:
     for obj in _iter_generated_mesh_objects(gym_config):
+        obj.pop("convex_decomposition_method", None)
+        obj.pop("acd_method", None)
+        shape = obj.get("shape")
+        if isinstance(shape, MutableMapping):
+            shape.pop("convex_decomposition_method", None)
+            shape.pop("acd_method", None)
+
         max_convex_hull_num = int(obj.get("max_convex_hull_num", 1))
         if max_convex_hull_num > 1:
             obj["acd_method"] = method
-            obj["convex_decomposition_method"] = method
-            shape = obj.get("shape")
             if isinstance(shape, MutableMapping):
                 shape["acd_method"] = method
 
@@ -1182,52 +1182,6 @@ def _iter_generated_mesh_objects(
     return objects
 
 
-def _attach_skipped_coacd_cache_summary(
-    bundle: dict[str, Any],
-    *,
-    convex_decomposition_method: str,
-) -> None:
-    needs_decomposition = any(
-        int(obj.get("max_convex_hull_num", 1)) > 1
-        for obj in _iter_generated_mesh_objects(bundle["gym_config"])
-    )
-    bundle.setdefault("summary", {})["coacd_cache"] = (
-        [
-            {
-                "status": "skipped",
-                "reason": (
-                    "convex_decomposition_method="
-                    f"{convex_decomposition_method}; environment loading uses ACD "
-                    "without CoACD prewarm"
-                ),
-            }
-        ]
-        if needs_decomposition
-        else []
-    )
-
-
-def _attach_coacd_cache_summary(
-    bundle: dict[str, Any],
-    *,
-    repo_root: Path | None = None,
-) -> None:
-    from embodichain.gen_sim.action_agent_pipeline.generation.coacd_cache import (
-        prewarm_coacd_cache_for_gym_config,
-    )
-
-    bundle.setdefault("summary", {})["coacd_cache"] = (
-        prewarm_coacd_cache_for_gym_config(bundle["gym_config"], repo_root=repo_root)
-    )
-
-
-def _repo_root_from_gym_config_path(gym_config_path: Path) -> Path:
-    for parent in gym_config_path.resolve().parents:
-        if (parent / "setup.py").is_file() and (parent / "embodichain").is_dir():
-            return parent
-    return gym_config_path.resolve().parent
-
-
 def _attach_body_scale_bake_summary(
     bundle: dict[str, Any],
     output_dir: Path,
@@ -1238,6 +1192,23 @@ def _attach_body_scale_bake_summary(
     )
     if reports:
         bundle.setdefault("summary", {})["body_scaled_meshes"] = reports
+
+
+def _mark_direct_gltf_meshes(gym_config: Mapping[str, Any]) -> None:
+    for obj in _iter_generated_mesh_objects(gym_config):
+        shape = obj.get("shape")
+        if not isinstance(shape, MutableMapping):
+            continue
+        mesh_path = Path(str(shape.get("fpath", "")))
+        if mesh_path.suffix.lower() in {".glb", ".gltf"}:
+            shape[_GLTF_TO_SIM_FRAME_KEY] = True
+
+
+def _strip_generation_mesh_metadata(gym_config: Mapping[str, Any]) -> None:
+    for obj in _iter_generated_mesh_objects(gym_config):
+        shape = obj.get("shape")
+        if isinstance(shape, MutableMapping):
+            shape.pop(_GLTF_TO_SIM_FRAME_KEY, None)
 
 
 def _attach_mesh_normalization_summary(
@@ -1457,28 +1428,16 @@ def _rotate_pose_about_world_z(
         _round_pose_value(position[2]),
     ]
 
-    rotation = _clean_vector3(obj_config.get("init_rot", [0.0, 0.0, 0.0]))
-    if abs(rotation[0]) < 1e-12 and abs(rotation[1]) < 1e-12:
-        obj_config["init_rot"] = [
-            0.0,
-            0.0,
-            _normalize_degrees(rotation[2] + float(rotation_degrees)),
-        ]
-        return
-
     from scipy.spatial.transform import Rotation
 
-    original = Rotation.from_euler("xyz", rotation, degrees=True)
-    world_z = Rotation.from_euler("z", float(rotation_degrees), degrees=True)
-    obj_config["init_rot"] = [
-        _round_pose_value(value)
-        for value in (world_z * original).as_euler("xyz", degrees=True)
-    ]
-
-
-def _normalize_degrees(value: float) -> float:
-    normalized = (float(value) + 180.0) % 360.0 - 180.0
-    return _round_pose_value(180.0 if normalized == -180.0 else normalized)
+    # Prompt2Scene exports and RigidObject.reset both use intrinsic XYZ Euler angles.
+    rotation = _clean_vector3(obj_config.get("init_rot", [0.0, 0.0, 0.0]))
+    original = Rotation.from_euler("XYZ", rotation, degrees=True)
+    world_z = Rotation.from_rotvec([0.0, 0.0, theta])
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Gimbal lock detected")
+        rotated_euler = (world_z * original).as_euler("XYZ", degrees=True)
+    obj_config["init_rot"] = [_round_pose_value(value) for value in rotated_euler]
 
 
 def _round_pose_value(value: float) -> float:
@@ -1518,6 +1477,39 @@ def _validate_source_scene_body_scale_mode(mode: str | None) -> str | None:
         expected = ", ".join(sorted(_SOURCE_SCENE_BODY_SCALE_MODES))
         raise ValueError(f"source_scene_body_scale_mode must be one of: {expected}")
     return normalized
+
+
+def _validate_surface_release_clearance(surface_release_clearance: float) -> float:
+    if isinstance(surface_release_clearance, bool):
+        raise ValueError(
+            "surface_release_clearance must be a finite non-negative number."
+        )
+    try:
+        clearance = float(surface_release_clearance)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "surface_release_clearance must be a finite non-negative number."
+        ) from exc
+    if not math.isfinite(clearance) or clearance < 0.0:
+        raise ValueError(
+            "surface_release_clearance must be a finite non-negative number."
+        )
+    return clearance
+
+
+def _with_relative_surface_release_clearance(
+    spec: _RelativePlacementSpec,
+    surface_release_clearance: float,
+) -> _RelativePlacementSpec:
+    placements = tuple(
+        replace(placement, surface_clearance=surface_release_clearance)
+        for placement in spec.placements
+    )
+    return replace(
+        spec,
+        placements=placements,
+        surface_clearance=surface_release_clearance,
+    )
 
 
 def _source_scene_body_scale(
@@ -1636,7 +1628,12 @@ def _build_relative_placement_bundle(
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
     inside_container_slot_distance_scale: float,
+    surface_release_clearance: float,
 ) -> dict[str, Any]:
+    spec = _with_relative_surface_release_clearance(
+        spec,
+        _validate_surface_release_clearance(surface_release_clearance),
+    )
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(

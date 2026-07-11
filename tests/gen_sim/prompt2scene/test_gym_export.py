@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    asset_orientation_is_upper_larger,
     export_z_axis_normalized_asset,
     match_asset_orientation_keyword,
 )
@@ -31,26 +32,57 @@ from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
 )
 
 
-def test_z_axis_normalization_keyword_detects_bottle_and_can() -> None:
-    bottle = match_asset_orientation_keyword(
-        object_id="interact_bottle_1",
-        name="bottle",
-        description="clear plastic bottle",
-    )
-    can = match_asset_orientation_keyword(
-        object_id="soda_can_1",
-        name="soda can",
-        description="red soda can",
-    )
-    apple = match_asset_orientation_keyword(
-        object_id="apple_1",
-        name="apple",
-        description="red apple",
+@pytest.mark.parametrize(
+    (
+        "object_id",
+        "name",
+        "description",
+        "expected_keyword",
+        "expected_is_upper_larger",
+    ),
+    [
+        (
+            "interact_bottle_1",
+            "bottle",
+            "clear plastic bottle",
+            "bottle",
+            False,
+        ),
+        ("soda_can_1", "soda can", "red soda can", "can", False),
+        (
+            "interact_canned_food_0",
+            "canned food",
+            "cylindrical canned food",
+            "canned food",
+            False,
+        ),
+        (
+            "interact_paper_cup_0",
+            "paper cup",
+            "tapered disposable paper cup",
+            "paper cup",
+            True,
+        ),
+        ("interact_cup_0", "cup", "plain cup", "cup", True),
+        ("interact_object_0", "纸杯", "一次性纸杯", "纸杯", True),
+        ("apple_1", "apple", "red apple", None, False),
+    ],
+)
+def test_z_axis_normalization_keyword_resolves_upright_asset_policy(
+    object_id: str,
+    name: str,
+    description: str,
+    expected_keyword: str | None,
+    expected_is_upper_larger: bool,
+) -> None:
+    keyword = match_asset_orientation_keyword(
+        object_id=object_id,
+        name=name,
+        description=description,
     )
 
-    assert bottle == "bottle"
-    assert can == "can"
-    assert apple is None
+    assert keyword == expected_keyword
+    assert asset_orientation_is_upper_larger(keyword) is expected_is_upper_larger
 
 
 @pytest.mark.parametrize(

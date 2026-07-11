@@ -18,14 +18,18 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import Any, Mapping
 
 import numpy as np
 import torch
 from tqdm import tqdm
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
     get_arm_states,
     resolve_arm_side,
@@ -33,6 +37,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import 
 from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
     GraspCollisionCachePreparationError,
     ensure_grasp_collision_cache_from_env_coacd,
+)
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    match_asset_orientation_keyword,
 )
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
@@ -123,6 +130,8 @@ SUPPORTED_CFG_KEYS = {
     "post_hold_steps",
     "obj_upright_direction",
     "rotate_upright",
+    "approach_alignment_max_angle",
+    "cartesian_waypoint_count",
 }
 
 
@@ -136,7 +145,7 @@ ATOMIC_ACTION_REGISTRY = {
 }
 
 
-_DEFAULT_SURFACE_RELEASE_CLEARANCE = 0.015
+_DEFAULT_SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _DEFAULT_PICKUP_LIFT_HEIGHT = 0.16
 
 
@@ -412,9 +421,22 @@ def _normalize_action_target(
         return {target_field: target_spec}
 
     if atomic_action_class == "Place":
-        if control != "arm" or target_field != "target_pose":
-            raise ValueError("Place requires control='arm' and target_pose.")
-        _validate_target_pose(target_spec)
+        if control != "arm" or target_field not in {
+            "target_pose",
+            "target_object_pose",
+        }:
+            raise ValueError(
+                "Place requires control='arm' and target_pose or target_object_pose."
+            )
+        if target_field == "target_pose":
+            _validate_target_pose(target_spec)
+        else:
+            _validate_target_object_pose(target_spec)
+            if target_spec.get("orientation_goal", "preserve") != "preserve":
+                raise ValueError(
+                    "Place target_object_pose only supports orientation_goal='preserve'; "
+                    "use MoveHeldObject for explicit in-air rotation."
+                )
         return {target_field: target_spec}
 
     if atomic_action_class == "MoveEndEffector":
@@ -719,6 +741,10 @@ def _execute_atomic_action_result(
         env, spec.robot_name
     )
     cfg = _build_action_cfg(env, spec, arm_part, hand_part, len(eef_joints))
+    if spec.atomic_action_class == "PickUp":
+        cfg.downstream_object_target_poses = _resolve_pickup_downstream_object_targets(
+            env, spec, target, runtime_kwargs
+        )
     target = _build_typed_target(spec, target)
     if state is None:
         state = WorldState(last_qpos=env.robot.get_qpos().clone())
@@ -1754,6 +1780,19 @@ def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
         value = cfg["rotate_upright"]
         if value is not None and not isinstance(value, int | float):
             raise ValueError("rotate_upright must be a numeric value in radians.")
+    if "approach_alignment_max_angle" in cfg:
+        value = cfg["approach_alignment_max_angle"]
+        if value is not None and (
+            not isinstance(value, int | float) or not 0.0 <= float(value) <= np.pi / 2
+        ):
+            raise ValueError(
+                "approach_alignment_max_angle must be a numeric value in "
+                "[0, pi / 2] radians or null."
+            )
+    if "cartesian_waypoint_count" in cfg:
+        value = cfg["cartesian_waypoint_count"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError("cartesian_waypoint_count must be an integer >= 1.")
 
 
 def _normalize_pickup_cfg_values(cfg_values: dict[str, Any], device) -> None:
@@ -1795,7 +1834,7 @@ def _resolve_target(
     if spec.atomic_action_class == "MoveHeldObject":
         return _resolve_move_held_object_target(env, spec, state)
     if spec.atomic_action_class == "Place":
-        return _resolve_place_target(env, spec)
+        return _resolve_place_target(env, spec, state)
     if spec.atomic_action_class == "CoordinatedPickment":
         return _resolve_coordinated_pickment_target(env, spec, runtime_kwargs, state)
     raise ValueError(f"Unsupported atomic action class: {spec.atomic_action_class}.")
@@ -1809,6 +1848,43 @@ def _resolve_pickup_target(
     if not spec.target_object:
         raise ValueError("PickUp requires target_object.")
     return _build_object_semantics(env, spec.target_object, runtime_kwargs)
+
+
+def _resolve_pickup_downstream_object_targets(
+    env,
+    spec: AtomicActionSpec,
+    semantics: ObjectSemantics,
+    runtime_kwargs: Mapping[str, Any],
+) -> tuple[torch.Tensor, ...]:
+    """Resolve graph-provided held-object targets before selecting a grasp pose."""
+    target_specs_by_robot = runtime_kwargs.get(
+        "pickup_downstream_object_target_specs", {}
+    )
+    if not isinstance(target_specs_by_robot, Mapping):
+        return ()
+    target_specs = target_specs_by_robot.get(spec.robot_name, ())
+    if not isinstance(target_specs, Sequence):
+        return ()
+
+    object_pose = _ensure_batched_pose_tensor(
+        semantics.entity.get_local_pose(to_matrix=True), env.robot.device
+    )
+    state = WorldState(
+        last_qpos=env.robot.get_qpos().clone(),
+        held_object=_semantics_as_held_object_state(
+            semantics, object_pose, env.robot.device
+        ),
+    )
+    targets: list[torch.Tensor] = []
+    for target_spec in target_specs:
+        if not isinstance(target_spec, Mapping):
+            continue
+        target_pose = _resolve_object_target_pose_like(env, target_spec, object_pose)
+        target_pose[..., :3, :3] = _resolve_object_orientation(
+            env, target_spec, object_pose, state
+        )
+        targets.append(_apply_surface_z_policy(env, target_spec, target_pose, state))
+    return tuple(targets)
 
 
 def _resolve_move_end_effector_target(env, spec: AtomicActionSpec):
@@ -1835,10 +1911,30 @@ def _resolve_move_held_object_target(
     return _resolve_held_object_pose_target(env, spec, state)
 
 
-def _resolve_place_target(env, spec: AtomicActionSpec):
-    if not spec.target_pose:
-        raise ValueError("Place requires target_pose.")
-    return _resolve_pose_target(env, spec)
+def _resolve_place_target(
+    env,
+    spec: AtomicActionSpec,
+    state: WorldState | None,
+) -> torch.Tensor:
+    if spec.target_pose:
+        return _resolve_pose_target(env, spec)
+    if not spec.target_object_pose:
+        raise ValueError("Place requires target_pose or target_object_pose.")
+    if state is None or state.held_object is None:
+        raise ValueError(
+            "Place with target_object_pose requires a held object from a prior PickUp."
+        )
+
+    object_target_pose = _resolve_held_object_pose_target(env, spec, state)
+    object_to_eef = state.held_object.object_to_eef.to(
+        device=env.robot.device,
+        dtype=torch.float32,
+    )
+    if object_to_eef.shape == (4, 4):
+        object_to_eef = object_to_eef.unsqueeze(0).repeat(
+            object_target_pose.shape[0], 1, 1
+        )
+    return torch.bmm(object_target_pose, object_to_eef)
 
 
 def _resolve_coordinated_pickment_target(
@@ -2972,7 +3068,19 @@ def _resolve_object_orientation(
     orientation_goal = target_pose_spec.get("orientation_goal", "preserve")
     current_rotation = current_object_pose[..., :3, :3].clone()
     if orientation_goal == "preserve":
-        return current_rotation
+        held = state.held_object
+        if held is None:
+            return current_rotation
+        pickup_object_pose = torch.matmul(
+            held.grasp_xpos.to(device=env.robot.device, dtype=torch.float32),
+            pose_inv(
+                held.object_to_eef.to(
+                    device=env.robot.device,
+                    dtype=torch.float32,
+                )
+            ),
+        )
+        return pickup_object_pose[..., :3, :3]
     # Non-preserve orientation goals are computed from a single representative env
     # and broadcast to all envs.
     if current_rotation.ndim == 3:
@@ -2983,6 +3091,8 @@ def _resolve_object_orientation(
     long_axis = local_axes[:, 0]
     up_axis = local_axes[:, 2]
     if orientation_goal == "upright":
+        if _held_object_local_z_is_upright_semantic(state):
+            return _semantic_local_z_upright_rotation(current_rotation)
         if _is_bottle_like_held_object(state, mesh_vertices):
             return _preview_aware_upright_rotation(
                 local_axes=local_axes,
@@ -3163,6 +3273,21 @@ def _is_bottle_like_held_object(state: WorldState, vertices: torch.Tensor) -> bo
     )
 
 
+def _held_object_local_z_is_upright_semantic(state: WorldState) -> bool:
+    held = state.held_object
+    if held is None:
+        return False
+    label = str(getattr(held.semantics, "label", ""))
+    return (
+        match_asset_orientation_keyword(
+            object_id=label,
+            name=label,
+            description="",
+        )
+        is not None
+    )
+
+
 def _has_bottle_like_keyword(text: str) -> bool:
     tokens = (
         text.replace("_", " ").replace("-", " ").replace("/", " ").replace(".", " ")
@@ -3170,6 +3295,42 @@ def _has_bottle_like_keyword(text: str) -> bool:
     return any(
         keyword in tokens if keyword in _SHORT_BOTTLE_LIKE_KEYWORDS else keyword in text
         for keyword in _BOTTLE_LIKE_KEYWORDS
+    )
+
+
+def _semantic_local_z_upright_rotation(current_rotation: torch.Tensor) -> torch.Tensor:
+    device = current_rotation.device
+    local_z = torch.tensor([0.0, 0.0, 1.0], device=device)
+    secondary_axes = [
+        torch.tensor([1.0, 0.0, 0.0], device=device),
+        torch.tensor([0.0, 1.0, 0.0], device=device),
+    ]
+    candidates: list[tuple[float, torch.Tensor]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[-axis for axis in secondary_axes],
+    ]:
+        preview_secondary = current_rotation @ secondary_axis
+        world_secondary = preview_secondary.clone()
+        world_secondary[2] = 0.0
+        if float(torch.linalg.norm(world_secondary)) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=local_z,
+            world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, current_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=local_z,
+        world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
+        local_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
+        world_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
     )
 
 
@@ -4155,12 +4316,17 @@ def _max_decomposition_hulls(target_obj, runtime_kwargs: Mapping[str, Any]) -> i
     if "grasp_max_decomposition_hulls" in runtime_kwargs:
         return int(runtime_kwargs["grasp_max_decomposition_hulls"])
 
-    max_convex_hull_num = getattr(
-        getattr(target_obj, "cfg", None),
-        "max_convex_hull_num",
-        None,
-    )
-    if max_convex_hull_num is not None and int(max_convex_hull_num) > 1:
+    cfg = getattr(target_obj, "cfg", None)
+    max_convex_hull_num = getattr(cfg, "max_convex_hull_num", MISSING)
+    if max_convex_hull_num is MISSING or max_convex_hull_num is None:
+        max_convex_hull_num = getattr(
+            getattr(cfg, "shape", None),
+            "max_convex_hull_num",
+            1,
+        )
+    if max_convex_hull_num is MISSING or max_convex_hull_num is None:
+        max_convex_hull_num = 1
+    if int(max_convex_hull_num) > 1:
         return int(max_convex_hull_num)
     return 8
 
@@ -4173,11 +4339,14 @@ def _grasp_convex_decomposition_method(
             runtime_kwargs["grasp_convex_decomposition_method"]
         )
 
-    method = getattr(
-        getattr(target_obj, "cfg", None),
-        "convex_decomposition_method",
-        "vhacd",
-    )
+    cfg = getattr(target_obj, "cfg", None)
+    method = getattr(cfg, "acd_method", MISSING)
+    if method is MISSING or method is None:
+        method = getattr(getattr(cfg, "shape", None), "acd_method", MISSING)
+    if method is MISSING or method is None:
+        method = getattr(cfg, "convex_decomposition_method", "vhacd")
+    if method is MISSING or method is None:
+        method = "vhacd"
     return _normalize_convex_decomposition_method(method)
 
 

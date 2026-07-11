@@ -31,6 +31,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _GLTF_TO_SIM_FRAME_KEY,
     _clean_vector3,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
@@ -898,6 +899,9 @@ def _make_shape_config(
         mesh_path = Path(_asset_path_for_config(scene_dir, str(shape["fpath"])))
         if mesh_normalizer is not None:
             mesh_path = mesh_normalizer.normalize_path(mesh_path)
+            shape.pop(_GLTF_TO_SIM_FRAME_KEY, None)
+        elif mesh_path.suffix.lower() in {".glb", ".gltf"}:
+            shape[_GLTF_TO_SIM_FRAME_KEY] = True
         shape["fpath"] = mesh_path.as_posix()
     shape.setdefault("compute_uv", False)
     return shape

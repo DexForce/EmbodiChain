@@ -20,6 +20,7 @@ import argparse
 from pathlib import Path
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
@@ -154,8 +155,18 @@ def cli() -> None:
         default=None,
         help=(
             "Keep source z placement instead of re-snapping objects to the "
-            "tabletop. GLBs are still normalized to OBJ. Defaults to true for "
-            "prompt2scene gym_export inputs and false otherwise."
+            "tabletop. Defaults to true for prompt2scene gym_export inputs and "
+            "false otherwise."
+        ),
+    )
+    parser.add_argument(
+        "--load_source_meshes_directly",
+        "--load-source-meshes-directly",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Keep source GLB/GLTF paths and use DexSim's native coordinate "
+            "conversion. Defaults to true for prompt2scene gym_export inputs."
         ),
     )
     parser.add_argument(
@@ -175,7 +186,7 @@ def cli() -> None:
         default=None,
         help=(
             "Local X-axis rotation baked into normalized GLB/GLTF meshes. "
-            "Defaults to 90 for prompt2scene gym_export inputs and 0 otherwise."
+            "Ignored when source meshes are loaded directly. Defaults to 0."
         ),
     )
     parser.add_argument(
@@ -187,6 +198,18 @@ def cli() -> None:
             "Scale factor for generated inside-container release slot offsets "
             "when multiple objects are placed into one container. Values below "
             "1.0 move release points closer to the container center."
+        ),
+    )
+    parser.add_argument(
+        "--surface_release_clearance",
+        "--surface-release-clearance",
+        type=float,
+        default=DEFAULT_SURFACE_RELEASE_CLEARANCE,
+        help=(
+            "Final object-bottom clearance above support surfaces for "
+            "object_on_surface release moves. Increase this when release poses "
+            "are too close to the table. Defaults to "
+            f"{DEFAULT_SURFACE_RELEASE_CLEARANCE}."
         ),
     )
     parser.add_argument(
@@ -250,25 +273,14 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
-        "--prewarm_coacd_cache",
-        "--prewarm-coacd-cache",
-        dest="prewarm_coacd_cache",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Precompute environment CoACD cache files during config generation. "
-            "Defaults to true."
-        ),
-    )
-    parser.add_argument(
+        "--acd_method",
+        "--acd-method",
         "--convex_decomposition_method",
         "--convex-decomposition-method",
-        choices=("vhacd", "visacd", "coacd"),
+        dest="acd_method",
+        choices=("vhacd",),
         default="vhacd",
-        help=(
-            "Convex decomposition backend written to generated mesh objects. "
-            "'visacd' is accepted as an alias for 'vhacd'. Defaults to vhacd."
-        ),
+        help="ACD backend written as acd_method. Only vhacd is supported.",
     )
     parser.add_argument(
         "--overwrite",
@@ -306,14 +318,15 @@ def cli() -> None:
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         preserve_source_scene_geometry=alignment["preserve_source_scene_geometry"],
+        load_source_meshes_directly=alignment["load_source_meshes_directly"],
         source_scene_z_rotation_degrees=alignment["source_scene_z_rotation_degrees"],
         source_mesh_x_rotation_degrees=alignment["source_mesh_x_rotation_degrees"],
         inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
+        surface_release_clearance=args.surface_release_clearance,
         target_replacements=target_replacements,
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
-        convex_decomposition_method=args.convex_decomposition_method,
-        prewarm_coacd_cache=args.prewarm_coacd_cache,
+        acd_method=args.acd_method,
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,
         max_episode_steps=args.max_episode_steps,
@@ -382,6 +395,10 @@ def _resolve_source_alignment(args: argparse.Namespace) -> dict[str, float | boo
     if preserve_source_scene_geometry is None:
         preserve_source_scene_geometry = is_prompt2scene
 
+    load_source_meshes_directly = args.load_source_meshes_directly
+    if load_source_meshes_directly is None:
+        load_source_meshes_directly = is_prompt2scene
+
     source_scene_z_rotation_degrees = args.source_scene_z_rotation_degrees
     if source_scene_z_rotation_degrees is None:
         source_scene_z_rotation_degrees = (
@@ -396,6 +413,7 @@ def _resolve_source_alignment(args: argparse.Namespace) -> dict[str, float | boo
 
     return {
         "preserve_source_scene_geometry": preserve_source_scene_geometry,
+        "load_source_meshes_directly": load_source_meshes_directly,
         "source_scene_z_rotation_degrees": source_scene_z_rotation_degrees,
         "source_mesh_x_rotation_degrees": source_mesh_x_rotation_degrees,
     }

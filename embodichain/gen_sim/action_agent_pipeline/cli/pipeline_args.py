@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
@@ -33,7 +34,6 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_IMAGE2SCENE_ROOT,
     DEFAULT_JOB_TIMEOUT_S,
     DEFAULT_PIPELINE_HISTORY,
-    DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_LLM_CONFIG,
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
@@ -238,17 +238,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--prompt2scene-mesh-x-rotation-degrees",
-        "--prompt2scene_mesh_x_rotation_degrees",
-        dest="prompt2scene_mesh_x_rotation_degrees",
-        type=float,
-        default=DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
-        help=(
-            "Local X-axis rotation baked into prompt2scene GLB meshes during "
-            "action-agent OBJ normalization. Defaults to 90."
-        ),
-    )
-    parser.add_argument(
         "--gym-project-root",
         default=str(DEFAULT_GYM_PROJECT_ROOT),
         help=(
@@ -384,6 +373,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--surface-release-clearance",
+        "--surface_release_clearance",
+        dest="surface_release_clearance",
+        type=float,
+        default=DEFAULT_SURFACE_RELEASE_CLEARANCE,
+        help=(
+            "Final object-bottom clearance above support surfaces for "
+            "object_on_surface release moves. Increase this when release poses "
+            "are too close to the table. Defaults to "
+            f"{DEFAULT_SURFACE_RELEASE_CLEARANCE}."
+        ),
+    )
+    parser.add_argument(
         "--target_replacement",
         "--target-replacement",
         dest="target_replacement",
@@ -444,25 +446,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--prewarm-coacd-cache",
-        "--prewarm_coacd_cache",
-        dest="prewarm_coacd_cache",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Precompute environment CoACD cache files during config generation. "
-            "Defaults to true."
-        ),
-    )
-    parser.add_argument(
+        "--acd-method",
+        "--acd_method",
         "--convex-decomposition-method",
         "--convex_decomposition_method",
-        choices=("vhacd", "visacd", "coacd"),
+        dest="acd_method",
+        choices=("vhacd",),
         default="vhacd",
-        help=(
-            "Convex decomposition backend written to generated mesh objects. "
-            "'visacd' is accepted as an alias for 'vhacd'. Defaults to vhacd."
-        ),
+        help="ACD backend written as acd_method. Only vhacd is supported.",
     )
     parser.add_argument(
         "--poll-interval",

@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    asset_orientation_is_upper_larger,
     export_z_axis_normalized_asset,
     match_asset_orientation_keyword,
 )
@@ -556,7 +557,7 @@ def export_gym_config(
 
     Uses table-fit GLBs baked so their sim-space AABB bottom-centre sits at
     the local origin. When ``z_axis_align_assets`` is enabled, hardcoded
-    elongated object classes are exported upright and restored with
+    bottle/can/cup-like object classes are exported upright and restored with
     ``init_pos`` plus ``init_rot``.
     """
     output_root = output_root.expanduser().resolve()
@@ -636,6 +637,7 @@ def export_gym_config(
                 om["table_fit_path"],
                 object_dst,
                 glb_to_sim_rotation=_glb_to_sim_rotation(),
+                is_upper_larger=asset_orientation_is_upper_larger(alignment_keyword),
             )
             init_pos = alignment_result.init_pos
             init_rot = alignment_result.init_rot

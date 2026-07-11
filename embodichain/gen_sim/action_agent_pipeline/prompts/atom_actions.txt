@@ -55,6 +55,9 @@ Use only these native atomic action classes:
    - For axis alignment to world/table axes, use `"orientation_axis": "x"` or `"y"` and omit `align_to`.
    - Typical cfg:
      {"sample_interval": 45}
+   - Do not use this action for an ordinary placement whose
+     orientation_goal="preserve". Use object-aware `Place` directly so the
+     transport does not introduce an in-air orientation target.
 
 4. `Place`
    - For ordinary placement, prefer this because one action lowers, opens the
@@ -68,6 +71,11 @@ Use only these native atomic action classes:
      {"reference": "object", "obj_name": "<object>", "offset": [x, y, z]}
      {"reference": "absolute", "position": [x, y, z]}
      {"reference": "relative", "offset": [dx, dy, dz], "frame": "world|eef"}
+   - For an ordinary held-object placement with no requested rotation, prefer:
+     {"target_object_pose": {"reference": "object", "obj_name": "<object>", "offset": [x, y, z], "orientation_goal": "preserve", "orientation_axis": "none"}, "cfg": {"sample_interval": 80, "lift_height": 0.2, "cartesian_waypoint_count": 4}}
+     This target is object-aware: runtime converts the desired object pose to a
+     TCP pose using the grasp transform. Non-preserve orientation goals must use
+     MoveHeldObject before a release-only Place.
    - Typical cfg:
      {"sample_interval": 80, "lift_height": 0.1}
 

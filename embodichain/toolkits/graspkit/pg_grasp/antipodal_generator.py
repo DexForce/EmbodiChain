@@ -78,8 +78,12 @@ class GraspGeneratorCfg:
     deviate more than this threshold from perpendicular to the approach are
     discarded during grasp pose computation."""
 
-    n_deviated_approach_directions: int = 4
-    """Number of approach directions with evenly deviated angles when sampling grasp poses."""
+    n_deviated_approach_directions: int = 1
+    """Number of approach directions sampled per grasp axis.
+
+    The default keeps only the requested approach direction. Values greater than
+    one add randomized deviations up to ``max_deviation_angle``.
+    """
 
     n_top_grasps: int = 50
     """Number of top-ranked grasp poses to return based on the scoring cost."""
@@ -611,6 +615,7 @@ class GraspGenerator:
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         visualize_collision: bool = False,
+        max_approach_alignment_angle: float | None = None,
     ):
         if self._hit_point_pairs is None:
             logger.log_warning(
@@ -636,9 +641,14 @@ class GraspGenerator:
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
         cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
         positive_angle = torch.abs(torch.acos(cos_angle))
-        valid_mask = (
-            positive_angle - torch.pi / 2
-        ).abs() <= self.cfg.max_deviation_angle
+        alignment_angle = (
+            self.cfg.max_deviation_angle
+            if max_approach_alignment_angle is None
+            else float(max_approach_alignment_angle)
+        )
+        if alignment_angle < 0.0 or alignment_angle > float(torch.pi / 2):
+            raise ValueError("max_approach_alignment_angle must be in [0, pi / 2].")
+        valid_mask = (positive_angle - torch.pi / 2).abs() <= alignment_angle
         if valid_mask.sum() == 0:
             logger.log_warning("No valid antipodal pairs after angle filtering.")
             return (

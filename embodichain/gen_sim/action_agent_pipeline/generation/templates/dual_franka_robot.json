@@ -1,0 +1,143 @@
+{
+  "uid": "DualFrankaPanda",
+  "urdf_cfg": {
+    "fname": "dual_franka_panda_basket",
+    "name_case": {
+      "joint": "original",
+      "link": "original"
+    },
+    "components": [
+      {
+        "component_type": "left_arm",
+        "urdf_path": "Franka/Panda/PandaWithHand.urdf",
+        "transform": [
+          [0.0, -1.0, 0.0, 0.3],
+          [1.0, 0.0, 0.0, -1.25],
+          [0.0, 0.0, 1.0, 0.4],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      {
+        "component_type": "right_arm",
+        "urdf_path": "Franka/Panda/PandaWithHand.urdf",
+        "transform": [
+          [0.0, -1.0, 0.0, -0.3],
+          [1.0, 0.0, 0.0, -1.25],
+          [0.0, 0.0, 1.0, 0.4],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      }
+    ]
+  },
+  "init_pos": [0.7, 0.0, 0.0],
+  "init_rot": [0.0, 0.0, -90.0],
+  "init_qpos": [
+    0.0,
+    0.0,
+    -0.569,
+    -0.569,
+    0.0,
+    0.0,
+    -2.81,
+    -2.81,
+    0.0,
+    0.0,
+    3.037,
+    3.037,
+    0.741,
+    0.741,
+    0.04,
+    0.04,
+    0.04,
+    0.04
+  ],
+  "drive_pros": {
+    "stiffness": {
+      "left_arm": 10000.0,
+      "right_arm": 10000.0,
+      "left_eef": 100.0,
+      "right_eef": 100.0
+    },
+    "damping": {
+      "left_arm": 1000.0,
+      "right_arm": 1000.0,
+      "left_eef": 10.0,
+      "right_eef": 10.0
+    },
+    "max_effort": {
+      "left_arm": 1000.0,
+      "right_arm": 1000.0,
+      "left_eef": 100.0,
+      "right_eef": 100.0
+    }
+  },
+  "control_parts": {
+    "left_arm": [
+      "left_fr3_joint1",
+      "left_fr3_joint2",
+      "left_fr3_joint3",
+      "left_fr3_joint4",
+      "left_fr3_joint5",
+      "left_fr3_joint6",
+      "left_fr3_joint7"
+    ],
+    "left_eef": ["left_fr3_finger_joint[1-2]"],
+    "right_arm": [
+      "right_fr3_joint1",
+      "right_fr3_joint2",
+      "right_fr3_joint3",
+      "right_fr3_joint4",
+      "right_fr3_joint5",
+      "right_fr3_joint6",
+      "right_fr3_joint7"
+    ],
+    "right_eef": ["right_fr3_finger_joint[1-2]"],
+    "dual_arm": [
+      "left_fr3_joint1",
+      "left_fr3_joint2",
+      "left_fr3_joint3",
+      "left_fr3_joint4",
+      "left_fr3_joint5",
+      "left_fr3_joint6",
+      "left_fr3_joint7",
+      "right_fr3_joint1",
+      "right_fr3_joint2",
+      "right_fr3_joint3",
+      "right_fr3_joint4",
+      "right_fr3_joint5",
+      "right_fr3_joint6",
+      "right_fr3_joint7"
+    ]
+  },
+  "observation_joint_parts": ["left_eef", "right_eef"],
+  "qpos_control_part_order": ["dual_arm", "left_eef", "right_eef"],
+  "solver_cfg": {
+    "left_arm": {
+      "class_type": "PytorchSolver",
+      "urdf_path": null,
+      "end_link_name": "left_fr3_hand_tcp",
+      "root_link_name": "left_base",
+      "tcp": [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    },
+    "right_arm": {
+      "class_type": "PytorchSolver",
+      "urdf_path": null,
+      "end_link_name": "right_fr3_hand_tcp",
+      "root_link_name": "right_base",
+      "tcp": [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    }
+  },
+  "qpos_limits": {
+    "(left|right)_fr3_finger_joint[1-2]": [0.0, 0.06]
+  }
+}

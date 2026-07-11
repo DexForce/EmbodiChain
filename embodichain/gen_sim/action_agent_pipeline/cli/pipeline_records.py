@@ -26,6 +26,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+)
+
 __all__ = [
     "append_pipeline_history",
     "build_pipeline_record",
@@ -202,14 +206,18 @@ def build_pipeline_record(
         "inside_container_slot_distance_scale": (
             args.inside_container_slot_distance_scale
         ),
+        "surface_release_clearance": getattr(
+            args,
+            "surface_release_clearance",
+            DEFAULT_SURFACE_RELEASE_CLEARANCE,
+        ),
         "target_replacements": _target_replacement_records(
             args,
             target_replacements,
         ),
         "sync_replacement_names": args.sync_replacement_names,
         "reuse_target_replacements": args.reuse_target_replacements,
-        "convex_decomposition_method": args.convex_decomposition_method,
-        "prewarm_coacd_cache": args.prewarm_coacd_cache,
+        "acd_method": args.acd_method,
         "overwrite_config": args.overwrite_config,
         "regenerate": args.regenerate,
         "skip_run_agent": args.skip_run_agent,
@@ -340,9 +348,6 @@ def _source_request_record(
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees
         )
-        record["prompt2scene_mesh_x_rotation_degrees"] = (
-            args.prompt2scene_mesh_x_rotation_degrees
-        )
     elif resolution.mode == _PROMPT2SCENE_EXISTING_PROJECT_MODE:
         record["gym_project"] = _record_path(
             Path(args.gym_project).expanduser(),
@@ -350,9 +355,6 @@ def _source_request_record(
         )
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees
-        )
-        record["prompt2scene_mesh_x_rotation_degrees"] = (
-            args.prompt2scene_mesh_x_rotation_degrees
         )
     elif resolution.mode == "image2tabletop":
         record.update(
