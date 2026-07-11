@@ -1,13 +1,13 @@
 # MotionGenerator
 
-`MotionGenerator` provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. It is designed to work with different planners (such as ToppraPlanner) and can be extended to support collision checking in the future.
+`MotionGenerator` provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. It dispatches to the selected backend: TOPPRA and NeuralPlanner retain their existing behavior, while the optional cuRobo V2 backend performs collision-aware planning against an explicit cuRobo world.
 
 ## Features
 
-* **Unified planning interface**: Supports trajectory planning with or without collision checking (collision checking is reserved for future implementation).
-* **Flexible planner selection**: Supports TOPPRA and NeuralPlanner (experimental).
+* **Unified planning interface**: Supports interpolation-oriented planners and collision-aware cuRobo V2 planning through one `generate()` API.
+* **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CUDA-only CuroboPlanner backend.
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
-* **Supports both joint and Cartesian interpolation**: Generates discrete trajectories using either joint space or Cartesian space interpolation.
+* **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
 * **Convenient sampling**: Supports various sampling strategies via `TrajectorySampleMethod`.
 
 ## Usage
@@ -181,5 +181,7 @@ print(f"Estimated sample count: {sample_count}")
 * The planner type can be specified as a string or `PlannerType` enum.
 * If the robot provides its own joint limits, those will be used; otherwise, default or user-specified limits are applied.
 * For Cartesian interpolation, inverse kinematics (IK) is used to compute joint configurations for each interpolated pose.
-* The class is designed to be extensible for additional planners and collision checking in the future.
+* Backends declare whether pre-interpolation is safe and whether their returned samples must be preserved. cuRobo V2 disables EmbodiChain Cartesian pre-interpolation and preserves its collision-checked samples.
+* CuroboPlanner is optional and requires CUDA plus a matching cuRobo V2 installation; see [the cuRobo planner page](curobo_planner.md) and [NVIDIA's installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html).
+* Run the collision-aware Panda demo with `python examples/sim/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1`.
 * The sample count estimation is useful for predicting computational load and memory requirements.

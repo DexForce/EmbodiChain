@@ -50,6 +50,7 @@ from embodichain.lab.sim.planners import (  # noqa: E402
 )
 from embodichain.lab.sim.planners.curobo_planner import (  # noqa: E402
     CuroboPlanOptions,
+    CuroboPlanner,
     CuroboPlannerCfg,
     CuroboRobotProfileCfg,
     CuroboWorldCfg,
@@ -59,6 +60,10 @@ ROBOT_UID = "curobo_franka"
 CONTROL_PART = "arm"
 DEMO_BLOCK_DIMS = [0.18, 0.40, 0.36]
 DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
+# Small displacement from Panda's neutral ready pose. It is deliberately far
+# from the joint limits so this smoke test exercises cuRobo planning rather
+# than limit handling.
+JOINT_1_TARGET_DELTA_RAD = 0.12
 
 
 def _demo_world_path() -> str:
@@ -73,18 +78,23 @@ def _franka_profile() -> CuroboRobotProfileCfg:
     return CuroboRobotProfileCfg(
         robot_config_path="franka.yml",
         sim_to_curobo_joint_names=sim_to_curobo,
-        fixed_joint_positions={
-            "panda_finger_joint1": 0.04,
-            "panda_finger_joint2": 0.04,
-        },
         base_link_name="panda_link0",
         tool_frame_name="panda_hand",
+        # DexSim targets the Panda TCP, while the stock cuRobo profile uses
+        # panda_hand. This fixed transform converts the requested TCP pose
+        # back into the cuRobo hand frame before planning.
+        tool_frame_to_tcp=[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.1034],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
     )
 
 
-def _make_sim_robot():
+def _make_sim_robot(num_envs: int = 1):
     sim = SimulationManager(
-        SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=1)
+        SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=num_envs)
     )
     robot = sim.add_robot(
         cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
@@ -111,6 +121,10 @@ def test_curobo_v2_plans_around_a_static_cuboid():
             robot_uid=ROBOT_UID,
             robot_profiles={CONTROL_PART: _franka_profile()},
             world=CuroboWorldCfg(world_config_path=_demo_world_path()),
+            # The real smoke test validates planner calls, not CUDA-graph capture.
+            # Skipping warmup keeps it practical on fresh CI GPU workers.
+            warmup=False,
+            use_cuda_graph=False,
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
 
@@ -120,7 +134,7 @@ def test_curobo_v2_plans_around_a_static_cuboid():
         )
         # Target beyond the cuboid so the planner must route around it.
         target_xpos = start_xpos.clone()
-        target_xpos[0, :3, 3] = torch.tensor([0.55, 0.20, 0.30], device=robot.device)
+        target_xpos[0, :3, 3] = torch.tensor([0.55, 0.30, 0.45], device=robot.device)
 
         result = mg.generate(
             [PlanState.from_xpos(target_xpos)],
@@ -148,5 +162,97 @@ def test_curobo_v2_plans_around_a_static_cuboid():
         err = torch.norm(final_xpos[0, :3, 3] - target_xpos[0, :3, 3])
         assert float(err) < 0.02
     finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.slow
+def test_curobo_v2_plans_a_joint_space_move():
+    """Route a ``JOINT_MOVE`` through V2 ``plan_cspace`` on CUDA."""
+    sim, robot = _make_sim_robot()
+    try:
+        cfg = CuroboPlannerCfg(
+            robot_uid=ROBOT_UID,
+            robot_profiles={CONTROL_PART: _franka_profile()},
+            world=CuroboWorldCfg(world_config_path=_demo_world_path()),
+            warmup=False,
+            use_cuda_graph=False,
+        )
+        mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
+        start_qpos = robot.get_qpos(name=CONTROL_PART)
+        target_qpos = start_qpos.clone()
+        target_qpos[:, 0] += JOINT_1_TARGET_DELTA_RAD
+
+        result = mg.generate(
+            [PlanState.from_qpos(target_qpos)],
+            MotionGenOptions(
+                start_qpos=start_qpos,
+                control_part=CONTROL_PART,
+                plan_opts=CuroboPlanOptions(control_part=CONTROL_PART),
+            ),
+        )
+
+        assert result.success.shape == (1,)
+        assert bool(result.success.item())
+        assert result.positions is not None
+        assert result.positions.shape[-1] == start_qpos.shape[-1]
+        assert torch.allclose(result.positions[0, 0], start_qpos[0], atol=1e-3)
+        assert torch.allclose(result.positions[0, -1], target_qpos[0], atol=1e-3)
+        assert float(result.duration[0]) > 0.0
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.slow
+def test_curobo_v2_multi_env_worlds_are_independent():
+    """V2 gets one static world and one dynamic obstacle update per row."""
+    sim, robot = _make_sim_robot(num_envs=2)
+    planner = None
+    try:
+        cfg = CuroboPlannerCfg(
+            robot_uid=ROBOT_UID,
+            robot_profiles={CONTROL_PART: _franka_profile()},
+            world=CuroboWorldCfg(
+                world_config_path=_demo_world_path(),
+                dynamic_obstacle_names=["demo_block"],
+                multi_env=True,
+            ),
+            warmup=False,
+            use_cuda_graph=False,
+        )
+        planner = CuroboPlanner(cfg)
+        profile = cfg.robot_profiles[CONTROL_PART]
+        backend = planner._get_backend(profile, CONTROL_PART, batch_size=2)
+        collision_checker = backend.planner.scene_collision_checker
+
+        assert collision_checker.num_envs == 2
+        assert collision_checker.get_obstacle_names(env_idx=0) == ["demo_block"]
+        assert collision_checker.get_obstacle_names(env_idx=1) == ["demo_block"]
+
+        start_qpos = robot.get_qpos(name=CONTROL_PART)
+        target_qpos = start_qpos.clone()
+        target_qpos[:, 0] += torch.tensor([0.08, -0.08], device=robot.device)
+        result = planner.plan(
+            [PlanState.from_qpos(target_qpos)],
+            CuroboPlanOptions(start_qpos=start_qpos, control_part=CONTROL_PART),
+        )
+        assert result.success.tolist() == [True, True]
+        assert result.positions is not None
+        assert result.positions.shape[0] == 2
+
+        # Start from each live simulator base, then request different local
+        # offsets. This verifies the adapter writes each V2 world independently.
+        dynamic_poses = planner._get_sim_base_pose(backend, batch_size=2).clone()
+        dynamic_poses[:, 0, 3] += torch.tensor(
+            [0.10, -0.15], device=dynamic_poses.device
+        )
+        planner.update_dynamic_obstacles({"demo_block": dynamic_poses}, backend)
+
+        inv_pose = collision_checker.data.cuboids.inv_pose[:, 0, :3]
+        assert not torch.allclose(inv_pose[0], inv_pose[1])
+    finally:
+        if planner is not None:
+            planner.close()
         sim.destroy()
         SimulationManager.flush_cleanup_queue()

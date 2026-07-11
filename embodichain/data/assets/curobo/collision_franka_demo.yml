@@ -6,6 +6,6 @@
 #
 # Pose convention: [x, y, z, qw, qx, qy, qz].
 cuboid:
-  - name: demo_block
+  demo_block:
     dims: [0.18, 0.40, 0.36]
     pose: [0.45, 0.0, 0.18, 1.0, 0.0, 0.0, 0.0]

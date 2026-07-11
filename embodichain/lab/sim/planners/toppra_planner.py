@@ -284,6 +284,10 @@ class ToppraPlanOptions(PlanOptions):
 
 
 class ToppraPlanner(BasePlanner):
+    """Time-optimal joint-space planner backed by TOPPRA."""
+
+    supports_joint_move = True
+
     def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 

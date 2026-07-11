@@ -172,6 +172,15 @@ class BasePlanner(ABC):
     waypoint count.
     """
 
+    supports_joint_move: bool = False
+    """Whether the backend accepts :attr:`MoveType.JOINT_MOVE` targets.
+
+    Atomic actions use this capability to decide whether their joint-only
+    phases may be delegated through ``MotionGenerator``. Cartesian-only
+    planners retain the deterministic local joint interpolation for those
+    phases.
+    """
+
     def default_plan_options(self) -> PlanOptions:
         """Return backend-default planning options."""
         return PlanOptions()

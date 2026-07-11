@@ -285,15 +285,17 @@ class CuroboRobotProfileCfg:
     robot_config_path: str = MISSING
     sim_to_curobo_joint_names: dict[str, str] = MISSING
     active_joint_names: list[str] | None = None
-    fixed_joint_positions: dict[str, float] = {}
     base_link_name: str | None = None
+    sim_base_link_name: str | None = None
+    sim_base_to_curobo_base: list[list[float]] | None = None
     tool_frame_name: str | None = None
+    tool_frame_to_tcp: list[list[float]] | None = None
 
 
 @configclass
 class CuroboWorldCfg:
     world_config_path: str | None = None
-    collision_cache: dict[str, int] = {"cuboid": 8, "mesh": 2, "voxel": 1}
+    collision_cache: dict[str, int] = {"cuboid": 8, "mesh": 2}
     dynamic_obstacle_names: list[str] = []
     multi_env: bool = False
 
@@ -307,7 +309,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     collision_activation_distance: float = 0.01
     max_attempts: int = 5
     max_planning_time: float | None = None
-    use_cuda_graph: bool = True
+    use_cuda_graph: bool = False
     interpolation_dt: float = 0.025
 
 
@@ -428,7 +430,7 @@ class CuroboPlanner(BasePlanner):
         return self._plan_segments(target_states, start, control_part, backend, options)
 ```
 
-`_get_backend` must reject a non-CUDA robot device; invoke V2 `MotionPlannerCfg.create` with the profile path, `scene_model=world_config_path`, non-`None` `collision_cache`, `max_batch_size=batch_size`, `multi_env=cfg.world.multi_env`, `optimizer_collision_activation_distance`, `use_cuda_graph`, and `interpolation_dt`. Instantiate `MotionPlanner` for `B == 1` and `BatchMotionPlanner` for `B > 1`; call V2 warmup once per cache entry when `cfg.warmup` is true. Cache only entries matching the actual batch size. When `profile.active_joint_names` is set, compare it with `backend.planner.joint_names` and raise on any missing, duplicate, or differently ordered name.
+`_get_backend` must reject a non-CUDA robot device; invoke V2 `MotionPlannerCfg.create` with the profile path, non-`None` `collision_cache`, `max_batch_size=batch_size`, `multi_env=cfg.world.multi_env`, `optimizer_collision_activation_distance`, `use_cuda_graph`, and `interpolation_dt`. In multi-environment mode it must materialize exactly `batch_size` scene mappings: clone a singleton mapping/empty world, or accept a top-level YAML list with exactly that many mappings. V2 infers collision-world count from this list, not from `max_batch_size`. Instantiate `MotionPlanner` for `B == 1` and `BatchMotionPlanner` for `B > 1`; call V2 warmup once per cache entry when `cfg.warmup` is true. Cache only entries matching the actual batch size. When `profile.active_joint_names` is set, compare it with `backend.planner.joint_names` and raise on any missing, duplicate, or differently ordered name.
 
 For each segment, construct V2 states and goals as follows:
 
@@ -629,7 +631,7 @@ Add `embodichain/data/assets/curobo/collision_franka_demo.yml`:
 
 ```yaml
 cuboid:
-  - name: demo_block
+  demo_block:
     dims: [0.18, 0.40, 0.36]
     pose: [0.45, 0.0, 0.18, 1.0, 0.0, 0.0, 0.0]
 ```
@@ -689,9 +691,14 @@ FRANKA_SIM_TO_CUROBO = {
 profile = CuroboRobotProfileCfg(
     robot_config_path="franka.yml",
     sim_to_curobo_joint_names=FRANKA_SIM_TO_CUROBO,
-    fixed_joint_positions={"panda_finger_joint1": 0.04, "panda_finger_joint2": 0.04},
     base_link_name="panda_link0",
     tool_frame_name="panda_hand",
+    tool_frame_to_tcp=[
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.1034],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
 )
 ```
 

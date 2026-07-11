@@ -135,6 +135,7 @@ def _make_curobo_mock_motion_generator(result_positions, success=None):
     planner.cfg.planner_type = "curobo"
     planner.preinterpolate_targets = False
     planner.preserve_plan_samples = True
+    planner.supports_joint_move = True
     mg.planner = planner
     B = result_positions.shape[0]
     if success is None:

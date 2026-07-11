@@ -46,7 +46,7 @@ module import time.
 - Cartesian pose planning and joint-space planning through the existing
   `PlanState` / `PlanResult` interface.
 - Single-arm control-part planning, including robust named-joint ordering,
-  fixed non-controlled joints, TCP, root-frame, and joint-limit handling.
+  locked non-controlled joints, TCP, root-frame, and joint-limit handling.
 - Batch-aware planning: the adapter accepts EmbodiChain's leading batch
   dimension and uses cuRobo's V2 batch planner where multiple environments are
   requested.  The CUDA integration test establishes the single-environment
@@ -83,9 +83,11 @@ The planner package adds focused, serializable config objects:
 CuroboRobotProfileCfg
     robot_config_path
     active_joint_names
-    fixed_joint_positions
     base_link_name
+    sim_base_link_name
+    sim_base_to_curobo_base
     tool_frame_name
+    tool_frame_to_tcp
 
 CuroboWorldCfg
     world_config_path
@@ -113,8 +115,14 @@ CuroboPlanOptions(PlanOptions)
 Each `robot_profiles` key is an EmbodiChain control-part name.  The selected
 profile explicitly maps between simulator joint names and cuRobo joint names;
 the backend never assumes that simulator indices and cuRobo indices are equal.
-The profile also pins non-controlled joints, including gripper joints, to
-current or configured values when the cuRobo robot model contains them.
+Any non-controlled joints, including gripper joints, must be locked in the
+cuRobo V2 robot profile so they do not appear in the backend's active joint
+list. Their preserved simulator values must equal the V2 profile's
+`lock_joints` values during planning and atomic-action playback; the first
+release documents this cross-model lock contract but does not automatically
+validate joint-name/value equivalence. The backend rejects an active-joint/
+profile mismatch rather than planning collision geometry that EmbodiChain will
+not execute.
 
 `CuroboPlanner` is a `BasePlanner` implementation.  It lazily imports V2
 types, creates and warms a `MotionPlanner` for a one-environment request and a
@@ -142,6 +150,8 @@ move types fail before planning with a clear `ValueError`.
 `BasePlanner` gains two explicit extension points:
 
 - `preinterpolate_targets: bool`, which defaults to `True`;
+- `supports_joint_move: bool`, which defaults to `False` and keeps
+  Cartesian-only backends on local joint interpolation for atomic phases;
 - `with_motion_context(options, *, start_qpos, control_part)`, whose base
   implementation returns the supplied options unchanged.
 
@@ -172,7 +182,9 @@ than a fragile implicit scene scan.
 All obstacle poses, goal poses, robot base poses, and tool poses use a single
 documented world coordinate convention.  The adapter converts EmbodiChain
 4x4 matrices to cuRobo's position/quaternion representation at this boundary
-and tests the quaternion ordering directly.
+and tests the quaternion ordering directly. Static collision YAML is authored
+in the cuRobo base frame and therefore applies to fixed-base scenes; a moving
+base must publish relevant obstacles through named dynamic updates.
 
 ### Atomic-Action Integration
 

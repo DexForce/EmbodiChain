@@ -65,10 +65,7 @@ POS_TOL = 0.02
 
 def _demo_world_path() -> str:
     return str(
-        Path(_data.__file__).parent
-        / "assets"
-        / "curobo"
-        / "collision_franka_demo.yml"
+        Path(_data.__file__).parent / "assets" / "curobo" / "collision_franka_demo.yml"
     )
 
 
@@ -77,12 +74,14 @@ def _franka_profile() -> CuroboRobotProfileCfg:
     return CuroboRobotProfileCfg(
         robot_config_path="franka.yml",
         sim_to_curobo_joint_names=sim_to_curobo,
-        fixed_joint_positions={
-            "panda_finger_joint1": 0.04,
-            "panda_finger_joint2": 0.04,
-        },
         base_link_name="panda_link0",
         tool_frame_name="panda_hand",
+        tool_frame_to_tcp=[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.1034],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
     )
 
 
@@ -109,6 +108,8 @@ def _make_franka_curobo_engine():
                 robot_uid=ROBOT_UID,
                 robot_profiles={CONTROL_PART: _franka_profile()},
                 world=CuroboWorldCfg(world_config_path=_demo_world_path()),
+                warmup=False,
+                use_cuda_graph=False,
             )
         )
     )
@@ -133,14 +134,24 @@ def _reachable_target_beyond_demo_block(robot) -> torch.Tensor:
     qpos = robot.get_qpos(name=CONTROL_PART)
     fk = robot.compute_fk(qpos=qpos, name=CONTROL_PART, to_matrix=True)
     target = fk[0].clone()
-    target[:3, 3] = torch.tensor([0.55, 0.20, 0.30], device=robot.device)
+    target[:3, 3] = torch.tensor([0.55, 0.30, 0.45], device=robot.device)
     return target
 
 
 def _play_trajectory(sim, robot, trajectory: torch.Tensor, step_repeat: int = 1):
-    arm_ids = robot.get_joint_ids(name=CONTROL_PART)
+    """Replay every waypoint with matching state and drive targets.
+
+    ``target=True`` alone only updates the articulation drive target.  The
+    physics step can therefore still be catching up with the previous sample
+    when the next one is supplied.  Set the current state first so the replay
+    validates the planned configuration rather than the drive controller's
+    tracking transient.
+    """
+    all_joint_ids = list(range(robot.dof))
     for w in range(trajectory.shape[1]):
-        robot.set_qpos(qpos=trajectory[:, w], joint_ids=list(range(robot.dof)))
+        waypoint = trajectory[:, w]
+        robot.set_qpos(qpos=waypoint, joint_ids=all_joint_ids, target=False)
+        robot.set_qpos(qpos=waypoint, joint_ids=all_joint_ids, target=True)
         sim.update(step=step_repeat)
 
 

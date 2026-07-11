@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import torch
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
@@ -45,6 +45,7 @@ def _mock_mg(num_envs=2, arm_dof=6, planner_type="toppra"):
     # TOPPRA allows MotionGenerator pre-interpolation; neural/curobo do not.
     planner.preinterpolate_targets = planner_type == "toppra"
     planner.preserve_plan_samples = planner_type == "curobo"
+    planner.supports_joint_move = planner_type in {"toppra", "curobo"}
     mg.planner = planner
     return mg
 
@@ -110,16 +111,21 @@ class TestPlanArmTrajMotionGen:
             [PlanState(xpos=torch.eye(4), move_type=MoveType.EEF_MOVE)]
             for _ in range(2)
         ]
-        ok, traj = builder.plan_arm_traj(
-            target_states_list,
-            start_qpos,
-            10,
-            control_part="arm",
-            arm_dof=6,
-            cfg=cfg,
-        )
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=torch.zeros(2, 10, 6),
+        ) as interpolate:
+            ok, traj = builder.plan_arm_traj(
+                target_states_list,
+                start_qpos,
+                10,
+                control_part="arm",
+                arm_dof=6,
+                cfg=cfg,
+            )
         assert ok.all().item()
         assert traj.shape[0] == 2
+        interpolate.assert_called_once()
 
 
 class TestCuroboBuilderDispatch:
@@ -239,3 +245,82 @@ class TestCuroboBuilderDispatch:
         assert success.tolist() == [True, False]
         # Failed env held at its start qpos across all samples.
         assert torch.allclose(trajectory[1], start[1].unsqueeze(0).repeat(5, 1))
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_indexless_cuda_robot_accepts_indexed_curobo_result(self):
+        positions = torch.zeros(2, 5, 6, device="cuda:0")
+        mg = _mock_curobo_motion_generator(result_positions=positions)
+        mg.robot.device = torch.device("cuda")
+        mg.device = torch.device("cuda")
+        builder = TrajectoryBuilder(mg)
+
+        success, trajectory = builder.plan_arm_traj(
+            _pose_targets_for_two_envs(),
+            torch.zeros(2, 6, device="cuda:0"),
+            n_waypoints=10,
+            control_part="arm",
+            arm_dof=6,
+            cfg=ActionCfg(
+                motion_source="motion_gen",
+                planner_type="curobo",
+                control_part="arm",
+            ),
+        )
+
+        assert success.tolist() == [True, True]
+        assert trajectory.device == torch.device("cuda:0")
+
+
+class TestJointMotionCapabilities:
+    def test_joint_capable_backend_delegates_through_motion_generator(self):
+        """TOPPRA retains the established motion-generator joint route."""
+        mg = _mock_mg(num_envs=2, arm_dof=6, planner_type="toppra")
+        mg.generate.return_value = PlanResult(
+            success=torch.ones(2, dtype=torch.bool),
+            positions=torch.zeros(2, 8, 6),
+        )
+        builder = TrajectoryBuilder(mg)
+        cfg = ActionCfg(
+            motion_source="motion_gen", planner_type="toppra", control_part="arm"
+        )
+
+        success, trajectory = builder.plan_joint_motion(
+            torch.zeros(2, 6),
+            torch.ones(2, 6),
+            n_waypoints=8,
+            control_part="arm",
+            arm_dof=6,
+            cfg=cfg,
+        )
+
+        assert success.tolist() == [True, True]
+        assert trajectory.shape == (2, 8, 6)
+        assert mg.generate.call_args.args[0][0].move_type is MoveType.JOINT_MOVE
+
+    def test_neural_joint_motion_falls_back_to_local_interpolation(self):
+        """Neural is Cartesian-only, so joint phases must not call generate."""
+        mg = _mock_mg(num_envs=2, arm_dof=6, planner_type="neural")
+        builder = TrajectoryBuilder(mg)
+        start = torch.zeros(2, 6)
+        target = torch.ones(2, 6)
+        cfg = ActionCfg(
+            motion_source="motion_gen", planner_type="neural", control_part="arm"
+        )
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=torch.zeros(2, 8, 6),
+        ) as interpolate:
+            success, trajectory = builder.plan_joint_motion(
+                start,
+                target,
+                n_waypoints=8,
+                control_part="arm",
+                arm_dof=6,
+                cfg=cfg,
+            )
+
+        assert success.tolist() == [True, True]
+        assert trajectory.shape == (2, 8, 6)
+        interpolate.assert_called_once()
+        mg.generate.assert_not_called()

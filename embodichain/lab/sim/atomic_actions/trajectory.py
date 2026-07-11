@@ -34,6 +34,14 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
 
 
+def _resolve_runtime_device(device: torch.device | str) -> torch.device:
+    """Resolve an indexless CUDA device to the active concrete GPU index."""
+    resolved = torch.device(device)
+    if resolved.type == "cuda" and resolved.index is None:
+        return torch.device(f"cuda:{torch.cuda.current_device()}")
+    return resolved
+
+
 class TrajectoryBuilder:
     """Stateless trajectory utilities shared by every atomic action.
 
@@ -45,7 +53,7 @@ class TrajectoryBuilder:
     def __init__(self, motion_generator: MotionGenerator) -> None:
         self.motion_generator = motion_generator
         self.robot = motion_generator.robot
-        self.device = self.robot.device
+        self.device = _resolve_runtime_device(self.robot.device)
 
     # ------------------------------------------------------------------
     # Success / shape helpers
@@ -531,10 +539,11 @@ class TrajectoryBuilder:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Plan a joint-space trajectory through one or more target waypoints.
 
-        For ``motion_source='motion_gen'`` this delegates to the same
-        MotionGenerator validation path as Cartesian planning, building batched
-        ``JOINT_MOVE`` PlanStates. For ``motion_source='ik_interp'`` (the
-        default) it returns an all-success linear interpolation.
+        For ``motion_source='motion_gen'``, this delegates only when the
+        selected backend advertises ``supports_joint_move``. Cartesian-only
+        backends (such as the neural planner) retain the deterministic local
+        interpolation for joint-only phases. ``motion_source='ik_interp'``
+        always uses that local interpolation.
 
         Returns:
             ``(success:(B,), trajectory:(B, N, arm_dof))``.
@@ -549,25 +558,26 @@ class TrajectoryBuilder:
                     ValueError,
                 )
             self._validate_planner_type(cfg)
-            if target_qpos.dim() == 2:
-                target_qpos = target_qpos.unsqueeze(1)  # (B, 1, D)
-            plan_states = [
-                PlanState(qpos=target_qpos[:, j], move_type=MoveType.JOINT_MOVE)
-                for j in range(target_qpos.shape[1])
-            ]
-            plan_opts = self._build_plan_opts(cfg, n_waypoints)
-            result: PlanResult = self.motion_generator.generate(
-                plan_states,
-                options=MotionGenOptions(
-                    start_qpos=start_qpos,
-                    control_part=control_part,
-                    plan_opts=plan_opts,
-                    is_interpolate=self.motion_generator.planner.preinterpolate_targets,
-                ),
-            )
-            return self._process_motion_gen_result(
-                result, start_qpos, n_waypoints, arm_dof
-            )
+            if self.motion_generator.planner.supports_joint_move:
+                if target_qpos.dim() == 2:
+                    target_qpos = target_qpos.unsqueeze(1)  # (B, 1, D)
+                plan_states = [
+                    PlanState(qpos=target_qpos[:, j], move_type=MoveType.JOINT_MOVE)
+                    for j in range(target_qpos.shape[1])
+                ]
+                plan_opts = self._build_plan_opts(cfg, n_waypoints)
+                result: PlanResult = self.motion_generator.generate(
+                    plan_states,
+                    options=MotionGenOptions(
+                        start_qpos=start_qpos,
+                        control_part=control_part,
+                        plan_opts=plan_opts,
+                        is_interpolate=self.motion_generator.planner.preinterpolate_targets,
+                    ),
+                )
+                return self._process_motion_gen_result(
+                    result, start_qpos, n_waypoints, arm_dof
+                )
         success = torch.ones(start_qpos.shape[0], dtype=torch.bool, device=self.device)
         trajectory = self.plan_joint_traj(start_qpos, target_qpos, n_waypoints)
         return success, trajectory
