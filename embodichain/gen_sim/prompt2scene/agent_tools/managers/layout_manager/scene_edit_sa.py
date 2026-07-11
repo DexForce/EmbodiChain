@@ -1,19 +1,3 @@
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ----------------------------------------------------------------------------
-
 from __future__ import annotations
 
 import copy
@@ -144,9 +128,7 @@ def _build_objects_config_scaled(
             output_root=output_root,
         )
         if not mesh_path.is_file():
-            raise FileNotFoundError(
-                f"Generated mesh not found for {object_id}: {mesh_path}"
-            )
+            raise FileNotFoundError(f"Generated mesh not found for {object_id}: {mesh_path}")
         rigid_objects.append(
             {
                 "uid": object_id,
@@ -177,9 +159,7 @@ def optimize_scene_edit_layout_with_sa_node3_5(
 ) -> dict[str, Any]:
     size_xy = support_region.get("size_xy")
     if not (isinstance(size_xy, list) and len(size_xy) == 2):
-        raise ValueError(
-            "support_region.size_xy is required for SA scene-edit optimization."
-        )
+        raise ValueError("support_region.size_xy is required for SA scene-edit optimization.")
     origin_x, origin_y = _support_region_origin_xy(support_region)
 
     runtime_root.mkdir(parents=True, exist_ok=True)
@@ -242,10 +222,7 @@ def optimize_scene_edit_layout_with_sa_node3_5(
         subject = str(rel.get("subject", "")).strip()
         relation_name = str(rel.get("relation", "")).strip()
         object_id = str(rel.get("object", "")).strip()
-        if (
-            subject not in state.raw_object_dict
-            or object_id not in state.raw_object_dict
-        ):
+        if subject not in state.raw_object_dict or object_id not in state.raw_object_dict:
             continue
         relation = state.raw_object_dict[subject]["relation"]
         if relation_name == "left_of":

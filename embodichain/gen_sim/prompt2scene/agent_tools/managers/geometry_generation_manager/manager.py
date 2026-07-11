@@ -160,9 +160,7 @@ def _validate_single_object_request(*, image_path: Path, output_path: Path) -> N
     if output_path.suffix.lower() != ".glb":
         raise ValueError("Geometry generation output_path must be a GLB file path.")
     if output_path.exists() and output_path.is_dir():
-        raise ValueError(
-            f"Geometry generation output_path is a directory: {output_path}"
-        )
+        raise ValueError(f"Geometry generation output_path is a directory: {output_path}")
 
 
 def _validate_multi_object_request(

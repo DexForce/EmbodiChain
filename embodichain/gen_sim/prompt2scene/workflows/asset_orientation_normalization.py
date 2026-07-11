@@ -27,39 +27,11 @@ import numpy as np
 __all__ = [
     "DEFAULT_ORIENTATION_NORMALIZATION_KEYWORDS",
     "AssetOrientationNormalizationResult",
-    "asset_orientation_is_upper_larger",
     "export_z_axis_normalized_asset",
     "match_asset_orientation_keyword",
 ]
 
-DEFAULT_ORIENTATION_NORMALIZATION_KEYWORDS: tuple[str, ...] = (
-    "bottle",
-    "can",
-    "canned food",
-    "tin can",
-    "food can",
-    "soda can",
-    "paper cup",
-    "disposable cup",
-    "coffee cup",
-    "cup",
-    "瓶",
-    "瓶子",
-    "罐头",
-    "易拉罐",
-    "纸杯",
-    "杯子",
-)
-_UPPER_LARGER_ORIENTATION_KEYWORDS = frozenset(
-    {
-        "paper cup",
-        "disposable cup",
-        "coffee cup",
-        "cup",
-        "纸杯",
-        "杯子",
-    }
-)
+DEFAULT_ORIENTATION_NORMALIZATION_KEYWORDS: tuple[str, ...] = ("bottle", "can")
 _DEFAULT_SURFACE_SAMPLE_COUNT = 10000
 
 
@@ -90,8 +62,6 @@ def match_asset_orientation_keyword(
             continue
         keyword_tokens = re.findall(r"[a-z0-9]+", keyword)
         if not keyword_tokens:
-            if keyword in text:
-                return keyword
             continue
         if len(keyword_tokens) == 1:
             if keyword_tokens[0] in tokens:
@@ -99,13 +69,6 @@ def match_asset_orientation_keyword(
         elif " ".join(keyword_tokens) in compact_text:
             return keyword
     return None
-
-
-def asset_orientation_is_upper_larger(keyword: str | None) -> bool:
-    """Return whether a matched asset has a larger top than bottom."""
-    if keyword is None:
-        return False
-    return str(keyword).strip().lower() in _UPPER_LARGER_ORIENTATION_KEYWORDS
 
 
 def export_z_axis_normalized_asset(

@@ -35,8 +35,6 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.layout_manager.utils 
     _settle_and_pack_object_footprints,
 )
 
-__all__ = ["LayoutManager"]
-
 
 class LayoutManager:
     """Public API for layout planning and footprint analysis.

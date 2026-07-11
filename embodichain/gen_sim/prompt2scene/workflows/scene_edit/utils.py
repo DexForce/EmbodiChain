@@ -33,7 +33,6 @@ from embodichain.gen_sim.prompt2scene.agent_tools.tools.text_asset_generation im
 )
 from embodichain.gen_sim.prompt2scene.utils.io import relative_path, write_json
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
-    asset_orientation_is_upper_larger,
     export_z_axis_normalized_asset,
     match_asset_orientation_keyword,
 )
@@ -154,22 +153,10 @@ def extract_scene_edit_support_region(scene_state: dict[str, Any]) -> dict[str, 
     """Return the table support-region 2D manifest from the previous scene."""
     table = scene_state.get("table")
     if not isinstance(table, dict):
-        return {
-            "unit": "m",
-            "center_xy": [],
-            "aabb_xy": [],
-            "size_xy": [],
-            "corners_xy": [],
-        }
+        return {"unit": "m", "center_xy": [], "aabb_xy": [], "size_xy": [], "corners_xy": []}
     support_region = table.get("support_region_2d")
     if not isinstance(support_region, dict):
-        return {
-            "unit": "m",
-            "center_xy": [],
-            "aabb_xy": [],
-            "size_xy": [],
-            "corners_xy": [],
-        }
+        return {"unit": "m", "center_xy": [], "aabb_xy": [], "size_xy": [], "corners_xy": []}
     return support_region
 
 
@@ -398,7 +385,9 @@ def resolve_scene_edit_intent(
                     {
                         **relation,
                         "source": (
-                            "moved_prompt" if op_type == "move" else "new_prompt"
+                            "moved_prompt"
+                            if op_type == "move"
+                            else "new_prompt"
                         ),
                     }
                 )
@@ -417,7 +406,9 @@ def resolve_scene_edit_intent(
 
 def tokenize_text(value: str) -> set[str]:
     return {
-        token for token in re.split(r"[^a-zA-Z0-9]+", value.lower()) if len(token) >= 2
+        token
+        for token in re.split(r"[^a-zA-Z0-9]+", value.lower())
+        if len(token) >= 2
     }
 
 
@@ -432,7 +423,10 @@ def match_prompt_scene_objects(
     for obj in scene_state.get("objects", []) or []:
         if not isinstance(obj, dict):
             continue
-        text = " ".join(str(obj.get(key, "")) for key in ("id", "name", "description"))
+        text = " ".join(
+            str(obj.get(key, ""))
+            for key in ("id", "name", "description")
+        )
         object_tokens = tokenize_text(text.replace("_", " "))
         overlap = sorted(prompt_tokens & object_tokens)
         if not overlap:
@@ -486,7 +480,8 @@ def generate_scene_edit_object_assets(
         for result in object_results
     ]
     succeeded = sum(
-        str(result.get("status", "")).strip() == "ok" for result in normalized_results
+        str(result.get("status", "")).strip() == "ok"
+        for result in normalized_results
     )
     status = "ok" if succeeded == len(normalized_results) else "partial"
     if not normalized_results:
@@ -500,7 +495,6 @@ def generate_scene_edit_object_assets(
         "object_count": len(normalized_results),
         "generated_assets": normalized_results,
     }
-
 
 def build_scene_edit_layout(
     *,
@@ -533,9 +527,7 @@ def build_scene_edit_layout(
     ]
     updated_grids = {
         str(object_id).strip(): str(grid).strip()
-        for object_id, grid in (
-            resolved_intent.get("updated_grid_assignments") or {}
-        ).items()
+        for object_id, grid in (resolved_intent.get("updated_grid_assignments") or {}).items()
         if str(object_id).strip() and str(grid).strip()
     }
     generated_asset_by_id = {
@@ -666,9 +658,7 @@ def build_scene_edit_layout(
         }
 
     initialized_added_centers = _initialize_added_object_centers(
-        added_ids=[
-            object_id for object_id in added_ids if object_id in generated_asset_by_id
-        ],
+        added_ids=[object_id for object_id in added_ids if object_id in generated_asset_by_id],
         placement_by_object_id=placement_by_object_id,
         updated_grids=updated_grids,
         updated_relations=updated_relations,
@@ -677,10 +667,7 @@ def build_scene_edit_layout(
         xy_sizes=xy_sizes,
     )
     for object_id in added_ids:
-        if (
-            object_id not in generated_asset_by_id
-            or object_id not in initialized_added_centers
-        ):
+        if object_id not in generated_asset_by_id or object_id not in initialized_added_centers:
             continue
         asset = generated_asset_by_id[object_id]
         center_xy = initialized_added_centers[object_id].tolist()
@@ -693,9 +680,7 @@ def build_scene_edit_layout(
             "replaces": "",
             "center_xy": center_xy,
             "size_xy": size_xy,
-            "footprint_2d": LayoutManager.build_xy_footprint(
-                center_xy=center_xy, size_xy=size_xy
-            ),
+            "footprint_2d": LayoutManager.build_xy_footprint(center_xy=center_xy, size_xy=size_xy),
             "source": "generated_asset",
             "simready_geometry_path": asset.get("simready_geometry_path")
             or asset.get("mesh_path"),
@@ -732,16 +717,16 @@ def build_scene_edit_layout(
         object_id: np.asarray(item["center_xy"], dtype=np.float64)
         for object_id, item in final_items.items()
     }
-    optimized_centers = {
-        object_id: center.copy() for object_id, center in initial_centers_all.items()
-    }
+    optimized_centers = {object_id: center.copy() for object_id, center in initial_centers_all.items()}
     optimization_metadata: dict[str, Any] | None = None
     all_object_ids = sorted(final_items)
     if all_object_ids:
         fixed_object_ids: list[str] = []
         if optimize_new_objects_only:
             movable_ids = (
-                set(added_ids) | set(moved_ids) | explicit_reposition_replace_ids
+                set(added_ids)
+                | set(moved_ids)
+                | explicit_reposition_replace_ids
             )
             fixed_object_ids = [
                 object_id
@@ -788,9 +773,7 @@ def build_scene_edit_layout(
         center_xy = optimized_centers[object_id].tolist()
         size_xy = item["size_xy"]
         item["center_xy"] = center_xy
-        item["footprint_2d"] = LayoutManager.build_xy_footprint(
-            center_xy=center_xy, size_xy=size_xy
-        )
+        item["footprint_2d"] = LayoutManager.build_xy_footprint(center_xy=center_xy, size_xy=size_xy)
 
     return {
         "status": "ok",
@@ -899,9 +882,7 @@ def export_scene_edit_gym_state(
         else:
             generated_asset = generated_asset_by_id.get(object_id)
             if generated_asset is None:
-                raise ValueError(
-                    f"Missing generated asset for edited object: {object_id}"
-                )
+                raise ValueError(f"Missing generated asset for edited object: {object_id}")
             updated_rigid = _build_generated_rigid_object(
                 object_id=object_id,
                 layout_item=layout_item,
@@ -938,12 +919,8 @@ def export_scene_edit_gym_state(
     updated_files.append(relative_path(topdown_path, output_root))
 
     state_payload = dict(scene_state)
-    state_payload["gym_config_path"] = str(
-        gym_config_path.relative_to(output_root / "gym_export")
-    )
-    state_payload["topdown_2d_plot_path"] = str(
-        topdown_path.relative_to(output_root / "gym_export")
-    )
+    state_payload["gym_config_path"] = str(gym_config_path.relative_to(output_root / "gym_export"))
+    state_payload["topdown_2d_plot_path"] = str(topdown_path.relative_to(output_root / "gym_export"))
     state_payload["objects"] = updated_scene_objects
     source_snapshots = dict(scene_state.get("source_snapshots") or {})
     layout_snapshot_path = scene_state_dir / "scene_edit_layout.json"
@@ -980,7 +957,8 @@ def validate_scene_edit_intent(
     unknown_deleted = sorted(deleted_ids - existing_ids)
     if unknown_deleted:
         raise ValueError(
-            "Scene edit intent deleted unknown object ids: " f"{unknown_deleted}"
+            "Scene edit intent deleted unknown object ids: "
+            f"{unknown_deleted}"
         )
 
     generated_objects = intent.get("generated_objects")
@@ -989,9 +967,7 @@ def validate_scene_edit_intent(
     generated_ids: set[str] = set()
     for generated in generated_objects:
         if not isinstance(generated, dict):
-            raise ValueError(
-                "Scene edit intent generated_objects entries must be objects."
-            )
+            raise ValueError("Scene edit intent generated_objects entries must be objects.")
         temp_id = str(generated.get("temp_id", "")).strip()
         if not temp_id:
             raise ValueError("Scene edit intent generated object has empty temp_id.")
@@ -1000,7 +976,9 @@ def validate_scene_edit_intent(
                 f"Scene edit generated temp_id collides with existing id: {temp_id}"
             )
         if temp_id in generated_ids:
-            raise ValueError(f"Scene edit generated temp_id is duplicated: {temp_id}")
+            raise ValueError(
+                f"Scene edit generated temp_id is duplicated: {temp_id}"
+            )
         generated_ids.add(temp_id)
 
     operations = intent.get("operations")
@@ -1145,9 +1123,15 @@ def _normalize_scene_edit_intent_ids(
         if str(obj.get("id", "")).strip()
     }
     generated_objects = [
-        obj for obj in normalized.get("generated_objects", []) if isinstance(obj, dict)
+        obj
+        for obj in normalized.get("generated_objects", [])
+        if isinstance(obj, dict)
     ]
-    operations = [op for op in normalized.get("operations", []) if isinstance(op, dict)]
+    operations = [
+        op
+        for op in normalized.get("operations", [])
+        if isinstance(op, dict)
+    ]
 
     generated_ids = {
         str(obj.get("temp_id", "")).strip()
@@ -1379,14 +1363,10 @@ def _infer_scene_edit_table_surface_height(
     if verts.size == 0:
         return 0.0
 
-    body_scale = np.asarray(
-        table.get("body_scale") or [1.0, 1.0, 1.0], dtype=np.float64
-    )
+    body_scale = np.asarray(table.get("body_scale") or [1.0, 1.0, 1.0], dtype=np.float64)
     if body_scale.shape != (3,) or not np.all(np.isfinite(body_scale)):
         body_scale = np.ones(3, dtype=np.float64)
-    glb_scale = np.asarray(
-        [body_scale[0], body_scale[2], body_scale[1]], dtype=np.float64
-    )
+    glb_scale = np.asarray([body_scale[0], body_scale[2], body_scale[1]], dtype=np.float64)
     verts = verts * glb_scale.reshape(1, 3)
 
     init_rot = np.asarray(table.get("init_rot") or [0.0, 0.0, 0.0], dtype=np.float64)
@@ -1421,10 +1401,9 @@ def _update_existing_rigid_object(
         init_pos[0] = float(init_pos[0]) + float(delta[0])
         init_pos[1] = float(init_pos[1]) + float(delta[1])
     updated["init_pos"] = [float(value) for value in init_pos]
-    updated["description"] = (
-        str(layout_item.get("description", "")).strip()
-        or str(updated.get("description", "")).strip()
-    )
+    updated["description"] = str(layout_item.get("description", "")).strip() or str(
+        updated.get("description", "")
+    ).strip()
     return updated
 
 
@@ -1438,9 +1417,7 @@ def _build_generated_rigid_object(
     table_height: float,
     z_axis_align_assets: bool = True,
 ) -> dict[str, Any]:
-    simready_path = _resolve_generated_asset_path(
-        generated_asset, output_root=output_root
-    )
+    simready_path = _resolve_generated_asset_path(generated_asset, output_root=output_root)
     if not simready_path.is_file():
         raise FileNotFoundError(f"Generated simready GLB not found: {simready_path}")
     safe_name = object_id.replace("interact_", "").strip("_") or "object"
@@ -1486,7 +1463,9 @@ def _build_generated_rigid_object(
         else None
     )
     if alignment_keyword is not None:
-        local_baked_path = object_dst.with_name(f".{object_dst.stem}_bottom_center.glb")
+        local_baked_path = object_dst.with_name(
+            f".{object_dst.stem}_bottom_center.glb"
+        )
         try:
             _bake_glb_bottom_center_to_origin(
                 simready_path,
@@ -1497,7 +1476,6 @@ def _build_generated_rigid_object(
                 local_baked_path,
                 object_dst,
                 glb_to_sim_rotation=_glb_to_sim_rotation(),
-                is_upper_larger=asset_orientation_is_upper_larger(alignment_keyword),
             )
         finally:
             local_baked_path.unlink(missing_ok=True)
@@ -1551,15 +1529,9 @@ def _build_scene_state_object(
     rigid_object: dict[str, Any],
     output_root: Path,
 ) -> dict[str, Any]:
-    init_rot = [
-        float(value) for value in rigid_object.get("init_rot") or [0.0, 0.0, 0.0]
-    ]
-    body_scale = [
-        float(value) for value in rigid_object.get("body_scale") or [1.0, 1.0, 1.0]
-    ]
-    init_pos = [
-        float(value) for value in rigid_object.get("init_pos") or [0.0, 0.0, 0.0]
-    ]
+    init_rot = [float(value) for value in rigid_object.get("init_rot") or [0.0, 0.0, 0.0]]
+    body_scale = [float(value) for value in rigid_object.get("body_scale") or [1.0, 1.0, 1.0]]
+    init_pos = [float(value) for value in rigid_object.get("init_pos") or [0.0, 0.0, 0.0]]
     footprint_2d = layout_item.get("footprint_2d") or LayoutManager.build_xy_footprint(
         center_xy=list(layout_item.get("center_xy", [0.0, 0.0])),
         size_xy=list(layout_item.get("size_xy", [0.0, 0.0])),
@@ -1671,9 +1643,7 @@ def _initialize_added_object_centers(
 ) -> dict[str, np.ndarray]:
     if not added_ids:
         return {}
-    support_center = LayoutManager.support_region_default_center(
-        support_region=support_region
-    )
+    support_center = LayoutManager.support_region_default_center(support_region=support_region)
     results: dict[str, np.ndarray] = {}
     for object_id in added_ids:
         seed_center = support_center.copy()

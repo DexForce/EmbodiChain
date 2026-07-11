@@ -111,9 +111,7 @@ class BaseHttpClient:
             except requests.exceptions.HTTPError as exc:
                 response = exc.response
                 if response is None:
-                    raise RuntimeError(
-                        f"{self.server_name} HTTP request failed."
-                    ) from exc
+                    raise RuntimeError(f"{self.server_name} HTTP request failed.") from exc
                 if response.status_code >= 500 and attempt < max_retries - 1:
                     log_warning(
                         f"{self.server_name} server error; retrying "

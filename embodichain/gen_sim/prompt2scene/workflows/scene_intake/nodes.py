@@ -87,7 +87,11 @@ def call_vlm_scene_intake_node(
             schema=SCENE_INTAKE_JSON_SCHEMA,
             messages=state["messages"],
             context="Scene intake",
+            
+            
             attempt_count=attempt_count,
+            
+            
         )
     except StructuredModelCallError as exc:
         error = format_attempt_error("Scene intake", attempt_count, exc)
@@ -159,7 +163,11 @@ def call_vlm_verify_scene_intake_node(
             schema=SCENE_INTAKE_JSON_SCHEMA,
             messages=messages,
             context="Scene intake verifier",
+            
+            
             attempt_count=attempt_count,
+            
+            
         )
     except StructuredModelCallError as exc:
         error = format_attempt_error("Scene intake verifier", attempt_count, exc)
@@ -194,9 +202,7 @@ def normalize_verified_scene_intake_node(
             model_output=raw_model_output,
         )
     except ValueError as exc:
-        error = format_attempt_error(
-            "Scene intake verifier", state["attempt_count"], exc
-        )
+        error = format_attempt_error("Scene intake verifier", state["attempt_count"], exc)
         log.log_warning(error)
         return {
             "scene_intake": None,

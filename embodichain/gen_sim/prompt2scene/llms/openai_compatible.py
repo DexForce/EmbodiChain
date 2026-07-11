@@ -21,20 +21,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+from langchain_openai import ChatOpenAI
+
 from embodichain.gen_sim.prompt2scene.llms.config import OpenAICompatibleLLMCfg
 
-__all__ = [
-    "DEFAULT_LLM_CONFIG_PATH",
-    "SIMREADY_LLM_ENV_PATH",
-    "build_chat_model",
-    "load_llm_config",
-]
+__all__ = ["DEFAULT_LLM_CONFIG_PATH", "build_chat_model", "load_llm_config"]
 
 DEFAULT_LLM_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "configs" / "llm_config.json"
-)
-SIMREADY_LLM_ENV_PATH = (
-    Path(__file__).resolve().parents[2] / "simready_pipeline" / "configs" / ".env"
 )
 
 
@@ -61,29 +55,12 @@ def load_llm_config(config_path: Path | None = None) -> OpenAICompatibleLLMCfg:
         raw_cfg: dict[str, Any] = json.load(f)
 
     cfg = raw_cfg.get("llm", {}).get("openai_compatible", {})
-    local_env = _load_env_file(SIMREADY_LLM_ENV_PATH)
-    api_key = _get_config_value(
-        local_env,
-        "OPENAI_API_KEY",
-        config_value=cfg.get("api_key", ""),
-    )
-    model = _get_config_value(
-        local_env,
-        "OPENAI_MODEL",
-        config_value=cfg.get("model", ""),
-    )
-    base_url = _get_config_value(
-        local_env,
-        "OPENAI_BASE_URL",
-        config_value=cfg.get("base_url", ""),
-    )
+    api_key = os.getenv("OPENAI_API_KEY") or cfg.get("api_key", "")
+    model = os.getenv("OPENAI_MODEL") or cfg.get("model", "")
+    base_url = os.getenv("OPENAI_BASE_URL") or cfg.get("base_url", "")
     default_query = cfg.get("default_query", {})
     max_attempts = _load_positive_int(
-        _get_config_value(
-            local_env,
-            "OPENAI_MAX_ATTEMPTS",
-            config_value=cfg.get("max_attempts", 3),
-        ),
+        os.getenv("OPENAI_MAX_ATTEMPTS") or cfg.get("max_attempts", 3),
         key="max_attempts",
     )
 
@@ -114,41 +91,6 @@ def load_llm_config(config_path: Path | None = None) -> OpenAICompatibleLLMCfg:
     )
 
 
-def _load_env_file(path: Path) -> dict[str, str]:
-    """Read local KEY=VALUE credentials without overriding shell variables."""
-    if not path.exists():
-        return {}
-
-    env_values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if key:
-            env_values[key] = value
-    return env_values
-
-
-def _get_config_value(
-    local_env: dict[str, str],
-    name: str,
-    *,
-    config_value: Any,
-) -> Any:
-    shell_value = os.getenv(name)
-    if shell_value:
-        return shell_value
-    env_value = local_env.get(name)
-    if env_value:
-        return env_value
-    return config_value
-
-
 def _load_positive_int(value: object, *, key: str) -> int:
     try:
         parsed = int(value)
@@ -161,8 +103,6 @@ def _load_positive_int(value: object, *, key: str) -> int:
 
 def build_chat_model(cfg: OpenAICompatibleLLMCfg) -> Any:
     """Build a LangChain OpenAI-compatible chat model."""
-    from langchain_openai import ChatOpenAI
-
     kwargs: dict[str, Any] = {
         "api_key": cfg.api_key,
         "base_url": cfg.base_url,

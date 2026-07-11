@@ -123,7 +123,9 @@ def fit_image_scene_table(
             object_ids=object_ids,
         )
         clutter_result = {
-            "clutter_2d_aabb_cm": alignment_result.get("final_clutter_2d_aabb_cm"),
+            "clutter_2d_aabb_cm": alignment_result.get(
+                "final_clutter_2d_aabb_cm"
+            ),
             "objects": [
                 {
                     "id": item["id"],

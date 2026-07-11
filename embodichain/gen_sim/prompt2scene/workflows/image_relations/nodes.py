@@ -156,8 +156,6 @@ def call_vlm_filter_initial_segments_node(
         debug_round_dir=art.debug_round_dir,
         write_debug_json=art.write_debug_round_json,
     )
-
-
 def retry_missing_by_candidates_node(
     state: ImageRelationsState,
     *,
@@ -410,14 +408,12 @@ def segment_table_node(
         y_order=image_relations.y_order,
         asset_layouts=image_relations.asset_layouts,
     )
-    artifact_writer.write_step_result(
-        updated_image_relations.to_segmentation_manifest()
-    )
+    artifact_writer.write_step_result(updated_image_relations.to_segmentation_manifest())
     return {"image_relations": updated_image_relations}
 
-    artifact_writer.write_step_result(
-        updated_image_relations.to_segmentation_manifest()
-    )
+
+
+    artifact_writer.write_step_result(updated_image_relations.to_segmentation_manifest())
     return {"image_relations": updated_image_relations}
 
 
@@ -455,7 +451,11 @@ def call_vlm_spatial_layout_node(
             schema=SPATIAL_LAYOUT_JSON_SCHEMA,
             messages=messages,
             context="Image spatial layout",
+            
+            
             attempt_count=attempt_count,
+            
+            
         )
         verifier_output = verify_spatial_layout_output(
             llm=llm,

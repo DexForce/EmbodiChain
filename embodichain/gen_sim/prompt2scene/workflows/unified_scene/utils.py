@@ -89,7 +89,9 @@ def build_unified_table(
         "id": scene_intake.table.id,
         "name": scene_intake.table.name,
         "description": scene_intake.table.description,
-        "complete_table_description": (scene_intake.table.complete_table_description),
+        "complete_table_description": (
+            scene_intake.table.complete_table_description
+        ),
         "is_complete_visible_table": scene_intake.table.is_complete_visible_table,
         "class_candidate": list(scene_intake.table.class_candidate),
         "image_path": None,
@@ -97,7 +99,9 @@ def build_unified_table(
         "grid_cells": grid_cells,
     }
     if scene_intake.table.object_coverage_percent is not None:
-        table["object_coverage_percent"] = scene_intake.table.object_coverage_percent
+        table["object_coverage_percent"] = (
+            scene_intake.table.object_coverage_percent
+        )
     return table
 
 
@@ -144,9 +148,7 @@ def resolve_image_layout(
     return bool(layout.is_arbitrary_layout), str(layout.reason)
 
 
-def grid_cells_from_objects(
-    objects: list[dict[str, Any]],
-) -> dict[str, list[str]] | None:
+def grid_cells_from_objects(objects: list[dict[str, Any]]) -> dict[str, list[str]] | None:
     """Build table grid cell membership from unified objects."""
     grid_cells: dict[str, list[str]] = {
         "center": [],
@@ -179,7 +181,9 @@ def build_unified_scene_from_image_relations(
     anchor = build_unified_spatial_anchor(image_relations.anchor)
     if anchor is None:
         raise ValueError("Image unified scene requires an anchor.")
-    layout_by_id = {layout.asset_id: layout for layout in image_relations.asset_layouts}
+    layout_by_id = {
+        layout.asset_id: layout for layout in image_relations.asset_layouts
+    }
     objects = []
     for spec in object_specs:
         is_arbitrary_layout, layout_reason = resolve_image_layout(
