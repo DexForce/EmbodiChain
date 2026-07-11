@@ -734,13 +734,6 @@ def _print_collision_item(item: Dict[str, Any]):
     )
 
 
-def _short_diagnostic_value(value: Any, limit: int = 180) -> str:
-    text = str(value)
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
-
-
 def _append_collision_backend_message(
     state: SceneState | Tempo_SceneState,
     diagnostics: Dict[str, Any],
@@ -749,10 +742,7 @@ def _append_collision_backend_message(
     has_problem = (
         level in {"warning", "error"}
         or bool(diagnostics.get("fallback_reason"))
-        or bool(diagnostics.get("collision_manager_error"))
         or bool(diagnostics.get("mesh_load_failures"))
-        or bool(diagnostics.get("mesh_add_failures"))
-        or bool(diagnostics.get("collision_query_failures"))
     )
     if not has_problem:
         return
@@ -763,23 +753,10 @@ def _append_collision_backend_message(
         f"eligible_objects={diagnostics.get('eligible_objects', 0)}",
         f"loaded_meshes={diagnostics.get('loaded_meshes', 0)}",
     ]
-    if diagnostics.get("missing_library"):
-        parts.append(f"missing_library={diagnostics['missing_library']}")
     if diagnostics.get("fallback_reason"):
         parts.append(f"reason={diagnostics['fallback_reason']}")
-    if diagnostics.get("collision_manager_error"):
-        parts.append(
-            "collision_manager_error="
-            + _short_diagnostic_value(diagnostics["collision_manager_error"])
-        )
     if diagnostics.get("mesh_load_failures"):
         parts.append(f"mesh_load_failures={len(diagnostics['mesh_load_failures'])}")
-    if diagnostics.get("mesh_add_failures"):
-        parts.append(f"mesh_add_failures={len(diagnostics['mesh_add_failures'])}")
-    if diagnostics.get("collision_query_failures"):
-        parts.append(
-            f"collision_query_failures={len(diagnostics['collision_query_failures'])}"
-        )
 
     message = f"Node 3.5 collision backend {level}: " + ", ".join(parts)
     state.messages.append(message)
@@ -1027,26 +1004,12 @@ def _build_collision_scene(
     if diagnostics is None:
         diagnostics = {}
     diagnostics.setdefault("stage", stage)
-    diagnostics.setdefault("backend", "fcl")
+    diagnostics.setdefault("backend", "mesh_aabb")
     diagnostics.setdefault("level", "info")
     diagnostics["configured_objects"] = len(cfg_by_uid)
     diagnostics["eligible_objects"] = 0
     diagnostics["loaded_meshes"] = 0
-    diagnostics["added_to_collision_manager"] = 0
     diagnostics["mesh_load_failures"] = []
-    diagnostics["mesh_add_failures"] = []
-
-    try:
-        cm = trimesh.collision.CollisionManager()
-    except Exception as exc:
-        cm = None
-        error_text = str(exc)
-        diagnostics["backend"] = "aabb_fallback"
-        diagnostics["level"] = "error"
-        diagnostics["fallback_reason"] = "collision_manager_unavailable"
-        diagnostics["collision_manager_error"] = repr(exc)
-        if "fcl" in error_text.lower():
-            diagnostics["missing_library"] = "python-fcl"
 
     mesh_dict = {}
     pose_dict = {}
@@ -1084,33 +1047,14 @@ def _build_collision_scene(
         mesh_dict[uid] = mesh
         pose_dict[uid] = pose
 
-        if cm is not None:
-            try:
-                cm.add_object(uid, mesh, transform=pose)
-                diagnostics["added_to_collision_manager"] += 1
-            except Exception as exc:
-                diagnostics["mesh_add_failures"].append(
-                    {
-                        "uid": uid,
-                        "mesh_path": str(mesh_path),
-                        "error": repr(exc),
-                    }
-                )
-
     if diagnostics["eligible_objects"] > 0 and diagnostics["loaded_meshes"] == 0:
-        cm = None
         diagnostics["backend"] = "skipped_no_collision_meshes"
         diagnostics["level"] = "error"
         diagnostics["fallback_reason"] = "no_collision_meshes_loaded"
-    elif cm is not None and diagnostics["mesh_add_failures"]:
-        cm = None
-        diagnostics["backend"] = "aabb_fallback_after_add_failure"
-        diagnostics["level"] = "error"
-        diagnostics["fallback_reason"] = "collision_manager_add_failure"
     elif diagnostics["mesh_load_failures"] and diagnostics.get("level") == "info":
         diagnostics["level"] = "warning"
 
-    return cm, mesh_dict, pose_dict
+    return None, mesh_dict, pose_dict
 
 
 def _collision_result_from_pair(
@@ -1179,19 +1123,8 @@ def _collision_result_from_pair(
     }
 
 
-def _collision_query_names(raw_result: Any) -> List[str]:
-    if isinstance(raw_result, tuple):
-        for item in raw_result:
-            if isinstance(item, (set, list, tuple)):
-                return [str(name) for name in item]
-        return []
-    if isinstance(raw_result, (set, list, tuple)):
-        return [str(name) for name in raw_result]
-    return []
-
-
 def _detect_collision_pairs(
-    cm,
+    _cm,
     mesh_dict: Dict[str, trimesh.Trimesh],
     pose_dict: Dict[str, np.ndarray],
     object_to_group: Dict[str, str],
@@ -1203,71 +1136,23 @@ def _detect_collision_pairs(
     ids = list(mesh_dict.keys())
     if diagnostics is not None:
         diagnostics["detection_object_count"] = len(ids)
+        diagnostics["detection_method"] = "pairwise_mesh_world_aabb"
 
-    seen = set()
-    query_failures = []
-    if cm is not None:
-        for uid in ids:
-            try:
-                if hasattr(cm, "in_collision_single"):
-                    raw_names = cm.in_collision_single(
-                        mesh_dict[uid], transform=pose_dict[uid], return_names=True
-                    )
-                else:
-                    raw_names = cm.in_collision_other(
-                        mesh_dict[uid], transform=pose_dict[uid], return_names=True
-                    )
-                names = _collision_query_names(raw_names)
-            except Exception as exc:
-                query_failures.append({"uid": uid, "error": repr(exc)})
-                break
-            for other in names or []:
-                if other == uid or other not in mesh_dict or other not in pose_dict:
-                    continue
-                key = tuple(sorted((uid, other)))
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                item = _collision_result_from_pair(
-                    uid,
-                    other,
-                    mesh_dict,
-                    pose_dict,
-                    object_to_group,
-                    relation_direction_map,
-                    separation_margin,
-                )
-                if item is not None:
-                    results.append(item)
-
-    if cm is None or query_failures:
-        if diagnostics is not None:
-            if query_failures:
-                diagnostics["collision_query_failures"] = query_failures
-                diagnostics["backend"] = "aabb_fallback_after_query_failure"
-                diagnostics["level"] = "error"
-                diagnostics["fallback_reason"] = "collision_query_failure"
-            elif diagnostics.get("backend") == "fcl":
-                diagnostics["backend"] = "aabb_fallback"
-                diagnostics["level"] = "error"
-                diagnostics["fallback_reason"] = "collision_manager_missing"
-        results = []
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                a = ids[i]
-                b = ids[j]
-                item = _collision_result_from_pair(
-                    a,
-                    b,
-                    mesh_dict,
-                    pose_dict,
-                    object_to_group,
-                    relation_direction_map,
-                    separation_margin,
-                )
-                if item is not None:
-                    results.append(item)
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            a = ids[i]
+            b = ids[j]
+            item = _collision_result_from_pair(
+                a,
+                b,
+                mesh_dict,
+                pose_dict,
+                object_to_group,
+                relation_direction_map,
+                separation_margin,
+            )
+            if item is not None:
+                results.append(item)
 
     results.sort(key=lambda item: float(item["severity"]), reverse=True)
     if diagnostics is not None:
