@@ -2432,8 +2432,14 @@ def test_dual_upright_in_place_supports_cup_like_objects(
     }
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
+    task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
     assert task_prompt.count('"orientation_goal":"upright"') >= 2
     assert '"obj_name":"table"' not in task_prompt
+    assert len(task_graph["edges"]) == 10
+    assert task_graph["edges"][0]["left_arm_action"]["atomic_action_class"] == "PickUp"
+    assert task_graph["edges"][0]["right_arm_action"] is None
+    assert task_graph["edges"][5]["left_arm_action"] is None
+    assert task_graph["edges"][5]["right_arm_action"]["atomic_action_class"] == "PickUp"
 
 
 def test_generation_upright_known_z_normalized_asset_uses_local_z(
@@ -2970,9 +2976,10 @@ def test_dual_upright_prompt_uses_one_final_move_per_arm() -> None:
 
     prompt = make_relative_task_prompt("DemoUpright", "demo_project", spec)
 
-    assert "Generate one deterministic nominal graph with exactly 9 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 10 nominal edges" in (
         prompt
     )
+    assert "before picking up the second object" in prompt
     assert '"obj_upright_direction":[1.0,0.0,0.0]' in prompt
     assert '"obj_upright_direction":[0.0,1.0,0.0]' in prompt
     assert f'"rotate_upright":{rotate_upright}' in prompt
@@ -2989,6 +2996,15 @@ def test_dual_upright_prompt_uses_one_final_move_per_arm() -> None:
     assert '"position":[0.1,0.2,0.55]' not in atom_actions
 
     task_graph = make_relative_task_graph("DemoUpright", spec)
+    assert len(task_graph["edges"]) == 10
+    assert task_graph["edges"][0]["left_arm_action"]["atomic_action_class"] == "PickUp"
+    assert task_graph["edges"][0]["right_arm_action"] is None
+    assert task_graph["edges"][4]["left_arm_action"]["target_qpos"] == {
+        "source": "initial"
+    }
+    assert task_graph["edges"][4]["right_arm_action"] is None
+    assert task_graph["edges"][5]["left_arm_action"] is None
+    assert task_graph["edges"][5]["right_arm_action"]["atomic_action_class"] == "PickUp"
     move_held_actions = [
         action
         for edge in task_graph["edges"]
