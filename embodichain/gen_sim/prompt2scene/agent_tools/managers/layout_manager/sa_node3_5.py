@@ -342,16 +342,34 @@ def rotate_mesh_to_optimization_frame(mesh):
     return mesh
 
 
-def _load_mesh_simple(mesh_path: str | Path):
+def _load_mesh_simple(
+    mesh_path: str | Path,
+    diagnostics: Optional[Dict[str, Any]] = None,
+    uid: Optional[str] = None,
+):
+    def _record_load_failure(reason: str, error: Optional[Exception] = None) -> None:
+        if diagnostics is None:
+            return
+        diagnostics.setdefault("mesh_load_failures", []).append(
+            {
+                "uid": uid,
+                "mesh_path": str(mesh_path),
+                "reason": reason,
+                "error": repr(error) if error is not None else None,
+            }
+        )
+
     mesh_path = Path(mesh_path)
     if not mesh_path.exists():
         print(f"[WARN] Mesh file not found: {mesh_path}")
+        _record_load_failure("mesh_file_not_found")
         return None
 
     try:
         mesh = trimesh.load(mesh_path, force="mesh")
     except Exception as e:
         print(f"[WARN] Failed to load mesh {mesh_path}: {e}")
+        _record_load_failure("mesh_load_exception", e)
         return None
 
     if isinstance(mesh, trimesh.Scene):
@@ -361,6 +379,7 @@ def _load_mesh_simple(mesh_path: str | Path):
                 geoms.append(geom.copy())
         if not geoms:
             print(f"[WARN] Scene has no geometry: {mesh_path}")
+            _record_load_failure("scene_has_no_geometry")
             return None
         mesh = trimesh.util.concatenate(geoms)
 
@@ -715,6 +734,58 @@ def _print_collision_item(item: Dict[str, Any]):
     )
 
 
+def _short_diagnostic_value(value: Any, limit: int = 180) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _append_collision_backend_message(
+    state: SceneState | Tempo_SceneState,
+    diagnostics: Dict[str, Any],
+) -> None:
+    level = str(diagnostics.get("level", "info"))
+    has_problem = (
+        level in {"warning", "error"}
+        or bool(diagnostics.get("fallback_reason"))
+        or bool(diagnostics.get("collision_manager_error"))
+        or bool(diagnostics.get("mesh_load_failures"))
+        or bool(diagnostics.get("mesh_add_failures"))
+        or bool(diagnostics.get("collision_query_failures"))
+    )
+    if not has_problem:
+        return
+
+    parts = [
+        f"backend={diagnostics.get('backend', 'unknown')}",
+        f"stage={diagnostics.get('stage', 'unknown')}",
+        f"eligible_objects={diagnostics.get('eligible_objects', 0)}",
+        f"loaded_meshes={diagnostics.get('loaded_meshes', 0)}",
+    ]
+    if diagnostics.get("missing_library"):
+        parts.append(f"missing_library={diagnostics['missing_library']}")
+    if diagnostics.get("fallback_reason"):
+        parts.append(f"reason={diagnostics['fallback_reason']}")
+    if diagnostics.get("collision_manager_error"):
+        parts.append(
+            "collision_manager_error="
+            + _short_diagnostic_value(diagnostics["collision_manager_error"])
+        )
+    if diagnostics.get("mesh_load_failures"):
+        parts.append(f"mesh_load_failures={len(diagnostics['mesh_load_failures'])}")
+    if diagnostics.get("mesh_add_failures"):
+        parts.append(f"mesh_add_failures={len(diagnostics['mesh_add_failures'])}")
+    if diagnostics.get("collision_query_failures"):
+        parts.append(
+            f"collision_query_failures={len(diagnostics['collision_query_failures'])}"
+        )
+
+    message = f"Node 3.5 collision backend {level}: " + ", ".join(parts)
+    state.messages.append(message)
+    print(f"[COLLISION][{level.upper()}] {message}")
+
+
 def _greedy_push_apart(
     current_centers: Dict[str, np.ndarray],
     collisions: List[Dict[str, Any]],
@@ -949,13 +1020,33 @@ def _build_collision_scene(
     ec_root: str | Path,
     group_centers: Dict[str, np.ndarray],
     object_to_group: Dict[str, str],
+    diagnostics: Optional[Dict[str, Any]] = None,
+    stage: str = "unknown",
 ):
     cfg_by_uid = _load_objects_cfg_by_uid(ec_root)
+    if diagnostics is None:
+        diagnostics = {}
+    diagnostics.setdefault("stage", stage)
+    diagnostics.setdefault("backend", "fcl")
+    diagnostics.setdefault("level", "info")
+    diagnostics["configured_objects"] = len(cfg_by_uid)
+    diagnostics["eligible_objects"] = 0
+    diagnostics["loaded_meshes"] = 0
+    diagnostics["added_to_collision_manager"] = 0
+    diagnostics["mesh_load_failures"] = []
+    diagnostics["mesh_add_failures"] = []
 
     try:
         cm = trimesh.collision.CollisionManager()
-    except Exception:
+    except Exception as exc:
         cm = None
+        error_text = str(exc)
+        diagnostics["backend"] = "aabb_fallback"
+        diagnostics["level"] = "error"
+        diagnostics["fallback_reason"] = "collision_manager_unavailable"
+        diagnostics["collision_manager_error"] = repr(exc)
+        if "fcl" in error_text.lower():
+            diagnostics["missing_library"] = "python-fcl"
 
     mesh_dict = {}
     pose_dict = {}
@@ -964,18 +1055,28 @@ def _build_collision_scene(
         gid = object_to_group.get(uid)
         if gid not in group_centers:
             continue
+        diagnostics["eligible_objects"] += 1
 
-        shape = cfg.get("shape", {})
+        shape = cfg.get("shape") or {}
         fpath = shape.get("fpath")
         if not fpath:
+            diagnostics["mesh_load_failures"].append(
+                {
+                    "uid": uid,
+                    "mesh_path": None,
+                    "reason": "missing_shape_fpath",
+                    "error": None,
+                }
+            )
             continue
 
         mesh_path = Path(ec_root) / fpath
-        mesh = _load_mesh_simple(mesh_path)
+        mesh = _load_mesh_simple(mesh_path, diagnostics=diagnostics, uid=uid)
         if mesh is None:
             continue
 
         mesh = _prepare_collision_mesh(mesh, cfg)
+        diagnostics["loaded_meshes"] += 1
 
         center_xy = np.asarray(group_centers[gid], dtype=float).reshape(2)
         pose = _pose_from_center_xy(mesh, float(center_xy[0]), float(center_xy[1]))
@@ -986,10 +1087,107 @@ def _build_collision_scene(
         if cm is not None:
             try:
                 cm.add_object(uid, mesh, transform=pose)
-            except Exception:
-                pass
+                diagnostics["added_to_collision_manager"] += 1
+            except Exception as exc:
+                diagnostics["mesh_add_failures"].append(
+                    {
+                        "uid": uid,
+                        "mesh_path": str(mesh_path),
+                        "error": repr(exc),
+                    }
+                )
+
+    if diagnostics["eligible_objects"] > 0 and diagnostics["loaded_meshes"] == 0:
+        cm = None
+        diagnostics["backend"] = "skipped_no_collision_meshes"
+        diagnostics["level"] = "error"
+        diagnostics["fallback_reason"] = "no_collision_meshes_loaded"
+    elif cm is not None and diagnostics["mesh_add_failures"]:
+        cm = None
+        diagnostics["backend"] = "aabb_fallback_after_add_failure"
+        diagnostics["level"] = "error"
+        diagnostics["fallback_reason"] = "collision_manager_add_failure"
+    elif diagnostics["mesh_load_failures"] and diagnostics.get("level") == "info":
+        diagnostics["level"] = "warning"
 
     return cm, mesh_dict, pose_dict
+
+
+def _collision_result_from_pair(
+    a: str,
+    b: str,
+    mesh_dict: Dict[str, trimesh.Trimesh],
+    pose_dict: Dict[str, np.ndarray],
+    object_to_group: Dict[str, str],
+    relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]],
+    separation_margin: float,
+) -> Optional[Dict[str, Any]]:
+    bmin_a, bmax_a = _world_bounds(mesh_dict[a], pose_dict[a])
+    bmin_b, bmax_b = _world_bounds(mesh_dict[b], pose_dict[b])
+    group_a = object_to_group.get(a, a)
+    group_b = object_to_group.get(b, b)
+
+    candidates = _relation_candidates_for_pair(
+        group_a, group_b, relation_direction_map
+    )
+    relation_choice = None
+    best_sep = None
+    for candidate in candidates:
+        sep = _pair_separation_from_bounds(
+            bmin_a,
+            bmax_a,
+            bmin_b,
+            bmax_b,
+            direction_2d=np.asarray(candidate["direction"], dtype=float),
+            margin=separation_margin,
+        )
+        if sep[0] is None:
+            continue
+        if best_sep is None or float(sep[2]) < float(best_sep[2]):
+            best_sep = sep
+            relation_choice = candidate
+    if best_sep is None:
+        best_sep = _pair_separation_from_bounds(
+            bmin_a,
+            bmax_a,
+            bmin_b,
+            bmax_b,
+            margin=separation_margin,
+        )
+    dir2d, required_sep, push_distance, severity = best_sep
+    if dir2d is None:
+        return None
+
+    overlap_x = min(bmax_a[0], bmax_b[0]) - max(bmin_a[0], bmin_b[0])
+    overlap_y = min(bmax_a[1], bmax_b[1]) - max(bmin_a[1], bmin_b[1])
+    overlap_z = min(bmax_a[2], bmax_b[2]) - max(bmin_a[2], bmin_b[2])
+
+    return {
+        "a": a,
+        "b": b,
+        "group_a": group_a,
+        "group_b": group_b,
+        "direction_2d": dir2d,
+        "required_sep": required_sep,
+        "push_distance": push_distance,
+        "severity": severity,
+        "relation_driven": relation_choice is not None,
+        "relation_choice": relation_choice,
+        "overlap_x": float(overlap_x),
+        "overlap_y": float(overlap_y),
+        "overlap_z": float(overlap_z),
+    }
+
+
+def _collision_query_names(raw_result: Any) -> List[str]:
+    if isinstance(raw_result, tuple):
+        for item in raw_result:
+            if isinstance(item, (set, list, tuple)):
+                return [str(name) for name in item]
+        return []
+    if isinstance(raw_result, (set, list, tuple)):
+        return [str(name) for name in raw_result]
+    return []
 
 
 def _detect_collision_pairs(
@@ -999,145 +1197,81 @@ def _detect_collision_pairs(
     object_to_group: Dict[str, str],
     relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]] = None,
     separation_margin: float = DEFAULT_OBJECT_CLEARANCE_M,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ):
     results = []
     ids = list(mesh_dict.keys())
+    if diagnostics is not None:
+        diagnostics["detection_object_count"] = len(ids)
 
     seen = set()
+    query_failures = []
     if cm is not None:
         for uid in ids:
             try:
-                names = cm.in_collision_other(
-                    mesh_dict[uid], transform=pose_dict[uid], return_names=True
-                )
-            except Exception:
-                names = []
+                if hasattr(cm, "in_collision_single"):
+                    raw_names = cm.in_collision_single(
+                        mesh_dict[uid], transform=pose_dict[uid], return_names=True
+                    )
+                else:
+                    raw_names = cm.in_collision_other(
+                        mesh_dict[uid], transform=pose_dict[uid], return_names=True
+                    )
+                names = _collision_query_names(raw_names)
+            except Exception as exc:
+                query_failures.append({"uid": uid, "error": repr(exc)})
+                break
             for other in names or []:
-                if other == uid:
+                if other == uid or other not in mesh_dict or other not in pose_dict:
                     continue
                 key = tuple(sorted((uid, other)))
                 if key in seen:
                     continue
                 seen.add(key)
 
-                bmin_a, bmax_a = _world_bounds(mesh_dict[uid], pose_dict[uid])
-                bmin_b, bmax_b = _world_bounds(mesh_dict[other], pose_dict[other])
-                group_a = object_to_group.get(uid, uid)
-                group_b = object_to_group.get(other, other)
-
-                candidates = _relation_candidates_for_pair(
-                    group_a, group_b, relation_direction_map
+                item = _collision_result_from_pair(
+                    uid,
+                    other,
+                    mesh_dict,
+                    pose_dict,
+                    object_to_group,
+                    relation_direction_map,
+                    separation_margin,
                 )
-                relation_choice = None
-                best_sep = None
-                for candidate in candidates:
-                    sep = _pair_separation_from_bounds(
-                        bmin_a,
-                        bmax_a,
-                        bmin_b,
-                        bmax_b,
-                        direction_2d=np.asarray(candidate["direction"], dtype=float),
-                        margin=separation_margin,
-                    )
-                    if sep[0] is None:
-                        continue
-                    if best_sep is None or float(sep[2]) < float(best_sep[2]):
-                        best_sep = sep
-                        relation_choice = candidate
-                if best_sep is None:
-                    best_sep = _pair_separation_from_bounds(
-                        bmin_a,
-                        bmax_a,
-                        bmin_b,
-                        bmax_b,
-                        margin=separation_margin,
-                    )
-                dir2d, required_sep, push_distance, severity = best_sep
-                if dir2d is None:
-                    continue
+                if item is not None:
+                    results.append(item)
 
-                overlap_x = min(bmax_a[0], bmax_b[0]) - max(bmin_a[0], bmin_b[0])
-                overlap_y = min(bmax_a[1], bmax_b[1]) - max(bmin_a[1], bmin_b[1])
-                overlap_z = min(bmax_a[2], bmax_b[2]) - max(bmin_a[2], bmin_b[2])
-
-                results.append(
-                    {
-                        "a": uid,
-                        "b": other,
-                        "group_a": group_a,
-                        "group_b": group_b,
-                        "direction_2d": dir2d,
-                        "required_sep": required_sep,
-                        "push_distance": push_distance,
-                        "severity": severity,
-                        "relation_driven": relation_choice is not None,
-                        "relation_choice": relation_choice,
-                        "overlap_x": float(overlap_x),
-                        "overlap_y": float(overlap_y),
-                        "overlap_z": float(overlap_z),
-                    }
-                )
-    else:
+    if cm is None or query_failures:
+        if diagnostics is not None:
+            if query_failures:
+                diagnostics["collision_query_failures"] = query_failures
+                diagnostics["backend"] = "aabb_fallback_after_query_failure"
+                diagnostics["level"] = "error"
+                diagnostics["fallback_reason"] = "collision_query_failure"
+            elif diagnostics.get("backend") == "fcl":
+                diagnostics["backend"] = "aabb_fallback"
+                diagnostics["level"] = "error"
+                diagnostics["fallback_reason"] = "collision_manager_missing"
+        results = []
         for i in range(len(ids)):
             for j in range(i + 1, len(ids)):
                 a = ids[i]
                 b = ids[j]
-                bmin_a, bmax_a = _world_bounds(mesh_dict[a], pose_dict[a])
-                bmin_b, bmax_b = _world_bounds(mesh_dict[b], pose_dict[b])
-                group_a = object_to_group.get(a, a)
-                group_b = object_to_group.get(b, b)
-                candidates = _relation_candidates_for_pair(
-                    group_a, group_b, relation_direction_map
+                item = _collision_result_from_pair(
+                    a,
+                    b,
+                    mesh_dict,
+                    pose_dict,
+                    object_to_group,
+                    relation_direction_map,
+                    separation_margin,
                 )
-                relation_choice = None
-                best_sep = None
-                for candidate in candidates:
-                    sep = _pair_separation_from_bounds(
-                        bmin_a,
-                        bmax_a,
-                        bmin_b,
-                        bmax_b,
-                        direction_2d=np.asarray(candidate["direction"], dtype=float),
-                        margin=separation_margin,
-                    )
-                    if sep[0] is None:
-                        continue
-                    if best_sep is None or float(sep[2]) < float(best_sep[2]):
-                        best_sep = sep
-                        relation_choice = candidate
-                if best_sep is None:
-                    best_sep = _pair_separation_from_bounds(
-                        bmin_a,
-                        bmax_a,
-                        bmin_b,
-                        bmax_b,
-                        margin=separation_margin,
-                    )
-                dir2d, required_sep, push_distance, severity = best_sep
-                if dir2d is None:
-                    continue
-                overlap_x = min(bmax_a[0], bmax_b[0]) - max(bmin_a[0], bmin_b[0])
-                overlap_y = min(bmax_a[1], bmax_b[1]) - max(bmin_a[1], bmin_b[1])
-                overlap_z = min(bmax_a[2], bmax_b[2]) - max(bmin_a[2], bmin_b[2])
-                results.append(
-                    {
-                        "a": a,
-                        "b": b,
-                        "group_a": group_a,
-                        "group_b": group_b,
-                        "direction_2d": dir2d,
-                        "required_sep": required_sep,
-                        "push_distance": push_distance,
-                        "severity": severity,
-                        "relation_driven": relation_choice is not None,
-                        "relation_choice": relation_choice,
-                        "overlap_x": float(overlap_x),
-                        "overlap_y": float(overlap_y),
-                        "overlap_z": float(overlap_z),
-                    }
-                )
+                if item is not None:
+                    results.append(item)
 
     results.sort(key=lambda item: float(item["severity"]), reverse=True)
+    if diagnostics is not None:
+        diagnostics["detected_collision_pairs"] = len(results)
     return results
 
 
@@ -1395,6 +1529,7 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
         "relation_terms": relation_terms,
         "table_bounds": {"x_range": [0.0, W], "y_range": [0.0, H]},
         "collision_terms": [],
+        "collision_backend_history": [],
         "notes": [
             "Center-point optimization only.",
             "Stack_on and Inside_of are bound by group roots.",
@@ -1427,14 +1562,44 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
 
     seen_pair_keys = set()
     collision_terms_history: List[Dict[str, Any]] = []
+    collision_backend_history: List[Dict[str, Any]] = []
     debug_renders: Dict[str, str] = {}
 
-    cm_initial, mesh_dict_initial, pose_dict_initial = _build_collision_scene(
-        state,
-        ec_root,
-        current_centers,
-        base_model["object_to_group"],
+    def build_collision_scene_with_diagnostics(stage: str):
+        diagnostics = {"stage": stage}
+        cm, mesh_dict, pose_dict = _build_collision_scene(
+            state,
+            ec_root,
+            current_centers,
+            base_model["object_to_group"],
+            diagnostics=diagnostics,
+            stage=stage,
+        )
+        collision_backend_history.append(diagnostics)
+        return cm, mesh_dict, pose_dict, diagnostics
+
+    def detect_collision_pairs_with_diagnostics(
+        cm,
+        mesh_dict: Dict[str, trimesh.Trimesh],
+        pose_dict: Dict[str, np.ndarray],
+        diagnostics: Dict[str, Any],
+    ):
+        collisions = _detect_collision_pairs(
+            cm,
+            mesh_dict,
+            pose_dict,
+            base_model["object_to_group"],
+            relation_direction_map=relation_direction_map,
+            separation_margin=collision_margin,
+            diagnostics=diagnostics,
+        )
+        _append_collision_backend_message(state, diagnostics)
+        return collisions
+
+    cm_initial, mesh_dict_initial, pose_dict_initial, initial_diagnostics = (
+        build_collision_scene_with_diagnostics("initial_render")
     )
+    _append_collision_backend_message(state, initial_diagnostics)
     before_render_path = Path(ec_root) / "collision_mesh_before.png"
     _render_collision_mesh_topdown(
         output_path=before_render_path,
@@ -1449,19 +1614,14 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
     for round_idx in range(max_rounds):
         print(f"\n>>> Collision refinement round {round_idx + 1}")
 
-        cm, mesh_dict, pose_dict = _build_collision_scene(
-            state,
-            ec_root,
-            current_centers,
-            base_model["object_to_group"],
+        cm, mesh_dict, pose_dict, diagnostics = build_collision_scene_with_diagnostics(
+            f"round_{round_idx + 1}_pre_solve"
         )
-        collisions = _detect_collision_pairs(
+        collisions = detect_collision_pairs_with_diagnostics(
             cm,
             mesh_dict,
             pose_dict,
-            base_model["object_to_group"],
-            relation_direction_map=relation_direction_map,
-            separation_margin=collision_margin,
+            diagnostics,
         )
 
         if not collisions:
@@ -1551,19 +1711,14 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             f"[SOLVE] done | constraints={len(collision_terms_history)} | max_move={max_move:.4f}"
         )
 
-        cm2, mesh_dict2, pose_dict2 = _build_collision_scene(
-            state,
-            ec_root,
-            current_centers,
-            base_model["object_to_group"],
+        cm2, mesh_dict2, pose_dict2, post_diagnostics = (
+            build_collision_scene_with_diagnostics(f"round_{round_idx + 1}_post_solve")
         )
-        post_collisions = _detect_collision_pairs(
+        post_collisions = detect_collision_pairs_with_diagnostics(
             cm2,
             mesh_dict2,
             pose_dict2,
-            base_model["object_to_group"],
-            relation_direction_map=relation_direction_map,
-            separation_margin=collision_margin,
+            post_diagnostics,
         )
 
         if not post_collisions:
@@ -1583,19 +1738,14 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
             break
 
     for safety_round in range(5):
-        cm_s, mesh_dict_s, pose_dict_s = _build_collision_scene(
-            state,
-            ec_root,
-            current_centers,
-            base_model["object_to_group"],
+        cm_s, mesh_dict_s, pose_dict_s, safety_diagnostics = (
+            build_collision_scene_with_diagnostics(f"safety_round_{safety_round + 1}")
         )
-        remaining = _detect_collision_pairs(
+        remaining = detect_collision_pairs_with_diagnostics(
             cm_s,
             mesh_dict_s,
             pose_dict_s,
-            base_model["object_to_group"],
-            relation_direction_map=relation_direction_map,
-            separation_margin=collision_margin,
+            safety_diagnostics,
         )
         if not remaining:
             break
@@ -1637,17 +1787,15 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
 
     state.optimization_model = base_model
     state.optimization_model["collision_terms"] = collision_terms_history
+    state.optimization_model["collision_backend_history"] = collision_backend_history
     state.optimization_model["debug_renders"] = debug_renders
     state.optimized_layout = optimized_layout
     state.optimized_group_centers = {
         gid: [float(v[0]), float(v[1])] for gid, v in current_centers.items()
     }
 
-    cm_f, mesh_dict_f, pose_dict_f = _build_collision_scene(
-        state,
-        ec_root,
-        current_centers,
-        base_model["object_to_group"],
+    cm_f, mesh_dict_f, pose_dict_f, final_diagnostics = (
+        build_collision_scene_with_diagnostics("final_render")
     )
     after_render_path = Path(ec_root) / "collision_mesh_after.png"
     _render_collision_mesh_topdown(
@@ -1661,13 +1809,11 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
         debug_renders["collision_mesh_after"] = str(after_render_path)
         state.optimization_model["debug_renders"] = debug_renders
 
-    final_collisions = _detect_collision_pairs(
+    final_collisions = detect_collision_pairs_with_diagnostics(
         cm_f,
         mesh_dict_f,
         pose_dict_f,
-        base_model["object_to_group"],
-        relation_direction_map=relation_direction_map,
-        separation_margin=collision_margin,
+        final_diagnostics,
     )
     if final_collisions:
         state.messages.append(
