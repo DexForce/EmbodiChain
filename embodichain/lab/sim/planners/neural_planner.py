@@ -245,6 +245,9 @@ class NeuralPlanner(BasePlanner):
         KeyError: If the checkpoint is missing required keys.
     """
 
+    preinterpolate_targets = False
+    """Neural rollouts consume raw EEF waypoints; pre-interpolation is disabled."""
+
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)
 
@@ -255,6 +258,22 @@ class NeuralPlanner(BasePlanner):
 
     def default_plan_options(self) -> NeuralPlanOptions:
         return NeuralPlanOptions()
+
+    def with_motion_context(
+        self,
+        options: PlanOptions,
+        *,
+        start_qpos: torch.Tensor | None,
+        control_part: str | None,
+    ) -> NeuralPlanOptions:
+        """Forward MotionGenerator context into :class:`NeuralPlanOptions`."""
+        if not isinstance(options, NeuralPlanOptions):
+            logger.log_error("NeuralPlanner requires NeuralPlanOptions", TypeError)
+        if options.control_part is None:
+            options.control_part = control_part
+        if options.start_qpos is None:
+            options.start_qpos = start_qpos
+        return options
 
     def _load_checkpoint(self, checkpoint_path: Path) -> None:
         if not checkpoint_path.exists():

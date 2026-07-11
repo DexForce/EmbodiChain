@@ -345,7 +345,7 @@ def test_motion_generator_neural_auto_disables_interpolation(
         )
 
     assert result.success.all().item()
-    assert "is_interpolate=True is not supported with NeuralPlanner" in caplog.text
+    assert "does not support MotionGenerator pre-interpolation" in caplog.text
 
 
 def test_safe_torch_load_roundtrip(tmp_path):

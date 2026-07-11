@@ -24,7 +24,61 @@ from embodichain.lab.sim.planners.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
+from embodichain.lab.sim.planners.base_planner import PlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
+
+
+class _DirectCartesianPlanner:
+    """Fake backend that consumes raw Cartesian targets (like cuRobo).
+
+    Used to verify ``MotionGenerator`` skips pre-interpolation and forwards the
+    runtime context through the generic capability hooks rather than a
+    planner-class special case.
+    """
+
+    preinterpolate_targets = False
+    preserve_plan_samples = True
+
+    def default_plan_options(self) -> PlanOptions:
+        return PlanOptions()
+
+    def with_motion_context(self, options, *, start_qpos, control_part):
+        self.received = (start_qpos.clone(), control_part)
+        return options
+
+    def plan(self, target_states, options):
+        self.target_states = target_states
+        return PlanResult(
+            success=torch.tensor([True]),
+            positions=torch.zeros(1, 3, 2),
+        )
+
+
+def test_direct_cartesian_planner_skips_preinterpolation():
+    planner = _DirectCartesianPlanner()
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+    start = torch.tensor([[0.1, -0.2]])
+    goal = PlanState.from_xpos(torch.eye(4).unsqueeze(0))
+
+    result = generator.generate(
+        [goal],
+        MotionGenOptions(
+            start_qpos=start,
+            control_part="arm",
+            is_interpolate=True,
+        ),
+    )
+
+    assert result.success.item()
+    # The original EEF target reaches the planner unchanged - no IK, no
+    # pre-interpolation, no start-pose prepend.
+    assert planner.target_states[0].move_type is MoveType.EEF_MOVE
+    assert torch.equal(planner.target_states[0].xpos, goal.xpos)
+    # Runtime context is forwarded through the generic hook.
+    assert torch.equal(planner.received[0], start)
+    assert planner.received[1] == "arm"
 
 
 def _mock_planner(b=3, n=15, dofs=6):

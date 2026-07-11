@@ -305,6 +305,10 @@ class ToppraPlanner(BasePlanner):
         # by SimulationManager.destroy(), which skips every Python finalizer.
         # __del__ below only handles in-process GC of an abandoned planner.
 
+    def default_plan_options(self) -> ToppraPlanOptions:
+        """Return backend-default planning options."""
+        return ToppraPlanOptions()
+
     @staticmethod
     def _resolve_mp_context(mp_context: str | None, device: torch.device) -> str:
         """Return the multiprocessing start method to use for the worker pool.
