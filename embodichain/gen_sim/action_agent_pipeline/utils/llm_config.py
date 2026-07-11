@@ -29,6 +29,7 @@ __all__ = [
     "LEGACY_LLM_ENV_PATH",
     "SIMREADY_LLM_ENV_PATH",
     "get_openai_compatible_llm_config",
+    "load_local_env_values",
 ]
 
 DEFAULT_LLM_MODEL = os.getenv("EMBODICHAIN_DEFAULT_LLM_MODEL", "gpt-4o")
@@ -83,6 +84,15 @@ def _load_env_files(paths: tuple[Path, ...] | None = None) -> dict[str, str]:
     return env_values
 
 
+def load_local_env_values() -> dict[str, str]:
+    """Load the action pipeline's local environment files.
+
+    Returned values do not include process environment variables. Callers must
+    let explicit shell variables take precedence when resolving individual keys.
+    """
+    return _load_env_files()
+
+
 def _get_first_value(
     local_env: dict[str, str],
     *names: str,
@@ -115,7 +125,7 @@ def get_openai_compatible_llm_config(
     default_model: str = DEFAULT_LLM_MODEL,
 ) -> dict[str, Any]:
     """Return shared OpenAI-compatible LLM config for agents and gen-sim."""
-    local_env = _load_env_files()
+    local_env = load_local_env_values()
     try:
         json_cfg = _load_gen_config()
     except FileNotFoundError:

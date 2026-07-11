@@ -184,7 +184,6 @@ _call_relative_task_llm = _call_object_manipulation_task_llm
 _SOURCE_SCENE_BODY_SCALE_MODES = {"preserve", "multiply", "absolute"}
 
 __all__ = [
-    "apply_robot_profile_to_gym_config",
     "GeneratedActionAgentConfigPaths",
     "TargetReplacementSpec",
     "generate_action_agent_config_from_project",
@@ -518,69 +517,6 @@ def _make_sensor_config_factory_for_robot(
         return _make_sensor_config_for_robot(robot_config)
 
     return sensor_config_factory
-
-
-def apply_robot_profile_to_gym_config(
-    gym_config: dict[str, Any],
-    *,
-    robot_profile: RobotProfile | str,
-) -> None:
-    """Apply an action-agent robot profile to an existing gym config.
-
-    This is used by ``run_agent`` as a runtime override for generated configs.
-    It keeps profile-derived runtime fields in sync with the robot template so
-    the simulator, observations, wrist cameras, and dataset metadata all target
-    the same robot.
-
-    Args:
-        gym_config: Gym configuration dictionary to mutate.
-        robot_profile: Robot profile ID, alias, or profile instance.
-    """
-    profile = resolve_robot_profile(robot_profile)
-    table_top_z = _table_top_z_from_gym_config(gym_config)
-    robot_config = profile.make_robot_config(table_top_z)
-
-    gym_config["robot"] = robot_config
-    gym_config["sensor"] = _make_sensor_config_for_robot(robot_config)
-
-    env_config = gym_config.setdefault("env", {})
-    extensions = env_config.setdefault("extensions", {})
-    extensions.update(profile.runtime_extensions())
-    env_config["observations"] = _make_observations_config(robot_config)
-    _sync_dataset_robot_profile(env_config, profile)
-
-
-def _table_top_z_from_gym_config(gym_config: Mapping[str, Any]) -> float | None:
-    table_config = next(
-        (
-            obj_config
-            for obj_config in _iter_scene_pose_configs(gym_config)
-            if obj_config.get("uid") == "table"
-        ),
-        None,
-    )
-    if table_config is None:
-        return None
-    return _mesh_config_world_zmax(table_config)
-
-
-def _sync_dataset_robot_profile(
-    env_config: MutableMapping[str, Any],
-    robot_profile: RobotProfile,
-) -> None:
-    dataset_config = env_config.get("dataset")
-    if not isinstance(dataset_config, MutableMapping):
-        return
-    lerobot_config = dataset_config.get("lerobot")
-    if not isinstance(lerobot_config, MutableMapping):
-        return
-    params = lerobot_config.get("params")
-    if not isinstance(params, MutableMapping):
-        return
-    robot_meta = params.setdefault("robot_meta", {})
-    if isinstance(robot_meta, MutableMapping):
-        robot_meta["robot_type"] = robot_profile.robot_meta_type
-        robot_meta.setdefault("control_freq", 25)
 
 
 def _robot_solver_end_link(

@@ -28,6 +28,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_observations_config,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _DUAL_FRANKA_TABLETOP_CLEARANCE,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_basket_basic_background,
 )
@@ -132,6 +135,7 @@ def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -
 
     assert robot["uid"] == "DualFrankaPanda"
     assert robot["init_pos"] == pytest.approx([0.7, 0.0, 0.45])
+    assert profile.tabletop_clearance == pytest.approx(_DUAL_FRANKA_TABLETOP_CLEARANCE)
     assert _arm_urdf_paths(robot) == {"Franka/Panda/PandaWithHand.urdf"}
     assert robot["init_qpos"] == pytest.approx(_DUAL_FRANKA_HOME_QPOS)
     assert robot["control_parts"]["left_arm"] == [
