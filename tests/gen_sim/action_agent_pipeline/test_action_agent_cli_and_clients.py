@@ -99,6 +99,13 @@ def test_run_agent_reset_randomization_configures_parallel_envs() -> None:
     }
 
 
+def test_run_agent_parser_rejects_robot_profile_override() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.run_agent import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--robot-profile", "franka"])
+
+
 def test_generate_config_cli_auto_applies_prompt2scene_alignment(
     monkeypatch,
     tmp_path,
@@ -443,6 +450,7 @@ def test_run_agent_command_passes_headless(monkeypatch, tmp_path) -> None:
     assert return_code == 0
     assert "--headless" in captured["command"]
     assert "--regenerate" in captured["command"]
+    assert "--robot-profile" not in captured["command"]
     assert captured["kwargs"]["check"] is False
 
 
@@ -1380,6 +1388,7 @@ def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -
     assert result == 0
     assert captured["headless"] is True
     assert captured["task_name"] == "Demo111"
+    assert "robot_profile" not in captured
 
 
 def test_batch_new_pipeline_command_uses_pipeline_scale_defaults(
