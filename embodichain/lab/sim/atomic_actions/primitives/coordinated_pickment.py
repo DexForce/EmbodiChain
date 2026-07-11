@@ -410,6 +410,13 @@ class CoordinatedPickment(AtomicAction):
         cfg: CoordinatedPickmentCfg | None = None,
     ) -> None:
         super().__init__(motion_generator, cfg or CoordinatedPickmentCfg())
+        if getattr(self.cfg, "planner_type", None) == "curobo":
+            logger.log_error(
+                "Coordinated dual-arm planning is not supported by the cuRobo "
+                "backend. Use a single-arm action or a dedicated multi-arm "
+                "planner.",
+                ValueError,
+            )
         self._init_dual_arm_parts(
             first_arm_control_part=self.cfg.left_arm_control_part,
             second_arm_control_part=self.cfg.right_arm_control_part,

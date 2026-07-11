@@ -211,22 +211,29 @@ class PickUp(AtomicAction):
             self.hand_open_qpos, self.hand_close_qpos, n_waypoints=n_close
         )
 
+        # Allocate from the actually-returned phase lengths so collision-aware
+        # planners (which preserve their own sample count) are not forced into
+        # the requested n_approach / n_lift counts.
+        n_approach_actual = approach_arm.shape[1]
+        n_lift_actual = lift_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_approach + n_close + n_lift, self.robot_dof),
+            (self.n_envs, n_approach_actual + n_close + n_lift_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :n_approach, self.arm_joint_ids] = approach_arm
-        full[:, :n_approach, self.hand_joint_ids] = self.hand_open_qpos
-        full[:, n_approach : n_approach + n_close, self.arm_joint_ids] = (
+        full[:, :n_approach_actual, self.arm_joint_ids] = approach_arm
+        full[:, :n_approach_actual, self.hand_joint_ids] = self.hand_open_qpos
+        full[:, n_approach_actual : n_approach_actual + n_close, self.arm_joint_ids] = (
             grasp_arm_qpos.unsqueeze(1)
         )
-        full[:, n_approach : n_approach + n_close, self.hand_joint_ids] = (
-            hand_close_path
+        full[
+            :, n_approach_actual : n_approach_actual + n_close, self.hand_joint_ids
+        ] = hand_close_path
+        full[:, n_approach_actual + n_close :, self.arm_joint_ids] = lift_arm
+        full[:, n_approach_actual + n_close :, self.hand_joint_ids] = (
+            self.hand_close_qpos
         )
-        full[:, n_approach + n_close :, self.arm_joint_ids] = lift_arm
-        full[:, n_approach + n_close :, self.hand_joint_ids] = self.hand_close_qpos
 
         obj_poses = sem.entity.get_local_pose(to_matrix=True)
         object_to_eef = torch.bmm(pose_inv(obj_poses), grasp_xpos)
@@ -285,7 +292,7 @@ class PickUp(AtomicAction):
             grasp_xpos_padding[i, n_pose:] = grasp_poses[0]
             grasp_cost_padding[i, n_pose:] = grasp_costs[0]
         grasp_xpos_padding, ik_success = self._select_symmetric_grasp_variants(
-            grasp_xpos_padding, start_qpos
+            grasp_xpos_padding, start_qpos, skip_ik=self._is_motion_gen_curobo()
         )
         grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
         best_cost, best_idx = grasp_cost_masked.min(dim=1)
@@ -295,10 +302,26 @@ class PickUp(AtomicAction):
         ]
         return is_success, best_grasp_xpos
 
+    def _is_motion_gen_curobo(self) -> bool:
+        """Whether this action is configured to plan through the cuRobo backend."""
+        return (
+            getattr(self.cfg, "motion_source", None) == "motion_gen"
+            and getattr(self.cfg, "planner_type", None) == "curobo"
+        )
+
     def _select_symmetric_grasp_variants(
-        self, grasp_xpos: torch.Tensor, start_qpos: torch.Tensor
+        self,
+        grasp_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        *,
+        skip_ik: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Choose the closest TCP z-roll variant, then validate reachability."""
+        """Choose the closest TCP z-roll variant, then validate reachability.
+
+        When ``skip_ik`` is set (cuRobo backend), the EmbodiChain IK prefilter
+        is skipped - cuRobo validates reachability and collision during motion
+        planning - and every variant is treated as reachable.
+        """
         n_envs, n_pose = grasp_xpos.shape[:2]
         mirrored_grasp_xpos = grasp_xpos.clone()
         mirrored_grasp_xpos[..., :3, 0] = -mirrored_grasp_xpos[..., :3, 0]
@@ -322,12 +345,17 @@ class PickUp(AtomicAction):
         env_idx = torch.arange(n_envs, device=self.device)[:, None]
         pose_idx = torch.arange(n_pose, device=self.device)[None, :]
         selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
-        start_qpos_repeat = start_qpos[:, None, :].repeat(1, n_pose, 1)
-        ik_success, _ = self.robot.compute_batch_ik(
-            pose=selected_grasp_xpos,
-            name=self.cfg.control_part,
-            joint_seed=start_qpos_repeat,
-        )
+        if skip_ik:
+            ik_success = torch.ones(
+                n_envs, n_pose, dtype=torch.bool, device=self.device
+            )
+        else:
+            start_qpos_repeat = start_qpos[:, None, :].repeat(1, n_pose, 1)
+            ik_success, _ = self.robot.compute_batch_ik(
+                pose=selected_grasp_xpos,
+                name=self.cfg.control_part,
+                joint_seed=start_qpos_repeat,
+            )
         return selected_grasp_xpos, ik_success
 
 

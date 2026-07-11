@@ -102,6 +102,13 @@ class CoordinatedPlacement(AtomicAction):
         cfg: CoordinatedPlacementCfg | None = None,
     ) -> None:
         super().__init__(motion_generator, cfg or CoordinatedPlacementCfg())
+        if getattr(self.cfg, "planner_type", None) == "curobo":
+            logger.log_error(
+                "Coordinated dual-arm planning is not supported by the cuRobo "
+                "backend. Use a single-arm action or a dedicated multi-arm "
+                "planner.",
+                ValueError,
+            )
         self.builder = TrajectoryBuilder(motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
