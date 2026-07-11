@@ -68,7 +68,8 @@ def load_unified_scene_input_kind_node(
     input_kind = str(input_record.get("input_kind") or "").strip()
     if input_kind != "image":
         raise ValueError(
-            "Unified scene input.input_kind must be 'image', " f"got {input_kind!r}."
+            "Unified scene input.input_kind must be 'image', "
+            f"got {input_kind!r}."
         )
 
     return {
@@ -76,7 +77,6 @@ def load_unified_scene_input_kind_node(
         "unified_scene": unified_scene,
         "input_kind": input_kind,
     }
-
 
 def generate_image_assets_node(state: UnifiedSceneGenState) -> dict[str, object]:
     """Generate table assets and layout-aware object GLBs for image input.
@@ -92,12 +92,15 @@ def generate_image_assets_node(state: UnifiedSceneGenState) -> dict[str, object]
     output_root = paths.output_root
     image_gen_dir, glb_gen_dir, debug_dir = paths.prepare_generation_dirs()
     log_info(
-        "generate_image_assets started " f"output_dir={paths.unified_scene_gen_dir}"
+        "generate_image_assets started "
+        f"output_dir={paths.unified_scene_gen_dir}"
     )
 
     segments_path = paths.image_segments_result
     if not segments_path.is_file():
-        raise FileNotFoundError(f"Image segments result not found: {segments_path}")
+        raise FileNotFoundError(
+            f"Image segments result not found: {segments_path}"
+        )
     with segments_path.open("r", encoding="utf-8") as _f:
         segments_data = json.load(_f)
     if not isinstance(segments_data, dict):

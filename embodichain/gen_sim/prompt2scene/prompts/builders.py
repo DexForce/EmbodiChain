@@ -46,19 +46,24 @@ IMAGE_RELATIONS_PROMPT = "image_relations.yaml"
 UNIFIED_SCENE_GEN_PROMPT = "unified_scene_gen.yaml"
 
 
+
 def build_scene_intake_messages(request: Prompt2SceneInput) -> list[dict[str, Any]]:
     """Build LangChain-compatible messages for scene intake."""
     return [
         {
             "role": "system",
-            "content": render_prompt(SCENE_INTAKE_PROMPT, prompt_key="image_system"),
+            "content": render_prompt(
+                SCENE_INTAKE_PROMPT, prompt_key="image_system"
+            ),
         },
         {
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": render_prompt(SCENE_INTAKE_PROMPT, prompt_key="image_user"),
+                    "text": render_prompt(
+                        SCENE_INTAKE_PROMPT, prompt_key="image_user"
+                    ),
                 },
                 {
                     "type": "image_url",
@@ -79,7 +84,9 @@ def build_scene_intake_verifier_messages(
     table_draft: dict[str, object] = {
         "name": scene_intake.table.name,
         "description": scene_intake.table.description,
-        "complete_table_description": (scene_intake.table.complete_table_description),
+        "complete_table_description": (
+            scene_intake.table.complete_table_description
+        ),
         "is_complete_visible_table": scene_intake.table.is_complete_visible_table,
         "class_candidate": list(scene_intake.table.class_candidate),
     }
@@ -110,7 +117,9 @@ def build_scene_intake_verifier_messages(
     return [
         {
             "role": "system",
-            "content": render_prompt(SCENE_INTAKE_PROMPT, prompt_key="verifier_system"),
+            "content": render_prompt(
+                SCENE_INTAKE_PROMPT, prompt_key="verifier_system"
+            ),
         },
         {
             "role": "user",
@@ -130,6 +139,8 @@ def build_scene_intake_verifier_messages(
             ],
         },
     ]
+
+
 
 
 def build_filter_extra_instances_messages(

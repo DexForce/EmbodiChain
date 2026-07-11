@@ -79,13 +79,17 @@ def is_model_output_error(exc: Exception) -> bool:
     """Return whether an exception is a retryable model output formatting error."""
     class_name = exc.__class__.__name__
     module_name = exc.__class__.__module__
-    return class_name in {
-        "JSONDecodeError",
-        "OutputParserException",
-        "SchemaValidationError",
-        "ValidationError",
-        "StructuredModelCallError",
-    } or module_name.startswith("pydantic")
+    return (
+        class_name
+        in {
+            "JSONDecodeError",
+            "OutputParserException",
+            "SchemaValidationError",
+            "ValidationError",
+            "StructuredModelCallError",
+        }
+        or module_name.startswith("pydantic")
+    )
 
 
 def validate_json_schema(

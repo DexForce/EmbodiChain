@@ -187,9 +187,7 @@ class GeometryManager:
         )
 
     @staticmethod
-    def load_table_fit_scene_internal_z(
-        path: Path, *, trimesh: Any, y_to_z: Any
-    ) -> Any:
+    def load_table_fit_scene_internal_z(path: Path, *, trimesh: Any, y_to_z: Any) -> Any:
         from . import utils as geometry_utils
 
         return geometry_utils._load_table_fit_scene_internal_z(
@@ -263,6 +261,7 @@ class GeometryManager:
         if not output_path.is_file():
             raise FileNotFoundError(f"Mesh was not written: {output_path}")
         return ExportMeshResult(output_path=output_path)
+
 
     @staticmethod
     def convert_up_axis(request: ConvertUpAxisRequest) -> ConvertUpAxisResult:
@@ -444,7 +443,9 @@ class GeometryManager:
         dumped = scene.dump(concatenate=True)
         if isinstance(dumped, trimesh_module.Trimesh):
             return dumped
-        meshes = [item for item in dumped if isinstance(item, trimesh_module.Trimesh)]
+        meshes = [
+            item for item in dumped if isinstance(item, trimesh_module.Trimesh)
+        ]
         if not meshes:
             raise ValueError("Scene contains no mesh geometry.")
         return trimesh_module.util.concatenate(meshes)
@@ -472,6 +473,7 @@ class GeometryManager:
             oriented_normal=oriented_normal,
             candidates=candidates,
         )
+
 
     @staticmethod
     def align_xy_long_axis(
@@ -506,6 +508,7 @@ class GeometryManager:
             yaw_angle_degrees=float(np.rad2deg(rotation_angle)),
         )
 
+
     @staticmethod
     def _align_vector_to_axis(
         mesh: Any,
@@ -513,17 +516,24 @@ class GeometryManager:
         source_axis: list[float],
         target_axis: list[float],
     ) -> Any:
-        source = GeometryManager._normalize(np.asarray(source_axis, dtype=float))
-        target = GeometryManager._normalize(np.asarray(target_axis, dtype=float))
+        source = GeometryManager._normalize(
+            np.asarray(source_axis, dtype=float)
+        )
+        target = GeometryManager._normalize(
+            np.asarray(target_axis, dtype=float)
+        )
         if np.linalg.norm(source) == 0:
             raise ValueError("source_axis must be non-zero.")
         if np.linalg.norm(target) == 0:
             raise ValueError("target_axis must be non-zero.")
 
-        transform = GeometryManager._rotation_transform_between_vectors(source, target)
+        transform = GeometryManager._rotation_transform_between_vectors(
+            source, target
+        )
         aligned = mesh.copy()
         aligned.apply_transform(transform)
         return aligned
+
 
     @staticmethod
     def _find_support_plane_candidates(
@@ -545,7 +555,9 @@ class GeometryManager:
             raise ValueError("Mesh has no positive face area.")
 
         if plane_distance_tol is None:
-            extent = float(np.linalg.norm(np.asarray(mesh.extents, dtype=float)))
+            extent = float(
+                np.linalg.norm(np.asarray(mesh.extents, dtype=float))
+            )
             plane_distance_tol = max(extent * 0.01, 1e-4)
 
         cos_tol = float(np.cos(np.deg2rad(normal_angle_tol_deg)))
@@ -579,10 +591,15 @@ class GeometryManager:
                 continue
 
             weighted_normal = GeometryManager._normalize(
-                np.sum(normals[face_indices] * areas[face_indices, None], axis=0),
+                np.sum(
+                    normals[face_indices] * areas[face_indices, None], axis=0
+                ),
             )
             center = (
-                np.sum(centers[face_indices] * areas[face_indices, None], axis=0) / area
+                np.sum(
+                    centers[face_indices] * areas[face_indices, None], axis=0
+                )
+                / area
             )
             candidate = GeometryManager._build_candidate(
                 normal=weighted_normal,
@@ -613,7 +630,9 @@ class GeometryManager:
     ) -> list[float]:
         GeometryManager._validate_mesh(mesh)
 
-        normal = GeometryManager._normalize(np.asarray(plane_normal, dtype=float))
+        normal = GeometryManager._normalize(
+            np.asarray(plane_normal, dtype=float)
+        )
         center = np.asarray(plane_center, dtype=float)
         if np.linalg.norm(normal) == 0:
             raise ValueError("plane_normal must be non-zero.")
@@ -648,7 +667,9 @@ class GeometryManager:
 
         smaller_score = min(below_score, above_score)
         larger_score = max(below_score, above_score)
-        asymmetry_score = min((larger_score + 1e-9) / (smaller_score + 1e-9), 10.0)
+        asymmetry_score = min(
+            (larger_score + 1e-9) / (smaller_score + 1e-9), 10.0
+        )
         score = float(area * asymmetry_score)
         return SupportPlaneCandidate(
             normal=[float(v) for v in normal],
@@ -661,6 +682,7 @@ class GeometryManager:
             above_area_score=above_score,
             score=score,
         )
+
 
     @staticmethod
     def _select_xy_vertices(
@@ -677,7 +699,9 @@ class GeometryManager:
         return vertices[selected_vertex_indices, :2]
 
     @staticmethod
-    def _minimal_angle_to_align_axis(source_angle: float, target_angle: float) -> float:
+    def _minimal_angle_to_align_axis(
+        source_angle: float, target_angle: float
+    ) -> float:
         candidates = [
             GeometryManager._wrap_to_pi(target_angle - source_angle),
             GeometryManager._wrap_to_pi(
@@ -706,8 +730,11 @@ class GeometryManager:
         )
         return transform
 
+
     @staticmethod
-    def _rotation_transform_between_vectors(source: Any, target: Any) -> Any:
+    def _rotation_transform_between_vectors(
+        source: Any, target: Any
+    ) -> Any:
         dot = float(np.clip(np.dot(source, target), -1.0, 1.0))
         transform = np.eye(4)
         if dot > 1.0 - 1e-8:

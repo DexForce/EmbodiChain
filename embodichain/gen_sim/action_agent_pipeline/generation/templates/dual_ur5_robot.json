@@ -126,6 +126,7 @@
       "urdf_path": null,
       "end_link_name": "left_ee_link",
       "root_link_name": "left_base_link",
+      "ik_nearest_weight": [1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
       "tcp": [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
@@ -139,6 +140,7 @@
       "urdf_path": null,
       "end_link_name": "right_ee_link",
       "root_link_name": "right_base_link",
+      "ik_nearest_weight": [1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
       "tcp": [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],

@@ -36,9 +36,7 @@ __all__ = [
 ]
 
 
-def _request_axis(
-    value: list[float] | None, default: tuple[float, float, float]
-) -> list[float]:
+def _request_axis(value: list[float] | None, default: tuple[float, float, float]) -> list[float]:
     if value is not None:
         return list(value)
     return list(default)
@@ -53,9 +51,7 @@ def _center_aabb_bottom_xy_at_origin(mesh: Any) -> Any:
     return centered
 
 
-def _axis_conversion_transform(
-    source_axis: list[float], target_axis: list[float]
-) -> np.ndarray:
+def _axis_conversion_transform(source_axis: list[float], target_axis: list[float]) -> np.ndarray:
     source = _normalize(np.asarray(source_axis, dtype=np.float64))
     target = _normalize(np.asarray(target_axis, dtype=np.float64))
     return _rotation_between_vectors(source, target)

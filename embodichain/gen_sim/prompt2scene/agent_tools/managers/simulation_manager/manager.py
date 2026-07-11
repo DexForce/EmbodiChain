@@ -63,14 +63,18 @@ class SimulationManager:
         self._physics_dt = physics_dt
         self._sim_device = sim_device
 
-    def run_gravity_simulation(self, request: GravityDropRequest) -> GravityDropResult:
+    def run_gravity_simulation(
+        self, request: GravityDropRequest
+    ) -> GravityDropResult:
         """Drop one GLB under gravity and return its final pose."""
         glb_path = request.glb_path.expanduser().resolve()
         if not glb_path.is_file():
             raise FileNotFoundError(f"GLB file not found: {glb_path}")
         settle_mode = str(request.gravity_settle_mode or "geometry").strip().lower()
         if settle_mode == "geometry":
-            return GravityDropResult(final_pose=self._aabb_bottom_center_pose(glb_path))
+            return GravityDropResult(
+                final_pose=self._aabb_bottom_center_pose(glb_path)
+            )
         if settle_mode != "physics":
             raise ValueError(
                 "gravity_settle_mode must be 'geometry' or 'physics', "
@@ -92,14 +96,11 @@ class SimulationManager:
         obj = sim.add_rigid_object(
             RigidObjectCfg(
                 uid="dropped_asset",
-                shape=MeshCfg(
-                    fpath=str(glb_path),
-                    max_convex_hull_num=request.max_convex_hull_num,
-                    acd_method=request.acd_method,
-                ),
+                shape=MeshCfg(fpath=str(glb_path)),
                 init_pos=(0.0, 0.0, initial_height),
                 init_rot=(0.0, 0.0, 0.0),
                 body_type="dynamic",
+                max_convex_hull_num=request.max_convex_hull_num,
             )
         )
         sim.update(step=300)

@@ -54,6 +54,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager.sc
     GravityDropRequest,
 )
 
+
 METRIC_SCALE_ENABLED = True
 
 from .utils import (
@@ -70,9 +71,6 @@ from .utils import (
     _scale_transform,
     _translation_transform,
 )
-
-__all__ = ["METRIC_SCALE_ENABLED", "SimreadyManager"]
-
 
 class SimreadyManager:
     """Prepare generated GLB assets for simulation placement."""
@@ -163,9 +161,7 @@ class SimreadyManager:
             transform = _scale_transform(normalize_result.scale_factor)
             raw_to_simready = transform @ raw_to_simready
 
-            transform = _place_above_plane_transform(
-                final_mesh, request.ground_clearance
-            )
+            transform = _place_above_plane_transform(final_mesh, request.ground_clearance)
             raw_to_simready = transform @ raw_to_simready
             final_mesh = geom.place_above_plane(
                 PlaceAbovePlaneRequest(
@@ -174,9 +170,7 @@ class SimreadyManager:
                 )
             ).mesh
 
-            transform = _axis_conversion_transform(
-                DEFAULT_UP_AXIS, DEFAULT_INPUT_UP_AXIS
-            )
+            transform = _axis_conversion_transform(DEFAULT_UP_AXIS, DEFAULT_INPUT_UP_AXIS)
             raw_to_simready = transform @ raw_to_simready
             final_mesh = geom.convert_up_axis(
                 ConvertUpAxisRequest(
@@ -186,9 +180,7 @@ class SimreadyManager:
                 )
             ).mesh
 
-            geom.export_mesh(
-                ExportMeshRequest(mesh=final_mesh, output_path=output_path)
-            )
+            geom.export_mesh(ExportMeshRequest(mesh=final_mesh, output_path=output_path))
         finally:
             pre_gravity_path.unlink(missing_ok=True)
 
@@ -300,9 +292,7 @@ class SimreadyManager:
             transform = _scale_transform(normalize_result.scale_factor)
             raw_to_simready = transform @ raw_to_simready
 
-            transform = _place_above_plane_transform(
-                final_mesh, request.ground_clearance
-            )
+            transform = _place_above_plane_transform(final_mesh, request.ground_clearance)
             raw_to_simready = transform @ raw_to_simready
             final_mesh = geom.place_above_plane(
                 PlaceAbovePlaneRequest(
@@ -311,9 +301,7 @@ class SimreadyManager:
                 )
             ).mesh
 
-            transform = _axis_conversion_transform(
-                DEFAULT_UP_AXIS, DEFAULT_INPUT_UP_AXIS
-            )
+            transform = _axis_conversion_transform(DEFAULT_UP_AXIS, DEFAULT_INPUT_UP_AXIS)
             raw_to_simready = transform @ raw_to_simready
             final_mesh = geom.convert_up_axis(
                 ConvertUpAxisRequest(
@@ -323,9 +311,7 @@ class SimreadyManager:
                 )
             ).mesh
 
-            geom.export_mesh(
-                ExportMeshRequest(mesh=final_mesh, output_path=output_path)
-            )
+            geom.export_mesh(ExportMeshRequest(mesh=final_mesh, output_path=output_path))
         finally:
             pre_gravity_path.unlink(missing_ok=True)
 
@@ -333,7 +319,6 @@ class SimreadyManager:
             output_path=output_path,
             transform_matrix=raw_to_simready.tolist(),
         )
-
     @staticmethod
     def estimate_metric_scales(request):
         from embodichain.gen_sim.prompt2scene.agent_tools.managers.simready_manager.schemas import (
@@ -375,6 +360,7 @@ class SimreadyManager:
             raw_model_output=raw_model_output,
         )
 
+
     @staticmethod
     def build_object_payload(objects):
         from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
@@ -390,19 +376,18 @@ class SimreadyManager:
         for obj in objects:
             mesh = geom.load_mesh(LoadMeshRequest(mesh_path=obj.mesh_path)).mesh
             normalized_bbox_size_m = GeometryManager.mesh_metric_bbox_size(mesh)
-            payload.append(
-                {
-                    "object_id": obj.object_id,
-                    "object_name": obj.object_name,
-                    "object_description": obj.object_description,
-                    "normalized_bbox_method": "pca_bbox",
-                    "normalized_bbox_size_m": normalized_bbox_size_m.tolist(),
-                    "normalized_bbox_ratio": GeometryManager.bbox_ratio(
-                        normalized_bbox_size_m
-                    ).tolist(),
-                }
-            )
+            payload.append({
+                "object_id": obj.object_id,
+                "object_name": obj.object_name,
+                "object_description": obj.object_description,
+                "normalized_bbox_method": "pca_bbox",
+                "normalized_bbox_size_m": normalized_bbox_size_m.tolist(),
+                "normalized_bbox_ratio": GeometryManager.bbox_ratio(
+                    normalized_bbox_size_m
+                ).tolist(),
+            })
         return payload
+
 
     @staticmethod
     def object_prompt_payload(objects):
@@ -414,6 +399,7 @@ class SimreadyManager:
             }
             for obj in objects
         ]
+
 
     @staticmethod
     def apply_model_output(*, object_payload, raw_model_output, method):
@@ -433,29 +419,26 @@ class SimreadyManager:
             oid = str(p.get("object_id", ""))
             model_item = model_by_id.get(oid)
             if model_item is None:
-                estimates.append(
-                    SimreadyManager.failure(
-                        object_id=oid,
-                        reason="missing_object_scale_from_model",
-                        method=method,
-                    )
-                )
-                continue
-            estimates.append(
-                SimreadyManager.select_candidate(
+                estimates.append(SimreadyManager.failure(
                     object_id=oid,
-                    object_name=str(p.get("object_name", "")),
-                    object_description=str(p.get("object_description", "")),
-                    bbox_dims_cm=model_item.get("bbox_dims_cm", []),
-                    confidence=float(model_item.get("confidence", 0.0)),
-                    reason=str(model_item.get("reason", "")),
-                    normalized_bbox_size_m=np.asarray(
-                        p["normalized_bbox_size_m"], dtype=np.float64
-                    ),
+                    reason="missing_object_scale_from_model",
                     method=method,
-                )
-            )
+                ))
+                continue
+            estimates.append(SimreadyManager.select_candidate(
+                object_id=oid,
+                object_name=str(p.get("object_name", "")),
+                object_description=str(p.get("object_description", "")),
+                bbox_dims_cm=model_item.get("bbox_dims_cm", []),
+                confidence=float(model_item.get("confidence", 0.0)),
+                reason=str(model_item.get("reason", "")),
+                normalized_bbox_size_m=np.asarray(
+                    p["normalized_bbox_size_m"], dtype=np.float64
+                ),
+                method=method,
+            ))
         return estimates
+
 
     @staticmethod
     def apply_to_objects(*, objects, object_scales):
@@ -465,23 +448,13 @@ class SimreadyManager:
             if oid in scale_by_id:
                 obj["metric_scale"] = scale_by_id[oid]
 
+
     @staticmethod
-    def select_candidate(
-        *,
-        object_id,
-        object_name,
-        object_description,
-        bbox_dims_cm,
-        confidence,
-        reason,
-        normalized_bbox_size_m,
-        method,
-    ):
+    def select_candidate(*, object_id, object_name, object_description, bbox_dims_cm, confidence, reason, normalized_bbox_size_m, method):
         import numpy as np
         from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
             GeometryManager,
         )
-
         try:
             selected = SimreadyManager.compute_from_bbox_dims(
                 bbox_dims_cm=bbox_dims_cm,
@@ -516,15 +489,13 @@ class SimreadyManager:
             "unit_note": "scale_factor is not baked into this GLB.",
         }
 
+
     @staticmethod
-    def compute_from_bbox_dims(
-        *, bbox_dims_cm, confidence, reason, normalized_bbox_size_m
-    ):
+    def compute_from_bbox_dims(*, bbox_dims_cm, confidence, reason, normalized_bbox_size_m):
         import numpy as np
         from embodichain.gen_sim.prompt2scene.agent_tools.managers.geometry_manager import (
             GeometryManager,
         )
-
         dims_cm = np.asarray([float(v) for v in bbox_dims_cm], dtype=np.float64)
         if dims_cm.shape != (3,) or np.any(dims_cm <= 0.0):
             raise ValueError("bbox_dims_cm must contain three positive values.")
@@ -541,6 +512,7 @@ class SimreadyManager:
             "reason": reason,
         }
 
+
     @staticmethod
     def failure(*, object_id, reason, method):
         return {
@@ -550,6 +522,7 @@ class SimreadyManager:
             "scale_factor": 1.0,
             "reason": reason,
         }
+
 
     @staticmethod
     def set_for_all_objects(*, objects, status, reason, method):
@@ -561,6 +534,7 @@ class SimreadyManager:
                 "scale_factor": 1.0,
                 "reason": reason,
             }
+
 
     @staticmethod
     def compute_global_from_object_scenes(request):
@@ -601,30 +575,19 @@ class SimreadyManager:
                 skipped.append({"id": object_id, "reason": "missing_metric_scale"})
                 continue
             if ms.get("status") != "ok":
-                skipped.append(
-                    {"id": object_id, "reason": str(ms.get("status") or "not_ok")}
-                )
+                skipped.append({"id": object_id, "reason": str(ms.get("status") or "not_ok")})
                 continue
             sf = float(ms.get("scale_factor", 1.0))
             if not np.isfinite(sf) or sf <= 0.0:
-                skipped.append(
-                    {"id": object_id, "reason": "invalid_simready_scale_factor"}
-                )
+                skipped.append({"id": object_id, "reason": "invalid_simready_scale_factor"})
                 continue
             try:
-                srs = np.asarray(
-                    [float(v) for v in ms.get("normalized_bbox_size_m", [])],
-                    dtype=np.float64,
-                )
+                srs = np.asarray([float(v) for v in ms.get("normalized_bbox_size_m", [])], dtype=np.float64)
             except (TypeError, ValueError):
-                skipped.append(
-                    {"id": object_id, "reason": "invalid_normalized_bbox_size_m"}
-                )
+                skipped.append({"id": object_id, "reason": "invalid_normalized_bbox_size_m"})
                 continue
             if srs.shape != (3,) or np.any(srs <= 0.0):
-                skipped.append(
-                    {"id": object_id, "reason": "invalid_normalized_bbox_size_m"}
-                )
+                skipped.append({"id": object_id, "reason": "invalid_normalized_bbox_size_m"})
                 continue
             cs = np.asarray(
                 GeometryManager.mesh_metric_bbox_size(
@@ -633,9 +596,7 @@ class SimreadyManager:
                 dtype=np.float64,
             )
             if cs.shape != (3,) or np.any(cs <= 0.0):
-                skipped.append(
-                    {"id": object_id, "reason": "invalid_current_scene_bbox"}
-                )
+                skipped.append({"id": object_id, "reason": "invalid_current_scene_bbox"})
                 continue
             geo_ratio = np.sort(cs) / np.sort(srs)
             geo_scale = float(np.median(geo_ratio))
@@ -644,24 +605,20 @@ class SimreadyManager:
                 continue
             effective = sf / geo_scale
             if not np.isfinite(effective) or effective <= 0.0:
-                skipped.append(
-                    {"id": object_id, "reason": "non_positive_effective_scale"}
-                )
+                skipped.append({"id": object_id, "reason": "non_positive_effective_scale"})
                 continue
-            used.append(
-                {
-                    "id": object_id,
-                    "effective_scale": effective,
-                    "scale_factor_simready": sf,
-                    "geo_scale": geo_scale,
-                    "simready_bbox_size_m": srs.tolist(),
-                    "simready_bbox_size_cm": (srs * 100.0).tolist(),
-                    "current_scene_bbox_size_m": cs.tolist(),
-                    "current_scene_bbox_size_cm": (cs * 100.0).tolist(),
-                    "target_bbox_dims_cm": ms.get("bbox_dims_cm"),
-                    "confidence": ms.get("confidence"),
-                }
-            )
+            used.append({
+                "id": object_id,
+                "effective_scale": effective,
+                "scale_factor_simready": sf,
+                "geo_scale": geo_scale,
+                "simready_bbox_size_m": srs.tolist(),
+                "simready_bbox_size_cm": (srs * 100.0).tolist(),
+                "current_scene_bbox_size_m": cs.tolist(),
+                "current_scene_bbox_size_cm": (cs * 100.0).tolist(),
+                "target_bbox_dims_cm": ms.get("bbox_dims_cm"),
+                "confidence": ms.get("confidence"),
+            })
 
         if not used:
             return {

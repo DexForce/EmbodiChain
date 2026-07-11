@@ -307,16 +307,7 @@ def _post_multi_object_generation_request(
         return client.session.post(
             url,
             data=request.to_form_data(),
-            files=[
-                (
-                    "image",
-                    (
-                        Path(request.image_path).name,
-                        _open_image_file(request.image_path),
-                    ),
-                )
-            ]
-            + mask_files,
+            files=[("image", (Path(request.image_path).name, _open_image_file(request.image_path)))] + mask_files,
             timeout=(10, client.timeout_s),
         )
     finally:

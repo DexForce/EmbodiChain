@@ -87,7 +87,9 @@ def _parse_table(raw_table: dict[str, Any]) -> SceneIntakeTable:
 
     if "complete_table_description" not in raw_table:
         raise ValueError("Scene intake table.complete_table_description is required.")
-    complete_table_description = str(raw_table["complete_table_description"]).strip()
+    complete_table_description = str(
+        raw_table["complete_table_description"]
+    ).strip()
     if not complete_table_description:
         raise ValueError(
             "Scene intake table.complete_table_description must be non-empty."
