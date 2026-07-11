@@ -1407,12 +1407,13 @@ def _dual_relative_edge_blocks(
         second_arm,
         sample_interval=30,
     )
+    serial_upright_sequence = _uses_serial_dual_upright_sequence(spec)
     first_release_edges = _dual_relative_release_edge_blocks(
         placement=first,
         active_arm=first_arm,
         active_slot=first_slot,
         waiting_slot=second_slot,
-        waiting_action=second_close_spec,
+        waiting_action=None if serial_upright_sequence else second_close_spec,
     )
     second_release_edges = _dual_relative_release_edge_blocks(
         placement=second,
@@ -1421,37 +1422,81 @@ def _dual_relative_edge_blocks(
         waiting_slot=first_slot,
         waiting_action=None,
     )
-    edge_blocks = [
-        (
-            "Pick up both moved objects simultaneously",
-            {
-                first_slot: first_pick_spec,
-                second_slot: second_pick_spec,
-            },
-        ),
-    ]
-    edge_blocks.extend(first_release_edges)
-    edge_blocks.extend(
+    edge_blocks = (
         [
             (
-                f"Return `{first_arm}` to its initial pose while `{second_arm}` "
-                f"keeps holding `{second.moved_runtime_uid}`",
+                f"Pick up `{first.moved_runtime_uid}` before starting "
+                f"`{second.moved_runtime_uid}`",
                 {
-                    first_slot: first_initial_spec,
-                    second_slot: second_close_spec,
+                    first_slot: first_pick_spec,
+                    second_slot: None,
                 },
-            ),
-            *second_release_edges,
+            )
+        ]
+        if serial_upright_sequence
+        else [
             (
-                f"Return `{second_arm}` to its initial pose",
+                "Pick up both moved objects simultaneously",
                 {
-                    first_slot: None,
-                    second_slot: second_initial_spec,
+                    first_slot: first_pick_spec,
+                    second_slot: second_pick_spec,
                 },
-            ),
+            )
         ]
     )
+    edge_blocks.extend(first_release_edges)
+    edge_blocks.extend(
+        (
+            [
+                (
+                    f"Return `{first_arm}` to its initial pose before picking up "
+                    f"`{second.moved_runtime_uid}`",
+                    {
+                        first_slot: first_initial_spec,
+                        second_slot: None,
+                    },
+                ),
+                (
+                    f"Pick up `{second.moved_runtime_uid}` after "
+                    f"`{first.moved_runtime_uid}` is upright",
+                    {
+                        first_slot: None,
+                        second_slot: second_pick_spec,
+                    },
+                ),
+            ]
+            if serial_upright_sequence
+            else [
+                (
+                    f"Return `{first_arm}` to its initial pose while `{second_arm}` "
+                    f"keeps holding `{second.moved_runtime_uid}`",
+                    {
+                        first_slot: first_initial_spec,
+                        second_slot: second_close_spec,
+                    },
+                )
+            ]
+        )
+    )
+    edge_blocks.extend(second_release_edges)
+    edge_blocks.append(
+        (
+            f"Return `{second_arm}` to its initial pose",
+            {
+                first_slot: None,
+                second_slot: second_initial_spec,
+            },
+        )
+    )
     return edge_blocks
+
+
+def _uses_serial_dual_upright_sequence(spec: _RelativeSpecLike) -> bool:
+    """Return whether both objects must be stood upright one after the other."""
+    return all(
+        getattr(placement, "upright_in_place", False)
+        for placement in spec.placements
+    )
 
 
 def _make_hold_hover_task_prompt(
@@ -1625,6 +1670,16 @@ def _dual_relative_release_edge_blocks(
 
 
 def _dual_relative_release_rule(spec: _RelativeSpecLike) -> str:
+    if _uses_serial_dual_upright_sequence(spec):
+        return (
+            "For this dual-object upright task, complete the first object's "
+            "pick-up, final-pose MoveHeldObject, release, retreat, and return "
+            "before picking up the second object. The inactive arm must remain "
+            "null throughout each object's sequence. For each object, use exactly "
+            "one MoveHeldObject to move directly to the final release object pose "
+            "while applying the requested orientation, then use the exact "
+            "relative-zero release-only Place spec and retreat upward."
+        )
     if any(_is_pose_sensitive_placement(placement) for placement in spec.placements):
         return (
             "For pose-sensitive placements, use exactly one `MoveHeldObject` to "
@@ -1825,10 +1880,25 @@ def _make_dual_relative_basic_background(
         for placement in spec.placements
     )
     registry = _format_runtime_object_registry(object_registry)
+    serial_upright_sequence = _uses_serial_dual_upright_sequence(spec)
+    execution_rule = (
+        "The execution-stage LLM should generate graph JSON that completes the "
+        "first moved object's pick-up, placement, retreat, and return before "
+        "picking up the second moved object. The inactive arm must remain null "
+        "throughout each object's sequence."
+        if serial_upright_sequence
+        else "The execution-stage LLM should generate graph JSON that grasps both "
+        "moved objects, stages and releases the first moved object, then stages "
+        "and releases the second moved object while the first arm returns to its "
+        "initial pose. Each arm must release its moved object before returning to "
+        "its initial pose."
+    )
     placement_rule = (
-        "Orientation-preserving placements use object-aware Place directly after "
-        "pickup, without MoveHeldObject. Pose-sensitive placements use exactly one "
-        "direct final-pose MoveHeldObject, then use release-only Place."
+        "Both objects are stood upright serially in placement-list order."
+        if serial_upright_sequence
+        else "Orientation-preserving placements use object-aware Place directly "
+        "after pickup, without MoveHeldObject. Pose-sensitive placements use "
+        "exactly one direct final-pose MoveHeldObject, then use release-only Place."
     )
     return f"""The scene comes from the exported {project_name} mesh environment.
 
@@ -1845,10 +1915,7 @@ Both arms participate in the nominal graph:
 Config-stage LLM notes:
 {notes}
 
-The execution-stage LLM should generate graph JSON that grasps both moved
-objects, stages and releases the first moved object, then stages and releases
-the second moved object while the first arm returns to its initial pose. Each
-arm must release its moved object before returning to its initial pose.
+{execution_rule}
 {placement_rule}
 """
 
