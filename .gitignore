@@ -203,3 +203,7 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+# Local agent execution state and isolated worktrees
+.superpowers/
+.worktrees/
