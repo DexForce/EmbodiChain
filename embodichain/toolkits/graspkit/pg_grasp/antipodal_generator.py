@@ -724,7 +724,7 @@ class GraspGenerator:
         )
         positive_angle = torch.abs(torch.acos(cos_angle))
         angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
-        center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
+        center_distance = torch.norm(valid_centers[:, :2] - mesh_center[:2], dim=-1)
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
