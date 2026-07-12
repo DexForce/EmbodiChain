@@ -36,13 +36,15 @@ from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.lab.sim.robots import URRobotCfg
 
 NUM_ENVS = 4
+CONTACT_TEST_WIDTH = 320
+CONTACT_TEST_HEIGHT = 240
 
 
 class ContactTest:
     def setup_simulation(self, sim_device, renderer="hybrid"):
         sim_cfg = SimulationManagerCfg(
-            width=1920,
-            height=1080,
+            width=CONTACT_TEST_WIDTH,
+            height=CONTACT_TEST_HEIGHT,
             num_envs=2,
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
