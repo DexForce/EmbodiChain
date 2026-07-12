@@ -198,6 +198,17 @@ class WindowRecordCfg:
 
 
 @configclass
+class WindowCameraPoseCfg:
+    """Configuration for printing the interactive viewer camera pose."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``p`` hotkey when the window opens."""
+
+    convert_to_look_at: bool = True
+    """Whether the hotkey prints a ``set_look_at`` call instead of a matrix."""
+
+
+@configclass
 class GPUMemoryCfg:
     """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
 
