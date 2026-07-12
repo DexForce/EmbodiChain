@@ -73,21 +73,13 @@ class TestNeuralIKSolver:
         cfg_dict = {
             "fpath": urdf,
             "control_parts": {
-                "main_arm": [
-                    "Joint1",
-                    "Joint2",
-                    "Joint3",
-                    "Joint4",
-                    "Joint5",
-                    "Joint6",
-                    "Joint7",
-                ],
+                "main_arm": [f"fr3_joint{index}" for index in range(1, 8)],
             },
             "solver_cfg": {
                 "main_arm": {
                     "class_type": "NeuralIKSolver",
-                    "end_link_name": "ee_link",
-                    "root_link_name": "base_link",
+                    "end_link_name": "fr3_hand_tcp",
+                    "root_link_name": "base",
                     "tcp": TCP,
                     "checkpoint_path": checkpoint_path,
                     "num_arm_joints": NUM_ARM_JOINTS,
@@ -100,12 +92,15 @@ class TestNeuralIKSolver:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
         self.sim.update(step=100)
 
     def teardown_method(self):
         if self.sim is not None:
             self.sim.destroy()
+            SimulationManager.flush_cleanup_queue()
+        self.sim = None
+        self.robot = None
 
     def _make_solver_input(self):
         """Create a standard qpos and its FK target for solver tests."""

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from embodichain.lab.gym.envs.action_bank.configurable_action import (
     ActionBank,
     tag_node,

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------,
 
+from __future__ import annotations
+
 import pytest
 import torch
 import os
@@ -26,29 +28,42 @@ from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
 from embodichain.data import get_data_path
 
-NUM_ENVS = 4
+FULL_NUM_ENVS = 4
+FULL_WIDTH = 640
+FULL_HEIGHT = 480
+SMOKE_NUM_ENVS = 1
+SMOKE_WIDTH = 160
+SMOKE_HEIGHT = 120
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 
 class CameraTest:
-    def setup_simulation(self, sim_device, renderer="hybrid"):
+    def setup_simulation(
+        self,
+        sim_device,
+        renderer="hybrid",
+        num_envs=FULL_NUM_ENVS,
+        width=FULL_WIDTH,
+        height=FULL_HEIGHT,
+        enable_auxiliary_data=True,
+    ):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
             render_cfg=RenderCfg(renderer=renderer),
-            num_envs=NUM_ENVS,
+            num_envs=num_envs,
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
         cfg_dict = {
             "sensor_type": "Camera",
-            "width": 640,
-            "height": 480,
-            "enable_mask": True,
-            "enable_depth": True,
-            "enable_normal": True,
-            "enable_position": True,
+            "width": width,
+            "height": height,
+            "enable_mask": enable_auxiliary_data,
+            "enable_depth": enable_auxiliary_data,
+            "enable_normal": enable_auxiliary_data,
+            "enable_position": enable_auxiliary_data,
         }
         cfg = SensorCfg.from_dict(cfg_dict)
         self.camera: Camera = self.sim.add_sensor(cfg)
@@ -68,25 +83,34 @@ class CameraTest:
             assert key in data, f"Missing key in camera data: {key}"
 
         # Check if the data shape matches the expected shape
-        assert data["color"].shape == (NUM_ENVS, 480, 640, 4), "RGB data shape mismatch"
+        assert data["color"].shape == (
+            FULL_NUM_ENVS,
+            FULL_HEIGHT,
+            FULL_WIDTH,
+            4,
+        ), "RGB data shape mismatch"
         assert data["depth"].shape == (
-            NUM_ENVS,
-            480,
-            640,
+            FULL_NUM_ENVS,
+            FULL_HEIGHT,
+            FULL_WIDTH,
         ), "Depth data shape mismatch"
         assert data["normal"].shape == (
-            NUM_ENVS,
-            480,
-            640,
+            FULL_NUM_ENVS,
+            FULL_HEIGHT,
+            FULL_WIDTH,
             3,
         ), "Normal data shape mismatch"
         assert data["position"].shape == (
-            NUM_ENVS,
-            480,
-            640,
+            FULL_NUM_ENVS,
+            FULL_HEIGHT,
+            FULL_WIDTH,
             3,
         ), "Position data shape mismatch"
-        assert data["mask"].shape == (NUM_ENVS, 480, 640), "Mask data shape mismatch"
+        assert data["mask"].shape == (
+            FULL_NUM_ENVS,
+            FULL_HEIGHT,
+            FULL_WIDTH,
+        ), "Mask data shape mismatch"
 
         # Check if the data types are correct
         assert data["color"].dtype == torch.uint8, "Color data type mismatch"
@@ -131,7 +155,7 @@ class CameraTest:
                 device=self.sim.device,
             )
             .unsqueeze(0)
-            .repeat(NUM_ENVS, 1)
+            .repeat(FULL_NUM_ENVS, 1)
         )
 
         # Set new intrinsic parameters for all environments
@@ -155,30 +179,36 @@ class CameraTest:
         gc.collect()
 
 
-class TestCameraHybrid(CameraTest):
-    def setup_method(self):
-
-        self.setup_simulation("cpu", renderer="hybrid")
-
-
 class TestCameraHybridCUDA(CameraTest):
     def setup_method(self):
 
         self.setup_simulation("cuda", renderer="hybrid")
 
 
-class TestCameraFastRT(CameraTest):
-    def setup_method(self):
-        self.setup_simulation("cpu", renderer="fast-rt")
-
-
-class TestCameraFastRTCUDA(CameraTest):
-    def setup_method(self):
-
-        self.setup_simulation("cuda", renderer="fast-rt")
+@pytest.mark.parametrize(
+    ("sim_device", "renderer"),
+    [("cpu", "hybrid"), ("cpu", "fast-rt"), ("cuda", "fast-rt")],
+)
+def test_camera_backend_smoke(sim_device, renderer):
+    """Check that each remaining backend/device pair renders a color frame."""
+    test = CameraTest()
+    test.setup_simulation(
+        sim_device,
+        renderer,
+        num_envs=SMOKE_NUM_ENVS,
+        width=SMOKE_WIDTH,
+        height=SMOKE_HEIGHT,
+        enable_auxiliary_data=False,
+    )
+    try:
+        test.camera.update()
+        data = test.camera.get_data()
+        assert data["color"].shape == (SMOKE_NUM_ENVS, SMOKE_HEIGHT, SMOKE_WIDTH, 4)
+    finally:
+        test.teardown_method()
 
 
 if __name__ == "__main__":
-    test = TestCameraFastRT()
+    test = TestCameraHybridCUDA()
     test.setup_method()
     test.test_attach_to_parent()
