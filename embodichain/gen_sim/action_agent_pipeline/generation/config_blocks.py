@@ -19,6 +19,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TASK_NAME,
+    generation_defaults_section,
+)
 import copy
 import math
 import re
@@ -70,29 +75,31 @@ __all__ = [
     "_target_body_scale_vector",
 ]
 
-_BACKGROUND_MAX_CONVEX_HULL_NUM = 1
-_TARGET_MAX_CONVEX_HULL_NUM = 16
-_CONTAINER_MAX_CONVEX_HULL_NUM = 8
-_EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
+_PHYSICS_DEFAULTS = generation_defaults_section("physics")
+_BACKGROUND_DEFAULTS = _PHYSICS_DEFAULTS["background"]
+_RIGID_OBJECT_DEFAULTS = _PHYSICS_DEFAULTS["rigid_object"]
+_CONVEX_HULL_DEFAULTS = _PHYSICS_DEFAULTS["convex_hulls"]
+_BACKGROUND_MAX_CONVEX_HULL_NUM = int(_BACKGROUND_DEFAULTS["max_convex_hull_num"])
+_TARGET_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["target"])
+_CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
+_EXTRA_RIGID_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["extra_rigid"])
 _ROBOT_VIEW_LABEL = "robot_view"
 _AUDIENCE_VIEW_LABEL = "audience_view"
 _AUDIENCE_VIEW_Z_ROTATION_DEGREES = 180.0
 
 _BACKGROUND_ATTRS = {
-    "mass": 10.0,
-    "static_friction": 0.95,
-    "dynamic_friction": 0.9,
-    "restitution": 0.01,
+    key: float(value)
+    for key, value in _BACKGROUND_DEFAULTS.items()
+    if key != "max_convex_hull_num"
 }
 
 _RIGID_OBJECT_ATTRS = {
-    "mass": 0.01,
-    "contact_offset": 0.003,
-    "rest_offset": 0.001,
-    "restitution": 0.01,
-    "max_depenetration_velocity": 10.0,
-    "min_position_iters": 32,
-    "min_velocity_iters": 8,
+    key: (
+        int(value)
+        if key in {"min_position_iters", "min_velocity_iters"}
+        else float(value)
+    )
+    for key, value in _RIGID_OBJECT_DEFAULTS.items()
 }
 
 
@@ -114,7 +121,7 @@ def _make_relative_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
         **_record_camera_event_configs(
@@ -159,7 +166,7 @@ def _make_arrangement_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
         **_record_camera_event_configs(
@@ -204,7 +211,7 @@ def _make_events_config(
     roles: _BasketTaskRoles,
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
         **_record_camera_event_configs(
@@ -249,7 +256,7 @@ def _make_events_config(
 def _record_camera_event_configs(
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     *,
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     camera = sensor_config_factory()[0]
     audience_camera = copy.deepcopy(camera)

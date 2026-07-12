@@ -20,6 +20,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
 import json
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -76,15 +80,18 @@ _ARRANGEMENT_KEYWORDS = (
     "排成",
     "一行",
 )
-_DEFAULT_RELEASE_Z = 0.04
-_DEFAULT_STAGING_Z_DELTA = 0.10
-_POSE_SENSITIVE_STAGING_Z_DELTA = 0.15
-_SLOT_MARGIN = 0.025
-_MIN_SLOT_SPACING = 0.07
-_LAYOUT_CLEARANCE = 0.025
-_ROW_SEARCH_STEP = 0.025
-_ROW_SEARCH_RADIUS = 0.25
-_MOVABLE_INITIAL_OVERLAP_SCORE_WEIGHT = 0.01
+_DEFAULTS = generation_defaults_section("arrangement")
+_DEFAULT_RELEASE_Z = float(_DEFAULTS["release_z"])
+_DEFAULT_STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
+_POSE_SENSITIVE_STAGING_Z_DELTA = float(_DEFAULTS["pose_sensitive_staging_z_delta"])
+_SLOT_MARGIN = float(_DEFAULTS["slot_margin"])
+_MIN_SLOT_SPACING = float(_DEFAULTS["min_slot_spacing"])
+_LAYOUT_CLEARANCE = float(_DEFAULTS["layout_clearance"])
+_ROW_SEARCH_STEP = float(_DEFAULTS["row_search_step"])
+_ROW_SEARCH_RADIUS = float(_DEFAULTS["row_search_radius"])
+_MOVABLE_INITIAL_OVERLAP_SCORE_WEIGHT = float(
+    _DEFAULTS["movable_initial_overlap_score_weight"]
+)
 _SUPPORTED_ORDER_BY = {"size", "color", "explicit"}
 _SUPPORTED_ORDER_DIRECTIONS = {"ascending", "descending", "given"}
 _SUPPORTED_AXES = {"table_long_axis", "world_x", "world_y"}
