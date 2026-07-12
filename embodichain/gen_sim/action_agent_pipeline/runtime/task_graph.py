@@ -146,10 +146,8 @@ class AgentTaskGraph:
         """Collect future object targets needed to choose a feasible pickup grasp."""
         targets: dict[str, tuple[dict[str, Any], ...]] = {}
         for action in (edge.left_arm_action, edge.right_arm_action):
-            if (
-                not isinstance(action, Mapping)
-                or action.get("atomic_action_class") != "PickUp"
-            ):
+            action = self._action_mapping(action)
+            if action is None or action.get("atomic_action_class") != "PickUp":
                 continue
             robot_name = action.get("robot_name")
             if not isinstance(robot_name, str):
@@ -167,7 +165,7 @@ class AgentTaskGraph:
         while node_id != self.goal:
             edge = self.edges[self._next_edge(node_id)]
             action = self._action_for_robot(edge, robot_name)
-            if isinstance(action, Mapping):
+            if action is not None:
                 action_class = action.get("atomic_action_class")
                 if action_class in {"MoveHeldObject", "Place"}:
                     target = action.get("target_object_pose")
@@ -187,9 +185,23 @@ class AgentTaskGraph:
     @staticmethod
     def _action_for_robot(edge: AgentGraphEdge, robot_name: str) -> Any:
         for action in (edge.left_arm_action, edge.right_arm_action):
-            if isinstance(action, Mapping) and action.get("robot_name") == robot_name:
-                return action
+            action_mapping = AgentTaskGraph._action_mapping(action)
+            if (
+                action_mapping is not None
+                and action_mapping.get("robot_name") == robot_name
+            ):
+                return action_mapping
         return None
+
+    @staticmethod
+    def _action_mapping(action: Any) -> Mapping[str, Any] | None:
+        if isinstance(action, Mapping):
+            return action
+        to_dict = getattr(action, "to_dict", None)
+        if not callable(to_dict):
+            return None
+        value = to_dict()
+        return value if isinstance(value, Mapping) else None
 
     def _next_edge(self, node_id: str) -> str:
         outgoing_edges = self.outgoing[node_id]

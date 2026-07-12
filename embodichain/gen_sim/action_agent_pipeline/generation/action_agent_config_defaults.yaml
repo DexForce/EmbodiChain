@@ -57,6 +57,7 @@ arrangement:
 stacking:
   staging_z_delta: 0.10
   clearance: 0.02
+  anchor_offset: 0.15
 
 action:
   basket_left_release_offset_y: 0.04

@@ -38,6 +38,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _mesh_config_has_distinct_xy_axis,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_world_xy_center,
+    _mesh_config_world_xy_axes,
+    _mesh_config_world_xy_bounds,
     _mesh_config_world_z_bounds,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
@@ -73,6 +75,7 @@ _STACKING_ANCHOR = "table_center"
 _DEFAULTS = generation_defaults_section("stacking")
 _STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
 _STACK_CLEARANCE = float(_DEFAULTS["clearance"])
+_ANCHOR_OFFSET = float(_DEFAULTS["anchor_offset"])
 
 
 def _is_stacking_task_description(task_description: str) -> bool:
@@ -321,7 +324,13 @@ def _with_stacking_generated_targets(
     table_config = object_configs.get("table") or object_configs.get(
         spec.table_source_uid
     )
-    anchor_xy = _generated_stacking_anchor_xy(table_config, spec.anchor_xy)
+    moved_runtime_uids = {step.runtime_uid for step in spec.steps}
+    anchor_xy = _generated_stacking_anchor_xy(
+        table_config,
+        spec.anchor_xy,
+        object_configs=object_configs,
+        ignored_runtime_uids=moved_runtime_uids,
+    )
     table_top_z = _generated_table_top_z(table_config)
     z_by_runtime_uid: dict[str, float] = {}
     steps = []
@@ -394,14 +403,64 @@ def _with_stacking_generated_targets(
 def _generated_stacking_anchor_xy(
     table_config: Mapping[str, Any] | None,
     fallback_xy: Sequence[float],
+    *,
+    object_configs: Mapping[str, Mapping[str, Any]] | None = None,
+    ignored_runtime_uids: set[str] | None = None,
 ) -> list[float]:
-    if table_config is not None:
-        center = _mesh_config_world_xy_center(table_config)
-        if center is not None:
-            return center
+    if table_config is None:
+        return [round(float(fallback_xy[0]), 6), round(float(fallback_xy[1]), 6)]
+
+    center = _mesh_config_world_xy_center(table_config)
+    if center is None:
         init_pos = _clean_vector3(table_config.get("init_pos", [0.0, 0.0, 0.0]))
-        return [round(init_pos[0], 6), round(init_pos[1], 6)]
-    return [round(float(fallback_xy[0]), 6), round(float(fallback_xy[1]), 6)]
+        center = [round(init_pos[0], 6), round(init_pos[1], 6)]
+    if not object_configs:
+        return center
+
+    table_bounds = _mesh_config_world_xy_bounds(table_config)
+    local_front, local_left = _mesh_config_world_xy_axes(table_config)
+    directions = (
+        [0.0, 0.0],
+        local_front,
+        local_left,
+        [-local_left[0], -local_left[1]],
+        [-local_front[0], -local_front[1]],
+    )
+    ignored = ignored_runtime_uids or set()
+    obstacle_bounds = []
+    for runtime_uid, config in object_configs.items():
+        if runtime_uid in ignored or config is table_config:
+            continue
+        bounds = _mesh_config_world_xy_bounds(config)
+        if bounds is not None:
+            obstacle_bounds.append(bounds)
+
+    for direction in directions:
+        candidate = [
+            round(center[0] + _ANCHOR_OFFSET * direction[0], 6),
+            round(center[1] + _ANCHOR_OFFSET * direction[1], 6),
+        ]
+        if table_bounds is not None and not _xy_point_in_bounds(
+            candidate, table_bounds
+        ):
+            continue
+        if any(_xy_point_in_bounds(candidate, bounds) for bounds in obstacle_bounds):
+            continue
+        return candidate
+    raise ValueError(
+        "Unable to find an unoccupied stacking anchor at the table center or "
+        "its 15 cm front/left/right/back offsets."
+    )
+
+
+def _xy_point_in_bounds(
+    point: Sequence[float],
+    bounds: tuple[list[float], list[float]],
+) -> bool:
+    mins, maxs = bounds
+    return float(mins[0]) <= float(point[0]) <= float(maxs[0]) and float(
+        mins[1]
+    ) <= float(point[1]) <= float(maxs[1])
 
 
 def _generated_table_top_z(

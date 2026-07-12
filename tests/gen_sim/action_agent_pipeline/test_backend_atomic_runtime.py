@@ -1017,6 +1017,41 @@ def test_agent_task_graph_collects_object_aware_place_target_for_pickup() -> Non
     }
 
 
+def test_compiled_agent_task_graph_collects_place_target_for_pickup() -> None:
+    graph = AgentTaskGraph(start="v0", goal="v2")
+    graph.add_node("v0").add_node("v1").add_node("v2")
+    graph.add_edge(
+        "e01",
+        "v0",
+        "v1",
+        left_arm_action=atom_actions.AtomicActionSpec(
+            atomic_action_class="PickUp",
+            robot_name="left_arm",
+            target_object={"obj_name": "cube", "affordance": "antipodal"},
+        ),
+    )
+    target = {
+        "reference": "absolute",
+        "position": [0.2, 0.1, 0.3],
+        "orientation_goal": "preserve",
+        "orientation_axis": "none",
+    }
+    graph.add_edge(
+        "e12",
+        "v1",
+        "v2",
+        left_arm_action=atom_actions.AtomicActionSpec(
+            atomic_action_class="Place",
+            robot_name="left_arm",
+            target_object_pose=target,
+        ),
+    )
+
+    assert graph._pickup_downstream_targets(graph.edges["e01"]) == {
+        "left_arm": (target,)
+    }
+
+
 def test_resolve_arm_side_rejects_unavailable_requested_arm() -> None:
     env = _FakeEnv()
     env.right_arm_joints = []

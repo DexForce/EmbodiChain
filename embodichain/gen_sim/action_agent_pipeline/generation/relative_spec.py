@@ -559,6 +559,7 @@ def _apply_relative_task_response(
         )
         for entry, forced_side in zip(placement_entries, forced_arm_sides)
     )
+    placements = _order_relative_placements_by_dependency(placements)
     _validate_relative_placements(placements)
 
     summary = str(response.get("task_prompt_summary", "")).strip()
@@ -833,12 +834,22 @@ def _validate_relative_placements(
         raise ValueError("Mixed manipulation intents are not supported in v1.")
     if "coordinated_pickment" in intents and len(placements) != 1:
         raise ValueError("CoordinatedPickment supports exactly one shared object.")
-    if len(placements) == 2:
-        active_sides = {placement.active_side for placement in placements}
-        if active_sides != {"left", "right"}:
-            raise ValueError(
-                "Dual-arm object manipulation requires one left arm and one right arm."
-            )
+
+
+def _order_relative_placements_by_dependency(
+    placements: tuple[_RelativePlacementStepSpec, ...],
+) -> tuple[_RelativePlacementStepSpec, ...]:
+    """Order two placements so a moved reference object is placed first."""
+    if len(placements) != 2:
+        return placements
+    first, second = placements
+    first_depends_on_second = first.reference_source_uid == second.moved_source_uid
+    second_depends_on_first = second.reference_source_uid == first.moved_source_uid
+    if first_depends_on_second and second_depends_on_first:
+        raise ValueError("Relative placements contain a cyclic object dependency.")
+    if first_depends_on_second:
+        return second, first
+    return placements
 
 
 def _is_uprightable_object(obj: _SceneObject) -> bool:

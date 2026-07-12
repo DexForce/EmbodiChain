@@ -3861,15 +3861,16 @@ def test_task_description_generates_three_block_stacking_config(
 
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
-    assert "Generate one deterministic nominal graph with exactly 18 nominal edges" in (
+    assert "Generate one deterministic nominal graph with exactly 9 nominal edges" in (
         task_prompt
     )
     assert "Pick up both" not in task_prompt
     assert task_prompt.count('"atomic_action_class":"PickUp"') == 3
-    assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 3
+    assert task_prompt.count('"atomic_action_class":"MoveHeldObject"') == 0
+    assert task_prompt.count('"atomic_action_class":"MoveEndEffector"') == 0
     assert task_prompt.count('"atomic_action_class":"Place"') == 3
     assert atom_actions.count('"orientation_goal":"axis_align"') == 0
-    assert atom_actions.count('"orientation_goal":"preserve"') == 6
+    assert atom_actions.count('"orientation_goal":"preserve"') == 3
 
 
 def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
@@ -3908,10 +3909,10 @@ def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
         placement["target_position"][:2] for placement in summary["placements"]
     ] == [summary["anchor_xy"]] * 3
     task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
-    assert task_graph["goal"] == "v18_done"
-    assert task_graph["nodes"][-1]["id"] == "v18_done"
-    assert len(task_graph["edges"]) == 18
-    assert len(task_graph["nodes"]) == 19
+    assert task_graph["goal"] == "v9_done"
+    assert task_graph["nodes"][-1]["id"] == "v9_done"
+    assert len(task_graph["edges"]) == 9
+    assert len(task_graph["nodes"]) == 10
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     success = gym_config["env"]["extensions"]["agent_success"]
@@ -4029,7 +4030,7 @@ def test_task_description_generates_two_block_stacking_config(
         for term in success_terms
     )
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
-    assert "exactly 12 nominal edges" in task_prompt
+    assert "exactly 6 nominal edges" in task_prompt
     assert "Pick up both" not in task_prompt
 
 
@@ -4089,7 +4090,7 @@ def test_task_description_generates_nested_bowl_stacking_by_size(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     assert "Stack mode: `nested`" in task_prompt
-    assert "exactly 18 nominal edges" in task_prompt
+    assert "exactly 9 nominal edges" in task_prompt
     assert "High staging orientation" not in atom_actions
     assert "Align `interact_bowl" not in task_prompt
 

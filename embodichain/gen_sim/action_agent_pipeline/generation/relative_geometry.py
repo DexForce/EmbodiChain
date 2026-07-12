@@ -45,7 +45,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
-    _position_side_axis_value,
 )
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
     match_asset_orientation_keyword,
@@ -177,27 +176,6 @@ def _with_final_auto_arm_sides(
         return spec
 
     placements = list(spec.placements)
-    auto_indices = [
-        index
-        for index, placement in enumerate(placements)
-        if placement.arm_request == "auto"
-        and placement.intent != "coordinated_pickment"
-    ]
-    if not auto_indices:
-        return spec
-
-    if len(placements) == 2 and len(auto_indices) == 1:
-        explicit_side = next(
-            placement.active_side
-            for index, placement in enumerate(placements)
-            if index not in auto_indices
-        )
-        placements[auto_indices[0]] = replace(
-            placements[auto_indices[0]],
-            active_side="right" if explicit_side == "left" else "left",
-        )
-        return _replace_relative_spec_placements(spec, tuple(placements))
-
     object_positions = _generated_object_positions(gym_config)
     inferred_sides = {
         index: _arm_side_for_position(
@@ -206,27 +184,9 @@ def _with_final_auto_arm_sides(
                 placements[index].moved_runtime_uid,
             )
         )
-        for index in auto_indices
+        for index, placement in enumerate(placements)
+        if placement.intent != "coordinated_pickment"
     }
-
-    if len(placements) == 2 and len(auto_indices) == 2:
-        sides = [inferred_sides[index] for index in auto_indices]
-        if set(sides) != {"left", "right"}:
-            side_values = [
-                _position_side_axis_value(
-                    _require_generated_object_position(
-                        object_positions,
-                        placements[index].moved_runtime_uid,
-                    )
-                )
-                for index in auto_indices
-            ]
-            sides = (
-                ["left", "right"]
-                if side_values[0] <= side_values[1]
-                else ["right", "left"]
-            )
-            inferred_sides = dict(zip(auto_indices, sides))
 
     for index, active_side in inferred_sides.items():
         placements[index] = replace(placements[index], active_side=active_side)
