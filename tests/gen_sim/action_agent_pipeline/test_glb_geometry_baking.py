@@ -29,7 +29,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _load_mesh_vertices,
 )
 
-
 _BODY_SCALE = [2.0, 3.0, 4.0]
 _SOURCE_NODE_TRANSLATION = [1.0, -2.0, 0.5]
 _EXPECTED_MINIMUM = [1.0, -7.5, 0.0]
