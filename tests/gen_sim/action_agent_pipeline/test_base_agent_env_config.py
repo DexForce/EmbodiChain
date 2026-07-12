@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (
@@ -67,3 +69,24 @@ def test_agentic_gen_sim_env_rejects_batched_state_init() -> None:
 
     with pytest.raises(ValueError, match="supports num_envs=1 only"):
         env.get_states()
+
+
+def test_agentic_gen_sim_env_draws_arrangement_target_and_high_markers() -> None:
+    env = AgenticGenSimEnv.__new__(AgenticGenSimEnv)
+    env.sim = Mock()
+    env.arrangement_debug = {
+        "slots": [
+            {
+                "target": [0.0, 0.2, 0.5],
+                "high": [0.0, 0.2, 0.7],
+            }
+        ]
+    }
+
+    env._draw_arrangement_debug_markers()
+
+    assert env.sim.draw_marker.call_count == 2
+    target_cfg = env.sim.draw_marker.call_args_list[0].args[0]
+    high_cfg = env.sim.draw_marker.call_args_list[1].args[0]
+    assert target_cfg.axis_xpos[0, :3, 3].tolist() == pytest.approx([0.0, 0.2, 0.5])
+    assert high_cfg.axis_xpos[0, :3, 3].tolist() == pytest.approx([0.0, 0.2, 0.7])

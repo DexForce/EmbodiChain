@@ -53,6 +53,7 @@ arrangement:
   row_search_step: 0.025
   row_search_radius: 0.25
   movable_initial_overlap_score_weight: 0.01
+  center_safe_half_width: 0.08
 
 stacking:
   staging_z_delta: 0.10

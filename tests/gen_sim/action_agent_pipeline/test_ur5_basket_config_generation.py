@@ -59,6 +59,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _rotate_camera_extrinsics_around_target_z,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _ArrangementLineStepSpec,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
 )
@@ -85,6 +86,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _apply_arrangement_task_response,
+    _arrangement_arm_side_for_motion,
+    _arrangement_direction_cost,
     _arrangement_line_slot_positions,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
@@ -3144,6 +3147,54 @@ def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
     ]
 
 
+def test_arrangement_direction_prefers_fewer_cross_side_moves() -> None:
+    steps = (
+        _ArrangementLineStepSpec(
+            source_uid="bottle",
+            runtime_uid="bottle",
+            slot_index=0,
+            active_side="left",
+            target_xy=[0.0, 0.0],
+            release_position=[0.0, 0.0, 0.0],
+            high_position=[0.0, 0.0, 0.0],
+            category="bottle",
+        ),
+        _ArrangementLineStepSpec(
+            source_uid="cube",
+            runtime_uid="cube",
+            slot_index=1,
+            active_side="right",
+            target_xy=[0.0, 0.0],
+            release_position=[0.0, 0.0, 0.0],
+            high_position=[0.0, 0.0, 0.0],
+            category="cube",
+        ),
+    )
+    rigid_configs = {
+        "bottle": {"init_pos": [0.0, 0.25, 0.5]},
+        "cube": {"init_pos": [0.0, -0.25, 0.5]},
+    }
+
+    natural = _arrangement_direction_cost(
+        steps,
+        [[0.0, 0.20], [0.0, -0.20]],
+        rigid_configs=rigid_configs,
+    )
+    crossed = _arrangement_direction_cost(
+        steps,
+        [[0.0, -0.20], [0.0, 0.20]],
+        rigid_configs=rigid_configs,
+    )
+
+    assert natural < crossed
+
+
+def test_arrangement_arm_assignment_uses_pickup_side_outside_center() -> None:
+    assert _arrangement_arm_side_for_motion([0.0, 0.20, 0.5], [0.0, -0.20]) == "left"
+    assert _arrangement_arm_side_for_motion([0.0, -0.20, 0.5], [0.0, 0.20]) == "right"
+    assert _arrangement_arm_side_for_motion([0.0, 0.01, 0.5], [0.0, 0.20]) == "left"
+
+
 def test_arrangement_line_slot_positions_support_world_x() -> None:
     slots = _arrangement_line_slot_positions(
         anchor_xy=[0.10, -0.20],
@@ -3359,6 +3410,7 @@ def test_arrangement_static_unmoved_object_blocks_line_layout(
             rigid_objects=rigid_objects,
             scene_dir=tmp_path,
             task_description="将桌面上的罐头摆成一排",
+            check_static_obstacles=True,
         )
 
 

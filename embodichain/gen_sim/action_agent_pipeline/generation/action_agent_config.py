@@ -116,6 +116,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _source_body_scale,
     _target_body_scale_vector,
 )
+from embodichain.utils import logger
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _DUAL_UR5_ARM_COMPONENT_Z,
     _DUAL_UR5_TABLETOP_CLEARANCE,
@@ -215,6 +216,7 @@ def generate_action_agent_config_from_project(
     sync_replacement_names: bool = False,
     reuse_target_replacements: bool = True,
     acd_method: str = "vhacd",
+    arrangement_debug_visualization: bool = False,
     overwrite: bool = False,
     max_episodes: int = DEFAULT_MAX_EPISODES,
     max_episode_steps: int = DEFAULT_MAX_EPISODE_STEPS,
@@ -281,6 +283,8 @@ def generate_action_agent_config_from_project(
             at the expected output path when it matches the requested prompt.
         acd_method: Convex decomposition backend written to generated mesh
             objects. Only ``"vhacd"`` is supported.
+        arrangement_debug_visualization: If true, write target-slot and
+            high-transport-point markers into the generated environment config.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -377,6 +381,7 @@ def generate_action_agent_config_from_project(
                 source_scene_body_scale_mode=source_scene_body_scale_mode,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+                arrangement_debug_visualization=arrangement_debug_visualization,
             )
             _validate_arrangement_bundle(bundle, spec)
             return _finalize_and_write_bundle(
@@ -758,6 +763,7 @@ def _build_arrangement_line_bundle(
     source_scene_body_scale_mode: str | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
+    arrangement_debug_visualization: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -851,6 +857,17 @@ def _build_arrangement_line_bundle(
         spec,
         robot_profile=robot_profile,
     )
+    if arrangement_debug_visualization:
+        gym_config["env"]["extensions"]["arrangement_debug"] = (
+            _make_arrangement_debug_config(spec)
+        )
+        for step in spec.steps:
+            logger.log_info(
+                "Arrangement debug slot "
+                f"{step.slot_index}: object={step.runtime_uid}, "
+                f"category={step.category}, arm={step.active_side}_arm, "
+                f"target={step.release_position}, high={step.high_position}."
+            )
     gym_config["env"]["dataset"] = _make_arrangement_dataset_config(
         project_name,
         spec,
@@ -896,6 +913,8 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
         ],
         "spacing": float(spec.spacing),
         "layout_clearance": float(spec.layout_clearance),
+        "category_order": list(spec.category_order),
+        "spatial_direction": spec.spatial_direction,
         "placements": [
             {
                 "object": step.runtime_uid,
@@ -905,9 +924,25 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
                 "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
                 "orientation_goal": step.orientation_goal,
                 "orientation_axis": step.orientation_axis,
+                "category": step.category,
             }
             for step in spec.steps
         ],
+    }
+
+
+def _make_arrangement_debug_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
+    return {
+        "slots": [
+            {
+                "object": step.runtime_uid,
+                "category": step.category,
+                "arm": f"{step.active_side}_arm",
+                "target": [float(value) for value in step.release_position],
+                "high": [float(value) for value in step.high_position],
+            }
+            for step in spec.steps
+        ]
     }
 
 

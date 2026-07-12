@@ -292,6 +292,12 @@ def cli() -> None:
         help="Overwrite generated files if they already exist.",
     )
     parser.add_argument(
+        "--arrangement-debug-visualization",
+        action="store_true",
+        default=False,
+        help="Draw arrangement target slots and high transport points.",
+    )
+    parser.add_argument(
         "--max_episodes",
         type=int,
         default=DEFAULT_MAX_EPISODES,
@@ -330,6 +336,7 @@ def cli() -> None:
         sync_replacement_names=args.sync_replacement_names,
         reuse_target_replacements=args.reuse_target_replacements,
         acd_method=args.acd_method,
+        arrangement_debug_visualization=args.arrangement_debug_visualization,
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,
         max_episode_steps=args.max_episode_steps,
