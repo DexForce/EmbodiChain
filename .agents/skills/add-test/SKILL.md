@@ -111,15 +111,14 @@ Use the narrowest test type that proves the behavior:
   cannot reveal that requirement (for example, a hidden CUDA helper or an
   end-to-end toolkit test).
 
-The full suite includes GPU tests by default. Use a marker expression only when
-you intentionally need a lower-resource local run:
+GPU tests are skipped by default to keep normal test runs within the shared VRAM budget. Run them explicitly and serially:
 
 ```bash
-# Full suite, including GPU tests.
+# Default suite: GPU-marked tests are skipped.
 pytest tests/
 
-# Optional lower-resource local suite.
-pytest tests/ -m "not gpu"
+# Dedicated GPU suite. Do not add -n unless pytest-xdist is installed.
+pytest tests/ --run-gpu -m gpu
 ```
 
 For backend/device matrices, run the complete contract on one representative
@@ -228,7 +227,7 @@ pytest tests/<subpath>/test_<module>.py -v
 pytest tests/<subpath>/test_<module>.py::test_expected_output -v
 
 # GPU-specific test
-pytest tests/<subpath>/test_<module>.py -m gpu -v
+pytest tests/<subpath>/test_<module>.py --run-gpu -m gpu -v
 
 # Single test class method
 pytest tests/<subpath>/test_<module>.py::TestMyClass::test_basic_behavior -v
@@ -250,7 +249,7 @@ black tests/<subpath>/test_<module>.py
 | `from __future__` | Required after header |
 | Magic numbers | Define as named constants with explanatory comments |
 | Simulation tests | Initialize/teardown in `setup_method`/`teardown_method` |
-| CUDA coverage | Use `@pytest.mark.gpu`; select it with `-m gpu` when needed |
+| CUDA coverage | Use `@pytest.mark.gpu`; run with `--run-gpu -m gpu` |
 | Long integration | Use `@pytest.mark.slow`; keep it out of normal PR runs |
 | Pure-logic tests | Use mock objects, no real sim |
 | `SceneEntityCfg` | Use `MagicMock(uid="...")` in tests |
@@ -274,7 +273,7 @@ black tests/<subpath>/test_<module>.py
 | Action | Command |
 |--------|---------|
 | Run default tests | `pytest tests/` |
-| Run GPU tests only | `pytest tests/ -m gpu` |
+| Run GPU tests | `pytest tests/ --run-gpu -m gpu` |
 | Run single file | `pytest tests/<path>/test_<name>.py -v` |
 | Run single test | `pytest tests/<path>::test_<name> -v` |
 | Run with print output | `pytest -s tests/<path>/test_<name>.py` |

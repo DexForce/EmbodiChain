@@ -28,6 +28,12 @@ def pytest_addoption(parser):
         default="hybrid",
         help="Specify the renderer backend: hybrid, or fast-rt",
     )
+    parser.addoption(
+        "--run-gpu",
+        action="store_true",
+        default=False,
+        help="Run tests marked gpu; these are skipped by default to limit VRAM use.",
+    )
 
 
 def pytest_configure(config):
@@ -96,6 +102,15 @@ def pytest_collection_modifyitems(config, items):
             "/sensors/" in nodeid or "hybrid" in nodeid or "fastrt" in nodeid
         ):
             item.add_marker(pytest.mark.renderer)
+
+        if item.get_closest_marker("gpu") is not None and not config.getoption(
+            "--run-gpu"
+        ):
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="GPU tests require --run-gpu and should run in a serial job."
+                )
+            )
 
 
 @pytest.fixture(autouse=True, scope="function")
