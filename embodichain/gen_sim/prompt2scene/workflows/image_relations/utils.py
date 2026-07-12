@@ -377,9 +377,7 @@ def write_table_candidate_debug_image(
     """Write table/support candidate mask debug image without VLM filtering."""
     if not segments:
         return
-    round_name = artifact_writer.next_debug_round_name(
-        label=f"{stage}_{group['name']}"
-    )
+    round_name = artifact_writer.next_debug_round_name(label=f"{stage}_{group['name']}")
     round_dir = artifact_writer.debug_round_dir(round_name)
     debug_image_path = draw_numbered_masks(
         image_path=image_path,
@@ -403,9 +401,7 @@ def filter_group_segments_with_artifacts(
     confirmed_segments: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Filter one group while keeping workflow artifact handling out of nodes."""
-    round_name = artifact_writer.next_debug_round_name(
-        label=f"{stage}_{group['name']}"
-    )
+    round_name = artifact_writer.next_debug_round_name(label=f"{stage}_{group['name']}")
     return filter_group_segments_with_vlm(
         llm=llm,
         image_path=image_path,
@@ -456,8 +452,7 @@ def merge_non_overlapping_segments(
         if len(merged) >= limit:
             break
         if all(
-            bbox_iou(segment["bbox_xyxy"], other["bbox_xyxy"])
-            < OVERLAP_IOU_THRESHOLD
+            bbox_iou(segment["bbox_xyxy"], other["bbox_xyxy"]) < OVERLAP_IOU_THRESHOLD
             for other in merged
         ):
             merged.append(segment)

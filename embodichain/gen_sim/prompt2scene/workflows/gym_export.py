@@ -83,7 +83,9 @@ def _resolve_table_fit_manifest_path(
     paths: PipelinePaths,
 ) -> Path:
     if not manifest_path_value:
-        raise FileNotFoundError("table_fit_to_clutter manifest_path is missing or empty")
+        raise FileNotFoundError(
+            "table_fit_to_clutter manifest_path is missing or empty"
+        )
 
     resolved = _resolve_path(str(manifest_path_value), output_root)
     if resolved.is_file():
@@ -176,14 +178,24 @@ def _support_region_2d(table_fit_manifest: dict[str, Any]) -> dict[str, Any]:
     support = table_fit_manifest.get("final_support_quad_centered") or {}
     support_hull = np.asarray(support.get("support_hull_xy", []), dtype=np.float64)
     corners = np.asarray(support.get("corners_xy", []), dtype=np.float64)
-    if support_hull.ndim == 2 and support_hull.shape[0] >= 3 and support_hull.shape[1] == 2:
+    if (
+        support_hull.ndim == 2
+        and support_hull.shape[0] >= 3
+        and support_hull.shape[1] == 2
+    ):
         points = support_hull
         source = "support_hull_aabb"
     elif corners.shape == (4, 2):
         points = corners
         source = "support_quad_aabb"
     else:
-        return {"unit": "m", "center_xy": [], "aabb_xy": [], "size_xy": [], "corners_xy": []}
+        return {
+            "unit": "m",
+            "center_xy": [],
+            "aabb_xy": [],
+            "size_xy": [],
+            "corners_xy": [],
+        }
     min_xy = points.min(axis=0)
     max_xy = points.max(axis=0)
     center_xy = 0.5 * (min_xy + max_xy)
@@ -450,7 +462,13 @@ def _resolve_existing_table_fit_path(
         return fallback
 
     if resolved.parent.name == "table_fit_to_clutter":
-        alt = output_root / "unified_scene_gen" / "glb_gen" / "table_fit_to_clutter" / resolved.name
+        alt = (
+            output_root
+            / "unified_scene_gen"
+            / "glb_gen"
+            / "table_fit_to_clutter"
+            / resolved.name
+        )
         if alt.is_file():
             return alt
 

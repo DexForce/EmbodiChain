@@ -1494,8 +1494,7 @@ def _dual_relative_edge_blocks(
 def _uses_serial_dual_upright_sequence(spec: _RelativeSpecLike) -> bool:
     """Return whether both objects must be stood upright one after the other."""
     return all(
-        getattr(placement, "upright_in_place", False)
-        for placement in spec.placements
+        getattr(placement, "upright_in_place", False) for placement in spec.placements
     )
 
 

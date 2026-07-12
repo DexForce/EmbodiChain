@@ -46,6 +46,7 @@ _SLSQP_OPTIONS: dict[str, Any] = {
     "disp": False,
 }
 
+
 def _object_scenes_xy_aabb_manifest(
     *,
     object_scenes: list[tuple[str, Any]],
@@ -58,7 +59,7 @@ def _object_scenes_xy_aabb_manifest(
             "status": "empty",
             "unit": unit,
             "object_count": 0,
-    }
+        }
     bounds = [
         np.asarray(
             GeometryManager.scene_to_mesh(scene, trimesh=trimesh).bounds,
@@ -88,7 +89,6 @@ def _object_scenes_xy_aabb_manifest(
     }
 
 
-
 def _settle_and_pack_object_footprints(
     *,
     object_scenes: list[tuple[str, Any]],
@@ -109,8 +109,8 @@ def _settle_and_pack_object_footprints(
             mesh = GeometryManager.scene_to_mesh(scene, trimesh=trimesh)
             mesh_bounds = np.asarray(mesh.bounds, dtype=np.float64)
             mesh_z_height = max(float(mesh_bounds[1][2] - mesh_bounds[0][2]), 0.0)
-            bottom_to_xy_plane_transform = GeometryManager.aabb_bottom_to_xy_plane_transform(
-                mesh_bounds
+            bottom_to_xy_plane_transform = (
+                GeometryManager.aabb_bottom_to_xy_plane_transform(mesh_bounds)
             )
             normalized_scene = GeometryManager.copy_scene_with_transform(
                 scene,
@@ -257,7 +257,6 @@ def _settle_and_pack_object_footprints(
     }
 
 
-
 def _optimize_xy_aabb_footprint_layout(
     *,
     object_ids: list[str],
@@ -298,8 +297,7 @@ def _optimize_xy_aabb_footprint_layout(
         xy_sizes=xy_sizes,
     )
     initial_centers = {
-        object_id: center.copy()
-        for object_id, center in centers.items()
+        object_id: center.copy() for object_id, center in centers.items()
     }
     initial_union_bounds = _xy_union_bounds(
         centers=initial_centers,
@@ -330,17 +328,13 @@ def _optimize_xy_aabb_footprint_layout(
                 if overlap_x <= overlap_y:
                     axis = 0
                     sign = (
-                        -1.0
-                        if centers[object_id][0] <= centers[other_id][0]
-                        else 1.0
+                        -1.0 if centers[object_id][0] <= centers[other_id][0] else 1.0
                     )
                     amount = overlap_x
                 else:
                     axis = 1
                     sign = (
-                        -1.0
-                        if centers[object_id][1] <= centers[other_id][1]
-                        else 1.0
+                        -1.0 if centers[object_id][1] <= centers[other_id][1] else 1.0
                     )
                     amount = overlap_y
                 shift = 0.5 * (amount + 1e-6) * overlap_strength
@@ -398,13 +392,11 @@ def _optimize_xy_aabb_footprint_layout(
         "knn_k": knn_k,
         "neighbor_edges": neighbor_edges,
         "final_centers": {
-            object_id: centers[object_id].tolist()
-            for object_id in object_ids
+            object_id: centers[object_id].tolist() for object_id in object_ids
         },
         **diagnostics,
     }
     return {"centers": centers, "metadata": metadata}
-
 
 
 def _knn_neighbor_edges(
@@ -441,7 +433,6 @@ def _knn_neighbor_edges(
     return edges
 
 
-
 def _apply_compactness_pull(
     *,
     centers: dict[str, np.ndarray],
@@ -466,7 +457,6 @@ def _apply_compactness_pull(
         centers[object_id] = center + delta
         max_delta = max(max_delta, float(np.linalg.norm(delta)))
     return max_delta
-
 
 
 def _footprint_layout_diagnostics(
@@ -498,12 +488,14 @@ def _footprint_layout_diagnostics(
     confidence_score = _footprint_confidence_score(
         remaining_overlap_count=len(remaining_overlaps),
         average_displacement=average_displacement,
-        max_extent=max(
-            float(max(xy_sizes[object_id][0], xy_sizes[object_id][1]))
-            for object_id in object_ids
-        )
-        if object_ids
-        else 1.0,
+        max_extent=(
+            max(
+                float(max(xy_sizes[object_id][0], xy_sizes[object_id][1]))
+                for object_id in object_ids
+            )
+            if object_ids
+            else 1.0
+        ),
         expansion_ratio=expansion_ratio,
     )
     return {
@@ -513,7 +505,6 @@ def _footprint_layout_diagnostics(
         "union_aabb_expansion_ratio": expansion_ratio,
         "confidence_score": confidence_score,
     }
-
 
 
 def _remaining_xy_overlaps(
@@ -546,7 +537,6 @@ def _remaining_xy_overlaps(
     return overlaps
 
 
-
 def _footprint_confidence_score(
     *,
     remaining_overlap_count: int,
@@ -560,15 +550,11 @@ def _footprint_confidence_score(
     expansion_penalty = min(max(expansion_ratio - 1.2, 0.0) * 0.25, 0.2)
     return float(
         np.clip(
-            1.0
-            - overlap_penalty
-            - displacement_penalty
-            - expansion_penalty,
+            1.0 - overlap_penalty - displacement_penalty - expansion_penalty,
             0.0,
             1.0,
         )
     )
-
 
 
 def _center_xy_aabb_layout(
@@ -585,14 +571,12 @@ def _center_xy_aabb_layout(
         bounds_min.append(center - half_size)
         bounds_max.append(center + half_size)
     clutter_center = 0.5 * (
-        np.vstack(bounds_min).min(axis=0)
-        + np.vstack(bounds_max).max(axis=0)
+        np.vstack(bounds_min).min(axis=0) + np.vstack(bounds_max).max(axis=0)
     )
     return {
         object_id: np.asarray(center, dtype=np.float64) - clutter_center
         for object_id, center in centers.items()
     }
-
 
 
 def _xy_union_bounds(
@@ -616,12 +600,10 @@ def _xy_union_bounds(
     )
 
 
-
 def _xy_union_area(bounds: np.ndarray) -> float:
     bounds = np.asarray(bounds, dtype=np.float64)
     size = np.maximum(bounds[1] - bounds[0], 1.0e-9)
     return float(size[0] * size[1])
-
 
 
 def _xy_aabb_overlap(
@@ -635,16 +617,16 @@ def _xy_aabb_overlap(
     half_a = 0.5 * np.asarray(size_a, dtype=np.float64)
     half_b = 0.5 * np.asarray(size_b, dtype=np.float64)
     delta = np.abs(
-        np.asarray(center_b, dtype=np.float64)
-        - np.asarray(center_a, dtype=np.float64)
+        np.asarray(center_b, dtype=np.float64) - np.asarray(center_a, dtype=np.float64)
     )
     overlap = half_a + half_b + padding - delta
     if float(overlap[0]) <= 0.0 or float(overlap[1]) <= 0.0:
         return None
     return float(overlap[0]), float(overlap[1])
+
+
 #     http://www.apache.org/licenses/LICENSE-2.0
 # distributed under the License is distributed on an "AS IS" BASIS,
-
 
 
 from typing import Any
@@ -652,6 +634,7 @@ from typing import Any
 import numpy as np
 
 __all__: list[str] = []
+
 
 def _transitive_closure(
     nodes: list[str],
@@ -680,7 +663,6 @@ def _transitive_closure(
             if adj[i][j]:
                 closed.append((nodes[i], nodes[j]))
     return closed
-
 
 
 def _longest_path_ranks(
@@ -721,7 +703,6 @@ def _longest_path_ranks(
                 ranks[v] = ranks[u] + 1
     # Remaining nodes (cycles / isolated) keep rank 0
     return ranks
-
 
 
 def _layout_text_objects_grid(
@@ -779,14 +760,22 @@ def _layout_text_objects_grid(
     # Parse nine-grid constraints.
     # −Y = front, so front row = 0, back row = 2
     _GRID_TO_RC: dict[str, tuple[int, int]] = {
-        "left_front": (0, 0), "center_front": (1, 0), "right_front": (2, 0),
-        "left_center": (0, 1), "center": (1, 1), "right_center": (2, 1),
-        "left_back": (0, 2), "center_back": (1, 2), "right_back": (2, 2),
-        "front": (1, 0), "back": (1, 2),
-        "left": (0, 1), "right": (2, 1),
+        "left_front": (0, 0),
+        "center_front": (1, 0),
+        "right_front": (2, 0),
+        "left_center": (0, 1),
+        "center": (1, 1),
+        "right_center": (2, 1),
+        "left_back": (0, 2),
+        "center_back": (1, 2),
+        "right_back": (2, 2),
+        "front": (1, 0),
+        "back": (1, 2),
+        "left": (0, 1),
+        "right": (2, 1),
     }
     grid_targets: dict[str, tuple[int, int]] = {}
-    for tc in (table_constraints or []):
+    for tc in table_constraints or []:
         asset = str(tc.get("asset") or "")
         grid_name = str(tc.get("grid") or "").strip()
         if asset in object_ids and grid_name in _GRID_TO_RC:
@@ -1003,7 +992,10 @@ def _layout_text_objects_grid(
         "initial_centers": initial_centers,
         "metadata": metadata,
     }
+
+
 #     http://www.apache.org/licenses/LICENSE-2.0
+
 
 def _optimize_text_layout_slp(
     *,
@@ -1043,9 +1035,7 @@ def _optimize_text_layout_slp(
         oid: np.asarray(initial_centers[oid], dtype=np.float64).copy()
         for oid in object_ids
     }
-    fixed_ids = {
-        oid for oid in (fixed_object_ids or []) if oid in initial_centers
-    }
+    fixed_ids = {oid for oid in (fixed_object_ids or []) if oid in initial_centers}
     initial_union_bounds = _xy_union_bounds(
         centers=initial_centers,
         xy_sizes=xy_sizes,
@@ -1192,9 +1182,7 @@ def _optimize_text_layout_slp(
         "bounds_expansion": 2.0,
         "initial_union_size": init_size.tolist(),
         **collision_metadata,
-        "final_centers": {
-            oid: centers[oid].tolist() for oid in object_ids
-        },
+        "final_centers": {oid: centers[oid].tolist() for oid in object_ids},
         **diagnostics,
     }
     return {"centers": centers, "metadata": metadata}
@@ -1222,9 +1210,7 @@ def _build_relation_constraints(
         i_b = index_by_id[obj]
         # A.x + gap ≤ B.x  →  B.x - A.x - gap ≥ 0
         gap = (
-            0.5 * float(xy_sizes[subject][0])
-            + 0.5 * float(xy_sizes[obj][0])
-            + padding
+            0.5 * float(xy_sizes[subject][0]) + 0.5 * float(xy_sizes[obj][0]) + padding
         )
         constraints.append(
             {
@@ -1242,9 +1228,7 @@ def _build_relation_constraints(
         i_b = index_by_id[obj]
         # A.y + gap ≤ B.y  →  B.y - A.y - gap ≥ 0
         gap = (
-            0.5 * float(xy_sizes[subject][1])
-            + 0.5 * float(xy_sizes[obj][1])
-            + padding
+            0.5 * float(xy_sizes[subject][1]) + 0.5 * float(xy_sizes[obj][1]) + padding
         )
         constraints.append(
             {
@@ -1319,12 +1303,8 @@ def _remove_mesh_aabb_collisions(
             elif b_fixed:
                 current[object_a][axis] += sign * amount * 2.0
             else:
-                drift_a = np.linalg.norm(
-                    current[object_a] - initial_centers[object_a]
-                )
-                drift_b = np.linalg.norm(
-                    current[object_b] - initial_centers[object_b]
-                )
+                drift_a = np.linalg.norm(current[object_a] - initial_centers[object_a])
+                drift_b = np.linalg.norm(current[object_b] - initial_centers[object_b])
                 if drift_a <= drift_b:
                     current[object_a][axis] += sign * amount * 1.25
                     current[object_b][axis] -= sign * amount * 0.75
