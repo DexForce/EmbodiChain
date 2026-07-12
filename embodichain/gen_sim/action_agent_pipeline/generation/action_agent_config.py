@@ -925,6 +925,9 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
                 "orientation_goal": step.orientation_goal,
                 "orientation_axis": step.orientation_axis,
                 "category": step.category,
+                "cross_side": step.cross_side,
+                "execution_index": step.execution_index,
+                "blocked_by": list(step.blocked_by),
             }
             for step in spec.steps
         ],
@@ -940,6 +943,10 @@ def _make_arrangement_debug_config(spec: _ArrangementLineSpec) -> dict[str, Any]
                 "arm": f"{step.active_side}_arm",
                 "target": [float(value) for value in step.release_position],
                 "high": [float(value) for value in step.high_position],
+                "slot_index": step.slot_index,
+                "cross_side": step.cross_side,
+                "execution_index": step.execution_index,
+                "blocked_by": list(step.blocked_by),
             }
             for step in spec.steps
         ]

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from itertools import permutations, product
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,39 @@ _SUPPORTED_ORDER_BY = {"size", "color", "explicit"}
 _SUPPORTED_ORDER_DIRECTIONS = {"ascending", "descending", "given"}
 _SUPPORTED_AXES = {"table_long_axis", "world_x", "world_y"}
 _CONCRETE_AXES = {"world_x", "world_y"}
+_SIZE_ORDER_MARKERS = (
+    "按大小",
+    "大小顺序",
+    "由大到小",
+    "从大到小",
+    "由小到大",
+    "从小到大",
+    "largest",
+    "smallest",
+    "large to small",
+    "small to large",
+    "by size",
+    "size order",
+)
+_COLOR_ORDER_MARKERS = ("按颜色", "颜色顺序", "color order", "by color")
+_COLOR_NAMES = (
+    "红",
+    "绿",
+    "蓝",
+    "黄",
+    "橙",
+    "紫",
+    "黑",
+    "白",
+    "red",
+    "green",
+    "blue",
+    "yellow",
+    "orange",
+    "purple",
+    "black",
+    "white",
+)
 
 
 def _is_arrangement_task_description(task_description: str) -> bool:
@@ -292,6 +326,11 @@ def _apply_arrangement_task_response(
     object_attributes = _object_attributes(response.get("object_attributes"))
     order_by = _normalize_order_by(response.get("order_by"))
     order_direction = _normalize_order_direction(response.get("order_direction"))
+    order_by, order_direction = _validated_arrangement_order(
+        order_by,
+        order_direction,
+        task_description=task_description,
+    )
     axis = "world_y"
     anchor = _normalize_anchor(response.get("anchor"))
 
@@ -418,6 +457,30 @@ def _apply_arrangement_task_response(
         layout_clearance=_LAYOUT_CLEARANCE,
         category_order=category_order,
     )
+
+
+def _validated_arrangement_order(
+    order_by: str,
+    order_direction: str,
+    *,
+    task_description: str,
+) -> tuple[str, str]:
+    text = task_description.strip().lower()
+    if order_by == "size" and not any(marker in text for marker in _SIZE_ORDER_MARKERS):
+        return "explicit", "given"
+    if order_by == "color":
+        color_count = sum(color in text for color in _COLOR_NAMES)
+        explicit_color_order = (
+            any(marker in text for marker in _COLOR_ORDER_MARKERS)
+            or color_count >= 2
+            and any(
+                marker in text
+                for marker in ("顺序", "依次", " order", "sequence", "sort")
+            )
+        )
+        if not explicit_color_order:
+            return "explicit", "given"
+    return order_by, order_direction
 
 
 def _arrangement_line_slot_positions(
@@ -782,22 +845,22 @@ def _with_arrangement_generated_pose_targets(
         table_bounds=_source_object_xy_bounds(table_obj, scene_dir=Path(".")),
     )
 
-    direction_candidates = (
-        ("right_to_left", slots),
-        ("left_to_right", list(reversed(slots))),
+    planned = _arrangement_plan_execution(
+        spec,
+        slots,
+        generated_objects=generated_objects,
+        rigid_configs=rigid_configs,
     )
-    spatial_direction, selected_slots = min(
-        direction_candidates,
-        key=lambda candidate: _arrangement_direction_cost(
-            spec.steps,
-            candidate[1],
-            rigid_configs=rigid_configs,
-        ),
-    )
-    slot_index_by_xy = {tuple(slot): index for index, slot in enumerate(slots)}
+    if planned is None:
+        raise ValueError(
+            "Unable to generate an arrangement execution order without cyclic "
+            "initial slot occupancy."
+        )
+    spatial_direction, planned_steps = planned
 
     steps = []
-    for step, target_xy in zip(spec.steps, selected_slots):
+    for step in planned_steps:
+        target_xy = step.target_xy
         config = rigid_configs[step.runtime_uid]
         release_z = _generated_release_z(config, table_top_z)
         release_position = [
@@ -818,11 +881,6 @@ def _with_arrangement_generated_pose_targets(
         steps.append(
             replace(
                 step,
-                slot_index=slot_index_by_xy[tuple(target_xy)],
-                active_side=_arrangement_arm_side_for_motion(
-                    init_position,
-                    target_xy,
-                ),
                 target_xy=[
                     round(float(target_xy[0]), 6),
                     round(float(target_xy[1]), 6),
@@ -965,6 +1023,184 @@ def _arrangement_arm_side_for_motion(
     target_y = float(target_xy[1])
     reference_y = init_y if abs(init_y) > _CENTER_SAFE_HALF_WIDTH else target_y
     return _arm_side_for_position([0.0, reference_y, 0.0])
+
+
+def _arrangement_motion_metadata(
+    init_position: Sequence[float],
+    target_xy: Sequence[float],
+) -> tuple[str, bool, float]:
+    init_y = float(init_position[1])
+    target_y = float(target_xy[1])
+    init_side = (
+        0 if abs(init_y) <= _CENTER_SAFE_HALF_WIDTH else (1 if init_y > 0 else -1)
+    )
+    target_side = (
+        0 if abs(target_y) <= _CENTER_SAFE_HALF_WIDTH else (1 if target_y > 0 else -1)
+    )
+    cross_side = init_side != 0 and target_side != 0 and init_side != target_side
+    return (
+        _arrangement_arm_side_for_motion(init_position, target_xy),
+        cross_side,
+        abs(init_y - target_y),
+    )
+
+
+def _arrangement_plan_execution(
+    spec: _ArrangementLineSpec,
+    slots: Sequence[Sequence[float]],
+    *,
+    generated_objects: Sequence[_SceneObject],
+    rigid_configs: Mapping[str, Mapping[str, Any]],
+) -> tuple[str, list[_ArrangementLineStepSpec]] | None:
+    groups = [
+        [step for step in spec.steps if step.category == category]
+        for category in spec.category_order
+    ]
+    if not groups or any(not group for group in groups):
+        groups = [list(spec.steps)]
+    group_orders = [
+        (
+            [tuple(group)]
+            if spec.order_by in {"size", "color"}
+            else list(permutations(sorted(group, key=lambda step: step.runtime_uid)))
+        )
+        for group in groups
+    ]
+    footprint_by_uid = {
+        obj.source_uid: _arrangement_object_footprint(obj, scene_dir=Path("."))
+        for obj in generated_objects
+    }
+    best = None
+    for grouped_order in product(*group_orders):
+        semantic_steps = [step for group in grouped_order for step in group]
+        for spatial_direction, candidate_slots in (
+            ("right_to_left", slots),
+            ("left_to_right", list(reversed(slots))),
+        ):
+            assigned_steps = []
+            for slot_index, (step, target_xy) in enumerate(
+                zip(semantic_steps, candidate_slots)
+            ):
+                init_position = _clean_vector3(
+                    rigid_configs[step.runtime_uid].get("init_pos", [0.0, 0.0, 0.0])
+                )
+                active_side, cross_side, _ = _arrangement_motion_metadata(
+                    init_position, target_xy
+                )
+                assigned_steps.append(
+                    replace(
+                        step,
+                        slot_index=slot_index,
+                        active_side=active_side,
+                        target_xy=[float(target_xy[0]), float(target_xy[1])],
+                        cross_side=cross_side,
+                    )
+                )
+            scheduled = _arrangement_initial_occupancy_schedule(
+                assigned_steps,
+                rigid_configs=rigid_configs,
+                footprint_by_uid=footprint_by_uid,
+                clearance=spec.layout_clearance,
+            )
+            if scheduled is None:
+                continue
+            execution_steps, blockers, conflict_count = scheduled
+            direction_cost = _arrangement_direction_cost(
+                assigned_steps,
+                candidate_slots,
+                rigid_configs=rigid_configs,
+            )
+            cost = (
+                direction_cost[0],
+                conflict_count,
+                direction_cost[1],
+                0 if spatial_direction == "left_to_right" else 1,
+                direction_cost[2],
+            )
+            finalized_steps = [
+                replace(
+                    step,
+                    execution_index=index,
+                    blocked_by=blockers[step.runtime_uid],
+                )
+                for index, step in enumerate(execution_steps)
+            ]
+            candidate = (cost, spatial_direction, finalized_steps)
+            if best is None or candidate[0] < best[0]:
+                best = candidate
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def _arrangement_initial_occupancy_schedule(
+    steps: Sequence[_ArrangementLineStepSpec],
+    *,
+    rigid_configs: Mapping[str, Mapping[str, Any]],
+    footprint_by_uid: Mapping[str, _ArrangementFootprint],
+    clearance: float,
+) -> tuple[list[_ArrangementLineStepSpec], dict[str, tuple[str, ...]], int] | None:
+    target_bounds = {
+        step.runtime_uid: _slot_xy_bounds(
+            step.target_xy,
+            max_half_extent=footprint_by_uid[step.runtime_uid].half_extent,
+        )
+        for step in steps
+    }
+    initial_bounds = {
+        uid: footprint.xy_bounds for uid, footprint in footprint_by_uid.items()
+    }
+    dependencies = {step.runtime_uid: set() for step in steps}
+    blockers = {}
+    for step in steps:
+        uid = step.runtime_uid
+        blocked_by = []
+        for other in steps:
+            other_uid = other.runtime_uid
+            if other_uid == uid:
+                continue
+            if _xy_bounds_overlap(
+                target_bounds[uid],
+                initial_bounds[other_uid],
+                clearance=clearance,
+            ):
+                dependencies[uid].add(other_uid)
+                blocked_by.append(other_uid)
+        blockers[uid] = tuple(sorted(blocked_by))
+
+    successors = {step.runtime_uid: set() for step in steps}
+    for uid, dependency_uids in dependencies.items():
+        for dependency_uid in dependency_uids:
+            successors[dependency_uid].add(uid)
+    by_uid = {step.runtime_uid: step for step in steps}
+    remaining = set(by_uid)
+    execution_steps = []
+    previous_arm = None
+    while remaining:
+        ready = [uid for uid in remaining if not (dependencies[uid] & remaining)]
+        if not ready:
+            return None
+
+        def priority(uid: str) -> tuple[int, bool, int, float, str]:
+            step = by_uid[uid]
+            init_position = _clean_vector3(
+                rigid_configs[uid].get("init_pos", [0.0, 0.0, 0.0])
+            )
+            _, _, distance = _arrangement_motion_metadata(init_position, step.target_xy)
+            return (
+                -len(successors[uid] & remaining),
+                step.cross_side,
+                0 if previous_arm is None or step.active_side == previous_arm else 1,
+                round(distance, 9),
+                uid,
+            )
+
+        selected_uid = min(ready, key=priority)
+        selected_step = by_uid[selected_uid]
+        execution_steps.append(selected_step)
+        previous_arm = selected_step.active_side
+        remaining.remove(selected_uid)
+    return execution_steps, blockers, sum(len(value) for value in blockers.values())
 
 
 def _arrangement_direction_cost(

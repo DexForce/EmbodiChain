@@ -169,6 +169,9 @@ class _ArrangementLineStepSpec:
     orientation_goal: str = "preserve"
     orientation_axis: str = "none"
     category: str = "object"
+    cross_side: bool = False
+    execution_index: int = 0
+    blocked_by: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

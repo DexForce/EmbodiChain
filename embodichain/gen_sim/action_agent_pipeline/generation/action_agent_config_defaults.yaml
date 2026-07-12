@@ -44,18 +44,18 @@ relative_placement:
   pickup_upright_rotate_degrees: 45.0
 
 arrangement:
-  release_z: 0.04
+  release_z: 0.02
   staging_z_delta: 0.10
   pose_sensitive_staging_z_delta: 0.15
-  slot_margin: 0.025
+  slot_margin: 0.08
   min_slot_spacing: 0.07
   layout_clearance: 0.025
   row_search_step: 0.025
   row_search_radius: 0.25
   movable_initial_overlap_score_weight: 0.01
   center_safe_half_width: 0.08
-  transport_clearance: 0.05
-  pickup_min_lift_height: 0.30
+  transport_clearance: 0.1
+  pickup_min_lift_height: 0.2
 
 stacking:
   staging_z_delta: 0.10

@@ -183,7 +183,8 @@ def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
 def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
     xy_tolerance = min(0.03, float(spec.spacing) * 0.35)
-    ordered_objects = [step.runtime_uid for step in spec.steps]
+    semantic_steps = sorted(spec.steps, key=lambda step: step.slot_index)
+    ordered_objects = [step.runtime_uid for step in semantic_steps]
     arrangement_axis = _arrangement_success_axis(spec)
     terms.extend(
         [
@@ -206,7 +207,7 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
             },
         ]
     )
-    for step in spec.steps:
+    for step in semantic_steps:
         terms.extend(
             [
                 {
