@@ -21,8 +21,12 @@ from pathlib import Path
 import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
+    GlbGeometryNormalizer,
     bake_body_scale_into_glbs,
     bake_glb_geometry,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _load_mesh_vertices,
 )
 
 
@@ -68,13 +72,44 @@ def test_bake_body_scale_into_glbs_replaces_runtime_scale_with_identity(
         output_dir=tmp_path / "baked_assets",
     )
     baked_path = Path(gym_config["rigid_object"][0]["shape"]["fpath"])
-    baked_mesh = _load_glb_mesh(baked_path)
+    sim_vertices = _load_mesh_vertices(baked_path)
 
     assert gym_config["rigid_object"][0]["body_scale"] == [1.0, 1.0, 1.0]
     assert baked_path.suffix == ".glb"
-    assert baked_mesh.bounds[0].tolist() == pytest.approx(_EXPECTED_MINIMUM)
-    assert baked_mesh.bounds[1].tolist() == pytest.approx(_EXPECTED_MAXIMUM)
+    sim_minimum = tuple(
+        min(vertex[index] for vertex in sim_vertices) for index in range(3)
+    )
+    sim_maximum = tuple(
+        max(vertex[index] for vertex in sim_vertices) for index in range(3)
+    )
+    assert sim_minimum == pytest.approx((1.0, -3.0, -10.0))
+    assert sim_maximum == pytest.approx((3.0, 0.0, -6.0))
     assert reports[0]["baked_path"] == baked_path.as_posix()
+    assert reports[0]["glb_scale"] == [2.0, 4.0, 3.0]
+
+
+def test_glb_geometry_normalizer_preserves_y_up_for_dexsim_loading(
+    tmp_path: Path,
+) -> None:
+    source_path = _write_transformed_box_glb(tmp_path / "source.glb")
+    normalized_path = GlbGeometryNormalizer(
+        output_dir=tmp_path / "normalized",
+    ).normalize_path(source_path)
+
+    normalized_mesh = _load_glb_mesh(normalized_path)
+
+    assert normalized_mesh.bounds[0].tolist() == pytest.approx([0.5, -2.5, 0.0])
+    assert normalized_mesh.bounds[1].tolist() == pytest.approx([1.5, -1.5, 1.0])
+
+
+def test_mesh_bounds_interprets_glb_y_up_height_as_simulation_z(
+    tmp_path: Path,
+) -> None:
+    source_path = _write_transformed_box_glb(tmp_path / "source.glb")
+
+    vertices = _load_mesh_vertices(source_path)
+
+    assert max(vertex[2] for vertex in vertices) == pytest.approx(-1.5)
 
 
 def _write_transformed_box_glb(path: Path) -> Path:

@@ -335,6 +335,12 @@ def _load_mesh_vertices(
     *,
     gltf_to_sim_frame: bool = False,
 ) -> list[tuple[float, float, float]] | None:
+    # DexSim converts every GLB/GLTF asset from Y-up into its Z-up scene frame
+    # during loading. Geometry analysis must use the same interpretation.
+    gltf_to_sim_frame = gltf_to_sim_frame or mesh_path.suffix.lower() in {
+        ".glb",
+        ".gltf",
+    }
     if mesh_path.suffix.lower() == ".glb":
         try:
             vertices = list(_iter_glb_world_position_vertices(mesh_path))

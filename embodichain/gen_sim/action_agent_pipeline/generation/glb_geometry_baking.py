@@ -27,20 +27,29 @@ import math
 __all__ = [
     "GLB_GEOMETRY_BAKE_POLICY_VERSION",
     "GLB_GEOMETRY_NORMALIZATION_POLICY_VERSION",
+    "GLTF_TO_SIM_FRAME_TRANSFORM",
     "GlbGeometryNormalizer",
     "bake_body_scale_into_glbs",
     "bake_glb_geometry",
 ]
 
 
-GLB_GEOMETRY_BAKE_POLICY_VERSION = "action_agent_glb_geometry_bake_v1"
-GLB_GEOMETRY_NORMALIZATION_POLICY_VERSION = "action_agent_glb_geometry_normalize_v1"
+GLB_GEOMETRY_BAKE_POLICY_VERSION = "action_agent_glb_geometry_bake_v2"
+GLB_GEOMETRY_NORMALIZATION_POLICY_VERSION = "action_agent_glb_geometry_normalize_v2"
 
 _IDENTITY_SCALE = [1.0, 1.0, 1.0]
 _IDENTITY_TRANSFORM = [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
     [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+]
+# GLB/GLTF assets use Y-up while the DexSim scene uses Z-up. This transform is
+# used by Python geometry analysis only; DexSim applies it when loading GLB.
+GLTF_TO_SIM_FRAME_TRANSFORM = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, -1.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 1.0],
 ]
 _FLOAT_ABS_TOL = 1e-12
@@ -87,7 +96,7 @@ class GlbGeometryNormalizer:
         return list(self._reports)
 
     def normalize_path(self, mesh_path: str | Path) -> Path:
-        """Return a flattened GLB path for a GLB or GLTF source mesh."""
+        """Return a flattened Y-up GLB path for a GLB or GLTF source mesh."""
         source_path = Path(mesh_path).expanduser().resolve()
         if source_path.suffix.lower() not in {".glb", ".gltf"}:
             raise ValueError(
@@ -159,11 +168,13 @@ def bake_body_scale_into_glbs(
             )
 
         source_sha256 = _file_sha256(source_path)
+        glb_scale = _sim_scale_to_glb(body_scale)
         baked_path = _baked_glb_path(
             source_path,
             output_dir,
             source_sha256,
             body_scale,
+            glb_scale,
             _IDENTITY_TRANSFORM,
         )
         status = "reused" if baked_path.is_file() else "generated"
@@ -171,7 +182,7 @@ def bake_body_scale_into_glbs(
             bake_glb_geometry(
                 source_path,
                 baked_path,
-                body_scale=body_scale,
+                body_scale=glb_scale,
             )
 
         shape["fpath"] = baked_path.as_posix()
@@ -184,6 +195,7 @@ def bake_body_scale_into_glbs(
                 "baked_path": baked_path.as_posix(),
                 "source_sha256": source_sha256,
                 "body_scale": body_scale,
+                "glb_scale": glb_scale,
                 "status": status,
                 "policy_version": GLB_GEOMETRY_BAKE_POLICY_VERSION,
             }
@@ -270,6 +282,7 @@ def _baked_glb_path(
     output_dir: Path,
     source_sha256: str,
     body_scale: list[float],
+    glb_scale: list[float],
     transform: list[list[float]],
 ) -> Path:
     stem = source_path.stem[:32].strip("._") or "mesh"
@@ -278,6 +291,7 @@ def _baked_glb_path(
             {
                 "source_sha256": source_sha256,
                 "body_scale": body_scale,
+                "glb_scale": glb_scale,
                 "transform": transform,
                 "policy_version": GLB_GEOMETRY_BAKE_POLICY_VERSION,
             },
@@ -317,6 +331,17 @@ def _vector3(value: Any) -> list[float]:
     if len(values) != 3 or not all(math.isfinite(item) for item in values):
         raise ValueError(f"Expected finite xyz body_scale, got: {value!r}")
     return values
+
+
+def _sim_scale_to_glb(body_scale: list[float]) -> list[float]:
+    """Map a DexSim xyz scale into GLB's x/y/z axes.
+
+    DexSim loads GLB with ``(x, y, z) -> (x, -z, y)``. Therefore simulation
+    y scale belongs to the GLB z axis and simulation z scale belongs to the
+    GLB y axis.
+    """
+
+    return [body_scale[0], body_scale[2], body_scale[1]]
 
 
 def _matrix4(value: list[list[float]]) -> Any:
