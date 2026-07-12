@@ -19,6 +19,8 @@ This script demonstrates the creation and simulation of a robot that grasps a ri
 in a simulated environment using the SimulationManager and grasp planning utilities.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
@@ -263,6 +265,7 @@ def test_grasp_pose_generator():
         assert grab_traj.shape == torch.Size([1, 200, 8])
     finally:
         sim.destroy()
+        SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":

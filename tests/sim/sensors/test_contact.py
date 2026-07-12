@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------,
 
+from __future__ import annotations
+
 import pytest
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg

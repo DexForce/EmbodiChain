@@ -105,9 +105,11 @@ class TestMySimComponent:
 Use the narrowest test type that proves the behavior:
 
 - Prefer mocks or CPU-only inputs for pure logic and shape validation.
-- Mark a test `@pytest.mark.gpu` only when it executes CUDA code or validates a CUDA-specific contract.
-- Mark long end-to-end tests `@pytest.mark.slow`.
-- Mark explicit real-simulation integration tests `@pytest.mark.requires_sim` when the module does not import `SimulationManager` at module scope.
+- `tests/conftest.py` automatically classifies conventional CUDA, renderer, and
+  real-simulation tests. Add `@pytest.mark.gpu`, `@pytest.mark.slow`, or
+  `@pytest.mark.requires_sim` explicitly only when the test's node id/source
+  cannot reveal that requirement (for example, a hidden CUDA helper or an
+  end-to-end toolkit test).
 
 GPU tests are skipped by default to keep normal test runs within the shared VRAM budget. Run them explicitly and serially:
 

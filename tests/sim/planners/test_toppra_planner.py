@@ -5,6 +5,9 @@
 # you may not use this file except in compliance with the License.
 ...
 # ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
 import torch
 import pytest
 import numpy as np
