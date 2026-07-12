@@ -454,7 +454,7 @@ SCENE_EDIT_INTENT_JSON_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "type": {
                         "type": "string",
-                            "enum": ["delete", "replace", "add", "move"],
+                        "enum": ["delete", "replace", "add", "move"],
                     },
                     "target_object_id": {
                         "type": "string",

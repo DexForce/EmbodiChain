@@ -12,7 +12,6 @@ import numpy as np
 import trimesh
 from scipy.optimize import minimize
 
-
 DEFAULT_OBJECT_CLEARANCE_M = 0.05
 
 
@@ -1071,9 +1070,7 @@ def _collision_result_from_pair(
     group_a = object_to_group.get(a, a)
     group_b = object_to_group.get(b, b)
 
-    candidates = _relation_candidates_for_pair(
-        group_a, group_b, relation_direction_map
-    )
+    candidates = _relation_candidates_for_pair(group_a, group_b, relation_direction_map)
     relation_choice = None
     best_sep = None
     for candidate in candidates:
@@ -1128,7 +1125,9 @@ def _detect_collision_pairs(
     mesh_dict: Dict[str, trimesh.Trimesh],
     pose_dict: Dict[str, np.ndarray],
     object_to_group: Dict[str, str],
-    relation_direction_map: Optional[Dict[Tuple[str, str], List[Dict[str, Any]]]] = None,
+    relation_direction_map: Optional[
+        Dict[Tuple[str, str], List[Dict[str, Any]]]
+    ] = None,
     separation_margin: float = DEFAULT_OBJECT_CLEARANCE_M,
     diagnostics: Optional[Dict[str, Any]] = None,
 ):
@@ -1185,7 +1184,9 @@ def _add_pair_separation_constraint(
     model["b_ub"].append(float(-required_sep))
 
 
-def _build_work_model(base_model: Dict[str, Any], collision_terms: List[Dict[str, Any]]):
+def _build_work_model(
+    base_model: Dict[str, Any], collision_terms: List[Dict[str, Any]]
+):
     model = copy.deepcopy(base_model)
     for term in collision_terms:
         _add_pair_separation_constraint(

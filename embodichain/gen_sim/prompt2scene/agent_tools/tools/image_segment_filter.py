@@ -66,9 +66,7 @@ def remove_extra_numbered_segments(
     if any(index < 0 or index >= len(segments) for index in extra_indices):
         raise ValueError("VLM returned an out-of-range extra mask number.")
     return [
-        segment
-        for index, segment in enumerate(segments)
-        if index not in extra_indices
+        segment for index, segment in enumerate(segments) if index not in extra_indices
     ]
 
 
@@ -126,8 +124,6 @@ def filter_group_segments_with_vlm(
         schema=FILTER_EXTRA_INSTANCES_JSON_SCHEMA,
         messages=messages,
         context=f"Image relation {stage} segmentation filtering",
-        
-        
         attempt_count=0,
         raw_output_writer=lambda payload: write_debug_json(
             round_name=debug_round_name,

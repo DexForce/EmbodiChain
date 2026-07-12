@@ -163,7 +163,5 @@ class ImageRelationSpec:
                 "left_to_right": [list(group) for group in self.x_order],
                 "front_to_back": [list(group) for group in self.y_order],
             },
-            "objects": [
-                layout.to_manifest() for layout in self.asset_layouts
-            ],
+            "objects": [layout.to_manifest() for layout in self.asset_layouts],
         }

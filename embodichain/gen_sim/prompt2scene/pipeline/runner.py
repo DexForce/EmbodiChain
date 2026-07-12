@@ -205,9 +205,7 @@ def _run_prompt2scene_impl(
             SCENE_INTAKE_STEP,
             scene_intake.to_manifest(),
         )
-        log.log_info(
-            f"step end scene_intake status=ok output={scene_intake_path}"
-        )
+        log.log_info(f"step end scene_intake status=ok output={scene_intake_path}")
         if request.input_kind != InputKind.IMAGE:
             raise ValueError(
                 f"Unsupported prompt2scene input_kind: {request.input_kind.value!r}."
@@ -259,9 +257,7 @@ def _run_prompt2scene_impl(
         unified_scene_path = paths.step_result(
             UNIFIED_SCENE_STEP,
         )
-        log.log_info(
-            f"step end unified_scene status=ok output={unified_scene_path}"
-        )
+        log.log_info(f"step end unified_scene status=ok output={unified_scene_path}")
         log.log_info("step start unified_scene_gen")
         _run_timed_workflow(
             timings,
@@ -445,9 +441,7 @@ def _update_timing_totals(timings: dict[str, Any]) -> None:
             6,
         ),
         "components": {
-            SCENE_EDIT_STEP: _elapsed_from_timing_entry(
-                workflows.get(SCENE_EDIT_STEP)
-            ),
+            SCENE_EDIT_STEP: _elapsed_from_timing_entry(workflows.get(SCENE_EDIT_STEP)),
             SCENE_RANDOMIZATION_STEP: _elapsed_from_timing_entry(
                 workflows.get(SCENE_RANDOMIZATION_STEP)
             ),
