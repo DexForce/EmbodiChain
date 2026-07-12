@@ -29,6 +29,7 @@ from tqdm import tqdm
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
+    generation_defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
     get_arm_states,
@@ -146,7 +147,11 @@ ATOMIC_ACTION_REGISTRY = {
 
 
 _DEFAULT_SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
-_DEFAULT_PICKUP_LIFT_HEIGHT = 0.16
+_ACTION_DEFAULTS = generation_defaults_section("action")
+_GRASP_DEFAULTS = generation_defaults_section("grasp")
+_DEFAULT_PICKUP_LIFT_HEIGHT = float(
+    _ACTION_DEFAULTS["runtime_default_pickup_lift_height"]
+)
 
 
 @dataclass(frozen=True)
@@ -218,14 +223,18 @@ class _CoordinatedGraspPair:
 
 @dataclass(frozen=True)
 class _GraspRuntimeDefaults:
-    antipodal_n_sample: int = 10000
-    antipodal_max_angle: float = float(np.pi / 12)
-    max_open_length: float = 0.14
-    min_open_length: float = 0.003
-    finger_length: float = 0.13
-    point_sample_dense: float = 0.012
-    max_deviation_angle: float = float(np.pi / 12)
-    viser_port: int = 11801
+    antipodal_n_sample: int = int(_GRASP_DEFAULTS["antipodal_n_sample"])
+    antipodal_max_angle: float = float(
+        np.deg2rad(_GRASP_DEFAULTS["antipodal_max_angle_degrees"])
+    )
+    max_open_length: float = float(_GRASP_DEFAULTS["max_open_length"])
+    min_open_length: float = float(_GRASP_DEFAULTS["min_open_length"])
+    finger_length: float = float(_GRASP_DEFAULTS["finger_length"])
+    point_sample_dense: float = float(_GRASP_DEFAULTS["point_sample_dense"])
+    max_deviation_angle: float = float(
+        np.deg2rad(_GRASP_DEFAULTS["max_deviation_angle_degrees"])
+    )
+    viser_port: int = int(_GRASP_DEFAULTS["viser_port"])
 
 
 _GRASP_RUNTIME_DEFAULTS = _GraspRuntimeDefaults()
@@ -296,9 +305,16 @@ _COORDINATED_ROD_LIKE_KEYWORDS = (
 _COORDINATED_GRASP_STYLE_CONTAINER = "container_like"
 _COORDINATED_GRASP_STYLE_ROD = "rod_like"
 _COORDINATED_GRASP_STYLE_GENERIC = "generic"
-_COORDINATED_ROD_LIKE_INSET_FRACTIONS = (0.35, 0.30, 0.25, 0.20)
-_COORDINATED_CONTAINER_LIKE_INSET_FRACTIONS = (0.08, 0.12, 0.20, 0.28)
-_COORDINATED_GENERIC_INSET_FRACTIONS = (0.28, 0.35, 0.20)
+_COORDINATED_ROD_LIKE_INSET_FRACTIONS = tuple(
+    float(value) for value in _GRASP_DEFAULTS["coordinated_rod_like_inset_fractions"]
+)
+_COORDINATED_CONTAINER_LIKE_INSET_FRACTIONS = tuple(
+    float(value)
+    for value in _GRASP_DEFAULTS["coordinated_container_like_inset_fractions"]
+)
+_COORDINATED_GENERIC_INSET_FRACTIONS = tuple(
+    float(value) for value in _GRASP_DEFAULTS["coordinated_generic_inset_fractions"]
+)
 
 
 def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:

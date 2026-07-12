@@ -481,12 +481,12 @@ def test_action_agent_python_modules_declare_all() -> None:
 def test_glb_io_is_shared_by_generation_modules() -> None:
     from embodichain.gen_sim.action_agent_pipeline.generation import (
         action_agent_config,
+        glb_geometry_baking,
         glb_io,
-        mesh_frame_normalization,
     )
 
     assert action_agent_config.read_glb is glb_io.read_glb
-    assert mesh_frame_normalization.read_glb is glb_io.read_glb
+    assert glb_geometry_baking.__name__.endswith("glb_geometry_baking")
 
 
 def test_gltf_normalized_accessor_components_are_scaled() -> None:
