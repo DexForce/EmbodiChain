@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------,
 
+from __future__ import annotations
+
 import pytest
 import torch
 
@@ -22,28 +24,39 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.sensors import StereoCamera, SensorCfg
 
 NUM_ENVS = 4
+SMOKE_NUM_ENVS = 1
+SMOKE_WIDTH = 160
+SMOKE_HEIGHT = 120
 
 
 class StereoCameraTest:
-    def setup_simulation(self, sim_device, renderer="hybrid"):
+    def setup_simulation(
+        self,
+        sim_device,
+        renderer="hybrid",
+        num_envs=NUM_ENVS,
+        width=640,
+        height=480,
+        enable_auxiliary_data=True,
+    ):
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
             sim_device=sim_device,
-            num_envs=NUM_ENVS,
+            num_envs=num_envs,
             render_cfg=RenderCfg(renderer=renderer),
         )
         self.sim = SimulationManager(config)
         # Create batch of cameras
         cfg_dict = {
             "sensor_type": "StereoCamera",
-            "width": 640,
-            "height": 480,
-            "enable_mask": True,
-            "enable_depth": True,
-            "enable_normal": True,
-            "enable_position": True,
-            "enable_disparity": True,
+            "width": width,
+            "height": height,
+            "enable_mask": enable_auxiliary_data,
+            "enable_depth": enable_auxiliary_data,
+            "enable_normal": enable_auxiliary_data,
+            "enable_position": enable_auxiliary_data,
+            "enable_disparity": enable_auxiliary_data,
             "left_to_right_pos": (0.1, 0.0, 0.0),
         }
         cfg = SensorCfg.from_dict(cfg_dict)
@@ -158,25 +171,30 @@ class StereoCameraTest:
         gc.collect()
 
 
-class TestStereoCameraHybrid(StereoCameraTest):
-    def setup_method(self):
-
-        self.setup_simulation("cpu", renderer="hybrid")
-
-
 class TestStereoCameraHybridCUDA(StereoCameraTest):
     def setup_method(self):
 
         self.setup_simulation("cuda", renderer="hybrid")
 
 
-class TestStereoCameraFastRT(StereoCameraTest):
-    def setup_method(self):
-
-        self.setup_simulation("cpu", renderer="fast-rt")
-
-
-class TestStereoCameraFastRTCUDA(StereoCameraTest):
-    def setup_method(self):
-
-        self.setup_simulation("cuda", renderer="fast-rt")
+@pytest.mark.parametrize(
+    ("sim_device", "renderer"),
+    [("cpu", "hybrid"), ("cpu", "fast-rt"), ("cuda", "fast-rt")],
+)
+def test_stereo_camera_backend_smoke(sim_device, renderer):
+    """Check that each remaining backend/device pair renders a color frame."""
+    test = StereoCameraTest()
+    test.setup_simulation(
+        sim_device,
+        renderer,
+        num_envs=SMOKE_NUM_ENVS,
+        width=SMOKE_WIDTH,
+        height=SMOKE_HEIGHT,
+        enable_auxiliary_data=False,
+    )
+    try:
+        test.camera.update()
+        data = test.camera.get_data()
+        assert data["color"].shape == (SMOKE_NUM_ENVS, SMOKE_HEIGHT, SMOKE_WIDTH, 4)
+    finally:
+        test.teardown_method()
