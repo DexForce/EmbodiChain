@@ -12,8 +12,8 @@ intent_system: |
   Direction convention:
   - left: move toward smaller X.
   - right: move toward larger X.
-  - front: move toward smaller Y.
-  - back: move toward larger Y.
+  - front: move toward larger Y.
+  - back: move toward smaller Y.
 
   Rules:
   - Use only exact object ids from the existing scene objects.

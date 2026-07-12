@@ -758,19 +758,19 @@ def _layout_text_objects_grid(
     front_of_closed = _transitive_closure(object_ids, front_of_edges)
 
     # Parse nine-grid constraints.
-    # −Y = front, so front row = 0, back row = 2
+    # +Y = front, so front row = 2, back row = 0.
     _GRID_TO_RC: dict[str, tuple[int, int]] = {
-        "left_front": (0, 0),
-        "center_front": (1, 0),
-        "right_front": (2, 0),
+        "left_front": (0, 2),
+        "center_front": (1, 2),
+        "right_front": (2, 2),
         "left_center": (0, 1),
         "center": (1, 1),
         "right_center": (2, 1),
-        "left_back": (0, 2),
-        "center_back": (1, 2),
-        "right_back": (2, 2),
-        "front": (1, 0),
-        "back": (1, 2),
+        "left_back": (0, 0),
+        "center_back": (1, 0),
+        "right_back": (2, 0),
+        "front": (1, 2),
+        "back": (1, 0),
         "left": (0, 1),
         "right": (2, 1),
     }
@@ -807,10 +807,11 @@ def _layout_text_objects_grid(
 
     # Derive ranks from the transitive closures.
     x_rank = _longest_path_ranks(object_ids, left_of_closed)
-    # −Y = front:  A front_of B  →  A.y < B.y  →  row[A] < row[B].
-    # _longest_path_ranks gives rank[src] < rank[dst]; edges are
-    # already (A,B) for "A front_of B", so NO reversal needed.
-    y_rank = _longest_path_ranks(object_ids, front_of_closed)
+    # +Y = front: A front_of B -> A.y > B.y -> row[A] > row[B].
+    # _longest_path_ranks gives rank[src] < rank[dst], so reverse Y edges.
+    y_rank = _longest_path_ranks(
+        object_ids, [(obj, subject) for subject, obj in front_of_closed]
+    )
 
     # Apply nine-grid shifts.
     # Pin 9‑grid objects to their target ranks; shift all connected
@@ -1226,7 +1227,7 @@ def _build_relation_constraints(
             continue
         i_a = index_by_id[subject]
         i_b = index_by_id[obj]
-        # A.y + gap ≤ B.y  →  B.y - A.y - gap ≥ 0
+        # A.y >= B.y + gap -> A.y - B.y - gap >= 0
         gap = (
             0.5 * float(xy_sizes[subject][1]) + 0.5 * float(xy_sizes[obj][1]) + padding
         )
@@ -1234,7 +1235,7 @@ def _build_relation_constraints(
             {
                 "type": "ineq",
                 "fun": lambda x, ia=i_a, ib=i_b, g=gap: float(
-                    x[2 * ib + 1] - x[2 * ia + 1] - g
+                    x[2 * ia + 1] - x[2 * ib + 1] - g
                 ),
             }
         )

@@ -131,17 +131,17 @@ def support_region_grid_center(
     size = max_xy - min_xy
     cell = size / 3.0
     grid_to_rc = {
-        "left_front": (0, 0),
-        "center_front": (1, 0),
-        "right_front": (2, 0),
+        "left_front": (0, 2),
+        "center_front": (1, 2),
+        "right_front": (2, 2),
         "left_center": (0, 1),
         "center": (1, 1),
         "right_center": (2, 1),
-        "left_back": (0, 2),
-        "center_back": (1, 2),
-        "right_back": (2, 2),
-        "front": (1, 0),
-        "back": (1, 2),
+        "left_back": (0, 0),
+        "center_back": (1, 0),
+        "right_back": (2, 0),
+        "front": (1, 2),
+        "back": (1, 0),
         "left": (0, 1),
         "right": (2, 1),
     }
