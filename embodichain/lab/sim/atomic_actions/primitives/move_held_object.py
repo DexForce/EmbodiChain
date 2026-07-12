@@ -35,9 +35,8 @@ from ..core import (
 )
 from ..trajectory import TrajectoryBuilder
 
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix
-)
+from embodichain.utils.math import axis_angle_to_rotation_matrix
+
 
 @configclass
 class MoveHeldObjectCfg(ActionCfg):
@@ -93,17 +92,23 @@ class MoveHeldObject(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-        end_arm_xpos = self.robot.compute_fk(start_arm_qpos, name=self.cfg.control_part, to_matrix=True)
+        end_arm_xpos = self.robot.compute_fk(
+            start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+        )
         end_arm_rx = end_arm_xpos[:, :3, 0]
-        down_z = torch.tensor([[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32).repeat(self.n_envs, 1)
+        down_z = torch.tensor(
+            [[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32
+        ).repeat(self.n_envs, 1)
         fake_y = torch.cross(down_z, end_arm_rx, dim=-1)
         fake_y_normalized = fake_y / torch.norm(fake_y, dim=-1, keepdim=True)
         fake_z = torch.cross(end_arm_rx, fake_y_normalized, dim=-1)
         fake_z_normalized = fake_z / torch.norm(fake_z, dim=-1, keepdim=True)
         end_arm_rz = end_arm_xpos[:, :3, 2]
         # arm dot angle
-        arm_dot_angle = torch.acos(torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0))
-        rota_axis_angle = (torch.pi - arm_dot_angle) * end_arm_rx
+        arm_dot_angle = torch.acos(
+            torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0)
+        )
+        rota_axis_angle = (torch.pi - arm_dot_angle).unsqueeze(-1) * end_arm_rx
         rota_offset = axis_angle_to_rotation_matrix(
             rota_axis_angle.reshape(-1, 3)
         ).reshape(*rota_axis_angle.shape[:-1], 3, 3)
@@ -116,22 +121,26 @@ class MoveHeldObject(AtomicAction):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-
-        end_arm_xpos = self.robot.compute_fk(start_arm_qpos, name=self.cfg.control_part, to_matrix=True)
+        end_arm_xpos = self.robot.compute_fk(
+            start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+        )
         end_arm_rx = end_arm_xpos[:, :3, 0]
         end_arm_rz = end_arm_xpos[:, :3, 2]
-        down_z = torch.tensor([[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32).repeat(self.n_envs, 1)
-        angle_diff = torch.acos(torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0))
+        down_z = torch.tensor(
+            [[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32
+        ).repeat(self.n_envs, 1)
+        angle_diff = torch.acos(
+            torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0)
+        )
         cross_z = torch.cross(end_arm_rz, down_z, dim=-1)
         dot_z = torch.sum(end_arm_rx * cross_z, dim=-1)
         revert_flag = torch.where(dot_z < 0, -1.0, 1.0)
-        if (angle_diff > 0.5).any():
-            rota_axis_angle = revert_flag * torch.pi * 0.5 * end_arm_rx
+        rotate_mask = angle_diff > 0.5
+        if rotate_mask.any():
+            rota_axis_angle = revert_flag.unsqueeze(-1) * torch.pi * 0.5 * end_arm_rx
             rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
             eef_rotation = torch.bmm(rota_offset, end_arm_xpos[:, :3, :3])
-            move_eef_xpos[:, :3, :3] = eef_rotation
-        print(f"move_eef_xpos: {move_eef_xpos}")
-
+            move_eef_xpos[rotate_mask, :3, :3] = eef_rotation[rotate_mask]
 
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]

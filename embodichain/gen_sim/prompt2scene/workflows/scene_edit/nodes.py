@@ -72,8 +72,7 @@ def analyze_scene_edit_intent_node(
     state_path = scene_state_path(request.output_root)
     if not state_path.is_file():
         raise FileNotFoundError(
-            "Scene edit requires an existing exported scene state: "
-            f"{state_path}"
+            "Scene edit requires an existing exported scene state: " f"{state_path}"
         )
     scene_state = load_json_object(state_path)
     scene_objects = extract_scene_objects(scene_state)
@@ -243,9 +242,7 @@ def generate_edit_assets_node(
         "generated_assets": generated_assets,
         "object_count": generation_result.get("object_count", 0),
         "metric_scale": metric_scale_result,
-        "reason": (
-            "Generated simready assets for scene-edit add/replace objects."
-        ),
+        "reason": ("Generated simready assets for scene-edit add/replace objects."),
     }
     return result
 

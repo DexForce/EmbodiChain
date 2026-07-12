@@ -30,7 +30,10 @@ from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_cl
 )
 from embodichain.gen_sim.prompt2scene.utils.log import log_info
 
-__all__ = ["parse_geometry_generation_response", "parse_multi_object_generation_response"]
+__all__ = [
+    "parse_geometry_generation_response",
+    "parse_multi_object_generation_response",
+]
 
 
 def parse_geometry_generation_response(
@@ -89,9 +92,7 @@ def parse_multi_object_generation_response(
     ok = body.get("ok", False)
     if not isinstance(ok, bool) or not ok:
         error_msg = body.get("error", "ok is not true")
-        raise RuntimeError(
-            f"Multi-object geometry generation failed: {error_msg}"
-        )
+        raise RuntimeError(f"Multi-object geometry generation failed: {error_msg}")
 
     result_data = body.get("result")
     if not isinstance(result_data, dict):

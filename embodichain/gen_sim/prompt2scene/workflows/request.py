@@ -71,9 +71,7 @@ class Prompt2SceneInput:
         prompt_text = prompt.strip() if prompt is not None else None
         if prompt_text == "":
             prompt_text = None
-        gravity_settle_mode = cls._validate_gravity_settle_mode(
-            gravity_settle_mode
-        )
+        gravity_settle_mode = cls._validate_gravity_settle_mode(gravity_settle_mode)
 
         if image_path is not None:
             image_path = image_path.expanduser().resolve()
@@ -119,8 +117,7 @@ class Prompt2SceneInput:
         scene_state = output_root / "gym_export" / "scene_state" / "result.json"
         if not scene_state.is_file():
             raise FileNotFoundError(
-                "Edit-only mode requires an existing scene state: "
-                f"{scene_state}"
+                "Edit-only mode requires an existing scene state: " f"{scene_state}"
             )
         return prompt
 

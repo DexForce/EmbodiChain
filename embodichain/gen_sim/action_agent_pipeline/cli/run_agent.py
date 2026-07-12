@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 from typing import Any
 
 import gymnasium
@@ -38,13 +39,14 @@ from embodichain.utils.utility import load_config
 
 __all__ = ["build_parser", "cli"]
 
-_SHOW_PHYSICAL_COLLISION_ENV = "EMBODICHAIN_SHOW_PHYSICAL_COLLISION"
-_PHYSICAL_COLLISION_RGBA = (0.0, 1.0, 0.0, 0.85)
-_FALSE_ENV_VALUES = {"", "0", "false", "no", "off"}
-# hard-coded param for waic demo.
-_RIGID_OBJECT_POSITION_RANGE = [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]]
-_RIGID_OBJECT_ROTATION_RANGE = [[0.0, 0.0, -45.0], [0.0, 0.0, 45.0]]
-_TABLE_HEIGHT_DELTA_RANGE = [[-0.05], [0.05]]
+_RUN_AGENT_DEFAULTS = load_config(Path(__file__).with_name("run_agent_defaults.yaml"))
+_PHYSICAL_COLLISION_CONFIG = _RUN_AGENT_DEFAULTS["physical_collision"]
+_VECTORIZED_RESET_CONFIG = _RUN_AGENT_DEFAULTS["vectorized_reset_randomization"]
+_WINDOW_LOOK_AT_CONFIG = _RUN_AGENT_DEFAULTS["window_look_at"]
+
+_SHOW_PHYSICAL_COLLISION_ENV = _PHYSICAL_COLLISION_CONFIG["environment_variable"]
+_PHYSICAL_COLLISION_RGBA = tuple(_PHYSICAL_COLLISION_CONFIG["rgba"])
+_FALSE_ENV_VALUES = frozenset(_PHYSICAL_COLLISION_CONFIG["false_env_values"])
 
 
 def cli() -> None:
@@ -72,6 +74,7 @@ def cli() -> None:
             task_name=args.task_name,
         )
     _show_physical_collision_if_requested(env)
+    _set_default_window_look_at(env, gym_config.get("num_envs", 1))
 
     with timing_scope("run_agent.total", metadata={"task_name": args.task_name}):
         _run_action_agent(args, env, gym_config)
@@ -156,14 +159,23 @@ def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
                 "params": {
                     "entity_cfg": {"uid": uid},
                     "position_range": [
-                        list(_RIGID_OBJECT_POSITION_RANGE[0]),
-                        list(_RIGID_OBJECT_POSITION_RANGE[1]),
+                        list(
+                            _VECTORIZED_RESET_CONFIG["rigid_object_position_range"][0]
+                        ),
+                        list(
+                            _VECTORIZED_RESET_CONFIG["rigid_object_position_range"][1]
+                        ),
                     ],
                     "rotation_range": [
-                        list(_RIGID_OBJECT_ROTATION_RANGE[0]),
-                        list(_RIGID_OBJECT_ROTATION_RANGE[1]),
+                        list(
+                            _VECTORIZED_RESET_CONFIG["rigid_object_rotation_range"][0]
+                        ),
+                        list(
+                            _VECTORIZED_RESET_CONFIG["rigid_object_rotation_range"][1]
+                        ),
                     ],
                     "relative_position": True,
+                    "relative_rotation": True,
                 },
             },
         )
@@ -176,8 +188,8 @@ def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
             "params": {
                 "anchor_uid": "table",
                 "height_delta_range": [
-                    list(_TABLE_HEIGHT_DELTA_RANGE[0]),
-                    list(_TABLE_HEIGHT_DELTA_RANGE[1]),
+                    list(_VECTORIZED_RESET_CONFIG["table_height_delta_range"][0]),
+                    list(_VECTORIZED_RESET_CONFIG["table_height_delta_range"][1]),
                 ],
             },
         },
@@ -329,6 +341,23 @@ def _show_physical_collision_if_requested(env: gymnasium.Env) -> None:
             color="green",
         )
         setattr(env, "_physical_collision_debug_logged", True)
+
+
+def _set_default_window_look_at(env: gymnasium.Env, num_envs: int) -> None:
+    """Set the action-agent runner's default simulator-window viewpoint."""
+    sim = _get_wrapped_attr(env, "sim")
+    window = getattr(sim, "_window", None)
+    if window is None:
+        return
+
+    look_at_config = _WINDOW_LOOK_AT_CONFIG[
+        "single_env" if num_envs == 1 else "multiple_envs"
+    ]
+    eye = np.array(look_at_config["eye"], dtype=np.float32)
+    look_at = np.array(look_at_config["look_at"], dtype=np.float32)
+    up = np.array(look_at_config["up"], dtype=np.float32)
+
+    window.set_look_at(eye=eye, look_at=look_at, up=up)
 
 
 def _physical_collision_debug_enabled() -> bool:

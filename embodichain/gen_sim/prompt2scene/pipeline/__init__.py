@@ -22,4 +22,3 @@ from embodichain.gen_sim.prompt2scene.pipeline.runner import (
 )
 
 __all__ = ["Prompt2SceneRunResult", "run_prompt2scene"]
-

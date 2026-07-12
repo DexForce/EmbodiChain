@@ -195,7 +195,9 @@ def _build_randomized_layout(
         size = np.asarray(items[object_id]["size_xy"], dtype=np.float64)
         center = _clamp_center(center + vec * move_step, size, support_min, support_max)
         items[object_id]["center_xy"] = center.tolist()
-        applied_operations.append({"target_object_id": object_id, "direction": direction})
+        applied_operations.append(
+            {"target_object_id": object_id, "direction": direction}
+        )
 
     overlap_history = _resolve_overlaps(
         items=items,
@@ -240,7 +242,8 @@ def _resolve_overlaps(
     for round_idx in range(max_rounds):
         overlaps = _overlap_pairs(items)
         actionable = [
-            pair for pair in overlaps
+            pair
+            for pair in overlaps
             if pair["a"] in moved_dirs or pair["b"] in moved_dirs
         ]
         if not actionable:
@@ -253,7 +256,9 @@ def _resolve_overlaps(
                     continue
                 size = np.asarray(items[object_id]["size_xy"], dtype=np.float64)
                 old = np.asarray(items[object_id]["center_xy"], dtype=np.float64)
-                new = _clamp_center(old + vec * push_step, size, support_min, support_max)
+                new = _clamp_center(
+                    old + vec * push_step, size, support_min, support_max
+                )
                 if not np.allclose(new, old):
                     items[object_id]["center_xy"] = new.tolist()
                     changed = True
@@ -267,7 +272,7 @@ def _overlap_pairs(items: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     ids = sorted(items)
     overlaps: list[dict[str, Any]] = []
     for index, a in enumerate(ids):
-        for b in ids[index + 1:]:
+        for b in ids[index + 1 :]:
             a_min, a_max = _item_aabb(items[a])
             b_min, b_max = _item_aabb(items[b])
             overlap = np.minimum(a_max, b_max) - np.maximum(a_min, b_min)
