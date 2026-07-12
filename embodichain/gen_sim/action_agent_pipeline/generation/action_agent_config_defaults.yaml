@@ -55,9 +55,10 @@ arrangement:
   movable_initial_overlap_score_weight: 0.01
 
 stacking:
-  staging_z_delta: 0.10
-  clearance: 0.02
-  anchor_offset: 0.15
+  staging_z_delta: 0.05
+  clearance: 0.05
+  anchor_offset: 0.1
+  anchor_clearance_radius: 0.1
 
 action:
   basket_left_release_offset_y: 0.04
@@ -87,6 +88,7 @@ physics:
   convex_hulls:
     target: 32
     container: 32
+    moved: 32
     extra_rigid: 1
 
 grasp:

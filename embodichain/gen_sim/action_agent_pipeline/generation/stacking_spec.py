@@ -21,6 +21,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import math
+
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
@@ -35,7 +37,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _TABLETOP_OBJECT_CLEARANCE,
     _clean_vector3,
     _iter_generated_scene_object_configs,
-    _mesh_config_has_distinct_xy_axis,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_world_xy_center,
     _mesh_config_world_xy_axes,
@@ -76,6 +77,7 @@ _DEFAULTS = generation_defaults_section("stacking")
 _STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
 _STACK_CLEARANCE = float(_DEFAULTS["clearance"])
 _ANCHOR_OFFSET = float(_DEFAULTS["anchor_offset"])
+_ANCHOR_CLEARANCE_RADIUS = float(_DEFAULTS["anchor_clearance_radius"])
 
 
 def _is_stacking_task_description(task_description: str) -> bool:
@@ -324,12 +326,10 @@ def _with_stacking_generated_targets(
     table_config = object_configs.get("table") or object_configs.get(
         spec.table_source_uid
     )
-    moved_runtime_uids = {step.runtime_uid for step in spec.steps}
     anchor_xy = _generated_stacking_anchor_xy(
         table_config,
         spec.anchor_xy,
         object_configs=object_configs,
-        ignored_runtime_uids=moved_runtime_uids,
     )
     table_top_z = _generated_table_top_z(table_config)
     z_by_runtime_uid: dict[str, float] = {}
@@ -405,7 +405,6 @@ def _generated_stacking_anchor_xy(
     fallback_xy: Sequence[float],
     *,
     object_configs: Mapping[str, Mapping[str, Any]] | None = None,
-    ignored_runtime_uids: set[str] | None = None,
 ) -> list[float]:
     if table_config is None:
         return [round(float(fallback_xy[0]), 6), round(float(fallback_xy[1]), 6)]
@@ -426,10 +425,9 @@ def _generated_stacking_anchor_xy(
         [-local_left[0], -local_left[1]],
         [-local_front[0], -local_front[1]],
     )
-    ignored = ignored_runtime_uids or set()
     obstacle_bounds = []
-    for runtime_uid, config in object_configs.items():
-        if runtime_uid in ignored or config is table_config:
+    for config in object_configs.values():
+        if config is table_config:
             continue
         bounds = _mesh_config_world_xy_bounds(config)
         if bounds is not None:
@@ -444,12 +442,16 @@ def _generated_stacking_anchor_xy(
             candidate, table_bounds
         ):
             continue
-        if any(_xy_point_in_bounds(candidate, bounds) for bounds in obstacle_bounds):
+        if any(
+            _xy_point_to_bounds_distance(candidate, bounds) < _ANCHOR_CLEARANCE_RADIUS
+            for bounds in obstacle_bounds
+        ):
             continue
         return candidate
     raise ValueError(
         "Unable to find an unoccupied stacking anchor at the table center or "
-        "its 15 cm front/left/right/back offsets."
+        f"its {_ANCHOR_OFFSET:g} m front/left/right/back offsets with "
+        f"{_ANCHOR_CLEARANCE_RADIUS:g} m obstacle clearance."
     )
 
 
@@ -461,6 +463,17 @@ def _xy_point_in_bounds(
     return float(mins[0]) <= float(point[0]) <= float(maxs[0]) and float(
         mins[1]
     ) <= float(point[1]) <= float(maxs[1])
+
+
+def _xy_point_to_bounds_distance(
+    point: Sequence[float],
+    bounds: tuple[list[float], list[float]],
+) -> float:
+    """Return the shortest XY distance from a point to an axis-aligned bound."""
+    mins, maxs = bounds
+    dx = max(float(mins[0]) - float(point[0]), 0.0, float(point[0]) - float(maxs[0]))
+    dy = max(float(mins[1]) - float(point[1]), 0.0, float(point[1]) - float(maxs[1]))
+    return math.hypot(dx, dy)
 
 
 def _generated_table_top_z(
@@ -708,8 +721,7 @@ def _stacking_config_orientation(
     *,
     stack_mode: str,
 ) -> tuple[str, str]:
-    if stack_mode == "on_top" and _mesh_config_has_distinct_xy_axis(obj_config):
-        return "axis_align", "x"
+    """Preserve the source orientation unless a future spec requests otherwise."""
     return "preserve", "none"
 
 

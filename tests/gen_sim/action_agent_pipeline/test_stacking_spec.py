@@ -41,7 +41,7 @@ def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
     obstacle = {"uid": "cup"}
     bounds_by_uid = {
         "table": ([-1.0, -1.0], [1.0, 1.0]),
-        "cup": ([-0.01, -0.01], [0.01, 0.01]),
+        "cup": ([0.0, 0.0], [0.0, 0.0]),
     }
     monkeypatch.setattr(
         stacking_spec,
@@ -63,13 +63,12 @@ def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
         table,
         [0.0, 0.0],
         object_configs={"table": table, "cup": obstacle},
-        ignored_runtime_uids=set(),
     )
 
-    assert anchor == pytest.approx([0.0, 0.15])
+    assert anchor == pytest.approx([0.0, stacking_spec._ANCHOR_OFFSET])
 
 
-def test_stacking_anchor_ignores_all_task_objects(
+def test_stacking_anchor_treats_task_objects_as_obstacles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     table = {"uid": "table"}
@@ -87,17 +86,62 @@ def test_stacking_anchor_ignores_all_task_objects(
     monkeypatch.setattr(
         stacking_spec,
         "_mesh_config_world_xy_bounds",
-        lambda config: ([-1.0, -1.0], [1.0, 1.0]),
+        lambda config: (
+            ([-1.0, -1.0], [1.0, 1.0])
+            if config["uid"] == "table"
+            else ([0.0, 0.0], [0.0, 0.0])
+        ),
     )
 
     anchor = stacking_spec._generated_stacking_anchor_xy(
         table,
         [0.0, 0.0],
         object_configs={"table": table, "cube": task_object},
-        ignored_runtime_uids={"cube"},
     )
 
-    assert anchor == pytest.approx([0.0, 0.0])
+    assert anchor == pytest.approx([stacking_spec._ANCHOR_OFFSET, 0.0])
+
+
+def test_stacking_anchor_uses_bounds_clearance_not_point_occupancy() -> None:
+    distance = stacking_spec._xy_point_to_bounds_distance(
+        [0.0, 0.0],
+        ([0.19, -0.01], [0.21, 0.01]),
+    )
+
+    assert distance == pytest.approx(0.19)
+
+
+def test_stacking_anchor_rejects_all_candidates_without_clearance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    table = {"uid": "table"}
+    obstacle = {"uid": "cube"}
+    monkeypatch.setattr(
+        stacking_spec,
+        "_mesh_config_world_xy_center",
+        lambda config: [0.0, 0.0],
+    )
+    monkeypatch.setattr(
+        stacking_spec,
+        "_mesh_config_world_xy_axes",
+        lambda config: ([1.0, 0.0], [0.0, 1.0]),
+    )
+    monkeypatch.setattr(
+        stacking_spec,
+        "_mesh_config_world_xy_bounds",
+        lambda config: (
+            ([-1.0, -1.0], [1.0, 1.0])
+            if config["uid"] == "table"
+            else ([-0.01, -0.01], [0.01, 0.01])
+        ),
+    )
+
+    with pytest.raises(ValueError, match="obstacle clearance"):
+        stacking_spec._generated_stacking_anchor_xy(
+            table,
+            [0.0, 0.0],
+            object_configs={"table": table, "cube": obstacle},
+        )
 
 
 def test_relative_placements_are_ordered_by_moved_object_dependency() -> None:
@@ -170,6 +214,18 @@ def test_stacking_preserve_uses_direct_place_without_move_held_object() -> None:
         "Place",
         "MoveJoints",
     ]
+
+
+def test_elongated_stacking_object_does_not_request_axis_alignment() -> None:
+    orientation = stacking_spec._stacking_config_orientation(
+        {
+            "uid": "elongated_block",
+            "body_scale": [4.0, 1.0, 1.0],
+        },
+        stack_mode="on_top",
+    )
+
+    assert orientation == ("preserve", "none")
 
 
 def test_pose_sensitive_relative_graph_rotates_at_high_staging() -> None:
