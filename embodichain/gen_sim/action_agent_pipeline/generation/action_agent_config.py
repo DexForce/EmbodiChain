@@ -24,8 +24,11 @@ import math
 import warnings
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_MAX_EPISODES,
+    DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
+    DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,
@@ -191,7 +194,7 @@ def generate_action_agent_config_from_project(
     gym_project: str | Path,
     output_dir: str | Path,
     *,
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
     task_description: str | None = None,
     use_llm_roles: bool = False,
     llm_model: str | None = None,
@@ -213,8 +216,8 @@ def generate_action_agent_config_from_project(
     reuse_target_replacements: bool = True,
     acd_method: str = "vhacd",
     overwrite: bool = False,
-    max_episodes: int = 1,
-    max_episode_steps: int = 1000,
+    max_episodes: int = DEFAULT_MAX_EPISODES,
+    max_episode_steps: int = DEFAULT_MAX_EPISODE_STEPS,
 ) -> GeneratedActionAgentConfigPaths:
     """Generate action-agent configs from an exported gym project.
 

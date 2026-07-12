@@ -20,6 +20,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
 import json
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -66,8 +70,9 @@ _STACKING_KEYWORDS = (
 _SUPPORTED_STACK_MODES = {"on_top", "nested"}
 _SUPPORTED_ORDER_BY = {"explicit", "size"}
 _STACKING_ANCHOR = "table_center"
-_STAGING_Z_DELTA = 0.10
-_STACK_CLEARANCE = 0.02
+_DEFAULTS = generation_defaults_section("stacking")
+_STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
+_STACK_CLEARANCE = float(_DEFAULTS["clearance"])
 
 
 def _is_stacking_task_description(task_description: str) -> bool:

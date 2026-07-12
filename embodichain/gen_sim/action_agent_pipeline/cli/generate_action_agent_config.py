@@ -20,8 +20,11 @@ import argparse
 from pathlib import Path
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_MAX_EPISODES,
+    DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
+    DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
@@ -70,7 +73,7 @@ def cli() -> None:
     parser.add_argument(
         "--task_name",
         type=str,
-        default="UR5BreadBasket",
+        default=DEFAULT_TASK_NAME,
         help="Task name passed to run_agent.",
     )
     parser.add_argument(
@@ -291,13 +294,13 @@ def cli() -> None:
     parser.add_argument(
         "--max_episodes",
         type=int,
-        default=1,
+        default=DEFAULT_MAX_EPISODES,
         help="max_episodes value written to fast_gym_config.json.",
     )
     parser.add_argument(
         "--max_episode_steps",
         type=int,
-        default=1000,
+        default=DEFAULT_MAX_EPISODE_STEPS,
         help="max_episode_steps value written to fast_gym_config.json.",
     )
     args = parser.parse_args()
