@@ -30,12 +30,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ResolvedTargetReplacement,
     _SceneObject,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
-    _GLTF_TO_SIM_FRAME_KEY,
-    _clean_vector3,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
-    MeshFrameNormalizer,
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import _clean_vector3
+from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
+    GlbGeometryNormalizer,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _left_target_text,
@@ -618,7 +615,7 @@ def _relative_dataset_instruction(
 def _make_background_config(
     scene_dir: Path,
     obj: _SceneObject,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
     return {
@@ -639,7 +636,7 @@ def _make_background_config(
 def _make_extra_background_config(
     scene_dir: Path,
     obj: _SceneObject,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     body_scale: Any | None = None,
     runtime_uid: str | None = None,
 ) -> dict[str, Any]:
@@ -669,7 +666,7 @@ def _make_target_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     target_scale: list[float],
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     replacement: _ResolvedTargetReplacement | None = None,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
@@ -690,7 +687,7 @@ def _make_container_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -710,7 +707,7 @@ def _make_container_background_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     config = _make_container_object_config(
         scene_dir,
@@ -728,7 +725,7 @@ def _make_container_rigid_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     config = _make_container_object_config(
         scene_dir,
@@ -748,7 +745,7 @@ def _make_relative_background_object_config(
     *,
     body_scale: Any | None = None,
     max_convex_hull_num: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
         scene_dir,
@@ -766,7 +763,7 @@ def _make_extra_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     runtime_uid: str | None = None,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
@@ -791,7 +788,7 @@ def _make_relative_rigid_object_config(
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     if max_convex_hull_num == _TARGET_MAX_CONVEX_HULL_NUM:
         resolved_max_convex_hull_num = max_convex_hull_num
@@ -819,8 +816,10 @@ def _make_rigid_object_config(
     body_scale: Any,
     max_convex_hull_num: int,
     mesh_fpath: str | Path | None = None,
-    mesh_normalizer: MeshFrameNormalizer | None = None,
+    mesh_normalizer: GlbGeometryNormalizer | None = None,
 ) -> dict[str, Any]:
+    if mesh_normalizer is None:
+        raise ValueError("GLB-only generation requires a GlbGeometryNormalizer.")
     shape = _make_shape_config(
         scene_dir,
         obj.config,
@@ -889,7 +888,7 @@ def _make_shape_config(
     source_config: Mapping[str, Any],
     *,
     mesh_fpath: str | Path | None = None,
-    mesh_normalizer: MeshFrameNormalizer | None = None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     shape = copy.deepcopy(dict(source_config.get("shape", {})))
     if mesh_fpath is not None:
@@ -897,11 +896,7 @@ def _make_shape_config(
         shape["fpath"] = str(mesh_fpath)
     if shape.get("shape_type") == "Mesh" and "fpath" in shape:
         mesh_path = Path(_asset_path_for_config(scene_dir, str(shape["fpath"])))
-        if mesh_normalizer is not None:
-            mesh_path = mesh_normalizer.normalize_path(mesh_path)
-            shape.pop(_GLTF_TO_SIM_FRAME_KEY, None)
-        elif mesh_path.suffix.lower() in {".glb", ".gltf"}:
-            shape[_GLTF_TO_SIM_FRAME_KEY] = True
+        mesh_path = mesh_normalizer.normalize_path(mesh_path)
         shape["fpath"] = mesh_path.as_posix()
     shape.setdefault("compute_uv", False)
     return shape
