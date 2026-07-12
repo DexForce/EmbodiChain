@@ -108,7 +108,7 @@ class MoveHeldObject(AtomicAction):
         arm_dot_angle = torch.acos(
             torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0)
         )
-        rota_axis_angle = (torch.pi - arm_dot_angle) * end_arm_rx
+        rota_axis_angle = (torch.pi - arm_dot_angle).unsqueeze(-1) * end_arm_rx
         rota_offset = axis_angle_to_rotation_matrix(
             rota_axis_angle.reshape(-1, 3)
         ).reshape(*rota_axis_angle.shape[:-1], 3, 3)
@@ -135,12 +135,12 @@ class MoveHeldObject(AtomicAction):
         cross_z = torch.cross(end_arm_rz, down_z, dim=-1)
         dot_z = torch.sum(end_arm_rx * cross_z, dim=-1)
         revert_flag = torch.where(dot_z < 0, -1.0, 1.0)
-        if (angle_diff > 0.5).any():
-            rota_axis_angle = revert_flag * torch.pi * 0.5 * end_arm_rx
+        rotate_mask = angle_diff > 0.5
+        if rotate_mask.any():
+            rota_axis_angle = revert_flag.unsqueeze(-1) * torch.pi * 0.5 * end_arm_rx
             rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
             eef_rotation = torch.bmm(rota_offset, end_arm_xpos[:, :3, :3])
-            move_eef_xpos[:, :3, :3] = eef_rotation
-        print(f"move_eef_xpos: {move_eef_xpos}")
+            move_eef_xpos[rotate_mask, :3, :3] = eef_rotation[rotate_mask]
 
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
