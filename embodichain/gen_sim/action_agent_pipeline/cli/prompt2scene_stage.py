@@ -25,6 +25,11 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_IMAGE_DIR,
     IMAGE_SUFFIXES,
 )
+from embodichain.gen_sim.action_agent_pipeline.utils.prompt2scene_runtime_config import (
+    build_prompt2scene_llm_config,
+    use_prompt2scene_client_config,
+    write_prompt2scene_client_config,
+)
 
 __all__ = ["resolve_prompt2scene_image", "run_prompt2scene_stage"]
 
@@ -36,20 +41,20 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     prompt = _resolve_prompt2scene_prompt(args)
     image_path = resolve_prompt2scene_image(args, use_default=prompt is None)
     gravity_settle_mode = _resolve_gravity_settle_mode(args)
-    load_llm_config, run_prompt2scene, prompt2scene_input_cls = (
-        _load_prompt2scene_components()
-    )
+    run_prompt2scene, prompt2scene_input_cls = _load_prompt2scene_components()
     request = prompt2scene_input_cls.from_cli_args(
         image_path=image_path,
         prompt=prompt,
         output_root=output_root,
         gravity_settle_mode=gravity_settle_mode,
     )
-    llm_cfg = load_llm_config(
+    llm_config_path = (
         Path(args.prompt2scene_llm_config).expanduser()
         if args.prompt2scene_llm_config
         else None
     )
+    llm_cfg = build_prompt2scene_llm_config(llm_config_path)
+    client_config_path = write_prompt2scene_client_config(output_root)
 
     print("Running prompt2scene pipeline:", flush=True)
     if request.image_path is not None:
@@ -59,7 +64,8 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     print(f"  gravity_settle_mode: {request.gravity_settle_mode}", flush=True)
     print(f"  output_root: {request.output_root}", flush=True)
 
-    result = run_prompt2scene(request, llm_cfg=llm_cfg)
+    with use_prompt2scene_client_config(client_config_path):
+        result = run_prompt2scene(request, llm_cfg=llm_cfg)
     gym_config_path = result.gym_config_path
     if gym_config_path is None:
         gym_config_path = request.output_root / "gym_export" / "gym_config.json"
@@ -73,12 +79,11 @@ def run_prompt2scene_stage(args: argparse.Namespace) -> Path:
     return gym_config_path
 
 
-def _load_prompt2scene_components() -> tuple[Any, Any, Any]:
-    from embodichain.gen_sim.prompt2scene.llms import load_llm_config
+def _load_prompt2scene_components() -> tuple[Any, Any]:
     from embodichain.gen_sim.prompt2scene.pipeline.runner import run_prompt2scene
     from embodichain.gen_sim.prompt2scene.workflows.request import Prompt2SceneInput
 
-    return load_llm_config, run_prompt2scene, Prompt2SceneInput
+    return run_prompt2scene, Prompt2SceneInput
 
 
 def resolve_prompt2scene_image(

@@ -190,7 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="prompt2scene_llm_config",
         default=str(DEFAULT_PROMPT2SCENE_LLM_CONFIG),
         help=(
-            "LLM config JSON used by prompt2scene. Defaults to "
+            "Prompt2Scene LLM defaults JSON. Credentials are loaded from the "
+            "shared action-pipeline environment configuration. Defaults to "
             f"{DEFAULT_PROMPT2SCENE_LLM_CONFIG.as_posix()}."
         ),
     )

@@ -28,6 +28,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates
     make_dual_ur_dh_pgi_robot_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _DUAL_FRANKA_TABLETOP_CLEARANCE,
     _DUAL_UR5_ARM_COMPONENT_Z,
     _DUAL_UR5_LEGACY_INIT_Z,
     _DUAL_UR5_TABLETOP_CLEARANCE,
@@ -201,6 +202,7 @@ def _dual_franka_profile() -> RobotProfile:
                 robot_init_z=robot_init_z,
             )
         ),
+        tabletop_clearance=_DUAL_FRANKA_TABLETOP_CLEARANCE,
         agent_arm_slots={
             "left": {
                 "arm": "right_arm",

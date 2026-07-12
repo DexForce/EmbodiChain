@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import ast
+from contextlib import nullcontext
 import importlib.util
 import json
 import os
@@ -96,6 +97,13 @@ def test_run_agent_reset_randomization_configures_parallel_envs() -> None:
         "anchor_uid": "table",
         "height_delta_range": [[-0.05], [0.05]],
     }
+
+
+def test_run_agent_parser_rejects_robot_profile_override() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.run_agent import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--robot-profile", "franka"])
 
 
 def test_generate_config_cli_auto_applies_prompt2scene_alignment(
@@ -442,6 +450,7 @@ def test_run_agent_command_passes_headless(monkeypatch, tmp_path) -> None:
     assert return_code == 0
     assert "--headless" in captured["command"]
     assert "--regenerate" in captured["command"]
+    assert "--robot-profile" not in captured["command"]
     assert captured["kwargs"]["check"] is False
 
 
@@ -841,10 +850,6 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     gym_config = output_root / "gym_export/gym_config.json"
     captured = {}
 
-    def fake_load_llm_config(path):
-        captured["llm_config_path"] = path
-        return "llm-cfg"
-
     def fake_run_prompt2scene(request, *, llm_cfg):
         captured["request"] = request
         captured["llm_cfg"] = llm_cfg
@@ -865,7 +870,22 @@ def test_prompt2scene_stage_returns_exported_gym_config(monkeypatch, tmp_path) -
     monkeypatch.setattr(
         prompt2scene_stage,
         "_load_prompt2scene_components",
-        lambda: (fake_load_llm_config, fake_run_prompt2scene, FakePrompt2SceneInput),
+        lambda: (fake_run_prompt2scene, FakePrompt2SceneInput),
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "build_prompt2scene_llm_config",
+        lambda path: captured.update(llm_config_path=path) or "llm-cfg",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "write_prompt2scene_client_config",
+        lambda _: tmp_path / "prompt2scene_client_config.json",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "use_prompt2scene_client_config",
+        lambda _: nullcontext(),
     )
 
     result = prompt2scene_stage.run_prompt2scene_stage(
@@ -901,10 +921,6 @@ def test_prompt2scene_stage_edit_only_does_not_use_default_image(
     gym_config.write_text("{}", encoding="utf-8")
     captured = {}
 
-    def fake_load_llm_config(path):
-        captured["llm_config_path"] = path
-        return "llm-cfg"
-
     def fake_run_prompt2scene(request, *, llm_cfg):
         captured["request"] = request
         captured["llm_cfg"] = llm_cfg
@@ -923,7 +939,22 @@ def test_prompt2scene_stage_edit_only_does_not_use_default_image(
     monkeypatch.setattr(
         prompt2scene_stage,
         "_load_prompt2scene_components",
-        lambda: (fake_load_llm_config, fake_run_prompt2scene, FakePrompt2SceneInput),
+        lambda: (fake_run_prompt2scene, FakePrompt2SceneInput),
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "build_prompt2scene_llm_config",
+        lambda path: captured.update(llm_config_path=path) or "llm-cfg",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "write_prompt2scene_client_config",
+        lambda _: tmp_path / "prompt2scene_client_config.json",
+    )
+    monkeypatch.setattr(
+        prompt2scene_stage,
+        "use_prompt2scene_client_config",
+        lambda _: nullcontext(),
     )
 
     result = prompt2scene_stage.run_prompt2scene_stage(
@@ -1357,6 +1388,7 @@ def test_pipeline_runner_forwards_headless_to_run_agent(monkeypatch, tmp_path) -
     assert result == 0
     assert captured["headless"] is True
     assert captured["task_name"] == "Demo111"
+    assert "robot_profile" not in captured
 
 
 def test_batch_new_pipeline_command_uses_pipeline_scale_defaults(
