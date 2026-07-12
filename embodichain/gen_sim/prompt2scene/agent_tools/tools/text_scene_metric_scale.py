@@ -34,7 +34,7 @@ __all__ = ["build_metric_scale_inputs", "estimate_text_scene_metric_scale"]
 
 DEFAULT_TEXT_METRIC_SCALE_FALLBACK_FACTOR = 0.10
 MIN_TEXT_METRIC_SCALE_FACTOR = 0.02
-MAX_TEXT_METRIC_SCALE_FACTOR = 0.50
+MAX_TEXT_METRIC_SCALE_FACTOR = 0.30
 
 
 def estimate_text_scene_metric_scale(
