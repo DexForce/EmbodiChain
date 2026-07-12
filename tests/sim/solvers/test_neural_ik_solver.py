@@ -15,28 +15,16 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-import math
-import os
-
 import numpy as np
 import pytest
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain.lab.sim.solvers import NeuralIKSolverCfg
 from embodichain.lab.sim.solvers.neural_ik_solver import _build_mlp
 from embodichain.utils.utility import reset_all_seeds
-
-_c = math.cos(-math.pi / 4)
-_s = math.sin(-math.pi / 4)
-TCP = [
-    [_c, -_s, 0.0, 0.0],
-    [_s, _c, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.1034],
-    [0.0, 0.0, 0.0, 1.0],
-]
 
 NUM_ARM_JOINTS = 7
 OBS_DIM = 2 * NUM_ARM_JOINTS + 14  # 28
@@ -67,27 +55,35 @@ class TestNeuralIKSolver:
         config = SimulationManagerCfg(headless=True, sim_device="cpu")
         self.sim = SimulationManager(config)
 
-        urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
-        assert os.path.isfile(urdf)
+        cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
+        cfg.solver_cfg["arm"] = NeuralIKSolverCfg(
+            end_link_name="fr3_hand_tcp",
+            root_link_name="base",
+            tcp=[
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            checkpoint_path=checkpoint_path,
+            num_arm_joints=NUM_ARM_JOINTS,
+            max_steps=30,
+            action_scale=0.2,
+            hidden_dims=HIDDEN_DIMS,
+            pos_eps=0.1,
+            rot_eps=0.5,
+        )
 
         cfg_dict = {
             "fpath": urdf,
             "control_parts": {
-                "main_arm": [
-                    "Joint1",
-                    "Joint2",
-                    "Joint3",
-                    "Joint4",
-                    "Joint5",
-                    "Joint6",
-                    "Joint7",
-                ],
+                "main_arm": [f"fr3_joint{index}" for index in range(1, 8)],
             },
             "solver_cfg": {
                 "main_arm": {
                     "class_type": "NeuralIKSolver",
-                    "end_link_name": "ee_link",
-                    "root_link_name": "base_link",
+                    "end_link_name": "fr3_hand_tcp",
+                    "root_link_name": "base",
                     "tcp": TCP,
                     "checkpoint_path": checkpoint_path,
                     "num_arm_joints": NUM_ARM_JOINTS,
@@ -100,16 +96,19 @@ class TestNeuralIKSolver:
             },
         }
 
-        self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
         self.sim.update(step=100)
 
     def teardown_method(self):
         if self.sim is not None:
             self.sim.destroy()
+            SimulationManager.flush_cleanup_queue()
+        self.sim = None
+        self.robot = None
 
     def _make_solver_input(self):
         """Create a standard qpos and its FK target for solver tests."""
-        arm_name = "main_arm"
+        arm_name = "arm"
         qpos = torch.tensor(
             [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
             dtype=torch.float32,
@@ -123,7 +122,7 @@ class TestNeuralIKSolver:
         """Verify compute_ik returns correct shapes and types."""
         reset_all_seeds(0)
         self._setup(tmp_path)
-        arm_name = "main_arm"
+        arm_name = "arm"
 
         qpos = torch.tensor(
             [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
