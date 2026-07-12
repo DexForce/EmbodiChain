@@ -77,15 +77,15 @@ physics:
     max_convex_hull_num: 1
   rigid_object:
     mass: 0.01
-    contact_offset: 0.003
-    rest_offset: 0.001
+    contact_offset: 0.00
+    rest_offset: 0.00
     restitution: 0.01
     max_depenetration_velocity: 10.0
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
-    target: 16
-    container: 8
+    target: 32
+    container: 32
     extra_rigid: 1
 
 grasp:
