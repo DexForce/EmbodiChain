@@ -89,6 +89,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec impor
     _arrangement_arm_side_for_motion,
     _arrangement_direction_cost,
     _arrangement_line_slot_positions,
+    _arrangement_transport_height,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _is_stacking_task_description,
@@ -3195,6 +3196,11 @@ def test_arrangement_arm_assignment_uses_pickup_side_outside_center() -> None:
     assert _arrangement_arm_side_for_motion([0.0, 0.01, 0.5], [0.0, 0.20]) == "left"
 
 
+def test_arrangement_transport_height_respects_both_clearances() -> None:
+    assert _arrangement_transport_height(initial_z=0.50, release_z=0.55) == 0.80
+    assert _arrangement_transport_height(initial_z=0.30, release_z=0.60) == 0.75
+
+
 def test_arrangement_line_slot_positions_support_world_x() -> None:
     slots = _arrangement_line_slot_positions(
         anchor_xy=[0.10, -0.20],
@@ -3338,11 +3344,17 @@ def test_arrangement_keeps_axis_alignment_for_elongated_objects(
         "axis_align",
         "axis_align",
     ]
-    assert [step.orientation_axis for step in spec.steps] == ["x", "x"]
-    assert all(
-        step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
-        for step in spec.steps
-    )
+    assert [step.orientation_axis for step in spec.steps] == ["y", "y"]
+    for step in spec.steps:
+        initial_z = next(
+            obj.config["init_pos"][2]
+            for obj in rigid_objects
+            if obj.source_uid == step.source_uid
+        )
+        assert step.high_position[2] == pytest.approx(
+            max(initial_z + 0.30, step.release_position[2] + 0.15),
+            abs=1e-6,
+        )
 
 
 def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
@@ -3369,21 +3381,29 @@ def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
 
     assert spec.line_origin_xy == pytest.approx([0.0, 0.0])
     assert [step.orientation_goal for step in spec.steps] == [
-        "preserve",
-        "preserve",
-        "preserve",
-        "preserve",
+        "axis_align",
+        "axis_align",
+        "axis_align",
+        "axis_align",
     ]
     assert [step.orientation_axis for step in spec.steps] == [
-        "none",
-        "none",
-        "none",
-        "none",
+        "y",
+        "y",
+        "y",
+        "y",
     ]
     assert len({round(step.target_xy[0], 6) for step in spec.steps}) == 1
     assert spec.steps[0].target_xy[0] == pytest.approx(0.0)
     for step in spec.steps:
-        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.10)
+        initial_z = next(
+            obj.config["init_pos"][2]
+            for obj in rigid_objects
+            if obj.source_uid == step.source_uid
+        )
+        assert step.high_position[2] == pytest.approx(
+            max(initial_z + 0.30, step.release_position[2] + 0.15),
+            abs=1e-6,
+        )
 
 
 def test_arrangement_static_unmoved_object_blocks_line_layout(

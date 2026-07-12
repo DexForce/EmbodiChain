@@ -54,6 +54,8 @@ arrangement:
   row_search_radius: 0.25
   movable_initial_overlap_score_weight: 0.01
   center_safe_half_width: 0.08
+  transport_clearance: 0.05
+  pickup_min_lift_height: 0.30
 
 stacking:
   staging_z_delta: 0.10

@@ -82,8 +82,6 @@ _ARRANGEMENT_KEYWORDS = (
 )
 _DEFAULTS = generation_defaults_section("arrangement")
 _DEFAULT_RELEASE_Z = float(_DEFAULTS["release_z"])
-_DEFAULT_STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
-_POSE_SENSITIVE_STAGING_Z_DELTA = float(_DEFAULTS["pose_sensitive_staging_z_delta"])
 _SLOT_MARGIN = float(_DEFAULTS["slot_margin"])
 _MIN_SLOT_SPACING = float(_DEFAULTS["min_slot_spacing"])
 _LAYOUT_CLEARANCE = float(_DEFAULTS["layout_clearance"])
@@ -93,6 +91,8 @@ _MOVABLE_INITIAL_OVERLAP_SCORE_WEIGHT = float(
     _DEFAULTS["movable_initial_overlap_score_weight"]
 )
 _CENTER_SAFE_HALF_WIDTH = float(_DEFAULTS["center_safe_half_width"])
+_TRANSPORT_CLEARANCE = float(_DEFAULTS["transport_clearance"])
+_PICKUP_MIN_LIFT_HEIGHT = float(_DEFAULTS["pickup_min_lift_height"])
 _SUPPORTED_ORDER_BY = {"size", "color", "explicit"}
 _SUPPORTED_ORDER_DIRECTIONS = {"ascending", "descending", "given"}
 _SUPPORTED_AXES = {"table_long_axis", "world_x", "world_y"}
@@ -369,11 +369,11 @@ def _apply_arrangement_task_response(
             orientation_axis=orientation_axis,
             scene_dir=scene_dir,
         )
+        init_position = _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))
         high_position = list(release_position)
-        high_position[2] = round(
-            high_position[2]
-            + _arrangement_staging_z_delta_for_goal(step_orientation_goal),
-            6,
+        high_position[2] = _arrangement_transport_height(
+            initial_z=init_position[2],
+            release_z=release_position[2],
         )
         steps.append(
             _ArrangementLineStepSpec(
@@ -381,7 +381,7 @@ def _apply_arrangement_task_response(
                 runtime_uid=runtime_uids[source_uid],
                 slot_index=slot_index,
                 active_side=_arrangement_arm_side_for_motion(
-                    _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
+                    init_position,
                     target_xy,
                 ),
                 target_xy=[
@@ -809,18 +809,18 @@ def _with_arrangement_generated_pose_targets(
             config,
             orientation_axis=orientation_axis,
         )
+        init_position = _clean_vector3(config.get("init_pos", [0.0, 0.0, 0.0]))
         high_position = list(release_position)
-        high_position[2] = round(
-            high_position[2]
-            + _arrangement_staging_z_delta_for_goal(step_orientation_goal),
-            6,
+        high_position[2] = _arrangement_transport_height(
+            initial_z=init_position[2],
+            release_z=release_position[2],
         )
         steps.append(
             replace(
                 step,
                 slot_index=slot_index_by_xy[tuple(target_xy)],
                 active_side=_arrangement_arm_side_for_motion(
-                    _clean_vector3(config.get("init_pos", [0.0, 0.0, 0.0])),
+                    init_position,
                     target_xy,
                 ),
                 target_xy=[
@@ -872,10 +872,9 @@ def _with_arrangement_generated_z_targets_fallback(
             round(float(init_z) + _DEFAULT_RELEASE_Z, 6),
         ]
         high_position = list(release_position)
-        high_position[2] = round(
-            high_position[2]
-            + _arrangement_staging_z_delta_for_goal(step.orientation_goal),
-            6,
+        high_position[2] = _arrangement_transport_height(
+            initial_z=init_z,
+            release_z=release_position[2],
         )
         steps.append(
             replace(
@@ -948,10 +947,14 @@ def _generated_release_z(
     return _DEFAULT_RELEASE_Z
 
 
-def _arrangement_staging_z_delta_for_goal(orientation_goal: str) -> float:
-    if orientation_goal != "preserve":
-        return _POSE_SENSITIVE_STAGING_Z_DELTA
-    return _DEFAULT_STAGING_Z_DELTA
+def _arrangement_transport_height(*, initial_z: float, release_z: float) -> float:
+    return round(
+        max(
+            float(initial_z) + _PICKUP_MIN_LIFT_HEIGHT,
+            float(release_z) + _TRANSPORT_CLEARANCE,
+        ),
+        6,
+    )
 
 
 def _arrangement_arm_side_for_motion(
