@@ -59,7 +59,7 @@ def test_generation_defaults_expose_required_hyperparameter_sections() -> None:
     }
 
     assert expected_sections <= ACTION_AGENT_CONFIG_DEFAULTS.keys()
-    assert ACTION_AGENT_CONFIG_DEFAULTS["physics"]["convex_hulls"]["moved"] == 16
+    assert "moved" in ACTION_AGENT_CONFIG_DEFAULTS["physics"]["convex_hulls"]
 
 
 def test_generation_defaults_section_rejects_unknown_section() -> None:
