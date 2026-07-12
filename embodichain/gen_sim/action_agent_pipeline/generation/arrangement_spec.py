@@ -853,8 +853,9 @@ def _with_arrangement_generated_pose_targets(
     )
     if planned is None:
         raise ValueError(
-            "Unable to generate an arrangement execution order without cyclic "
-            "initial slot occupancy."
+            "Unable to generate a feasible arrangement: every candidate either "
+            "assigns an object's pickup arm to a forbidden outer slot or creates "
+            "cyclic initial slot occupancy."
         )
     spatial_direction, planned_steps = planned
 
@@ -1031,18 +1032,60 @@ def _arrangement_motion_metadata(
 ) -> tuple[str, bool, float]:
     init_y = float(init_position[1])
     target_y = float(target_xy[1])
-    init_side = (
-        0 if abs(init_y) <= _CENTER_SAFE_HALF_WIDTH else (1 if init_y > 0 else -1)
-    )
-    target_side = (
-        0 if abs(target_y) <= _CENTER_SAFE_HALF_WIDTH else (1 if target_y > 0 else -1)
-    )
+    init_side = 0 if init_y == 0.0 else (1 if init_y > 0 else -1)
+    target_side = 0 if target_y == 0.0 else (1 if target_y > 0 else -1)
     cross_side = init_side != 0 and target_side != 0 and init_side != target_side
     return (
         _arrangement_arm_side_for_motion(init_position, target_xy),
         cross_side,
         abs(init_y - target_y),
     )
+
+
+def _arrangement_slot_allowed_sides(slot_index: int, slot_count: int) -> frozenset[str]:
+    """Return semantic arms allowed to place into a world-y ordered slot."""
+    if slot_count < 1:
+        raise ValueError("Arrangement requires at least one slot.")
+    if not 0 <= slot_index < slot_count:
+        raise ValueError(
+            f"Arrangement slot index {slot_index} is outside [0, {slot_count})."
+        )
+
+    center = slot_count // 2
+    if slot_count % 2 == 0:
+        shared_start, shared_end = center - 1, center
+    else:
+        shared_start, shared_end = max(0, center - 1), min(slot_count - 1, center + 1)
+    if shared_start <= slot_index <= shared_end:
+        return frozenset({"left", "right"})
+    if slot_index < shared_start:
+        return frozenset({"right"})
+    return frozenset({"left"})
+
+
+def _arrangement_assignment_side(
+    init_position: Sequence[float],
+    target_xy: Sequence[float],
+    *,
+    slot_index: int,
+    slot_count: int,
+) -> str | None:
+    """Choose a pickup arm only when it is permitted for the target slot."""
+    init_y = float(init_position[1])
+    pickup_sides = (
+        frozenset({"left", "right"})
+        if init_y == 0.0
+        else frozenset({"left" if init_y > 0.0 else "right"})
+    )
+    compatible_sides = pickup_sides & _arrangement_slot_allowed_sides(
+        slot_index, slot_count
+    )
+    if not compatible_sides:
+        return None
+    preferred_side = _arm_side_for_position([0.0, float(target_xy[1]), 0.0])
+    if preferred_side in compatible_sides:
+        return preferred_side
+    return min(compatible_sides)
 
 
 def _arrangement_plan_execution(
@@ -1073,29 +1116,41 @@ def _arrangement_plan_execution(
     best = None
     for grouped_order in product(*group_orders):
         semantic_steps = [step for group in grouped_order for step in group]
-        for spatial_direction, candidate_slots in (
-            ("right_to_left", slots),
-            ("left_to_right", list(reversed(slots))),
+        for spatial_direction, candidate_slots, physical_slot_indices in (
+            ("right_to_left", slots, range(len(slots))),
+            ("left_to_right", list(reversed(slots)), reversed(range(len(slots)))),
         ):
             assigned_steps = []
-            for slot_index, (step, target_xy) in enumerate(
-                zip(semantic_steps, candidate_slots)
+            assignment_is_valid = True
+            for step, target_xy, physical_slot_index in zip(
+                semantic_steps, candidate_slots, physical_slot_indices
             ):
                 init_position = _clean_vector3(
                     rigid_configs[step.runtime_uid].get("init_pos", [0.0, 0.0, 0.0])
                 )
-                active_side, cross_side, _ = _arrangement_motion_metadata(
+                active_side = _arrangement_assignment_side(
+                    init_position,
+                    target_xy,
+                    slot_index=physical_slot_index,
+                    slot_count=len(slots),
+                )
+                if active_side is None:
+                    assignment_is_valid = False
+                    break
+                _, cross_side, _ = _arrangement_motion_metadata(
                     init_position, target_xy
                 )
                 assigned_steps.append(
                     replace(
                         step,
-                        slot_index=slot_index,
+                        slot_index=physical_slot_index,
                         active_side=active_side,
                         target_xy=[float(target_xy[0]), float(target_xy[1])],
                         cross_side=cross_side,
                     )
                 )
+            if not assignment_is_valid:
+                continue
             scheduled = _arrangement_initial_occupancy_schedule(
                 assigned_steps,
                 rigid_configs=rigid_configs,
@@ -1112,10 +1167,11 @@ def _arrangement_plan_execution(
             )
             cost = (
                 direction_cost[0],
-                conflict_count,
                 direction_cost[1],
-                0 if spatial_direction == "left_to_right" else 1,
                 direction_cost[2],
+                conflict_count,
+                0 if spatial_direction == "left_to_right" else 1,
+                direction_cost[3],
             )
             finalized_steps = [
                 replace(
@@ -1208,29 +1264,28 @@ def _arrangement_direction_cost(
     slots: Sequence[Sequence[float]],
     *,
     rigid_configs: Mapping[str, Mapping[str, Any]],
-) -> tuple[int, float, tuple[str, ...]]:
-    cross_side_count = 0
+) -> tuple[float, float, int, tuple[str, ...]]:
+    max_y_distance = 0.0
     total_y_distance = 0.0
+    reverse_shared_use_count = 0
+    slot_count = len(slots)
     for step, slot in zip(steps, slots):
         init_position = _clean_vector3(
             rigid_configs[step.runtime_uid].get("init_pos", [0.0, 0.0, 0.0])
         )
         init_y = float(init_position[1])
         target_y = float(slot[1])
-        init_side = (
-            0 if abs(init_y) <= _CENTER_SAFE_HALF_WIDTH else (1 if init_y > 0 else -1)
-        )
-        target_side = (
-            0
-            if abs(target_y) <= _CENTER_SAFE_HALF_WIDTH
-            else (1 if target_y > 0 else -1)
-        )
-        if init_side != 0 and target_side != 0 and init_side != target_side:
-            cross_side_count += 1
-        total_y_distance += abs(init_y - target_y)
+        distance = abs(init_y - target_y)
+        max_y_distance = max(max_y_distance, distance)
+        total_y_distance += distance
+        allowed_sides = _arrangement_slot_allowed_sides(step.slot_index, slot_count)
+        target_preferred_side = _arm_side_for_position([0.0, target_y, 0.0])
+        if len(allowed_sides) > 1 and step.active_side != target_preferred_side:
+            reverse_shared_use_count += 1
     return (
-        cross_side_count,
+        round(max_y_distance, 9),
         round(total_y_distance, 9),
+        reverse_shared_use_count,
         tuple(step.runtime_uid for step in steps),
     )
 

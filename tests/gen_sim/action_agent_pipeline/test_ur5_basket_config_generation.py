@@ -94,6 +94,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec impor
     _arrangement_initial_occupancy_schedule,
     _arrangement_line_slot_positions,
     _arrangement_plan_execution,
+    _arrangement_slot_allowed_sides,
     _arrangement_transport_height,
     _ArrangementFootprint,
     _validated_arrangement_order,
@@ -3198,6 +3199,32 @@ def test_arrangement_direction_prefers_fewer_cross_side_moves() -> None:
     assert natural < crossed
 
 
+@pytest.mark.parametrize(
+    ("slot_count", "expected"),
+    [
+        (4, [("right",), ("left", "right"), ("left", "right"), ("left",)]),
+        (
+            5,
+            [
+                ("right",),
+                ("left", "right"),
+                ("left", "right"),
+                ("left", "right"),
+                ("left",),
+            ],
+        ),
+    ],
+)
+def test_arrangement_slot_permissions_follow_world_y_order(
+    slot_count: int,
+    expected: list[tuple[str, ...]],
+) -> None:
+    assert [
+        tuple(sorted(_arrangement_slot_allowed_sides(index, slot_count)))
+        for index in range(slot_count)
+    ] == expected
+
+
 def test_arrangement_arm_assignment_uses_pickup_side_outside_center() -> None:
     assert _arrangement_arm_side_for_motion([0.0, 0.20, 0.5], [0.0, -0.20]) == "left"
     assert _arrangement_arm_side_for_motion([0.0, -0.20, 0.5], [0.0, 0.20]) == "right"
@@ -3405,6 +3432,72 @@ def test_arrangement_plan_matches_same_category_instances_to_their_side(
         "bottle_right": -0.2,
         "bottle_left": 0.2,
     }
+
+
+def test_arrangement_plan_rejects_opposite_arm_for_outer_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    steps = (
+        _arrangement_test_step("left_a", category="a"),
+        _arrangement_test_step("left_b", category="b"),
+        _arrangement_test_step("right_b", category="b"),
+        _arrangement_test_step("right_a", category="a"),
+    )
+    spec = _ArrangementLineSpec(
+        table_source_uid="table",
+        task_description="arrange",
+        task_prompt_summary="arrange",
+        basic_background_notes="",
+        order_by="explicit",
+        order_direction="given",
+        axis="world_y",
+        anchor="table_center",
+        steps=steps,
+        line_origin_xy=[0.0, 0.0],
+        spacing=0.2,
+        layout_clearance=0.0,
+        category_order=("a", "b"),
+    )
+    rigid_configs = {
+        "left_a": {"init_pos": [0.2, 0.4, 0.5]},
+        "left_b": {"init_pos": [0.2, 0.2, 0.5]},
+        "right_b": {"init_pos": [0.2, -0.2, 0.5]},
+        "right_a": {"init_pos": [0.2, -0.4, 0.5]},
+    }
+    objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid=uid,
+            source_role="rigid_object",
+            config=config,
+        )
+        for uid, config in rigid_configs.items()
+    ]
+    monkeypatch.setattr(
+        arrangement_spec_generation,
+        "_arrangement_object_footprint",
+        lambda obj, scene_dir: _ArrangementFootprint(
+            xy_bounds=(
+                [0.18, rigid_configs[obj.source_uid]["init_pos"][1] - 0.01],
+                [0.22, rigid_configs[obj.source_uid]["init_pos"][1] + 0.01],
+            ),
+            half_extent=0.01,
+        ),
+    )
+
+    result = _arrangement_plan_execution(
+        spec,
+        [[0.0, -0.3], [0.0, -0.1], [0.0, 0.1], [0.0, 0.3]],
+        generated_objects=objects,
+        rigid_configs=rigid_configs,
+    )
+
+    assert result is not None
+    _, execution_steps = result
+    by_slot = {step.slot_index: step for step in execution_steps}
+    assert by_slot[0].active_side == "right"
+    assert by_slot[0].target_xy[1] == -0.3
+    assert by_slot[3].active_side == "left"
+    assert by_slot[3].target_xy[1] == 0.3
 
 
 def test_arrangement_success_uses_semantic_slots_not_execution_order() -> None:

@@ -55,7 +55,7 @@ arrangement:
   movable_initial_overlap_score_weight: 0.01
   center_safe_half_width: 0.08
   transport_clearance: 0.1
-  pickup_min_lift_height: 0.2
+  pickup_min_lift_height: 0.225
 
 stacking:
   staging_z_delta: 0.10
@@ -66,7 +66,7 @@ action:
   basket_right_release_offset_y: -0.04
   pickup_lift_height: 0.30
   runtime_default_pickup_lift_height: 0.16
-  place_lift_height: 0.20
+  place_lift_height: 0.15
   direct_place_cartesian_waypoint_count: 4
   release_only_place_sample_interval: 10
   empty_hand_retreat_sample_interval: 30

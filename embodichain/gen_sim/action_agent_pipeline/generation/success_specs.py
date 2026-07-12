@@ -198,11 +198,7 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
                 "type": "objects_ordered",
                 "objects": ordered_objects,
                 "axis": arrangement_axis,
-                "direction": (
-                    "descending"
-                    if spec.spatial_direction == "left_to_right"
-                    else "ascending"
-                ),
+                "direction": "ascending",
                 "tolerance": xy_tolerance,
             },
         ]
