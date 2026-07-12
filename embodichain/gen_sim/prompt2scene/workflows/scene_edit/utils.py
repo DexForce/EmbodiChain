@@ -1762,9 +1762,9 @@ def _offset_center_by_relation(
     elif relation == "right_of":
         offset[0] = gap_x
     elif relation == "front_of":
-        offset[1] = -gap_y
-    elif relation in {"back_of", "behind"}:
         offset[1] = gap_y
+    elif relation in {"back_of", "behind"}:
+        offset[1] = -gap_y
     else:
         offset = np.asarray([gap_x, 0.0], dtype=np.float64)
     return reference_center + offset

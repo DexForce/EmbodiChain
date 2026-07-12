@@ -142,17 +142,17 @@ def _region_box(region: str, W: float, H: float):
     elif region == "right_area":
         return [W * 0.66, W, 0.0, H]
     elif region == "front_area":
-        return [0.0, W, 0.0, H * 0.5]
-    elif region == "back_area":
         return [0.0, W, H * 0.5, H]
+    elif region == "back_area":
+        return [0.0, W, 0.0, H * 0.5]
     elif region == "front_left_area":
-        return [0.0, W * 0.33, 0.0, H * 0.5]
-    elif region == "front_right_area":
-        return [W * 0.66, W, 0.0, H * 0.5]
-    elif region == "back_left_area":
         return [0.0, W * 0.33, H * 0.5, H]
-    elif region == "back_right_area":
+    elif region == "front_right_area":
         return [W * 0.66, W, H * 0.5, H]
+    elif region == "back_left_area":
+        return [0.0, W * 0.33, 0.0, H * 0.5]
+    elif region == "back_right_area":
+        return [W * 0.66, W, 0.0, H * 0.5]
     return None
 
 
@@ -164,17 +164,17 @@ def _region_seed(region: str, W: float, H: float) -> Tuple[float, float]:
     elif region == "right_area":
         return (W * 0.85, H * 0.5)
     elif region == "front_area":
-        return (W * 0.5, H * 0.2)
-    elif region == "back_area":
         return (W * 0.5, H * 0.8)
+    elif region == "back_area":
+        return (W * 0.5, H * 0.2)
     elif region == "front_left_area":
-        return (W * 0.15, H * 0.2)
-    elif region == "front_right_area":
-        return (W * 0.85, H * 0.2)
-    elif region == "back_left_area":
         return (W * 0.15, H * 0.8)
-    elif region == "back_right_area":
+    elif region == "front_right_area":
         return (W * 0.85, H * 0.8)
+    elif region == "back_left_area":
+        return (W * 0.15, H * 0.2)
+    elif region == "back_right_area":
+        return (W * 0.85, H * 0.2)
     return (W * 0.5, H * 0.5)
 
 
@@ -571,9 +571,9 @@ def _relation_direction_vector(relation_name: str) -> Optional[np.ndarray]:
     if relation_name == "right_of":
         return np.array([1.0, 0.0], dtype=float)
     if relation_name == "front_of":
-        return np.array([0.0, -1.0], dtype=float)
-    if relation_name in {"back_of", "behind"}:
         return np.array([0.0, 1.0], dtype=float)
+    if relation_name in {"back_of", "behind"}:
+        return np.array([0.0, -1.0], dtype=float)
     return None
 
 
@@ -1321,9 +1321,9 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
                 elif rel_type == "right_of":
                     add_ub({2 * src_i: -1.0}, -(px + clearance))
                 elif rel_type == "front_of":
-                    add_ub({2 * src_i + 1: 1.0}, py - clearance)
-                elif rel_type == "back_of":
                     add_ub({2 * src_i + 1: -1.0}, -(py + clearance))
+                elif rel_type == "back_of":
+                    add_ub({2 * src_i + 1: 1.0}, py - clearance)
                 relation_terms.append(
                     {
                         "source": src_id,
@@ -1351,10 +1351,10 @@ def run_node_3_5(state: Tempo_SceneState, ec_root: str | Path) -> Tempo_SceneSta
                 add_ub({2 * tgt_j: 1.0, 2 * src_i: -1.0}, -gap)
             elif rel_type == "front_of":
                 gap = float(src_half[1] + tgt_half[1] + clearance)
-                add_ub({2 * src_i + 1: 1.0, 2 * tgt_j + 1: -1.0}, -gap)
+                add_ub({2 * tgt_j + 1: 1.0, 2 * src_i + 1: -1.0}, -gap)
             elif rel_type == "back_of":
                 gap = float(src_half[1] + tgt_half[1] + clearance)
-                add_ub({2 * tgt_j + 1: 1.0, 2 * src_i + 1: -1.0}, -gap)
+                add_ub({2 * src_i + 1: 1.0, 2 * tgt_j + 1: -1.0}, -gap)
             else:
                 gap = clearance
             relation_terms.append(

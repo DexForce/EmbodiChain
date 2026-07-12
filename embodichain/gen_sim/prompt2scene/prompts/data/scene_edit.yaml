@@ -12,8 +12,8 @@ intent_system: |
   - Existing object ids may have any prefix. Do not decide whether an object already exists from its id prefix; use only the provided Existing scene objects list.
   - New generated object temp_id values must use the same asset id style as interact objects: interact_<canonical_snake_case_name>_<index>. Do not use a new_ prefix.
   - center_xy uses tabletop XY coordinates in meters.
-  - left means smaller X. right means larger X. front means smaller Y. back means larger Y.
-  - When the user uses positional qualifiers among objects of the same semantic type, even if their names differ, resolve them using center_xy: leftmost/smaller-left = smallest X, rightmost = largest X, frontmost = smallest Y, backmost = largest Y.
+  - left means smaller X. right means larger X. front means larger Y. back means smaller Y.
+  - When the user uses positional qualifiers among objects of the same semantic type, even if their names differ, resolve them using center_xy: leftmost/smaller-left = smallest X, rightmost = largest X, frontmost = largest Y, backmost = smallest Y.
   - When the user says "left side of object A", the new or moved object should be left_of object A. "right side" means right_of, "front side" means front_of, and "back side" means back_of.
   - If two or more candidate objects remain ambiguous after using name, description, and center_xy, put the ambiguity in unresolved instead of guessing.
   - deleted_object_ids may contain only ids from the existing scene objects.

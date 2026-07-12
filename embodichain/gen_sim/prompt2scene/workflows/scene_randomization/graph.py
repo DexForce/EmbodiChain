@@ -53,8 +53,8 @@ if TYPE_CHECKING:
 _DIRECTION_VECTORS: dict[str, np.ndarray] = {
     "left": np.array([-1.0, 0.0], dtype=np.float64),
     "right": np.array([1.0, 0.0], dtype=np.float64),
-    "front": np.array([0.0, -1.0], dtype=np.float64),
-    "back": np.array([0.0, 1.0], dtype=np.float64),
+    "front": np.array([0.0, 1.0], dtype=np.float64),
+    "back": np.array([0.0, -1.0], dtype=np.float64),
 }
 
 
