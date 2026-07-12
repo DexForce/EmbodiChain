@@ -42,14 +42,17 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates
     make_light_config,
     make_sensor_config,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
-    MESH_FRAME_NORMALIZATION_POLICY_VERSION,
-    MeshFrameNormalizer,
+from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
+    GLB_GEOMETRY_BAKE_POLICY_VERSION,
+    GLB_GEOMETRY_NORMALIZATION_POLICY_VERSION,
+    GlbGeometryNormalizer,
+    bake_body_scale_into_glbs,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking import (
-    BODY_SCALE_BAKE_POLICY_VERSION,
-    bake_body_scale_into_meshes,
-)
+
+MESH_FRAME_NORMALIZATION_POLICY_VERSION = GLB_GEOMETRY_NORMALIZATION_POLICY_VERSION
+MeshFrameNormalizer = GlbGeometryNormalizer
+BODY_SCALE_BAKE_POLICY_VERSION = GLB_GEOMETRY_BAKE_POLICY_VERSION
+bake_body_scale_into_meshes = bake_body_scale_into_glbs
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_observations_config,
     _record_camera_event_configs,
@@ -611,7 +614,7 @@ def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
         )
 
 
-def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
+def test_glb_geometry_normalizer_bakes_glb_scene_transform(
     tmp_path: Path,
 ) -> None:
     mesh_path = tmp_path / "source" / "triangle.glb"
@@ -621,46 +624,24 @@ def test_mesh_frame_normalizer_bakes_glb_scene_transform_to_obj(
         node_translation=(1.0, 0.0, 0.0),
     )
     source_sha256 = hashlib.sha256(mesh_path.read_bytes()).hexdigest()
-    normalizer = MeshFrameNormalizer(output_dir=tmp_path / "normalized")
+    normalizer = GlbGeometryNormalizer(output_dir=tmp_path / "normalized")
 
     normalized_path = normalizer.normalize_path(mesh_path)
     repeated_path = normalizer.normalize_path(mesh_path)
 
     assert repeated_path == normalized_path
-    assert normalized_path.suffix == ".obj"
+    assert normalized_path.suffix == ".glb"
     assert MESH_FRAME_NORMALIZATION_POLICY_VERSION not in normalized_path.name
     assert len(normalized_path.name) <= 64
-    obj_text = normalized_path.read_text(encoding="utf-8")
-    assert f"policy_version: {MESH_FRAME_NORMALIZATION_POLICY_VERSION}" in obj_text
-    assert f"source_sha256: {source_sha256}" in obj_text
-    assert "dexsim_engine_version:" in obj_text
-    transform = _obj_header_json_value(obj_text, "transform")
-    assert _flatten_matrix(transform) == pytest.approx(
-        _flatten_matrix(
-            [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ]
-        )
-    )
-    assert "mtllib material.mtl" in obj_text
-    material_text = (normalized_path.parent / "material.mtl").read_text(
-        encoding="utf-8"
-    )
-    material_name = _single_obj_material_name(obj_text)
-    assert material_name != "material_0"
-    assert f"newmtl {material_name}" in material_text
-    assert "map_Kd " not in material_text
-    assert _rounded_vertex_set(_obj_vertices(normalized_path)) == {
+    assert normalizer.reports[0]["source_sha256"] == source_sha256
+    assert _rounded_vertex_set(_glb_vertices(normalized_path)) == {
         (1.0, 0.0, 0.0),
         (1.0, 1.0, 0.0),
         (1.0, 0.0, 1.0),
     }
 
 
-def test_mesh_frame_normalizer_extracts_embedded_base_color_texture(
+def test_glb_geometry_normalizer_preserves_glb_output_for_textured_source(
     tmp_path: Path,
 ) -> None:
     mesh_path = tmp_path / "source" / "textured_triangle.glb"
@@ -672,78 +653,34 @@ def test_mesh_frame_normalizer_extracts_embedded_base_color_texture(
     )
     output_dir = tmp_path / "normalized"
 
-    normalized_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(
+    normalized_path = GlbGeometryNormalizer(output_dir=output_dir).normalize_path(
         mesh_path
     )
-
-    obj_text = normalized_path.read_text(encoding="utf-8")
-    material_name = _single_obj_material_name(obj_text)
-    material_text = (output_dir / "material.mtl").read_text(encoding="utf-8")
-    assert f"newmtl {material_name}" in material_text
-    assert "Kd 1.0 1.0 1.0" in material_text
-    map_kd = _single_map_kd_path(material_text, material_name)
-    assert map_kd.startswith("textures/")
-    assert map_kd.endswith("_basecolor.png")
-    assert (output_dir / map_kd).read_bytes() == texture_png
-
-    material_path = output_dir / "material.mtl"
-    texture_path = output_dir / map_kd
-    material_path.unlink()
-    texture_path.unlink()
-
-    reused_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(mesh_path)
-
-    assert reused_path == normalized_path
-    assert material_path.is_file()
-    assert texture_path.read_bytes() == texture_png
+    assert normalized_path.suffix == ".glb"
+    assert normalized_path.read_bytes().startswith(b"glTF")
 
 
-def test_mesh_frame_normalizer_recreates_material_library_for_reused_obj(
+def test_glb_geometry_normalizer_reuses_normalized_glb(
     tmp_path: Path,
 ) -> None:
     mesh_path = tmp_path / "source" / "triangle.glb"
     _write_minimal_glb(mesh_path, _default_mesh_vertices())
     output_dir = tmp_path / "normalized"
-    normalized_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(
-        mesh_path
-    )
-    material_path = normalized_path.parent / "material.mtl"
-    material_path.unlink()
-
-    reused_path = MeshFrameNormalizer(output_dir=output_dir).normalize_path(mesh_path)
+    normalizer = GlbGeometryNormalizer(output_dir=output_dir)
+    normalized_path = normalizer.normalize_path(mesh_path)
+    reused_path = normalizer.normalize_path(mesh_path)
 
     assert reused_path == normalized_path
-    assert material_path.is_file()
-    material_text = material_path.read_text(encoding="utf-8")
-    reused_material_name = _single_obj_material_name(
-        reused_path.read_text(encoding="utf-8")
-    )
-    assert f"newmtl {reused_material_name}" in material_text
 
 
-def test_body_scale_bake_writes_scaled_obj_and_clears_runtime_scale(
+def test_body_scale_bake_writes_scaled_glb_and_clears_runtime_scale(
     tmp_path: Path,
 ) -> None:
     source_dir = tmp_path / "normalized"
-    source_dir.mkdir()
-    mesh_path = source_dir / "triangle.obj"
-    mesh_path.write_text(
-        "\n".join(
-            [
-                "mtllib material.mtl",
-                "usemtl material_test",
-                "v 1 2 3",
-                "v -1 0 2",
-                "v 0.5 1 0",
-                "f 1 2 3",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    (source_dir / "material.mtl").write_text(
-        "newmtl material_test\nKd 1.0 1.0 1.0\n",
-        encoding="utf-8",
+    mesh_path = source_dir / "triangle.glb"
+    _write_minimal_glb(
+        mesh_path,
+        [(1.0, 2.0, 3.0), (-1.0, 0.0, 2.0), (0.5, 1.0, 0.0)],
     )
     gym_config = {
         "background": [],
@@ -773,19 +710,19 @@ def test_body_scale_bake_writes_scaled_obj_and_clears_runtime_scale(
             "uid": "scaled_triangle",
             "section": "rigid_object",
             "source_path": mesh_path.as_posix(),
-            "scaled_path": scaled_path.as_posix(),
+            "baked_path": scaled_path.as_posix(),
             "source_sha256": reports[0]["source_sha256"],
             "body_scale": [2.0, 0.5, 3.0],
+            "glb_scale": [2.0, 3.0, 0.5],
             "status": "generated",
             "policy_version": BODY_SCALE_BAKE_POLICY_VERSION,
         }
     ]
-    assert _rounded_vertex_set(_obj_vertices(scaled_path)) == {
-        (2.0, 1.0, 9.0),
-        (-2.0, 0.0, 6.0),
-        (1.0, 0.5, 0.0),
+    assert _rounded_vertex_set(_glb_vertices(scaled_path)) == {
+        (2.0, 6.0, 1.5),
+        (-2.0, 0.0, 1.0),
+        (1.0, 3.0, 0.0),
     }
-    assert (scaled_path.parent / "material.mtl").is_file()
 
 
 def test_target_replacements_generate_meshes_and_replace_paths(
@@ -5514,21 +5451,19 @@ def _mesh_object(
 
 def _assert_normalized_obj_path(fpath: str) -> None:
     path = Path(fpath)
-    assert path.suffix == ".obj"
-    assert "mesh_assets/normalized" in path.as_posix()
+    assert path.suffix == ".glb"
+    assert "mesh_assets/normalized_glb" in path.as_posix()
     assert MESH_FRAME_NORMALIZATION_POLICY_VERSION not in path.name
     assert len(path.name) <= 64
     assert path.is_file()
-    assert (path.parent / "material.mtl").is_file()
 
 
 def _assert_body_scaled_obj_path(fpath: str) -> None:
     path = Path(fpath)
-    assert path.suffix == ".obj"
-    assert "mesh_assets/body_scaled" in path.as_posix()
+    assert path.suffix == ".glb"
+    assert "mesh_assets/baked_glb" in path.as_posix()
     assert BODY_SCALE_BAKE_POLICY_VERSION not in path.name
     assert path.is_file()
-    assert (path.parent / "material.mtl").is_file()
 
 
 def _body_scaled_meshes_by_uid(summary: dict) -> dict[str, dict]:
@@ -5642,6 +5577,13 @@ def _obj_vertices(path: Path) -> list[tuple[float, float, float]]:
         _, x, y, z = line.split(maxsplit=3)
         vertices.append((float(x), float(y), float(z)))
     return vertices
+
+
+def _glb_vertices(path: Path) -> list[tuple[float, float, float]]:
+    trimesh = pytest.importorskip("trimesh")
+    scene = trimesh.load(path.as_posix(), force="scene")
+    mesh = scene.dump(concatenate=True)
+    return [tuple(float(value) for value in vertex) for vertex in mesh.vertices]
 
 
 def _single_obj_material_name(obj_text: str) -> str:

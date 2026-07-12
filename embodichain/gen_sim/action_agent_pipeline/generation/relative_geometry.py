@@ -22,6 +22,10 @@ import math
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
+
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
@@ -63,17 +67,20 @@ __all__ = [
     "_with_self_relative_absolute_targets",
 ]
 
-_SIDE_RELATION_DISTANCE = 0.16
-_SIDE_RELEASE_Z_OFFSET = 0.12
-_CONTAINER_SLOT_MIN_OFFSET = 0.04
-_CONTAINER_SLOT_MAX_OFFSET = 0.12
-_CONTAINER_SLOT_FRACTION = 0.25
-_CONTAINER_SLOT_MAX_FRACTION = 0.40
-_CONTAINER_SLOT_AXIS_TIE_RATIO = 0.10
-_STAGING_Z_DELTA = 0.10
-_POSE_SENSITIVE_STAGING_Z_DELTA = 0.25
-_ON_RELEASE_Z_OFFSET = 0.2
-_PICKUP_UPRIGHT_ROTATE_RADIANS = math.pi / 4.0
+_DEFAULTS = generation_defaults_section("relative_placement")
+_SIDE_RELATION_DISTANCE = float(_DEFAULTS["side_relation_distance"])
+_SIDE_RELEASE_Z_OFFSET = float(_DEFAULTS["side_release_z_offset"])
+_CONTAINER_SLOT_MIN_OFFSET = float(_DEFAULTS["container_slot_min_offset"])
+_CONTAINER_SLOT_MAX_OFFSET = float(_DEFAULTS["container_slot_max_offset"])
+_CONTAINER_SLOT_FRACTION = float(_DEFAULTS["container_slot_fraction"])
+_CONTAINER_SLOT_MAX_FRACTION = float(_DEFAULTS["container_slot_max_fraction"])
+_CONTAINER_SLOT_AXIS_TIE_RATIO = float(_DEFAULTS["container_slot_axis_tie_ratio"])
+_STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
+_POSE_SENSITIVE_STAGING_Z_DELTA = float(_DEFAULTS["pose_sensitive_staging_z_delta"])
+_ON_RELEASE_Z_OFFSET = float(_DEFAULTS["on_release_z_offset"])
+_PICKUP_UPRIGHT_ROTATE_RADIANS = math.radians(
+    float(_DEFAULTS["pickup_upright_rotate_degrees"])
+)
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
 _DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER = {"right": 0, "left": 1}
