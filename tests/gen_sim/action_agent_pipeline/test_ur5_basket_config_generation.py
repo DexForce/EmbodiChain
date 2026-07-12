@@ -713,14 +713,15 @@ def test_body_scale_bake_writes_scaled_glb_and_clears_runtime_scale(
             "baked_path": scaled_path.as_posix(),
             "source_sha256": reports[0]["source_sha256"],
             "body_scale": [2.0, 0.5, 3.0],
+            "glb_scale": [2.0, 3.0, 0.5],
             "status": "generated",
             "policy_version": BODY_SCALE_BAKE_POLICY_VERSION,
         }
     ]
     assert _rounded_vertex_set(_glb_vertices(scaled_path)) == {
-        (2.0, 1.0, 9.0),
-        (-2.0, 0.0, 6.0),
-        (1.0, 0.5, 0.0),
+        (2.0, 6.0, 1.5),
+        (-2.0, 0.0, 1.0),
+        (1.0, 3.0, 0.0),
     }
 
 

@@ -30,7 +30,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ResolvedTargetReplacement,
     _SceneObject,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import _clean_vector3
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _clean_vector3,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
     GlbGeometryNormalizer,
 )
