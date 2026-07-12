@@ -2431,9 +2431,10 @@ class SimulationManager:
         """Convert a DexSim window model matrix to look-at vectors.
 
         DexSim stores the viewer camera model matrix with columns
-        ``[right, up, -forward]``. ``Windows.set_look_at`` expects the
-        corresponding world-space look-at vectors, so the conversion is done
-        from the matrix columns rather than by assuming a fixed world axis.
+        ``[right, up, -forward]``. The local camera up axis changes while the
+        viewer orbits, but ``Windows.set_look_at`` uses a world-up reference.
+        Always use DexSim's default Z-up vector so a captured snippet retains
+        the standard viewer controls.
 
         Args:
             pose: A 4x4 homogeneous viewer camera pose matrix.
@@ -2452,7 +2453,7 @@ class SimulationManager:
             )
         eye = matrix[:3, 3]
         look_at = eye - matrix[:3, 2]
-        up = matrix[:3, 1]
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
         return eye, look_at, up
 
     @staticmethod
