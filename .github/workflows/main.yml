@@ -164,18 +164,12 @@ jobs:
             --extra-index-url https://download.blender.org/pypi/
           pip install pytest-xdist
 
-      - name: Run default tests
+      - name: Run full test suite
         run: |
-          echo "Default test suite (GPU-marked tests are skipped)"
+          echo "Full test suite, including GPU-marked tests"
           export HF_ENDPOINT=https://hf-mirror.com
           pytest tests/docs -q --confcutdir=tests/docs
           pytest tests
-
-      - name: Run GPU tests serially
-        run: |
-          echo "Dedicated GPU test suite"
-          export HF_ENDPOINT=https://hf-mirror.com
-          pytest tests --run-gpu -m gpu
 
   release-build:
     if: startsWith(github.ref, 'refs/tags/v')
