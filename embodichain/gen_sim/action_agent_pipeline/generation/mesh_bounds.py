@@ -19,6 +19,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
 import json
 import math
 import struct
@@ -46,11 +50,14 @@ __all__ = [
 
 _GLTF_TO_SIM_FRAME_KEY = "_gltf_to_sim_frame"
 
-_DUAL_UR5_LEGACY_INIT_Z = 0.5
-_DUAL_UR5_ARM_COMPONENT_Z = 0.4
-_DUAL_UR5_TABLETOP_CLEARANCE = 0.05
-_DUAL_FRANKA_TABLETOP_CLEARANCE = 0.05
-_TABLETOP_OBJECT_CLEARANCE = 0.003
+_GEOMETRY_DEFAULTS = generation_defaults_section("geometry")
+_DUAL_UR5_DEFAULTS = _GEOMETRY_DEFAULTS["dual_ur5"]
+_DUAL_FRANKA_DEFAULTS = _GEOMETRY_DEFAULTS["dual_franka"]
+_DUAL_UR5_LEGACY_INIT_Z = float(_DUAL_UR5_DEFAULTS["legacy_init_z"])
+_DUAL_UR5_ARM_COMPONENT_Z = float(_DUAL_UR5_DEFAULTS["arm_component_z"])
+_DUAL_UR5_TABLETOP_CLEARANCE = float(_DUAL_UR5_DEFAULTS["tabletop_clearance"])
+_DUAL_FRANKA_TABLETOP_CLEARANCE = float(_DUAL_FRANKA_DEFAULTS["tabletop_clearance"])
+_TABLETOP_OBJECT_CLEARANCE = float(_GEOMETRY_DEFAULTS["tabletop_object_clearance"])
 _GLTF_COMPONENT_FORMATS = {
     5120: ("b", 1),
     5121: ("B", 1),
@@ -335,6 +342,12 @@ def _load_mesh_vertices(
     *,
     gltf_to_sim_frame: bool = False,
 ) -> list[tuple[float, float, float]] | None:
+    # DexSim converts every GLB/GLTF asset from Y-up into its Z-up scene frame
+    # during loading. Geometry analysis must use the same interpretation.
+    gltf_to_sim_frame = gltf_to_sim_frame or mesh_path.suffix.lower() in {
+        ".glb",
+        ".gltf",
+    }
     if mesh_path.suffix.lower() == ".glb":
         try:
             vertices = list(_iter_glb_world_position_vertices(mesh_path))

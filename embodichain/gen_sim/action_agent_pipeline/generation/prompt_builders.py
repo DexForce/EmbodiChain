@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
+    generation_defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
     NominalGraphStep,
@@ -56,13 +57,22 @@ __all__ = [
     "make_stacking_task_prompt",
 ]
 
-_BASKET_LEFT_RELEASE_OFFSET_Y = 0.04
-_BASKET_RIGHT_RELEASE_OFFSET_Y = -0.04
-_PICKUP_LIFT_HEIGHT = 0.30
-_PLACE_LIFT_HEIGHT = 0.20
-_DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT = 4
-_RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = 10
-_EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = 30
+_ACTION_DEFAULTS = generation_defaults_section("action")
+_BASKET_LEFT_RELEASE_OFFSET_Y = float(_ACTION_DEFAULTS["basket_left_release_offset_y"])
+_BASKET_RIGHT_RELEASE_OFFSET_Y = float(
+    _ACTION_DEFAULTS["basket_right_release_offset_y"]
+)
+_PICKUP_LIFT_HEIGHT = float(_ACTION_DEFAULTS["pickup_lift_height"])
+_PLACE_LIFT_HEIGHT = float(_ACTION_DEFAULTS["place_lift_height"])
+_DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT = int(
+    _ACTION_DEFAULTS["direct_place_cartesian_waypoint_count"]
+)
+_RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = int(
+    _ACTION_DEFAULTS["release_only_place_sample_interval"]
+)
+_EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = int(
+    _ACTION_DEFAULTS["empty_hand_retreat_sample_interval"]
+)
 _SURFACE_RELEASE_Z_POLICY = "object_on_surface"
 _SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _USE_PLACEMENT_ALIGN_TO = object()

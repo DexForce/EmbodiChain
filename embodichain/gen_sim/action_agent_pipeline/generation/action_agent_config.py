@@ -24,8 +24,11 @@ import math
 import warnings
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_MAX_EPISODES,
+    DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
+    DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,
@@ -48,14 +51,12 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _infer_project_name,
     _resolve_gym_config_path,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
-    MeshFrameNormalizer,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _normalize_runtime_uid,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.body_scale_baking import (
-    bake_body_scale_into_meshes,
+from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
+    GlbGeometryNormalizer,
+    bake_body_scale_into_glbs,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
@@ -118,7 +119,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _DUAL_UR5_ARM_COMPONENT_Z,
     _DUAL_UR5_TABLETOP_CLEARANCE,
-    _GLTF_TO_SIM_FRAME_KEY,
     _TABLETOP_OBJECT_CLEARANCE,
     _apply_tabletop_z_placement,
     _mesh_config_world_z_bounds,
@@ -194,7 +194,7 @@ def generate_action_agent_config_from_project(
     gym_project: str | Path,
     output_dir: str | Path,
     *,
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
     task_description: str | None = None,
     use_llm_roles: bool = False,
     llm_model: str | None = None,
@@ -216,8 +216,8 @@ def generate_action_agent_config_from_project(
     reuse_target_replacements: bool = True,
     acd_method: str = "vhacd",
     overwrite: bool = False,
-    max_episodes: int = 1,
-    max_episode_steps: int = 1000,
+    max_episodes: int = DEFAULT_MAX_EPISODES,
+    max_episode_steps: int = DEFAULT_MAX_EPISODE_STEPS,
 ) -> GeneratedActionAgentConfigPaths:
     """Generate action-agent configs from an exported gym project.
 
@@ -258,16 +258,13 @@ def generate_action_agent_config_from_project(
             behavior is preserved.
         preserve_source_scene_geometry: If true, generated scene objects keep
             source z placement instead of re-snapping objects to the tabletop.
-        load_source_meshes_directly: If true, keep source GLB/GLTF paths in the
-            generated config and let DexSim perform its native GLTF Y-up to
-            simulation-frame conversion. Runtime ``body_scale`` is preserved
-            instead of being baked into OBJ vertices.
+        load_source_meshes_directly: Deprecated compatibility option. Generated
+            runtime assets are always normalized and baked GLB files.
         source_scene_z_rotation_degrees: World-frame Z rotation applied to
             generated scene object poses after config generation. Mesh paths and
             scales are unchanged.
-        source_mesh_x_rotation_degrees: Local X-axis rotation baked into
-            normalized GLB/GLTF meshes. This is ignored when
-            ``load_source_meshes_directly`` is true.
+        source_mesh_x_rotation_degrees: Deprecated compatibility option. GLB
+            frame conversion is handled by the GLB geometry baker.
         inside_container_slot_distance_scale: Multiplier for automatically
             generated inside-container slot offsets when multiple moved objects
             share one container. Values below ``1`` place release points closer
@@ -300,21 +297,14 @@ def generate_action_agent_config_from_project(
     gym_config_path = _resolve_gym_config_path(input_path)
     scene_dir = gym_config_path.parent
     source_config = _read_json(gym_config_path)
-    if load_source_meshes_directly:
-        _mark_direct_gltf_meshes(source_config)
     project_name = _infer_project_name(input_path, scene_dir)
     replacement_specs = _normalize_target_replacements(target_replacements)
     source_scene_body_scale_mode = _validate_source_scene_body_scale_mode(
         source_scene_body_scale_mode
     )
     acd_method = _validate_acd_method(acd_method)
-    mesh_normalizer = (
-        None
-        if load_source_meshes_directly
-        else MeshFrameNormalizer(
-            output_dir=output_dir_path / "mesh_assets" / "normalized",
-            local_x_correction_degrees=source_mesh_x_rotation_degrees,
-        )
+    mesh_normalizer = GlbGeometryNormalizer(
+        output_dir=output_dir_path / "mesh_assets" / "normalized_glb",
     )
 
     scene_objects = _collect_scene_objects(source_config)
@@ -547,7 +537,7 @@ def _build_basket_bundle(
     target_replacements: Sequence[_ResolvedTargetReplacement],
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
 ) -> dict[str, Any]:
@@ -764,7 +754,7 @@ def _build_arrangement_line_bundle(
     target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     source_scene_body_scale_mode: str | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
@@ -943,7 +933,7 @@ def _build_stacking_bundle(
     target_body_scale: float | list[float] | tuple[float, float, float],
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     source_scene_body_scale_mode: str | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
@@ -1109,7 +1099,7 @@ def _finalize_and_write_bundle(
     bundle: dict[str, Any],
     *,
     output_dir: Path,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     load_source_meshes_directly: bool,
     acd_method: str,
     overwrite: bool,
@@ -1120,13 +1110,9 @@ def _finalize_and_write_bundle(
         method=acd_method,
     )
     _attach_mesh_normalization_summary(bundle, mesh_normalizer)
-    if not load_source_meshes_directly:
-        _attach_body_scale_bake_summary(bundle, output_dir)
-    _strip_generation_mesh_metadata(bundle["gym_config"])
+    _attach_body_scale_bake_summary(bundle, output_dir)
     summary = bundle.setdefault("summary", {})
-    summary["mesh_loading_mode"] = (
-        "direct_source" if load_source_meshes_directly else "normalized_obj"
-    )
+    summary["mesh_loading_mode"] = "baked_glb"
     summary["acd_method"] = acd_method
     summary.pop("convex_decomposition_method", None)
     return _write_config_bundle(
@@ -1186,34 +1172,17 @@ def _attach_body_scale_bake_summary(
     bundle: dict[str, Any],
     output_dir: Path,
 ) -> None:
-    reports = bake_body_scale_into_meshes(
+    reports = bake_body_scale_into_glbs(
         bundle["gym_config"],
-        output_dir=output_dir / "mesh_assets" / "body_scaled",
+        output_dir=output_dir / "mesh_assets" / "baked_glb",
     )
     if reports:
         bundle.setdefault("summary", {})["body_scaled_meshes"] = reports
 
 
-def _mark_direct_gltf_meshes(gym_config: Mapping[str, Any]) -> None:
-    for obj in _iter_generated_mesh_objects(gym_config):
-        shape = obj.get("shape")
-        if not isinstance(shape, MutableMapping):
-            continue
-        mesh_path = Path(str(shape.get("fpath", "")))
-        if mesh_path.suffix.lower() in {".glb", ".gltf"}:
-            shape[_GLTF_TO_SIM_FRAME_KEY] = True
-
-
-def _strip_generation_mesh_metadata(gym_config: Mapping[str, Any]) -> None:
-    for obj in _iter_generated_mesh_objects(gym_config):
-        shape = obj.get("shape")
-        if isinstance(shape, MutableMapping):
-            shape.pop(_GLTF_TO_SIM_FRAME_KEY, None)
-
-
 def _attach_mesh_normalization_summary(
     bundle: dict[str, Any],
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> None:
     if mesh_normalizer is None:
         return
@@ -1624,7 +1593,7 @@ def _build_relative_placement_bundle(
     source_scene_body_scale_mode: str | None,
     max_episodes: int,
     max_episode_steps: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
     inside_container_slot_distance_scale: float,

@@ -19,6 +19,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_TASK_NAME,
+    generation_defaults_section,
+)
 import copy
 import math
 import re
@@ -31,11 +36,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
-    _GLTF_TO_SIM_FRAME_KEY,
     _clean_vector3,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.mesh_frame_normalization import (
-    MeshFrameNormalizer,
+from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
+    GlbGeometryNormalizer,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _left_target_text,
@@ -71,29 +75,31 @@ __all__ = [
     "_target_body_scale_vector",
 ]
 
-_BACKGROUND_MAX_CONVEX_HULL_NUM = 1
-_TARGET_MAX_CONVEX_HULL_NUM = 16
-_CONTAINER_MAX_CONVEX_HULL_NUM = 8
-_EXTRA_RIGID_MAX_CONVEX_HULL_NUM = 1
+_PHYSICS_DEFAULTS = generation_defaults_section("physics")
+_BACKGROUND_DEFAULTS = _PHYSICS_DEFAULTS["background"]
+_RIGID_OBJECT_DEFAULTS = _PHYSICS_DEFAULTS["rigid_object"]
+_CONVEX_HULL_DEFAULTS = _PHYSICS_DEFAULTS["convex_hulls"]
+_BACKGROUND_MAX_CONVEX_HULL_NUM = int(_BACKGROUND_DEFAULTS["max_convex_hull_num"])
+_TARGET_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["target"])
+_CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
+_EXTRA_RIGID_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["extra_rigid"])
 _ROBOT_VIEW_LABEL = "robot_view"
 _AUDIENCE_VIEW_LABEL = "audience_view"
 _AUDIENCE_VIEW_Z_ROTATION_DEGREES = 180.0
 
 _BACKGROUND_ATTRS = {
-    "mass": 10.0,
-    "static_friction": 0.95,
-    "dynamic_friction": 0.9,
-    "restitution": 0.01,
+    key: float(value)
+    for key, value in _BACKGROUND_DEFAULTS.items()
+    if key != "max_convex_hull_num"
 }
 
 _RIGID_OBJECT_ATTRS = {
-    "mass": 0.01,
-    "contact_offset": 0.003,
-    "rest_offset": 0.001,
-    "restitution": 0.01,
-    "max_depenetration_velocity": 10.0,
-    "min_position_iters": 32,
-    "min_velocity_iters": 8,
+    key: (
+        int(value)
+        if key in {"min_position_iters", "min_velocity_iters"}
+        else float(value)
+    )
+    for key, value in _RIGID_OBJECT_DEFAULTS.items()
 }
 
 
@@ -115,7 +121,7 @@ def _make_relative_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
         **_record_camera_event_configs(
@@ -160,7 +166,7 @@ def _make_arrangement_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
         **_record_camera_event_configs(
@@ -205,7 +211,7 @@ def _make_events_config(
     roles: _BasketTaskRoles,
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
         **_record_camera_event_configs(
@@ -250,7 +256,7 @@ def _make_events_config(
 def _record_camera_event_configs(
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     *,
-    task_name: str = "UR5BreadBasket",
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     camera = sensor_config_factory()[0]
     audience_camera = copy.deepcopy(camera)
@@ -618,7 +624,7 @@ def _relative_dataset_instruction(
 def _make_background_config(
     scene_dir: Path,
     obj: _SceneObject,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
     return {
@@ -639,7 +645,7 @@ def _make_background_config(
 def _make_extra_background_config(
     scene_dir: Path,
     obj: _SceneObject,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     body_scale: Any | None = None,
     runtime_uid: str | None = None,
 ) -> dict[str, Any]:
@@ -669,7 +675,7 @@ def _make_target_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     target_scale: list[float],
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     replacement: _ResolvedTargetReplacement | None = None,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
@@ -690,7 +696,7 @@ def _make_container_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     return _make_rigid_object_config(
         scene_dir,
@@ -710,7 +716,7 @@ def _make_container_background_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     config = _make_container_object_config(
         scene_dir,
@@ -728,7 +734,7 @@ def _make_container_rigid_object_config(
     obj: _SceneObject,
     runtime_uid: str,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     config = _make_container_object_config(
         scene_dir,
@@ -748,7 +754,7 @@ def _make_relative_background_object_config(
     *,
     body_scale: Any | None = None,
     max_convex_hull_num: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
         scene_dir,
@@ -766,7 +772,7 @@ def _make_extra_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
     body_scale: Any,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
     runtime_uid: str | None = None,
 ) -> dict[str, Any]:
     config = _make_rigid_object_config(
@@ -791,7 +797,7 @@ def _make_relative_rigid_object_config(
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
-    mesh_normalizer: MeshFrameNormalizer | None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     if max_convex_hull_num == _TARGET_MAX_CONVEX_HULL_NUM:
         resolved_max_convex_hull_num = max_convex_hull_num
@@ -819,8 +825,10 @@ def _make_rigid_object_config(
     body_scale: Any,
     max_convex_hull_num: int,
     mesh_fpath: str | Path | None = None,
-    mesh_normalizer: MeshFrameNormalizer | None = None,
+    mesh_normalizer: GlbGeometryNormalizer | None = None,
 ) -> dict[str, Any]:
+    if mesh_normalizer is None:
+        raise ValueError("GLB-only generation requires a GlbGeometryNormalizer.")
     shape = _make_shape_config(
         scene_dir,
         obj.config,
@@ -889,7 +897,7 @@ def _make_shape_config(
     source_config: Mapping[str, Any],
     *,
     mesh_fpath: str | Path | None = None,
-    mesh_normalizer: MeshFrameNormalizer | None = None,
+    mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     shape = copy.deepcopy(dict(source_config.get("shape", {})))
     if mesh_fpath is not None:
@@ -897,11 +905,7 @@ def _make_shape_config(
         shape["fpath"] = str(mesh_fpath)
     if shape.get("shape_type") == "Mesh" and "fpath" in shape:
         mesh_path = Path(_asset_path_for_config(scene_dir, str(shape["fpath"])))
-        if mesh_normalizer is not None:
-            mesh_path = mesh_normalizer.normalize_path(mesh_path)
-            shape.pop(_GLTF_TO_SIM_FRAME_KEY, None)
-        elif mesh_path.suffix.lower() in {".glb", ".gltf"}:
-            shape[_GLTF_TO_SIM_FRAME_KEY] = True
+        mesh_path = mesh_normalizer.normalize_path(mesh_path)
         shape["fpath"] = mesh_path.as_posix()
     shape.setdefault("compute_uv", False)
     return shape
