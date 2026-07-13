@@ -228,7 +228,7 @@ def test_elongated_stacking_object_does_not_request_axis_alignment() -> None:
     assert orientation == ("preserve", "none")
 
 
-def test_pose_sensitive_relative_graph_rotates_at_high_staging() -> None:
+def test_pose_sensitive_relative_graph_uses_one_final_move() -> None:
     placement = _relative_step("bottle", "table", side="left")
     placement = _RelativePlacementStepSpec(
         **{
@@ -246,13 +246,9 @@ def test_pose_sensitive_relative_graph_rotates_at_high_staging() -> None:
         and edge["left_arm_action"]["atomic_action_class"] == "MoveHeldObject"
     ]
 
-    assert [target["orientation_goal"] for target in move_targets] == [
-        "preserve",
-        "upright",
-        "upright",
-    ]
-    assert move_targets[0]["offset"] == pytest.approx([0.0, 0.0, 0.3])
-    assert move_targets[-1]["offset"] == pytest.approx([0.0, 0.0, 0.2])
+    assert len(move_targets) == 1
+    assert move_targets[0]["orientation_goal"] == "upright"
+    assert move_targets[0]["offset"] == pytest.approx([0.0, 0.0, 0.2])
 
 
 def _relative_step(
