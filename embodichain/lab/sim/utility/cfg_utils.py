@@ -96,22 +96,49 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
 
     for key, value in override_cfg_dict.items():
         if key == "solver_cfg":
-            # merge provided solver_cfg values into default solver config
+            # Per-part merge of provided solver_cfg into default solver config.
+            # Two modes:
+            #   1. Part dict includes "class_type" → new/replacement solver
+            #      (already deserialized into a SolverCfg subclass by
+            #      RobotCfg.from_dict above).
+            #   2. Part dict lacks "class_type" → attribute overrides for an
+            #      existing solver part (e.g. {"tcp": ..., "stiffness": ...}).
             provided_solver_cfg = override_cfg_dict.get("solver_cfg")
-            if provided_solver_cfg:
+            if provided_solver_cfg and isinstance(provided_solver_cfg, dict):
+                if base_cfg.solver_cfg is None:
+                    base_cfg.solver_cfg = {}
                 for part, item in provided_solver_cfg.items():
-                    if "class_type" in provided_solver_cfg[part]:
-                        base_cfg.solver_cfg[part] = robot_cfg.solver_cfg[part]
+                    if isinstance(item, dict) and "class_type" in item:
+                        # New or replacement solver part — use the deserialized
+                        # SolverCfg object produced by RobotCfg.from_dict.
+                        parsed = (
+                            robot_cfg.solver_cfg.get(part)
+                            if isinstance(robot_cfg.solver_cfg, dict)
+                            else None
+                        )
+                        if parsed is not None:
+                            base_cfg.solver_cfg[part] = parsed
+                        else:
+                            logger.log_warning(
+                                f"Failed to deserialize solver_cfg['{part}'] "
+                                f"with class_type={item.get('class_type')!r}. "
+                                f"Skipping."
+                            )
+                    elif part in base_cfg.solver_cfg:
+                        # Existing part — merge individual attribute overrides
+                        # in-place so other parts are preserved.
+                        target = base_cfg.solver_cfg[part]
+                        if isinstance(item, dict):
+                            for attr_name, attr_val in item.items():
+                                if hasattr(target, attr_name):
+                                    setattr(target, attr_name, attr_val)
                     else:
-                        try:
-                            merged = merge_solver_cfg(
-                                base_cfg.solver_cfg, provided_solver_cfg
-                            )
-                            base_cfg.solver_cfg = merged
-                        except Exception:
-                            logger.log_error(
-                                f"Failed to merge solver_cfg, using provided config outright."
-                            )
+                        logger.log_warning(
+                            f"Cannot add solver part {part!r} without "
+                            f"'class_type'. Provide 'class_type' to create a "
+                            f"new solver entry, or ensure the part name "
+                            f"matches an existing solver."
+                        )
         elif key == "drive_pros":
             # merge joint drive properties
             user_drive_pros_dict = override_cfg_dict.get("drive_pros")

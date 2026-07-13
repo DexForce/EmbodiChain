@@ -55,6 +55,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.solvers import SolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.utils import configclass
 
@@ -74,8 +75,9 @@ _DEFAULT_MOUNT: dict = {"preset": "side_by_side", "separation": 0.6}
 
 #: Registry mapping a ``base_robot`` key to ``(single-arm cfg class, init dict)``.
 #: Adding a new single-arm robot here is all that is needed to make it
-#: dual-arm-able: e.g. ``"franka": (FrankaRobotCfg, {})``.
+#: dual-arm-able: e.g. ``"franka": (FrankaPandaCfg, {"robot_type": "panda"})``.
 _BASE_ROBOT_REGISTRY: Dict[str, tuple] = {
+    "franka": (FrankaPandaCfg, {"robot_type": "panda"}),
     "ur3": (URRobotCfg, {"robot_type": "ur3"}),
     "ur3e": (URRobotCfg, {"robot_type": "ur3e"}),
     "ur5": (URRobotCfg, {"robot_type": "ur5"}),

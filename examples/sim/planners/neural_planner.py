@@ -17,18 +17,16 @@
 from __future__ import annotations
 
 import argparse
-import math
-import os
 import time
 
 import numpy as np
 import torch
 
-from embodichain.data import get_data_path
 from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenOptions,
@@ -89,44 +87,8 @@ def _resolve_device(device: str) -> str:
     return device
 
 
-def _franka_tcp() -> list[list[float]]:
-    c = math.cos(-math.pi / 4)
-    s = math.sin(-math.pi / 4)
-    return [
-        [c, -s, 0.0, 0.0],
-        [s, c, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.1034],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-
-
 def create_franka(sim: SimulationManager) -> Robot:
-    urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
-    assert os.path.isfile(urdf)
-
-    cfg_dict = {
-        "fpath": urdf,
-        "control_parts": {
-            "main_arm": [
-                "Joint1",
-                "Joint2",
-                "Joint3",
-                "Joint4",
-                "Joint5",
-                "Joint6",
-                "Joint7",
-            ],
-        },
-        "solver_cfg": {
-            "main_arm": {
-                "class_type": "PytorchSolver",
-                "end_link_name": "ee_link",
-                "root_link_name": "base_link",
-                "tcp": _franka_tcp(),
-            },
-        },
-    }
-    return sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    return sim.add_robot(cfg=FrankaPandaCfg.from_dict({"robot_type": "panda"}))
 
 
 def make_waypoints(start_pose: torch.Tensor, num_waypoints: int) -> torch.Tensor:
@@ -179,6 +141,9 @@ def play_trajectory(
     delay: float = 0.0,
 ) -> None:
     joint_ids = robot.get_joint_ids(arm_name)
+    # ``positions`` may be env-batched (B, N, DOF); this example is single-env.
+    if positions.dim() == 3:
+        positions = positions[0]
     for qpos in positions:
         robot.set_qpos(qpos=qpos.unsqueeze(0), joint_ids=joint_ids)
         sim.update(step=step_repeat)
@@ -201,7 +166,7 @@ def main() -> None:
     )
 
     robot = create_franka(sim)
-    arm_name = "main_arm"
+    arm_name = "arm"
     device = robot.device
 
     if not args.headless:
@@ -233,7 +198,8 @@ def main() -> None:
         )
     )
     target_states = [
-        PlanState(move_type=MoveType.EEF_MOVE, xpos=waypoint) for waypoint in waypoints
+        PlanState.single(move_type=MoveType.EEF_MOVE, xpos=waypoint)
+        for waypoint in waypoints
     ]
     result = motion_generator.generate(
         target_states=target_states,
@@ -248,7 +214,7 @@ def main() -> None:
     print(f"NeuralPlanner success: {result.success}")
     print(f"positions shape: {tuple(result.positions.shape)}")
     print(f"xpos_list shape: {tuple(result.xpos_list.shape)}")
-    print(f"duration: {result.duration:.3f}s")
+    print(f"duration: {result.duration.item():.3f}s")
 
     play_trajectory(
         sim,

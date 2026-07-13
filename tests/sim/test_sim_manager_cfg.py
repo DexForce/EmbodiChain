@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 
 from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg, WindowCameraPoseCfg
 
 
 def test_physics_runtime_fields_are_stored_on_physics_cfg() -> None:
@@ -49,6 +49,17 @@ def test_simulation_manager_cfg_keeps_legacy_physics_accessors() -> None:
 
     assert cfg.physics_cfg.physics_dt == 0.005
     assert cfg.physics_cfg.device == "cuda:0"
+
+
+def test_simulation_manager_cfg_initializes_window_camera_pose() -> None:
+    window_camera_pose = WindowCameraPoseCfg(
+        enable_hotkey=False,
+        convert_to_look_at=False,
+    )
+
+    cfg = SimulationManagerCfg(window_camera_pose=window_camera_pose)
+
+    assert cfg.window_camera_pose == window_camera_pose
 
 
 def test_newton_physics_cfg_uses_device() -> None:

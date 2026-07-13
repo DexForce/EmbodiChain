@@ -827,6 +827,12 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        "--max_episodes",
+        help="Override the max_episodes value from the gym config.",
+        default=None,
+        type=int,
+    )
 
 
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
@@ -849,6 +855,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config["physics"] = args.physics
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
+    if args.max_episodes is not None:
+        merged_config["max_episodes"] = args.max_episodes
     return merged_config
 
 

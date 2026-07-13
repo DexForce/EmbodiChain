@@ -104,6 +104,18 @@ def _make_sim_manager(window: object | None = None) -> SimulationManager:
     return sim
 
 
+def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
+    """Captured look-at snippets preserve DexSim's default Z-up controls."""
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+
+    eye, look_at, up = SimulationManager._window_camera_pose_to_look_at(pose)
+
+    np.testing.assert_allclose(eye, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(look_at, [1.0, 2.0, 2.0])
+    np.testing.assert_allclose(up, [0.0, 0.0, 1.0])
+
+
 def test_start_window_record_rejects_invalid_parameters() -> None:
     sim = _make_sim_manager()
 
