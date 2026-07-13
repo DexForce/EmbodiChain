@@ -100,13 +100,13 @@ physics:
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
-    target: 18
+    target: 16
     container: 32
     moved: 32
     extra_rigid: 1
 
 grasp:
-  affordance_stabilization_steps: 250
+  affordance_stabilization_steps: 10
   antipodal_n_sample: 10000
   antipodal_max_angle_degrees: 15.0
   max_open_length: 0.11
