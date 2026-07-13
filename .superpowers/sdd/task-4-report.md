@@ -17,3 +17,8 @@ Implemented persistent visual texture-reference caching.
 
 Full renderer-backed four-environment integration coverage was not added because this task worktree's existing manager tests are pure tests and no stable fixture/API for constructing a four-environment simulator was available without modifying unrelated test infrastructure.
 
+## Review follow-up
+
+Added a simulation-owned canonical-path GPU texture-reference cache with teardown clearing. Added an explicitly skipped renderer integration placeholder documenting the missing fixture.
+
+Latest focused output: `8 passed, 1 skipped in 0.02s`.
