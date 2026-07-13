@@ -724,7 +724,7 @@ class GraspGenerator:
         )
         positive_angle = torch.abs(torch.acos(cos_angle))
         angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
-        center_distance = torch.norm(valid_centers[:, :2] - mesh_center[:2], dim=-1)
+        center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
@@ -887,6 +887,77 @@ class GraspGenerator:
         grasp_visual.transform(grasp_pose.to("cpu").numpy())
         o3d.visualization.draw_geometries(
             [grasp_visual, mesh, groud_plane],
+            window_name="Grasp Pose Visualization",
+            mesh_show_back_face=True,
+        )
+
+    def visualize_grasp_poses(
+        self,
+        obj_pose: torch.Tensor,
+        grasp_poses: torch.Tensor,
+        open_lengths: torch.Tensor,
+    ):
+        mesh = o3d.geometry.TriangleMesh(
+            vertices=o3d.utility.Vector3dVector(self.vertices.to("cpu").numpy()),
+            triangles=o3d.utility.Vector3iVector(self.triangles.to("cpu").numpy()),
+        )
+        mesh.compute_vertex_normals()
+        mesh.paint_uniform_color([0.3, 0.6, 0.3])
+        mesh.transform(obj_pose.to("cpu").numpy())
+        vertices_ = torch.tensor(
+            np.asarray(mesh.vertices),
+            device=self.vertices.device,
+            dtype=self.vertices.dtype,
+        )
+        mesh_scale = (vertices_.max(dim=0)[0] - vertices_.min(dim=0)[0]).max().item()
+        groud_plane = o3d.geometry.TriangleMesh.create_cylinder(
+            radius=mesh_scale, height=0.01 * mesh_scale
+        )
+        groud_plane.compute_vertex_normals()
+        center = vertices_.mean(dim=0)
+        z_sim = vertices_.min(dim=0)[0][2].item()
+        groud_plane.translate(
+            (center[0].item(), center[1].item(), z_sim - 0.005 * mesh_scale)
+        )
+        draw_thickness = 0.02 * mesh_scale
+        draw_length = 0.3 * mesh_scale
+        visual_mesh_list = [mesh, groud_plane]
+        for i in range(grasp_poses.shape[0]):
+            grasp_finger1 = o3d.geometry.TriangleMesh.create_box(
+                draw_thickness, draw_thickness, draw_length
+            )
+            grasp_finger1.translate(
+                (-0.5 * draw_thickness, -0.5 * draw_thickness, -0.5 * draw_length)
+            )
+            grasp_finger2 = o3d.geometry.TriangleMesh.create_box(
+                draw_thickness, draw_thickness, draw_length
+            )
+            grasp_finger2.translate(
+                (-0.5 * draw_thickness, -0.5 * draw_thickness, -0.5 * draw_length)
+            )
+            grasp_finger1.translate((-open_lengths[i] / 2, 0, -0.25 * draw_length))
+            grasp_finger2.translate((open_lengths[i] / 2, 0, -0.25 * draw_length))
+            grasp_root1 = o3d.geometry.TriangleMesh.create_box(
+                open_lengths[i], draw_thickness, draw_thickness
+            )
+            grasp_root1.translate(
+                (-open_lengths[i] / 2, -0.5 * draw_thickness, -0.5 * draw_thickness)
+            )
+            grasp_root1.translate((0, 0, -0.75 * draw_length))
+            grasp_root2 = o3d.geometry.TriangleMesh.create_box(
+                draw_thickness, draw_thickness, draw_length
+            )
+            grasp_root2.translate(
+                (-0.5 * draw_thickness, -0.5 * draw_thickness, -0.5 * draw_length)
+            )
+            grasp_root2.translate((0, 0, -1.25 * draw_length))
+
+            grasp_visual = grasp_finger1 + grasp_finger2 + grasp_root1 + grasp_root2
+            grasp_visual.paint_uniform_color([0.8, 0.2, 0.8])
+            grasp_visual.transform(grasp_poses[i].to("cpu").numpy())
+            visual_mesh_list.append(grasp_visual)
+        o3d.visualization.draw_geometries(
+            visual_mesh_list,
             window_name="Grasp Pose Visualization",
             mesh_show_back_face=True,
         )
