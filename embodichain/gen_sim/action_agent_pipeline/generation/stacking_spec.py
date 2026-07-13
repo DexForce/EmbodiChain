@@ -470,9 +470,9 @@ def _generated_stacking_anchor_xy(
     directions = (
         [0.0, 0.0],
         local_front,
-        local_left,
-        [-local_left[0], -local_left[1]],
         [-local_front[0], -local_front[1]],
+        [-local_left[0], -local_left[1]],
+        local_left,
     )
     obstacle_bounds = []
     for config in object_configs.values():

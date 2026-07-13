@@ -240,15 +240,32 @@ def test_object_anchored_nested_stack_centers_each_inner_container() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("blocked_count", "expected_direction"),
+    [
+        (0, [0.0, 0.0]),
+        (1, [0.0, 1.0]),
+        (2, [0.0, -1.0]),
+        (3, [1.0, 0.0]),
+        (4, [-1.0, 0.0]),
+    ],
+)
 def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
     monkeypatch: pytest.MonkeyPatch,
+    blocked_count: int,
+    expected_direction: list[float],
 ) -> None:
     table = {"uid": "table"}
     obstacle = {"uid": "cup"}
-    bounds_by_uid = {
-        "table": ([-1.0, -1.0], [1.0, 1.0]),
-        "cup": ([0.0, 0.0], [0.0, 0.0]),
-    }
+    offset = stacking_spec._ANCHOR_OFFSET
+    candidate_order = (
+        [0.0, 0.0],
+        [0.0, offset],
+        [0.0, -offset],
+        [offset, 0.0],
+        [-offset, 0.0],
+    )
+    blocked = candidate_order[:blocked_count]
     monkeypatch.setattr(
         stacking_spec,
         "_mesh_config_world_xy_center",
@@ -262,7 +279,16 @@ def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
     monkeypatch.setattr(
         stacking_spec,
         "_mesh_config_world_xy_bounds",
-        lambda config: bounds_by_uid[config["uid"]],
+        lambda config: (
+            ([-1.0, -1.0], [1.0, 1.0])
+            if config["uid"] == "table"
+            else ([0.0, 0.0], [0.0, 0.0])
+        ),
+    )
+    monkeypatch.setattr(
+        stacking_spec,
+        "_xy_point_to_bounds_distance",
+        lambda point, bounds: (0.0 if point in blocked else float("inf")),
     )
 
     anchor = stacking_spec._generated_stacking_anchor_xy(
@@ -271,7 +297,8 @@ def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
         object_configs={"table": table, "cup": obstacle},
     )
 
-    assert anchor == pytest.approx([0.0, stacking_spec._ANCHOR_OFFSET])
+    expected_anchor = [offset * component for component in expected_direction]
+    assert anchor == pytest.approx(expected_anchor)
 
 
 def test_stacking_anchor_treats_task_objects_as_obstacles(
@@ -322,6 +349,7 @@ def test_stacking_anchor_rejects_all_candidates_without_clearance(
 ) -> None:
     table = {"uid": "table"}
     obstacle = {"uid": "cube"}
+    obstacle_half_extent = stacking_spec._ANCHOR_OFFSET
     monkeypatch.setattr(
         stacking_spec,
         "_mesh_config_world_xy_center",
@@ -338,7 +366,10 @@ def test_stacking_anchor_rejects_all_candidates_without_clearance(
         lambda config: (
             ([-1.0, -1.0], [1.0, 1.0])
             if config["uid"] == "table"
-            else ([-0.01, -0.01], [0.01, 0.01])
+            else (
+                [-obstacle_half_extent, -obstacle_half_extent],
+                [obstacle_half_extent, obstacle_half_extent],
+            )
         ),
     )
 
