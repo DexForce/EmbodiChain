@@ -312,6 +312,7 @@ class SimulationManager:
         # Global texture cache for material creation or randomization.
         # The structure is keys to the loaded texture data. The keys represent the texture group.
         self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
+        self._texture_ref_cache: Dict[str, List[object]] = dict()
 
         self._init_sim_resources()
 
@@ -801,6 +802,14 @@ class SimulationManager:
             logger.log_warning(f"Texture {key} not found in global texture cache.")
             return None
         return self._texture_cache[key]
+
+    def get_texture_ref_cache(self, key: str) -> List[object] | None:
+        """Return cached GPU texture references for a canonical source key."""
+        return self._texture_ref_cache.get(key)
+
+    def set_texture_ref_cache(self, key: str, refs: List[object]) -> None:
+        """Cache GPU texture references for a canonical source key."""
+        self._texture_ref_cache[key] = refs
 
     def get_asset(
         self, uid: str
@@ -2769,6 +2778,7 @@ class SimulationManager:
 
         self._visual_materials.clear()
         self._texture_cache.clear()
+        self._texture_ref_cache.clear()
         self._arenas.clear()
         self._markers.clear()
         self._gizmos.clear()

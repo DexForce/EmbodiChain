@@ -186,8 +186,7 @@ def test_generated_color_branch_sets_texture_without_unbound_error():
 
 def test_texture_references_are_created_once(monkeypatch):
     functor = object.__new__(randomize_visual_material)
-    source_images = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
-    functor.textures = source_images
+    functor.textures = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
     functor.texture_refs = [object()]
     calls = []
 
@@ -198,3 +197,8 @@ def test_texture_references_are_created_once(monkeypatch):
     functor._randomize_mat_inst(Instance(), {}, random_texture_prob=1.0, texture_idx=0)
     functor._randomize_mat_inst(Instance(), {}, random_texture_prob=1.0, texture_idx=0)
     assert calls == [functor.texture_refs[0], functor.texture_refs[0]]
+
+
+@pytest.mark.skip(reason="Requires renderer-backed four-environment fixture")
+def test_four_environment_visual_texture_integration():
+    pass
