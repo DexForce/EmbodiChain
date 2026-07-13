@@ -64,6 +64,75 @@ __all__ = [
 ]
 
 
+def _normalize_env_ids(env_ids, num_envs: int) -> list[int]:
+    """Normalize environment selectors to validated integer IDs."""
+    if num_envs < 0:
+        raise ValueError("num_envs must be non-negative")
+    if env_ids is None or (isinstance(env_ids, slice) and env_ids == slice(None)):
+        ids = list(range(num_envs))
+    elif isinstance(env_ids, slice):
+        ids = list(range(num_envs))[env_ids]
+    elif isinstance(env_ids, torch.Tensor):
+        ids = env_ids.detach().cpu().reshape(-1).tolist()
+    else:
+        try:
+            ids = list(env_ids)
+        except TypeError:
+            ids = [env_ids]
+    normalized: list[int] = []
+    for env_id in ids:
+        if isinstance(env_id, bool) or int(env_id) != env_id:
+            raise ValueError(f"Invalid environment ID: {env_id!r}")
+        env_id = int(env_id)
+        if env_id < 0 or env_id >= num_envs:
+            raise ValueError(f"Environment ID {env_id} is outside [0, {num_envs})")
+        normalized.append(env_id)
+    return normalized
+
+
+def _select_texture_indices(
+    mode: str,
+    target_ids: list[int],
+    num_textures: int,
+    texture_indices: dict[int, int] | None,
+) -> list[int]:
+    """Select one texture index for each target environment."""
+    if num_textures <= 0:
+        raise ValueError("At least one texture source is required")
+    count = len(target_ids)
+    if mode == "random":
+        return torch.randint(num_textures, (count,)).tolist()
+    if mode == "without_replacement":
+        if count > num_textures:
+            raise ValueError(
+                "without_replacement requires at least one texture per target"
+            )
+        return torch.randperm(num_textures)[:count].tolist()
+    if mode == "cycle":
+        return [index % num_textures for index in range(count)]
+    if mode == "fixed":
+        if texture_indices is None:
+            raise ValueError("fixed texture selection requires texture_indices")
+        selected: list[int] = []
+        for env_id in target_ids:
+            if env_id not in texture_indices:
+                raise ValueError(
+                    f"Missing fixed texture index for environment {env_id}"
+                )
+            index = texture_indices[env_id]
+            if (
+                isinstance(index, bool)
+                or int(index) != index
+                or not 0 <= int(index) < num_textures
+            ):
+                raise ValueError(
+                    f"Invalid texture index for environment {env_id}: {index!r}"
+                )
+            selected.append(int(index))
+        return selected
+    raise ValueError(f"Unknown texture selection mode: {mode!r}")
+
+
 def set_rigid_object_visual_material(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
