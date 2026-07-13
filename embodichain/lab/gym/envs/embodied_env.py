@@ -566,6 +566,9 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)
 
+        if self.cfg.dataset:
+            self.dataset_manager.reset(env_ids=env_ids)
+
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
         """Infer whether the rollout buffer is expert recording or RL training data."""
         if {
