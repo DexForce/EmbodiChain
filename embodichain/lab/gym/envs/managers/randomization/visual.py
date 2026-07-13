@@ -615,11 +615,15 @@ class randomize_visual_material(Functor):
 
                 env.sim.set_texture_cache(texture_key, self.textures)
 
+        self._fallback_to_new = bool(cfg.params.get("fallback_to_new", False))
+        self._new_mode = False  # set True in Task 5 for the reuse path
+        self._init_legacy(env)
+
+    def _init_legacy(self, env: EmbodiedEnv) -> None:
+        """Legacy init: create a new material and replace the object's material."""
         if self.entity_cfg.uid == "default_plane":
             pass
-
         else:
-            # TODO: we may need to get the default material instance from the asset itself.
             mat: VisualMaterial = env.sim.create_visual_material(
                 cfg=VisualMaterialCfg(
                     base_color=[1.0, 1.0, 1.0, 1.0],
@@ -635,7 +639,6 @@ class randomize_visual_material(Functor):
                 self.entity_cfg.link_names = link_names
                 self.entity.set_visual_material(mat, link_names=link_names)
 
-        # ground plane only has one instance.
         self._mat_insts = None
         if self.entity_cfg.uid == "default_plane":
             self._mat_insts = env.sim.get_visual_material(
@@ -711,11 +714,37 @@ class randomize_visual_material(Functor):
         metallic_range: tuple[float, float] | None = None,
         roughness_range: tuple[float, float] | None = None,
         ior_range: tuple[float, float] | None = None,
+        fallback_to_new: bool = False,
+        p_original: float | None = None,
+        p_library: float | None = None,
+        p_solid: float | None = None,
+        shared: bool | None = None,
     ):
+        return self._call_legacy(
+            env,
+            env_ids,
+            random_texture_prob,
+            base_color_range,
+            metallic_range,
+            roughness_range,
+            ior_range,
+            clean=True,
+        )
+
+    def _call_legacy(
+        self,
+        env: EmbodiedEnv,
+        env_ids: Union[torch.Tensor, None],
+        random_texture_prob: float,
+        base_color_range,
+        metallic_range,
+        roughness_range,
+        ior_range,
+        clean: bool,
+    ) -> None:
         if self.entity_cfg.uid != "default_plane" and self.entity is None:
             return
 
-        # resolve environment ids
         if env_ids is None:
             env_ids = torch.arange(env.num_envs, device="cpu")
         else:
@@ -729,13 +758,11 @@ class randomize_visual_material(Functor):
             base_color = sample_uniform(
                 lower=torch.tensor(base_color_range[0], dtype=torch.float32),
                 upper=torch.tensor(base_color_range[1], dtype=torch.float32),
-                size=(len(env_ids), 3),  # RGB
+                size=(len(env_ids), 3),
             )
-            # append alpha channel
             alpha_channel = torch.ones((len(env_ids), 1), dtype=torch.float32)
             base_color = torch.cat((base_color, alpha_channel), dim=1)
             randomize_plan["base_color"] = base_color
-
         if metallic_range:
             metallic = sample_uniform(
                 lower=torch.tensor(metallic_range[0], dtype=torch.float32),
@@ -743,7 +770,6 @@ class randomize_visual_material(Functor):
                 size=(len(env_ids), 1),
             )
             randomize_plan["metallic"] = metallic
-
         if roughness_range:
             roughness = sample_uniform(
                 lower=torch.tensor(roughness_range[0], dtype=torch.float32),
@@ -751,7 +777,6 @@ class randomize_visual_material(Functor):
                 size=(len(env_ids), 1),
             )
             randomize_plan["roughness"] = roughness
-
         if ior_range:
             ior = sample_uniform(
                 lower=torch.tensor(ior_range[0], dtype=torch.float32),
@@ -768,14 +793,14 @@ class randomize_visual_material(Functor):
                 random_texture_prob=random_texture_prob,
                 idx=0,
             )
+            if clean:
+                env.sim.get_env().clean_materials()
             return
 
         for i, data in enumerate(self._mat_insts):
             if isinstance(self.entity, RigidObject):
-                # For RigidObject, data is the material instance directly
                 mat: VisualMaterialInst = data
             elif isinstance(self.entity, Articulation):
-                # For Articulation, data is the key-value pair of link name and material instance
                 mat: Dict[str, VisualMaterialInst] = data
 
             if isinstance(self.entity, RigidObject):
@@ -794,8 +819,8 @@ class randomize_visual_material(Functor):
                         idx=i,
                     )
 
-        env = self._env.sim.get_env()
-        env.clean_materials()
+        if clean:
+            env.sim.get_env().clean_materials()
 
 
 class randomize_indirect_lighting(Functor):
