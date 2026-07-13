@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import base64
@@ -34,6 +35,7 @@ from embodichain.gen_sim.action_agent_pipeline.cli import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation import (
     action_agent_config as action_agent_config_generation,
+    arrangement_spec as arrangement_spec_generation,
     relative_geometry,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
@@ -59,6 +61,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _rotate_camera_extrinsics_around_target_z,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _ArrangementLineSpec,
+    _ArrangementLineStepSpec,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
 )
@@ -85,12 +89,21 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _apply_arrangement_task_response,
+    _arrangement_arm_side_for_motion,
+    _arrangement_direction_cost,
+    _arrangement_initial_occupancy_schedule,
     _arrangement_line_slot_positions,
+    _arrangement_plan_execution,
+    _arrangement_slot_allowed_sides,
+    _arrangement_transport_height,
+    _ArrangementFootprint,
+    _validated_arrangement_order,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _is_stacking_task_description,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
+    _make_arrangement_success_spec,
     _validate_success_uids,
 )
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
@@ -3144,6 +3157,405 @@ def test_arrangement_line_slot_positions_are_centered_left_to_right() -> None:
     ]
 
 
+def test_arrangement_direction_prefers_fewer_cross_side_moves() -> None:
+    steps = (
+        _ArrangementLineStepSpec(
+            source_uid="bottle",
+            runtime_uid="bottle",
+            slot_index=0,
+            active_side="left",
+            target_xy=[0.0, 0.0],
+            release_position=[0.0, 0.0, 0.0],
+            high_position=[0.0, 0.0, 0.0],
+            category="bottle",
+        ),
+        _ArrangementLineStepSpec(
+            source_uid="cube",
+            runtime_uid="cube",
+            slot_index=1,
+            active_side="right",
+            target_xy=[0.0, 0.0],
+            release_position=[0.0, 0.0, 0.0],
+            high_position=[0.0, 0.0, 0.0],
+            category="cube",
+        ),
+    )
+    rigid_configs = {
+        "bottle": {"init_pos": [0.0, 0.25, 0.5]},
+        "cube": {"init_pos": [0.0, -0.25, 0.5]},
+    }
+
+    natural = _arrangement_direction_cost(
+        steps,
+        [[0.0, 0.20], [0.0, -0.20]],
+        rigid_configs=rigid_configs,
+    )
+    crossed = _arrangement_direction_cost(
+        steps,
+        [[0.0, -0.20], [0.0, 0.20]],
+        rigid_configs=rigid_configs,
+    )
+
+    assert natural < crossed
+
+
+@pytest.mark.parametrize(
+    ("slot_count", "expected"),
+    [
+        (4, [("right",), ("left", "right"), ("left", "right"), ("left",)]),
+        (
+            5,
+            [
+                ("right",),
+                ("left", "right"),
+                ("left", "right"),
+                ("left", "right"),
+                ("left",),
+            ],
+        ),
+    ],
+)
+def test_arrangement_slot_permissions_follow_world_y_order(
+    slot_count: int,
+    expected: list[tuple[str, ...]],
+) -> None:
+    assert [
+        tuple(sorted(_arrangement_slot_allowed_sides(index, slot_count)))
+        for index in range(slot_count)
+    ] == expected
+
+
+def test_arrangement_arm_assignment_uses_pickup_side_outside_center() -> None:
+    assert _arrangement_arm_side_for_motion([0.0, 0.20, 0.5], [0.0, -0.20]) == "left"
+    assert _arrangement_arm_side_for_motion([0.0, -0.20, 0.5], [0.0, 0.20]) == "right"
+    assert _arrangement_arm_side_for_motion([0.0, 0.01, 0.5], [0.0, 0.20]) == "left"
+
+
+def test_arrangement_transport_height_respects_both_clearances() -> None:
+    assert _arrangement_transport_height(initial_z=0.50, release_z=0.55) == 0.80
+    assert _arrangement_transport_height(initial_z=0.30, release_z=0.60) == 0.65
+
+
+def test_arrangement_ignores_unrequested_llm_size_order() -> None:
+    assert _validated_arrangement_order(
+        "size",
+        "ascending",
+        task_description="把桌面上的罐头摆成一排",
+    ) == ("explicit", "given")
+
+
+def test_arrangement_ignores_color_order_when_colors_are_only_descriptive() -> None:
+    assert _validated_arrangement_order(
+        "color",
+        "given",
+        task_description="把红色瓶子和蓝色方块按照瓶子、方块类别摆成一排",
+    ) == ("explicit", "given")
+
+
+@pytest.mark.parametrize(
+    ("order_by", "direction", "task_description"),
+    [
+        ("size", "descending", "把方块从大到小摆成一排"),
+        ("color", "given", "把方块按照红、绿、蓝的顺序摆成一排"),
+        ("color", "given", "arrange the cubes in red green blue order"),
+    ],
+)
+def test_arrangement_keeps_explicit_intra_category_order(
+    order_by: str,
+    direction: str,
+    task_description: str,
+) -> None:
+    assert _validated_arrangement_order(
+        order_by,
+        direction,
+        task_description=task_description,
+    ) == (order_by, direction)
+
+
+def test_arrangement_initial_occupancy_schedules_blocker_first() -> None:
+    steps = (
+        _arrangement_test_step("object_a", target_y=0.0, active_side="right"),
+        _arrangement_test_step("object_b", target_y=0.3, active_side="left"),
+    )
+    rigid_configs = {
+        "object_a": {"init_pos": [0.0, -0.3, 0.5]},
+        "object_b": {"init_pos": [0.0, 0.0, 0.5]},
+    }
+    footprints = {
+        "object_a": _ArrangementFootprint(
+            xy_bounds=([-0.05, -0.35], [0.05, -0.25]), half_extent=0.05
+        ),
+        "object_b": _ArrangementFootprint(
+            xy_bounds=([-0.05, -0.05], [0.05, 0.05]), half_extent=0.05
+        ),
+    }
+
+    result = _arrangement_initial_occupancy_schedule(
+        steps,
+        rigid_configs=rigid_configs,
+        footprint_by_uid=footprints,
+        clearance=0.025,
+    )
+
+    assert result is not None
+    execution_steps, blockers, _ = result
+    assert [step.runtime_uid for step in execution_steps] == ["object_b", "object_a"]
+    assert blockers == {"object_a": ("object_b",), "object_b": ()}
+
+
+def test_arrangement_initial_occupancy_rejects_cycle() -> None:
+    steps = (
+        _arrangement_test_step("object_a", target_y=0.2, active_side="left"),
+        _arrangement_test_step("object_b", target_y=-0.2, active_side="right"),
+    )
+    rigid_configs = {
+        "object_a": {"init_pos": [0.0, -0.2, 0.5]},
+        "object_b": {"init_pos": [0.0, 0.2, 0.5]},
+    }
+    footprints = {
+        "object_a": _ArrangementFootprint(
+            xy_bounds=([-0.05, -0.25], [0.05, -0.15]), half_extent=0.05
+        ),
+        "object_b": _ArrangementFootprint(
+            xy_bounds=([-0.05, 0.15], [0.05, 0.25]), half_extent=0.05
+        ),
+    }
+
+    assert (
+        _arrangement_initial_occupancy_schedule(
+            steps,
+            rigid_configs=rigid_configs,
+            footprint_by_uid=footprints,
+            clearance=0.025,
+        )
+        is None
+    )
+
+
+def test_arrangement_ready_queue_prefers_same_arm_after_first_move() -> None:
+    steps = (
+        _arrangement_test_step("a_left", target_y=0.25, active_side="left"),
+        _arrangement_test_step("b_left", target_y=0.15, active_side="left"),
+        _arrangement_test_step("c_right", target_y=-0.05, active_side="right"),
+    )
+    rigid_configs = {
+        "a_left": {"init_pos": [0.0, 0.25, 0.5]},
+        "b_left": {"init_pos": [0.0, 0.35, 0.5]},
+        "c_right": {"init_pos": [0.0, -0.06, 0.5]},
+    }
+    footprints = {
+        uid: _ArrangementFootprint(
+            xy_bounds=(
+                [-0.02, pos["init_pos"][1] - 0.02],
+                [0.02, pos["init_pos"][1] + 0.02],
+            ),
+            half_extent=0.02,
+        )
+        for uid, pos in rigid_configs.items()
+    }
+
+    result = _arrangement_initial_occupancy_schedule(
+        steps,
+        rigid_configs=rigid_configs,
+        footprint_by_uid=footprints,
+        clearance=0.0,
+    )
+
+    assert result is not None
+    execution_steps, _, _ = result
+    assert [step.runtime_uid for step in execution_steps] == [
+        "a_left",
+        "b_left",
+        "c_right",
+    ]
+
+
+def test_arrangement_plan_matches_same_category_instances_to_their_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    steps = (
+        _arrangement_test_step("bottle_right", category="bottle"),
+        _arrangement_test_step("bottle_left", category="bottle"),
+    )
+    spec = _ArrangementLineSpec(
+        table_source_uid="table",
+        task_description="arrange bottles",
+        task_prompt_summary="arrange bottles",
+        basic_background_notes="",
+        order_by="explicit",
+        order_direction="given",
+        axis="world_y",
+        anchor="table_center",
+        steps=steps,
+        line_origin_xy=[0.0, 0.0],
+        spacing=0.4,
+        layout_clearance=0.025,
+        category_order=("bottle",),
+    )
+    rigid_configs = {
+        "bottle_right": {"init_pos": [0.0, -0.2, 0.5]},
+        "bottle_left": {"init_pos": [0.0, 0.2, 0.5]},
+    }
+    objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid=uid,
+            source_role="rigid_object",
+            config=rigid_configs[uid],
+        )
+        for uid in rigid_configs
+    ]
+    footprints = {
+        "bottle_right": _ArrangementFootprint(
+            xy_bounds=([-0.05, -0.25], [0.05, -0.15]), half_extent=0.04
+        ),
+        "bottle_left": _ArrangementFootprint(
+            xy_bounds=([-0.05, 0.15], [0.05, 0.25]), half_extent=0.04
+        ),
+    }
+    monkeypatch.setattr(
+        arrangement_spec_generation,
+        "_arrangement_object_footprint",
+        lambda obj, scene_dir: footprints[obj.source_uid],
+    )
+
+    result = _arrangement_plan_execution(
+        spec,
+        [[0.0, -0.2], [0.0, 0.2]],
+        generated_objects=objects,
+        rigid_configs=rigid_configs,
+    )
+
+    assert result is not None
+    _, execution_steps = result
+    assert all(not step.cross_side for step in execution_steps)
+    assert {step.runtime_uid: step.target_xy[1] for step in execution_steps} == {
+        "bottle_right": -0.2,
+        "bottle_left": 0.2,
+    }
+
+
+def test_arrangement_plan_rejects_opposite_arm_for_outer_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    steps = (
+        _arrangement_test_step("left_a", category="a"),
+        _arrangement_test_step("left_b", category="b"),
+        _arrangement_test_step("right_b", category="b"),
+        _arrangement_test_step("right_a", category="a"),
+    )
+    spec = _ArrangementLineSpec(
+        table_source_uid="table",
+        task_description="arrange",
+        task_prompt_summary="arrange",
+        basic_background_notes="",
+        order_by="explicit",
+        order_direction="given",
+        axis="world_y",
+        anchor="table_center",
+        steps=steps,
+        line_origin_xy=[0.0, 0.0],
+        spacing=0.2,
+        layout_clearance=0.0,
+        category_order=("a", "b"),
+    )
+    rigid_configs = {
+        "left_a": {"init_pos": [0.2, 0.4, 0.5]},
+        "left_b": {"init_pos": [0.2, 0.2, 0.5]},
+        "right_b": {"init_pos": [0.2, -0.2, 0.5]},
+        "right_a": {"init_pos": [0.2, -0.4, 0.5]},
+    }
+    objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid=uid,
+            source_role="rigid_object",
+            config=config,
+        )
+        for uid, config in rigid_configs.items()
+    ]
+    monkeypatch.setattr(
+        arrangement_spec_generation,
+        "_arrangement_object_footprint",
+        lambda obj, scene_dir: _ArrangementFootprint(
+            xy_bounds=(
+                [0.18, rigid_configs[obj.source_uid]["init_pos"][1] - 0.01],
+                [0.22, rigid_configs[obj.source_uid]["init_pos"][1] + 0.01],
+            ),
+            half_extent=0.01,
+        ),
+    )
+
+    result = _arrangement_plan_execution(
+        spec,
+        [[0.0, -0.3], [0.0, -0.1], [0.0, 0.1], [0.0, 0.3]],
+        generated_objects=objects,
+        rigid_configs=rigid_configs,
+    )
+
+    assert result is not None
+    _, execution_steps = result
+    by_slot = {step.slot_index: step for step in execution_steps}
+    assert by_slot[0].active_side == "right"
+    assert by_slot[0].target_xy[1] == -0.3
+    assert by_slot[3].active_side == "left"
+    assert by_slot[3].target_xy[1] == 0.3
+
+
+def test_arrangement_success_uses_semantic_slots_not_execution_order() -> None:
+    slot_one = replace(
+        _arrangement_test_step("slot_one", target_y=0.2),
+        slot_index=1,
+        execution_index=0,
+    )
+    slot_zero = replace(
+        _arrangement_test_step("slot_zero", target_y=-0.2),
+        slot_index=0,
+        execution_index=1,
+    )
+    spec = _ArrangementLineSpec(
+        table_source_uid="table",
+        task_description="arrange",
+        task_prompt_summary="arrange",
+        basic_background_notes="",
+        order_by="explicit",
+        order_direction="given",
+        axis="world_y",
+        anchor="table_center",
+        steps=(slot_one, slot_zero),
+        line_origin_xy=[0.0, 0.0],
+        spacing=0.4,
+        layout_clearance=0.025,
+        category_order=("object",),
+        spatial_direction="right_to_left",
+    )
+
+    success = _make_arrangement_success_spec(spec)
+    ordered = next(
+        term for term in success["terms"] if term["type"] == "objects_ordered"
+    )
+
+    assert ordered["objects"] == ["slot_zero", "slot_one"]
+    assert ordered["direction"] == "ascending"
+
+
+def _arrangement_test_step(
+    uid: str,
+    *,
+    target_y: float = 0.0,
+    active_side: str = "right",
+    category: str = "object",
+) -> _ArrangementLineStepSpec:
+    return _ArrangementLineStepSpec(
+        source_uid=uid,
+        runtime_uid=uid,
+        slot_index=0,
+        active_side=active_side,
+        target_xy=[0.0, target_y],
+        release_position=[0.0, target_y, 0.5],
+        high_position=[0.0, target_y, 0.8],
+        category=category,
+    )
+
+
 def test_arrangement_line_slot_positions_support_world_x() -> None:
     slots = _arrangement_line_slot_positions(
         anchor_xy=[0.10, -0.20],
@@ -3287,11 +3699,17 @@ def test_arrangement_keeps_axis_alignment_for_elongated_objects(
         "axis_align",
         "axis_align",
     ]
-    assert [step.orientation_axis for step in spec.steps] == ["x", "x"]
-    assert all(
-        step.high_position[2] - step.release_position[2] == pytest.approx(0.15)
-        for step in spec.steps
-    )
+    assert [step.orientation_axis for step in spec.steps] == ["y", "y"]
+    for step in spec.steps:
+        initial_z = next(
+            obj.config["init_pos"][2]
+            for obj in rigid_objects
+            if obj.source_uid == step.source_uid
+        )
+        assert step.high_position[2] == pytest.approx(
+            max(initial_z + 0.30, step.release_position[2] + 0.15),
+            abs=1e-6,
+        )
 
 
 def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
@@ -3318,21 +3736,29 @@ def test_demo153_like_cans_keep_row_near_table_center_for_reachability(
 
     assert spec.line_origin_xy == pytest.approx([0.0, 0.0])
     assert [step.orientation_goal for step in spec.steps] == [
-        "preserve",
-        "preserve",
-        "preserve",
-        "preserve",
+        "axis_align",
+        "axis_align",
+        "axis_align",
+        "axis_align",
     ]
     assert [step.orientation_axis for step in spec.steps] == [
-        "none",
-        "none",
-        "none",
-        "none",
+        "y",
+        "y",
+        "y",
+        "y",
     ]
     assert len({round(step.target_xy[0], 6) for step in spec.steps}) == 1
     assert spec.steps[0].target_xy[0] == pytest.approx(0.0)
     for step in spec.steps:
-        assert step.high_position[2] - step.release_position[2] == pytest.approx(0.10)
+        initial_z = next(
+            obj.config["init_pos"][2]
+            for obj in rigid_objects
+            if obj.source_uid == step.source_uid
+        )
+        assert step.high_position[2] == pytest.approx(
+            max(initial_z + 0.30, step.release_position[2] + 0.15),
+            abs=1e-6,
+        )
 
 
 def test_arrangement_static_unmoved_object_blocks_line_layout(
@@ -3359,6 +3785,7 @@ def test_arrangement_static_unmoved_object_blocks_line_layout(
             rigid_objects=rigid_objects,
             scene_dir=tmp_path,
             task_description="将桌面上的罐头摆成一排",
+            check_static_obstacles=True,
         )
 
 
