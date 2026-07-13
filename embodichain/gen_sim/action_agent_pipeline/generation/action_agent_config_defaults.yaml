@@ -108,7 +108,7 @@ physics:
     extra_rigid: 1
 
 grasp:
-  affordance_stabilization_steps: 250
+  affordance_stabilization_steps: 10
   antipodal_n_sample: 10000
   antipodal_max_angle_degrees: 15.0
   max_open_length: 0.11
