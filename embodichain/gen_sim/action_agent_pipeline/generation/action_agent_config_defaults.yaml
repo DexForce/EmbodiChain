@@ -58,8 +58,10 @@ arrangement:
   pickup_min_lift_height: 0.225
 
 stacking:
-  staging_z_delta: 0.10
-  clearance: 0.02
+  staging_z_delta: 0.05
+  clearance: 0.05
+  anchor_offset: 0.1
+  anchor_clearance_radius: 0.1
 
 action:
   basket_left_release_offset_y: 0.04
@@ -89,16 +91,17 @@ physics:
   convex_hulls:
     target: 12
     container: 32
+    moved: 32
     extra_rigid: 1
 
 grasp:
   antipodal_n_sample: 10000
   antipodal_max_angle_degrees: 15.0
-  max_open_length: 0.14
-  min_open_length: 0.003
+  max_open_length: 0.11
+  min_open_length: 0.02
   finger_length: 0.13
   point_sample_dense: 0.012
-  max_deviation_angle_degrees: 15.0
+  max_deviation_angle_degrees: 20.0
   viser_port: 11801
   coordinated_rod_like_inset_fractions: [0.18, 0.22, 0.26, 0.30]
   coordinated_container_like_inset_fractions: [0.08, 0.12, 0.20, 0.28]

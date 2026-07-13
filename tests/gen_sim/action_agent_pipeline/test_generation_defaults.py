@@ -27,6 +27,12 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_TASK_NAME,
     generation_defaults_section,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
+    _moved_rigid_object_max_convex_hull_num,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _SceneObject,
+)
 
 
 def test_public_generation_defaults_are_loaded_from_yaml() -> None:
@@ -53,8 +59,22 @@ def test_generation_defaults_expose_required_hyperparameter_sections() -> None:
     }
 
     assert expected_sections <= ACTION_AGENT_CONFIG_DEFAULTS.keys()
+    assert "moved" in ACTION_AGENT_CONFIG_DEFAULTS["physics"]["convex_hulls"]
 
 
 def test_generation_defaults_section_rejects_unknown_section() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         generation_defaults_section("missing")
+
+
+def test_moved_convex_hull_limit_is_loaded_from_defaults() -> None:
+    moved_default = ACTION_AGENT_CONFIG_DEFAULTS["physics"]["convex_hulls"]["moved"]
+    moved_object = _SceneObject("cube", "rigid_object", {})
+    source_limited_object = _SceneObject(
+        "cup",
+        "rigid_object",
+        {"max_convex_hull_num": 4},
+    )
+
+    assert _moved_rigid_object_max_convex_hull_num(moved_object) == moved_default
+    assert _moved_rigid_object_max_convex_hull_num(source_limited_object) == 4

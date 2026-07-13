@@ -69,6 +69,7 @@ __all__ = [
     "_make_relative_events_config",
     "_make_relative_rigid_object_config",
     "_make_target_object_config",
+    "_moved_rigid_object_max_convex_hull_num",
     "_relative_rigid_object_max_convex_hull_num",
     "_relative_static_background_max_convex_hull_num",
     "_source_body_scale",
@@ -82,6 +83,7 @@ _CONVEX_HULL_DEFAULTS = _PHYSICS_DEFAULTS["convex_hulls"]
 _BACKGROUND_MAX_CONVEX_HULL_NUM = int(_BACKGROUND_DEFAULTS["max_convex_hull_num"])
 _TARGET_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["target"])
 _CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
+_MOVED_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["moved"])
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["extra_rigid"])
 _ROBOT_VIEW_LABEL = "robot_view"
 _AUDIENCE_VIEW_LABEL = "audience_view"
@@ -857,6 +859,11 @@ def _role_limited_max_convex_hull_num(
     if source_max_convex_hull_num is None:
         return role_max_convex_hull_num
     return max(1, min(int(source_max_convex_hull_num), role_max_convex_hull_num))
+
+
+def _moved_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
+    """Return the configured convex-decomposition limit for a moved object."""
+    return _role_limited_max_convex_hull_num(obj, _MOVED_MAX_CONVEX_HULL_NUM)
 
 
 def _relative_rigid_object_max_convex_hull_num(

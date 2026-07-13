@@ -3797,11 +3797,11 @@ def _build_object_semantics(
                     _GRASP_RUNTIME_DEFAULTS.antipodal_max_angle,
                 ),
                 "max_length": runtime_kwargs.get(
-                    "grasp_max_open_length",
+                    "max_open_length",
                     _GRASP_RUNTIME_DEFAULTS.max_open_length,
                 ),
                 "min_length": runtime_kwargs.get(
-                    "grasp_min_open_length",
+                    "min_open_length",
                     _GRASP_RUNTIME_DEFAULTS.min_open_length,
                 ),
             },

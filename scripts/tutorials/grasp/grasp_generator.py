@@ -227,7 +227,7 @@ if __name__ == "__main__":
         antipodal_sampler_cfg=AntipodalSamplerCfg(
             n_sample=10000, max_length=0.088, min_length=0.003
         ),
-        is_partial_annotate=False,
+        is_partial_annotate=True,
         is_filter_ground_collision=True,
         n_top_grasps=30,
     )

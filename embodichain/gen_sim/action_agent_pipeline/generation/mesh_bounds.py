@@ -41,6 +41,7 @@ __all__ = [
     "_mesh_config_has_distinct_xy_axis",
     "_mesh_config_world_xy_bounds",
     "_mesh_config_world_xy_center",
+    "_mesh_config_world_xy_axes",
     "_mesh_config_world_xy_extents",
     "_mesh_config_world_z_bounds",
     "_mesh_config_world_zmax",
@@ -198,6 +199,22 @@ def _mesh_config_world_xy_center(
         round((float(mins[0]) + float(maxs[0])) / 2.0, 6),
         round((float(mins[1]) + float(maxs[1])) / 2.0, 6),
     ]
+
+
+def _mesh_config_world_xy_axes(
+    obj_config: Mapping[str, Any],
+) -> tuple[list[float], list[float]]:
+    """Return normalized local X/Y axes projected into the world XY plane."""
+    matrix = _mesh_config_transform_matrix(obj_config)
+    axes = []
+    for column in (0, 1):
+        x_value = float(matrix[0][column])
+        y_value = float(matrix[1][column])
+        norm = math.hypot(x_value, y_value)
+        if norm <= 1e-9:
+            raise ValueError("Object local XY axis has no world XY projection.")
+        axes.append([x_value / norm, y_value / norm])
+    return axes[0], axes[1]
 
 
 def _mesh_config_world_xy_bounds(
