@@ -119,27 +119,28 @@ class MoveHeldObject(AtomicAction):
         arm_dot_angle = torch.abs(
             torch.acos(torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0))
         )
-        rota_axis = torch.tensor(
-            [1, 0, 0], device=self.device, dtype=torch.float32
-        ).repeat(self.n_envs, 1)
-        rota_axis_angle = (
-            (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1) * rota_axis * revert_flag
-        )
-        rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
-        target_rotatio_a = torch.bmm(template_rotation_a, rota_offset)
-        target_rotatio_b = torch.bmm(template_rotation_b, rota_offset)
-        relative_rotation_a = get_relative_rotation(
-            target_rotatio_a, end_arm_xpos[:, :3, :3]
-        )
-        relative_rotation_b = get_relative_rotation(
-            target_rotatio_b, end_arm_xpos[:, :3, :3]
-        )
-        target_rotation = torch.where(
-            relative_rotation_a < relative_rotation_b,
-            target_rotatio_a,
-            target_rotatio_b,
-        )
-        move_eef_xpos[:, :3, :3] = target_rotation
+        if (arm_dot_angle > torch.pi * 0.5).any():
+            rota_axis = torch.tensor(
+                [1, 0, 0], device=self.device, dtype=torch.float32
+            ).repeat(self.n_envs, 1)
+            rota_axis_angle = (
+                (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1) * rota_axis * revert_flag
+            )
+            rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
+            target_rotatio_a = torch.bmm(template_rotation_a, rota_offset)
+            target_rotatio_b = torch.bmm(template_rotation_b, rota_offset)
+            relative_rotation_a = get_relative_rotation(
+                target_rotatio_a, end_arm_xpos[:, :3, :3]
+            )
+            relative_rotation_b = get_relative_rotation(
+                target_rotatio_b, end_arm_xpos[:, :3, :3]
+            )
+            target_rotation = torch.where(
+                relative_rotation_a < relative_rotation_b,
+                target_rotatio_a,
+                target_rotatio_b,
+            )
+            move_eef_xpos[:, :3, :3] = target_rotation
 
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
