@@ -35,14 +35,14 @@
 
 **Files:**
 - Modify: `embodichain/lab/sim/material.py:243-271` (`set_base_color_texture`)
-- Test: `tests/lab/sim/test_material_texture_obj.py`
+- Test: `tests/sim/test_material_texture_obj.py`
 
 **Interfaces:**
 - Produces: `VisualMaterialInst.set_base_color_texture(texture_path=None, texture_data=None, texture_obj=None)` — when `texture_obj` (a dexsim `Texture`) is given, calls `MaterialInst.set_base_color_map(texture_obj)` directly with no `create_color_texture` upload.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/lab/sim/test_material_texture_obj.py`:
+Create `tests/sim/test_material_texture_obj.py`:
 
 ```python
 # ----------------------------------------------------------------------------
@@ -92,7 +92,7 @@ def test_texture_obj_takes_priority_over_data():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/lab/sim/test_material_texture_obj.py -v`
+Run: `pytest tests/sim/test_material_texture_obj.py -v`
 Expected: FAIL with `TypeError: set_base_color_texture() got an unexpected keyword argument 'texture_obj'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -142,14 +142,14 @@ Replace the body of `set_base_color_texture` in `embodichain/lab/sim/material.py
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/lab/sim/test_material_texture_obj.py -v`
+Run: `pytest tests/sim/test_material_texture_obj.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-black embodichain/lab/sim/material.py tests/lab/sim/test_material_texture_obj.py
-git add embodichain/lab/sim/material.py tests/lab/sim/test_material_texture_obj.py
+black embodichain/lab/sim/material.py tests/sim/test_material_texture_obj.py
+git add embodichain/lab/sim/material.py tests/sim/test_material_texture_obj.py
 git commit -m "feat(material): accept pre-created Texture in set_base_color_texture"
 ```
 
@@ -161,7 +161,7 @@ git commit -m "feat(material): accept pre-created Texture in set_base_color_text
 - Modify: `embodichain/lab/sim/material.py` (add `ReuseSegmentState`, import `dataclass`)
 - Modify: `embodichain/lab/sim/__init__.py` (export `ReuseSegmentState`)
 - Modify: `embodichain/lab/sim/objects/rigid_object.py` (add two methods)
-- Test: `tests/lab/sim/objects/test_rigid_object_reuse_material.py`
+- Test: `tests/sim/objects/test_rigid_object_reuse_material.py`
 
 **Interfaces:**
 - Produces:
@@ -171,7 +171,7 @@ git commit -m "feat(material): accept pre-created Texture in set_base_color_text
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/lab/sim/objects/test_rigid_object_reuse_material.py` (with Apache header). Use the "subclass and skip `__init__`" mock trick:
+Create `tests/sim/objects/test_rigid_object_reuse_material.py` (with Apache header). Use the "subclass and skip `__init__`" mock trick:
 
 ```python
 from __future__ import annotations
@@ -252,7 +252,7 @@ def test_apply_render_material_inst_swaps_on_render_body():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/lab/sim/objects/test_rigid_object_reuse_material.py -v`
+Run: `pytest tests/sim/objects/test_rigid_object_reuse_material.py -v`
 Expected: FAIL with `ImportError: cannot import name 'ReuseSegmentState'`
 
 - [ ] **Step 3: Add `ReuseSegmentState` to `material.py`**
@@ -380,14 +380,14 @@ In `embodichain/lab/sim/objects/rigid_object.py`, ensure `ReuseSegmentState` is 
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `pytest tests/lab/sim/objects/test_rigid_object_reuse_material.py -v`
+Run: `pytest tests/sim/objects/test_rigid_object_reuse_material.py -v`
 Expected: PASS (4 tests)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-black embodichain/lab/sim/material.py embodichain/lab/sim/__init__.py embodichain/lab/sim/objects/rigid_object.py tests/lab/sim/objects/test_rigid_object_reuse_material.py
-git add embodichain/lab/sim/material.py embodichain/lab/sim/__init__.py embodichain/lab/sim/objects/rigid_object.py tests/lab/sim/objects/test_rigid_object_reuse_material.py
+black embodichain/lab/sim/material.py embodichain/lab/sim/__init__.py embodichain/lab/sim/objects/rigid_object.py tests/sim/objects/test_rigid_object_reuse_material.py
+git add embodichain/lab/sim/material.py embodichain/lab/sim/__init__.py embodichain/lab/sim/objects/rigid_object.py tests/sim/objects/test_rigid_object_reuse_material.py
 git commit -m "feat(rigid_object): add get_existing_visual_material and apply_render_material_inst"
 ```
 
@@ -397,7 +397,7 @@ git commit -m "feat(rigid_object): add get_existing_visual_material and apply_re
 
 **Files:**
 - Modify: `embodichain/lab/sim/objects/articulation.py` (add two methods)
-- Test: `tests/lab/sim/objects/test_articulation_reuse_material.py`
+- Test: `tests/sim/objects/test_articulation_reuse_material.py`
 
 **Interfaces:**
 - Produces:
@@ -406,7 +406,7 @@ git commit -m "feat(rigid_object): add get_existing_visual_material and apply_re
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/lab/sim/objects/test_articulation_reuse_material.py` (Apache header):
+Create `tests/sim/objects/test_articulation_reuse_material.py` (Apache header):
 
 ```python
 from __future__ import annotations
@@ -482,7 +482,7 @@ def test_apply_render_material_inst_swaps_on_link_render_body():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/lab/sim/objects/test_articulation_reuse_material.py -v`
+Run: `pytest tests/sim/objects/test_articulation_reuse_material.py -v`
 Expected: FAIL with `AttributeError: ... has no attribute 'get_existing_visual_material'`
 
 - [ ] **Step 3: Add the two methods to `Articulation`**
@@ -571,14 +571,14 @@ In `embodichain/lab/sim/objects/articulation.py`, update the import that brings 
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/lab/sim/objects/test_articulation_reuse_material.py -v`
+Run: `pytest tests/sim/objects/test_articulation_reuse_material.py -v`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-black embodichain/lab/sim/objects/articulation.py tests/lab/sim/objects/test_articulation_reuse_material.py
-git add embodichain/lab/sim/objects/articulation.py tests/lab/sim/objects/test_articulation_reuse_material.py
+black embodichain/lab/sim/objects/articulation.py tests/sim/objects/test_articulation_reuse_material.py
+git add embodichain/lab/sim/objects/articulation.py tests/sim/objects/test_articulation_reuse_material.py
 git commit -m "feat(articulation): add get_existing_visual_material and apply_render_material_inst"
 ```
 
@@ -1470,7 +1470,7 @@ def test_multi_segment_all_swapped():
 
 - [ ] **Step 2: Run the full test suite for the feature**
 
-Run: `pytest tests/gym/envs/managers/test_randomize_visual_material.py tests/lab/sim/objects/test_rigid_object_reuse_material.py tests/lab/sim/objects/test_articulation_reuse_material.py tests/lab/sim/test_material_texture_obj.py -v`
+Run: `pytest tests/gym/envs/managers/test_randomize_visual_material.py tests/sim/objects/test_rigid_object_reuse_material.py tests/sim/objects/test_articulation_reuse_material.py tests/sim/test_material_texture_obj.py -v`
 Expected: PASS (all tests across all tasks).
 
 - [ ] **Step 3: Run pre-commit check**
