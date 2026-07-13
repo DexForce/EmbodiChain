@@ -19,6 +19,15 @@ task:
   max_episodes: 1
   max_episode_steps: 1000
 
+visual_material:
+  table:
+    entity_uid: table
+    material_uid: action_agent_table_wood
+    base_color: [1.0, 1.0, 1.0, 1.0]
+    base_color_texture: templates/textures/table_wood.jpg
+    metallic: 0.0
+    roughness: 0.7
+
 geometry:
   target_body_scale: 1.3
   surface_release_clearance: 0.075
