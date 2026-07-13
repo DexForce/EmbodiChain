@@ -32,7 +32,7 @@ from dexsim.types import (
 )
 from dexsim.engine import CudaArray, PhysicsScene
 
-from embodichain.lab.sim import VisualMaterialInst, VisualMaterial
+from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
@@ -2227,6 +2227,86 @@ class Articulation(BatchEntity):
                 }
                 result.append(mat_dict)
         return result
+
+    def get_existing_visual_material(
+        self,
+        env_ids: Sequence[int] | None = None,
+        link_names: List[str] | None = None,
+        shared: bool = False,
+    ) -> List[Dict[str, List[ReuseSegmentState]]]:
+        """Build reuse state from materials dexsim parsed onto each link's render body.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are used.
+            link_names: Links to include. If None, all links are used.
+            shared: If True, build state for the first env only.
+
+        Returns:
+            Per-env dict mapping link name to per-segment :obj:`ReuseSegmentState`.
+
+        Raises:
+            ValueError: If a link/segment has no material or no retrievable template.
+        """
+        if shared:
+            local_env_ids = [self._all_indices[0]]
+        else:
+            local_env_ids = self._all_indices if env_ids is None else list(env_ids)
+        link_names = self.link_names if link_names is None else list(link_names)
+
+        per_env: List[Dict[str, List[ReuseSegmentState]]] = []
+        for env_idx in local_env_ids:
+            link_map: Dict[str, List[ReuseSegmentState]] = {}
+            for link_name in link_names:
+                render_body = self._entities[env_idx].get_render_body(link_name)
+                if render_body is None:
+                    raise ValueError(
+                        f"Articulation '{self.uid}' link '{link_name}' has no render body."
+                    )
+                mesh_count = render_body.get_mesh_count()
+                segments: List[ReuseSegmentState] = []
+                for mesh_id in range(mesh_count):
+                    original_inst = render_body.get_material(mesh_id)
+                    if original_inst is None:
+                        raise ValueError(
+                            f"Articulation '{self.uid}' link '{link_name}' segment {mesh_id} has no material."
+                        )
+                    template = original_inst.get_template()
+                    if template is None:
+                        raise ValueError(
+                            f"Articulation '{self.uid}' link '{link_name}' material has no template."
+                        )
+                    working_name = f"{self.uid}_reuse_{env_idx}_{link_name}_{mesh_id}"
+                    template.create_inst(working_name)
+                    working_inst = VisualMaterialInst(working_name, template)
+                    segments.append(
+                        ReuseSegmentState(
+                            mesh_id=mesh_id,
+                            original_inst=original_inst,
+                            working_inst=working_inst,
+                        )
+                    )
+                link_map[link_name] = segments
+            per_env.append(link_map)
+        return per_env
+
+    def apply_render_material_inst(
+        self,
+        env_idx: int,
+        mat_inst,
+        link_name: str,
+        mesh_id: int = 0,
+    ) -> None:
+        """Swap a dexsim MaterialInst onto a link's render-body segment for the given env.
+
+        Args:
+            env_idx: Environment index.
+            mat_inst: dexsim ``MaterialInst`` to attach.
+            link_name: Link whose render body receives the material.
+            mesh_id: Render-body segment index.
+        """
+        self._entities[env_idx].get_render_body(link_name).set_material(
+            mesh_id, mat_inst
+        )
 
     def set_physical_visible(
         self,
