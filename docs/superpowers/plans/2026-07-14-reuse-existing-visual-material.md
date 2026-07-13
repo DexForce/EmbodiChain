@@ -620,7 +620,8 @@ class _MockRigidObject(RigidObject):
 
     def __init__(self, uid="obj", num_envs=2):
         self.uid = uid
-        self.num_instances = num_envs
+        # NOTE: do not set self.num_instances - it is a read-only BatchEntity
+        # property that returns len(self._entities).
         self._all_indices = list(range(num_envs))
         self._entities = [MagicMock(name=f"mesh{i}") for i in range(num_envs)]
         self._visual_material = [None] * num_envs
@@ -1267,7 +1268,7 @@ def _art_asset(uid="art"):
             self._entities = []
             self._all_indices = [0, 1]
             self.uid = uid
-            self.num_instances = 2
+            # num_instances is a read-only property; not set here.
             self.is_shared_visual_material = False
             self.link_names = ["link0"]
 
