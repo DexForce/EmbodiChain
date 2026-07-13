@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -30,6 +32,7 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
     VisualMaterial,
     VisualMaterialInst,
+    ReuseSegmentState,
     BatchEntity,
 )
 from embodichain.utils.math import convert_quat
@@ -889,6 +892,76 @@ class RigidObject(BatchEntity):
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return [self._visual_material[i] for i in ids]
+
+    def get_existing_visual_material(
+        self,
+        env_ids: Sequence[int] | None = None,
+        shared: bool = False,
+    ) -> List[List[ReuseSegmentState]]:
+        """Build reuse state from the material dexsim parsed onto each env's render body.
+
+        For each env (first only if ``shared``) and each render-body segment, the existing
+        ``MaterialInst`` is captured as an immutable original and a working instance is
+        created from its template and wrapped as ``VisualMaterialInst``.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are used.
+            shared: If True, build state for the first env only (caller applies it to all).
+
+        Returns:
+            Per-env list of per-segment :obj:`ReuseSegmentState` (length 1 if ``shared``).
+
+        Raises:
+            ValueError: If a segment has no material or no retrievable template.
+        """
+        if shared:
+            local_env_ids = [self._all_indices[0]]
+        else:
+            local_env_ids = self._all_indices if env_ids is None else list(env_ids)
+
+        per_env: List[List[ReuseSegmentState]] = []
+        for env_idx in local_env_ids:
+            render_body = self._entities[env_idx].get_render_body()
+            mesh_count = render_body.get_mesh_count()
+            segments: List[ReuseSegmentState] = []
+            for mesh_id in range(mesh_count):
+                original_inst = render_body.get_material(mesh_id)
+                if original_inst is None:
+                    raise ValueError(
+                        f"RigidObject '{self.uid}' env {env_idx} segment {mesh_id} has no material."
+                    )
+                template = original_inst.get_template()
+                if template is None:
+                    raise ValueError(
+                        f"RigidObject '{self.uid}' segment {mesh_id} material has no template."
+                    )
+                working_name = f"{self.uid}_reuse_{env_idx}_{mesh_id}"
+                template.create_inst(working_name)
+                working_inst = VisualMaterialInst(working_name, template)
+                segments.append(
+                    ReuseSegmentState(
+                        mesh_id=mesh_id,
+                        original_inst=original_inst,
+                        working_inst=working_inst,
+                    )
+                )
+            per_env.append(segments)
+        return per_env
+
+    def apply_render_material_inst(
+        self,
+        env_idx: int,
+        mat_inst,
+        mesh_id: int = 0,
+    ) -> None:
+        """Swap a dexsim MaterialInst onto a render-body segment for the given env.
+
+        Args:
+            env_idx: Environment index.
+            mat_inst: dexsim ``MaterialInst`` to attach.
+            mesh_id: Render-body segment index.
+        """
+        self._entities[env_idx].get_render_body().set_material(mesh_id, mat_inst)
 
     def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
         """Share material instances for the rigid object.

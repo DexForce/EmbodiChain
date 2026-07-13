@@ -21,11 +21,19 @@ import torch
 import dexsim
 import numpy as np
 
+from dataclasses import dataclass
 from typing import Dict, Union
 from functools import cached_property
 
 from dexsim.engine import MaterialInst, Material
 from embodichain.utils import configclass, logger
+
+__all__ = [
+    "VisualMaterialCfg",
+    "VisualMaterial",
+    "VisualMaterialInst",
+    "ReuseSegmentState",
+]
 
 
 @configclass
@@ -407,3 +415,23 @@ class VisualMaterialInst:
         self.ior = ior
         inst = self._mat.get_inst(self.uid)
         inst.set_pbr_param("ior", ior)
+
+
+@dataclass
+class ReuseSegmentState:
+    """Reuse state for one render-body segment of a parsed object.
+
+    Used by ``randomize_visual_material`` to randomize on top of the material dexsim
+    parsed from the asset, instead of creating a new material.
+
+    Attributes:
+        mesh_id: The render-body segment index.
+        original_inst: The dexsim ``MaterialInst`` parsed from the asset. Kept immutable
+            and swapped back onto the render body for the "original" tier.
+        working_inst: A ``VisualMaterialInst`` created from ``original_inst``'s template;
+            mutated in place for the "library"/"solid" tiers.
+    """
+
+    mesh_id: int
+    original_inst: MaterialInst
+    working_inst: VisualMaterialInst

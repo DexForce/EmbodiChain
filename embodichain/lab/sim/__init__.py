@@ -14,10 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .material import VisualMaterialCfg, VisualMaterial, VisualMaterialInst
+from __future__ import annotations
+
+from .material import (
+    VisualMaterialCfg,
+    VisualMaterial,
+    VisualMaterialInst,
+    ReuseSegmentState,
+)
 from .common import BatchEntity
 
 from .sim_manager import *
+
+__all__ = [
+    "VisualMaterialCfg",
+    "VisualMaterial",
+    "VisualMaterialInst",
+    "ReuseSegmentState",
+    "BatchEntity",
+]
+
 
 from .utility.dynamic_pybind import init_dynamic_pybind
 
