@@ -23,6 +23,7 @@ from embodichain.lab.sim.material import VisualMaterialInst
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     _normalize_env_ids,
     _select_texture_indices,
+    randomize_visual_material,
 )
 
 
@@ -67,3 +68,31 @@ def test_texture_selection_modes():
     assert _select_texture_indices("fixed", [3, 1], 4, {1: 2, 3: 0}) == [0, 2]
     with pytest.raises(ValueError, match="without_replacement"):
         _select_texture_indices("without_replacement", [0, 1], 1, None)
+
+
+def test_partial_reset_targets_only_selected_environment_ids():
+    assert _normalize_env_ids(torch.tensor([1, 3]), 4) == [1, 3]
+
+
+def test_fixed_assignment_maps_global_environment_ids():
+    assert _select_texture_indices("fixed", [1, 3], 4, {1: 2, 3: 0}) == [2, 0]
+
+
+def test_per_instance_selection_is_reused_for_all_links():
+    selected = _select_texture_indices("fixed", [2], 4, {2: 3})
+    assert selected == [3]
+    assert selected[0] == selected[0]
+
+
+def test_generated_color_branch_sets_texture_without_unbound_error():
+    functor = object.__new__(randomize_visual_material)
+    functor.textures = []
+    class Instance:
+        texture = None
+
+        def set_base_color_texture(self, texture_data=None, **kwargs):
+            self.texture = texture_data
+
+    instance = Instance()
+    functor._randomize_mat_inst(instance, {}, random_texture_prob=1.0)
+    assert instance.texture is not None

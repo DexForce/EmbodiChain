@@ -16,6 +16,13 @@ Implemented targeted visual material randomization in `visual.py`.
 - `pytest tests/gym/envs/managers/test_randomize_visual_material.py -q`: 3 passed.
 - `pytest tests/gym/envs/managers -q`: 154 passed, 2 skipped.
 
+## Coverage additions
+
+Added focused tests for partial-reset ID isolation, fixed global-ID assignment, per-instance selection reuse, and the generated-color fallback branch.
+
+- `pytest tests/gym/envs/managers/test_randomize_visual_material.py -q`: 7 passed.
+- `pytest tests/gym/envs/managers -q`: 158 passed, 2 skipped.
+
 Commit: `c251b690`
 
 Concern: the existing `per_material` scope retains one texture selection per environment for articulation links; per-instance behavior is explicitly supported and tested by the task requirements.
