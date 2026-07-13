@@ -37,3 +37,14 @@ Verification after fixes:
 
 - `pytest tests/gym/envs/managers/test_randomize_visual_material.py -q`: 3 passed.
 - `pytest tests/gym/envs/managers -q`: 154 passed, 2 skipped.
+
+## Test Repair
+
+Reworked the integration fakes to match the functor's keyword-based helper API
+and isolated class-symbol monkeypatches per test. The tests now exercise actual
+`__call__` dispatch for partial resets, fixed global environment mappings,
+articulation per-instance link reuse, and the nonempty texture branch.
+
+Final verification:
+
+- `pytest tests/gym/envs/managers/test_randomize_visual_material.py -q`: 7 passed.
