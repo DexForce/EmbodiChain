@@ -685,11 +685,12 @@ class randomize_visual_material(Functor):
 
         # Preload textures (currently only base color textures are supported)
         self.textures = []
+        self.texture_refs = []
         texture_path = get_data_path(cfg.params.get("texture_path", None))
         if texture_path is not None:
             from embodichain.utils.utility import read_all_folder_images
 
-            texture_key = os.path.basename(texture_path)
+            texture_key = str(Path(texture_path).resolve())
             # check if the texture group is already loaded in the global texture cache
             if texture_key in env.sim.get_texture_cache():
                 logger.log_info(
@@ -713,6 +714,18 @@ class randomize_visual_material(Functor):
                         self.textures[i] = data
 
                 env.sim.set_texture_cache(texture_key, self.textures)
+
+            # Create GPU texture handles once and reuse them on every reset.
+            # Passing image data to VisualMaterialInst would recreate a handle
+            # for each assignment, which is both expensive and invalidates the
+            # intended per-instance reuse semantics.
+            import dexsim
+
+            dex_env = dexsim.default_world().get_env()
+            self.texture_refs = [
+                dex_env.create_color_texture(image.cpu().numpy(), has_alpha=True)
+                for image in self.textures
+            ]
 
         if self.entity_cfg.uid == "default_plane":
             pass
@@ -776,7 +789,11 @@ class randomize_visual_material(Functor):
         if len(self.textures) > 0:
             if texture_idx is None:
                 texture_idx = torch.randint(0, len(self.textures), (1,)).item()
-            mat_inst.set_base_color_texture(texture_data=self.textures[texture_idx])
+            texture_refs = getattr(self, "texture_refs", None)
+            if texture_refs:
+                mat_inst.set_base_color_texture(texture_ref=texture_refs[texture_idx])
+            else:
+                mat_inst.set_base_color_texture(texture_data=self.textures[texture_idx])
 
     def _randomize_mat_inst(
         self,

@@ -182,3 +182,19 @@ def test_generated_color_branch_sets_texture_without_unbound_error():
     instance = Instance()
     functor._randomize_mat_inst(instance, {}, random_texture_prob=1.0)
     assert instance.texture is texture
+
+
+def test_texture_references_are_created_once(monkeypatch):
+    functor = object.__new__(randomize_visual_material)
+    source_images = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
+    functor.textures = source_images
+    functor.texture_refs = [object()]
+    calls = []
+
+    class Instance:
+        def set_base_color_texture(self, *, texture_ref=None, **kwargs):
+            calls.append(texture_ref)
+
+    functor._randomize_mat_inst(Instance(), {}, random_texture_prob=1.0, texture_idx=0)
+    functor._randomize_mat_inst(Instance(), {}, random_texture_prob=1.0, texture_idx=0)
+    assert calls == [functor.texture_refs[0], functor.texture_refs[0]]
