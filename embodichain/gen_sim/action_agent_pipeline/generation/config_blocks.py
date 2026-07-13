@@ -78,9 +78,11 @@ __all__ = [
 ]
 
 _PHYSICS_DEFAULTS = generation_defaults_section("physics")
+_VISUAL_MATERIAL_DEFAULTS = generation_defaults_section("visual_material")
 _BACKGROUND_DEFAULTS = _PHYSICS_DEFAULTS["background"]
 _RIGID_OBJECT_DEFAULTS = _PHYSICS_DEFAULTS["rigid_object"]
 _CONVEX_HULL_DEFAULTS = _PHYSICS_DEFAULTS["convex_hulls"]
+_TABLE_VISUAL_MATERIAL_DEFAULTS = _VISUAL_MATERIAL_DEFAULTS["table"]
 _BACKGROUND_MAX_CONVEX_HULL_NUM = int(_BACKGROUND_DEFAULTS["max_convex_hull_num"])
 _TARGET_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["target"])
 _CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
@@ -127,11 +129,10 @@ def _make_relative_events_config(
     task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
-        **_record_camera_event_configs(
+        **_make_common_events_config(
             sensor_config_factory,
             task_name=task_name,
         ),
-        "validation_cameras": _validation_cameras_event_config(),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
             "mode": "reset",
@@ -172,11 +173,10 @@ def _make_arrangement_events_config(
     task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
-        **_record_camera_event_configs(
+        **_make_common_events_config(
             sensor_config_factory,
             task_name=task_name,
         ),
-        "validation_cameras": _validation_cameras_event_config(),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
             "mode": "reset",
@@ -217,11 +217,10 @@ def _make_events_config(
     task_name: str = DEFAULT_TASK_NAME,
 ) -> dict[str, Any]:
     return {
-        **_record_camera_event_configs(
+        **_make_common_events_config(
             sensor_config_factory,
             task_name=task_name,
         ),
-        "validation_cameras": _validation_cameras_event_config(),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
             "mode": "reset",
@@ -251,6 +250,49 @@ def _make_events_config(
                 ],
                 "registration": "affordance_datas",
                 "sim_update": True,
+            },
+        },
+    }
+
+
+def _make_common_events_config(
+    sensor_config_factory: Callable[[], list[dict[str, Any]]],
+    *,
+    task_name: str,
+) -> dict[str, Any]:
+    return {
+        **_record_camera_event_configs(
+            sensor_config_factory,
+            task_name=task_name,
+        ),
+        "validation_cameras": _validation_cameras_event_config(),
+        "set_table_visual_material": _table_visual_material_event_config(),
+    }
+
+
+def _table_visual_material_event_config() -> dict[str, Any]:
+    texture_path = (
+        Path(__file__).resolve().parent
+        / str(_TABLE_VISUAL_MATERIAL_DEFAULTS["base_color_texture"])
+    ).resolve()
+    if not texture_path.is_file():
+        raise FileNotFoundError(
+            f"Table visual material texture not found: {texture_path}"
+        )
+
+    return {
+        "func": "set_rigid_object_visual_material",
+        "mode": "startup",
+        "params": {
+            "entity_cfg": {
+                "uid": str(_TABLE_VISUAL_MATERIAL_DEFAULTS["entity_uid"]),
+            },
+            "mat_cfg": {
+                "uid": str(_TABLE_VISUAL_MATERIAL_DEFAULTS["material_uid"]),
+                "base_color": list(_TABLE_VISUAL_MATERIAL_DEFAULTS["base_color"]),
+                "base_color_texture": str(texture_path),
+                "metallic": float(_TABLE_VISUAL_MATERIAL_DEFAULTS["metallic"]),
+                "roughness": float(_TABLE_VISUAL_MATERIAL_DEFAULTS["roughness"]),
             },
         },
     }

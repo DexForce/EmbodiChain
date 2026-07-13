@@ -62,6 +62,15 @@ def test_generation_defaults_expose_required_hyperparameter_sections() -> None:
     assert "moved" in ACTION_AGENT_CONFIG_DEFAULTS["physics"]["convex_hulls"]
 
 
+def test_affordance_stabilization_steps_is_a_non_negative_integer() -> None:
+    stabilization_steps = ACTION_AGENT_CONFIG_DEFAULTS["grasp"][
+        "affordance_stabilization_steps"
+    ]
+
+    assert isinstance(stabilization_steps, int)
+    assert stabilization_steps >= 0
+
+
 def test_generation_defaults_section_rejects_unknown_section() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         generation_defaults_section("missing")

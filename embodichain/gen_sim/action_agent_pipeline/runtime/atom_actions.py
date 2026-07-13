@@ -3941,7 +3941,12 @@ def _stabilize_affordance_object(
     if not bool(runtime_kwargs.get("stabilize_affordance_object", True)):
         return
 
-    update_steps = int(runtime_kwargs.get("affordance_stabilization_steps", 5))
+    update_steps = int(
+        runtime_kwargs.get(
+            "affordance_stabilization_steps",
+            _GRASP_DEFAULTS["affordance_stabilization_steps"],
+        )
+    )
     if update_steps > 0 and hasattr(env.sim, "update"):
         env.sim.update(step=update_steps)
     if hasattr(target_obj, "clear_dynamics"):
