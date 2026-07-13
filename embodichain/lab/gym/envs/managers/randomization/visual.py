@@ -80,34 +80,6 @@ def _get_texture_refs(sim, key: str, textures: list[torch.Tensor]) -> list[objec
     return refs
 
 
-def _select_texture_indices(
-    mode: str,
-    env_ids: Sequence[int],
-    count: int,
-    texture_indices: Mapping[int, int] | None = None,
-) -> list[int]:
-    if mode == "random":
-        return torch.randint(0, count, (len(env_ids),)).tolist() if count else []
-    if mode == "without_replacement":
-        if len(env_ids) > count:
-            raise ValueError(
-                "without_replacement requires at least one texture per environment"
-            )
-        return torch.randperm(count)[: len(env_ids)].tolist()
-    if mode == "fixed":
-        if texture_indices is None or any(i not in texture_indices for i in env_ids):
-            raise ValueError(
-                "fixed texture_sampling requires texture_indices for every environment"
-            )
-        result = [int(texture_indices[i]) for i in env_ids]
-        if any(i < 0 or i >= count for i in result):
-            raise ValueError("texture index out of range")
-        return result
-    if mode == "cycle":
-        return [i % count for i in env_ids] if count else []
-    raise ValueError(f"Unsupported texture_sampling mode: {mode}")
-
-
 def _normalize_env_ids(
     env_ids: torch.Tensor | Sequence[int] | slice | None, num_envs: int
 ) -> list[int]:
