@@ -187,14 +187,27 @@ def test_generated_color_branch_sets_texture_without_unbound_error():
 
 def test_texture_references_are_created_once(monkeypatch):
     calls = []
+
     class Sim:
-        def __init__(self): self.cache = {}
-        def get_texture_ref_cache(self, key): return self.cache.get(key)
-        def set_texture_ref_cache(self, key, refs): self.cache[key] = refs
+        def __init__(self):
+            self.cache = {}
+
+        def get_texture_ref_cache(self, key):
+            return self.cache.get(key)
+
+        def set_texture_ref_cache(self, key, refs):
+            self.cache[key] = refs
+
     class E:
-        def create_color_texture(self, image, has_alpha): calls.append(image); return object()
-    monkeypatch.setattr(dexsim, "default_world", lambda: type("W", (), {"get_env": lambda s: E()})())
-    sim = Sim(); images = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
+        def create_color_texture(self, image, has_alpha):
+            calls.append(image)
+            return object()
+
+    monkeypatch.setattr(
+        dexsim, "default_world", lambda: type("W", (), {"get_env": lambda s: E()})()
+    )
+    sim = Sim()
+    images = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
     visual._get_texture_refs(sim, "/tmp/source", images)
     visual._get_texture_refs(sim, "/tmp/source", images)
     assert len(calls) == 1

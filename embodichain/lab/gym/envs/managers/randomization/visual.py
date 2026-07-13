@@ -72,7 +72,10 @@ def _get_texture_refs(sim, key: str, textures: list[torch.Tensor]) -> list[objec
     import dexsim
 
     dex_env = dexsim.default_world().get_env()
-    refs = [dex_env.create_color_texture(image.cpu().numpy(), has_alpha=True) for image in textures]
+    refs = [
+        dex_env.create_color_texture(image.cpu().numpy(), has_alpha=True)
+        for image in textures
+    ]
     sim.set_texture_ref_cache(key, refs)
     return refs
 
