@@ -529,14 +529,26 @@ class EmbodiedEnv(BaseEnv):
         if save_data and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
 
-                # Filter to only save successful episodes
-                successful_env_ids = self.episode_success_status | self._task_success
+                # Dataset collection normally keeps successful episodes only.
+                # Recorders can opt in to retain failed episodes for debugging,
+                # visualization, or failure-analysis datasets.
+                if self.dataset_manager.save_failed_episodes:
+                    save_env_ids = torch.as_tensor(
+                        env_ids_to_process,
+                        device=self.device,
+                        dtype=torch.long,
+                    )
+                else:
+                    successful_env_ids = (
+                        self.episode_success_status | self._task_success
+                    )
+                    save_env_ids = successful_env_ids.nonzero(as_tuple=True)[0]
 
-                if successful_env_ids.any():
+                if len(save_env_ids) > 0:
 
                     self.dataset_manager.apply(
                         mode="save",
-                        env_ids=successful_env_ids.nonzero(as_tuple=True)[0],
+                        env_ids=save_env_ids,
                     )
 
         # Save recorded camera data before resetting
