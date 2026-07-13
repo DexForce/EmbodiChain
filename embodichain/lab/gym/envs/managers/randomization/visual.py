@@ -956,8 +956,16 @@ class randomize_visual_material(Functor):
             working_inst.set_ior(plan["ior"][idx].item())
 
     def _apply_tier_articulation(self, reuse_i, env_idx, tier, plan) -> None:
-        # Implemented in Task 6.
-        raise NotImplementedError
+        link_map = self._reuse_state[reuse_i]  # Dict[str, List[ReuseSegmentState]]
+        for link_name, segments in link_map.items():
+            for seg in segments:
+                if tier == 0:  # original
+                    self._apply_inst(env_idx, seg.original_inst, seg.mesh_id, link_name)
+                    continue
+                if tier == 1 and self._library_textures:  # library
+                    self._apply_library_tier(seg, env_idx, plan, reuse_i, link_name)
+                else:  # solid
+                    self._apply_solid_tier(seg, env_idx, link_name)
 
     def _call_legacy(
         self,

@@ -201,3 +201,69 @@ def test_new_call_no_clean_and_swaps():
 
     env.sim.env.clean_materials.assert_not_called()
     obj.apply_render_material_inst.assert_called()
+
+
+def _art_asset(uid="art"):
+    from embodichain.lab.sim.objects.articulation import Articulation
+
+    class _A(Articulation):
+        def __init__(self):
+            self._entities = []
+            self._all_indices = [0, 1]
+            self.uid = uid
+            # num_instances is a read-only property; not set here.
+            self.is_shared_visual_material = False
+            self.link_names = ["link0"]
+
+    obj = _A()
+    seg = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
+    obj.get_existing_visual_material = MagicMock(return_value=[{"link0": [seg]}])
+    obj.apply_render_material_inst = MagicMock()
+    return obj
+
+
+def test_new_init_articulation_reuse():
+    env = _MockEnv()
+    env.sim.asset_uids = ["art"]
+    env.sim.get_asset = lambda uid: _art_asset()
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="art", link_names=["link0"])})
+
+    functor = randomize_visual_material(cfg, env)
+
+    assert functor._new_mode is True
+    assert env.sim.created_visual_materials == []
+
+
+def test_new_call_articulation_swaps_per_link():
+    env = _MockEnv()
+    art = _art_asset()
+    env.sim.get_asset = lambda uid: art
+    env.sim.asset_uids = ["art"]
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="art", link_names=["link0"])})
+    functor = randomize_visual_material(cfg, env)
+    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+
+    functor(
+        env,
+        torch.arange(env.num_envs),
+        entity_cfg=SceneEntityCfg(uid="art", link_names=["link0"]),
+    )
+
+    art.apply_render_material_inst.assert_called()
+
+
+def test_plane_new_mode_uses_legacy_inplace_no_clean():
+    env = _MockEnv()
+    env.sim.asset_uids = ["default_plane"]
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="default_plane")})
+
+    functor = randomize_visual_material(cfg, env)
+    assert functor._new_mode is False  # plane never uses swap path
+
+    env.sim.env.clean_materials.reset_mock()
+    functor(
+        env,
+        torch.arange(env.num_envs),
+        entity_cfg=SceneEntityCfg(uid="default_plane"),
+    )
+    env.sim.env.clean_materials.assert_not_called()
