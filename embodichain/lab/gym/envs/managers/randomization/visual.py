@@ -800,7 +800,7 @@ class randomize_visual_material(Functor):
             random_color_texture = (
                 randomize_visual_material.gen_random_base_color_texture(2, 2)
             )
-        mat_inst.set_base_color_texture(texture_data=random_color_texture)
+            mat_inst.set_base_color_texture(texture_data=random_color_texture)
 
     def __call__(
         self,
@@ -816,7 +816,7 @@ class randomize_visual_material(Functor):
         texture_sampling: str = "random",
         texture_indices: Mapping[int, int] | None = None,
         texture_scope: str = "per_material",
-    ):
+    ) -> None:
         if self.entity_cfg.uid != "default_plane" and self.entity is None:
             return
 
@@ -904,7 +904,15 @@ class randomize_visual_material(Functor):
                     plan=randomize_plan,
                     random_texture_prob=random_texture_prob,
                     idx=i,
-                    texture_idx=texture_plan[i] if texture_plan else None,
+                    texture_idx=(
+                        texture_plan[i]
+                        if texture_plan
+                        and (
+                            texture_scope == "per_instance"
+                            or texture_sampling != "random"
+                        )
+                        else None
+                    ),
                 )
             else:
                 for name, mat_inst in mat.items():
@@ -913,7 +921,15 @@ class randomize_visual_material(Functor):
                         plan=randomize_plan,
                         random_texture_prob=random_texture_prob,
                         idx=i,
-                        texture_idx=texture_plan[i] if texture_plan else None,
+                        texture_idx=(
+                            texture_plan[i]
+                            if texture_plan
+                            and (
+                                texture_scope == "per_instance"
+                                or texture_sampling != "random"
+                            )
+                            else None
+                        ),
                     )
 
 
