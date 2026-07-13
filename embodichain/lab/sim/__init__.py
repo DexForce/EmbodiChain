@@ -32,6 +32,12 @@ __all__ = [
     "VisualMaterialInst",
     "ReuseSegmentState",
     "BatchEntity",
+    "SimulationManager",
+    "SimulationManagerCfg",
+    "SIM_CACHE_DIR",
+    "MATERIAL_CACHE_DIR",
+    "CONVEX_DECOMP_DIR",
+    "REACHABLE_XPOS_DIR",
 ]
 
 
