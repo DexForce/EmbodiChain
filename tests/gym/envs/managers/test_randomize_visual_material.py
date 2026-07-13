@@ -267,3 +267,124 @@ def test_plane_new_mode_uses_legacy_inplace_no_clean():
         entity_cfg=SceneEntityCfg(uid="default_plane"),
     )
     env.sim.env.clean_materials.assert_not_called()
+
+
+def test_tier_probs_backward_compat_derivation():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(
+        return_value=[[_seg(0, MagicMock(), MagicMock())]]
+    )
+    cfg = _make_cfg(
+        {"entity_cfg": SceneEntityCfg(uid="obj"), "random_texture_prob": 0.3}
+    )
+    functor = randomize_visual_material(cfg, env)
+
+    # With a non-empty library, backward-compat derivation gives p_library=0.3, p_solid=0.7.
+    functor._library_textures = [MagicMock(name="Texture")]
+    functor._resolve_tier_probs()
+
+    assert functor._p_original == 0.0
+    assert pytest.approx(functor._p_library) == 0.3
+    assert pytest.approx(functor._p_solid) == 0.7
+
+
+def test_tier_probs_explicit_normalize():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(
+        return_value=[[_seg(0, MagicMock(), MagicMock())]]
+    )
+    cfg = _make_cfg(
+        {
+            "entity_cfg": SceneEntityCfg(uid="obj"),
+            "p_original": 1.0,
+            "p_library": 1.0,
+            "p_solid": 2.0,
+        }
+    )
+    functor = randomize_visual_material(cfg, env)
+    functor._library_textures = [MagicMock(name="Texture")]
+    functor._resolve_tier_probs()
+
+    assert pytest.approx(functor._p_original) == 0.25
+    assert pytest.approx(functor._p_library) == 0.25
+    assert pytest.approx(functor._p_solid) == 0.5
+
+
+def test_empty_library_folds_into_solid():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(
+        return_value=[[_seg(0, MagicMock(), MagicMock())]]
+    )
+    cfg = _make_cfg(
+        {
+            "entity_cfg": SceneEntityCfg(uid="obj"),
+            "p_original": 0.0,
+            "p_library": 0.5,
+            "p_solid": 0.5,
+        }
+    )  # no texture_path -> empty library
+
+    functor = randomize_visual_material(cfg, env)
+
+    assert functor._p_library == 0.0
+    assert pytest.approx(functor._p_solid) == 1.0
+
+
+def test_library_textures_cached_across_functors():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(
+        return_value=[[_seg(0, MagicMock(), MagicMock())]]
+    )
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+
+    # Simulate a non-empty texture library and run _build_library_textures directly.
+    fake_tex = torch.zeros((2, 2, 4), dtype=torch.uint8)
+    functor.textures = [fake_tex]
+    functor._texture_key = "texA"
+    functor._build_library_textures(env)
+    assert env.sim.get_env().create_color_texture.call_count == 1
+
+    # A second functor with the same key reuses the cached Textures (no new upload).
+    functor2 = randomize_visual_material(cfg, env)
+    functor2.textures = [fake_tex]
+    functor2._texture_key = "texA"
+    functor2._build_library_textures(env)
+    assert env.sim.get_env().create_color_texture.call_count == 1
+
+
+def test_fallback_to_new_preserves_legacy():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(
+        return_value=[[_seg(0, MagicMock(), MagicMock())]]
+    )
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj"), "fallback_to_new": True})
+
+    functor = randomize_visual_material(cfg, env)
+    assert functor._new_mode is False
+    assert env.sim.created_visual_materials  # legacy created a material
+
+    env.sim.env.clean_materials.reset_mock()
+    functor(env, torch.arange(env.num_envs), entity_cfg=SceneEntityCfg(uid="obj"))
+    env.sim.env.clean_materials.assert_called_once()  # legacy cleans
+
+
+def test_multi_segment_all_swapped():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    segs = [_seg(0, MagicMock(), MagicMock()), _seg(1, MagicMock(), MagicMock())]
+    obj.get_existing_visual_material = MagicMock(return_value=[segs])
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+
+    functor(env, torch.arange(env.num_envs), entity_cfg=SceneEntityCfg(uid="obj"))
+
+    # two segments -> two apply calls; mesh_id is the 3rd positional arg
+    mesh_ids = {call.args[2] for call in obj.apply_render_material_inst.call_args_list}
+    assert mesh_ids == {0, 1}
