@@ -241,14 +241,32 @@ class VisualMaterialInst:
         logger.log_error("Unimplemented: set_emissive_intensity")
 
     def set_base_color_texture(
-        self, texture_path: str = None, texture_data: torch.Tensor | None = None
+        self,
+        texture_path: str = None,
+        texture_data: torch.Tensor | None = None,
+        texture_ref: object | None = None,
     ) -> None:
-        """Set base color texture from file path or texture data.
+        """Set base color texture from a file path, data, or existing texture.
 
         Args:
             texture_path: Path to texture file
             texture_data: Texture data as a torch.Tensor
+            texture_ref: Existing DexSim texture reference to assign directly.
         """
+        if texture_ref is not None and (
+            texture_path is not None or texture_data is not None
+        ):
+            logger.log_warning(
+                "texture_ref provided with texture_path or texture_data. "
+                "Using texture_ref."
+            )
+
+        if texture_ref is not None:
+            self.base_color_texture = texture_ref
+            inst = self._mat.get_inst(self.uid)
+            inst.set_base_color_map(texture_ref)
+            return
+
         if texture_path is not None and texture_data is not None:
             logger.log_warning(
                 "Both texture_path and texture_data are provided. Using texture_path."
