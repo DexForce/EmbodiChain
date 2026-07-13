@@ -22,6 +22,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation import stacking_spec
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
+    _SceneObject,
     _StackingSpec,
     _StackingStepSpec,
 )
@@ -32,6 +33,206 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
     _order_relative_placements_by_dependency,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
+    _make_stacking_success_spec,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
+    _normalize_task_route_response,
+)
+
+
+def test_explicit_stacking_goal_overrides_object_manipulation_route() -> None:
+    route = _normalize_task_route_response(
+        {
+            "route": "object_manipulation",
+            "confidence": 0.8,
+            "reason": "Two relative placements.",
+        },
+        scene_objects=[
+            _scene_object("block_a"),
+            _scene_object("block_b"),
+        ],
+        task_description="把 A 叠放到 B 上",
+    )
+
+    assert route.route == "stacking"
+
+
+def test_negated_stacking_goal_does_not_override_route() -> None:
+    route = _normalize_task_route_response(
+        {
+            "route": "object_manipulation",
+            "confidence": 0.8,
+            "reason": "Keep the objects separate.",
+        },
+        scene_objects=[
+            _scene_object("block_a"),
+            _scene_object("block_b"),
+        ],
+        task_description="不要堆叠 A 和 B，把 A 放到 B 左边",
+    )
+
+    assert route.route == "object_manipulation"
+
+
+def test_existing_stack_description_does_not_override_route() -> None:
+    route = _normalize_task_route_response(
+        {
+            "route": "object_manipulation",
+            "confidence": 0.8,
+            "reason": "Remove one object from the existing stack.",
+        },
+        scene_objects=[
+            _scene_object("block_a"),
+            _scene_object("block_b"),
+        ],
+        task_description="把 A 从已经叠放好的 B 上拿走",
+    )
+
+    assert route.route == "object_manipulation"
+
+
+def test_object_anchored_stack_builds_support_chain(tmp_path) -> None:
+    scene_objects = [
+        _scene_object("table", role="background"),
+        _scene_object("headphones"),
+        _scene_object("paper_cup"),
+        _scene_object("popcorn_bucket"),
+    ]
+
+    spec = stacking_spec._apply_stacking_task_response(
+        response={
+            "objects": ["paper_cup", "headphones"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["paper_cup", "headphones"],
+            "order_by": "explicit",
+            "anchor": {"type": "object", "object": "popcorn_bucket"},
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=scene_objects[1:],
+        scene_dir=tmp_path,
+        task_description="把耳机叠放到纸杯上，再把纸杯叠放到爆米花桶上",
+    )
+
+    assert spec.anchor == "object"
+    assert spec.anchor_source_uid == "popcorn_bucket"
+    assert [step.source_uid for step in spec.steps] == ["paper_cup", "headphones"]
+    assert [step.support_runtime_uid for step in spec.steps] == [
+        spec.anchor_runtime_uid,
+        spec.steps[0].runtime_uid,
+    ]
+
+
+def test_object_anchor_allows_one_moved_stack_layer(tmp_path) -> None:
+    scene_objects = [
+        _scene_object("table", role="background"),
+        _scene_object("block_a"),
+        _scene_object("block_b"),
+    ]
+
+    spec = stacking_spec._apply_stacking_task_response(
+        response={
+            "objects": ["block_a"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["block_a"],
+            "order_by": "explicit",
+            "anchor": {"type": "object", "object": "block_b"},
+        },
+        table_source_uid="table",
+        scene_objects=scene_objects,
+        rigid_objects=scene_objects[1:],
+        scene_dir=tmp_path,
+        task_description="把 A 叠放到 B 上",
+    )
+
+    assert len(spec.steps) == 1
+    assert spec.steps[0].support_runtime_uid == spec.anchor_runtime_uid
+
+
+def test_object_anchored_stack_uses_dynamic_support_targets() -> None:
+    bottom = _stacking_step("paper_cup", 0, support="popcorn_bucket")
+    top = _stacking_step("headphones", 1, support="paper_cup")
+    spec = _stacking_spec(
+        (bottom, top),
+        anchor="object",
+        anchor_source_uid="popcorn_bucket_source",
+        anchor_runtime_uid="popcorn_bucket",
+    )
+
+    graph = make_stacking_task_graph("anchored", spec)
+    place_targets = [
+        (edge["left_arm_action"] or edge["right_arm_action"])["target_object_pose"]
+        for edge in graph["edges"]
+        if (edge["left_arm_action"] or edge["right_arm_action"])["atomic_action_class"]
+        == "Place"
+    ]
+
+    assert [target["obj_name"] for target in place_targets] == [
+        "popcorn_bucket",
+        "paper_cup",
+    ]
+    assert all(target["offset"][:2] == [0.0, 0.0] for target in place_targets)
+    assert all(target["z_policy"] == "surface_release" for target in place_targets)
+
+
+def test_object_anchored_stack_success_uses_direct_supports() -> None:
+    bottom = _stacking_step("paper_cup", 0, support="popcorn_bucket")
+    top = _stacking_step("headphones", 1, support="paper_cup")
+    spec = _stacking_spec(
+        (bottom, top),
+        anchor="object",
+        anchor_source_uid="popcorn_bucket_source",
+        anchor_runtime_uid="popcorn_bucket",
+    )
+
+    success = _make_stacking_success_spec(spec)
+    support_pairs = {
+        (term["object"], term["support"])
+        for term in success["terms"]
+        if term["type"] == "object_on_object"
+    }
+
+    assert support_pairs == {
+        ("paper_cup", "popcorn_bucket"),
+        ("headphones", "paper_cup"),
+    }
+
+
+def test_object_anchored_nested_stack_centers_each_inner_container() -> None:
+    outer = _stacking_step("left_cup", 0, support="popcorn_bucket")
+    inner = _stacking_step("right_cup", 1, support="left_cup")
+    spec = _stacking_spec(
+        (outer, inner),
+        anchor="object",
+        anchor_source_uid="popcorn_bucket_source",
+        anchor_runtime_uid="popcorn_bucket",
+        stack_mode="nested",
+    )
+
+    graph = make_stacking_task_graph("nested", spec)
+    place_targets = [
+        (edge["left_arm_action"] or edge["right_arm_action"])["target_object_pose"]
+        for edge in graph["edges"]
+        if (edge["left_arm_action"] or edge["right_arm_action"])["atomic_action_class"]
+        == "Place"
+    ]
+    success = _make_stacking_success_spec(spec)
+
+    assert [target["obj_name"] for target in place_targets] == [
+        "popcorn_bucket",
+        "left_cup",
+    ]
+    assert all(target["offset"][:2] == [0.0, 0.0] for target in place_targets)
+    assert all("z_policy" not in target for target in place_targets)
+    assert {
+        (term["object"], term["container"])
+        for term in success["terms"]
+        if term["type"] == "object_in_container"
+    } == {
+        ("left_cup", "popcorn_bucket"),
+        ("right_cup", "left_cup"),
+    }
 
 
 def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
@@ -294,4 +495,52 @@ def _relative_spec(
         high_position=primary.high_position,
         orientation_goal=primary.orientation_goal,
         orientation_axis=primary.orientation_axis,
+    )
+
+
+def _scene_object(uid: str, *, role: str = "rigid_object") -> _SceneObject:
+    return _SceneObject(
+        source_uid=uid,
+        source_role=role,
+        config={"uid": uid, "init_pos": [0.0, 0.0, 0.0]},
+    )
+
+
+def _stacking_step(
+    uid: str,
+    layer_index: int,
+    *,
+    support: str | None,
+) -> _StackingStepSpec:
+    return _StackingStepSpec(
+        source_uid=f"{uid}_source",
+        runtime_uid=uid,
+        layer_index=layer_index,
+        active_side="left" if layer_index % 2 == 0 else "right",
+        target_position=[0.0, 0.0, 0.2 + 0.1 * layer_index],
+        high_position=[0.0, 0.0, 0.3 + 0.1 * layer_index],
+        support_runtime_uid=support,
+    )
+
+
+def _stacking_spec(
+    steps: tuple[_StackingStepSpec, ...],
+    *,
+    anchor: str,
+    anchor_source_uid: str | None = None,
+    anchor_runtime_uid: str | None = None,
+    stack_mode: str = "on_top",
+) -> _StackingSpec:
+    return _StackingSpec(
+        table_source_uid="table_source",
+        task_description="stack objects",
+        task_prompt_summary="Stack objects.",
+        basic_background_notes="",
+        stack_mode=stack_mode,
+        order_by="explicit",
+        anchor=anchor,
+        anchor_xy=[0.0, 0.0],
+        steps=steps,
+        anchor_source_uid=anchor_source_uid,
+        anchor_runtime_uid=anchor_runtime_uid,
     )

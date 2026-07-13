@@ -100,6 +100,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _clean_vector3,
+    _container_rigid_object_max_convex_hull_num,
     _make_background_config,
     _make_arrangement_dataset_config,
     _make_arrangement_events_config,
@@ -994,6 +995,8 @@ def _build_stacking_bundle(
     moved_source_uids = {step.source_uid for step in spec.steps}
     for step in spec.steps:
         runtime_uids[step.source_uid] = step.runtime_uid
+    if spec.anchor_source_uid is not None and spec.anchor_runtime_uid is not None:
+        runtime_uids[spec.anchor_source_uid] = spec.anchor_runtime_uid
 
     dynamic_rigid_objects = [
         obj for obj in scene_objects if obj.source_uid != spec.table_source_uid
@@ -1021,7 +1024,12 @@ def _build_stacking_bundle(
         "env": {
             "extensions": {},
             "events": _make_arrangement_events_config(
-                [step.runtime_uid for step in spec.steps],
+                [step.runtime_uid for step in spec.steps]
+                + (
+                    [spec.anchor_runtime_uid]
+                    if spec.anchor_runtime_uid is not None
+                    else []
+                ),
                 sensor_config_factory=sensor_config_factory,
                 task_name=task_name,
             ),
@@ -1048,7 +1056,11 @@ def _build_stacking_bundle(
                 max_convex_hull_num=(
                     _moved_rigid_object_max_convex_hull_num(obj)
                     if obj.source_uid in moved_source_uids
-                    else 1
+                    else (
+                        _container_rigid_object_max_convex_hull_num(obj)
+                        if obj.source_uid == spec.anchor_source_uid
+                        else 1
+                    )
                 ),
                 mesh_normalizer=mesh_normalizer,
             )
@@ -1120,6 +1132,11 @@ def _make_stacking_dataset_config(
     robot_profile: RobotProfile,
 ) -> dict[str, Any]:
     ordered = ", ".join(step.runtime_uid for step in spec.steps)
+    anchor_text = (
+        f"the object {spec.anchor_runtime_uid}"
+        if spec.anchor_runtime_uid is not None
+        else "the selected free table anchor"
+    )
     return {
         "lerobot": {
             "func": "LeRobotRecorder",
@@ -1131,8 +1148,8 @@ def _make_stacking_dataset_config(
                 },
                 "instruction": {
                     "lang": (
-                        "Move the selected objects to the table center and stack "
-                        f"them bottom-to-top as: {ordered}."
+                        f"Stack the selected objects on {anchor_text} "
+                        f"bottom-to-top as: {ordered}."
                     ),
                 },
                 "extra": {

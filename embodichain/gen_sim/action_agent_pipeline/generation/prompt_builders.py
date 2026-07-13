@@ -73,6 +73,9 @@ _RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = int(
 _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = int(
     _ACTION_DEFAULTS["empty_hand_retreat_sample_interval"]
 )
+_STACKING_DEFAULTS = generation_defaults_section("stacking")
+_STACKING_NESTED_RELEASE_Z_OFFSET = float(_STACKING_DEFAULTS["nested_release_z_offset"])
+_STACKING_SURFACE_CLEARANCE = float(_STACKING_DEFAULTS["clearance"])
 _SURFACE_RELEASE_Z_POLICY = "object_on_surface"
 _SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _USE_PLACEMENT_ALIGN_TO = object()
@@ -182,6 +185,8 @@ class _StackingSpecLike(Protocol):
     order_by: str
     anchor: str
     anchor_xy: Sequence[float]
+    anchor_source_uid: str | None
+    anchor_runtime_uid: str | None
     steps: Sequence[_StackingStepLike]
 
 
@@ -613,11 +618,30 @@ def make_stacking_task_prompt(
     edge_index = 1
     step_blocks_list = []
     for step in spec.steps:
-        step_blocks_list.append(_stacking_step_prompt_block(edge_index, step))
+        step_blocks_list.append(
+            _stacking_step_prompt_block(
+                edge_index,
+                step,
+                object_anchored=spec.anchor == "object",
+                stack_mode=spec.stack_mode,
+            )
+        )
         edge_index += _stacking_step_edge_count(step)
     step_blocks = "\n\n".join(step_blocks_list)
     stack_order = ", ".join(
         f"`{step.runtime_uid}` layer {step.layer_index}" for step in spec.steps
+    )
+    anchor_description = (
+        f"object `{spec.anchor_runtime_uid}` at its current runtime pose"
+        if spec.anchor == "object"
+        else f"`{spec.anchor}` at xy `{list(spec.anchor_xy)}`"
+    )
+    final_target_rule = (
+        "Use the exact object-referenced target_object_pose JSON specs shown "
+        "above so every layer follows its direct support's current pose."
+        if spec.anchor == "object"
+        else "Use the exact absolute target_object_pose JSON specs shown above; "
+        "do not rewrite them."
     )
     return f"""Task:
 {task_name}: {spec.task_prompt_summary}
@@ -630,7 +654,7 @@ Original simple task description:
 
 Stacking plan:
 - Stack mode: `{spec.stack_mode}`.
-- Anchor: `{spec.anchor}` at xy `{list(spec.anchor_xy)}` in the exported {project_name} environment.
+- Anchor: {anchor_description} in the exported {project_name} environment.
 - Ordering rule: `{spec.order_by}`.
 - Bottom-to-top order: {stack_order}.
 
@@ -646,10 +670,9 @@ retreat the empty hand upward, then return that arm to its initial pose.
 
 {step_blocks}
 
-Final state: the objects must be stacked at the configured table-center anchor.
+Final state: the objects must be stacked at the configured anchor.
 For `on_top`, each upper layer rests on the previous layer. For `nested`, each
-upper bowl is nested into the previous bowl. Use the exact absolute
-target_object_pose JSON specs shown above; do not rewrite them.
+upper bowl is nested into the previous bowl. {final_target_rule}
 """
 
 
@@ -661,7 +684,11 @@ def make_stacking_task_graph(
     for step in spec.steps:
         steps.extend(
             _nominal_step(title, actions)
-            for title, actions in _stacking_step_edge_blocks(step)
+            for title, actions in _stacking_step_edge_blocks(
+                step,
+                object_anchored=spec.anchor == "object",
+                stack_mode=spec.stack_mode,
+            )
         )
     return build_nominal_task_graph(task_name=task_name, steps=steps)
 
@@ -672,6 +699,9 @@ def _stacking_step_edge_count(step: _StackingStepLike) -> int:
 
 def _stacking_step_edge_blocks(
     step: _StackingStepLike,
+    *,
+    object_anchored: bool,
+    stack_mode: str,
 ) -> list[tuple[str, Mapping[str, str | None]]]:
     active_arm = f"{step.active_side}_arm"
     active_slot = f"{step.active_side}_arm_action"
@@ -703,8 +733,11 @@ def _stacking_step_edge_blocks(
                 f"Place `{step.runtime_uid}` directly at the final stack pose "
                 "without changing orientation",
                 {
-                    active_slot: _format_direct_absolute_place_spec(
-                        active_arm, step.target_position
+                    active_slot: _format_stacking_place_spec(
+                        active_arm,
+                        step,
+                        object_anchored=object_anchored,
+                        stack_mode=stack_mode,
                     ),
                     inactive_slot: None,
                 },
@@ -798,7 +831,13 @@ def _stacking_step_edge_blocks(
     return blocks
 
 
-def _stacking_step_prompt_block(start_edge: int, step: _StackingStepLike) -> str:
+def _stacking_step_prompt_block(
+    start_edge: int,
+    step: _StackingStepLike,
+    *,
+    object_anchored: bool,
+    stack_mode: str,
+) -> str:
     active_arm = f"{step.active_side}_arm"
     active_slot = f"{step.active_side}_arm_action"
     inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
@@ -832,7 +871,7 @@ def _stacking_step_prompt_block(start_edge: int, step: _StackingStepLike) -> str
    - {inactive_slot}: null
 
 {start_edge + 1}. Place `{step.runtime_uid}` directly at the final stack pose without changing orientation:
-   - {active_slot}: {_format_direct_absolute_place_spec(active_arm, step.target_position)}
+   - {active_slot}: {_format_stacking_place_spec(active_arm, step, object_anchored=object_anchored, stack_mode=stack_mode)}
    - {inactive_slot}: null
 
 {start_edge + 2}. Return `{active_arm}` to its initial pose:
@@ -889,7 +928,7 @@ generated from a simple natural-language task description.
 
 {_robot_context(profile)}
 
-Stack mode: `{spec.stack_mode}` at table-center xy `{list(spec.anchor_xy)}`.
+Stack mode: `{spec.stack_mode}` with `{spec.anchor}` anchor at xy `{list(spec.anchor_xy)}`.
 
 Interactive task objects and stack layers:
 {object_lines}
@@ -926,18 +965,30 @@ def make_stacking_atom_actions_prompt(
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
-    blocks = "\n\n".join(_stacking_atom_action_block(step) for step in spec.steps)
+    blocks = "\n\n".join(
+        _stacking_atom_action_block(
+            step,
+            object_anchored=spec.anchor == "object",
+            stack_mode=spec.stack_mode,
+        )
+        for step in spec.steps
+    )
     return f"""### Atomic Action Class JSON Specs for {profile.display_name} Stacking
 
 Use only the native atomic action class JSON specs shown below. Each object is
-moved to an absolute table-center stack pose computed by the config-stage
-generator. Keep the non-active arm null for each listed object.
+moved to the configured stack target computed by the config-stage generator.
+Keep the non-active arm null for each listed object.
 
 {blocks}
 """
 
 
-def _stacking_atom_action_block(step: _StackingStepLike) -> str:
+def _stacking_atom_action_block(
+    step: _StackingStepLike,
+    *,
+    object_anchored: bool,
+    stack_mode: str,
+) -> str:
     active_arm = f"{step.active_side}_arm"
     high_oriented_spec = _format_pose_absolute_spec(
         active_arm,
@@ -951,7 +1002,7 @@ def _stacking_atom_action_block(step: _StackingStepLike) -> str:
 - Pick up:
   {_format_pick_up_spec(active_arm, step.runtime_uid)}
 - Direct final Place without orientation change:
-  {_format_direct_absolute_place_spec(active_arm, step.target_position)}
+  {_format_stacking_place_spec(active_arm, step, object_anchored=object_anchored, stack_mode=stack_mode)}
 - Return:
   {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
     return f"""Object `{step.runtime_uid}` to stack layer {step.layer_index}:
@@ -2761,6 +2812,51 @@ def _format_direct_relative_place_spec(
     if target_object_pose.get("orientation_goal", "preserve") != "preserve":
         raise ValueError(
             "Direct relative Place only supports orientation_goal='preserve'."
+        )
+    return _compact_json(
+        {
+            "atomic_action_class": "Place",
+            "robot_name": robot_name,
+            "control": "arm",
+            "target_object_pose": target_object_pose,
+            "cfg": {
+                "sample_interval": 80,
+                "lift_height": _PLACE_LIFT_HEIGHT,
+                "cartesian_waypoint_count": _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT,
+            },
+        }
+    )
+
+
+def _format_stacking_place_spec(
+    robot_name: str,
+    step: _StackingStepLike,
+    *,
+    object_anchored: bool,
+    stack_mode: str,
+) -> str:
+    if not object_anchored:
+        return _format_direct_absolute_place_spec(robot_name, step.target_position)
+    if step.support_runtime_uid is None:
+        raise ValueError("Object-anchored stacking requires a support per layer.")
+
+    target_object_pose: dict[str, Any] = {
+        "reference": "object",
+        "obj_name": step.support_runtime_uid,
+        "offset": [
+            0.0,
+            0.0,
+            _STACKING_NESTED_RELEASE_Z_OFFSET if stack_mode == "nested" else 0.0,
+        ],
+        "orientation_goal": "preserve",
+        "orientation_axis": "none",
+    }
+    if stack_mode == "on_top":
+        _add_surface_z_policy(
+            target_object_pose,
+            z_policy="surface_release",
+            support=step.support_runtime_uid,
+            surface_clearance=_STACKING_SURFACE_CLEARANCE,
         )
     return _compact_json(
         {

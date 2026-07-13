@@ -69,6 +69,7 @@ __all__ = [
     "_make_relative_events_config",
     "_make_relative_rigid_object_config",
     "_make_target_object_config",
+    "_container_rigid_object_max_convex_hull_num",
     "_moved_rigid_object_max_convex_hull_num",
     "_relative_rigid_object_max_convex_hull_num",
     "_relative_static_background_max_convex_hull_num",
@@ -864,6 +865,11 @@ def _role_limited_max_convex_hull_num(
 def _moved_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
     """Return the configured convex-decomposition limit for a moved object."""
     return _role_limited_max_convex_hull_num(obj, _MOVED_MAX_CONVEX_HULL_NUM)
+
+
+def _container_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
+    """Return the configured convex-decomposition limit for a container."""
+    return _role_limited_max_convex_hull_num(obj, _CONTAINER_MAX_CONVEX_HULL_NUM)
 
 
 def _relative_rigid_object_max_convex_hull_num(

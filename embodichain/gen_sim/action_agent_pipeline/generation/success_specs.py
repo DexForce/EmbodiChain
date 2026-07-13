@@ -140,7 +140,7 @@ def _make_stacking_extensions_config(
 def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
     for step in spec.steps:
-        if step.layer_index == 0:
+        if step.support_runtime_uid is None:
             terms.append(
                 {
                     "type": "object_xy_near",
@@ -537,10 +537,12 @@ def _validate_stacking_bundle(
     background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
     scene_uids = rigid_uids | background_uids
     required = {step.runtime_uid for step in spec.steps}
+    if spec.anchor_runtime_uid is not None:
+        required.add(spec.anchor_runtime_uid)
     missing = required - rigid_uids
     if missing:
         raise ValueError(
-            f"Generated stacking config missing moved rigid object(s): {missing}"
+            f"Generated stacking config missing required rigid object(s): {missing}"
         )
 
     _validate_success_uids(
