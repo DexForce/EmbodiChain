@@ -388,3 +388,17 @@ def test_multi_segment_all_swapped():
     # two segments -> two apply calls; mesh_id is the 3rd positional arg
     mesh_ids = {call.args[2] for call in obj.apply_render_material_inst.call_args_list}
     assert mesh_ids == {0, 1}
+
+
+def test_new_call_empty_reuse_state_no_crash():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(return_value=[])
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+
+    functor = randomize_visual_material(cfg, env)
+
+    assert functor._new_mode is True
+    # Non-shared mode with zero existing instances used to crash in _call_reuse
+    # because torch.multinomial cannot sample zero samples.
+    functor(env, torch.arange(env.num_envs), entity_cfg=SceneEntityCfg(uid="obj"))

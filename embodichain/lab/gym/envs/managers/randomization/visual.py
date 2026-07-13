@@ -624,9 +624,7 @@ class randomize_visual_material(Functor):
         self._reuse_state = None
         self._library_textures: list = []
         self._texture_key = (
-            os.path.basename(get_data_path(cfg.params.get("texture_path", None)))
-            if cfg.params.get("texture_path", None)
-            else ""
+            os.path.basename(texture_path) if texture_path is not None else ""
         )
 
         can_reuse = (
@@ -850,6 +848,8 @@ class randomize_visual_material(Functor):
             env_ids = env_ids.cpu()
 
         num_reuse = len(self._reuse_state)  # 1 if shared, else num_envs
+        if num_reuse == 0:
+            return
         plan = self._sample_plan(
             num_reuse, base_color_range, metallic_range, roughness_range, ior_range
         )
