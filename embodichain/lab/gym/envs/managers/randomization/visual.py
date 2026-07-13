@@ -23,7 +23,7 @@ import copy
 import numpy as np
 from pathlib import Path
 
-from typing import TYPE_CHECKING, Literal, Union, Dict, Sequence
+from typing import TYPE_CHECKING, Literal, Union, Dict, Sequence, Mapping
 
 from embodichain.lab.sim.objects import (
     Light,
@@ -62,6 +62,34 @@ __all__ = [
     "randomize_visual_material",
     "randomize_indirect_lighting",
 ]
+
+
+def _select_texture_indices(
+    mode: str,
+    env_ids: Sequence[int],
+    count: int,
+    texture_indices: Mapping[int, int] | None = None,
+) -> list[int]:
+    if mode == "random":
+        return torch.randint(0, count, (len(env_ids),)).tolist() if count else []
+    if mode == "without_replacement":
+        if len(env_ids) > count:
+            raise ValueError(
+                "without_replacement requires at least one texture per environment"
+            )
+        return torch.randperm(count)[: len(env_ids)].tolist()
+    if mode == "fixed":
+        if texture_indices is None or any(i not in texture_indices for i in env_ids):
+            raise ValueError(
+                "fixed texture_sampling requires texture_indices for every environment"
+            )
+        result = [int(texture_indices[i]) for i in env_ids]
+        if any(i < 0 or i >= count for i in result):
+            raise ValueError("texture index out of range")
+        return result
+    if mode == "cycle":
+        return [i % count for i in env_ids] if count else []
+    raise ValueError(f"Unsupported texture_sampling mode: {mode}")
 
 
 def _normalize_env_ids(
@@ -742,10 +770,12 @@ class randomize_visual_material(Functor):
         rgba = (rgba * 255).to(torch.uint8)
         return rgba
 
-    def _randomize_texture(self, mat_inst: VisualMaterialInst) -> None:
+    def _randomize_texture(
+        self, mat_inst: VisualMaterialInst, texture_idx: int | None = None
+    ) -> None:
         if len(self.textures) > 0:
-            # Randomly select a texture from the preloaded textures
-            texture_idx = torch.randint(0, len(self.textures), (1,)).item()
+            if texture_idx is None:
+                texture_idx = torch.randint(0, len(self.textures), (1,)).item()
             mat_inst.set_base_color_texture(texture_data=self.textures[texture_idx])
 
     def _randomize_mat_inst(
@@ -754,22 +784,23 @@ class randomize_visual_material(Functor):
         plan: Dict[str, torch.Tensor],
         random_texture_prob: float,
         idx: int = 0,
+        texture_idx: int | None = None,
     ) -> None:
         # randomize texture or base color based on the probability.
-        if random.random() < random_texture_prob and len(self.textures) != 0:
-            for key, value in plan.items():
-                if key == "base_color":
-                    mat_inst.set_base_color(value[idx].tolist())
-                else:
-                    getattr(mat_inst, f"set_{key}")(value[idx].item())
-
-            self._randomize_texture(mat_inst)
+        use_texture = random.random() < random_texture_prob and len(self.textures) != 0
+        for key, value in plan.items():
+            if key == "base_color":
+                mat_inst.set_base_color(value[idx].tolist())
+            else:
+                getattr(mat_inst, f"set_{key}")(value[idx].item())
+        if use_texture:
+            self._randomize_texture(mat_inst, texture_idx)
         else:
             # set a random base color instead.
             random_color_texture = (
                 randomize_visual_material.gen_random_base_color_texture(2, 2)
             )
-            mat_inst.set_base_color_texture(texture_data=random_color_texture)
+        mat_inst.set_base_color_texture(texture_data=random_color_texture)
 
     def __call__(
         self,
@@ -782,18 +813,28 @@ class randomize_visual_material(Functor):
         metallic_range: tuple[float, float] | None = None,
         roughness_range: tuple[float, float] | None = None,
         ior_range: tuple[float, float] | None = None,
+        texture_sampling: str = "random",
+        texture_indices: Mapping[int, int] | None = None,
+        texture_scope: str = "per_material",
     ):
         if self.entity_cfg.uid != "default_plane" and self.entity is None:
             return
 
         # resolve environment ids
-        if env_ids is None:
-            env_ids = torch.arange(env.num_envs, device="cpu")
-        else:
-            env_ids = env_ids.cpu()
+        env_ids = _normalize_env_ids(env_ids, env.num_envs)
 
         if self.entity_cfg.uid == "default_plane":
             env_ids = [0]
+
+        if texture_scope not in ("per_material", "per_instance"):
+            raise ValueError(f"Unsupported texture_scope: {texture_scope}")
+        texture_plan = (
+            _select_texture_indices(
+                texture_sampling, env_ids, len(self.textures), texture_indices
+            )
+            if self.textures
+            else [None] * len(env_ids)
+        )
 
         randomize_plan = {}
         if base_color_range:
@@ -838,10 +879,18 @@ class randomize_visual_material(Functor):
                 plan=randomize_plan,
                 random_texture_prob=random_texture_prob,
                 idx=0,
+                texture_idx=texture_plan[0] if texture_plan else None,
             )
             return
 
-        for i, data in enumerate(self._mat_insts):
+        if isinstance(self.entity, RigidObject):
+            mat_insts = self.entity.get_visual_material_inst(env_ids=env_ids)
+        else:
+            mat_insts = self.entity.get_visual_material_inst(
+                env_ids=env_ids, link_names=self.entity_cfg.link_names
+            )
+
+        for i, data in enumerate(mat_insts):
             if isinstance(self.entity, RigidObject):
                 # For RigidObject, data is the material instance directly
                 mat: VisualMaterialInst = data
@@ -855,6 +904,7 @@ class randomize_visual_material(Functor):
                     plan=randomize_plan,
                     random_texture_prob=random_texture_prob,
                     idx=i,
+                    texture_idx=texture_plan[i] if texture_plan else None,
                 )
             else:
                 for name, mat_inst in mat.items():
@@ -863,10 +913,8 @@ class randomize_visual_material(Functor):
                         plan=randomize_plan,
                         random_texture_prob=random_texture_prob,
                         idx=i,
+                        texture_idx=texture_plan[i] if texture_plan else None,
                     )
-
-        env = self._env.sim.get_env()
-        env.clean_materials()
 
 
 class randomize_indirect_lighting(Functor):
