@@ -23,7 +23,7 @@ import copy
 import numpy as np
 from pathlib import Path
 
-from typing import TYPE_CHECKING, Literal, Union, Dict
+from typing import TYPE_CHECKING, Literal, Union, Dict, Sequence
 
 from embodichain.lab.sim.objects import (
     Light,
@@ -64,7 +64,9 @@ __all__ = [
 ]
 
 
-def _normalize_env_ids(env_ids, num_envs: int) -> list[int]:
+def _normalize_env_ids(
+    env_ids: torch.Tensor | Sequence[int] | slice | None, num_envs: int
+) -> list[int]:
     """Normalize environment selectors to validated integer IDs."""
     if num_envs < 0:
         raise ValueError("num_envs must be non-negative")
