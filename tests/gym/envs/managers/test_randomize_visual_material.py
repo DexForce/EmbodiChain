@@ -170,7 +170,8 @@ class FakeMat:
 
 def test_generated_color_branch_sets_texture_without_unbound_error():
     functor = object.__new__(randomize_visual_material)
-    functor.textures = []
+    texture = object()
+    functor.textures = [texture]
 
     class Instance:
         texture = None
@@ -180,4 +181,4 @@ def test_generated_color_branch_sets_texture_without_unbound_error():
 
     instance = Instance()
     functor._randomize_mat_inst(instance, {}, random_texture_prob=1.0)
-    assert instance.texture is not None
+    assert instance.texture is texture
