@@ -64,6 +64,19 @@ __all__ = [
 ]
 
 
+def _get_texture_refs(sim, key: str, textures: list[torch.Tensor]) -> list[object]:
+    """Return simulation-cached GPU texture references for source images."""
+    cached = sim.get_texture_ref_cache(key)
+    if cached is not None:
+        return cached
+    import dexsim
+
+    dex_env = dexsim.default_world().get_env()
+    refs = [dex_env.create_color_texture(image.cpu().numpy(), has_alpha=True) for image in textures]
+    sim.set_texture_ref_cache(key, refs)
+    return refs
+
+
 def _select_texture_indices(
     mode: str,
     env_ids: Sequence[int],
@@ -719,18 +732,7 @@ class randomize_visual_material(Functor):
             # Passing image data to VisualMaterialInst would recreate a handle
             # for each assignment, which is both expensive and invalidates the
             # intended per-instance reuse semantics.
-            cached_refs = env.sim.get_texture_ref_cache(texture_key)
-            if cached_refs is not None:
-                self.texture_refs = cached_refs
-            else:
-                import dexsim
-
-                dex_env = dexsim.default_world().get_env()
-                self.texture_refs = [
-                    dex_env.create_color_texture(image.cpu().numpy(), has_alpha=True)
-                    for image in self.textures
-                ]
-                env.sim.set_texture_ref_cache(texture_key, self.texture_refs)
+            self.texture_refs = _get_texture_refs(env.sim, texture_key, self.textures)
 
         if self.entity_cfg.uid == "default_plane":
             pass

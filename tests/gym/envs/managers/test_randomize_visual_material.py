@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 import torch
 import embodichain.lab.gym.envs.managers.randomization.visual as visual
+import dexsim
 
 from embodichain.lab.sim.material import VisualMaterialInst
 from embodichain.lab.gym.envs.managers.randomization.visual import (
@@ -185,20 +186,22 @@ def test_generated_color_branch_sets_texture_without_unbound_error():
 
 
 def test_texture_references_are_created_once(monkeypatch):
-    functor = object.__new__(randomize_visual_material)
-    functor.textures = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
-    functor.texture_refs = [object()]
     calls = []
+    class Sim:
+        def __init__(self): self.cache = {}
+        def get_texture_ref_cache(self, key): return self.cache.get(key)
+        def set_texture_ref_cache(self, key, refs): self.cache[key] = refs
+    class E:
+        def create_color_texture(self, image, has_alpha): calls.append(image); return object()
+    monkeypatch.setattr(dexsim, "default_world", lambda: type("W", (), {"get_env": lambda s: E()})())
+    sim = Sim(); images = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
+    visual._get_texture_refs(sim, "/tmp/source", images)
+    visual._get_texture_refs(sim, "/tmp/source", images)
+    assert len(calls) == 1
 
-    class Instance:
-        def set_base_color_texture(self, *, texture_ref=None, **kwargs):
-            calls.append(texture_ref)
 
-    functor._randomize_mat_inst(Instance(), {}, random_texture_prob=1.0, texture_idx=0)
-    functor._randomize_mat_inst(Instance(), {}, random_texture_prob=1.0, texture_idx=0)
-    assert calls == [functor.texture_refs[0], functor.texture_refs[0]]
-
-
-@pytest.mark.skip(reason="Requires renderer-backed four-environment fixture")
-def test_four_environment_visual_texture_integration():
-    pass
+def test_four_environment_fake_assignments_cover_reset_cases():
+    first = _select_texture_indices("without_replacement", [0, 1, 2, 3], 4, None)
+    assert len(set(first)) == 4
+    assert _select_texture_indices("fixed", [1, 3], 4, {1: 2, 3: 0}) == [2, 0]
+    assert _select_texture_indices("fixed", [3], 4, {3: 1}) == [1]
