@@ -1,0 +1,505 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+import time
+from typing import Any, Callable, TypeVar
+
+from embodichain.gen_sim.prompt2scene.llms import OpenAICompatibleLLMCfg
+from embodichain.gen_sim.prompt2scene.workflows.request import (
+    InputKind,
+    Prompt2SceneInput,
+)
+from embodichain.gen_sim.prompt2scene.workflows.paths import (
+    IMAGE_SEGMENTS_STEP,
+    IMAGE_SPATIAL_RELATIONS_STEP,
+    SCENE_EDIT_STEP,
+    SCENE_PROMPT_ROUTE_STEP,
+    SCENE_RANDOMIZATION_STEP,
+    SCENE_INTAKE_STEP,
+    UNIFIED_SCENE_STEP,
+    PipelinePaths,
+)
+from embodichain.gen_sim.prompt2scene.workflows.artifact_writer import (
+    write_step_result,
+)
+from embodichain.gen_sim.prompt2scene.workflows.unified_scene.graph import (
+    run_unified_scene,
+)
+from embodichain.gen_sim.prompt2scene.workflows.gym_export import (
+    export_gym_config,
+)
+from embodichain.gen_sim.prompt2scene.utils.io import write_json
+from embodichain.gen_sim.prompt2scene.utils import log
+from embodichain.gen_sim.prompt2scene.workflows.image_relations import (
+    run_image_relations,
+)
+from embodichain.gen_sim.prompt2scene.workflows.scene_intake import run_scene_intake
+
+__all__ = [
+    "IMAGE_SEGMENTS_DIRNAME",
+    "IMAGE_SPATIAL_RELATIONS_DIRNAME",
+    "INPUT_MANIFEST_FILENAME",
+    "SCENE_EDIT_DIRNAME",
+    "SCENE_INTAKE_DIRNAME",
+    "SCENE_PROMPT_ROUTE_DIRNAME",
+    "SCENE_RANDOMIZATION_DIRNAME",
+    "STEP_RESULT_FILENAME",
+    "UNIFIED_SCENE_DIRNAME",
+    "Prompt2SceneRunResult",
+    "run_prompt2scene",
+]
+
+INPUT_MANIFEST_FILENAME = "input_manifest.json"
+SCENE_INTAKE_DIRNAME = SCENE_INTAKE_STEP
+SCENE_EDIT_DIRNAME = SCENE_EDIT_STEP
+SCENE_PROMPT_ROUTE_DIRNAME = SCENE_PROMPT_ROUTE_STEP
+SCENE_RANDOMIZATION_DIRNAME = SCENE_RANDOMIZATION_STEP
+IMAGE_SEGMENTS_DIRNAME = IMAGE_SEGMENTS_STEP
+IMAGE_SPATIAL_RELATIONS_DIRNAME = IMAGE_SPATIAL_RELATIONS_STEP
+UNIFIED_SCENE_DIRNAME = UNIFIED_SCENE_STEP
+WORKFLOW_TIMINGS_FILENAME = "workflow_timings.json"
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class Prompt2SceneRunResult:
+    """Result returned by the prompt2scene runner.
+
+    Args:
+        output_root: Directory where prompt2scene outputs were written.
+        manifest_path: Path to the serialized input manifest.
+        scene_intake_path: Path to the serialized scene intake output.
+        image_segments_path: Path to serialized image segment alignment output.
+        image_spatial_relations_path: Path to serialized image spatial relations.
+        unified_scene_path: Path to serialized unified scene output.
+        gym_config_path: Path to the exported gym config.
+        scene_prompt_route_path: Path to serialized prompt route output.
+        scene_edit_path: Path to serialized scene edit output.
+        scene_randomization_path: Path to serialized scene randomization output.
+    """
+
+    output_root: Path
+    manifest_path: Path
+    scene_intake_path: Path | None = None
+    image_segments_path: Path | None = None
+    image_spatial_relations_path: Path | None = None
+    unified_scene_path: Path | None = None
+    gym_config_path: Path | None = None
+    scene_prompt_route_path: Path | None = None
+    scene_edit_path: Path | None = None
+    scene_randomization_path: Path | None = None
+
+
+def run_prompt2scene(
+    request: Prompt2SceneInput,
+    llm_cfg: OpenAICompatibleLLMCfg | None = None,
+) -> Prompt2SceneRunResult:
+    """Run the prompt2scene pipeline.
+
+    This runner creates the output directory, writes the parsed input manifest,
+    and runs fixed VLM-based scene intake when an LLM config is provided.
+
+    Args:
+        request: Parsed prompt2scene input.
+        llm_cfg: Optional LLM config used by later pipeline stages.
+
+    Returns:
+        Paths created by the runner.
+    """
+    from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_client import (
+        clear_sam3d_generation_timings,
+    )
+
+    clear_sam3d_generation_timings()
+    timings = _new_timing_payload()
+    pipeline_started_perf = time.perf_counter()
+    timings["pipeline"] = _new_timing_entry("pipeline")
+    try:
+        request.output_root.mkdir(parents=True, exist_ok=True)
+        _write_workflow_timings(request.output_root, timings)
+        result = _run_prompt2scene_impl(
+            request=request,
+            llm_cfg=llm_cfg,
+            timings=timings,
+        )
+        _finish_timing_entry(
+            timings["pipeline"],
+            started_perf=pipeline_started_perf,
+            status="ok",
+        )
+        return result
+    except Exception as exc:
+        _finish_timing_entry(
+            timings["pipeline"],
+            started_perf=pipeline_started_perf,
+            status="failed",
+            error=exc,
+        )
+        raise
+    finally:
+        _write_workflow_timings(request.output_root, timings)
+
+
+def _run_prompt2scene_impl(
+    *,
+    request: Prompt2SceneInput,
+    llm_cfg: OpenAICompatibleLLMCfg | None = None,
+    timings: dict[str, Any],
+) -> Prompt2SceneRunResult:
+    log.log_info(
+        "run start "
+        f"input_kind={request.input_kind.value} output_root={request.output_root}"
+    )
+    request.output_root.mkdir(parents=True, exist_ok=True)
+    paths = PipelinePaths(request.output_root)
+    manifest_path = request.output_root / INPUT_MANIFEST_FILENAME
+    manifest = request.to_manifest()
+    if llm_cfg is not None:
+        manifest["llm"] = llm_cfg.to_manifest()
+    write_json(manifest_path, manifest)
+
+    scene_intake_path = None
+    image_segments_path = None
+    image_spatial_relations_path = None
+    unified_scene_path = None
+    gym_config_path = None
+    scene_prompt_route_path = None
+    scene_edit_path = None
+    scene_randomization_path = None
+    if request.input_kind == InputKind.EDIT:
+        scene_edit_path = _run_timed_workflow(
+            timings,
+            SCENE_EDIT_STEP,
+            lambda: _run_existing_scene_edit_workflow(
+                request=request,
+                llm_cfg=llm_cfg,
+            ),
+        )
+    elif llm_cfg is not None:
+        log.log_info("step start scene_intake")
+        scene_intake = _run_timed_workflow(
+            timings,
+            SCENE_INTAKE_STEP,
+            lambda: run_scene_intake(request, llm_cfg=llm_cfg),
+        )
+        scene_intake_path = write_step_result(
+            request.output_root,
+            SCENE_INTAKE_STEP,
+            scene_intake.to_manifest(),
+        )
+        log.log_info(
+            f"step end scene_intake status=ok output={scene_intake_path}"
+        )
+        if request.input_kind != InputKind.IMAGE:
+            raise ValueError(
+                f"Unsupported prompt2scene input_kind: {request.input_kind.value!r}."
+            )
+        log.log_info("step start image_relations")
+        image_relations = _run_timed_workflow(
+            timings,
+            "image_relations",
+            lambda: run_image_relations(
+                request,
+                scene_intake=scene_intake,
+                llm_cfg=llm_cfg,
+                output_root=request.output_root,
+            ),
+        )
+        image_segments_path = paths.step_result(
+            IMAGE_SEGMENTS_STEP,
+        )
+        if not image_segments_path.is_file():
+            write_step_result(
+                request.output_root,
+                IMAGE_SEGMENTS_STEP,
+                image_relations.to_segmentation_manifest(),
+            )
+        image_spatial_relations_path = paths.step_result(
+            IMAGE_SPATIAL_RELATIONS_STEP,
+        )
+        if not image_spatial_relations_path.is_file():
+            write_step_result(
+                request.output_root,
+                IMAGE_SPATIAL_RELATIONS_STEP,
+                image_relations.to_spatial_manifest(),
+            )
+        log.log_info(
+            "step end image_relations "
+            f"status=ok output={image_spatial_relations_path}"
+        )
+        log.log_info("step start unified_scene")
+        unified_scene = _run_timed_workflow(
+            timings,
+            UNIFIED_SCENE_STEP,
+            lambda: run_unified_scene(
+                request,
+                scene_intake=scene_intake,
+                image_relations=image_relations,
+                output_root=request.output_root,
+            ),
+        )
+        unified_scene_path = paths.step_result(
+            UNIFIED_SCENE_STEP,
+        )
+        log.log_info(
+            f"step end unified_scene status=ok output={unified_scene_path}"
+        )
+        log.log_info("step start unified_scene_gen")
+        _run_timed_workflow(
+            timings,
+            "unified_scene_gen",
+            lambda: _run_unified_scene_gen(
+                request=request,
+                unified_scene_path=unified_scene_path,
+                llm_cfg=llm_cfg,
+            ),
+        )
+        log.log_info("step end unified_scene_gen status=ok")
+
+        log.log_info("step start gym_export")
+        gym_config_path = export_gym_config(
+            request.output_root,
+            z_axis_align_assets=request.z_axis_align_assets,
+        )
+        log.log_info(f"step end gym_export status=ok output={gym_config_path}")
+        if request.prompt:
+            scene_edit_path = _run_timed_workflow(
+                timings,
+                SCENE_EDIT_STEP,
+                lambda: _run_existing_scene_edit_workflow(
+                    request=request,
+                    llm_cfg=llm_cfg,
+                ),
+            )
+
+    log.log_info(f"run end output_root={request.output_root}")
+
+    return Prompt2SceneRunResult(
+        output_root=request.output_root,
+        manifest_path=manifest_path,
+        scene_intake_path=scene_intake_path,
+        image_segments_path=image_segments_path,
+        image_spatial_relations_path=image_spatial_relations_path,
+        unified_scene_path=unified_scene_path,
+        gym_config_path=gym_config_path,
+        scene_prompt_route_path=scene_prompt_route_path,
+        scene_edit_path=scene_edit_path,
+        scene_randomization_path=scene_randomization_path,
+    )
+
+
+def _run_existing_scene_edit_workflow(
+    *,
+    request: Prompt2SceneInput,
+    llm_cfg: OpenAICompatibleLLMCfg | None,
+) -> Path:
+    from embodichain.gen_sim.prompt2scene.workflows.scene_edit import (
+        run_scene_edit,
+    )
+    from embodichain.gen_sim.prompt2scene.workflows.scene_edit.schema import (
+        SceneEditRequest,
+    )
+
+    paths = PipelinePaths(request.output_root)
+    log.log_info("step start scene_edit")
+    run_scene_edit(
+        SceneEditRequest(
+            output_root=request.output_root,
+            prompt=request.prompt or "",
+            gravity_settle_mode=request.gravity_settle_mode,
+            z_axis_align_assets=request.z_axis_align_assets,
+        ),
+        llm_cfg=llm_cfg,
+    )
+    scene_edit_path = paths.step_result(SCENE_EDIT_STEP)
+    log.log_info(f"step end scene_edit status=ok output={scene_edit_path}")
+    return scene_edit_path
+
+
+def _run_unified_scene_gen(
+    *,
+    request: Prompt2SceneInput,
+    unified_scene_path: Path | None,
+    llm_cfg: OpenAICompatibleLLMCfg,
+) -> None:
+    from embodichain.gen_sim.prompt2scene.workflows.unified_scene_gen.graph import (
+        run_unified_scene_gen,
+    )
+
+    run_unified_scene_gen(
+        request.output_root,
+        unified_scene_result_path=unified_scene_path,
+        llm_cfg=llm_cfg,
+        gravity_settle_mode=request.gravity_settle_mode,
+    )
+
+
+def _scene_state_path(output_root: Path) -> Path:
+    return output_root / "gym_export" / "scene_state" / "result.json"
+
+
+def _new_timing_payload() -> dict[str, Any]:
+    return {
+        "pipeline": {},
+        "workflows": {},
+        "updated_at": _utc_now_iso(),
+    }
+
+
+def _new_timing_entry(name: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": "running",
+        "started_at": _utc_now_iso(),
+        "ended_at": None,
+        "elapsed_seconds": None,
+    }
+
+
+def _run_timed_workflow(
+    timings: dict[str, Any],
+    name: str,
+    func: Callable[[], _T],
+) -> _T:
+    workflows = timings.setdefault("workflows", {})
+    if not isinstance(workflows, dict):
+        workflows = {}
+        timings["workflows"] = workflows
+    started_perf = time.perf_counter()
+    entry = _new_timing_entry(name)
+    workflows[name] = entry
+    try:
+        result = func()
+    except Exception as exc:
+        _finish_timing_entry(
+            entry,
+            started_perf=started_perf,
+            status="failed",
+            error=exc,
+        )
+        raise
+    _finish_timing_entry(
+        entry,
+        started_perf=started_perf,
+        status="ok",
+    )
+    return result
+
+
+def _finish_timing_entry(
+    entry: dict[str, Any],
+    *,
+    started_perf: float,
+    status: str,
+    error: Exception | None = None,
+) -> None:
+    entry["status"] = status
+    entry["ended_at"] = _utc_now_iso()
+    entry["elapsed_seconds"] = round(time.perf_counter() - started_perf, 6)
+    if error is not None:
+        entry["error"] = {
+            "type": type(error).__name__,
+            "message": str(error),
+        }
+    else:
+        entry.pop("error", None)
+
+
+def _write_workflow_timings(
+    output_root: Path,
+    timings: dict[str, Any],
+) -> None:
+    output_root.mkdir(parents=True, exist_ok=True)
+    _update_timing_totals(timings)
+    _update_sam3d_generation_timing(output_root, timings)
+    timings["updated_at"] = _utc_now_iso()
+    write_json(output_root / WORKFLOW_TIMINGS_FILENAME, timings)
+
+
+def _update_timing_totals(timings: dict[str, Any]) -> None:
+    workflows = timings.get("workflows")
+    workflows = workflows if isinstance(workflows, dict) else {}
+    timings["edit_randomization_total"] = {
+        "status": "ok",
+        "elapsed_seconds": round(
+            _elapsed_from_timing_entry(workflows.get(SCENE_EDIT_STEP))
+            + _elapsed_from_timing_entry(workflows.get(SCENE_RANDOMIZATION_STEP)),
+            6,
+        ),
+        "components": {
+            SCENE_EDIT_STEP: _elapsed_from_timing_entry(
+                workflows.get(SCENE_EDIT_STEP)
+            ),
+            SCENE_RANDOMIZATION_STEP: _elapsed_from_timing_entry(
+                workflows.get(SCENE_RANDOMIZATION_STEP)
+            ),
+        },
+    }
+
+
+def _elapsed_from_timing_entry(entry: Any) -> float:
+    if not isinstance(entry, dict):
+        return 0.0
+    value = entry.get("elapsed_seconds")
+    try:
+        elapsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if elapsed < 0.0:
+        return 0.0
+    return elapsed
+
+
+def _update_sam3d_generation_timing(
+    output_root: Path,
+    timings: dict[str, Any],
+) -> None:
+    from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_client import (
+        get_sam3d_generation_timings,
+    )
+
+    items = get_sam3d_generation_timings()
+    timings["sam3d_generation"] = {
+        "status": "ok",
+        "scope": "current_run",
+        "elapsed_seconds": round(
+            sum(
+                (_positive_float(item.get("elapsed_seconds")) for item in items),
+                0.0,
+            ),
+            6,
+        ),
+        "items": items,
+    }
+
+
+def _positive_float(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if parsed < 0.0:
+        return 0.0
+    return parsed
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
