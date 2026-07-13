@@ -56,9 +56,13 @@ MeshFrameNormalizer = GlbGeometryNormalizer
 BODY_SCALE_BAKE_POLICY_VERSION = GLB_GEOMETRY_BAKE_POLICY_VERSION
 bake_body_scale_into_meshes = bake_body_scale_into_glbs
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
+    _make_arrangement_events_config,
+    _make_events_config,
     _make_observations_config,
+    _make_relative_events_config,
     _record_camera_event_configs,
     _rotate_camera_extrinsics_around_target_z,
+    _table_visual_material_event_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
@@ -214,6 +218,45 @@ def test_record_camera_events_generate_audience_view_name() -> None:
     assert params["eye"] == pytest.approx([0.6, 0.0, 1.8])
     assert params["target"] == pytest.approx([0.0, 0.0, 0.75])
     assert params["up"] == pytest.approx([-1.0, 0.0, 0.0])
+
+
+def test_table_visual_material_event_uses_packaged_texture() -> None:
+    event = _table_visual_material_event_config()
+
+    assert event["func"] == "set_rigid_object_visual_material"
+    assert event["mode"] == "startup"
+    assert event["params"]["entity_cfg"] == {"uid": "table"}
+
+    material = event["params"]["mat_cfg"]
+    assert material["uid"] == "action_agent_table_wood"
+    assert material["base_color"] == [1.0, 1.0, 1.0, 1.0]
+    assert material["metallic"] == pytest.approx(0.0)
+    assert material["roughness"] == pytest.approx(0.7)
+    assert Path(material["base_color_texture"]).is_file()
+
+
+def test_all_task_event_builders_include_table_visual_material() -> None:
+    roles = SimpleNamespace(
+        left_target_runtime_uid="left_target",
+        right_target_runtime_uid="right_target",
+        container_runtime_uid="container",
+    )
+    event_configs = (
+        _make_events_config(roles, sensor_config_factory=make_sensor_config),
+        _make_relative_events_config(
+            SimpleNamespace(),
+            ["table", "target"],
+            sensor_config_factory=make_sensor_config,
+        ),
+        _make_arrangement_events_config(
+            ["table", "target"],
+            sensor_config_factory=make_sensor_config,
+        ),
+    )
+
+    expected = _table_visual_material_event_config()
+    for events in event_configs:
+        assert events["set_table_visual_material"] == expected
 
 
 def test_camera_rotation_preserves_target_and_height() -> None:
@@ -411,6 +454,9 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
     assert registered_uids == {"left_apple", "right_apple", "wicker_basket"}
     record_events = gym_config["env"]["events"]
+    assert record_events["set_table_visual_material"] == (
+        _table_visual_material_event_config()
+    )
     assert (
         record_events["record_camera"]["params"]["video_name"]
         == "Demo111_audience_view"
