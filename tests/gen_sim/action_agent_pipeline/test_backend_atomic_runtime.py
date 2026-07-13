@@ -2267,6 +2267,37 @@ def test_grasp_collision_cache_bridge_error_falls_back(monkeypatch) -> None:
     assert "cache conversion failed" in warnings[0]
 
 
+def test_affordance_stabilization_uses_generation_default() -> None:
+    update_steps = []
+    env = SimpleNamespace(
+        sim=SimpleNamespace(update=lambda *, step: update_steps.append(step))
+    )
+    target_obj = SimpleNamespace(clear_dynamics=lambda: None)
+
+    atom_actions._stabilize_affordance_object(env, target_obj, {})
+
+    assert update_steps == [
+        atom_actions._GRASP_DEFAULTS["affordance_stabilization_steps"]
+    ]
+
+
+def test_affordance_stabilization_runtime_steps_override_default() -> None:
+    override_steps = 20
+    update_steps = []
+    env = SimpleNamespace(
+        sim=SimpleNamespace(update=lambda *, step: update_steps.append(step))
+    )
+    target_obj = SimpleNamespace(clear_dynamics=lambda: None)
+
+    atom_actions._stabilize_affordance_object(
+        env,
+        target_obj,
+        {"affordance_stabilization_steps": override_steps},
+    )
+
+    assert update_steps == [override_steps]
+
+
 def test_grasp_collision_cache_unexpected_error_propagates(monkeypatch) -> None:
     def raise_unexpected_error(**kwargs):
         raise AssertionError("unexpected bug")
