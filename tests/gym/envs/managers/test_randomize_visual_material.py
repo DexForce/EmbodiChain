@@ -83,13 +83,23 @@ def test_partial_reset_targets_only_selected_environment_ids():
 
 
 def test_fixed_assignment_maps_global_environment_ids():
-    assert _select_texture_indices("fixed", [1, 3], 4, {1: 2, 3: 0}) == [2, 0]
+    class Obj:
+        is_shared_visual_material = False
+        def get_visual_material_inst(self, env_ids=None, **kwargs): return [{"l": FakeMat()} for _ in env_ids]
+    f = object.__new__(randomize_visual_material); f.entity_cfg=type("C",(),{"uid":"x","link_names":None})(); f.entity=Obj(); f.textures=["a","b","c"]
+    seen=[]; f._randomize_mat_inst=lambda m,plan,random_texture_prob,idx=0,texture_idx=None: seen.append(texture_idx)
+    f.__call__(type("E",(),{"num_envs":4})(), torch.tensor([1,3]), f.entity_cfg, texture_sampling="fixed", texture_indices={1:2,3:0})
+    assert seen == [2,0]
 
 
 def test_per_instance_selection_is_reused_for_all_links():
-    selected = _select_texture_indices("fixed", [2], 4, {2: 3})
-    assert selected == [3]
-    assert selected[0] == selected[0]
+    class Obj:
+        is_shared_visual_material = False
+        def get_visual_material_inst(self, env_ids=None, **kwargs): return [{"a":FakeMat(),"b":FakeMat()} for _ in env_ids]
+    f=object.__new__(randomize_visual_material); f.entity_cfg=type("C",(),{"uid":"x","link_names":None})(); f.entity=Obj(); f.textures=["a","b"]
+    seen=[]; f._randomize_mat_inst=lambda m,plan,random_texture_prob,idx=0,texture_idx=None: seen.append(texture_idx)
+    f.__call__(type("E",(),{"num_envs":4})(), torch.tensor([1,3]), f.entity_cfg, texture_sampling="fixed", texture_indices={1:1,3:0}, texture_scope="per_instance")
+    assert seen == [1,1,0,0]
 
 
 class FakeMat:
