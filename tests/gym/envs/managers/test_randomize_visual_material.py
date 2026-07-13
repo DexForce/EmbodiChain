@@ -71,7 +71,15 @@ def test_texture_selection_modes():
 
 
 def test_partial_reset_targets_only_selected_environment_ids():
-    assert _normalize_env_ids(torch.tensor([1, 3]), 4) == [1, 3]
+    class Obj:
+        is_shared_visual_material = False
+        def __init__(self): self.mats = [FakeMat() for _ in range(4)]
+        def get_visual_material_inst(self, env_ids=None, **kwargs): return [{"l": self.mats[i]} for i in env_ids]
+    functor = object.__new__(randomize_visual_material); functor.entity_cfg = type("C", (), {"uid":"x", "link_names":None})(); functor.entity = Obj(); functor.textures=[]
+    functor._randomize_mat_inst = lambda m, plan, random_texture_prob, idx=0, texture_idx=None: [v.set_base_color([1,1,1,1]) for v in (m.values() if isinstance(m, dict) else [m])]
+    env = type("E", (), {"num_envs":4})(); functor.__call__(env, torch.tensor([1,3]), functor.entity_cfg, random_texture_prob=0)
+    assert functor.entity.mats[0].color is None and functor.entity.mats[2].color is None
+    assert functor.entity.mats[1].color is not None and functor.entity.mats[3].color is not None
 
 
 def test_fixed_assignment_maps_global_environment_ids():
@@ -82,6 +90,11 @@ def test_per_instance_selection_is_reused_for_all_links():
     selected = _select_texture_indices("fixed", [2], 4, {2: 3})
     assert selected == [3]
     assert selected[0] == selected[0]
+
+
+class FakeMat:
+    def __init__(self): self.color = None
+    def set_base_color(self, value): self.color = value
 
 
 def test_generated_color_branch_sets_texture_without_unbound_error():
