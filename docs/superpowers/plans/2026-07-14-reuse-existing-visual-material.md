@@ -984,7 +984,20 @@ Expected: FAIL (reuse path does not exist; `functor._new_mode` absent).
 
 - [ ] **Step 3: Implement the reuse init**
 
-In `randomize_visual_material.__init__` (in `visual.py`), replace the `self._init_legacy(env)` line added in Task 4 with the branching:
+First, earlier in `randomize_visual_material.__init__` (the texture-preload block that Task 4 left in place), guard the `get_data_path` call so omitting `texture_path` no longer crashes (`get_data_path(None)` raises `TypeError`). Change:
+
+```python
+texture_path = get_data_path(cfg.params.get("texture_path", None))
+```
+
+to:
+
+```python
+_raw_texture_path = cfg.params.get("texture_path", None)
+texture_path = get_data_path(_raw_texture_path) if _raw_texture_path is not None else None
+```
+
+Then, replace the `self._init_legacy(env)` line added in Task 4 with the branching:
 
 ```python
         self._fallback_to_new = bool(cfg.params.get("fallback_to_new", False))
