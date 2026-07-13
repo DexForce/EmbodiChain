@@ -68,7 +68,8 @@ arrangement:
 
 stacking:
   staging_z_delta: 0.05
-  clearance: 0.05
+  clearance: 0.025
+  max_approach_retract_z: 0.8
   nested_release_z_offset: 0.12
   anchor_offset: 0.1
   anchor_clearance_radius: 0.1
@@ -91,19 +92,19 @@ physics:
     restitution: 0.01
     max_convex_hull_num: 1
   rigid_object:
-    mass: 0.1
+    mass: 1
     static_friction: 1.2
     dynamic_friction: 1.0
     contact_offset: 0.00
     rest_offset: 0.00
     restitution: 0.01
-    max_depenetration_velocity: 5.0
+    max_depenetration_velocity: 1.0
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
-    target: 12
-    container: 32
-    moved: 32
+    target: 8
+    container: 8
+    moved: 8
     extra_rigid: 1
 
 grasp:

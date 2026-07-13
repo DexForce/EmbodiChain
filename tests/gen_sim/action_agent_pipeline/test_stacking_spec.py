@@ -161,12 +161,13 @@ def test_object_anchored_stack_uses_dynamic_support_targets() -> None:
     )
 
     graph = make_stacking_task_graph("anchored", spec)
-    place_targets = [
-        (edge["left_arm_action"] or edge["right_arm_action"])["target_object_pose"]
+    place_actions = [
+        edge["left_arm_action"] or edge["right_arm_action"]
         for edge in graph["edges"]
         if (edge["left_arm_action"] or edge["right_arm_action"])["atomic_action_class"]
         == "Place"
     ]
+    place_targets = [action["target_object_pose"] for action in place_actions]
 
     assert [target["obj_name"] for target in place_targets] == [
         "popcorn_bucket",
@@ -174,6 +175,10 @@ def test_object_anchored_stack_uses_dynamic_support_targets() -> None:
     ]
     assert all(target["offset"][:2] == [0.0, 0.0] for target in place_targets)
     assert all(target["z_policy"] == "surface_release" for target in place_targets)
+    assert all(
+        action["cfg"]["max_approach_retract_z"] == pytest.approx(0.8)
+        for action in place_actions
+    )
 
 
 def test_object_anchored_stack_success_uses_direct_supports() -> None:
@@ -415,6 +420,7 @@ def test_stacking_preserve_uses_direct_place_without_move_held_object() -> None:
         "Place",
         "MoveJoints",
     ]
+    assert actions[1]["cfg"]["max_approach_retract_z"] == pytest.approx(0.8)
 
 
 def test_elongated_stacking_object_does_not_request_axis_alignment() -> None:

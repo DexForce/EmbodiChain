@@ -76,6 +76,7 @@ _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = int(
 _STACKING_DEFAULTS = generation_defaults_section("stacking")
 _STACKING_NESTED_RELEASE_Z_OFFSET = float(_STACKING_DEFAULTS["nested_release_z_offset"])
 _STACKING_SURFACE_CLEARANCE = float(_STACKING_DEFAULTS["clearance"])
+_STACKING_MAX_APPROACH_RETRACT_Z = float(_STACKING_DEFAULTS["max_approach_retract_z"])
 _SURFACE_RELEASE_Z_POLICY = "object_on_surface"
 _SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _USE_PLACEMENT_ALIGN_TO = object()
@@ -2836,7 +2837,11 @@ def _format_stacking_place_spec(
     stack_mode: str,
 ) -> str:
     if not object_anchored:
-        return _format_direct_absolute_place_spec(robot_name, step.target_position)
+        return _format_direct_absolute_place_spec(
+            robot_name,
+            step.target_position,
+            max_approach_retract_z=_STACKING_MAX_APPROACH_RETRACT_Z,
+        )
     if step.support_runtime_uid is None:
         raise ValueError("Object-anchored stacking requires a support per layer.")
 
@@ -2867,6 +2872,7 @@ def _format_stacking_place_spec(
             "cfg": {
                 "sample_interval": 80,
                 "lift_height": _PLACE_LIFT_HEIGHT,
+                "max_approach_retract_z": _STACKING_MAX_APPROACH_RETRACT_Z,
                 "cartesian_waypoint_count": _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT,
             },
         }
@@ -2876,8 +2882,17 @@ def _format_stacking_place_spec(
 def _format_direct_absolute_place_spec(
     robot_name: str,
     position: Sequence[float],
+    *,
+    max_approach_retract_z: float | None = None,
 ) -> str:
     """Format an absolute Place that preserves the held-object orientation."""
+    cfg = {
+        "sample_interval": 80,
+        "lift_height": _PLACE_LIFT_HEIGHT,
+        "cartesian_waypoint_count": _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT,
+    }
+    if max_approach_retract_z is not None:
+        cfg["max_approach_retract_z"] = float(max_approach_retract_z)
     return _compact_json(
         {
             "atomic_action_class": "Place",
@@ -2889,11 +2904,7 @@ def _format_direct_absolute_place_spec(
                 "orientation_goal": "preserve",
                 "orientation_axis": "none",
             },
-            "cfg": {
-                "sample_interval": 80,
-                "lift_height": _PLACE_LIFT_HEIGHT,
-                "cartesian_waypoint_count": _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT,
-            },
+            "cfg": cfg,
         }
     )
 
