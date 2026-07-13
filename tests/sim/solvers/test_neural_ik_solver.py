@@ -74,29 +74,7 @@ class TestNeuralIKSolver:
             rot_eps=0.5,
         )
 
-        cfg_dict = {
-            "fpath": urdf,
-            "control_parts": {
-                "main_arm": [f"fr3_joint{index}" for index in range(1, 8)],
-            },
-            "solver_cfg": {
-                "main_arm": {
-                    "class_type": "NeuralIKSolver",
-                    "end_link_name": "fr3_hand_tcp",
-                    "root_link_name": "base",
-                    "tcp": TCP,
-                    "checkpoint_path": checkpoint_path,
-                    "num_arm_joints": NUM_ARM_JOINTS,
-                    "max_steps": 30,
-                    "action_scale": 0.2,
-                    "hidden_dims": HIDDEN_DIMS,
-                    "pos_eps": 0.1,
-                    "rot_eps": 0.5,
-                },
-            },
-        }
-
-        self.robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.robot = self.sim.add_robot(cfg=cfg)
         self.sim.update(step=100)
 
     def teardown_method(self):

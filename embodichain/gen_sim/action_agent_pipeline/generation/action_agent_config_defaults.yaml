@@ -87,7 +87,7 @@ physics:
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
-    target: 32
+    target: 12
     container: 32
     extra_rigid: 1
 
