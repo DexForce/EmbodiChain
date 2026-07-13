@@ -241,23 +241,34 @@ class VisualMaterialInst:
         logger.log_error("Unimplemented: set_emissive_intensity")
 
     def set_base_color_texture(
-        self, texture_path: str = None, texture_data: torch.Tensor | None = None
+        self,
+        texture_path: str = None,
+        texture_data: torch.Tensor | None = None,
+        texture_obj=None,
     ) -> None:
-        """Set base color texture from file path or texture data.
+        """Set base color texture from file path, tensor data, or a pre-created Texture.
 
         Args:
-            texture_path: Path to texture file
-            texture_data: Texture data as a torch.Tensor
+            texture_path: Path to texture file.
+            texture_data: Texture data as a torch.Tensor (uploaded each call).
+            texture_obj: A pre-created dexsim ``Texture`` object. When provided, it is
+                bound directly without re-uploading (priority over ``texture_data``).
         """
-        if texture_path is not None and texture_data is not None:
+        if texture_path is not None and (
+            texture_data is not None or texture_obj is not None
+        ):
             logger.log_warning(
-                "Both texture_path and texture_data are provided. Using texture_path."
+                "Both texture_path and another texture source are provided. Using texture_path."
             )
 
         if texture_path is not None:
             self.base_color_texture = texture_path
             inst = self._mat.get_inst(self.uid)
             inst.set_base_color_map(texture_path)
+        elif texture_obj is not None:
+            self.base_color_texture = texture_obj
+            inst = self._mat.get_inst(self.uid)
+            inst.set_base_color_map(texture_obj)
         elif texture_data is not None:
             self.base_color_texture = texture_data
             inst = self._mat.get_inst(self.uid)
