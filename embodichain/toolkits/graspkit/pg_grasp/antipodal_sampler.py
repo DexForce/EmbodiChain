@@ -91,16 +91,11 @@ class AntipodalSampler:
         ray_origin = (
             sample_points - 2.0 * max_range * ray_direc
         )  # ray origin in the other side of the mesh
-        disturb_direc = AntipodalSampler._random_rotate_unit_vectors(
-            ray_direc, max_angle=self.cfg.max_angle
-        )
-        ray_origin = torch.vstack([ray_origin, ray_origin])
-        ray_direc = torch.vstack([ray_direc, disturb_direc])
         # casting
         return self._get_raycast_result(
             ray_origin,
             ray_direc,
-            surface_origin=torch.vstack([sample_points, sample_points]),
+            surface_origin=sample_points,
         )
 
     def _sample_surface_by_fibonacci_raycast(
@@ -216,18 +211,27 @@ class AntipodalSampler:
         t_hit = torch.from_numpy(ans["t_hit"].numpy()).to(
             device=ray_origin.device, dtype=ray_origin.dtype
         )
+        normals = torch.from_numpy(np.asarray(ans["primitive_normals"].numpy())).to(
+            device=ray_origin.device, dtype=ray_origin.dtype
+        )
+        normal_angle = torch.acos(
+            torch.abs(torch.clamp(torch.sum(normals * ray_direc, dim=-1), -1.0, 1.0))
+        )
+        angle_valid_mask = normal_angle < self.cfg.max_angle
+
         hit_points = ray_origin + t_hit[:, None] * ray_direc
         antipodal_len = torch.norm(hit_points - surface_origin, dim=-1)
         hit_mask = torch.logical_and(
             antipodal_len > self.cfg.min_length, antipodal_len < self.cfg.max_length
         )
-
-        hit_points = hit_points[hit_mask]
-        hit_origins = surface_origin[hit_mask]
+        all_mask = torch.logical_and(hit_mask, angle_valid_mask)
+        hit_points = hit_points[all_mask]
+        hit_origins = surface_origin[all_mask]
         hit_point_pairs = torch.cat(
             [hit_points[:, None, :], hit_origins[:, None, :]], dim=1
         )
         hit_point_pairs = hit_point_pairs.to(dtype=torch.float32)
+        # self.visualize_antipodal_pairs(hit_point_pairs)
         return hit_point_pairs
 
     @staticmethod
