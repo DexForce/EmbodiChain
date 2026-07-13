@@ -586,7 +586,10 @@ class randomize_visual_material(Functor):
 
         # Preload textures (currently only base color textures are supported)
         self.textures = []
-        texture_path = get_data_path(cfg.params.get("texture_path", None))
+        _raw_texture_path = cfg.params.get("texture_path", None)
+        texture_path = (
+            get_data_path(_raw_texture_path) if _raw_texture_path is not None else None
+        )
         if texture_path is not None:
             from embodichain.utils.utility import read_all_folder_images
 
@@ -616,8 +619,103 @@ class randomize_visual_material(Functor):
                 env.sim.set_texture_cache(texture_key, self.textures)
 
         self._fallback_to_new = bool(cfg.params.get("fallback_to_new", False))
-        self._new_mode = False  # set True in Task 5 for the reuse path
-        self._init_legacy(env)
+        self._shared = bool(cfg.params.get("shared", False))
+        self._new_mode = False
+        self._reuse_state = None
+        self._library_textures: list = []
+        self._texture_key = (
+            os.path.basename(get_data_path(cfg.params.get("texture_path", None)))
+            if cfg.params.get("texture_path", None)
+            else ""
+        )
+
+        can_reuse = (
+            not self._fallback_to_new
+            and self.entity_cfg.uid != "default_plane"
+            and isinstance(self.entity, (RigidObject, Articulation))
+        )
+        if can_reuse:
+            try:
+                self._init_reuse(env)
+                self._new_mode = True
+            except Exception as e:  # noqa: BLE001 - degrade gracefully
+                logger.log_warning(
+                    f"randomize_visual_material: reuse-existing-material unavailable for "
+                    f"'{self.entity_cfg.uid}' ({e}); falling back to new-material path."
+                )
+                self._new_mode = False
+        if not self._new_mode:
+            self._init_legacy(env)
+
+    def _init_reuse(self, env: EmbodiedEnv) -> None:
+        """Init the reuse path: capture existing materials, pre-create textures, resolve tiers."""
+        if isinstance(self.entity, RigidObject):
+            self._reuse_state = self.entity.get_existing_visual_material(
+                shared=self._shared
+            )
+        elif isinstance(self.entity, Articulation):
+            _, link_names = resolve_matching_names(
+                self.entity_cfg.link_names, self.entity.link_names
+            )
+            self.entity_cfg.link_names = link_names
+            self._reuse_state = self.entity.get_existing_visual_material(
+                link_names=link_names, shared=self._shared
+            )
+        self._build_library_textures(env)
+        self._resolve_tier_probs()
+
+    def _build_library_textures(self, env: EmbodiedEnv) -> None:
+        """Pre-create dexsim Texture objects once, cached at sim level across functors."""
+        self._library_textures = []
+        if not self.textures:
+            return
+        sim = env.sim
+        cache = sim.get_texture_cache()  # whole dict when key is None
+        tex_key = f"{self._texture_key}__tex_objs"
+        if tex_key in cache:
+            self._library_textures = cache[tex_key]
+            return
+        dexsim_env = sim.get_env()
+        self._library_textures = [
+            dexsim_env.create_color_texture(t.cpu().numpy(), has_alpha=True)
+            for t in self.textures
+        ]
+        sim.set_texture_cache(tex_key, self._library_textures)
+
+    def _resolve_tier_probs(self) -> None:
+        """Resolve p_original/p_library/p_solid with backward-compat derivation."""
+        cfg = self.cfg
+        p_original = cfg.params.get("p_original", None)
+        p_library = cfg.params.get("p_library", None)
+        p_solid = cfg.params.get("p_solid", None)
+        random_texture_prob = float(cfg.params.get("random_texture_prob", 0.5))
+
+        if p_original is None and p_library is None and p_solid is None:
+            p_original, p_library, p_solid = (
+                0.0,
+                random_texture_prob,
+                1.0 - random_texture_prob,
+            )
+        else:
+            p_original = 0.0 if p_original is None else float(p_original)
+            p_library = 0.0 if p_library is None else float(p_library)
+            p_solid = 0.0 if p_solid is None else float(p_solid)
+
+        if not self._library_textures:
+            p_solid += p_library
+            p_library = 0.0
+
+        total = p_original + p_library + p_solid
+        if total <= 0:
+            p_solid = 1.0
+            total = 1.0
+        if abs(total - 1.0) > 1e-6:
+            logger.log_warning(
+                f"randomize_visual_material: tier probabilities sum to {total}; normalizing."
+            )
+        self._p_original = p_original / total
+        self._p_library = p_library / total
+        self._p_solid = p_solid / total
 
     def _init_legacy(self, env: EmbodiedEnv) -> None:
         """Legacy init: create a new material and replace the object's material."""
@@ -720,6 +818,16 @@ class randomize_visual_material(Functor):
         p_solid: float | None = None,
         shared: bool | None = None,
     ):
+        if self._new_mode:
+            return self._call_reuse(
+                env,
+                env_ids,
+                base_color_range,
+                metallic_range,
+                roughness_range,
+                ior_range,
+            )
+        clean = bool(self._fallback_to_new)
         return self._call_legacy(
             env,
             env_ids,
@@ -728,8 +836,128 @@ class randomize_visual_material(Functor):
             metallic_range,
             roughness_range,
             ior_range,
-            clean=True,
+            clean=clean,
         )
+
+    def _call_reuse(
+        self, env, env_ids, base_color_range, metallic_range, roughness_range, ior_range
+    ) -> None:
+        if self.entity is None:
+            return
+        if env_ids is None:
+            env_ids = torch.arange(env.num_envs, device="cpu")
+        else:
+            env_ids = env_ids.cpu()
+
+        num_reuse = len(self._reuse_state)  # 1 if shared, else num_envs
+        plan = self._sample_plan(
+            num_reuse, base_color_range, metallic_range, roughness_range, ior_range
+        )
+        tiers = self._sample_tiers(num_reuse)
+
+        is_articulation = isinstance(self.entity, Articulation)
+
+        def _apply(reuse_i: int, env_idx: int) -> None:
+            tier = int(tiers[reuse_i].item())
+            if is_articulation:
+                self._apply_tier_articulation(reuse_i, env_idx, tier, plan)
+            else:
+                for seg in self._reuse_state[reuse_i]:
+                    self._apply_tier_rigid(seg, env_idx, tier, plan, reuse_i)
+
+        if self._shared:
+            # single reuse state applied to every env
+            for env_idx in env_ids.tolist():
+                _apply(0, int(env_idx))
+        else:
+            for reuse_i in range(num_reuse):
+                _apply(reuse_i, int(env_ids[reuse_i]))
+
+    def _sample_plan(
+        self, num, base_color_range, metallic_range, roughness_range, ior_range
+    ):
+        plan = {}
+        if base_color_range:
+            base_color = sample_uniform(
+                lower=torch.tensor(base_color_range[0], dtype=torch.float32),
+                upper=torch.tensor(base_color_range[1], dtype=torch.float32),
+                size=(num, 3),
+            )
+            alpha = torch.ones((num, 1), dtype=torch.float32)
+            plan["base_color"] = torch.cat((base_color, alpha), dim=1)
+        if metallic_range:
+            plan["metallic"] = sample_uniform(
+                lower=torch.tensor(metallic_range[0], dtype=torch.float32),
+                upper=torch.tensor(metallic_range[1], dtype=torch.float32),
+                size=(num, 1),
+            )
+        if roughness_range:
+            plan["roughness"] = sample_uniform(
+                lower=torch.tensor(roughness_range[0], dtype=torch.float32),
+                upper=torch.tensor(roughness_range[1], dtype=torch.float32),
+                size=(num, 1),
+            )
+        if ior_range:
+            plan["ior"] = sample_uniform(
+                lower=torch.tensor(ior_range[0], dtype=torch.float32),
+                upper=torch.tensor(ior_range[1], dtype=torch.float32),
+                size=(num, 1),
+            )
+        return plan
+
+    def _sample_tiers(self, num_reuse: int) -> torch.Tensor:
+        probs = torch.tensor(
+            [self._p_original, self._p_library, self._p_solid], dtype=torch.float32
+        )
+        return torch.multinomial(probs, num_samples=num_reuse, replacement=True)
+
+    def _apply_inst(self, env_idx, mat_inst, mesh_id, link_name=None) -> None:
+        """Swap a MaterialInst onto the render body (link-aware for Articulation)."""
+        if link_name is None:
+            self.entity.apply_render_material_inst(env_idx, mat_inst, mesh_id)
+        else:
+            self.entity.apply_render_material_inst(
+                env_idx, mat_inst, link_name, mesh_id
+            )
+
+    def _apply_tier_rigid(self, seg, env_idx, tier, plan, idx) -> None:
+        if tier == 0:  # original
+            self._apply_inst(env_idx, seg.original_inst, seg.mesh_id)
+            return
+        if tier == 1 and self._library_textures:  # library
+            self._apply_library_tier(seg, env_idx, plan, idx)
+        else:  # solid (or library with empty library)
+            self._apply_solid_tier(seg, env_idx)
+
+    def _apply_library_tier(self, seg, env_idx, plan, idx, link_name=None) -> None:
+        tex_idx = torch.randint(0, len(self._library_textures), (1,)).item()
+        seg.working_inst.set_base_color_texture(
+            texture_obj=self._library_textures[tex_idx]
+        )
+        self._apply_plan_props(seg.working_inst, plan, idx)
+        self._apply_inst(env_idx, seg.working_inst.mat, seg.mesh_id, link_name)
+
+    def _apply_solid_tier(self, seg, env_idx, link_name=None) -> None:
+        seg.working_inst.set_base_color([1.0, 1.0, 1.0, 1.0])
+        seg.working_inst.set_metallic(0.0)
+        seg.working_inst.set_roughness(0.7)
+        solid = randomize_visual_material.gen_random_base_color_texture(2, 2)
+        seg.working_inst.set_base_color_texture(texture_data=solid)
+        self._apply_inst(env_idx, seg.working_inst.mat, seg.mesh_id, link_name)
+
+    def _apply_plan_props(self, working_inst, plan, idx) -> None:
+        if "base_color" in plan:
+            working_inst.set_base_color(plan["base_color"][idx].tolist())
+        if "metallic" in plan:
+            working_inst.set_metallic(plan["metallic"][idx].item())
+        if "roughness" in plan:
+            working_inst.set_roughness(plan["roughness"][idx].item())
+        if "ior" in plan:
+            working_inst.set_ior(plan["ior"][idx].item())
+
+    def _apply_tier_articulation(self, reuse_i, env_idx, tier, plan) -> None:
+        # Implemented in Task 6.
+        raise NotImplementedError
 
     def _call_legacy(
         self,

@@ -134,3 +134,70 @@ def test_legacy_call_runs_clean_materials():
     env.sim.env.clean_materials = MagicMock()
     functor(env, torch.arange(env.num_envs), entity_cfg=entity_cfg)
     env.sim.env.clean_materials.assert_called_once()
+
+
+def _seg(mesh_id, orig, tmpl):
+    """Build a ReuseSegmentState whose working_inst is a fully-mocked VisualMaterialInst."""
+    from embodichain.lab.sim.material import ReuseSegmentState, VisualMaterialInst
+
+    inst = VisualMaterialInst.__new__(VisualMaterialInst)
+    inst.uid = f"w_{mesh_id}"
+    tmpl.get_inst = MagicMock(return_value=MagicMock(name="working_mat_inst"))
+    inst._mat = tmpl
+    inst.base_color_texture = None
+    inst.base_color = [1, 1, 1, 1]
+    inst.metallic = 0.0
+    inst.roughness = 0.7
+    inst.ior = 1.5
+    inst.emissive = [0, 0, 0]
+    inst.set_base_color = MagicMock()
+    inst.set_metallic = MagicMock()
+    inst.set_roughness = MagicMock()
+    inst.set_ior = MagicMock()
+    inst.set_base_color_texture = MagicMock()
+    return ReuseSegmentState(mesh_id=mesh_id, original_inst=orig, working_inst=inst)
+
+
+def test_new_init_does_not_create_visual_material():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")  # cached _MockRigidObject
+    seg = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
+    obj.get_existing_visual_material = MagicMock(return_value=[[seg]])
+    cfg = _make_cfg(
+        {"entity_cfg": SceneEntityCfg(uid="obj")}
+    )  # fallback_to_new defaults False
+
+    functor = randomize_visual_material(cfg, env)
+
+    assert env.sim.created_visual_materials == []  # no new material
+    assert functor._new_mode is True
+
+
+def test_new_init_degrades_to_legacy_on_failure():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(side_effect=ValueError("no material"))
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+
+    functor = randomize_visual_material(cfg, env)
+
+    assert functor._new_mode is False
+    assert env.sim.created_visual_materials  # degraded to legacy
+
+
+def test_new_call_no_clean_and_swaps():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    seg = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
+    obj.get_existing_visual_material = MagicMock(return_value=[[seg]])
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+
+    env.sim.env.clean_materials.reset_mock()
+    # force original tier (p_original=1)
+    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+
+    functor(env, torch.arange(env.num_envs), entity_cfg=SceneEntityCfg(uid="obj"))
+
+    env.sim.env.clean_materials.assert_not_called()
+    obj.apply_render_material_inst.assert_called()
