@@ -168,6 +168,10 @@ class _ArrangementLineStepSpec:
     color: str | None = None
     orientation_goal: str = "preserve"
     orientation_axis: str = "none"
+    category: str = "object"
+    cross_side: bool = False
+    execution_index: int = 0
+    blocked_by: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -184,6 +188,8 @@ class _ArrangementLineSpec:
     line_origin_xy: list[float]
     spacing: float
     layout_clearance: float
+    category_order: tuple[str, ...] = ()
+    spatial_direction: str = "ascending"
 
 
 @dataclass(frozen=True)

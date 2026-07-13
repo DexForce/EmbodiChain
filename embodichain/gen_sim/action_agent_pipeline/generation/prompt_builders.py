@@ -269,7 +269,8 @@ def make_arrangement_task_prompt(
         edge_index += _arrangement_step_edge_count(step)
     step_blocks = "\n\n".join(step_blocks_list)
     final_order = ", ".join(
-        f"`{step.runtime_uid}` at slot {step.slot_index}" for step in spec.steps
+        f"`{step.runtime_uid}` at slot {step.slot_index}"
+        for step in sorted(spec.steps, key=lambda item: item.slot_index)
     )
     world_axis = _arrangement_world_axis(spec)
     return f"""Task:
@@ -282,13 +283,13 @@ Original simple task description:
 {spec.task_description}
 
 Arrangement plan:
-- Layout axis: `{spec.axis}`, resolved to world `{world_axis}`. Slot 0 is the
-  negative end of the line, and later slots move monotonically toward positive
-  `{world_axis}`.
+- Layout axis: `{spec.axis}`, resolved to world `{world_axis}`. Semantic slots
+  unfold `{spec.spatial_direction}` while execution follows occupancy dependencies.
 - Anchor: `{spec.anchor}` in the exported {project_name} environment.
 - Collision-aware line origin xy: `{list(spec.line_origin_xy)}`.
 - Slot spacing: `{float(spec.spacing):.6g}` with clearance `{float(spec.layout_clearance):.6g}`.
 - Ordering rule: `{spec.order_by}` with direction `{spec.order_direction}`.
+- Category order: `{list(spec.category_order)}`.
 - Final order: {final_order}.
 
 Generate one deterministic nominal graph with exactly {edge_count} nominal edges.

@@ -28,6 +28,7 @@ from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success im
 from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.utils import logger
 
 __all__ = ["AgenticGenSimEnv", "AtomicActionsAgentEnv"]
@@ -56,8 +57,55 @@ class AgenticGenSimEnv(EmbodiedEnv):
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
         obs, info = super().reset(seed=seed, options=options)
+        self._draw_arrangement_debug_markers()
         self.get_states()
         return obs, info
+
+    def _draw_arrangement_debug_markers(self) -> None:
+        debug = getattr(self, "arrangement_debug", None)
+        if not isinstance(debug, Mapping) or getattr(
+            self, "_arrangement_debug_drawn", False
+        ):
+            return
+        slots = debug.get("slots", [])
+        target_poses = []
+        high_poses = []
+        for slot in slots:
+            if not isinstance(slot, Mapping):
+                continue
+            target = slot.get("target")
+            high = slot.get("high")
+            if not (
+                isinstance(target, (list, tuple))
+                and len(target) == 3
+                and isinstance(high, (list, tuple))
+                and len(high) == 3
+            ):
+                continue
+            target_pose = torch.eye(4)
+            target_pose[:3, 3] = torch.tensor(target, dtype=target_pose.dtype)
+            high_pose = torch.eye(4)
+            high_pose[:3, 3] = torch.tensor(high, dtype=high_pose.dtype)
+            target_poses.append(target_pose)
+            high_poses.append(high_pose)
+        if target_poses:
+            self.sim.draw_marker(
+                MarkerCfg(
+                    name="arrangement_target_slots",
+                    axis_xpos=torch.stack(target_poses),
+                    axis_size=0.004,
+                    axis_len=0.06,
+                )
+            )
+            self.sim.draw_marker(
+                MarkerCfg(
+                    name="arrangement_high_points",
+                    axis_xpos=torch.stack(high_poses),
+                    axis_size=0.002,
+                    axis_len=0.035,
+                )
+            )
+        self._arrangement_debug_drawn = True
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         return evaluate_configured_success(self)

@@ -180,6 +180,15 @@ class DatasetManager(ManagerBase):
         """List of available modes for the dataset manager."""
         return list(self._mode_functor_names.keys())
 
+    @property
+    def save_failed_episodes(self) -> bool:
+        """Whether any configured dataset recorder should keep failed episodes."""
+        return any(
+            bool(functor_cfg.params.get("save_failed_episodes", False))
+            for mode_cfgs in self._mode_functor_cfgs.values()
+            for functor_cfg in mode_cfgs
+        )
+
     """
     Operations.
     """

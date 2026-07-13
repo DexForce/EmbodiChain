@@ -153,6 +153,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
             "franka",
             "--target_body_scale",
             "1.0",
+            "--arrangement-debug-visualization",
             "--overwrite",
         ],
     )
@@ -160,6 +161,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
     generate_action_agent_config.cli()
 
     assert captured["robot_profile"] == "franka"
+    assert captured["arrangement_debug_visualization"] is True
     assert captured["preserve_source_scene_geometry"] is True
     assert captured["load_source_meshes_directly"] is True
     assert captured["source_scene_z_rotation_degrees"] == (
