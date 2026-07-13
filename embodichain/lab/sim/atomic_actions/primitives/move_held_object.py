@@ -95,19 +95,6 @@ class MoveHeldObject(AtomicAction):
         end_arm_xpos = self.robot.compute_fk(
             start_arm_qpos, name=self.cfg.control_part, to_matrix=True
         )
-        from embodichain.lab.sim.sim_manager import SimulationManager
-        from embodichain.lab.sim.cfg import MarkerCfg
-
-        sim = SimulationManager.get_instance()
-        sim.draw_marker(
-            cfg=MarkerCfg(
-                name="end_arm_xpos",
-                axis_xpos=end_arm_xpos,
-                axis_len=0.085,
-                axis_size=0.003,
-            )
-        )
-
         object_to_eef = state.held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
