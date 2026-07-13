@@ -15,9 +15,9 @@
 # ----------------------------------------------------------------------------
 
 task:
-  default_name: UR5BreadBasket
+  default_name: gen_sim
   max_episodes: 1
-  max_episode_steps: 1000
+  max_episode_steps: 2000
 
 visual_material:
   table:
@@ -90,11 +90,13 @@ physics:
     restitution: 0.01
     max_convex_hull_num: 1
   rigid_object:
-    mass: 0.01
+    mass: 0.1
+    static_friction: 1.2
+    dynamic_friction: 1.0
     contact_offset: 0.00
     rest_offset: 0.00
     restitution: 0.01
-    max_depenetration_velocity: 10.0
+    max_depenetration_velocity: 5.0
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
