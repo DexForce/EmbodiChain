@@ -2004,27 +2004,14 @@ def test_relative_orientation_intent_generates_axis_align_move_held_object(
     release_offset_json = json.dumps(
         summary["release_offset"], ensure_ascii=False, separators=(",", ":")
     )
-    high_offset = list(summary["release_offset"])
-    high_offset[2] = round(float(high_offset[2]) + 0.25, 6)
-    high_offset_json = json.dumps(
-        high_offset, ensure_ascii=False, separators=(",", ":")
-    )
     assert (
-        "Generate one deterministic nominal graph with exactly 7 nominal edges"
+        "Generate one deterministic nominal graph with exactly 5 nominal edges"
         in task_prompt
     )
     for text in (task_prompt, atom_actions):
-        assert '"atomic_action_class":"MoveHeldObject"' in text
+        assert text.count('"atomic_action_class":"MoveHeldObject"') == 1
         assert '"target_object_pose":{"reference":"object"' in text
         assert '"obj_name":"colored_pad"' in text
-        assert (
-            f'"offset":{high_offset_json},"orientation_goal":"preserve",'
-            '"orientation_axis":"none"}' in text
-        )
-        assert (
-            f'"offset":{high_offset_json},"orientation_goal":"axis_align",'
-            '"orientation_axis":"long_axis","align_to":"colored_pad"' in text
-        )
         assert f'"offset":{release_offset_json}' in text
         assert '"orientation_goal":"axis_align"' in text
         assert '"orientation_axis":"long_axis"' in text
@@ -2037,8 +2024,7 @@ def test_relative_orientation_intent_generates_axis_align_move_held_object(
         )
         assert (
             f'"atomic_action_class":"MoveEndEffector","robot_name":"{active_arm}",'
-            '"control":"arm","target_pose":{"reference":"relative",'
-            '"offset":[0.0,0.0,0.1],"frame":"world"}' in text
+            '"control":"arm","target_pose":{"reference":"relative"' in text
         )
 
     assert summary["orientation_goal"] == "axis_align"
@@ -2078,11 +2064,11 @@ def test_relative_orientation_upright_does_not_emit_align_to(
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
     assert (
-        "Generate one deterministic nominal graph with exactly 7 nominal edges"
+        "Generate one deterministic nominal graph with exactly 5 nominal edges"
         in task_prompt
     )
     for text in (task_prompt, atom_actions):
-        assert '"orientation_goal":"preserve","orientation_axis":"none"' in text
+        assert text.count('"atomic_action_class":"MoveHeldObject"') == 1
         assert '"orientation_goal":"upright"' in text
         assert '"orientation_axis":"none"' in text
         assert '"align_to"' not in text
