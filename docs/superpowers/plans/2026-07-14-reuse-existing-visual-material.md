@@ -1185,28 +1185,35 @@ Add `_call_reuse` and tier helpers (RigidObject branch; Articulation added in Ta
         )
         return torch.multinomial(probs, num_samples=num_reuse, replacement=True)
 
+    def _apply_inst(self, env_idx, mat_inst, mesh_id, link_name=None) -> None:
+        """Swap a MaterialInst onto the render body (link-aware for Articulation)."""
+        if link_name is None:
+            self.entity.apply_render_material_inst(env_idx, mat_inst, mesh_id)
+        else:
+            self.entity.apply_render_material_inst(env_idx, mat_inst, link_name, mesh_id)
+
     def _apply_tier_rigid(self, seg, env_idx, tier, plan, idx) -> None:
         if tier == 0:  # original
-            self.entity.apply_render_material_inst(env_idx, seg.original_inst, seg.mesh_id)
+            self._apply_inst(env_idx, seg.original_inst, seg.mesh_id)
             return
         if tier == 1 and self._library_textures:  # library
             self._apply_library_tier(seg, env_idx, plan, idx)
         else:  # solid (or library with empty library)
             self._apply_solid_tier(seg, env_idx)
 
-    def _apply_library_tier(self, seg, env_idx, plan, idx) -> None:
+    def _apply_library_tier(self, seg, env_idx, plan, idx, link_name=None) -> None:
         tex_idx = torch.randint(0, len(self._library_textures), (1,)).item()
         seg.working_inst.set_base_color_texture(texture_obj=self._library_textures[tex_idx])
         self._apply_plan_props(seg.working_inst, plan, idx)
-        self.entity.apply_render_material_inst(env_idx, seg.working_inst.mat, seg.mesh_id)
+        self._apply_inst(env_idx, seg.working_inst.mat, seg.mesh_id, link_name)
 
-    def _apply_solid_tier(self, seg, env_idx) -> None:
+    def _apply_solid_tier(self, seg, env_idx, link_name=None) -> None:
         seg.working_inst.set_base_color([1.0, 1.0, 1.0, 1.0])
         seg.working_inst.set_metallic(0.0)
         seg.working_inst.set_roughness(0.7)
         solid = randomize_visual_material.gen_random_base_color_texture(2, 2)
         seg.working_inst.set_base_color_texture(texture_data=solid)
-        self.entity.apply_render_material_inst(env_idx, seg.working_inst.mat, seg.mesh_id)
+        self._apply_inst(env_idx, seg.working_inst.mat, seg.mesh_id, link_name)
 
     def _apply_plan_props(self, working_inst, plan, idx) -> None:
         if "base_color" in plan:
@@ -1325,28 +1332,12 @@ Replace the `NotImplementedError` stub in `visual.py` with:
         for link_name, segments in link_map.items():
             for seg in segments:
                 if tier == 0:  # original
-                    self.entity.apply_render_material_inst(
-                        env_idx, seg.original_inst, link_name, seg.mesh_id
-                    )
+                    self._apply_inst(env_idx, seg.original_inst, seg.mesh_id, link_name)
                     continue
                 if tier == 1 and self._library_textures:  # library
-                    tex_idx = torch.randint(0, len(self._library_textures), (1,)).item()
-                    seg.working_inst.set_base_color_texture(
-                        texture_obj=self._library_textures[tex_idx]
-                    )
-                    self._apply_plan_props(seg.working_inst, plan, reuse_i)
-                    self.entity.apply_render_material_inst(
-                        env_idx, seg.working_inst.mat, link_name, seg.mesh_id
-                    )
+                    self._apply_library_tier(seg, env_idx, plan, reuse_i, link_name)
                 else:  # solid
-                    seg.working_inst.set_base_color([1.0, 1.0, 1.0, 1.0])
-                    seg.working_inst.set_metallic(0.0)
-                    seg.working_inst.set_roughness(0.7)
-                    solid = randomize_visual_material.gen_random_base_color_texture(2, 2)
-                    seg.working_inst.set_base_color_texture(texture_data=solid)
-                    self.entity.apply_render_material_inst(
-                        env_idx, seg.working_inst.mat, link_name, seg.mesh_id
-                    )
+                    self._apply_solid_tier(seg, env_idx, link_name)
 ```
 
 Also ensure the plane path in `_call_legacy` does not call `clean_materials` when invoked from new mode. The `clean` flag already controls this; `__call__` passes `clean=self._fallback_to_new` (False for plane in new mode). Verify the plane branch in `_call_legacy` respects `clean` (it does, per Task 4).
