@@ -9,7 +9,7 @@
     "components": [
       {
         "component_type": "left_arm",
-        "urdf_path": "Franka/Panda/PandaWithHand.urdf",
+        "urdf_path": "Franka/Panda/Panda.urdf",
         "transform": [
           [0.0, -1.0, 0.0, 0.3],
           [1.0, 0.0, 0.0, -1.25],
@@ -18,14 +18,22 @@
         ]
       },
       {
+        "component_type": "left_hand",
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+      },
+      {
         "component_type": "right_arm",
-        "urdf_path": "Franka/Panda/PandaWithHand.urdf",
+        "urdf_path": "Franka/Panda/Panda.urdf",
         "transform": [
           [0.0, -1.0, 0.0, -0.3],
           [1.0, 0.0, 0.0, -1.25],
           [0.0, 0.0, 1.0, 0.4],
           [0.0, 0.0, 0.0, 1.0]
         ]
+      },
+      {
+        "component_type": "right_hand",
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
       }
     ]
   },
@@ -44,12 +52,21 @@
     0.0,
     3.037,
     3.037,
-    0.741,
-    0.741,
-    0.04,
-    0.04,
-    0.04,
-    0.04
+    0,
+    0,
+    
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
   ],
   "drive_pros": {
     "stiffness": {
@@ -81,7 +98,14 @@
       "left_fr3_joint6",
       "left_fr3_joint7"
     ],
-    "left_eef": ["left_fr3_finger_joint[1-2]"],
+    "left_eef": [
+      "left_finger_joint",
+      "left_inner_knuckle_joint",
+      "left_inner_finger_joint",
+      "left_right_outer_knuckle_joint",
+      "left_right_inner_knuckle_joint",
+      "left_right_inner_finger_joint"
+    ],
     "right_arm": [
       "right_fr3_joint1",
       "right_fr3_joint2",
@@ -91,7 +115,14 @@
       "right_fr3_joint6",
       "right_fr3_joint7"
     ],
-    "right_eef": ["right_fr3_finger_joint[1-2]"],
+    "right_eef": [
+      "right_finger_joint",
+      "right_left_inner_knuckle_joint",
+      "right_left_inner_finger_joint",
+      "right_outer_knuckle_joint",
+      "right_inner_knuckle_joint",
+      "right_inner_finger_joint"
+    ],
     "dual_arm": [
       "left_fr3_joint1",
       "left_fr3_joint2",
@@ -115,29 +146,26 @@
     "left_arm": {
       "class_type": "PytorchSolver",
       "urdf_path": null,
-      "end_link_name": "left_fr3_hand_tcp",
+      "end_link_name": "left_fr3_link8",
       "root_link_name": "left_base",
       "tcp": [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0, 0.2],
         [0.0, 0.0, 0.0, 1.0]
       ]
     },
     "right_arm": {
       "class_type": "PytorchSolver",
       "urdf_path": null,
-      "end_link_name": "right_fr3_hand_tcp",
+      "end_link_name": "right_fr3_link8",
       "root_link_name": "right_base",
       "tcp": [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0, 0.2],
         [0.0, 0.0, 0.0, 1.0]
       ]
     }
-  },
-  "qpos_limits": {
-    "(left|right)_fr3_finger_joint[1-2]": [0.0, 0.06]
   }
 }
