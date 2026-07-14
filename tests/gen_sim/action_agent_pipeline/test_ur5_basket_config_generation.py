@@ -220,19 +220,32 @@ def test_record_camera_events_generate_audience_view_name() -> None:
     assert params["up"] == pytest.approx([-1.0, 0.0, 0.0])
 
 
-def test_table_visual_material_event_uses_packaged_texture() -> None:
+def test_table_visual_material_event_randomizes_packaged_textures() -> None:
     event = _table_visual_material_event_config()
 
-    assert event["func"] == "set_rigid_object_visual_material"
+    assert event["func"] == "randomize_visual_material"
     assert event["mode"] == "startup"
     assert event["params"]["entity_cfg"] == {"uid": "table"}
 
-    material = event["params"]["mat_cfg"]
-    assert material["uid"] == "action_agent_table_wood"
-    assert material["base_color"] == [1.0, 1.0, 1.0, 1.0]
-    assert material["metallic"] == pytest.approx(0.0)
-    assert material["roughness"] == pytest.approx(0.7)
-    assert Path(material["base_color_texture"]).is_file()
+    params = event["params"]
+    texture_path = Path(params["texture_path"])
+    assert texture_path == (
+        Path(__file__).resolve().parents[3]
+        / "embodichain/gen_sim/action_agent_pipeline/generation/templates/textures"
+        / "table_randomized"
+    )
+    assert sorted(path.name for path in texture_path.iterdir()) == [
+        "1.jpg",
+        "2.jpg",
+        "3.jpg",
+    ]
+    assert params["random_texture_prob"] == pytest.approx(1.0)
+    assert params["base_color_range"] == [
+        [1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ]
+    assert params["metallic_range"] == [0.0, 0.0]
+    assert params["roughness_range"] == [0.7, 0.7]
 
 
 def test_all_task_event_builders_include_table_visual_material() -> None:
