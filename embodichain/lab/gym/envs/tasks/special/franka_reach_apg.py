@@ -19,8 +19,8 @@ Built on :class:`DifferentiableEmbodiedEnv`. The Warp-tape bridge
 produces ``action.grad`` that flows back through a differentiable
 forward-kinematics path (``newton.eval_fk``). The semi_implicit
 solver does not propagate grad through ``joint_target_pos`` to
-``body_q`` (the grad path is zero), so we bypass the dynamics
-solver and run FK directly, matching the reference APG
+``body_q`` (the grad path is zero), so this task explicitly selects
+the kinematics route and runs FK directly, matching the reference APG
 implementation in
 ``/root/sources/analytic_policy_gradients/envs/franka_reach_env.py``.
 """
@@ -115,13 +115,16 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         action -> new_joint_q (action kernel) -> eval_fk -> body_q
                 -> reward kernel -> reward_wp -> tape.backward -> action.grad
 
-    The dynamics solver (semi_implicit) is bypassed because it does not
-    propagate gradient through ``joint_target_pos`` to ``body_q`` (the
-    stiffness-driven grad path evaluates to zero in practice). This
-    matches the reference APG env's workaround.
+    This task explicitly uses the ``kinematics`` route because the
+    semi_implicit dynamics solver does not propagate gradient through
+    ``joint_target_pos`` to ``body_q`` (the stiffness-driven grad path
+    evaluates to zero in practice). This matches the reference APG env's
+    FK-only workaround without changing the default route for other
+    differentiable environments.
     """
 
     metadata = {"render_modes": ["human"], "default_num_envs": 4}
+    differentiable_step_mode = "kinematics"
 
     def __init__(
         self,
@@ -275,13 +278,13 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
     # -- DifferentiableEmbodiedEnv contract ------------------------------ #
 
-    def _make_step_fn(self) -> Callable[[], Any]:
-        """FK bypass: compute body_q from new_joint_q via newton.eval_fk.
+    def _make_kinematic_step_fn(self) -> Callable[[], Any]:
+        """Explicit FK hook: compute body_q from new_joint_q via ``eval_fk``.
 
         The semi_implicit solver does not propagate grad through
         ``joint_target_pos`` to ``body_q`` (the grad path is zero), so
-        we bypass the dynamics solver and run forward kinematics
-        directly inside the tape. ``self._new_joint_q`` is populated by
+        this kinematics-mode task runs forward kinematics directly
+        inside the tape. ``self._new_joint_q`` is populated by
         :meth:`_apply_action_kernel` before this callable runs.
         """
         env = self
@@ -303,7 +306,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
         Writes ``new_joint_q = clamp(current_q + action * scale, lo, hi)``
         into a freshly allocated ``self._new_joint_q`` Warp array. The
-        FK step function then consumes this array via ``newton.eval_fk``.
+        explicit kinematic hook then consumes this array via ``newton.eval_fk``.
         """
         nm = self.sim.physics.newton_manager
         n = self.sim.num_envs

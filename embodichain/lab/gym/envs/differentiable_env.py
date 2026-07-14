@@ -31,7 +31,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import torch
 
@@ -48,8 +48,15 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
 
     Subclasses must implement :meth:`_apply_action_kernel` and
     :meth:`_read_outputs`; the rest of the EmbodiedEnv contract (reset,
-    observation managers, reward functors) carries over.
+    observation managers, reward functors) carries over. The default
+    ``dynamics`` route invokes the Newton solver through
+    :class:`NewtonStepFunc`; subclasses that intentionally use FK-only
+    stepping must explicitly select ``kinematics`` and implement
+    :meth:`_make_kinematic_step_fn`.
     """
+
+    differentiable_step_mode: Literal["dynamics", "kinematics"] = "dynamics"
+    """Stepping route used by :meth:`_build_sim_state_dict`."""
 
     def __init__(self, cfg: EmbodiedEnvCfg, *args, **kwargs) -> None:
         self._validate_diff_cfg(cfg)
@@ -111,12 +118,11 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
         Warp kernel launches (or differentiable Newton calls like
         ``eval_fk``) are recorded on the tape.
 
-        The default implementation runs the differentiable
-        :class:`DifferentiableStepper` for ``sim_steps_per_control``
-        substeps. Subclasses can override this to swap in an FK-only
-        differentiable path (bypassing the dynamics solver when it does
-        not propagate grad through control inputs) or any other
-        tape-tracked stepping strategy.
+        This helper runs the differentiable :class:`DifferentiableStepper`
+        for ``sim_steps_per_control`` substeps. The public environment
+        ``dynamics`` route deliberately uses :class:`NewtonStepFunc`'s
+        native implementation instead, but this helper remains available
+        for direct advanced use.
         """
         manager = self.sim
         substeps = self.cfg.sim_steps_per_control
@@ -128,12 +134,28 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
         dt_val = nm.solver_dt
 
         def _step():
+            nonlocal state_in, state_out
             for _ in range(substeps):
                 stepper.step(state_in, state_out, contacts=contacts, dt=dt_val)
                 state_in, state_out = state_out, state_in
             return state_in
 
         return _step
+
+    def _make_kinematic_step_fn(self) -> Callable[[], Any]:
+        """Return the explicitly selected FK-only stepping callback.
+
+        Subclasses must override this hook only when they set
+        :attr:`differentiable_step_mode` to ``"kinematics"``. This keeps
+        kinematics distinct from the default solver-dynamics route.
+
+        Raises:
+            NotImplementedError: If kinematics mode has no named FK hook.
+        """
+        raise NotImplementedError(
+            "DifferentiableEmbodiedEnv in kinematics mode requires "
+            "_make_kinematic_step_fn()."
+        )
 
     # -- gym surface ------------------------------------------------------ #
 
@@ -157,15 +179,24 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
         return obs, reward, terminated, truncated, info
 
     def _build_sim_state_dict(self, action: torch.Tensor) -> dict:
-        return {
+        mode = self.differentiable_step_mode
+        if mode not in {"dynamics", "kinematics"}:
+            raise ValueError(
+                "differentiable_step_mode must be 'dynamics' or 'kinematics', "
+                f"got {mode!r}."
+            )
+
+        sim_state = {
             "manager": self.sim,
             "substeps": self.cfg.sim_steps_per_control,
             "action_to_control_kernel": self._wrap_action_kernel(),
             "kernel_args": (),
             "obs_reward_fn": self._read_outputs,
-            "step_fn": self._make_step_fn(),
             "last_info": {},
         }
+        if mode == "kinematics":
+            sim_state["step_fn"] = self._make_kinematic_step_fn()
+        return sim_state
 
     def _wrap_action_kernel(self):
         env = self
