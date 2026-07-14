@@ -233,6 +233,7 @@ class _CoordinatedGraspPair:
     right_object_to_eef: torch.Tensor
     priority: int
     score: float
+    axis_kind: str
 
 
 @dataclass(frozen=True)
@@ -2380,6 +2381,11 @@ def _default_coordinated_object_to_eef(
         device=device,
     )
     if selected is not None:
+        if selected.axis_kind != "long_axis":
+            log_warning(
+                "Preferred long-axis CoordinatedPickment grasp is unavailable; "
+                f"using {selected.axis_kind} fallback."
+            )
         return selected.left_object_to_eef, selected.right_object_to_eef
     if _has_coordinated_ik_api(env):
         log_warning(
@@ -2480,13 +2486,12 @@ def _coordinated_grasp_pair_candidates(
                 object_initial_pose=object_initial_pose,
                 inset_fractions=inset_fractions,
                 priority=principal_priority_offset + axis_rank * 20,
+                axis_kind="long_axis" if axis_rank == 0 else "short_axis",
                 env=env,
                 device=device,
             )
         )
-    local_priority_offset = (
-        20 if principal_axis_pairs else 0
-    ) + principal_priority_offset
+    local_priority_offset = len(principal_axis_pairs) * 20 + principal_priority_offset
     for axis_rank, axis_index in enumerate(top_down_axis_indices):
         candidates.extend(
             _coordinated_top_down_grasp_candidates(
@@ -2495,6 +2500,7 @@ def _coordinated_grasp_pair_candidates(
                 inset_fractions=inset_fractions,
                 use_edge_closing=use_edge_closing,
                 priority=local_priority_offset + axis_rank * 20,
+                axis_kind="long_axis" if axis_rank == 0 else "short_axis",
                 object_initial_pose=object_initial_pose,
                 env=env,
                 device=device,
@@ -2535,6 +2541,7 @@ def _coordinated_grasp_pair_candidates(
             device=device,
             priority=len(top_down_axis_indices) * 20 + 10,
             score_bias=10.0,
+            axis_kind="side",
         )
     )
     return sorted(candidates, key=lambda pair: (pair.priority, pair.score))
@@ -2552,6 +2559,7 @@ def _coordinated_top_down_grasp_candidates(
     inset_fractions: tuple[float, ...],
     use_edge_closing: bool,
     priority: int,
+    axis_kind: str,
     object_initial_pose: torch.Tensor,
     env,
     device,
@@ -2572,6 +2580,7 @@ def _coordinated_top_down_grasp_candidates(
         object_initial_pose=object_initial_pose,
         inset_fractions=inset_fractions,
         priority=priority,
+        axis_kind=axis_kind,
         env=env,
         device=device,
     )
@@ -2586,6 +2595,7 @@ def _coordinated_projected_top_down_grasp_candidates(
     object_initial_pose: torch.Tensor,
     inset_fractions: tuple[float, ...],
     priority: int,
+    axis_kind: str,
     env,
     device,
 ) -> list[_CoordinatedGraspPair]:
@@ -2631,6 +2641,7 @@ def _coordinated_projected_top_down_grasp_candidates(
                 device=device,
                 priority=priority + inset_rank,
                 score_bias=0.0,
+                axis_kind=axis_kind,
             )
         )
     return candidates
@@ -2680,6 +2691,7 @@ def _coordinated_world_lateral_top_down_grasp_candidates(
                 device=device,
                 priority=priority + inset_rank,
                 score_bias=0.0,
+                axis_kind="world_lateral",
             )
         )
     return candidates
@@ -2856,7 +2868,7 @@ def _coordinated_novel_principal_axis_pairs(
     short_axis = _normalize_horizontal_axis(short_axis, device)
     if not _coordinated_axis_pair_is_novel(long_axis, object_initial_pose, device):
         return []
-    return [(long_axis, short_axis)]
+    return [(long_axis, short_axis), (short_axis, long_axis)]
 
 
 def _coordinated_axis_pair_is_novel(
@@ -2900,6 +2912,7 @@ def _make_coordinated_top_down_world_grasp_pair(
     device,
     priority: int,
     score_bias: float,
+    axis_kind: str,
 ) -> _CoordinatedGraspPair:
     z_axis = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
     x_axis = _orthogonalized_axis(closing_axis, z_axis)
@@ -2936,6 +2949,7 @@ def _make_coordinated_top_down_world_grasp_pair(
         device=device,
         priority=priority,
         score_bias=score_bias,
+        axis_kind=axis_kind,
     )
 
 
@@ -2981,6 +2995,7 @@ def _make_coordinated_grasp_pair(
     device,
     priority: int,
     score_bias: float,
+    axis_kind: str,
 ) -> _CoordinatedGraspPair:
     left_world = object_initial_pose @ left_object_to_eef
     right_world = object_initial_pose @ right_object_to_eef
@@ -2995,6 +3010,7 @@ def _make_coordinated_grasp_pair(
         right_object_to_eef=right_object_to_eef,
         priority=int(priority),
         score=score + float(score_bias),
+        axis_kind=axis_kind,
     )
 
 
