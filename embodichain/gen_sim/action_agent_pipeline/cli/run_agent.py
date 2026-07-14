@@ -253,6 +253,20 @@ def _add_vectorized_reset_randomization(
             },
         },
     )
+    events.setdefault(
+        "random_table_visual_material-interval",
+        {
+            "func": "randomize_visual_material",
+            "mode": "interval",
+            "interval_step": 40,
+            "params": {
+                "entity_cfg": {"uid": "table"},
+                "random_texture_prob": 1.0,
+                "texture_path": table_texture_path,
+                "texture_sampling": "without_replacement",
+            },
+        },
+    )
 
 
 def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: dict):
