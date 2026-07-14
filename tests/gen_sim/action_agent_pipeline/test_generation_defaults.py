@@ -44,14 +44,14 @@ _EXPECTED_RIGID_OBJECT_PHYSICS = {
     "mass": 0.2,
     "static_friction": 0.95,
     "dynamic_friction": 0.9,
-    "linear_damping": 0.7,
-    "angular_damping": 0.7,
+    "linear_damping": 0.9,
+    "angular_damping": 0.9,
     "contact_offset": 0.002,
     "rest_offset": 0.001,
     "restitution": 0.05,
-    "max_depenetration_velocity": 5.0,
-    "max_linear_velocity": 1.0,
-    "max_angular_velocity": 1.0,
+    "max_depenetration_velocity": 0.8,
+    "max_linear_velocity": 0.5,
+    "max_angular_velocity": 0.5,
 }
 
 
