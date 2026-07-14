@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
@@ -28,11 +30,29 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
+    _make_target_object_config,
     _moved_rigid_object_max_convex_hull_num,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
+    GlbGeometryNormalizer,
+)
+
+_EXPECTED_RIGID_OBJECT_PHYSICS = {
+    "mass": 0.2,
+    "static_friction": 0.95,
+    "dynamic_friction": 0.9,
+    "linear_damping": 0.7,
+    "angular_damping": 0.7,
+    "contact_offset": 0.002,
+    "rest_offset": 0.001,
+    "restitution": 0.05,
+    "max_depenetration_velocity": 5.0,
+    "max_linear_velocity": 1.0,
+    "max_angular_velocity": 1.0,
+}
 
 
 def test_public_generation_defaults_are_loaded_from_yaml() -> None:
@@ -69,6 +89,28 @@ def test_affordance_stabilization_steps_is_a_non_negative_integer() -> None:
 
     assert isinstance(stabilization_steps, int)
     assert stabilization_steps >= 0
+
+
+def test_generated_rigid_object_uses_complete_physics_defaults(
+    tmp_path: Path,
+) -> None:
+    obj = _SceneObject(
+        "cube",
+        "rigid_object",
+        {"shape": {"shape_type": "Box"}},
+    )
+
+    config = _make_target_object_config(
+        tmp_path,
+        obj,
+        "cube",
+        [1.0, 1.0, 1.0],
+        GlbGeometryNormalizer(output_dir=tmp_path / "normalized"),
+    )
+
+    assert {
+        key: config["attrs"][key] for key in _EXPECTED_RIGID_OBJECT_PHYSICS
+    } == _EXPECTED_RIGID_OBJECT_PHYSICS
 
 
 def test_generation_defaults_section_rejects_unknown_section() -> None:
