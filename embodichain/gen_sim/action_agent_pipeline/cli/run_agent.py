@@ -43,6 +43,9 @@ _RUN_AGENT_DEFAULTS = load_config(Path(__file__).with_name("run_agent_defaults.y
 _PHYSICAL_COLLISION_CONFIG = _RUN_AGENT_DEFAULTS["physical_collision"]
 _VECTORIZED_RESET_CONFIG = _RUN_AGENT_DEFAULTS["vectorized_reset_randomization"]
 _WINDOW_LOOK_AT_CONFIG = _RUN_AGENT_DEFAULTS["window_look_at"]
+_DEFAULT_TABLE_TEXTURE_PATH = str(
+    Path(__file__).resolve().parents[4] / "gym_project" / "background_texture"
+)
 
 _SHOW_PHYSICAL_COLLISION_ENV = _PHYSICAL_COLLISION_CONFIG["environment_variable"]
 _PHYSICAL_COLLISION_RGBA = tuple(_PHYSICAL_COLLISION_CONFIG["rgba"])
@@ -58,7 +61,9 @@ def cli() -> None:
 
     env_cfg, gym_config, _ = build_env_cfg_from_args(
         args,
-        gym_config_modifier=_modify_gym_config_for_run_agent,
+        gym_config_modifier=lambda config: _modify_gym_config_for_run_agent(
+            config, table_texture_path=args.table_texture_path
+        ),
     )
     agent_config = load_config(args.agent_config)
 
@@ -106,14 +111,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="Whether to regenerate code if already existed.",
         default=False,
     )
+    parser.add_argument(
+        "--table_texture_path",
+        "--table-texture-path",
+        dest="table_texture_path",
+        type=str,
+        default=_DEFAULT_TABLE_TEXTURE_PATH,
+        help=(
+            "Directory of table textures used for reset randomization. "
+            "Defaults to gym_project/background_texture in the repository."
+        ),
+    )
     return parser
 
 
-def _modify_gym_config_for_run_agent(gym_config: dict[str, Any]) -> None:
-    _add_vectorized_reset_randomization(gym_config)
+def _modify_gym_config_for_run_agent(
+    gym_config: dict[str, Any], table_texture_path: str | None = None
+) -> None:
+    """Apply action-agent demo defaults to a merged gym configuration."""
+    _set_rect_light_intensity_for_parallel_envs(gym_config)
+    _add_vectorized_reset_randomization(
+        gym_config,
+        table_texture_path=table_texture_path or _DEFAULT_TABLE_TEXTURE_PATH,
+    )
 
 
-def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
+def _set_rect_light_intensity_for_parallel_envs(gym_config: dict[str, Any]) -> None:
+    """Reduce direct rect-light intensity for vectorized environment runs."""
+    if gym_config.get("num_envs", 1) <= 1:
+        return
+
+    light_config = gym_config.get("light")
+    if not isinstance(light_config, dict):
+        return
+    direct_lights = light_config.get("direct")
+    if not isinstance(direct_lights, list):
+        return
+
+    for light in direct_lights:
+        if isinstance(light, dict) and light.get("light_type") == "rect":
+            light["intensity"] = 10.0
+
+
+def _add_vectorized_reset_randomization(
+    gym_config: dict[str, Any], *, table_texture_path: str | None = None
+) -> None:
     """Add default reset randomization for parallel action-agent environments.
 
     Dataset functors are removed because dataset recorders are not supported for
@@ -127,9 +169,13 @@ def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
     Args:
         gym_config: Merged gym configuration that will be parsed into the
             environment configuration.
+        table_texture_path: Directory containing texture images for the table.
+            Uses the repository demo texture directory when omitted.
     """
     if gym_config.get("num_envs", 1) <= 1:
         return
+
+    table_texture_path = table_texture_path or _DEFAULT_TABLE_TEXTURE_PATH
 
     env_config = gym_config.setdefault("env", {})
     dataset_config = env_config.get("dataset")
@@ -191,6 +237,19 @@ def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
                     list(_VECTORIZED_RESET_CONFIG["table_height_delta_range"][0]),
                     list(_VECTORIZED_RESET_CONFIG["table_height_delta_range"][1]),
                 ],
+            },
+        },
+    )
+    events.setdefault(
+        "random_table_visual_material",
+        {
+            "func": "randomize_visual_material",
+            "mode": "reset",
+            "params": {
+                "entity_cfg": {"uid": "table"},
+                "random_texture_prob": 1.0,
+                "texture_path": table_texture_path,
+                "texture_sampling": "without_replacement",
             },
         },
     )

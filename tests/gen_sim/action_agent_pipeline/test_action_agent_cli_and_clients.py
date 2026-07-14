@@ -90,13 +90,88 @@ def test_run_agent_reset_randomization_configures_parallel_envs() -> None:
     assert events["init_apple_pose"]["params"] == {
         "entity_cfg": {"uid": "apple"},
         "position_range": [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]],
-        "rotation_range": [[0.0, 0.0, -45.0], [0.0, 0.0, 45.0]],
+        "rotation_range": [[0.0, 0.0, -30.0], [0.0, 0.0, 30.0]],
         "relative_position": True,
+        "relative_rotation": True,
     }
     assert events["random_table_height"]["params"] == {
         "anchor_uid": "table",
         "height_delta_range": [[-0.05], [0.05]],
     }
+
+
+def test_run_agent_sets_rect_light_intensity_for_parallel_envs() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
+
+    gym_config = {
+        "num_envs": 2,
+        "light": {
+            "direct": [
+                {"light_type": "rect", "intensity": 30.0},
+                {"light_type": "point", "intensity": 40.0},
+            ]
+        },
+    }
+
+    run_agent._modify_gym_config_for_run_agent(gym_config)
+
+    direct_lights = gym_config["light"]["direct"]
+    assert direct_lights[0]["intensity"] == 10.0
+    assert direct_lights[1]["intensity"] == 40.0
+
+
+def test_run_agent_preserves_rect_light_intensity_for_single_env() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
+
+    gym_config = {
+        "num_envs": 1,
+        "light": {"direct": [{"light_type": "rect", "intensity": 30.0}]},
+    }
+
+    run_agent._modify_gym_config_for_run_agent(gym_config)
+
+    assert gym_config["light"]["direct"][0]["intensity"] == 30.0
+
+
+def test_run_agent_adds_configurable_table_visual_material_randomization() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
+
+    texture_path = "/tmp/demo-table-textures"
+    gym_config = {"num_envs": 2}
+
+    run_agent._modify_gym_config_for_run_agent(
+        gym_config, table_texture_path=texture_path
+    )
+
+    assert gym_config["env"]["events"]["random_table_visual_material"] == {
+        "func": "randomize_visual_material",
+        "mode": "reset",
+        "params": {
+            "entity_cfg": {"uid": "table"},
+            "random_texture_prob": 1.0,
+            "texture_path": texture_path,
+            "texture_sampling": "without_replacement",
+        },
+    }
+
+
+def test_run_agent_parser_accepts_table_texture_path_override() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.run_agent import build_parser
+
+    texture_path = "/tmp/demo-table-textures"
+
+    args = build_parser().parse_args(
+        [
+            "--task_name",
+            "demo",
+            "--agent_config",
+            "agent.yaml",
+            "--table-texture-path",
+            texture_path,
+        ]
+    )
+
+    assert args.table_texture_path == texture_path
 
 
 def test_run_agent_parser_rejects_robot_profile_override() -> None:

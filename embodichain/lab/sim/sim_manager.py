@@ -486,6 +486,9 @@ class SimulationManager:
             sim_config.render_cfg.spp
         )
 
+        world_config.postprocess_config.tone_mapping_enabled = True
+        world_config.postprocess_config.tone_mapping_exposure = 1.0
+
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
         else:
