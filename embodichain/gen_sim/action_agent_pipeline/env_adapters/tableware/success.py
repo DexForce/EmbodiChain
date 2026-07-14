@@ -89,6 +89,8 @@ def _evaluate_spec(
         return _both_grippers_open(env)
     if term_type == "grippers_clear_of_object":
         return _grippers_clear_of_object(env, spec)
+    if term_type == "both_arms_at_initial_qpos":
+        return _both_arms_at_initial_qpos(env, spec)
     raise ValueError(f"Unsupported success term type: {term_type!r}.")
 
 
@@ -352,6 +354,54 @@ def _grippers_clear_of_object(env, spec: Mapping[str, Any]) -> torch.Tensor:
     if distances is None:
         return _constant(env, False)
     return (distances[0] >= min_distance) & (distances[1] >= min_distance)
+
+
+def _both_arms_at_initial_qpos(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    if not hasattr(env, "get_current_qpos_agent"):
+        return _constant(env, False)
+    left_initial = getattr(env, "left_arm_init_qpos", None)
+    right_initial = getattr(env, "right_arm_init_qpos", None)
+    if left_initial is None or right_initial is None:
+        return _constant(env, False)
+    try:
+        left_current, right_current = env.get_current_qpos_agent()
+    except (AttributeError, TypeError, ValueError):
+        return _constant(env, False)
+
+    tolerance = float(spec.get("tolerance", 0.05))
+    arm_results = []
+    for current, initial in (
+        (left_current, left_initial),
+        (right_current, right_initial),
+    ):
+        current_qpos = _batched_qpos(env, current)
+        initial_qpos = _batched_qpos(env, initial)
+        if (
+            current_qpos is None
+            or initial_qpos is None
+            or current_qpos.shape != initial_qpos.shape
+            or current_qpos.shape[-1] == 0
+        ):
+            return _constant(env, False)
+        arm_results.append(
+            torch.all(torch.abs(current_qpos - initial_qpos) <= tolerance, dim=-1)
+        )
+    return arm_results[0] & arm_results[1]
+
+
+def _batched_qpos(env, value: Any) -> torch.Tensor | None:
+    if value is None:
+        return None
+    qpos = torch.as_tensor(value, dtype=torch.float32, device=env.device)
+    if qpos.ndim == 1:
+        qpos = qpos.unsqueeze(0)
+    if qpos.ndim != 2:
+        return None
+    if qpos.shape[0] == 1 and env.num_envs > 1:
+        qpos = qpos.expand(env.num_envs, -1)
+    if qpos.shape[0] != env.num_envs:
+        return None
+    return qpos
 
 
 def _gripper_to_object_surface_distances(

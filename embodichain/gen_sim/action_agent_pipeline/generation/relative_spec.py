@@ -910,14 +910,31 @@ def _normalize_coordinated_terminal_behavior(
 ) -> str:
     if value is None:
         text = task_description.lower()
-        if any(
-            keyword in text
-            for keyword in ("端起", "举起", "悬空", "保持", "举着", "hold")
-        ):
-            return "hold"
+        terminal_cues = {
+            "hold": ("端起", "举起", "悬空", "保持", "举着", "hold"),
+            "place": ("放下", "落下", "放回", "松开", "put down", "release"),
+        }
+        matched_cues = [
+            (text.rfind(keyword), behavior)
+            for behavior, keywords in terminal_cues.items()
+            for keyword in keywords
+            if keyword in text
+        ]
+        if matched_cues:
+            return max(matched_cues, key=lambda match: match[0])[1]
         return "place"
     behavior = str(value).strip().lower()
-    aliases = {"悬空": "hold", "保持": "hold", "放下": "place"}
+    aliases = {
+        "悬空": "hold",
+        "保持": "hold",
+        "举着": "hold",
+        "放下": "place",
+        "落下": "place",
+        "放回": "place",
+        "松开": "place",
+        "put down": "place",
+        "release": "place",
+    }
     behavior = aliases.get(behavior, behavior)
     if behavior not in _COORDINATED_TERMINAL_BEHAVIORS:
         raise ValueError(

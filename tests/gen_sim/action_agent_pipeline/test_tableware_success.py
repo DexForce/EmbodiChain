@@ -192,3 +192,31 @@ def test_both_grippers_open_returns_false_before_open_state_init() -> None:
     success = evaluate_configured_success(env, {"type": "both_grippers_open"})
 
     assert success.tolist() == [False]
+
+
+def test_both_arms_at_initial_qpos_checks_each_arm() -> None:
+    env = _FakeEnv()
+    env.left_arm_init_qpos = torch.tensor([[0.1, 0.2]])
+    env.right_arm_init_qpos = torch.tensor([[-0.1, -0.2]])
+    env.get_current_qpos_agent = lambda: (
+        torch.tensor([[0.11, 0.19]]),
+        torch.tensor([[-0.12, -0.18]]),
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {"type": "both_arms_at_initial_qpos", "tolerance": 0.05},
+    )
+
+    assert success.tolist() == [True]
+
+    env.get_current_qpos_agent = lambda: (
+        torch.tensor([[0.11, 0.19]]),
+        torch.tensor([[-0.2, -0.18]]),
+    )
+    success = evaluate_configured_success(
+        env,
+        {"type": "both_arms_at_initial_qpos", "tolerance": 0.05},
+    )
+
+    assert success.tolist() == [False]

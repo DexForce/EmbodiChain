@@ -312,6 +312,10 @@ def _make_relative_success_spec(
                         "object": carrier.moved_runtime_uid,
                         "min_distance": 0.05,
                     },
+                    {
+                        "type": "both_arms_at_initial_qpos",
+                        "tolerance": 0.05,
+                    },
                 ],
             }
         return {"op": "all", "terms": [*payload_terms, carrier_term]}
@@ -711,7 +715,7 @@ def _validate_success_uids(
         "grippers_clear_of_object",
     }:
         required_keys = ("object",)
-    elif success_type == "both_grippers_open":
+    elif success_type in {"both_grippers_open", "both_arms_at_initial_qpos"}:
         return
     else:
         raise ValueError(f"Unsupported generated success term: {success_type!r}.")

@@ -85,6 +85,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
     _normalize_coordinated_direction,
+    _normalize_coordinated_terminal_behavior,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _is_container_like,
@@ -5485,6 +5486,28 @@ def test_coordinated_transport_accepts_supported_directions(direction: str) -> N
     assert _normalize_coordinated_direction(direction) == direction
 
 
+@pytest.mark.parametrize(
+    ("task_description", "expected"),
+    [
+        ("双臂端起盘子并保持悬空", "hold"),
+        ("双臂端起盘子向前移动，然后放下", "place"),
+        ("先把苹果放下到盘中，再端起盘子", "hold"),
+        ("双臂往前搬运盘子", "place"),
+    ],
+)
+def test_coordinated_transport_infers_terminal_behavior_from_last_cue(
+    task_description: str,
+    expected: str,
+) -> None:
+    assert (
+        _normalize_coordinated_terminal_behavior(
+            None,
+            task_description=task_description,
+        )
+        == expected
+    )
+
+
 @pytest.mark.parametrize("name", ["washbasin", "脸盆", "bucket"])
 def test_coordinated_transport_recognizes_additional_container_names(name: str) -> None:
     carrier = _SceneObject(
@@ -5567,6 +5590,26 @@ def test_coordinated_transport_loads_payloads_then_places_vertically(
     assert paths.summary["payloads"] == ["apple_1", "apple_2"]
     assert paths.summary["terminal_behavior"] == "place"
     assert paths.summary["release_offset"][:2] == pytest.approx([0.15, 0.0])
+    release = graph["edges"][8]
+    for side in ("left_arm_action", "right_arm_action"):
+        assert release[side]["control"] == "hand"
+        assert release[side]["target_qpos"] == {
+            "source": "gripper_state",
+            "state": "open",
+        }
+    return_edge = graph["edges"][10]
+    for side in ("left_arm_action", "right_arm_action"):
+        assert return_edge[side]["control"] == "arm"
+        assert return_edge[side]["target_qpos"] == {"source": "initial"}
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    carrier_terms = gym_config["env"]["extensions"]["agent_success"]["terms"][-1][
+        "terms"
+    ]
+    assert {
+        "type": "both_arms_at_initial_qpos",
+        "tolerance": 0.05,
+    } in carrier_terms
 
 
 def test_coordinated_transport_generates_for_insufficient_carrier_capacity(
