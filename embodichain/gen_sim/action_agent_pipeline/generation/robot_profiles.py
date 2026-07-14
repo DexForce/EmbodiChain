@@ -154,7 +154,8 @@ def _dual_ur_profile(
         robot_meta_type=display_name.replace(" ", ""),
         robot_config_factory=(
             lambda robot_init_z, ur_type=ur_type: make_dual_ur_dh_pgi_robot_config(
-                ur_type=ur_type,
+                # TODO: hard coded to ur10 for now, but should be parameterized by ur_type
+                ur_type="ur10",
                 robot_init_z=robot_init_z,
             )
         ),
