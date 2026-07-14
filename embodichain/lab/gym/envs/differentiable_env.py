@@ -109,39 +109,6 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
             "_read_outputs(final_state)."
         )
 
-    def _make_step_fn(self) -> Callable[[], Any]:
-        """Return a callable that advances the sim inside the open tape.
-
-        The returned callable takes no arguments and returns the final
-        Newton :class:`State` after stepping. It is invoked by
-        :class:`NewtonStepFunc` inside the ``with tape:`` block, so any
-        Warp kernel launches (or differentiable Newton calls like
-        ``eval_fk``) are recorded on the tape.
-
-        This helper runs the differentiable :class:`DifferentiableStepper`
-        for ``sim_steps_per_control`` substeps. The public environment
-        ``dynamics`` route deliberately uses :class:`NewtonStepFunc`'s
-        native implementation instead, but this helper remains available
-        for direct advanced use.
-        """
-        manager = self.sim
-        substeps = self.cfg.sim_steps_per_control
-        nm = manager.physics.newton_manager
-        stepper = manager.create_differentiable_stepper()
-        state_in = nm._state_0
-        state_out = nm._model.state()
-        contacts = stepper.create_contacts()
-        dt_val = nm.solver_dt
-
-        def _step():
-            nonlocal state_in, state_out
-            for _ in range(substeps):
-                stepper.step(state_in, state_out, contacts=contacts, dt=dt_val)
-                state_in, state_out = state_out, state_in
-            return state_in
-
-        return _step
-
     def _make_kinematic_step_fn(self) -> Callable[[], Any]:
         """Return the explicitly selected FK-only stepping callback.
 

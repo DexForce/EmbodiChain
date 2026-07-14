@@ -29,6 +29,49 @@ if TYPE_CHECKING:
 __all__ = ["NewtonStepFunc", "differentiable_step", "tape_context"]
 
 
+def _solver_step_count(nm: Any, control_substeps: int) -> int:
+    """Return the solver calls represented by an EmbodiChain control step.
+
+    A control step contains ``control_substeps`` Newton physics updates, and
+    each physics update contains ``nm.num_substeps`` solver updates at
+    ``nm.solver_dt``.
+    """
+    physics_substeps = int(nm.num_substeps)
+    if control_substeps < 1 or physics_substeps < 1:
+        raise ValueError(
+            "Differentiable solver stepping requires positive control and "
+            "Newton substep counts."
+        )
+    return control_substeps * physics_substeps
+
+
+def _allocate_solver_trajectory(
+    nm: Any, stepper: Any, solver_steps: int
+) -> tuple[list[Any], list[Any]]:
+    """Allocate detached state/contact buffers for a tape-tracked trajectory."""
+    if solver_steps < 1:
+        raise ValueError(f"solver_steps must be positive, got {solver_steps}.")
+    states = [nm._model.state() for _ in range(solver_steps + 1)]
+    # This occurs before the tape opens so the trajectory never aliases or
+    # writes the manager's published live state during its taped solver calls.
+    states[0].assign(nm._state_0)
+    contacts = [stepper.create_contacts() for _ in range(solver_steps)]
+    return states, contacts
+
+
+def _commit_final_state_detached(nm: Any, final_state: Any) -> None:
+    """Publish a solver final state through non-taped live-state copies."""
+    copied_state_ids: set[int] = set()
+    for live_state in (nm._state_0, getattr(nm, "_state_1", None)):
+        if live_state is None or id(live_state) in copied_state_ids:
+            continue
+        # Called after the tape closes: this must not become part of the
+        # action-to-output graph, but it makes the next environment step start
+        # from the exact final solver state even after an odd number of steps.
+        live_state.assign(final_state)
+        copied_state_ids.add(id(live_state))
+
+
 @contextmanager
 def tape_context(manager: "SimulationManager") -> Iterator[wp.Tape]:
     """Open a Warp tape bound to the manager's Newton state.
@@ -52,7 +95,11 @@ def differentiable_step(
     substeps: int,
     dt: float | None = None,
 ) -> dict:
-    """Run one EmbodiChain-level physics step inside a Warp tape.
+    """Run a low-level Newton solver trajectory inside a Warp tape.
+
+    Unlike :class:`NewtonStepFunc`'s environment route, ``substeps`` here is
+    already a solver-step count. This preserves the direct advanced API while
+    the environment route expands control steps by ``nm.num_substeps``.
 
     Args:
         manager: The owning :class:`SimulationManager` (must be Newton).
@@ -61,8 +108,7 @@ def differentiable_step(
             step. Receives the open tape; must launch Warp kernels (or
             call dexsim setters that are tape-aware) to populate
             ``manager.physics.newton_manager._control``.
-        substeps: Number of solver substeps to run (typically
-            ``sim_cfg.sim_steps_per_control``).
+        substeps: Number of solver substeps to run.
         dt: Solver dt; defaults to the manager's configured dt.
 
     Returns:
@@ -73,22 +119,22 @@ def differentiable_step(
         raise RuntimeError("differentiable_step requires the Newton backend.")
     nm = manager.physics.newton_manager
     stepper = manager.create_differentiable_stepper()
-    state_in = nm._state_0
-    state_out = nm._model.state()
-    contacts = stepper.create_contacts()
+    states, contacts = _allocate_solver_trajectory(nm, stepper, substeps)
     dt_val = nm.solver_dt if dt is None else float(dt)
 
     tape = wp.Tape()
     with tape:
         apply_control_fn(tape)
-        for _ in range(substeps):
-            stepper.step(state_in, state_out, contacts=contacts, dt=dt_val)
-            state_in, state_out = state_out, state_in
+        for state_in, state_out, contact in zip(states, states[1:], contacts):
+            stepper.step(state_in, state_out, contacts=contact, dt=dt_val)
 
-    # The final state lives in state_in after the swap.
+    final_state = states[-1]
+    _commit_final_state_detached(nm, final_state)
     return {
         "tape": tape,
-        "final_state": state_in,
+        "final_state": final_state,
+        "states": states,
+        "contacts": contacts,
         "stepper": stepper,
     }
 
@@ -109,13 +155,15 @@ class NewtonStepFunc(torch.autograd.Function):
 
     Callers must supply a ``sim_state`` dict with the following keys:
         manager: SimulationManager (Newton, requires_grad=True)
-        substeps: int (used by the default solver-based step_fn)
+        substeps: int control-level physics updates (used by the default
+            solver-based step route)
         action_to_control_kernel: callable(action_wp, *kernel_args)
         kernel_args: tuple consumed by action_to_control_kernel
         obs_reward_fn: callable(final_state) -> dict with torch outputs
         step_fn: optional callable() -> final Newton state; when omitted
-            the bridge runs the differentiable stepper for ``substeps``
-            iterations (the original solver-based path)
+            the bridge runs the differentiable stepper for
+            ``substeps * manager.physics.newton_manager.num_substeps``
+            iterations (the solver-based path)
 
     The ``obs_reward_fn`` must return a dict containing:
         _order: tuple of output names (returned in this order)
@@ -148,14 +196,16 @@ class NewtonStepFunc(torch.autograd.Function):
                 final_state = step_fn()
             else:
                 stepper = manager.create_differentiable_stepper()
-                state_in = nm._state_0
-                state_out = nm._model.state()
-                contacts = stepper.create_contacts()
+                solver_steps = _solver_step_count(nm, substeps)
+                trajectory_states, trajectory_contacts = _allocate_solver_trajectory(
+                    nm, stepper, solver_steps
+                )
                 dt_val = nm.solver_dt
-                for _ in range(substeps):
-                    stepper.step(state_in, state_out, contacts=contacts, dt=dt_val)
-                    state_in, state_out = state_out, state_in
-                final_state = state_in
+                for state_in, state_out, contact in zip(
+                    trajectory_states, trajectory_states[1:], trajectory_contacts
+                ):
+                    stepper.step(state_in, state_out, contacts=contact, dt=dt_val)
+                final_state = trajectory_states[-1]
             # Compute obs/reward INSIDE the tape so the reward/obs kernels
             # participate in the Warp autodiff graph. The torch tensors
             # returned by obs_reward_fn are built via wp.to_torch of
@@ -163,6 +213,14 @@ class NewtonStepFunc(torch.autograd.Function):
             # action_wp when tape.backward() is called.
             outputs = obs_reward_fn(final_state)
 
+        if step_fn is None:
+            _commit_final_state_detached(nm, final_state)
+            # The tape keeps Warp arrays alive internally, but retain the full
+            # trajectory explicitly because backward must traverse every
+            # state/contact edge after this forward call returns.
+            ctx.trajectory_states = trajectory_states
+            ctx.trajectory_contacts = trajectory_contacts
+            ctx.stepper = stepper
         ctx.tape = tape
         ctx.action_wp = action_wp
         ctx.outputs_order = outputs["_order"]
