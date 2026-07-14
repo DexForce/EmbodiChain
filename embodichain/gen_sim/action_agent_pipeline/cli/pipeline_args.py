@@ -361,6 +361,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--load-template-material",
+        "--load_template_material",
+        dest="load_template_material",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Load the packaged table visual material in generated configs. "
+            "Disabled by default to preserve the source table appearance."
+        ),
+    )
+    parser.add_argument(
         "--inside-container-slot-distance-scale",
         "--inside_container_slot_distance_scale",
         dest="inside_container_slot_distance_scale",

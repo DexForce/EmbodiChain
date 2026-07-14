@@ -153,6 +153,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
             "franka",
             "--target_body_scale",
             "1.0",
+            "--load-template-material",
             "--arrangement-debug-visualization",
             "--overwrite",
         ],
@@ -161,6 +162,7 @@ def test_generate_config_cli_auto_applies_prompt2scene_alignment(
     generate_action_agent_config.cli()
 
     assert captured["robot_profile"] == "franka"
+    assert captured["load_template_material"] is True
     assert captured["arrangement_debug_visualization"] is True
     assert captured["preserve_source_scene_geometry"] is True
     assert captured["load_source_meshes_directly"] is True
@@ -219,6 +221,7 @@ def test_generate_config_cli_defaults_to_prompt2scene_scale_multiplier(
 
     assert captured["target_body_scale"] == DEFAULT_TARGET_BODY_SCALE
     assert captured["source_scene_body_scale_mode"] == "multiply"
+    assert captured["load_template_material"] is False
 
 
 def test_generate_config_cli_respects_explicit_prompt2scene_alignment_overrides(
@@ -419,6 +422,15 @@ def test_pipeline_parser_defaults_to_target_body_scale() -> None:
 
     assert args.target_body_scale == DEFAULT_TARGET_BODY_SCALE
     assert args.surface_release_clearance == DEFAULT_SURFACE_RELEASE_CLEARANCE
+    assert args.load_template_material is False
+
+
+def test_pipeline_parser_can_enable_template_material() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import build_parser
+
+    args = build_parser().parse_args(["--load-template-material"])
+
+    assert args.load_template_material is True
 
 
 def test_pipeline_parser_accepts_surface_release_clearance() -> None:
@@ -1041,6 +1053,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
             target_body_scale_mode="multiply",
             inside_container_slot_distance_scale=1.0,
             surface_release_clearance=0.05,
+            load_template_material=False,
             target_replacement1=None,
             target_replacement2=None,
             sync_replacement_names=False,
@@ -1082,6 +1095,7 @@ def test_prompt2scene_source_record_includes_request_fields(tmp_path) -> None:
     assert record["prompt2scene_scene_z_rotation_degrees"] == -90.0
     assert "prompt2scene_mesh_x_rotation_degrees" not in record
     assert record["target_body_scale_mode"] == "multiply"
+    assert record["load_template_material"] is False
     assert record["surface_release_clearance"] == pytest.approx(0.05)
     assert record["acd_method"] == "vhacd"
     assert record["headless"] is True
@@ -1283,6 +1297,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
             target_body_scale_mode=target_body_scale_mode,
             inside_container_slot_distance_scale=1.0,
             surface_release_clearance=0.05,
+            load_template_material=False,
             prompt2scene_scene_z_rotation_degrees=-90.0,
             sync_replacement_names=False,
             reuse_target_replacements=True,
@@ -1302,6 +1317,7 @@ def test_prompt2scene_pipeline_handles_target_scale(
     assert captured["source_scene_z_rotation_degrees"] == -90.0
     assert "source_mesh_x_rotation_degrees" not in captured
     assert captured["target_body_scale"] == expected_target_body_scale
+    assert captured["load_template_material"] is False
     assert captured["surface_release_clearance"] == pytest.approx(0.05)
     assert captured["acd_method"] == "vhacd"
 

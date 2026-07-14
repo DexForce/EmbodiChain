@@ -203,6 +203,7 @@ def build_pipeline_record(
         "robot_profile": getattr(args, "robot_profile", None),
         "target_body_scale": args.target_body_scale,
         "target_body_scale_mode": getattr(args, "target_body_scale_mode", None),
+        "load_template_material": getattr(args, "load_template_material", False),
         "inside_container_slot_distance_scale": (
             args.inside_container_slot_distance_scale
         ),

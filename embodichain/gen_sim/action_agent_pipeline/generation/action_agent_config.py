@@ -212,6 +212,7 @@ def generate_action_agent_config_from_project(
     load_source_meshes_directly: bool = False,
     source_scene_z_rotation_degrees: float = 0.0,
     source_mesh_x_rotation_degrees: float = 0.0,
+    load_template_material: bool = False,
     inside_container_slot_distance_scale: float = 1.0,
     surface_release_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE,
     target_replacements: Sequence[TargetReplacementSpec] | None = None,
@@ -269,6 +270,9 @@ def generate_action_agent_config_from_project(
             scales are unchanged.
         source_mesh_x_rotation_degrees: Deprecated compatibility option. GLB
             frame conversion is handled by the GLB geometry baker.
+        load_template_material: If true, add the packaged table visual-material
+            startup event to generated configs. If false, preserve the source
+            scene's table appearance without loading the packaged texture.
         inside_container_slot_distance_scale: Multiplier for automatically
             generated inside-container slot offsets when multiple moved objects
             share one container. Values below ``1`` place release points closer
@@ -350,6 +354,7 @@ def generate_action_agent_config_from_project(
                 source_scene_body_scale_mode=source_scene_body_scale_mode,
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+                load_template_material=load_template_material,
             )
             _validate_stacking_bundle(bundle, spec)
             return _finalize_and_write_bundle(
@@ -384,6 +389,7 @@ def generate_action_agent_config_from_project(
                 preserve_source_scene_geometry=preserve_source_scene_geometry,
                 source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
                 arrangement_debug_visualization=arrangement_debug_visualization,
+                load_template_material=load_template_material,
             )
             _validate_arrangement_bundle(bundle, spec)
             return _finalize_and_write_bundle(
@@ -429,6 +435,7 @@ def generate_action_agent_config_from_project(
             source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
             inside_container_slot_distance_scale=inside_container_slot_distance_scale,
             surface_release_clearance=surface_release_clearance,
+            load_template_material=load_template_material,
         )
         _validate_relative_bundle(bundle, spec)
         return _finalize_and_write_bundle(
@@ -477,6 +484,7 @@ def generate_action_agent_config_from_project(
         mesh_normalizer=mesh_normalizer,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+        load_template_material=load_template_material,
     )
     _validate_bundle(bundle, roles)
     return _finalize_and_write_bundle(
@@ -547,6 +555,7 @@ def _build_basket_bundle(
     mesh_normalizer: GlbGeometryNormalizer,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
+    load_template_material: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -611,6 +620,7 @@ def _build_basket_bundle(
                 roles,
                 sensor_config_factory=sensor_config_factory,
                 task_name=task_name,
+                load_template_material=load_template_material,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": _make_dataset_config(
@@ -766,6 +776,7 @@ def _build_arrangement_line_bundle(
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
     arrangement_debug_visualization: bool,
+    load_template_material: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -806,6 +817,7 @@ def _build_arrangement_line_bundle(
                 [step.runtime_uid for step in spec.steps],
                 sensor_config_factory=sensor_config_factory,
                 task_name=task_name,
+                load_template_material=load_template_material,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
@@ -985,6 +997,7 @@ def _build_stacking_bundle(
     source_scene_body_scale_mode: str | None,
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
+    load_template_material: bool,
 ) -> dict[str, Any]:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -1032,6 +1045,7 @@ def _build_stacking_bundle(
                 ),
                 sensor_config_factory=sensor_config_factory,
                 task_name=task_name,
+                load_template_material=load_template_material,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
@@ -1666,6 +1680,7 @@ def _build_relative_placement_bundle(
     source_scene_z_rotation_degrees: float,
     inside_container_slot_distance_scale: float,
     surface_release_clearance: float,
+    load_template_material: bool,
 ) -> dict[str, Any]:
     spec = _with_relative_surface_release_clearance(
         spec,
@@ -1715,6 +1730,7 @@ def _build_relative_placement_bundle(
                 registered_runtime_uids,
                 sensor_config_factory=sensor_config_factory,
                 task_name=task_name,
+                load_template_material=load_template_material,
             ),
             "observations": _make_observations_config(robot_config),
             "dataset": {},
