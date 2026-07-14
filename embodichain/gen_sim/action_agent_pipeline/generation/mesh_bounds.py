@@ -53,10 +53,14 @@ _GLTF_TO_SIM_FRAME_KEY = "_gltf_to_sim_frame"
 
 _GEOMETRY_DEFAULTS = generation_defaults_section("geometry")
 _DUAL_UR5_DEFAULTS = _GEOMETRY_DEFAULTS["dual_ur5"]
+_DUAL_UR10_DEFAULTS = _GEOMETRY_DEFAULTS["dual_ur10"]
 _DUAL_FRANKA_DEFAULTS = _GEOMETRY_DEFAULTS["dual_franka"]
 _DUAL_UR5_LEGACY_INIT_Z = float(_DUAL_UR5_DEFAULTS["legacy_init_z"])
 _DUAL_UR5_ARM_COMPONENT_Z = float(_DUAL_UR5_DEFAULTS["arm_component_z"])
 _DUAL_UR5_TABLETOP_CLEARANCE = float(_DUAL_UR5_DEFAULTS["tabletop_clearance"])
+_DUAL_UR10_LEGACY_INIT_Z = float(_DUAL_UR10_DEFAULTS["legacy_init_z"])
+_DUAL_UR10_ARM_COMPONENT_Z = float(_DUAL_UR10_DEFAULTS["arm_component_z"])
+_DUAL_UR10_TABLETOP_CLEARANCE = float(_DUAL_UR10_DEFAULTS["tabletop_clearance"])
 _DUAL_FRANKA_TABLETOP_CLEARANCE = float(_DUAL_FRANKA_DEFAULTS["tabletop_clearance"])
 _TABLETOP_OBJECT_CLEARANCE = float(_GEOMETRY_DEFAULTS["tabletop_object_clearance"])
 _GLTF_COMPONENT_FORMATS = {

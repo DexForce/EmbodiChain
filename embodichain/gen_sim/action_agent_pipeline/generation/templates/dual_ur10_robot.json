@@ -1,0 +1,152 @@
+{
+  "uid": "DualUR10",
+  "urdf_cfg": {
+    "fname": "dual_ur10_robotiq_arg2f_140_basket",
+    "name_case": {
+      "joint": "lower",
+      "link": "lower"
+    },
+    "components": [
+      {
+        "component_type": "left_arm",
+        "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+        "transform": [
+          [0.0, -1.0, 0.0, -0.3],
+          [1.0, 0.0, 0.0, -1.1],
+          [0.0, 0.0, 1.0, 0.3],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      {
+        "component_type": "left_hand",
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+      },
+      {
+        "component_type": "right_arm",
+        "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+        "transform": [
+          [0.0, -1.0, 0.0, 0.3],
+          [1.0, 0.0, 0.0, -1.1],
+          [0.0, 0.0, 1.0, 0.3],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
+      },
+      {
+        "component_type": "right_hand",
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+      }
+    ]
+  },
+  "init_pos": [-2.0, 0.0, 0.0],
+  "init_rot": [0.0, 0.0, 90.0],
+  "init_qpos": [
+    0,
+    0,
+    -1.57,
+    -1.57,
+    1.57,
+    1.57,
+    -1.57,
+    -1.57,
+    -1.57,
+    -1.57,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "drive_pros": {
+    "stiffness": {
+      "left_arm": 10000.0,
+      "right_arm": 10000.0,
+      "left_eef": 100.0,
+      "right_eef": 100.0
+    },
+    "damping": {
+      "left_arm": 1000.0,
+      "right_arm": 1000.0,
+      "left_eef": 10.0,
+      "right_eef": 10.0
+    },
+    "max_effort": {
+      "left_arm": 330.0,
+      "right_arm": 330.0,
+      "left_eef": 1000.0,
+      "right_eef": 1000.0
+    }
+  },
+  "control_parts": {
+    "left_arm": [
+      "left_joint1",
+      "left_joint2",
+      "left_joint3",
+      "left_joint4",
+      "left_joint5",
+      "left_joint6"
+    ],
+    "left_eef": [
+      "left_finger_joint",
+      "left_inner_knuckle_joint",
+      "left_inner_finger_joint",
+      "left_right_outer_knuckle_joint",
+      "left_right_inner_knuckle_joint",
+      "left_right_inner_finger_joint"
+    ],
+    "right_arm": [
+      "right_joint1",
+      "right_joint2",
+      "right_joint3",
+      "right_joint4",
+      "right_joint5",
+      "right_joint6"
+    ],
+    "right_eef": [
+      "right_finger_joint",
+      "right_left_inner_knuckle_joint",
+      "right_left_inner_finger_joint",
+      "right_outer_knuckle_joint",
+      "right_inner_knuckle_joint",
+      "right_inner_finger_joint"
+    ]
+  },
+  "solver_cfg": {
+    "left_arm": {
+      "class_type": "URSolver",
+      "ur_type": "ur10",
+      "urdf_path": null,
+      "end_link_name": "left_ee_link",
+      "root_link_name": "left_base_link",
+      "ik_nearest_weight": [1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
+      "tcp": [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.19],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    },
+    "right_arm": {
+      "class_type": "URSolver",
+      "ur_type": "ur10",
+      "urdf_path": null,
+      "end_link_name": "right_ee_link",
+      "root_link_name": "right_base_link",
+      "ik_nearest_weight": [1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
+      "tcp": [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.19],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    }
+  }
+}
