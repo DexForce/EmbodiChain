@@ -580,7 +580,7 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)
 
-        if self.cfg.dataset:
+        if self.dataset_manager:
             self.dataset_manager.reset(env_ids=env_ids)
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
