@@ -119,7 +119,7 @@ class MoveHeldObject(AtomicAction):
         arm_dot_angle = torch.abs(
             torch.acos(torch.clamp(torch.sum(end_arm_rz * down_z, dim=-1), -1.0, 1.0))
         )
-        if (arm_dot_angle > torch.pi * 0.5).any():
+        if (arm_dot_angle > torch.pi * 0.25).any():
             rota_axis = torch.tensor(
                 [1, 0, 0], device=self.device, dtype=torch.float32
             ).repeat(self.n_envs, 1)
