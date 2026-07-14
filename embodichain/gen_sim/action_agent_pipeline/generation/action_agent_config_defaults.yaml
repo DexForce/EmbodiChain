@@ -24,7 +24,6 @@ visual_material:
     entity_uid: table
     material_uid: action_agent_table_wood
     base_color: [1.0, 1.0, 1.0, 1.0]
-    base_color_texture: templates/textures/table_wood.jpg
     metallic: 0.0
     roughness: 0.7
 
