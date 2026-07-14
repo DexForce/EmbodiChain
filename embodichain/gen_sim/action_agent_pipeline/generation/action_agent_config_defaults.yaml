@@ -68,7 +68,7 @@ arrangement:
 
 stacking:
   staging_z_delta: 0.05
-  clearance: 0.03
+  clearance: 0.05
   max_approach_retract_z: 0.8
   nested_release_z_offset: 0.12
   anchor_offset: 0.15
