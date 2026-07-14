@@ -73,9 +73,11 @@ _STACKING_KEYWORDS = (
 _SUPPORTED_STACK_MODES = {"on_top", "nested"}
 _SUPPORTED_ORDER_BY = {"explicit", "size"}
 _STACKING_ANCHOR = "table_center"
+_OBJECT_STACKING_ANCHOR = "object"
 _DEFAULTS = generation_defaults_section("stacking")
 _STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
 _STACK_CLEARANCE = float(_DEFAULTS["clearance"])
+_NESTED_RELEASE_Z_OFFSET = float(_DEFAULTS["nested_release_z_offset"])
 _ANCHOR_OFFSET = float(_DEFAULTS["anchor_offset"])
 _ANCHOR_CLEARANCE_RADIUS = float(_DEFAULTS["anchor_clearance_radius"])
 
@@ -150,7 +152,7 @@ def _call_stacking_task_llm(
         '  "bottom_to_top": ["<source_uid bottom>", "..."],\n'
         '  "order_by": "explicit|size",\n'
         '  "object_attributes": {"<source_uid>": {"color": "red"}},\n'
-        '  "anchor": "table_center",\n'
+        '  "anchor": "table_center" | {"type": "object", "object": "<source_uid>"},\n'
         '  "task_prompt_summary": "<short execution summary>",\n'
         '  "basic_background_notes": "<short notes>"\n'
         "}\n\n"
@@ -159,22 +161,28 @@ def _call_stacking_task_llm(
         "- This route is only for building, reordering, or moving a selected "
         "set of multiple objects into one vertical stack, pile, or nested "
         "stack.\n"
-        "- Include every object that must be actively moved as part of that "
-        "global stack.\n"
-        "- Do not add a passive support/reference object from a single-object "
-        "placement task. Tasks like 'place A on top of B' belong to the "
-        "object_manipulation route, with A as moved_object and B as "
-        "reference_object.\n"
+        "- Include every object that must be actively moved as part of the "
+        "stack in objects. A passive base/support belongs in anchor.object and "
+        "must not be added to objects.\n"
         "- Use stack_mode='on_top' for blocks, cubes, books, and solid objects "
         "that should be vertically stacked.\n"
         "- Use stack_mode='nested' for bowls or cup-like containers that should "
         "be nested into each other.\n"
         "- For explicit statements like blue on green and green on red, return "
         "bottom_to_top=[red, green, blue] and order_by='explicit'.\n"
+        "- For 'A stack on B, then B stack on C', C is the passive object "
+        "anchor and bottom_to_top=[B, A].\n"
+        "- When successive instructions stack A and then B onto the same named "
+        "root C, treat C as the stack anchor and append in instruction order: "
+        "bottom_to_top=[A, B]. The second object rests on the current stack top, "
+        "not directly on C.\n"
         "- If no order is specified for nested bowls, return order_by='size' "
         "and leave bottom_to_top empty; the generator sorts large-to-small.\n"
-        "- Use anchor='table_center'. Do not return target positions, robot "
-        "config, success JSON, or action graphs.\n\n"
+        "- Use anchor='table_center' only for a free stack with no named root "
+        'support. Use anchor={"type":"object","object":C} when the task '
+        "names C as the root support/container.\n"
+        "- Do not return target positions, robot config, success JSON, or action "
+        "graphs.\n\n"
         f"Project: {project_name}\n"
         f"Task description:\n{task_description}\n"
         f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
@@ -234,12 +242,19 @@ def _apply_stacking_task_response(
     rigid_by_uid = {obj.source_uid: obj for obj in rigid_objects}
     runtime_uids = _stacking_runtime_uid_mapping(rigid_objects)
 
-    object_source_uids = _resolve_stacking_object_uids(
-        response.get("objects"), rigid_by_uid
+    anchor, anchor_source_uid = _normalize_anchor(
+        response.get("anchor"),
+        rigid_by_uid=rigid_by_uid,
     )
+    object_source_uids = _resolve_stacking_object_uids(
+        response.get("objects"),
+        rigid_by_uid,
+        min_count=1 if anchor == _OBJECT_STACKING_ANCHOR else 2,
+    )
+    if anchor_source_uid in object_source_uids:
+        raise ValueError("Stacking object anchor must be a passive support object.")
     stack_mode = _normalize_stack_mode(response.get("stack_mode"))
     order_by = _normalize_order_by(response.get("order_by"))
-    anchor = _normalize_anchor(response.get("anchor"))
     object_attributes = _object_attributes(response.get("object_attributes"))
 
     explicit_order = _string_list(response.get("bottom_to_top"))
@@ -265,7 +280,16 @@ def _apply_stacking_task_response(
     else:
         ordered_source_uids = object_source_uids
 
-    anchor_xy = _table_anchor_xy(table_obj, anchor, scene_dir=scene_dir)
+    anchor_runtime_uid = (
+        runtime_uids[anchor_source_uid] if anchor_source_uid is not None else None
+    )
+    if anchor_source_uid is None:
+        anchor_xy = _table_anchor_xy(table_obj, anchor, scene_dir=scene_dir)
+    else:
+        anchor_position = _clean_vector3(
+            rigid_by_uid[anchor_source_uid].config.get("init_pos", [0.0, 0.0, 0.0])
+        )
+        anchor_xy = [float(anchor_position[0]), float(anchor_position[1])]
     steps = []
     for layer_index, source_uid in enumerate(ordered_source_uids):
         obj = rigid_by_uid[source_uid]
@@ -287,7 +311,7 @@ def _apply_stacking_task_response(
                 support_runtime_uid=(
                     runtime_uids[ordered_source_uids[layer_index - 1]]
                     if layer_index > 0
-                    else None
+                    else anchor_runtime_uid
                 ),
                 size_score=_stacking_object_size_score(obj, scene_dir=scene_dir),
                 color=_object_color(source_uid, object_attributes),
@@ -311,6 +335,8 @@ def _apply_stacking_task_response(
         anchor=anchor,
         anchor_xy=anchor_xy,
         steps=tuple(steps),
+        anchor_source_uid=anchor_source_uid,
+        anchor_runtime_uid=anchor_runtime_uid,
     )
 
 
@@ -326,13 +352,31 @@ def _with_stacking_generated_targets(
     table_config = object_configs.get("table") or object_configs.get(
         spec.table_source_uid
     )
-    anchor_xy = _generated_stacking_anchor_xy(
-        table_config,
-        spec.anchor_xy,
-        object_configs=object_configs,
+    anchor_config = (
+        object_configs.get(str(spec.anchor_runtime_uid))
+        if spec.anchor == _OBJECT_STACKING_ANCHOR
+        else None
     )
+    if spec.anchor == _OBJECT_STACKING_ANCHOR:
+        if anchor_config is None:
+            raise ValueError(
+                f"Generated stacking config missing object anchor "
+                f"{spec.anchor_runtime_uid!r}."
+            )
+        anchor_position = _clean_vector3(anchor_config.get("init_pos", [0.0, 0.0, 0.0]))
+        anchor_xy = [float(anchor_position[0]), float(anchor_position[1])]
+    else:
+        anchor_xy = _generated_stacking_anchor_xy(
+            table_config,
+            spec.anchor_xy,
+            object_configs=object_configs,
+        )
     table_top_z = _generated_table_top_z(table_config)
     z_by_runtime_uid: dict[str, float] = {}
+    if spec.anchor_runtime_uid is not None and anchor_config is not None:
+        z_by_runtime_uid[spec.anchor_runtime_uid] = _clean_vector3(
+            anchor_config.get("init_pos", [0.0, 0.0, 0.0])
+        )[2]
     steps = []
     for step in spec.steps:
         moved_config = object_configs.get(step.runtime_uid)
@@ -344,7 +388,7 @@ def _with_stacking_generated_targets(
             steps.append(step)
             continue
 
-        if step.layer_index == 0:
+        if step.layer_index == 0 and step.support_runtime_uid is None:
             if table_top_z is None:
                 target_z = _clean_vector3(
                     moved_config.get("init_pos", [0.0, 0.0, 0.0])
@@ -362,16 +406,21 @@ def _with_stacking_generated_targets(
             if support_z is None or support_config is None:
                 steps.append(step)
                 continue
-            support_top_offset = _mesh_config_local_zmax_after_rotation(support_config)
-            if support_top_offset is None:
-                steps.append(step)
-                continue
-            target_z = (
-                support_z
-                + support_top_offset
-                + _STACK_CLEARANCE
-                - float(moved_bottom_offset)
-            )
+            if spec.stack_mode == "nested":
+                target_z = support_z + _NESTED_RELEASE_Z_OFFSET
+            else:
+                support_top_offset = _mesh_config_local_zmax_after_rotation(
+                    support_config
+                )
+                if support_top_offset is None:
+                    steps.append(step)
+                    continue
+                target_z = (
+                    support_z
+                    + support_top_offset
+                    + _STACK_CLEARANCE
+                    - float(moved_bottom_offset)
+                )
 
         target_position = [
             float(anchor_xy[0]),
@@ -421,9 +470,9 @@ def _generated_stacking_anchor_xy(
     directions = (
         [0.0, 0.0],
         local_front,
-        local_left,
-        [-local_left[0], -local_left[1]],
         [-local_front[0], -local_front[1]],
+        [-local_left[0], -local_left[1]],
+        local_left,
     )
     obstacle_bounds = []
     for config in object_configs.values():
@@ -488,7 +537,7 @@ def _generated_table_top_z(
 
 
 def _make_stacking_summary(spec: _StackingSpec) -> dict[str, Any]:
-    return {
+    summary = {
         "mode": "stacking",
         "stack_mode": spec.stack_mode,
         "anchor": spec.anchor,
@@ -509,6 +558,9 @@ def _make_stacking_summary(spec: _StackingSpec) -> dict[str, Any]:
             for step in spec.steps
         ],
     }
+    if spec.anchor_runtime_uid is not None:
+        summary["anchor_object"] = spec.anchor_runtime_uid
+    return summary
 
 
 def _mesh_config_local_zmax_after_rotation(
@@ -523,6 +575,8 @@ def _mesh_config_local_zmax_after_rotation(
 def _resolve_stacking_object_uids(
     value: Any,
     rigid_by_uid: Mapping[str, _SceneObject],
+    *,
+    min_count: int = 2,
 ) -> list[str]:
     values = _string_list(value)
     if not values:
@@ -531,8 +585,10 @@ def _resolve_stacking_object_uids(
         _resolve_rigid_uid(raw_value, rigid_by_uid, field_name="objects")
         for raw_value in values
     ]
-    if len(resolved) < 2:
-        raise ValueError("Stacking requires at least two distinct objects.")
+    if len(resolved) < min_count:
+        raise ValueError(
+            f"Stacking requires at least {min_count} distinct moved object(s)."
+        )
     if len(resolved) != len(set(resolved)):
         raise ValueError("Stacking objects must be distinct.")
     return resolved
@@ -597,7 +653,24 @@ def _normalize_order_by(value: Any) -> str:
     return text
 
 
-def _normalize_anchor(value: Any) -> str:
+def _normalize_anchor(
+    value: Any,
+    *,
+    rigid_by_uid: Mapping[str, _SceneObject],
+) -> tuple[str, str | None]:
+    if isinstance(value, Mapping):
+        anchor_type = str(value.get("type", "")).strip().lower().replace("-", "_")
+        if anchor_type not in {_OBJECT_STACKING_ANCHOR, "support"}:
+            raise ValueError("Stacking object anchor requires type='object'.")
+        raw_anchor_uid = value.get("object")
+        if not isinstance(raw_anchor_uid, str) or not raw_anchor_uid.strip():
+            raise ValueError("Stacking object anchor requires a non-empty object.")
+        return _OBJECT_STACKING_ANCHOR, _resolve_rigid_uid(
+            raw_anchor_uid,
+            rigid_by_uid,
+            field_name="anchor.object",
+        )
+
     text = str(value or _STACKING_ANCHOR).strip().lower().replace("-", "_")
     aliases = {
         "center": _STACKING_ANCHOR,
@@ -607,8 +680,8 @@ def _normalize_anchor(value: Any) -> str:
     }
     text = aliases.get(text, text)
     if text != _STACKING_ANCHOR:
-        raise ValueError("Stacking only supports anchor='table_center'.")
-    return text
+        raise ValueError("Stacking anchor must be 'table_center' or an object anchor.")
+    return text, None
 
 
 def _object_attributes(value: Any) -> dict[str, dict[str, str]]:
@@ -679,7 +752,8 @@ def _table_anchor_xy(
     *,
     scene_dir: Path,
 ) -> list[float]:
-    _normalize_anchor(anchor)
+    if anchor != _STACKING_ANCHOR:
+        raise ValueError("Table stacking requires anchor='table_center'.")
     center = _mesh_config_world_xy_center(
         _resolved_mesh_config(table_obj, scene_dir=scene_dir)
     )

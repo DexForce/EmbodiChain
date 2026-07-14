@@ -91,6 +91,31 @@ _GLOBAL_STACKING_PATTERNS = (
     re.compile(r"\b(?:nested|nesting|vertical stack)\b", re.IGNORECASE),
     re.compile(r"(?:叠放|堆叠|叠成|堆成|摞成|叠起来|堆起来|摞起来|堆叠起来)"),
 )
+_EXPLICIT_STACKING_GOAL_PATTERNS = (
+    re.compile(
+        r"(?:叠放|堆叠|叠到|叠在|叠成|叠起来|堆成|摞到|摞在|摞起来|码放|套叠|嵌套)"
+    ),
+    re.compile(r"(?<!折)(?<!重)叠(?!加)"),
+    re.compile(r"\b(?:stack|pile|nest)(?:ed|ing|s)?\b", re.IGNORECASE),
+)
+_NEGATED_STACKING_GOAL_PATTERNS = (
+    re.compile(
+        r"(?:不要|禁止|避免|无需|不用).{0,12}"
+        r"(?:叠放|堆叠|叠到|叠在|叠成|叠起来|堆成|叠|摞|码放|套叠|嵌套)"
+    ),
+    re.compile(
+        r"\b(?:do not|don't|avoid|without)\s+(?:stack|pile|nest)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:已经|已|原本|当前).{0,8}" r"(?:叠放|堆叠|叠在|叠|摞在|码放|套叠|嵌套)"
+    ),
+    re.compile(r"\balready\s+(?:stacked|piled|nested)\b", re.IGNORECASE),
+)
+_STACKING_ROUTE_OVERRIDE_WARNING = (
+    "Overrode the task-router result because the goal contains an explicit "
+    "stacking instruction."
+)
 
 
 @dataclass(frozen=True)
@@ -178,6 +203,9 @@ def _call_task_router_llm(
         "nested stack. Examples include stacking all blocks, nesting bowls "
         "large-to-small, or Chinese phrases such as 把这些物体叠起来, 堆叠这些物体, "
         "叠成一列, 摞起来.\n"
+        "- Explicit positive stacking verbs such as 叠放, 堆叠, 摞, stack, "
+        "pile, or nest always select stacking, including when one moved object "
+        "is stacked onto a named passive support.\n"
         "- Do not choose stacking for a single moved object placed/put/moved "
         "on top of a support object, even when the final contact is vertical; "
         "choose object_manipulation for that case.\n"
@@ -248,8 +276,15 @@ def _normalize_task_route_response(
     reason = str(response.get("reason", "")).strip()
     candidate_objects = tuple(_string_list(response.get("candidate_objects")))
     warnings = tuple(_string_list(response.get("warnings")))
-    if route == _TASK_ROUTE_STACKING and _is_single_object_on_support_task(
-        task_description
+    explicit_stacking_goal = _has_explicit_stacking_goal(task_description)
+    if route != _TASK_ROUTE_STACKING and explicit_stacking_goal:
+        route = _TASK_ROUTE_STACKING
+        reason = "The task goal contains an explicit stacking instruction."
+        warnings = (*warnings, _STACKING_ROUTE_OVERRIDE_WARNING)
+    if (
+        route == _TASK_ROUTE_STACKING
+        and not explicit_stacking_goal
+        and _is_single_object_on_support_task(task_description)
     ):
         route = _TASK_ROUTE_OBJECT_MANIPULATION
         warnings = (*warnings, _STACKING_DOWNGRADE_WARNING)
@@ -263,6 +298,18 @@ def _normalize_task_route_response(
         reason=reason,
         candidate_objects=candidate_objects,
         warnings=warnings,
+    )
+
+
+def _has_explicit_stacking_goal(task_description: str) -> bool:
+    text = task_description.strip()
+    if not text:
+        return False
+    positive_text = text
+    for pattern in _NEGATED_STACKING_GOAL_PATTERNS:
+        positive_text = pattern.sub("", positive_text)
+    return any(
+        pattern.search(positive_text) for pattern in _EXPLICIT_STACKING_GOAL_PATTERNS
     )
 
 

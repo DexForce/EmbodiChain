@@ -218,3 +218,5 @@ class _StackingSpec:
     anchor: str
     anchor_xy: list[float]
     steps: tuple[_StackingStepSpec, ...]
+    anchor_source_uid: str | None = None
+    anchor_runtime_uid: str | None = None

@@ -1776,7 +1776,11 @@ def test_place_action_builds_place_cfg(monkeypatch) -> None:
                 "offset": [0.0, 0.0, 0.1],
                 "frame": "world",
             },
-            "cfg": {"sample_interval": 19, "lift_height": 0.06},
+            "cfg": {
+                "sample_interval": 19,
+                "lift_height": 0.06,
+                "max_approach_retract_z": 0.8,
+            },
         },
         env=env,
     )
@@ -1785,6 +1789,7 @@ def test_place_action_builds_place_cfg(monkeypatch) -> None:
     assert isinstance(capture[0]["cfg"], PlaceCfg)
     assert capture[0]["cfg"].control_part == "left_arm"
     assert capture[0]["cfg"].lift_height == pytest.approx(0.06)
+    assert capture[0]["cfg"].max_approach_retract_z == pytest.approx(0.8)
 
 
 def _held_state_with_yaw(

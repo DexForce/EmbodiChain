@@ -4332,6 +4332,69 @@ def test_task_description_generates_three_block_stacking_config(
     assert atom_actions.count('"orientation_goal":"preserve"') == 3
 
 
+def test_explicit_stack_uses_named_object_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "object_anchor_stacking_gym_project"
+    _write_stacking_blocks_project(project_dir, count=3)
+
+    def fake_call_stacking_task_llm(**kwargs):
+        return {
+            "objects": ["green_cube_2", "blue_cube_3"],
+            "stack_mode": "on_top",
+            "bottom_to_top": ["green_cube_2", "blue_cube_3"],
+            "order_by": "explicit",
+            "anchor": {"type": "object", "object": "red_cube_1"},
+            "task_prompt_summary": "Stack blue on green and green on red.",
+        }
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_stacking_task_llm",
+        fake_call_stacking_task_llm,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_object_anchor_stacking_agent",
+        task_description="把蓝色方块叠到绿色方块上，再把绿色方块叠到红色方块上",
+    )
+
+    summary = paths.summary
+    task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    place_targets = [
+        (edge["left_arm_action"] or edge["right_arm_action"])["target_object_pose"]
+        for edge in task_graph["edges"]
+        if (edge["left_arm_action"] or edge["right_arm_action"])["atomic_action_class"]
+        == "Place"
+    ]
+
+    assert summary["anchor"] == "object"
+    assert summary["anchor_object"] == "red_cube"
+    assert summary["bottom_to_top"] == ["green_cube", "blue_cube"]
+    assert [placement["support"] for placement in summary["placements"]] == [
+        "red_cube",
+        "green_cube",
+    ]
+    assert [target["obj_name"] for target in place_targets] == [
+        "red_cube",
+        "green_cube",
+    ]
+    assert all(target["offset"][:2] == [0.0, 0.0] for target in place_targets)
+    rigid_by_uid = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
+    assert rigid_by_uid["red_cube"]["max_convex_hull_num"] == 32
+    assert {
+        (term["object"], term["support"])
+        for term in gym_config["env"]["extensions"]["agent_success"]["terms"]
+        if term["type"] == "object_on_object"
+    } == {
+        ("green_cube", "red_cube"),
+        ("blue_cube", "green_cube"),
+    }
+
+
 def test_stacking_uses_table_mesh_bounds_center_when_table_origin_is_offset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -125,6 +125,7 @@ SUPPORTED_CFG_KEYS = {
     "sample_interval",
     "pre_grasp_distance",
     "lift_height",
+    "max_approach_retract_z",
     "hand_interp_steps",
     "hold_steps",
     "object_motion_keyframes",
@@ -1790,6 +1791,14 @@ def _build_action_cfg(
 
 
 def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
+    if "max_approach_retract_z" in cfg:
+        value = cfg["max_approach_retract_z"]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not np.isfinite(value)
+        ):
+            raise ValueError("max_approach_retract_z must be a finite number.")
     if "obj_upright_direction" in cfg:
         _xyz(cfg["obj_upright_direction"], "obj_upright_direction")
     if "rotate_upright" in cfg:

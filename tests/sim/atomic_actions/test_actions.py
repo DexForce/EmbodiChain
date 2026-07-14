@@ -1090,6 +1090,51 @@ class TestPlaceAction:
         # start prepended to the 3 down-phase IK solutions -> 4 keyframes.
         assert captured["down_keyframes"].shape == (NUM_ENVS, 4, ARM_DOF)
 
+    @pytest.mark.parametrize(
+        ("release_z", "expected_lifted_z"),
+        [(0.7, 0.8), (0.85, 0.85)],
+    )
+    def test_caps_approach_and_retract_world_z_without_descending(
+        self,
+        release_z,
+        expected_lifted_z,
+    ):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            lift_height=0.15,
+            max_approach_retract_z=0.8,
+        )
+        action = Place(self.mg, cfg)
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        release_pose = torch.eye(4)
+        release_pose[2, 3] = release_z
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: trajectory[
+                :, -1:, :
+            ].repeat(1, interp_num, 1),
+        ):
+            result = action.execute(
+                EndEffectorPoseTarget(xpos=release_pose),
+                state,
+            )
+
+        assert result.success.all()
+        assert [pose[0, 2, 3].item() for pose in seen_poses] == pytest.approx(
+            [expected_lifted_z, release_z, expected_lifted_z]
+        )
+
     def test_cartesian_waypoints_hold_target_rotation_during_translation(self):
         waypoint_count = 3
         cfg = PlaceCfg(

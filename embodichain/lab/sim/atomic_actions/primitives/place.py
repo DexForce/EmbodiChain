@@ -60,6 +60,9 @@ class PlaceCfg(ActionCfg):
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
 
+    max_approach_retract_z: float | None = None
+    """Optional maximum world-frame TCP z for approach and retract poses (m)."""
+
     cartesian_waypoint_count: int = 1
     """Number of fixed-orientation Cartesian keyframes per translation segment."""
 
@@ -124,9 +127,8 @@ class Place(AtomicAction):
             third_phase_name="back",
         )
 
-        lift_offset = torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height
-        approach_xpos = self.builder.apply_local_offset(place_xpos[:, 0], lift_offset)
-        retract_xpos = self.builder.apply_local_offset(place_xpos[:, -1], lift_offset)
+        approach_xpos = self._lifted_pose(place_xpos[:, 0])
+        retract_xpos = self._lifted_pose(place_xpos[:, -1])
 
         start_xpos = self.robot.compute_fk(
             qpos=start_arm_qpos,
@@ -201,6 +203,23 @@ class Place(AtomicAction):
                 coordinated_held_object=state.coordinated_held_object,
             ),
         )
+
+    def _lifted_pose(self, release_xpos: torch.Tensor) -> torch.Tensor:
+        """Build an above-release pose while respecting the optional TCP z cap."""
+        lifted_xpos = release_xpos.clone()
+        lifted_z = release_xpos[:, 2, 3] + self.cfg.lift_height
+        if self.cfg.max_approach_retract_z is not None:
+            max_z = torch.as_tensor(
+                self.cfg.max_approach_retract_z,
+                dtype=release_xpos.dtype,
+                device=release_xpos.device,
+            )
+            lifted_z = torch.maximum(
+                release_xpos[:, 2, 3],
+                torch.clamp_max(lifted_z, max_z),
+            )
+        lifted_xpos[:, 2, 3] = lifted_z
+        return lifted_xpos
 
     def _translation_keyframes(
         self, start_xpos: torch.Tensor, target_xpos: torch.Tensor
