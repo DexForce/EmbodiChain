@@ -270,9 +270,9 @@ def generate_action_agent_config_from_project(
             scales are unchanged.
         source_mesh_x_rotation_degrees: Deprecated compatibility option. GLB
             frame conversion is handled by the GLB geometry baker.
-        load_template_material: If true, add the packaged table visual-material
-            startup event to generated configs. If false, preserve the source
-            scene's table appearance without loading the packaged texture.
+        load_template_material: If true, add a startup event that randomly
+            selects a table texture from the packaged action-agent texture
+            set. If false, preserve the source scene's table appearance.
         inside_container_slot_distance_scale: Multiplier for automatically
             generated inside-container slot offsets when multiple moved objects
             share one container. Values below ``1`` place release points closer
