@@ -91,6 +91,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
     make_relative_task_graph,
     make_relative_task_prompt,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
+    resolve_robot_profile,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _apply_arrangement_task_response,
     _arrangement_arm_side_for_motion,
@@ -335,8 +338,8 @@ def test_dual_ur5_template_uses_ur_solver_config() -> None:
     assert left_solver["end_link_name"] == "left_ee_link"
     assert right_solver["root_link_name"] == "right_base_link"
     assert right_solver["end_link_name"] == "right_ee_link"
-    assert left_solver["tcp"][2][3] == pytest.approx(0.16)
-    assert right_solver["tcp"][2][3] == pytest.approx(0.21)
+    assert left_solver["tcp"][2][3] == pytest.approx(0.17)
+    assert right_solver["tcp"][2][3] == pytest.approx(0.17)
 
 
 def test_dual_ur5_template_uses_robotiq_arg2f_140_grippers() -> None:
@@ -393,7 +396,7 @@ def test_dual_ur5_template_deserializes_to_ur5_solver_cfg() -> None:
         assert solver_cfg.d1 == pytest.approx(0.089159)
         assert solver_cfg.a2 == pytest.approx(-0.425)
         assert solver_cfg.a3 == pytest.approx(-0.39225)
-        assert solver_cfg.tcp[2][3] == pytest.approx(0.16)
+        assert solver_cfg.tcp[2][3] == pytest.approx(0.17)
 
 
 def test_observation_joint_ids_derive_from_dual_ur5_robot_config() -> None:
@@ -444,14 +447,12 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     table_top_z = action_agent_config_generation._mesh_config_world_zmax(
         background_objects["table"]
     )
-    expected_robot_init_z = (
-        table_top_z
-        + action_agent_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
-        - action_agent_config_generation._DUAL_UR5_ARM_COMPONENT_Z
-    )
+    default_profile = resolve_robot_profile(None)
+    expected_robot_init_z = default_profile.robot_init_z_from_table_top(table_top_z)
     assert gym_config["robot"]["init_pos"] == pytest.approx(
         [-2.0, 0.0, expected_robot_init_z]
     )
+    assert gym_config["robot"]["uid"] == "DualUR10"
     assert gym_config["robot"]["init_rot"] == [0.0, 0.0, 90.0]
     for arm_name, root_link_name, end_link_name in (
         ("left_arm", "left_base_link", "left_ee_link"),
@@ -459,7 +460,7 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     ):
         solver = gym_config["robot"]["solver_cfg"][arm_name]
         assert solver["class_type"] == "URSolver"
-        assert solver["ur_type"] == "ur5"
+        assert solver["ur_type"] == "ur10"
         assert solver["urdf_path"] is None
         assert solver["root_link_name"] == root_link_name
         assert solver["end_link_name"] == end_link_name
@@ -471,15 +472,16 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     ):
         solver_cfg = robot_cfg.solver_cfg[arm_name]
         assert isinstance(solver_cfg, URSolverCfg)
-        assert solver_cfg.ur_type == "ur5"
+        assert solver_cfg.ur_type == "ur10"
         assert solver_cfg.urdf_path is None
         assert solver_cfg.root_link_name == root_link_name
         assert solver_cfg.end_link_name == end_link_name
-        assert solver_cfg.d1 == pytest.approx(0.089159)
-        assert solver_cfg.a2 == pytest.approx(-0.425)
-        assert solver_cfg.a3 == pytest.approx(-0.39225)
+        assert solver_cfg.d1 == pytest.approx(0.1273)
+        assert solver_cfg.a2 == pytest.approx(-0.612)
+        assert solver_cfg.a3 == pytest.approx(-0.5723)
 
     extensions = gym_config["env"]["extensions"]
+    assert extensions["agent_robot_profile"] == "dual_ur10"
     assert extensions["agent_arm_slots"]["left"] == {
         "arm": "right_arm",
         "eef": "right_eef",
@@ -530,6 +532,7 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert "Generate exactly 6 nominal edges" in normalized_task_prompt
     assert "Generate exactly 10 nominal edges" not in normalized_task_prompt
     assert "positive-y side" in basic_background
+    assert "Dual UR10" in basic_background
     assert "negative-y side" in basic_background
     assert "negative-x side" not in basic_background
     assert "positive-x side" not in basic_background
@@ -5176,10 +5179,12 @@ def test_high_tabletop_scene_adjusts_robot_height_and_light(
     )
 
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
-    expected_init_z = (
-        1.18
-        + action_agent_config_generation._DUAL_UR5_TABLETOP_CLEARANCE
-        - action_agent_config_generation._DUAL_UR5_ARM_COMPONENT_Z
+    table_config = next(
+        config for config in gym_config["background"] if config["uid"] == "table"
+    )
+    table_top_z = action_agent_config_generation._mesh_config_world_zmax(table_config)
+    expected_init_z = resolve_robot_profile(None).robot_init_z_from_table_top(
+        table_top_z
     )
     assert gym_config["robot"]["init_pos"][2] == pytest.approx(expected_init_z)
     direct_lights = gym_config["light"]["direct"]

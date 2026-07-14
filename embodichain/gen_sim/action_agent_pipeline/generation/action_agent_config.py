@@ -244,7 +244,7 @@ def generate_action_agent_config_from_project(
         llm_model: Optional model override for role refinement.
         robot_profile: Robot profile ID or profile instance used to generate the
             robot config, runtime arm-slot mapping, prompts, and dataset robot
-            metadata. Defaults to ``dual_ur5``.
+            metadata. Defaults to ``dual_ur10``.
         target_body_scale: Uniform or xyz scale applied to generated target
             objects. Basket-like containers keep their source ``body_scale``.
         preserve_source_target_body_scale: If true, moved target objects keep
