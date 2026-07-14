@@ -124,7 +124,9 @@ class MoveHeldObject(AtomicAction):
                 [1, 0, 0], device=self.device, dtype=torch.float32
             ).repeat(self.n_envs, 1)
             rota_axis_angle = (
-                (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1) * rota_axis * revert_flag
+                (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1)
+                * rota_axis
+                * revert_flag.unsqueeze(-1)
             )
             rota_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
             target_rotatio_a = torch.bmm(template_rotation_a, rota_offset)
@@ -136,7 +138,10 @@ class MoveHeldObject(AtomicAction):
                 target_rotatio_b, end_arm_xpos[:, :3, :3]
             )
             target_rotation = torch.where(
-                relative_rotation_a < relative_rotation_b,
+                (relative_rotation_a < relative_rotation_b)
+                .unsqueeze(-1)
+                .unsqueeze(-1)
+                .repeat(1, 3, 3),
                 target_rotatio_a,
                 target_rotatio_b,
             )
