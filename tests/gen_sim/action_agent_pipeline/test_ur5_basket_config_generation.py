@@ -242,7 +242,40 @@ def test_all_task_event_builders_include_table_visual_material() -> None:
         container_runtime_uid="container",
     )
     event_configs = (
-        _make_events_config(roles, sensor_config_factory=make_sensor_config),
+        _make_events_config(
+            roles,
+            sensor_config_factory=make_sensor_config,
+            load_template_material=True,
+        ),
+        _make_relative_events_config(
+            SimpleNamespace(),
+            ["table", "target"],
+            sensor_config_factory=make_sensor_config,
+            load_template_material=True,
+        ),
+        _make_arrangement_events_config(
+            ["table", "target"],
+            sensor_config_factory=make_sensor_config,
+            load_template_material=True,
+        ),
+    )
+
+    expected = _table_visual_material_event_config()
+    for events in event_configs:
+        assert events["set_table_visual_material"] == expected
+
+
+def test_all_task_event_builders_skip_table_visual_material_by_default() -> None:
+    roles = SimpleNamespace(
+        left_target_runtime_uid="left_target",
+        right_target_runtime_uid="right_target",
+        container_runtime_uid="container",
+    )
+    event_configs = (
+        _make_events_config(
+            roles,
+            sensor_config_factory=make_sensor_config,
+        ),
         _make_relative_events_config(
             SimpleNamespace(),
             ["table", "target"],
@@ -254,9 +287,8 @@ def test_all_task_event_builders_include_table_visual_material() -> None:
         ),
     )
 
-    expected = _table_visual_material_event_config()
     for events in event_configs:
-        assert events["set_table_visual_material"] == expected
+        assert "set_table_visual_material" not in events
 
 
 def test_camera_rotation_preserves_target_and_height() -> None:
@@ -454,9 +486,7 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     registered_uids = {entry["entity_cfg"]["uid"] for entry in registry}
     assert registered_uids == {"left_apple", "right_apple", "wicker_basket"}
     record_events = gym_config["env"]["events"]
-    assert record_events["set_table_visual_material"] == (
-        _table_visual_material_event_config()
-    )
+    assert "set_table_visual_material" not in record_events
     assert (
         record_events["record_camera"]["params"]["video_name"]
         == "Demo111_audience_view"
@@ -541,6 +571,22 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert '"state":"close"' not in handoff_edge
     assert "left_arm_action: null" not in handoff_edge
     assert paths.summary["mode"] == "basket_template"
+
+
+def test_generator_can_load_template_table_material(tmp_path: Path) -> None:
+    project_dir = tmp_path / "1790000000_gym_project"
+    _write_project(project_dir)
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "generated_agent",
+        load_template_material=True,
+    )
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    assert gym_config["env"]["events"]["set_table_visual_material"] == (
+        _table_visual_material_event_config()
+    )
 
 
 @pytest.mark.parametrize(
