@@ -22,10 +22,12 @@ task:
 visual_material:
   table:
     entity_uid: table
-    material_uid: action_agent_table_wood
-    base_color: [1.0, 1.0, 1.0, 1.0]
-    metallic: 0.0
-    roughness: 0.7
+    texture_path: templates/textures/table_randomized
+    expected_texture_count: 3
+    random_texture_prob: 1.0
+    base_color_range: [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+    metallic_range: [0.0, 0.0]
+    roughness_range: [0.7, 0.7]
 
 geometry:
   target_body_scale: 1.3
@@ -67,7 +69,7 @@ arrangement:
 
 stacking:
   staging_z_delta: 0.05
-  clearance: 0.03
+  clearance: 0.05
   max_approach_retract_z: 0.8
   nested_release_z_offset: 0.12
   anchor_offset: 0.15

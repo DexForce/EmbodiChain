@@ -179,7 +179,7 @@ def cli() -> None:
         action=argparse.BooleanOptionalAction,
         default=False,
         help=(
-            "Load the packaged table visual material in generated configs. "
+            "Randomize the table texture from the packaged action-agent texture set. "
             "Disabled by default to preserve the source table appearance."
         ),
     )
