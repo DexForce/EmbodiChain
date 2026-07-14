@@ -239,6 +239,82 @@ def _make_relative_success_spec(
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
+    if (
+        spec.intent == "coordinated_pickment"
+        and spec.coordinated_terminal_behavior is not None
+    ):
+        carrier = next(
+            placement
+            for placement in spec.placements
+            if placement.intent == "coordinated_pickment"
+        )
+        payload_terms = [
+            _make_relative_placement_success_spec(
+                placement,
+                side_relation_xy_offsets=side_relation_xy_offsets,
+            )
+            for placement in spec.placements
+            if placement.intent == "place_relative"
+        ]
+        if spec.coordinated_terminal_behavior == "hold":
+            if carrier.release_position is None:
+                raise ValueError("Coordinated hold success requires a target position.")
+            hover_position = list(carrier.release_position)
+            hover_position[2] += float(carrier.hover_height)
+            carrier_term: dict[str, Any] = {
+                "op": "all",
+                "terms": [
+                    {
+                        "type": "object_position_near",
+                        "object": carrier.moved_runtime_uid,
+                        "target_position": hover_position,
+                        "tolerance": 0.05,
+                    },
+                    {
+                        "type": "object_lifted",
+                        "object": carrier.moved_runtime_uid,
+                        "min_height": 0.08,
+                    },
+                    {
+                        "type": "object_held_by_both_grippers",
+                        "object": carrier.moved_runtime_uid,
+                        "max_distance": 0.10,
+                    },
+                    {
+                        "type": "object_not_fallen",
+                        "object": carrier.moved_runtime_uid,
+                        "max_tilt": 0.174533,
+                    },
+                ],
+            }
+        else:
+            if carrier.release_position is None:
+                raise ValueError(
+                    "Coordinated place success requires a target position."
+                )
+            carrier_term = {
+                "op": "all",
+                "terms": [
+                    {
+                        "type": "object_position_near",
+                        "object": carrier.moved_runtime_uid,
+                        "target_position": carrier.release_position,
+                        "tolerance": 0.05,
+                    },
+                    {
+                        "type": "object_not_fallen",
+                        "object": carrier.moved_runtime_uid,
+                        "max_tilt": 0.174533,
+                    },
+                    {"type": "both_grippers_open"},
+                    {
+                        "type": "grippers_clear_of_object",
+                        "object": carrier.moved_runtime_uid,
+                        "min_distance": 0.05,
+                    },
+                ],
+            }
+        return {"op": "all", "terms": [*payload_terms, carrier_term]}
     if len(spec.placements) == 1:
         return _make_relative_placement_success_spec(
             spec.placements[0],
@@ -605,7 +681,12 @@ def _validate_success_uids(
         required_keys = ("object", "reference")
     elif success_type in {"object_axis_near", "object_coordinate_near"}:
         required_keys = ("object",)
-    elif success_type in {"object_xy_near", "object_near_xy"}:
+    elif success_type in {
+        "object_position_near",
+        "object_near_position",
+        "object_xy_near",
+        "object_near_xy",
+    }:
         required_keys = ("object",)
     elif success_type in {"objects_collinear", "objects_ordered"}:
         objects = success.get("objects", success.get("object_uids", []))
@@ -623,8 +704,15 @@ def _validate_success_uids(
         required_keys = ("object",)
     elif success_type in {"object_lifted", "object_height_above_initial"}:
         required_keys = ("object",)
-    elif success_type in {"object_held_by_gripper", "object_gripper_near"}:
+    elif success_type in {
+        "object_held_by_gripper",
+        "object_gripper_near",
+        "object_held_by_both_grippers",
+        "grippers_clear_of_object",
+    }:
         required_keys = ("object",)
+    elif success_type == "both_grippers_open":
+        return
     else:
         raise ValueError(f"Unsupported generated success term: {success_type!r}.")
 

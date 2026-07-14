@@ -138,6 +138,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _relative_release_offset,
     _side_relation_xy_offsets,
     _with_coordinated_side_release_height_offsets,
+    _with_coordinated_transport_geometry,
     _with_final_auto_arm_sides,
     _with_inside_container_slot_offsets,
     _with_on_surface_release_offsets,
@@ -1788,6 +1789,7 @@ def _build_relative_placement_bundle(
             slot_distance_scale=inside_container_slot_distance_scale,
         )
         spec = _with_on_surface_release_offsets(spec, gym_config)
+        spec = _with_coordinated_transport_geometry(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
         robot_profile=robot_profile,

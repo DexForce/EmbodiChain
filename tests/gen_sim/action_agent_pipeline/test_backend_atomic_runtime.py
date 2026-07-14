@@ -451,6 +451,7 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
             "target_object": {
                 "obj_name": "apple",
                 "affordance": "antipodal",
+                "payloads": ["bottle_left", "bottle_right"],
             },
             "target_object_pose": {
                 "reference": "relative",
@@ -465,7 +466,42 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
 
     assert normalized["atomic_action_class"] == "CoordinatedPickment"
     assert normalized["target_object"]["obj_name"] == "apple"
+    assert normalized["target_object"]["payloads"] == [
+        "bottle_left",
+        "bottle_right",
+    ]
     assert normalized["target_object_pose"]["offset"] == [0.16, 0.0, 0.0]
+
+
+def test_coordinated_payload_drift_enters_failure_mask() -> None:
+    env = _FakeEnv()
+    carrier = env.sim.get_rigid_object("pad_x")
+    payload = env.sim.get_rigid_object("apple")
+    initial_carrier_pose = carrier.get_local_pose(to_matrix=True)
+    initial_payload_pose = payload.get_local_pose(to_matrix=True)
+    carrier_to_payload = torch.bmm(
+        torch.linalg.inv(initial_carrier_pose), initial_payload_pose
+    )
+    payload._pose[0, 3] += 0.10
+    env._action_agent_coordinated_payload_state = (
+        atom_actions._CoordinatedPayloadRuntimeState(
+            carrier_uid="pad_x",
+            payload_uids=("apple",),
+            initial_carrier_pose=initial_carrier_pose,
+            carrier_to_payload=(carrier_to_payload,),
+            support_half_extents=(0.5, 0.5),
+            max_payload_drift=0.04,
+        )
+    )
+
+    failed = atom_actions._coordinated_transport_failure_mask(
+        env,
+        {"coordinated": WorldState(last_qpos=env.robot.get_qpos())},
+        {},
+    )
+
+    assert failed.tolist() == [True]
+    assert not hasattr(env, "_action_agent_coordinated_payload_state")
 
 
 def test_pickup_upright_cfg_is_normalized_for_typed_cfg() -> None:

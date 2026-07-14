@@ -115,6 +115,19 @@ _UPRIGHT_TASK_KEYWORDS = (
     "立起来",
 )
 _DEFAULT_HOVER_HEIGHT = 0.10
+_COORDINATED_DIRECTIONS = {
+    "front",
+    "back",
+    "left",
+    "right",
+    "front_left",
+    "front_right",
+    "back_left",
+    "back_right",
+    "none",
+}
+_COORDINATED_TERMINAL_BEHAVIORS = {"hold", "place"}
+_FLAT_CARRIER_KEYWORDS = ("plate", "dish", "platter", "盘", "盘子")
 
 _SELF_REFERENCE_VALUES = {
     "self",
@@ -439,7 +452,10 @@ def _call_object_manipulation_task_llm(
         '      "hover_height": 0.10,\n'
         '      "orientation_goal": "preserve|upright|lay_flat|axis_align",\n'
         '      "orientation_reference": "none|world_axes|reference_object",\n'
-        '      "orientation_axis": "none|x|y|long_axis|short_axis"\n'
+        '      "orientation_axis": "none|x|y|long_axis|short_axis",\n'
+        '      "payloads": [{"object": "<source_uid>", "arm": "left|right|auto", "slot": "left|right|center"}],\n'
+        '      "direction": "front|back|left|right|front_left|front_right|back_left|back_right|none",\n'
+        '      "terminal_behavior": "hold|place"\n'
         "    }\n"
         "  ],\n"
         '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
@@ -452,6 +468,14 @@ def _call_object_manipulation_task_llm(
         "pick, lift, carry, or move one shared object such as a pot, tray, "
         "roller, or other large object. Return exactly one manipulation for "
         "this case.\n"
+        "- A coordinated_pickment manipulation may contain zero to two payloads. "
+        "Use payloads when objects must first be placed on or inside the shared "
+        "carrier before both arms lift it. Payloads must be distinct from the "
+        "shared object. Use their scene side for arm and slot when unspecified.\n"
+        "- For coordinated_pickment, direction describes the carrier motion. Use "
+        "direction='none' for lifting in place. Use terminal_behavior='hold' for "
+        "端起/举起/悬空/保持/hold and 'place' for 放下/place. A move or transport "
+        "without an explicit terminal behavior defaults to place.\n"
         "- Use intent='hold_hover' when the task asks one arm, or each arm for "
         "its own object, to pick up, lift, hold, "
         "or suspend an object in the air without placing or releasing it. For "
@@ -467,8 +491,9 @@ def _call_object_manipulation_task_llm(
         "双臂, 两臂, both arms, two arms, 一只机械臂...另一只机械臂, or separate "
         "work for left and right arms. If the dual-arm task moves one shared "
         "object, use exactly one coordinated_pickment manipulation instead.\n"
-        "- Do not mix hold_hover, place_relative, and coordinated_pickment in "
-        "one response; v1 only supports homogeneous manipulation intents.\n"
+        "- Do not mix top-level hold_hover, place_relative, and "
+        "coordinated_pickment manipulations. Payloads must be nested inside the "
+        "single coordinated_pickment manipulation.\n"
         "- For dual-arm tasks with two objects, use two different moved_object "
         "values and one left arm plus one right arm. Use arm='auto' only when "
         "the user did not specify which arm handles that manipulation. For "
@@ -530,18 +555,48 @@ def _apply_relative_task_response(
         table_source_uid=table_source_uid,
     )
 
-    placement_entries = _relative_placement_entries(response)
-    placement_entries = _with_coordinated_pickment_intent(
-        placement_entries,
+    top_level_entries = _relative_placement_entries(response)
+    top_level_entries = _with_coordinated_pickment_intent(
+        top_level_entries,
         task_description=task_description,
     )
-    if len(placement_entries) > 2:
+    if len(top_level_entries) > 2:
         raise ValueError("Object manipulation supports at most two arm actions.")
 
-    forced_arm_sides = _relative_forced_arm_sides(
-        placement_entries,
+    coordinated_entry = _coordinated_transport_entry(top_level_entries)
+    payload_entries: list[Mapping[str, Any]] = []
+    coordinated_direction: str | None = None
+    coordinated_terminal_behavior: str | None = None
+    if coordinated_entry is not None:
+        payload_entries = _coordinated_payload_entries(
+            coordinated_entry,
+            by_uid=by_uid,
+            rigid_objects=rigid_objects,
+        )
+        coordinated_direction = _normalize_coordinated_direction(
+            coordinated_entry.get("direction")
+        )
+        coordinated_terminal_behavior = _normalize_coordinated_terminal_behavior(
+            coordinated_entry.get("terminal_behavior"),
+            task_description=task_description,
+        )
+        coordinated_entry = _with_coordinated_transport_relation(
+            coordinated_entry,
+            direction=coordinated_direction,
+        )
+        placement_entries = [*payload_entries, coordinated_entry]
+    else:
+        placement_entries = top_level_entries
+
+    payload_forced_sides = _relative_forced_arm_sides(
+        payload_entries if payload_entries else placement_entries,
         by_uid=by_uid,
         rigid_objects=rigid_objects,
+    )
+    forced_arm_sides = (
+        [*payload_forced_sides, None]
+        if coordinated_entry is not None
+        else payload_forced_sides
     )
     placements = tuple(
         _build_relative_placement_step(
@@ -559,7 +614,8 @@ def _apply_relative_task_response(
         )
         for entry, forced_side in zip(placement_entries, forced_arm_sides)
     )
-    placements = _order_relative_placements_by_dependency(placements)
+    if coordinated_entry is None:
+        placements = _order_relative_placements_by_dependency(placements)
     _validate_relative_placements(placements)
 
     summary = str(response.get("task_prompt_summary", "")).strip()
@@ -570,7 +626,7 @@ def _apply_relative_task_response(
     if not action_sketch:
         action_sketch = _default_relative_action_sketch(placements)
 
-    primary = placements[0]
+    primary = _relative_primary_placement(placements)
 
     return _RelativePlacementSpec(
         intent=primary.intent,
@@ -599,6 +655,181 @@ def _apply_relative_task_response(
         pickup_upright_direction=primary.pickup_upright_direction,
         pickup_rotate_upright=primary.pickup_rotate_upright,
         surface_clearance=primary.surface_clearance,
+        coordinated_direction=coordinated_direction,
+        coordinated_terminal_behavior=coordinated_terminal_behavior,
+    )
+
+
+def _coordinated_transport_entry(
+    entries: list[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    if len(entries) != 1:
+        return None
+    entry = entries[0]
+    if _normalize_manipulation_intent(entry.get("intent")) != "coordinated_pickment":
+        return None
+    if not any(
+        field in entry for field in ("payloads", "direction", "terminal_behavior")
+    ):
+        return None
+    return entry
+
+
+def _coordinated_payload_entries(
+    coordinated_entry: Mapping[str, Any],
+    *,
+    by_uid: Mapping[str, _SceneObject],
+    rigid_objects: list[_SceneObject],
+) -> list[Mapping[str, Any]]:
+    raw_payloads = coordinated_entry.get("payloads", [])
+    if not isinstance(raw_payloads, list) or len(raw_payloads) > 2:
+        raise ValueError(
+            "CoordinatedPickment payloads must be a list of at most two objects."
+        )
+    carrier_uid = _resolve_rigid_source_uid(
+        coordinated_entry.get("moved_object"),
+        rigid_objects,
+        field_name="moved_object",
+    )
+    relation = _coordinated_payload_relation(by_uid[carrier_uid])
+    entries: list[Mapping[str, Any]] = []
+    payload_uids: list[str] = []
+    for index, payload in enumerate(raw_payloads):
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"CoordinatedPickment payload {index} must be an object.")
+        payload_uid = _resolve_rigid_source_uid(
+            payload.get("object"),
+            rigid_objects,
+            field_name=f"payloads[{index}].object",
+        )
+        if payload_uid == carrier_uid:
+            raise ValueError(
+                "CoordinatedPickment payload must differ from moved_object."
+            )
+        if payload_uid in payload_uids:
+            raise ValueError("CoordinatedPickment payload objects must be distinct.")
+        payload_uids.append(payload_uid)
+        slot = str(payload.get("slot", "auto")).strip().lower()
+        if slot not in {"left", "right", "center", "auto"}:
+            raise ValueError(
+                "CoordinatedPickment payload slot must be left, right, center, or auto."
+            )
+        arm = payload.get("arm", "auto")
+        if str(arm).strip().lower() == "auto" and slot in {"left", "right"}:
+            arm = slot
+        entries.append(
+            {
+                "intent": "place_relative",
+                "moved_object": payload_uid,
+                "arm": arm,
+                "reference_object": carrier_uid,
+                "goal_relation": relation,
+                "orientation_goal": "preserve",
+                "orientation_reference": "none",
+                "orientation_axis": "none",
+            }
+        )
+    return entries
+
+
+def _coordinated_payload_relation(carrier: _SceneObject) -> str:
+    text = " ".join(
+        (
+            carrier.source_uid,
+            _base_name(carrier),
+            str(carrier.config.get("description", "")),
+            str((carrier.config.get("shape", {}) or {}).get("fpath", "")),
+        )
+    ).lower()
+    if any(keyword in text for keyword in _FLAT_CARRIER_KEYWORDS):
+        return "on"
+    return "inside" if _is_container_like(carrier) else "on"
+
+
+def _normalize_coordinated_direction(value: Any) -> str:
+    if value is None:
+        return "none"
+    direction = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "behind": "back",
+        "front_of": "front",
+        "left_of": "left",
+        "right_of": "right",
+        "原地": "none",
+        "前": "front",
+        "后": "back",
+        "左": "left",
+        "右": "right",
+    }
+    direction = aliases.get(direction, direction)
+    if direction not in _COORDINATED_DIRECTIONS:
+        raise ValueError(
+            f"Unsupported coordinated direction {value!r}; expected one of "
+            f"{sorted(_COORDINATED_DIRECTIONS)}."
+        )
+    return direction
+
+
+def _normalize_coordinated_terminal_behavior(
+    value: Any,
+    *,
+    task_description: str,
+) -> str:
+    if value is None:
+        text = task_description.lower()
+        if any(
+            keyword in text
+            for keyword in ("端起", "举起", "悬空", "保持", "举着", "hold")
+        ):
+            return "hold"
+        return "place"
+    behavior = str(value).strip().lower()
+    aliases = {"悬空": "hold", "保持": "hold", "放下": "place"}
+    behavior = aliases.get(behavior, behavior)
+    if behavior not in _COORDINATED_TERMINAL_BEHAVIORS:
+        raise ValueError(
+            f"Unsupported coordinated terminal_behavior {value!r}; expected "
+            f"one of {sorted(_COORDINATED_TERMINAL_BEHAVIORS)}."
+        )
+    return behavior
+
+
+def _with_coordinated_transport_relation(
+    entry: Mapping[str, Any],
+    *,
+    direction: str,
+) -> Mapping[str, Any]:
+    relation_by_direction = {
+        "front": "front_of",
+        "back": "behind",
+        "left": "left_of",
+        "right": "right_of",
+        "front_left": "front_left_of",
+        "front_right": "front_right_of",
+        "back_left": "back_left_of",
+        "back_right": "back_right_of",
+        "none": "on",
+    }
+    normalized = dict(entry)
+    normalized["reference_object"] = entry.get("moved_object")
+    normalized["goal_relation"] = relation_by_direction[direction]
+    normalized["arm"] = "auto"
+    normalized["orientation_goal"] = "preserve"
+    normalized["orientation_reference"] = "none"
+    normalized["orientation_axis"] = "none"
+    return normalized
+
+
+def _relative_primary_placement(
+    placements: tuple[_RelativePlacementStepSpec, ...],
+) -> _RelativePlacementStepSpec:
+    return next(
+        (
+            placement
+            for placement in placements
+            if placement.intent == "coordinated_pickment"
+        ),
+        placements[0],
     )
 
 
@@ -737,7 +968,11 @@ def _build_relative_placement_step(
         reference_source_uid = table_source_uid
         reference_is_initial_pose = False
     if intent != "hold_hover":
-        if reference_is_initial_pose and relation not in _SIDE_RELATIONS:
+        if (
+            reference_is_initial_pose
+            and relation not in _SIDE_RELATIONS
+            and intent != "coordinated_pickment"
+        ):
             raise ValueError(
                 "Initial-position self-relative placement only supports directional "
                 "relations, not inside/on."
@@ -830,6 +1065,25 @@ def _validate_relative_placements(
     if len(moved_source_uids) != len(set(moved_source_uids)):
         raise ValueError("Object manipulations must use distinct moved_object values.")
     intents = {placement.intent for placement in placements}
+    if intents == {"place_relative", "coordinated_pickment"}:
+        coordinated = [
+            placement
+            for placement in placements
+            if placement.intent == "coordinated_pickment"
+        ]
+        payloads = [
+            placement
+            for placement in placements
+            if placement.intent == "place_relative"
+        ]
+        if len(coordinated) != 1 or not 1 <= len(payloads) <= 2:
+            raise ValueError(
+                "Loaded CoordinatedPickment requires one shared object and one or two payloads."
+            )
+        carrier_uid = coordinated[0].moved_source_uid
+        if any(payload.reference_source_uid != carrier_uid for payload in payloads):
+            raise ValueError("Every coordinated payload must target the shared object.")
+        return
     if len(intents) > 1:
         raise ValueError("Mixed manipulation intents are not supported in v1.")
     if "coordinated_pickment" in intents and len(placements) != 1:

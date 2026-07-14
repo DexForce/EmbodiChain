@@ -149,6 +149,8 @@ class _RelativePlacementSpec:
     pickup_upright_direction: list[float] | None = None
     pickup_rotate_upright: float | None = None
     surface_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE
+    coordinated_direction: str | None = None
+    coordinated_terminal_behavior: str | None = None
 
 
 _ObjectManipulationStepSpec = _RelativePlacementStepSpec

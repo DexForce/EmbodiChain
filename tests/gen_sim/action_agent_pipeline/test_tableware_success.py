@@ -59,6 +59,18 @@ class _FakeObject:
         pose[:, :3, 3] = self.position
         return pose
 
+    def get_vertices(self, env_ids=None, scale: bool = True):
+        vertices = torch.tensor(
+            [
+                [-0.5, -0.2, -0.05],
+                [-0.5, 0.2, 0.05],
+                [0.5, -0.2, 0.05],
+                [0.5, 0.2, -0.05],
+            ],
+            dtype=torch.float32,
+        )
+        return [vertices]
+
 
 def test_object_lifted_requires_initial_height() -> None:
     env = _FakeEnv()
@@ -87,6 +99,67 @@ def test_object_lifted_uses_recorded_initial_height() -> None:
             "type": "object_lifted",
             "object": "apple",
             "min_height": 0.1,
+        },
+    )
+
+    assert success.tolist() == [True]
+
+
+def test_object_held_by_both_grippers_uses_surface_distance() -> None:
+    env = _FakeEnv()
+    env.sim = _FakeSim({"tray": _FakeObject([0.0, 0.0, 0.2])})
+    env.close_state = torch.tensor([0.0])
+    env.open_state = torch.tensor([0.05])
+    env.get_current_gripper_state_agent = lambda: (
+        torch.tensor([0.0]),
+        torch.tensor([0.0]),
+    )
+    left_pose = torch.eye(4).unsqueeze(0)
+    right_pose = torch.eye(4).unsqueeze(0)
+    left_pose[:, :3, 3] = torch.tensor([0.55, 0.0, 0.2])
+    right_pose[:, :3, 3] = torch.tensor([-0.55, 0.0, 0.2])
+    env.get_current_xpos_agent = lambda: (left_pose, right_pose)
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "object_held_by_both_grippers",
+            "object": "tray",
+            "max_distance": 0.10,
+        },
+    )
+
+    assert success.tolist() == [True]
+    assert torch.linalg.norm(left_pose[0, :3, 3] - torch.tensor([0.0, 0.0, 0.2])) > 0.5
+
+
+def test_both_grippers_open_and_clear_of_object() -> None:
+    env = _FakeEnv()
+    env.sim = _FakeSim({"tray": _FakeObject([0.0, 0.0, 0.2])})
+    env.close_state = torch.tensor([0.0])
+    env.open_state = torch.tensor([0.05])
+    env.get_current_gripper_state_agent = lambda: (
+        torch.tensor([0.05]),
+        torch.tensor([0.05]),
+    )
+    left_pose = torch.eye(4).unsqueeze(0)
+    right_pose = torch.eye(4).unsqueeze(0)
+    left_pose[:, :3, 3] = torch.tensor([0.8, 0.0, 0.2])
+    right_pose[:, :3, 3] = torch.tensor([-0.8, 0.0, 0.2])
+    env.get_current_xpos_agent = lambda: (left_pose, right_pose)
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "op": "all",
+            "terms": [
+                {"type": "both_grippers_open"},
+                {
+                    "type": "grippers_clear_of_object",
+                    "object": "tray",
+                    "min_distance": 0.05,
+                },
+            ],
         },
     )
 
