@@ -92,7 +92,7 @@ physics:
     restitution: 0.01
     max_convex_hull_num: 1
   rigid_object:
-    mass: 1
+    mass: 0.1
     static_friction: 1.2
     dynamic_friction: 1.0
     contact_offset: 0.00
@@ -102,9 +102,9 @@ physics:
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
-    target: 8
-    container: 8
-    moved: 8
+    target: 16
+    container: 24
+    moved: 16
     extra_rigid: 1
 
 grasp:
