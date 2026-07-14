@@ -173,6 +173,17 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--load-template-material",
+        "--load_template_material",
+        dest="load_template_material",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Load the packaged table visual material in generated configs. "
+            "Disabled by default to preserve the source table appearance."
+        ),
+    )
+    parser.add_argument(
         "--source_scene_z_rotation_degrees",
         "--source-scene-z-rotation-degrees",
         type=float,
@@ -330,6 +341,7 @@ def cli() -> None:
         load_source_meshes_directly=alignment["load_source_meshes_directly"],
         source_scene_z_rotation_degrees=alignment["source_scene_z_rotation_degrees"],
         source_mesh_x_rotation_degrees=alignment["source_mesh_x_rotation_degrees"],
+        load_template_material=args.load_template_material,
         inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
         surface_release_clearance=args.surface_release_clearance,
         target_replacements=target_replacements,

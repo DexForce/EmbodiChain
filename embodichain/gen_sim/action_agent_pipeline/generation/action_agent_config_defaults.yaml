@@ -91,13 +91,17 @@ physics:
     restitution: 0.01
     max_convex_hull_num: 1
   rigid_object:
-    mass: 0.1
-    static_friction: 1.2
-    dynamic_friction: 1.0
-    contact_offset: 0.00
-    rest_offset: 0.00
-    restitution: 0.01
-    max_depenetration_velocity: 1.0
+    mass: 0.2
+    static_friction: 0.95
+    dynamic_friction: 0.9
+    linear_damping: 0.9
+    angular_damping: 0.9
+    contact_offset: 0.002
+    rest_offset: 0.001
+    restitution: 0.05
+    max_depenetration_velocity: 0.8
+    max_linear_velocity: 0.5
+    max_angular_velocity: 0.5
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:

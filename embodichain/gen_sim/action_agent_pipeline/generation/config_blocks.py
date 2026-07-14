@@ -127,11 +127,13 @@ def _make_relative_events_config(
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     task_name: str = DEFAULT_TASK_NAME,
+    load_template_material: bool = False,
 ) -> dict[str, Any]:
     return {
         **_make_common_events_config(
             sensor_config_factory,
             task_name=task_name,
+            load_template_material=load_template_material,
         ),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
@@ -171,11 +173,13 @@ def _make_arrangement_events_config(
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     task_name: str = DEFAULT_TASK_NAME,
+    load_template_material: bool = False,
 ) -> dict[str, Any]:
     return {
         **_make_common_events_config(
             sensor_config_factory,
             task_name=task_name,
+            load_template_material=load_template_material,
         ),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
@@ -215,11 +219,13 @@ def _make_events_config(
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     task_name: str = DEFAULT_TASK_NAME,
+    load_template_material: bool = False,
 ) -> dict[str, Any]:
     return {
         **_make_common_events_config(
             sensor_config_factory,
             task_name=task_name,
+            load_template_material=load_template_material,
         ),
         "prepare_extra_attr": {
             "func": "prepare_extra_attr",
@@ -259,15 +265,18 @@ def _make_common_events_config(
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     *,
     task_name: str,
+    load_template_material: bool,
 ) -> dict[str, Any]:
-    return {
+    events = {
         **_record_camera_event_configs(
             sensor_config_factory,
             task_name=task_name,
         ),
         "validation_cameras": _validation_cameras_event_config(),
-        "set_table_visual_material": _table_visual_material_event_config(),
     }
+    if load_template_material:
+        events["set_table_visual_material"] = _table_visual_material_event_config()
+    return events
 
 
 def _table_visual_material_event_config() -> dict[str, Any]:

@@ -176,7 +176,7 @@ def _dual_ur_profile(
         },
         grasp_runtime_defaults={
             "grasp_max_open_length": 0.1,
-            "grasp_min_open_length": 0.003,
+            "grasp_min_open_length": 0.02,
             "grasp_finger_length": 0.13,
         },
         prompt_description=(
@@ -213,15 +213,15 @@ def _dual_franka_profile() -> RobotProfile:
                 "eef": "left_eef",
             },
         },
-        gripper_open_state=(0.06, 0.06),
-        gripper_close_state=(0.0, 0.0),
+        gripper_open_state=_ROBOTIQ_ARG2F_140_OPEN_QPOS,
+        gripper_close_state=_ROBOTIQ_ARG2F_140_CLOSE_QPOS,
         arm_aim_yaw_offset={
             "left": _PI,
             "right": 0.0,
         },
         grasp_runtime_defaults={
-            "grasp_max_open_length": 0.08,
-            "grasp_min_open_length": 0.0,
+            "grasp_max_open_length": 0.1,
+            "grasp_min_open_length": 0.02,
             "grasp_finger_length": 0.058,
         },
         prompt_description=(

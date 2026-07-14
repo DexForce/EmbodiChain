@@ -156,6 +156,7 @@ def _run_pipeline(
                 if uses_prompt2scene_alignment
                 else 0.0
             ),
+            load_template_material=getattr(args, "load_template_material", False),
             inside_container_slot_distance_scale=(
                 args.inside_container_slot_distance_scale
             ),
