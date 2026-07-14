@@ -1,7 +1,7 @@
 {
-  "uid": "DualUR5",
+  "uid": "DualUR10",
   "urdf_cfg": {
-    "fname": "dual_ur5_robotiq_arg2f_140_basket",
+    "fname": "dual_ur10_robotiq_arg2f_140_basket",
     "name_case": {
       "joint": "lower",
       "link": "lower"
@@ -79,8 +79,8 @@
       "right_eef": 10.0
     },
     "max_effort": {
-      "left_arm": 100000.0,
-      "right_arm": 100000.0,
+      "left_arm": 330.0,
+      "right_arm": 330.0,
       "left_eef": 1000.0,
       "right_eef": 1000.0
     }

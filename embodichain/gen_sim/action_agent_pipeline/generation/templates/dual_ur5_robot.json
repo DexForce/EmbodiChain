@@ -9,11 +9,11 @@
     "components": [
       {
         "component_type": "left_arm",
-        "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+        "urdf_path": "UniversalRobots/UR5/UR5.urdf",
         "transform": [
           [0.0, -1.0, 0.0, -0.3],
-          [1.0, 0.0, 0.0, -1.1],
-          [0.0, 0.0, 1.0, 0.3],
+          [1.0, 0.0, 0.0, -1.45],
+          [0.0, 0.0, 1.0, 0.4],
           [0.0, 0.0, 0.0, 1.0]
         ]
       },
@@ -23,11 +23,11 @@
       },
       {
         "component_type": "right_arm",
-        "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+        "urdf_path": "UniversalRobots/UR5/UR5.urdf",
         "transform": [
           [0.0, -1.0, 0.0, 0.3],
-          [1.0, 0.0, 0.0, -1.1],
-          [0.0, 0.0, 1.0, 0.3],
+          [1.0, 0.0, 0.0, -1.45],
+          [0.0, 0.0, 1.0, 0.4],
           [0.0, 0.0, 0.0, 1.0]
         ]
       },
@@ -122,7 +122,7 @@
   "solver_cfg": {
     "left_arm": {
       "class_type": "URSolver",
-      "ur_type": "ur10",
+      "ur_type": "ur5",
       "urdf_path": null,
       "end_link_name": "left_ee_link",
       "root_link_name": "left_base_link",
@@ -130,13 +130,13 @@
       "tcp": [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.19],
+        [0.0, 0.0, 1.0, 0.17],
         [0.0, 0.0, 0.0, 1.0]
       ]
     },
     "right_arm": {
       "class_type": "URSolver",
-      "ur_type": "ur10",
+      "ur_type": "ur5",
       "urdf_path": null,
       "end_link_name": "right_ee_link",
       "root_link_name": "right_base_link",
@@ -144,7 +144,7 @@
       "tcp": [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.19],
+        [0.0, 0.0, 1.0, 0.17],
         [0.0, 0.0, 0.0, 1.0]
       ]
     }

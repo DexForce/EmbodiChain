@@ -39,6 +39,14 @@ _UR_URDF_DIRS = {
     "ur10": "UR10",
     "ur10e": "UR10e",
 }
+_UR_TEMPLATE_FILES = {
+    "ur3": "dual_ur5_robot.json",
+    "ur3e": "dual_ur5_robot.json",
+    "ur5": "dual_ur5_robot.json",
+    "ur5e": "dual_ur5_robot.json",
+    "ur10": "dual_ur10_robot.json",
+    "ur10e": "dual_ur10_robot.json",
+}
 _UR_MAX_EFFORT = {
     "ur3": 56.0,
     "ur3e": 56.0,
@@ -67,7 +75,7 @@ def make_dual_ur_dh_pgi_robot_config(
             f"one of {sorted(_UR_URDF_DIRS)}."
         )
 
-    config = _load_template("dual_ur5_robot.json")
+    config = _load_template(_UR_TEMPLATE_FILES[ur_type])
     urdf_dir = _UR_URDF_DIRS[ur_type]
     arm_urdf_path = f"UniversalRobots/{urdf_dir}/{urdf_dir}.urdf"
     display = ur_type.upper().replace("E", "e")

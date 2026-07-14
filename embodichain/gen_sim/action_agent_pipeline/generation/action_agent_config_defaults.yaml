@@ -36,6 +36,10 @@ geometry:
     legacy_init_z: 0.5
     arm_component_z: 0.4
     tabletop_clearance: 0.05
+  dual_ur10:
+    legacy_init_z: 0.5
+    arm_component_z: 0.3
+    tabletop_clearance: 0.05
   dual_franka:
     tabletop_clearance: 0.05
 
