@@ -164,3 +164,31 @@ def test_both_grippers_open_and_clear_of_object() -> None:
     )
 
     assert success.tolist() == [True]
+
+
+def test_both_grippers_open_returns_false_before_gripper_cache_init() -> None:
+    env = _FakeEnv()
+
+    def get_uninitialized_gripper_state():
+        return (
+            env.left_arm_current_gripper_state,
+            env.right_arm_current_gripper_state,
+        )
+
+    env.get_current_gripper_state_agent = get_uninitialized_gripper_state
+
+    success = evaluate_configured_success(env, {"type": "both_grippers_open"})
+
+    assert success.tolist() == [False]
+
+
+def test_both_grippers_open_returns_false_before_open_state_init() -> None:
+    env = _FakeEnv()
+    env.get_current_gripper_state_agent = lambda: (
+        torch.tensor([0.05]),
+        torch.tensor([0.05]),
+    )
+
+    success = evaluate_configured_success(env, {"type": "both_grippers_open"})
+
+    assert success.tolist() == [False]

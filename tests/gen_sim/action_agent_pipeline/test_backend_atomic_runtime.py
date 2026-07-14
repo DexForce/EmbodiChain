@@ -451,7 +451,12 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
             "target_object": {
                 "obj_name": "apple",
                 "affordance": "antipodal",
-                "payloads": ["bottle_left", "bottle_right"],
+                "payloads": [
+                    "bottle_left",
+                    "bottle_right",
+                    "cup_left",
+                    "cup_right",
+                ],
             },
             "target_object_pose": {
                 "reference": "relative",
@@ -469,8 +474,34 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
     assert normalized["target_object"]["payloads"] == [
         "bottle_left",
         "bottle_right",
+        "cup_left",
+        "cup_right",
     ]
     assert normalized["target_object_pose"]["offset"] == [0.16, 0.0, 0.0]
+
+
+def test_normalize_atomic_action_spec_rejects_more_than_four_payloads() -> None:
+    with pytest.raises(ValueError, match="at most 4 UIDs"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "CoordinatedPickment",
+                "robot_name": "dual_arm",
+                "control": "arm",
+                "target_object": {
+                    "obj_name": "tray",
+                    "affordance": "antipodal",
+                    "payloads": [f"payload_{index}" for index in range(5)],
+                },
+                "target_object_pose": {
+                    "reference": "relative",
+                    "offset": [0.15, 0.0, 0.1],
+                    "frame": "world",
+                    "orientation_goal": "preserve",
+                    "orientation_axis": "none",
+                },
+                "cfg": {},
+            }
+        )
 
 
 def test_coordinated_payload_drift_enters_failure_mask() -> None:

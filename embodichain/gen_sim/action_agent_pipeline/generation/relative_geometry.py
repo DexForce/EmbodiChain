@@ -250,6 +250,16 @@ def _with_inside_container_slot_offsets(
     slot_offsets_by_index: dict[int, list[float]] = {}
     for reference_uid, indices in inside_groups.items():
         container_config = object_configs.get(reference_uid)
+        if spec.intent == "coordinated_pickment" and len(indices) >= 3:
+            slot_offsets_by_index.update(
+                _coordinated_payload_grid_offsets(
+                    indices,
+                    placements=spec.placements,
+                    object_configs=object_configs,
+                    container_config=container_config,
+                )
+            )
+            continue
         axis, slot_distance = _inside_container_slot_axis_and_distance(
             container_config,
             slot_distance_scale=slot_distance_scale,
@@ -290,6 +300,84 @@ def _with_inside_container_slot_offsets(
         for index, placement in enumerate(spec.placements)
     )
     return _replace_relative_spec_placements(spec, placements)
+
+
+def _coordinated_payload_grid_offsets(
+    indices: Sequence[int],
+    *,
+    placements: Sequence[_RelativePlacementStepSpec],
+    object_configs: Mapping[str, Mapping[str, Any]],
+    container_config: Mapping[str, Any] | None,
+) -> dict[int, list[float]]:
+    """Choose a deterministic best-effort grid for three or four payloads."""
+    count = len(indices)
+    carrier_extents = (
+        _mesh_config_world_xy_extents(container_config)
+        if container_config is not None
+        else None
+    )
+    if carrier_extents is None:
+        carrier_extents = (
+            2.0 * _CONTAINER_SLOT_MAX_OFFSET,
+            2.0 * _CONTAINER_SLOT_MAX_OFFSET,
+        )
+    usable_x = max(0.02, float(carrier_extents[0]) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
+    usable_y = max(0.02, float(carrier_extents[1]) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
+    ordered_indices = sorted(
+        indices,
+        key=lambda index: (
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=1,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=0,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            index,
+        ),
+    )
+    payload_extents = {
+        index: _mesh_config_world_xy_extents(
+            object_configs.get(placements[index].moved_runtime_uid, {})
+        )
+        or (0.0, 0.0)
+        for index in ordered_indices
+    }
+    grid_shapes = [(count, 1), (1, count), (2, 2)]
+    candidates: list[tuple[tuple[float, float], dict[int, list[float]]]] = []
+    for columns, rows in grid_shapes:
+        cell_x = usable_x / float(columns)
+        cell_y = usable_y / float(rows)
+        cells = [
+            (
+                -usable_x * 0.5 + (column + 0.5) * cell_x,
+                -usable_y * 0.5 + (row + 0.5) * cell_y,
+            )
+            for row in range(rows)
+            for column in range(columns)
+        ][:count]
+        overflow = 0.0
+        min_clearance = float("inf")
+        offsets: dict[int, list[float]] = {}
+        for index, (x, y) in zip(ordered_indices, cells):
+            payload_x, payload_y = payload_extents[index]
+            clearance_x = cell_x - float(payload_x)
+            clearance_y = cell_y - float(payload_y)
+            overflow += max(0.0, _COORDINATED_GEOMETRY_MARGIN - clearance_x)
+            overflow += max(0.0, _COORDINATED_GEOMETRY_MARGIN - clearance_y)
+            min_clearance = min(min_clearance, clearance_x, clearance_y)
+            offsets[index] = [
+                round(float(x), 6),
+                round(float(y), 6),
+                _SIDE_RELEASE_Z_OFFSET,
+            ]
+        candidates.append(((round(overflow, 9), -min_clearance), offsets))
+    return min(candidates, key=lambda candidate: candidate[0])[1]
 
 
 def _payload_aware_slot_distance(
@@ -461,17 +549,6 @@ def _with_coordinated_transport_geometry(
         raise ValueError(
             f"Generated config is missing coordinated carrier {carrier.moved_runtime_uid!r}."
         )
-    payloads = tuple(
-        placement
-        for placement in spec.placements
-        if placement.intent == "place_relative"
-    )
-    _validate_coordinated_payload_capacity(
-        carrier_config=carrier_config,
-        payloads=payloads,
-        object_configs=object_configs,
-    )
-
     initial_position = _clean_vector3(carrier_config.get("init_pos", [0.0, 0.0, 0.0]))
     direction = _coordinated_direction_vector(spec.coordinated_direction)
     distance = _coordinated_safe_transport_distance(
@@ -588,42 +665,6 @@ def _coordinated_safe_transport_distance(
             f"boundary with at least {_COORDINATED_MIN_TRANSPORT_DISTANCE:.2f} m movement."
         )
     return round(allowed, 6)
-
-
-def _validate_coordinated_payload_capacity(
-    *,
-    carrier_config: Mapping[str, Any],
-    payloads: Sequence[_RelativePlacementStepSpec],
-    object_configs: Mapping[str, Mapping[str, Any]],
-) -> None:
-    if not payloads:
-        return
-    carrier_extents = _mesh_config_world_xy_extents(carrier_config)
-    payload_extents = [
-        _mesh_config_world_xy_extents(object_configs.get(payload.moved_runtime_uid, {}))
-        for payload in payloads
-    ]
-    if carrier_extents is None or any(extents is None for extents in payload_extents):
-        return
-    axis = 0 if carrier_extents[0] >= carrier_extents[1] else 1
-    cross_axis = 1 - axis
-    usable = [
-        max(0.0, float(extent) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
-        for extent in carrier_extents
-    ]
-    resolved_payload_extents = [
-        extents for extents in payload_extents if extents is not None
-    ]
-    required_axis = sum(float(extents[axis]) for extents in resolved_payload_extents)
-    required_axis += _COORDINATED_GEOMETRY_MARGIN * max(0, len(payloads) - 1)
-    required_cross = max(
-        float(extents[cross_axis]) for extents in resolved_payload_extents
-    )
-    if required_axis > usable[axis] or required_cross > usable[cross_axis]:
-        raise ValueError(
-            "Coordinated carrier does not have enough usable support area for the "
-            "declared payloads."
-        )
 
 
 def _with_on_surface_release_offsets(

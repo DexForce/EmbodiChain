@@ -127,6 +127,7 @@ _COORDINATED_DIRECTIONS = {
     "none",
 }
 _COORDINATED_TERMINAL_BEHAVIORS = {"hold", "place"}
+_MAX_COORDINATED_PAYLOADS = 4
 _FLAT_CARRIER_KEYWORDS = ("plate", "dish", "platter", "盘", "盘子")
 
 _SELF_REFERENCE_VALUES = {
@@ -468,7 +469,7 @@ def _call_object_manipulation_task_llm(
         "pick, lift, carry, or move one shared object such as a pot, tray, "
         "roller, or other large object. Return exactly one manipulation for "
         "this case.\n"
-        "- A coordinated_pickment manipulation may contain zero to two payloads. "
+        "- A coordinated_pickment manipulation may contain zero to four payloads. "
         "Use payloads when objects must first be placed on or inside the shared "
         "carrier before both arms lift it. Payloads must be distinct from the "
         "shared object. Use their scene side for arm and slot when unspecified.\n"
@@ -560,8 +561,20 @@ def _apply_relative_task_response(
         top_level_entries,
         task_description=task_description,
     )
+    top_level_entries = _canonicalize_flat_coordinated_transport_entries(
+        top_level_entries,
+        rigid_objects=rigid_objects,
+    )
     if len(top_level_entries) > 2:
-        raise ValueError("Object manipulation supports at most two arm actions.")
+        intents = [
+            _normalize_manipulation_intent(entry.get("intent"))
+            for entry in top_level_entries
+        ]
+        raise ValueError(
+            "Object manipulation supports at most two independent arm actions; "
+            "loaded coordinated transport must use one coordinated_pickment with "
+            f"at most {_MAX_COORDINATED_PAYLOADS} payloads. Received intents: {intents}."
+        )
 
     coordinated_entry = _coordinated_transport_entry(top_level_entries)
     payload_entries: list[Mapping[str, Any]] = []
@@ -675,6 +688,122 @@ def _coordinated_transport_entry(
     return entry
 
 
+def _canonicalize_flat_coordinated_transport_entries(
+    entries: list[Mapping[str, Any]],
+    *,
+    rigid_objects: list[_SceneObject],
+) -> list[Mapping[str, Any]]:
+    """Fold flat payload placements into one coordinated transport entry."""
+    if len(entries) <= 1:
+        return entries
+    coordinated = [
+        entry
+        for entry in entries
+        if _normalize_manipulation_intent(entry.get("intent")) == "coordinated_pickment"
+    ]
+    payload_entries = [
+        entry
+        for entry in entries
+        if _normalize_manipulation_intent(entry.get("intent")) == "place_relative"
+    ]
+    if (
+        len(coordinated) != 1
+        or not 1 <= len(payload_entries) <= _MAX_COORDINATED_PAYLOADS
+        or len(entries) != len(payload_entries) + 1
+    ):
+        return entries
+
+    coordinated_entry = dict(coordinated[0])
+    raw_nested_payloads = coordinated_entry.get("payloads", [])
+    if (
+        not isinstance(raw_nested_payloads, list)
+        or len(raw_nested_payloads) > _MAX_COORDINATED_PAYLOADS
+    ):
+        raise ValueError(
+            "CoordinatedPickment payloads must be a list of at most "
+            f"{_MAX_COORDINATED_PAYLOADS} objects."
+        )
+    carrier_uid = _resolve_rigid_source_uid(
+        coordinated_entry.get("moved_object"),
+        rigid_objects,
+        field_name="moved_object",
+    )
+    nested_by_uid: dict[str, Mapping[str, Any]] = {}
+    for index, payload in enumerate(raw_nested_payloads):
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"CoordinatedPickment payload {index} must be an object.")
+        payload_uid = _resolve_rigid_source_uid(
+            payload.get("object"),
+            rigid_objects,
+            field_name=f"payloads[{index}].object",
+        )
+        if payload_uid in nested_by_uid:
+            raise ValueError("CoordinatedPickment payload objects must be distinct.")
+        nested_by_uid[payload_uid] = payload
+
+    flat_payloads: list[tuple[str, str]] = []
+    flat_payload_uids: set[str] = set()
+    for index, entry in enumerate(payload_entries):
+        reference_uid = _resolve_rigid_source_uid(
+            entry.get("reference_object"),
+            rigid_objects,
+            field_name=f"flat payload {index} reference_object",
+        )
+        relation = _normalize_relative_relation(entry.get("goal_relation"))
+        if reference_uid != carrier_uid or relation not in {"inside", "on"}:
+            return entries
+        payload_uid = _resolve_rigid_source_uid(
+            entry.get("moved_object"),
+            rigid_objects,
+            field_name=f"flat payload {index} moved_object",
+        )
+        if payload_uid in flat_payload_uids:
+            raise ValueError("CoordinatedPickment payload objects must be distinct.")
+        flat_payload_uids.add(payload_uid)
+        arm = _normalize_relative_arm(entry.get("arm"))
+        flat_payloads.append((payload_uid, arm))
+
+    if nested_by_uid and set(nested_by_uid) != flat_payload_uids:
+        nested_only = sorted(set(nested_by_uid) - flat_payload_uids)
+        flat_only = sorted(flat_payload_uids - set(nested_by_uid))
+        raise ValueError(
+            "Loaded coordinated transport has conflicting nested and top-level "
+            f"payload objects; nested_only={nested_only}, flat_only={flat_only}."
+        )
+
+    payloads: list[dict[str, Any]] = []
+    for payload_uid, flat_arm in flat_payloads:
+        nested = nested_by_uid.get(payload_uid, {})
+        nested_arm = nested.get("arm", "auto")
+        arm = flat_arm if flat_arm != "auto" else nested_arm
+        slot = nested.get("slot")
+        if slot is None:
+            slot = flat_arm if flat_arm in {"left", "right"} else "auto"
+        payloads.append(
+            {
+                "object": payload_uid,
+                "arm": arm,
+                "slot": slot,
+            }
+        )
+    coordinated_entry["payloads"] = payloads
+    if "direction" not in coordinated_entry:
+        relation = str(coordinated_entry.get("goal_relation", "")).strip().lower()
+        direction_by_relation = {
+            "front_of": "front",
+            "behind": "back",
+            "left_of": "left",
+            "right_of": "right",
+            "front_left_of": "front_left",
+            "front_right_of": "front_right",
+            "back_left_of": "back_left",
+            "back_right_of": "back_right",
+        }
+        if relation in direction_by_relation:
+            coordinated_entry["direction"] = direction_by_relation[relation]
+    return [coordinated_entry]
+
+
 def _coordinated_payload_entries(
     coordinated_entry: Mapping[str, Any],
     *,
@@ -682,9 +811,13 @@ def _coordinated_payload_entries(
     rigid_objects: list[_SceneObject],
 ) -> list[Mapping[str, Any]]:
     raw_payloads = coordinated_entry.get("payloads", [])
-    if not isinstance(raw_payloads, list) or len(raw_payloads) > 2:
+    if (
+        not isinstance(raw_payloads, list)
+        or len(raw_payloads) > _MAX_COORDINATED_PAYLOADS
+    ):
         raise ValueError(
-            "CoordinatedPickment payloads must be a list of at most two objects."
+            "CoordinatedPickment payloads must be a list of at most "
+            f"{_MAX_COORDINATED_PAYLOADS} objects."
         )
     carrier_uid = _resolve_rigid_source_uid(
         coordinated_entry.get("moved_object"),
@@ -1076,9 +1209,10 @@ def _validate_relative_placements(
             for placement in placements
             if placement.intent == "place_relative"
         ]
-        if len(coordinated) != 1 or not 1 <= len(payloads) <= 2:
+        if len(coordinated) != 1 or not 1 <= len(payloads) <= _MAX_COORDINATED_PAYLOADS:
             raise ValueError(
-                "Loaded CoordinatedPickment requires one shared object and one or two payloads."
+                "Loaded CoordinatedPickment requires one shared object and one to "
+                f"{_MAX_COORDINATED_PAYLOADS} payloads."
             )
         carrier_uid = coordinated[0].moved_source_uid
         if any(payload.reference_source_uid != carrier_uid for payload in payloads):

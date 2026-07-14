@@ -444,9 +444,13 @@ def _gripper_is_closed(env, arm_name: str, device: torch.device) -> torch.Tensor
 def _gripper_is_open(env, arm_name: str, device: torch.device) -> torch.Tensor:
     if not hasattr(env, "get_current_gripper_state_agent"):
         return _constant(env, False)
-    left_state, right_state = env.get_current_gripper_state_agent()
+    try:
+        left_state, right_state = env.get_current_gripper_state_agent()
+    except AttributeError:
+        return _constant(env, False)
     state = right_state if "right" in arm_name else left_state
-    if state is None:
+    open_state = getattr(env, "open_state", None)
+    if state is None or open_state is None:
         return _constant(env, False)
     state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
     state_tensor = (
@@ -454,7 +458,7 @@ def _gripper_is_open(env, arm_name: str, device: torch.device) -> torch.Tensor:
     )
     if state_tensor.shape[0] == 1 and env.num_envs > 1:
         state_tensor = state_tensor.expand(env.num_envs, -1)
-    open_tensor = torch.as_tensor(env.open_state, dtype=torch.float32, device=device)
+    open_tensor = torch.as_tensor(open_state, dtype=torch.float32, device=device)
     open_tensor = open_tensor.reshape(1, -1) if open_tensor.ndim == 1 else open_tensor
     if open_tensor.shape[0] == 1 and state_tensor.shape[0] > 1:
         open_tensor = open_tensor.expand(state_tensor.shape[0], -1)

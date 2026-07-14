@@ -113,6 +113,7 @@ ACTION_SPEC_FIELDS = {
 SUPPORTED_POSE_REFERENCES = {"object", "absolute", "relative"}
 SUPPORTED_OBJECT_ORIENTATION_GOALS = {"preserve", "upright", "lay_flat", "axis_align"}
 SUPPORTED_OBJECT_ORIENTATION_AXES = {"none", "x", "y", "long_axis", "short_axis"}
+_MAX_COORDINATED_PAYLOADS = 4
 SUPPORTED_SURFACE_Z_POLICIES = {"preserve", "object_on_surface", "surface_release"}
 SURFACE_Z_POLICY_FIELDS = {
     "z_policy",
@@ -506,8 +507,11 @@ def _validate_target_object(target_object: Mapping[str, Any]) -> None:
     if affordance != "antipodal":
         raise ValueError("target_object only supports affordance='antipodal'.")
     payloads = target_object.get("payloads", [])
-    if not isinstance(payloads, list) or len(payloads) > 2:
-        raise ValueError("target_object payloads must be a list with at most two UIDs.")
+    if not isinstance(payloads, list) or len(payloads) > _MAX_COORDINATED_PAYLOADS:
+        raise ValueError(
+            "target_object payloads must be a list with at most "
+            f"{_MAX_COORDINATED_PAYLOADS} UIDs."
+        )
     if any(not isinstance(payload, str) or not payload for payload in payloads):
         raise ValueError("target_object payloads must contain non-empty UID strings.")
     if len(payloads) != len(set(payloads)):
