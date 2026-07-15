@@ -1036,6 +1036,95 @@ def test_environment_kinematics_hook_keeps_its_strict_legacy_signature(
     assert manager.physics.newton_manager.trajectory_requests == []
 
 
+def test_grad_terminal_step_defers_reset_until_after_backward(monkeypatch) -> None:
+    """A terminal grad step must return before touching fenced live state."""
+    warp = _RecordingWarp()
+    manager = _TrajectorySimulationManager(warp)
+    env, _ = _route_env(manager)
+    monkeypatch.setattr(diff_bridge, "wp", warp)
+    nm = manager.physics.newton_manager
+    reset_calls: list[torch.Tensor] = []
+
+    def _terminal_outputs(_final_state: object) -> dict[str, Any]:
+        return {
+            "obs": torch.full((1, 1), 7.0),
+            "reward": torch.full((1,), 3.0),
+            "terminated": torch.ones(1, dtype=torch.bool),
+            "truncated": torch.zeros(1, dtype=torch.bool),
+            "_order": ("obs", "reward", "terminated", "truncated"),
+            "_grad_track": {},
+        }
+
+    def _reset(*, options: dict[str, Any]):
+        if nm._active_trajectory is not None:
+            raise RuntimeError("reset crossed an active Newton trajectory fence")
+        reset_ids = torch.as_tensor(options["reset_ids"]).clone()
+        reset_calls.append(reset_ids)
+        return torch.full((1, 1), -1.0), {}
+
+    env._read_outputs = _terminal_outputs
+    env.reset = _reset
+    action = torch.zeros(1, requires_grad=True)
+
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    assert torch.equal(obs.detach(), torch.full((1, 1), 7.0))
+    assert terminated.tolist() == [True]
+    assert truncated.tolist() == [False]
+    assert reset_calls == []
+    assert info["requires_reset_after_backward"] is True
+    assert torch.equal(info["deferred_reset_ids"], torch.tensor([0]))
+    assert nm._active_trajectory is not None
+
+    reward.sum().backward()
+
+    assert action.grad is not None
+    assert nm._active_trajectory is None
+    env.reset(options={"reset_ids": info["deferred_reset_ids"]})
+    assert len(reset_calls) == 1
+    assert torch.equal(reset_calls[0], torch.tensor([0]))
+
+
+def test_no_grad_terminal_step_keeps_synchronous_auto_reset(monkeypatch) -> None:
+    """A terminal no-grad step may reset after its tape is released."""
+    warp = _RecordingWarp()
+    manager = _TrajectorySimulationManager(warp)
+    env, _ = _route_env(manager)
+    monkeypatch.setattr(diff_bridge, "wp", warp)
+    nm = manager.physics.newton_manager
+    reset_calls: list[torch.Tensor] = []
+
+    env._read_outputs = lambda _state: {
+        "obs": torch.full((1, 1), 7.0),
+        "reward": torch.full((1,), 3.0),
+        "terminated": torch.ones(1, dtype=torch.bool),
+        "truncated": torch.zeros(1, dtype=torch.bool),
+        "_order": ("obs", "reward", "terminated", "truncated"),
+        "_grad_track": {},
+    }
+
+    def _reset(*, options: dict[str, Any]):
+        assert nm._active_trajectory is None
+        reset_ids = torch.as_tensor(options["reset_ids"]).clone()
+        reset_calls.append(reset_ids)
+        return torch.full((1, 1), -1.0), {}
+
+    env.reset = _reset
+    with torch.no_grad():
+        obs, reward, terminated, truncated, info = env.step(
+            torch.zeros(1, requires_grad=True)
+        )
+
+    assert torch.equal(obs, torch.full((1, 1), -1.0))
+    assert not reward.requires_grad
+    assert terminated.tolist() == [True]
+    assert truncated.tolist() == [False]
+    assert len(reset_calls) == 1
+    assert torch.equal(reset_calls[0], torch.tensor([0]))
+    assert "deferred_reset_ids" not in info
+    assert "requires_reset_after_backward" not in info
+
+
 def test_default_dynamics_route_uses_manager_trajectory_without_bypass(monkeypatch):
     """Default state construction delegates one control step to Newton."""
     warp = _RecordingWarp()
@@ -1405,6 +1494,192 @@ def _import_franka_env():
     )
 
     return FrankaReachApgEnv
+
+
+def test_franka_kinematics_build_snapshots_live_primal_before_bridge(
+    monkeypatch,
+) -> None:
+    """Franka must detach taped FK inputs before the parent opens a tape."""
+    from embodichain.lab.gym.envs.tasks.special import franka_reach_apg
+
+    env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
+    live_joint_q = object()
+    snapshot_joint_q = object()
+    fresh_fk_state = object()
+    events: list[str] = []
+    env.sim = SimpleNamespace(
+        physics=SimpleNamespace(
+            newton_manager=SimpleNamespace(
+                _state_0=SimpleNamespace(joint_q=live_joint_q),
+                _model=SimpleNamespace(
+                    state=lambda: (events.append("state"), fresh_fk_state)[1]
+                ),
+            )
+        )
+    )
+
+    def _clone(array: object) -> object:
+        assert array is live_joint_q
+        events.append("clone")
+        return snapshot_joint_q
+
+    def _parent_build(_self: object, _action: torch.Tensor) -> dict[str, Any]:
+        events.append("parent")
+        assert env._current_joint_q_snapshot is snapshot_joint_q
+        assert env._fk_state is fresh_fk_state
+        return {"prepared": True}
+
+    monkeypatch.setattr(franka_reach_apg.wp, "clone", _clone)
+    monkeypatch.setattr(
+        DifferentiableEmbodiedEnv,
+        "_build_sim_state_dict",
+        _parent_build,
+    )
+
+    result = env._build_sim_state_dict(torch.zeros(1, 7))
+
+    assert result == {"prepared": True}
+    assert events == ["clone", "state", "parent"]
+
+
+def test_franka_action_kernel_reads_snapshot_instead_of_live_state(monkeypatch) -> None:
+    """The recorded action kernel must not capture mutable manager state."""
+    from embodichain.lab.gym.envs.tasks.special import franka_reach_apg
+
+    env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
+    live_joint_q = object()
+    snapshot_joint_q = object()
+    target_joint_q = object()
+    action_wp = object()
+    launch_inputs: list[object] = []
+    env.sim = SimpleNamespace(
+        num_envs=1,
+        physics=SimpleNamespace(
+            newton_manager=SimpleNamespace(
+                _state_0=SimpleNamespace(joint_q=live_joint_q)
+            )
+        ),
+    )
+    env._current_joint_q_snapshot = snapshot_joint_q
+    env._n_joints_per_env = 9
+    env._wp_device = "cpu"
+    env._limit_lo_wp = object()
+    env._limit_hi_wp = object()
+    env._action_scale = 0.2
+
+    monkeypatch.setattr(
+        franka_reach_apg.wp,
+        "zeros",
+        lambda *_args, **_kwargs: target_joint_q,
+    )
+
+    def _launch(*_args: Any, inputs: list[object], **_kwargs: Any) -> None:
+        launch_inputs.extend(inputs)
+
+    monkeypatch.setattr(franka_reach_apg.wp, "launch", _launch)
+
+    env._apply_action_kernel(action_wp, tape=object())
+
+    assert launch_inputs[0] is action_wp
+    assert launch_inputs[1] is snapshot_joint_q
+    assert launch_inputs[1] is not live_joint_q
+    assert launch_inputs[2] is target_joint_q
+
+
+def test_franka_snapshot_keeps_gradient_after_live_state_mutation_and_matches_fd(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Detached FK input survives live writes before backward under strict mode."""
+    from embodichain.lab.gym.envs.tasks.special import franka_reach_apg
+
+    env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
+    device = "cpu"
+    live_joint_q = wp.zeros(7, dtype=wp.float32, device=device)
+    env.sim = SimpleNamespace(
+        num_envs=1,
+        physics=SimpleNamespace(
+            newton_manager=SimpleNamespace(
+                _state_0=SimpleNamespace(joint_q=live_joint_q),
+                _model=SimpleNamespace(state=lambda: object()),
+            )
+        ),
+    )
+    env._wp_device = device
+    env._n_joints_per_env = 7
+    env._limit_lo_wp = wp.array(
+        np.full(7, -10.0, dtype=np.float32),
+        dtype=wp.float32,
+        device=device,
+    )
+    env._limit_hi_wp = wp.array(
+        np.full(7, 10.0, dtype=np.float32),
+        dtype=wp.float32,
+        device=device,
+    )
+    env._action_scale = 0.2
+    monkeypatch.setattr(
+        DifferentiableEmbodiedEnv,
+        "_build_sim_state_dict",
+        lambda _self, _action: {},
+    )
+    env._build_sim_state_dict(torch.zeros(1, 7))
+
+    previous_verify_access = wp.config.verify_autograd_array_access
+    previous_kernel_cache_dir = wp.config.kernel_cache_dir
+    wp.config.verify_autograd_array_access = True
+    wp.config.kernel_cache_dir = str(tmp_path / "warp_cache")
+    tape = wp.Tape()
+    try:
+        action_wp = wp.array(
+            np.zeros(7, dtype=np.float32),
+            dtype=wp.float32,
+            device=device,
+            requires_grad=True,
+        )
+        with tape:
+            env._apply_action_kernel(action_wp, tape=tape)
+        analytic_output = env._new_joint_q
+
+        wp.copy(
+            live_joint_q,
+            wp.array(
+                np.full(7, 5.0, dtype=np.float32),
+                dtype=wp.float32,
+                device=device,
+            ),
+        )
+        tape.backward(grads={analytic_output: wp.ones_like(analytic_output)})
+        analytic_gradient = action_wp.grad.numpy().copy()
+
+        assert np.isfinite(analytic_gradient).all()
+        assert np.all(np.abs(analytic_gradient) > 0.0)
+
+        def _loss(action_value: float) -> float:
+            values = np.zeros(7, dtype=np.float32)
+            values[0] = action_value
+            finite_difference_action = wp.array(
+                values,
+                dtype=wp.float32,
+                device=device,
+            )
+            env._apply_action_kernel(finite_difference_action, tape=object())
+            return float(env._new_joint_q.numpy().sum())
+
+        epsilon = 1.0e-3
+        finite_difference_gradient = (_loss(epsilon) - _loss(-epsilon)) / (
+            2.0 * epsilon
+        )
+        assert np.isclose(
+            analytic_gradient[0],
+            finite_difference_gradient,
+            rtol=1.0e-4,
+            atol=1.0e-5,
+        )
+    finally:
+        tape.reset()
+        wp.config.verify_autograd_array_access = previous_verify_access
+        wp.config.kernel_cache_dir = previous_kernel_cache_dir
 
 
 def test_franka_apg_smoke_backward():

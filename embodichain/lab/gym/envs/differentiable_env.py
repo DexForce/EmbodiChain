@@ -149,8 +149,18 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
     # -- gym surface ------------------------------------------------------ #
 
     def step(self, action: torch.Tensor):
+        """Advance one differentiable control step.
+
+        Terminal environments are auto-reset only when the call cannot retain
+        a Warp tape for backward. A grad-tracked step returns terminal
+        observations unchanged and records ``deferred_reset_ids`` in ``info``;
+        callers must run backward before resetting those environments.
+        """
         if not isinstance(action, torch.Tensor):
             action = torch.as_tensor(action, dtype=torch.float32)
+        retains_tape_for_backward = bool(
+            torch.is_grad_enabled() and action.requires_grad
+        )
         sim_state = self._build_sim_state_dict(action)
         outputs = NewtonStepFunc.apply(action, sim_state)
         obs, reward, terminated, truncated = outputs[:4]
@@ -159,12 +169,16 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
         done_mask = terminated | truncated
         if done_mask.any():
             reset_ids = done_mask.nonzero(as_tuple=False).squeeze(-1)
-            fresh_obs, _ = self.reset(options={"reset_ids": reset_ids})
-            obs = torch.where(
-                done_mask.unsqueeze(-1).expand_as(obs),
-                fresh_obs.detach(),
-                obs,
-            )
+            if retains_tape_for_backward:
+                info["requires_reset_after_backward"] = True
+                info["deferred_reset_ids"] = reset_ids.detach().clone()
+            else:
+                fresh_obs, _ = self.reset(options={"reset_ids": reset_ids})
+                obs = torch.where(
+                    done_mask.unsqueeze(-1).expand_as(obs),
+                    fresh_obs.detach(),
+                    obs,
+                )
         return obs, reward, terminated, truncated, info
 
     def _build_sim_state_dict(self, action: torch.Tensor) -> dict:
