@@ -56,10 +56,18 @@ _DUAL_FRANKA_HOME_QPOS = [
     3.037,
     0.741,
     0.741,
-    0.04,
-    0.04,
-    0.04,
-    0.04,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
 ]
 
 
@@ -150,13 +158,13 @@ def test_dual_ur_robotiq_tcp_rotates_grasp_x_onto_gripper_y_axis() -> None:
     assert robot["solver_cfg"]["left_arm"]["tcp"] == [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.17],
+        [0.0, 0.0, 1.0, 0.19],
         [0.0, 0.0, 0.0, 1.0],
     ]
     assert robot["solver_cfg"]["right_arm"]["tcp"] == [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.17],
+        [0.0, 0.0, 1.0, 0.19],
         [0.0, 0.0, 0.0, 1.0],
     ]
 
@@ -170,7 +178,10 @@ def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -
     assert robot["uid"] == "DualFrankaPanda"
     assert robot["init_pos"] == pytest.approx([0.7, 0.0, 0.45])
     assert profile.tabletop_clearance == pytest.approx(_DUAL_FRANKA_TABLETOP_CLEARANCE)
-    assert _arm_urdf_paths(robot) == {"Franka/Panda/PandaWithHand.urdf"}
+    assert _arm_urdf_paths(robot) == {"Franka/Panda/Panda.urdf"}
+    assert _hand_urdf_paths(robot) == {
+        "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+    }
     assert robot["init_qpos"] == pytest.approx(_DUAL_FRANKA_HOME_QPOS)
     assert robot["control_parts"]["left_arm"] == [
         "left_fr3_joint1",
@@ -190,37 +201,79 @@ def test_dual_franka_profile_defines_robot_runtime_and_observation_contracts() -
         "right_fr3_joint6",
         "right_fr3_joint7",
     ]
-    assert robot["control_parts"]["left_eef"] == ["left_fr3_finger_joint[1-2]"]
-    assert robot["control_parts"]["right_eef"] == ["right_fr3_finger_joint[1-2]"]
+    assert robot["control_parts"]["left_eef"] == [
+        "left_finger_joint",
+        "left_inner_knuckle_joint",
+        "left_inner_finger_joint",
+        "left_right_outer_knuckle_joint",
+        "left_right_inner_knuckle_joint",
+        "left_right_inner_finger_joint",
+    ]
+    assert robot["control_parts"]["right_eef"] == [
+        "right_finger_joint",
+        "right_left_inner_knuckle_joint",
+        "right_left_inner_finger_joint",
+        "right_outer_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "right_inner_finger_joint",
+    ]
     assert robot["solver_cfg"]["left_arm"]["class_type"] == "PytorchSolver"
     assert robot["solver_cfg"]["left_arm"]["root_link_name"] == "left_base"
-    assert robot["solver_cfg"]["left_arm"]["end_link_name"] == "left_fr3_hand_tcp"
+    assert robot["solver_cfg"]["left_arm"]["end_link_name"] == "left_fr3_link8"
     assert robot["solver_cfg"]["right_arm"]["class_type"] == "PytorchSolver"
     assert robot["solver_cfg"]["right_arm"]["root_link_name"] == "right_base"
-    assert robot["solver_cfg"]["right_arm"]["end_link_name"] == "right_fr3_hand_tcp"
+    assert robot["solver_cfg"]["right_arm"]["end_link_name"] == "right_fr3_link8"
     expected_tcp = [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0, 0.19],
         [0.0, 0.0, 0.0, 1.0],
     ]
     assert robot["solver_cfg"]["left_arm"]["tcp"] == expected_tcp
     assert robot["solver_cfg"]["right_arm"]["tcp"] == expected_tcp
-    assert robot["qpos_limits"]["(left|right)_fr3_finger_joint[1-2]"] == [
-        0.0,
-        0.06,
-    ]
     assert observations["norm_robot_eef_joint"]["params"]["joint_ids"] == [
         14,
         15,
         16,
         17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
     ]
     assert extensions["agent_robot_profile"] == "dual_franka"
-    assert extensions["gripper_open_state"] == [0.06, 0.06]
-    assert extensions["gripper_close_state"] == [0.0, 0.0]
+    assert extensions["gripper_open_state"] == [0.0] * 6
+    assert extensions["gripper_close_state"] == [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
     assert extensions["agent_grasp_runtime_defaults"]["grasp_finger_length"] == (
-        pytest.approx(0.058)
+        pytest.approx(0.13)
+    )
+
+
+def test_dual_franka_robotiq_settings_match_dual_ur5() -> None:
+    ur5_profile = resolve_robot_profile("ur5")
+    franka_profile = resolve_robot_profile("franka")
+    ur5 = ur5_profile.robot_config_factory(0.45)
+    franka = franka_profile.robot_config_factory(0.45)
+
+    assert franka["drive_pros"]["max_effort"]["left_eef"] == pytest.approx(
+        ur5["drive_pros"]["max_effort"]["left_eef"]
+    )
+    assert franka["drive_pros"]["max_effort"]["right_eef"] == pytest.approx(
+        ur5["drive_pros"]["max_effort"]["right_eef"]
+    )
+    assert (
+        franka["solver_cfg"]["left_arm"]["tcp"] == ur5["solver_cfg"]["left_arm"]["tcp"]
+    )
+    assert (
+        franka["solver_cfg"]["right_arm"]["tcp"]
+        == ur5["solver_cfg"]["right_arm"]["tcp"]
+    )
+    assert franka_profile.grasp_runtime_defaults["grasp_finger_length"] == (
+        ur5_profile.grasp_runtime_defaults["grasp_finger_length"]
     )
 
 
@@ -242,6 +295,14 @@ def _arm_urdf_paths(robot_config: dict) -> set[str]:
         component["urdf_path"]
         for component in robot_config["urdf_cfg"]["components"]
         if str(component["component_type"]).endswith("_arm")
+    }
+
+
+def _hand_urdf_paths(robot_config: dict) -> set[str]:
+    return {
+        component["urdf_path"]
+        for component in robot_config["urdf_cfg"]["components"]
+        if str(component["component_type"]).endswith("_hand")
     }
 
 

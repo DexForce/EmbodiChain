@@ -231,7 +231,7 @@ def _dual_franka_profile() -> RobotProfile:
         grasp_runtime_defaults={
             "max_open_length": 0.115,
             "min_open_length": 0.02,
-            "grasp_finger_length": 0.058,
+            "grasp_finger_length": 0.13,
         },
         prompt_description=(
             "The robot is a Dual Franka Panda composite robot with Panda "
