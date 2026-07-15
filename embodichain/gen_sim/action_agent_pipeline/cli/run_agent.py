@@ -129,10 +129,17 @@ def _modify_gym_config_for_run_agent(
     gym_config: dict[str, Any], table_texture_path: str | None = None
 ) -> None:
     """Apply action-agent demo defaults to a merged gym configuration."""
+    if gym_config.get("num_envs", 1) > 1:
+        _remove_light_config_for_vectorized_envs(gym_config)
     _add_vectorized_reset_randomization(
         gym_config,
         table_texture_path=table_texture_path or _DEFAULT_TABLE_TEXTURE_PATH,
     )
+
+
+def _remove_light_config_for_vectorized_envs(gym_config: dict[str, Any]) -> None:
+    """Remove light configuration for vectorized environment runs."""
+    gym_config.pop("light", None)
 
 
 def _add_vectorized_reset_randomization(

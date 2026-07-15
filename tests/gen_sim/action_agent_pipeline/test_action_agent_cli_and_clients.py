@@ -100,7 +100,7 @@ def test_run_agent_reset_randomization_configures_parallel_envs() -> None:
     }
 
 
-def test_run_agent_sets_rect_light_intensity_for_parallel_envs() -> None:
+def test_run_agent_removes_light_config_for_parallel_envs() -> None:
     from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
 
     gym_config = {
@@ -115,12 +115,10 @@ def test_run_agent_sets_rect_light_intensity_for_parallel_envs() -> None:
 
     run_agent._modify_gym_config_for_run_agent(gym_config)
 
-    direct_lights = gym_config["light"]["direct"]
-    assert direct_lights[0]["intensity"] == 10.0
-    assert direct_lights[1]["intensity"] == 40.0
+    assert "light" not in gym_config
 
 
-def test_run_agent_preserves_rect_light_intensity_for_single_env() -> None:
+def test_run_agent_preserves_light_config_for_single_env() -> None:
     from embodichain.gen_sim.action_agent_pipeline.cli import run_agent
 
     gym_config = {
@@ -130,6 +128,7 @@ def test_run_agent_preserves_rect_light_intensity_for_single_env() -> None:
 
     run_agent._modify_gym_config_for_run_agent(gym_config)
 
+    assert "light" in gym_config
     assert gym_config["light"]["direct"][0]["intensity"] == 30.0
 
 
