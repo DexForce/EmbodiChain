@@ -24,6 +24,7 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (
     AgenticGenSimEnv,
 )
+from embodichain.lab.gym.envs import EmbodiedEnv
 
 
 class _SingleEnvAgenticGenSimEnv(AgenticGenSimEnv):
@@ -73,6 +74,33 @@ def test_agentic_gen_sim_env_preserves_success_validation_after_runtime_ready() 
 
     with pytest.raises(ValueError, match="requires an initial height"):
         env.is_task_success()
+
+
+def test_agentic_gen_sim_env_reset_latches_success_before_invalidating_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _SingleEnvAgenticGenSimEnv.__new__(_SingleEnvAgenticGenSimEnv)
+    env._agent_runtime_state_ready = True
+    env.episode_success_status = torch.zeros(1, dtype=torch.bool)
+    env.is_task_success = Mock(return_value=torch.tensor([True]))
+    env._draw_arrangement_debug_markers = Mock()
+    env.get_states = Mock()
+    runtime_ready_during_parent_reset = None
+
+    def fake_parent_reset(self, seed=None, options=None):
+        nonlocal runtime_ready_during_parent_reset
+        runtime_ready_during_parent_reset = self._agent_runtime_state_ready
+        return "obs", {}
+
+    monkeypatch.setattr(EmbodiedEnv, "reset", fake_parent_reset)
+
+    obs, info = env.reset()
+
+    assert env.episode_success_status.tolist() == [True]
+    assert runtime_ready_during_parent_reset is False
+    assert env._agent_runtime_state_ready is True
+    assert obs == "obs"
+    assert info == {}
 
 
 def test_agentic_gen_sim_env_rejects_reserved_common_agent_config_keys() -> None:

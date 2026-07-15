@@ -574,6 +574,7 @@ def _make_dataset_config(
                     ),
                     "data_type": "sim",
                 },
+                "save_failed_episodes": True,
                 "use_videos": True,
             },
         }
@@ -609,6 +610,7 @@ def _make_relative_dataset_config(
                     "task_description": spec.task_description,
                     "data_type": "sim",
                 },
+                "save_failed_episodes": True,
                 "use_videos": True,
             },
         }
@@ -639,6 +641,7 @@ def _make_arrangement_dataset_config(
                     "task_description": spec.task_description,
                     "data_type": "sim",
                 },
+                "save_failed_episodes": True,
                 "use_videos": True,
             },
         }

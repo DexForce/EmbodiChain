@@ -56,9 +56,12 @@ MeshFrameNormalizer = GlbGeometryNormalizer
 BODY_SCALE_BAKE_POLICY_VERSION = GLB_GEOMETRY_BAKE_POLICY_VERSION
 bake_body_scale_into_meshes = bake_body_scale_into_glbs
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
+    _make_arrangement_dataset_config,
     _make_arrangement_events_config,
+    _make_dataset_config,
     _make_events_config,
     _make_observations_config,
+    _make_relative_dataset_config,
     _make_relative_events_config,
     _record_camera_event_configs,
     _rotate_camera_extrinsics_around_target_z,
@@ -92,6 +95,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
+    _make_stacking_dataset_config,
     generate_action_agent_config_from_project,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
@@ -695,6 +699,58 @@ def test_action_agent_config_generator_uses_selected_robot_profile(
     assert dataset_params["robot_meta"]["robot_type"] == expected_meta_type
     assert paths.summary["robot_profile"]["robot_meta_type"] == expected_meta_type
     assert paths.summary["robot_profile"]["display_name"] in basic_background
+
+
+@pytest.mark.parametrize(
+    "dataset_config",
+    [
+        _make_dataset_config(
+            "test_scene",
+            SimpleNamespace(
+                container_runtime_uid="basket",
+                left_target_noun="apple",
+                right_target_noun="block",
+            ),
+        ),
+        _make_relative_dataset_config(
+            "test_scene",
+            SimpleNamespace(
+                intent="placement",
+                placements=(
+                    SimpleNamespace(
+                        active_side="left",
+                        moved_runtime_uid="apple",
+                        relation="left_of",
+                        reference_runtime_uid="basket",
+                    ),
+                ),
+                task_description="Place the apple left of the basket.",
+            ),
+            relation_phrase=lambda relation: relation,
+        ),
+        _make_arrangement_dataset_config(
+            "test_scene",
+            SimpleNamespace(
+                steps=(SimpleNamespace(runtime_uid="block"),),
+                task_description="Arrange the block.",
+            ),
+        ),
+        _make_stacking_dataset_config(
+            "test_scene",
+            SimpleNamespace(
+                steps=(SimpleNamespace(runtime_uid="block"),),
+                anchor_runtime_uid=None,
+                task_description="Stack the block.",
+            ),
+            robot_profile=resolve_robot_profile("ur10"),
+        ),
+    ],
+    ids=("basket", "relative", "arrangement", "stacking"),
+)
+def test_action_agent_dataset_configs_save_failed_episodes(
+    dataset_config: dict,
+) -> None:
+    assert dataset_config["lerobot"]["params"]["save_failed_episodes"] is True
 
 
 def test_generator_normalizes_glb_meshes_and_preserves_source_rot(
