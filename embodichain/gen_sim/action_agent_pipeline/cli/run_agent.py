@@ -129,28 +129,10 @@ def _modify_gym_config_for_run_agent(
     gym_config: dict[str, Any], table_texture_path: str | None = None
 ) -> None:
     """Apply action-agent demo defaults to a merged gym configuration."""
-    _set_rect_light_intensity_for_parallel_envs(gym_config)
     _add_vectorized_reset_randomization(
         gym_config,
         table_texture_path=table_texture_path or _DEFAULT_TABLE_TEXTURE_PATH,
     )
-
-
-def _set_rect_light_intensity_for_parallel_envs(gym_config: dict[str, Any]) -> None:
-    """Reduce direct rect-light intensity for vectorized environment runs."""
-    if gym_config.get("num_envs", 1) <= 1:
-        return
-
-    light_config = gym_config.get("light")
-    if not isinstance(light_config, dict):
-        return
-    direct_lights = light_config.get("direct")
-    if not isinstance(direct_lights, list):
-        return
-
-    for light in direct_lights:
-        if isinstance(light, dict) and light.get("light_type") == "rect":
-            light["intensity"] = 10.0
 
 
 def _add_vectorized_reset_randomization(
