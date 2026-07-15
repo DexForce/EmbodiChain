@@ -31,21 +31,18 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, SoftObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
-    JointDrivePropertiesCfg,
-    RobotCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
     LightCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
-    URDFCfg,
 )
+from embodichain.lab.sim.robots import URRobotCfg
 import os
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 import tempfile
@@ -62,42 +59,47 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]):
     Returns:
         Robot: The configured robot instance added to the simulation.
     """
-    # Retrieve URDF paths for the robot arm and hand
-    ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
     gripper_urdf_path = get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf")
-    # Configure the robot with its components and control properties
-    cfg = RobotCfg(
-        uid="UR10",
-        urdf_cfg=URDFCfg(
-            components=[
-                {"component_type": "arm", "urdf_path": ur10_urdf_path},
-                {"component_type": "hand", "urdf_path": gripper_urdf_path},
-            ]
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
-            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
-            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},
-            drive_type="force",
-        ),
-        control_parts={
-            "arm": ["JOINT[0-9]"],
-            "hand": ["FINGER[1-2]"],
-        },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [0.0, 1.0, 0.0, 0.0],
-                    [-1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.12],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-            )
-        },
-        init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
-        init_pos=position,
+    cfg = URRobotCfg.from_dict(
+        {
+            "robot_type": "ur10",
+            "uid": "UR10",
+            "urdf_cfg": {
+                "components": [
+                    {"component_type": "hand", "urdf_path": gripper_urdf_path},
+                ]
+            },
+            "drive_pros": {
+                "stiffness": {"FINGER[1-2]": 1e2},
+                "damping": {"FINGER[1-2]": 1e1},
+                "max_effort": {"FINGER[1-2]": 1e3},
+                "drive_type": "force",
+            },
+            "control_parts": {
+                "hand": ["FINGER[1-2]"],
+            },
+            "solver_cfg": {
+                "arm": {
+                    "tcp": [
+                        [0.0, 1.0, 0.0, 0.0],
+                        [-1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.12],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                }
+            },
+            "init_qpos": [
+                0.0,
+                -np.pi / 2,
+                -np.pi / 2,
+                np.pi / 2,
+                -np.pi / 2,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            "init_pos": position,
+        }
     )
     return sim.add_robot(cfg=cfg)
 

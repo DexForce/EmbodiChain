@@ -15,18 +15,18 @@
 # ----------------------------------------------------------------------------
 import argparse
 import math
-import os
 import time
 
 import numpy as np
 import torch
 from IPython import embed
 
-from embodichain.data import get_data_path
 from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
-from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
-from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain.lab.sim.solvers import NeuralIKSolverCfg
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,55 +97,32 @@ def main():
     )
     sim = SimulationManager(config)
 
-    urdf = get_data_path("Franka/Panda/PandaWithHand.urdf")
-    assert os.path.isfile(urdf)
-
     checkpoint_path = download_neural_ik_checkpoint()
 
-    c = math.cos(-math.pi / 4)
-    s = math.sin(-math.pi / 4)
-    tcp = [
-        [c, -s, 0.0, 0.0],
-        [s, c, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.1034],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
+    cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
+    cfg.solver_cfg["arm"] = NeuralIKSolverCfg(
+        end_link_name="fr3_hand_tcp",
+        root_link_name="base",
+        tcp=[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        checkpoint_path=checkpoint_path,
+        num_arm_joints=7,
+        max_steps=30,
+        action_scale=0.2,
+        hidden_dims=[256, 256],
+        pos_eps=0.1,
+        rot_eps=0.5,
+    )
 
-    cfg_dict = {
-        "fpath": urdf,
-        "control_parts": {
-            "main_arm": [
-                "Joint1",
-                "Joint2",
-                "Joint3",
-                "Joint4",
-                "Joint5",
-                "Joint6",
-                "Joint7",
-            ],
-        },
-        "solver_cfg": {
-            "main_arm": {
-                "class_type": "NeuralIKSolver",
-                "end_link_name": "ee_link",
-                "root_link_name": "base_link",
-                "tcp": tcp,
-                "checkpoint_path": checkpoint_path,
-                "num_arm_joints": 7,
-                "max_steps": 30,
-                "action_scale": 0.2,
-                "hidden_dims": [256, 256],
-                "pos_eps": 0.1,
-                "rot_eps": 0.5,
-            },
-        },
-    }
-
-    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    robot: Robot = sim.add_robot(cfg=cfg)
 
     sim.open_window()
 
-    arm_name = "main_arm"
+    arm_name = "arm"
     device = robot.device
 
     seed_qpos = torch.tensor(

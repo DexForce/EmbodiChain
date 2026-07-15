@@ -19,8 +19,8 @@ Built on :class:`DifferentiableEmbodiedEnv`. The Warp-tape bridge
 produces ``action.grad`` that flows back through a differentiable
 forward-kinematics path (``newton.eval_fk``). The semi_implicit
 solver does not propagate grad through ``joint_target_pos`` to
-``body_q`` (the grad path is zero), so we bypass the dynamics
-solver and run FK directly, matching the reference APG
+``body_q`` (the grad path is zero), so this task explicitly selects
+the kinematics route and runs FK directly, matching the reference APG
 implementation in
 ``/root/sources/analytic_policy_gradients/envs/franka_reach_env.py``.
 """
@@ -115,13 +115,16 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         action -> new_joint_q (action kernel) -> eval_fk -> body_q
                 -> reward kernel -> reward_wp -> tape.backward -> action.grad
 
-    The dynamics solver (semi_implicit) is bypassed because it does not
-    propagate gradient through ``joint_target_pos`` to ``body_q`` (the
-    stiffness-driven grad path evaluates to zero in practice). This
-    matches the reference APG env's workaround.
+    This task explicitly uses the ``kinematics`` route because the
+    semi_implicit dynamics solver does not propagate gradient through
+    ``joint_target_pos`` to ``body_q`` (the stiffness-driven grad path
+    evaluates to zero in practice). This matches the reference APG env's
+    FK-only workaround without changing the default route for other
+    differentiable environments.
     """
 
     metadata = {"render_modes": ["human"], "default_num_envs": 4}
+    differentiable_step_mode = "kinematics"
 
     def __init__(
         self,
@@ -208,7 +211,9 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         self._limit_lo_wp = wp.array(lo, dtype=wp.float32, device=self._wp_device)
         self._limit_hi_wp = wp.array(hi, dtype=wp.float32, device=self._wp_device)
         self._n_joints_per_env = int(len(model.joint_q) // self.sim.num_envs)
-        # Fresh FK state; reused across step calls (eval_fk overwrites it).
+        # Every taped forward replaces these with private primal buffers before
+        # the bridge opens its tape. They must never alias manager live state.
+        self._current_joint_q_snapshot: wp.array | None = None
         self._fk_state = model.state()
         self._new_joint_q: wp.array | None = None
         # Per-env global EE body indices into the flat body_q array.
@@ -275,13 +280,20 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
     # -- DifferentiableEmbodiedEnv contract ------------------------------ #
 
-    def _make_step_fn(self) -> Callable[[], Any]:
-        """FK bypass: compute body_q from new_joint_q via newton.eval_fk.
+    def _build_sim_state_dict(self, action: torch.Tensor) -> dict:
+        """Detach FK primal buffers before the parent opens a Warp tape."""
+        nm = self.sim.physics.newton_manager
+        self._current_joint_q_snapshot = wp.clone(nm._state_0.joint_q)
+        self._fk_state = nm._model.state()
+        return super()._build_sim_state_dict(action)
+
+    def _make_kinematic_step_fn(self) -> Callable[[], Any]:
+        """Explicit FK hook: compute body_q from new_joint_q via ``eval_fk``.
 
         The semi_implicit solver does not propagate grad through
         ``joint_target_pos`` to ``body_q`` (the grad path is zero), so
-        we bypass the dynamics solver and run forward kinematics
-        directly inside the tape. ``self._new_joint_q`` is populated by
+        this kinematics-mode task runs forward kinematics directly
+        inside the tape. ``self._new_joint_q`` is populated by
         :meth:`_apply_action_kernel` before this callable runs.
         """
         env = self
@@ -303,11 +315,15 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
         Writes ``new_joint_q = clamp(current_q + action * scale, lo, hi)``
         into a freshly allocated ``self._new_joint_q`` Warp array. The
-        FK step function then consumes this array via ``newton.eval_fk``.
+        explicit kinematic hook then consumes this array via ``newton.eval_fk``.
         """
-        nm = self.sim.physics.newton_manager
         n = self.sim.num_envs
         total = n * FRANKA_NUM_ARM_JOINTS
+        if self._current_joint_q_snapshot is None:
+            raise RuntimeError(
+                "Franka kinematics requires a detached joint_q snapshot "
+                "before opening its Warp tape."
+            )
         # Allocate a fresh new_joint_q each call so each forward pass
         # has its own grad graph (the tape records the kernel writes).
         self._new_joint_q = wp.zeros(
@@ -321,7 +337,7 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
             dim=total,
             inputs=[
                 action_wp,
-                nm._state_0.joint_q,
+                self._current_joint_q_snapshot,
                 self._new_joint_q,
                 self._limit_lo_wp,
                 self._limit_hi_wp,
@@ -399,8 +415,9 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
 
         The parent :meth:`DifferentiableEmbodiedEnv.step` runs the
         differentiable bridge. After it returns, we update
-        ``nm._state_0.joint_q`` (detached) for envs that were not
-        auto-reset so the next step starts from the new configuration.
+        ``nm._state_0.joint_q`` for non-terminal envs so the next step starts
+        from the new configuration. The tape reads a per-forward detached
+        snapshot, so this live continuation cannot overwrite its primal input.
         """
         if not isinstance(action, torch.Tensor):
             action = torch.as_tensor(action, dtype=torch.float32)
@@ -437,8 +454,9 @@ class FrankaReachApgEnv(DifferentiableEmbodiedEnv):
         Args:
             seed: Optional RNG seed for deterministic resets.
             options: Optional dict; supports ``{"reset_ids": <tensor>}``
-                for partial resets (used by auto-reset in
-                :meth:`DifferentiableEmbodiedEnv.step`).
+                for partial resets. No-grad terminal steps use it for
+                auto-reset; grad-tracked terminal steps expose the IDs in
+                ``info`` for an explicit reset after backward.
 
         Returns:
             Tuple of ``(obs, info)``.

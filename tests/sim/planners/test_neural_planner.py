@@ -132,7 +132,7 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
         )
     )
 
-    target_state = PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+    target_state = PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
     result = motion_generator.generate(
         target_states=[target_state],
         options=MotionGenOptions(
@@ -143,7 +143,7 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
         ),
     )
 
-    assert result.success is True
+    assert result.success.all().item()
     assert result.positions is not None
     assert result.positions.shape[-1] == NUM_ARM_JOINTS
     assert torch.isfinite(result.positions).all()
@@ -169,7 +169,9 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
     )
     custom_qpos = torch.ones(NUM_ARM_JOINTS)
     result = motion_generator.generate(
-        target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
         options=MotionGenOptions(
             plan_opts=NeuralPlanOptions(
                 control_part="main_arm",
@@ -178,8 +180,8 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
         ),
     )
 
-    assert result.success is True
-    assert torch.allclose(result.positions[0], custom_qpos)
+    assert result.success.all().item()
+    assert torch.allclose(result.positions[0, 0], custom_qpos)
 
 
 def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
@@ -201,7 +203,9 @@ def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="policy expects"):
         motion_generator.generate(
-            target_states=[PlanState(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+            target_states=[
+                PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+            ],
             options=MotionGenOptions(
                 plan_opts=NeuralPlanOptions(
                     control_part="main_arm",
@@ -209,3 +213,148 @@ def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
                 ),
             ),
         )
+
+
+def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypatch):
+    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+    )
+
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                checkpoint_path=checkpoint_path,
+                control_part="main_arm",
+            )
+        )
+    )
+
+    result = motion_generator.generate(
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
+        options=MotionGenOptions(
+            plan_opts=NeuralPlanOptions(
+                control_part="main_arm",
+                start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            ),
+        ),
+    )
+
+    assert result.velocities is not None
+    assert result.accelerations is not None
+    assert result.velocities.shape == result.positions.shape
+    assert result.accelerations.shape == result.positions.shape
+    assert torch.isfinite(result.velocities).all()
+    assert torch.isfinite(result.accelerations).all()
+
+
+def test_neural_planner_finite_diff_helper():
+    """Finite-difference estimates match a known polynomial trajectory."""
+    b, n, dof = 2, 5, 7
+    dt_value = 0.01
+    positions = torch.zeros(b, n, dof)
+    for t in range(n):
+        positions[:, t] = (t * dt_value) ** 2
+    dt = torch.full((b, n), dt_value)
+
+    velocities, accelerations = NeuralPlanner._compute_vel_acc_via_finite_diff(
+        positions, dt
+    )
+
+    # For p(t) = t^2, v(t) = 2t, a(t) = 2. Interior central differences should
+    # match exactly; boundary one-sided differences deviate slightly.
+    expected_v = torch.zeros(b, n, dof)
+    for t in range(n):
+        expected_v[:, t] = 2.0 * (t * dt_value)
+    expected_a = torch.full((b, n, dof), 2.0)
+
+    assert velocities.shape == (b, n, dof)
+    assert accelerations.shape == (b, n, dof)
+    assert torch.allclose(velocities[:, 1:-1], expected_v[:, 1:-1], atol=1e-5)
+    assert torch.allclose(accelerations[:, 1:-1], expected_a[:, 1:-1], atol=1e-3)
+    # Boundary points should still be finite and have the right sign/order.
+    assert torch.all(velocities[:, 0] >= 0.0)
+    assert torch.all(velocities[:, -1] >= velocities[:, 0])
+
+
+def test_motion_generator_neural_propagates_motion_gen_options(tmp_path, monkeypatch):
+    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+    )
+
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                checkpoint_path=checkpoint_path,
+            )
+        )
+    )
+    custom_qpos = torch.ones(NUM_ARM_JOINTS)
+    result = motion_generator.generate(
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
+        options=MotionGenOptions(
+            control_part="main_arm",
+            start_qpos=custom_qpos,
+        ),
+    )
+
+    assert result.success.all().item()
+    assert torch.allclose(result.positions[0, 0], custom_qpos)
+
+
+def test_motion_generator_neural_auto_disables_interpolation(
+    tmp_path, monkeypatch, caplog
+):
+    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+    )
+
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                checkpoint_path=checkpoint_path,
+                control_part="main_arm",
+            )
+        )
+    )
+
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        result = motion_generator.generate(
+            target_states=[
+                PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+            ],
+            options=MotionGenOptions(
+                is_interpolate=True,
+                control_part="main_arm",
+                start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            ),
+        )
+
+    assert result.success.all().item()
+    assert "is_interpolate=True is not supported with NeuralPlanner" in caplog.text
+
+
+def test_safe_torch_load_roundtrip(tmp_path):
+    checkpoint = {"agent": torch.tensor([1.0, 2.0, 3.0])}
+    path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, path)
+
+    from embodichain.lab.sim.planners.neural_planner import _safe_torch_load
+
+    loaded = _safe_torch_load(path, map_location=torch.device("cpu"))
+    assert "agent" in loaded
+    assert torch.equal(loaded["agent"], checkpoint["agent"])

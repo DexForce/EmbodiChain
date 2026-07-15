@@ -17,18 +17,19 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 import torch
-import argparse
 
 from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
+    DEFAULT_MANAGER_MODULES,
     add_env_launcher_args_to_parser,
+    config_to_cfg,
     init_rollout_buffer_from_config,
     merge_args_with_gym_config,
-    config_to_cfg,
-    DEFAULT_MANAGER_MODULES,
 )
 from embodichain.utils.utility import load_config, save_config
 
@@ -278,92 +279,134 @@ class TestInitRolloutBufferFromConfig:
         assert "value" in buffer["obs"]["custom"]["group1"]
         assert buffer["obs"]["custom"]["group1"]["value"].shape == (4, 100, 4)
 
-    def test_sensor_and_extra_obs_together(self):
-        """Test that both sensors and extra observations work together."""
-        config = {
-            "sensor": [
-                {
-                    "uid": "camera",
-                    "width": 320,
-                    "height": 240,
-                    "enable_mask": True,
+
+def test_merge_args_with_gym_config_overrides_max_episodes():
+    """Test that CLI max_episodes overrides the gym config value."""
+    args = argparse.Namespace(
+        num_envs=1,
+        device="cpu",
+        headless=False,
+        renderer="auto",
+        physics="default",
+        gpu_id=0,
+        arena_space=5.0,
+        max_episodes=12,
+    )
+    gym_config = {"max_episodes": 3, "id": "Dummy-v0"}
+
+    merged_config = merge_args_with_gym_config(args, gym_config)
+
+    assert merged_config["max_episodes"] == 12
+    assert gym_config["max_episodes"] == 3
+
+
+def test_merge_args_with_gym_config_keeps_default_max_episodes():
+    """Test that gym config max_episodes is preserved when CLI omits it."""
+    args = argparse.Namespace(
+        num_envs=1,
+        device="cpu",
+        headless=False,
+        renderer="auto",
+        physics="default",
+        gpu_id=0,
+        arena_space=5.0,
+        max_episodes=None,
+    )
+    gym_config = {"max_episodes": 3, "id": "Dummy-v0"}
+
+    merged_config = merge_args_with_gym_config(args, gym_config)
+
+    assert merged_config["max_episodes"] == 3
+
+
+def test_sensor_and_extra_obs_together():
+    """Test that both sensors and extra observations work together."""
+    config = {
+        "sensor": [
+            {
+                "uid": "camera",
+                "width": 320,
+                "height": 240,
+                "enable_mask": True,
+            }
+        ],
+        "env": {
+            "observations": {
+                "extra_vec": {
+                    "mode": "add",
+                    "extra": {"shape": [10]},
                 }
-            ],
-            "env": {
-                "observations": {
-                    "extra_vec": {
-                        "mode": "add",
-                        "extra": {"shape": [10]},
-                    }
+            }
+        },
+    }
+
+    buffer = init_rollout_buffer_from_config(
+        config=config,
+        max_episode_steps=100,
+        batch_size=4,
+        state_dim=7,
+        device="cpu",
+    )
+
+    # Check sensor is present
+    assert "sensor" in buffer["obs"]
+    assert "camera" in buffer["obs"]["sensor"]
+    assert buffer["obs"]["sensor"]["camera"]["color"].shape == (4, 100, 240, 320, 4)
+    assert buffer["obs"]["sensor"]["camera"]["mask"].shape == (4, 100, 240, 320)
+
+    # Check extra obs is present
+    assert "extra_vec" in buffer["obs"]
+    assert buffer["obs"]["extra_vec"].shape == (4, 100, 10)
+
+
+def test_different_batch_sizes():
+    """Test that batch_size correctly affects extra observations."""
+    config = {
+        "sensor": [],
+        "env": {
+            "observations": {
+                "extra_data": {
+                    "mode": "add",
+                    "extra": {"shape": [5]},
                 }
-            },
-        }
+            }
+        },
+    }
 
-        buffer = init_rollout_buffer_from_config(
-            config=config,
-            max_episode_steps=100,
-            batch_size=4,
-            state_dim=7,
-            device="cpu",
-        )
+    buffer = init_rollout_buffer_from_config(
+        config=config,
+        max_episode_steps=50,
+        batch_size=8,
+        state_dim=7,
+        device="cpu",
+    )
 
-        # Check sensor is present
-        assert "sensor" in buffer["obs"]
-        assert "camera" in buffer["obs"]["sensor"]
-        assert buffer["obs"]["sensor"]["camera"]["color"].shape == (4, 100, 240, 320, 4)
-        assert buffer["obs"]["sensor"]["camera"]["mask"].shape == (4, 100, 240, 320)
+    assert buffer["obs"]["extra_data"].shape == (8, 50, 5)
 
-        # Check extra obs is present
-        assert "extra_vec" in buffer["obs"]
-        assert buffer["obs"]["extra_vec"].shape == (4, 100, 10)
 
-    def test_different_batch_sizes(self):
-        """Test that batch_size correctly affects extra observations."""
-        config = {
-            "sensor": [],
-            "env": {
-                "observations": {
-                    "extra_data": {
-                        "mode": "add",
-                        "extra": {"shape": [5]},
-                    }
+def test_different_max_episode_steps():
+    """Test that max_episode_steps correctly affects extra observations."""
+    config = {
+        "sensor": [],
+        "env": {
+            "observations": {
+                "extra_data": {
+                    "mode": "add",
+                    "extra": {"shape": [2]},
                 }
-            },
-        }
+            }
+        },
+    }
 
-        buffer = init_rollout_buffer_from_config(
-            config=config,
-            max_episode_steps=50,
-            batch_size=8,
-            state_dim=7,
-            device="cpu",
-        )
+    buffer = init_rollout_buffer_from_config(
+        config=config,
+        max_episode_steps=200,
+        batch_size=4,
+        state_dim=7,
+        device="cpu",
+    )
 
-        assert buffer["obs"]["extra_data"].shape == (8, 50, 5)
-
-    def test_different_max_episode_steps(self):
-        """Test that max_episode_steps correctly affects extra observations."""
-        config = {
-            "sensor": [],
-            "env": {
-                "observations": {
-                    "extra_data": {
-                        "mode": "add",
-                        "extra": {"shape": [2]},
-                    }
-                }
-            },
-        }
-
-        buffer = init_rollout_buffer_from_config(
-            config=config,
-            max_episode_steps=200,
-            batch_size=4,
-            state_dim=7,
-            device="cpu",
-        )
-
-        assert buffer["obs"]["extra_data"].shape == (4, 200, 2)
+    assert buffer["obs"]["extra_data"].shape == (4, 200, 2)
 
 
 class TestConfigToCfgFromYaml:

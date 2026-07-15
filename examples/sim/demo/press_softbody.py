@@ -30,21 +30,19 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, SoftObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
-    RobotCfg,
     LightCfg,
     SoftObjectCfg,
     SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
-    URDFCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.robots import URRobotCfg
 
 
 def parse_arguments():
@@ -94,33 +92,20 @@ def create_robot(sim: SimulationManager):
     Returns:
         Robot: The configured robot instance added to the simulation.
     """
-    # Retrieve URDF paths for the robot arm and hand
-    ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
-
-    # Configure the robot with its components and control properties
-    cfg = RobotCfg(
-        uid="UR10",
-        urdf_cfg=URDFCfg(
-            components=[{"component_type": "arm", "urdf_path": ur10_urdf_path}]
-        ),
-        control_parts={
-            "arm": ["Joint[0-9]"],
-        },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=np.eye(4),
-            )
-        },
-        init_qpos=[
-            0.0,
-            -np.pi / 2,
-            -np.pi / 2,
-            np.pi / 2,
-            -np.pi / 2,
-            0.0,
-        ],
+    cfg = URRobotCfg.from_dict(
+        {
+            "robot_type": "ur10",
+            "uid": "UR10",
+            "solver_cfg": {"arm": {"tcp": np.eye(4)}},
+            "init_qpos": [
+                0.0,
+                -np.pi / 2,
+                -np.pi / 2,
+                np.pi / 2,
+                -np.pi / 2,
+                0.0,
+            ],
+        }
     )
     return sim.add_robot(cfg=cfg)
 

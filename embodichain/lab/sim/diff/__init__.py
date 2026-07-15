@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 """Differentiable Newton stepping for EmbodiChain.
 
-Bridges DexSim's :class:`~dexsim.engine.newton_physics.DifferentiableStepper`
-into PyTorch autograd via a :class:`torch.autograd.Function`, and exposes a
+Bridges DexSim's manager-owned differentiable trajectory transaction into
+PyTorch autograd via a :class:`torch.autograd.Function`, and exposes a
 :class:`tape_context` manager for advanced users who want to compose their
 own Warp kernels.
 """
