@@ -134,6 +134,8 @@ class _RelativeSpecLike(_RelativePlacementLike, Protocol):
     task_description: str
     action_sketch: Sequence[str]
     basic_background_notes: str
+    coordinated_direction: str | None
+    coordinated_terminal_behavior: str | None
 
 
 class _ArrangementStepLike(Protocol):
@@ -1269,6 +1271,25 @@ def _make_coordinated_pickment_task_prompt(
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
     resolve_robot_profile(robot_profile)
+    if spec.coordinated_terminal_behavior is not None:
+        graph = make_relative_task_graph(task_name, spec)
+        return f"""Task:
+{task_name}: {spec.task_prompt_summary}
+
+This is an object_manipulation task using the existing coordinated_pickment
+recognition path. Generate exactly the deterministic graph below; do not add,
+remove, merge, or reorder edges and do not replace existing atomic action
+classes.
+
+Original simple task description:
+{spec.task_description}
+
+Configured direction: {spec.coordinated_direction}
+Configured terminal behavior: {spec.coordinated_terminal_behavior}
+
+Deterministic graph JSON:
+{json.dumps(graph, ensure_ascii=False, indent=2)}
+"""
     action_sketch = _format_action_sketch(spec.action_sketch)
     action_spec = _format_coordinated_pickment_spec(spec)
     left_release_spec = _format_gripper_spec(
@@ -1338,6 +1359,87 @@ arm joint poses with grippers open.
 def _coordinated_pickment_graph_steps(
     spec: _RelativeSpecLike,
 ) -> list[NominalGraphStep]:
+    if spec.coordinated_terminal_behavior is not None:
+        carrier = _coordinated_carrier_placement(spec)
+        payloads = [
+            placement
+            for placement in spec.placements
+            if placement.intent == "place_relative"
+        ]
+        steps: list[NominalGraphStep] = []
+        for payload in payloads:
+            steps.extend(_single_relative_graph_steps(payload))
+        steps.append(
+            _nominal_step(
+                f"Coordinated lift and transport `{carrier.moved_runtime_uid}`",
+                {
+                    "left_arm_action": _format_coordinated_pickment_spec(
+                        carrier,
+                        payload_runtime_uids=[
+                            payload.moved_runtime_uid for payload in payloads
+                        ],
+                        target_hover=True,
+                        hold_steps=20,
+                    ),
+                    "right_arm_action": None,
+                },
+            )
+        )
+        if spec.coordinated_terminal_behavior == "hold":
+            return steps
+        steps.extend(
+            [
+                _nominal_step(
+                    f"Lower `{carrier.moved_runtime_uid}` vertically onto the support",
+                    {
+                        "left_arm_action": _format_relative_eef_move_spec(
+                            "left_arm",
+                            offset=[0.0, 0.0, -float(carrier.hover_height)],
+                            sample_interval=50,
+                            post_hold_steps=20,
+                        ),
+                        "right_arm_action": _format_relative_eef_move_spec(
+                            "right_arm",
+                            offset=[0.0, 0.0, -float(carrier.hover_height)],
+                            sample_interval=50,
+                            post_hold_steps=20,
+                        ),
+                    },
+                ),
+                _nominal_step(
+                    f"Release `{carrier.moved_runtime_uid}` from both grippers",
+                    {
+                        "left_arm_action": _format_gripper_spec(
+                            "left_arm", "open", sample_interval=10, post_hold_steps=20
+                        ),
+                        "right_arm_action": _format_gripper_spec(
+                            "right_arm", "open", sample_interval=10, post_hold_steps=20
+                        ),
+                    },
+                ),
+                _nominal_step(
+                    "Retreat both empty arms vertically",
+                    {
+                        "left_arm_action": _format_empty_hand_retreat_spec("left_arm"),
+                        "right_arm_action": _format_empty_hand_retreat_spec(
+                            "right_arm"
+                        ),
+                    },
+                ),
+                _nominal_step(
+                    "Return both empty arms to their initial poses",
+                    {
+                        "left_arm_action": _format_initial_qpos_spec(
+                            "left_arm", sample_interval=30
+                        ),
+                        "right_arm_action": _format_initial_qpos_spec(
+                            "right_arm", sample_interval=30
+                        ),
+                    },
+                ),
+            ]
+        )
+        return steps
     return [
         _nominal_step(
             f"Coordinated pick and move `{spec.moved_runtime_uid}`",
@@ -1377,6 +1479,16 @@ def _coordinated_pickment_graph_steps(
             },
         ),
     ]
+
+
+def _coordinated_carrier_placement(
+    spec: _RelativeSpecLike,
+) -> _RelativePlacementLike:
+    return next(
+        placement
+        for placement in spec.placements
+        if placement.intent == "coordinated_pickment"
+    )
 
 
 def _make_dual_relative_task_prompt(
@@ -1918,6 +2030,30 @@ def _make_coordinated_pickment_basic_background(
         "No extra scene notes were provided by the config-stage LLM."
     )
     registry = _format_runtime_object_registry(object_registry)
+    if spec.coordinated_terminal_behavior is not None:
+        payloads = [
+            placement.moved_runtime_uid
+            for placement in spec.placements
+            if placement.intent == "place_relative"
+        ]
+        return f"""The scene comes from the exported {project_name} mesh environment.
+
+This task stays on the existing object_manipulation coordinated_pickment path.
+Payload objects are placed sequentially with existing single-arm actions, then
+both arms use one CoordinatedPickment action to lift and transport the shared
+object. A place terminal uses synchronized relative MoveEndEffector descent,
+parallel gripper opening, vertical retreat, and return; a hold terminal ends
+with both grippers closed.
+
+Shared object: {spec.moved_runtime_uid}
+Payloads: {payloads or "none"}
+Direction: {spec.coordinated_direction}
+Terminal behavior: {spec.coordinated_terminal_behavior}
+{registry}
+
+Config-stage LLM notes:
+{notes}
+"""
     return f"""The scene comes from the exported {project_name} mesh environment.
 
 This configuration directory is for a {profile.display_name} coordinated
@@ -2169,6 +2305,22 @@ def _make_coordinated_pickment_atom_actions_prompt(
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
+    if spec.coordinated_terminal_behavior is not None:
+        steps = _coordinated_pickment_graph_steps(spec)
+        lines = []
+        for index, step in enumerate(steps, start=1):
+            lines.append(
+                f"{index}. {step.semantic}\n"
+                f"   left_arm_action: {json.dumps(step.left_arm_action, ensure_ascii=False, separators=(',', ':')) if step.left_arm_action is not None else 'null'}\n"
+                f"   right_arm_action: {json.dumps(step.right_arm_action, ensure_ascii=False, separators=(',', ':')) if step.right_arm_action is not None else 'null'}"
+            )
+        return f"""### Atomic Action Class JSON Specs for {profile.display_name} Coordinated Transport
+
+Use exactly the following existing atomic-action sequence. No new atomic action
+class is required or allowed.
+
+{chr(10).join(lines)}
+"""
     left_release_spec = _format_gripper_spec(
         "left_arm",
         "open",
@@ -2611,6 +2763,9 @@ def _format_coordinated_pickment_spec(
     placement: _RelativePlacementLike,
     *,
     sample_interval: int = 120,
+    payload_runtime_uids: Sequence[str] = (),
+    target_hover: bool = False,
+    hold_steps: int | None = None,
 ) -> str:
     target_object_pose: dict[str, Any]
     if getattr(placement, "reference_is_initial_pose", False):
@@ -2618,9 +2773,12 @@ def _format_coordinated_pickment_spec(
             raise ValueError(
                 "CoordinatedPickment self-relative target requires release_position."
             )
+        position = [float(value) for value in placement.release_position]
+        if target_hover:
+            position[2] += float(placement.hover_height)
         target_object_pose = {
             "reference": "absolute",
-            "position": [float(value) for value in placement.release_position],
+            "position": position,
             "orientation_goal": placement.orientation_goal,
             "orientation_axis": placement.orientation_axis,
         }
@@ -2646,21 +2804,54 @@ def _format_coordinated_pickment_spec(
             support=placement.reference_runtime_uid,
             surface_clearance=_surface_release_clearance(placement),
         )
+    target_object = {
+        "obj_name": placement.moved_runtime_uid,
+        "affordance": "antipodal",
+    }
+    if target_hover or payload_runtime_uids:
+        target_object["payloads"] = [str(uid) for uid in payload_runtime_uids]
+    cfg: dict[str, Any] = {
+        "pre_grasp_distance": 0.1,
+        "sample_interval": sample_interval,
+        "hand_interp_steps": 10,
+    }
+    if target_hover:
+        cfg["lift_height"] = float(placement.hover_height)
+    if hold_steps is not None:
+        cfg["hold_steps"] = int(hold_steps)
     return _compact_json(
         {
             "atomic_action_class": "CoordinatedPickment",
             "robot_name": "dual_arm",
             "control": "arm",
-            "target_object": {
-                "obj_name": placement.moved_runtime_uid,
-                "affordance": "antipodal",
-            },
+            "target_object": target_object,
             "target_object_pose": target_object_pose,
-            "cfg": {
-                "pre_grasp_distance": 0.1,
-                "sample_interval": sample_interval,
-                "hand_interp_steps": 10,
+            "cfg": cfg,
+        }
+    )
+
+
+def _format_relative_eef_move_spec(
+    robot_name: str,
+    *,
+    offset: Sequence[float],
+    sample_interval: int,
+    post_hold_steps: int = 0,
+) -> str:
+    cfg = {"sample_interval": int(sample_interval)}
+    if post_hold_steps > 0:
+        cfg["post_hold_steps"] = int(post_hold_steps)
+    return _compact_json(
+        {
+            "atomic_action_class": "MoveEndEffector",
+            "robot_name": robot_name,
+            "control": "arm",
+            "target_pose": {
+                "reference": "relative",
+                "offset": [float(value) for value in offset],
+                "frame": "world",
             },
+            "cfg": cfg,
         }
     )
 

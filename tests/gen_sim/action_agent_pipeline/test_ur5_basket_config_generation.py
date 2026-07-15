@@ -69,6 +69,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineStepSpec,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
+    _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _GLTF_TO_SIM_FRAME_KEY,
@@ -81,6 +82,13 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
+    _normalize_coordinated_direction,
+    _normalize_coordinated_terminal_behavior,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
+    _is_container_like,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
     TargetReplacementSpec,
@@ -5432,6 +5440,642 @@ def test_object_held_by_gripper_returns_false_before_agent_state_init() -> None:
     )
 
     assert bool(success.item()) is False
+
+
+def test_coordinated_transport_empty_carrier_holds_in_place(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_hold_project"
+    _write_coordinated_transport_project(project_dir)
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [],
+                    "direction": "none",
+                    "terminal_behavior": "hold",
+                    "arm": "auto",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "coordinated_hold_agent",
+        task_name="HoldBasket",
+        task_description="双手端起篮子并保持悬空",
+        preserve_source_target_body_scale=True,
+    )
+
+    graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    assert len(graph["edges"]) == 1
+    action = graph["edges"][0]["left_arm_action"]
+    assert action["atomic_action_class"] == "CoordinatedPickment"
+    assert action["cfg"]["hold_steps"] == 20
+    assert action["target_object"]["payloads"] == []
+    assert action["target_object_pose"]["position"][2] == pytest.approx(
+        paths.summary["target_position"][2] + 0.10
+    )
+
+
+def test_legacy_coordinated_pickment_graph_stays_three_edges() -> None:
+    placement = _RelativePlacementStepSpec(
+        intent="coordinated_pickment",
+        moved_source_uid="tray",
+        reference_source_uid="tray",
+        moved_runtime_uid="tray",
+        reference_runtime_uid="tray",
+        relation="front_of",
+        active_side="left",
+        release_offset=[0.15, 0.0, 0.0],
+        high_offset=[0.15, 0.0, 0.1],
+        reference_is_initial_pose=True,
+        release_position=[0.15, 0.0, 0.75],
+    )
+    spec = _RelativePlacementSpec(
+        intent="coordinated_pickment",
+        table_source_uid="table",
+        moved_source_uid="tray",
+        reference_source_uid="tray",
+        moved_runtime_uid="tray",
+        reference_runtime_uid="tray",
+        relation="front_of",
+        active_side="left",
+        task_description="双臂移动托盘",
+        task_prompt_summary="Move tray.",
+        basic_background_notes="",
+        action_sketch=[],
+        release_offset=[0.15, 0.0, 0.0],
+        high_offset=[0.15, 0.0, 0.1],
+        placements=(placement,),
+        reference_is_initial_pose=True,
+        release_position=[0.15, 0.0, 0.75],
+    )
+
+    graph = make_relative_task_graph("LegacyCoordinated", spec)
+
+    assert [
+        edge["left_arm_action"]["atomic_action_class"] for edge in graph["edges"]
+    ] == ["CoordinatedPickment", "MoveJoints", "MoveJoints"]
+    assert graph["edges"][0]["right_arm_action"] is None
+
+
+@pytest.mark.parametrize(
+    "direction",
+    [
+        "front",
+        "back",
+        "left",
+        "right",
+        "front_left",
+        "front_right",
+        "back_left",
+        "back_right",
+        "none",
+    ],
+)
+def test_coordinated_transport_accepts_supported_directions(direction: str) -> None:
+    assert _normalize_coordinated_direction(direction) == direction
+
+
+@pytest.mark.parametrize(
+    ("task_description", "expected"),
+    [
+        ("双臂端起盘子并保持悬空", "hold"),
+        ("双臂端起盘子向前移动，然后放下", "place"),
+        ("先把苹果放下到盘中，再端起盘子", "hold"),
+        ("双臂往前搬运盘子", "place"),
+    ],
+)
+def test_coordinated_transport_infers_terminal_behavior_from_last_cue(
+    task_description: str,
+    expected: str,
+) -> None:
+    assert (
+        _normalize_coordinated_terminal_behavior(
+            None,
+            task_description=task_description,
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize("name", ["washbasin", "脸盆", "bucket"])
+def test_coordinated_transport_recognizes_additional_container_names(name: str) -> None:
+    carrier = _SceneObject(
+        source_uid=f"interact_{name}_0",
+        source_role="rigid_object",
+        config={"name": name},
+    )
+
+    assert _is_container_like(carrier)
+
+
+def test_coordinated_transport_loads_payloads_then_places_vertically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_loaded_project"
+    _write_coordinated_transport_project(project_dir)
+
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [
+                        {"object": "apple_1", "arm": "left", "slot": "left"},
+                        {"object": "apple_2", "arm": "right", "slot": "right"},
+                    ],
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                    "arm": "auto",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "coordinated_loaded_agent",
+        task_name="LoadAndTransportBasket",
+        task_description="双臂把两边的物体放入篮子，再向前端起并放下",
+        preserve_source_target_body_scale=True,
+    )
+
+    graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    action_classes = [
+        (edge["left_arm_action"] or edge["right_arm_action"])["atomic_action_class"]
+        for edge in graph["edges"]
+    ]
+    assert action_classes == [
+        "PickUp",
+        "Place",
+        "MoveJoints",
+        "PickUp",
+        "Place",
+        "MoveJoints",
+        "CoordinatedPickment",
+        "MoveEndEffector",
+        "MoveJoints",
+        "MoveEndEffector",
+        "MoveJoints",
+    ]
+    coordinated = graph["edges"][6]["left_arm_action"]
+    assert coordinated["target_object"]["payloads"] == ["apple_1", "apple_2"]
+    descent = graph["edges"][7]
+    for side in ("left_arm_action", "right_arm_action"):
+        assert descent[side]["target_pose"] == {
+            "reference": "relative",
+            "offset": [0.0, 0.0, -0.1],
+            "frame": "world",
+        }
+        assert descent[side]["cfg"]["post_hold_steps"] == 20
+    assert paths.summary["payloads"] == ["apple_1", "apple_2"]
+    assert paths.summary["terminal_behavior"] == "place"
+    assert paths.summary["release_offset"][:2] == pytest.approx([0.15, 0.0])
+    release = graph["edges"][8]
+    for side in ("left_arm_action", "right_arm_action"):
+        assert release[side]["control"] == "hand"
+        assert release[side]["target_qpos"] == {
+            "source": "gripper_state",
+            "state": "open",
+        }
+    return_edge = graph["edges"][10]
+    for side in ("left_arm_action", "right_arm_action"):
+        assert return_edge[side]["control"] == "arm"
+        assert return_edge[side]["target_qpos"] == {"source": "initial"}
+
+    gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
+    carrier_terms = gym_config["env"]["extensions"]["agent_success"]["terms"][-1][
+        "terms"
+    ]
+    assert {
+        "type": "both_arms_at_initial_qpos",
+        "tolerance": 0.05,
+    } in carrier_terms
+
+
+def test_coordinated_transport_generates_for_insufficient_carrier_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_small_carrier_project"
+    _write_coordinated_transport_project(project_dir)
+    _write_minimal_glb(
+        project_dir / "mesh_assets/basket/basket_3/basket_3.glb",
+        [
+            (-0.05, -0.05, 0.0),
+            (0.05, -0.05, 0.0),
+            (0.05, 0.05, 0.0),
+            (-0.05, 0.05, 0.0),
+        ],
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [
+                        {"object": "apple_1", "arm": "left"},
+                        {"object": "apple_2", "arm": "right"},
+                    ],
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "coordinated_small_carrier_agent",
+        task_name="CarrierTooSmall",
+        task_description="把两个苹果放进小篮子后向前搬运",
+        preserve_source_target_body_scale=True,
+    )
+
+    assert paths.task_graph.exists()
+    assert paths.summary["payloads"] == ["apple_1", "apple_2"]
+
+
+def test_coordinated_transport_canonicalizes_flat_three_step_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_flat_project"
+    _write_coordinated_transport_project(project_dir)
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "left",
+                },
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "right",
+                },
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "coordinated_flat_agent",
+        task_name="FlatLoadedTransport",
+        task_description="把两个苹果放进篮子，再用双臂向前搬运篮子",
+        preserve_source_target_body_scale=True,
+    )
+
+    graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    coordinated = graph["edges"][6]["left_arm_action"]
+    assert coordinated["atomic_action_class"] == "CoordinatedPickment"
+    assert coordinated["target_object"]["payloads"] == ["apple_1", "apple_2"]
+
+
+def test_coordinated_transport_merges_matching_nested_and_flat_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_hybrid_project"
+    _write_coordinated_transport_project(project_dir)
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "left",
+                },
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "right",
+                },
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [
+                        {"object": "apple_2", "arm": "auto", "slot": "right"},
+                        {"object": "apple_1", "arm": "auto", "slot": "left"},
+                    ],
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "coordinated_hybrid_agent",
+        task_name="HybridLoadedTransport",
+        task_description="把两个苹果放进篮子，再用双臂向前搬运篮子",
+        preserve_source_target_body_scale=True,
+    )
+
+    graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    assert graph["edges"][0]["left_arm_action"]["atomic_action_class"] == "PickUp"
+    assert graph["edges"][3]["right_arm_action"]["atomic_action_class"] == "PickUp"
+    assert graph["edges"][6]["left_arm_action"]["target_object"]["payloads"] == [
+        "apple_1",
+        "apple_2",
+    ]
+
+
+def test_coordinated_transport_rejects_conflicting_nested_and_flat_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_conflicting_hybrid_project"
+    _write_coordinated_transport_project(project_dir)
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_1",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "left",
+                },
+                {
+                    "intent": "place_relative",
+                    "moved_object": "apple_2",
+                    "reference_object": "basket_3",
+                    "goal_relation": "inside",
+                    "arm": "right",
+                },
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [{"object": "apple_1", "arm": "left"}],
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                },
+            ]
+        },
+    )
+
+    with pytest.raises(ValueError, match="flat_only=\\['apple_2'\\]"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "coordinated_conflicting_hybrid_agent",
+            task_name="ConflictingHybridLoadedTransport",
+            task_description="把两个苹果放进篮子，再用双臂向前搬运篮子",
+        )
+
+
+def test_coordinated_transport_supports_four_sequential_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_four_payload_project"
+    _write_coordinated_transport_project(project_dir, payload_count=4)
+    payloads = [
+        {
+            "object": f"apple_{index}",
+            "arm": "left" if index % 2 else "right",
+            "slot": "auto",
+        }
+        for index in range(1, 5)
+    ]
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": payloads,
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_resolve_table_mesh_world_zmax",
+        lambda scene_dir, table_obj: None,
+    )
+
+    paths = generate_action_agent_config_from_project(
+        project_dir,
+        tmp_path / "coordinated_four_payload_agent",
+        task_name="FourPayloadTransport",
+        task_description="依次把四个苹果放进篮子，再用双臂向前搬运并放下",
+        preserve_source_target_body_scale=True,
+    )
+
+    graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    coordinated = graph["edges"][12]["left_arm_action"]
+    assert coordinated["atomic_action_class"] == "CoordinatedPickment"
+    assert coordinated["target_object"]["payloads"] == [
+        "apple_1",
+        "apple_2",
+        "apple_3",
+        "apple_4",
+    ]
+    place_offsets = [
+        tuple(
+            graph["edges"][index][
+                "left_arm_action" if index in {1, 7} else "right_arm_action"
+            ]["target_object_pose"]["offset"][:2]
+        )
+        for index in (1, 4, 7, 10)
+    ]
+    assert len(set(place_offsets)) == 4
+
+
+def test_coordinated_transport_rejects_duplicate_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_invalid_project"
+    _write_coordinated_transport_project(project_dir)
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [
+                        {"object": "apple_1", "arm": "left"},
+                        {"object": "apple_1", "arm": "right"},
+                    ],
+                    "direction": "none",
+                    "terminal_behavior": "hold",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValueError, match="payload objects must be distinct"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "coordinated_invalid_agent",
+            task_name="InvalidPayloads",
+            task_description="把两个相同物体放进篮子再端起",
+        )
+
+
+def test_coordinated_transport_rejects_more_than_four_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "coordinated_too_many_payloads_project"
+    _write_coordinated_transport_project(project_dir, payload_count=5)
+    monkeypatch.setattr(
+        action_agent_config_generation,
+        "_call_relative_task_llm",
+        lambda **kwargs: {
+            "manipulations": [
+                {
+                    "intent": "coordinated_pickment",
+                    "moved_object": "basket_3",
+                    "payloads": [
+                        {"object": f"apple_{index}", "arm": "auto"}
+                        for index in range(1, 6)
+                    ],
+                    "direction": "front",
+                    "terminal_behavior": "place",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValueError, match="at most 4 objects"):
+        generate_action_agent_config_from_project(
+            project_dir,
+            tmp_path / "coordinated_too_many_payloads_agent",
+            task_name="TooManyPayloads",
+            task_description="把五个苹果放进篮子后向前搬运",
+        )
+
+
+def _write_coordinated_transport_project(
+    project_dir: Path, *, payload_count: int = 2
+) -> None:
+    mesh_specs = {
+        "mesh_assets/table/table_0.glb": [
+            (-0.6, -0.6, 0.0),
+            (0.6, -0.6, 0.0),
+            (0.6, 0.6, 0.0),
+            (-0.6, 0.6, 0.0),
+        ],
+        "mesh_assets/basket/basket_3/basket_3.glb": [
+            (-0.25, -0.15, 0.0),
+            (0.25, -0.15, 0.0),
+            (0.25, 0.15, 0.0),
+            (-0.25, 0.15, 0.0),
+        ],
+    }
+    for index in range(1, payload_count + 1):
+        mesh_specs[f"mesh_assets/apple/apple_{index}/apple_{index}.glb"] = (
+            _default_mesh_vertices()
+        )
+    for rel_path, vertices in mesh_specs.items():
+        _write_minimal_glb(project_dir / rel_path, vertices)
+    gym_config = {
+        "id": "Image2Tabletop-coordinated-transport-v0",
+        "background": [
+            _mesh_object(
+                "table",
+                "mesh_assets/table/table_0.glb",
+                [0.0, 0.0, 0.36],
+                [0.0, 0.0, 0.0],
+            )
+        ],
+        "rigid_object": [
+            _mesh_object(
+                "basket_3",
+                "mesh_assets/basket/basket_3/basket_3.glb",
+                [0.0, 0.0, 0.75],
+                [0.0, 0.0, 0.0],
+            ),
+            *[
+                _mesh_object(
+                    f"apple_{index}",
+                    f"mesh_assets/apple/apple_{index}/apple_{index}.glb",
+                    [
+                        -0.18 if index > 2 else 0.18,
+                        0.28 if index % 2 else -0.28,
+                        0.76,
+                    ],
+                    [0.0, 0.0, 0.0],
+                )
+                for index in range(1, payload_count + 1)
+            ],
+        ],
+    }
+    (project_dir / "gym_config.json").write_text(
+        json.dumps(gym_config, indent=2), encoding="utf-8"
+    )
 
 
 def _write_project(project_dir: Path) -> None:

@@ -36,12 +36,14 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _load_mesh_vertices,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_transform_matrix,
+    _mesh_config_world_xy_bounds,
     _mesh_config_world_zmax,
     _mesh_config_world_xy_extents,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
     _SIDE_RELATIONS,
     _normalize_relative_relation,
+    _relative_primary_placement,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
@@ -62,6 +64,7 @@ __all__ = [
     "_with_on_surface_release_offsets",
     "_with_inside_container_slot_offsets",
     "_with_coordinated_side_release_height_offsets",
+    "_with_coordinated_transport_geometry",
     "_with_final_auto_arm_sides",
     "_with_self_relative_absolute_targets",
 ]
@@ -83,6 +86,9 @@ _PICKUP_UPRIGHT_ROTATE_RADIANS = math.radians(
 _ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
 _ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
 _DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER = {"right": 0, "left": 1}
+_COORDINATED_TRANSPORT_DISTANCE = 0.15
+_COORDINATED_MIN_TRANSPORT_DISTANCE = 0.05
+_COORDINATED_GEOMETRY_MARGIN = 0.02
 
 
 def _relative_release_offset(relation: str) -> list[float]:
@@ -137,35 +143,7 @@ def _with_self_relative_absolute_targets(
         _with_self_relative_absolute_target(placement, generated_positions)
         for placement in spec.placements
     )
-    primary = placements[0]
-    return _RelativePlacementSpec(
-        intent=primary.intent,
-        table_source_uid=spec.table_source_uid,
-        moved_source_uid=primary.moved_source_uid,
-        reference_source_uid=primary.reference_source_uid,
-        moved_runtime_uid=primary.moved_runtime_uid,
-        reference_runtime_uid=primary.reference_runtime_uid,
-        relation=primary.relation,
-        active_side=primary.active_side,
-        task_description=spec.task_description,
-        task_prompt_summary=spec.task_prompt_summary,
-        basic_background_notes=spec.basic_background_notes,
-        action_sketch=spec.action_sketch,
-        release_offset=primary.release_offset,
-        high_offset=primary.high_offset,
-        placements=placements,
-        reference_is_initial_pose=primary.reference_is_initial_pose,
-        release_position=primary.release_position,
-        high_position=primary.high_position,
-        orientation_goal=primary.orientation_goal,
-        orientation_axis=primary.orientation_axis,
-        orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
-        hover_height=primary.hover_height,
-        upright_in_place=primary.upright_in_place,
-        pickup_upright_direction=primary.pickup_upright_direction,
-        pickup_rotate_upright=primary.pickup_rotate_upright,
-        surface_clearance=primary.surface_clearance,
-    )
+    return _replace_relative_spec_placements(spec, placements)
 
 
 def _with_final_auto_arm_sides(
@@ -244,9 +222,15 @@ def _with_inside_container_slot_offsets(
     *,
     slot_distance_scale: float = 1.0,
 ) -> _RelativePlacementSpec:
+    slotted_relations = {"inside"}
+    if spec.intent == "coordinated_pickment":
+        slotted_relations.add("on")
     inside_groups: dict[str, list[int]] = {}
     for index, placement in enumerate(spec.placements):
-        if placement.relation != "inside" or placement.reference_is_initial_pose:
+        if (
+            placement.relation not in slotted_relations
+            or placement.reference_is_initial_pose
+        ):
             continue
         inside_groups.setdefault(placement.reference_runtime_uid, []).append(index)
 
@@ -266,9 +250,26 @@ def _with_inside_container_slot_offsets(
     slot_offsets_by_index: dict[int, list[float]] = {}
     for reference_uid, indices in inside_groups.items():
         container_config = object_configs.get(reference_uid)
+        if spec.intent == "coordinated_pickment" and len(indices) >= 3:
+            slot_offsets_by_index.update(
+                _coordinated_payload_grid_offsets(
+                    indices,
+                    placements=spec.placements,
+                    object_configs=object_configs,
+                    container_config=container_config,
+                )
+            )
+            continue
         axis, slot_distance = _inside_container_slot_axis_and_distance(
             container_config,
             slot_distance_scale=slot_distance_scale,
+        )
+        slot_distance = _payload_aware_slot_distance(
+            indices,
+            axis=axis,
+            default_distance=slot_distance,
+            placements=spec.placements,
+            object_configs=object_configs,
         )
         ordered_indices = _order_inside_container_slot_indices(
             indices,
@@ -299,6 +300,112 @@ def _with_inside_container_slot_offsets(
         for index, placement in enumerate(spec.placements)
     )
     return _replace_relative_spec_placements(spec, placements)
+
+
+def _coordinated_payload_grid_offsets(
+    indices: Sequence[int],
+    *,
+    placements: Sequence[_RelativePlacementStepSpec],
+    object_configs: Mapping[str, Mapping[str, Any]],
+    container_config: Mapping[str, Any] | None,
+) -> dict[int, list[float]]:
+    """Choose a deterministic best-effort grid for three or four payloads."""
+    count = len(indices)
+    carrier_extents = (
+        _mesh_config_world_xy_extents(container_config)
+        if container_config is not None
+        else None
+    )
+    if carrier_extents is None:
+        carrier_extents = (
+            2.0 * _CONTAINER_SLOT_MAX_OFFSET,
+            2.0 * _CONTAINER_SLOT_MAX_OFFSET,
+        )
+    usable_x = max(0.02, float(carrier_extents[0]) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
+    usable_y = max(0.02, float(carrier_extents[1]) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
+    ordered_indices = sorted(
+        indices,
+        key=lambda index: (
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=1,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=0,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            index,
+        ),
+    )
+    payload_extents = {
+        index: _mesh_config_world_xy_extents(
+            object_configs.get(placements[index].moved_runtime_uid, {})
+        )
+        or (0.0, 0.0)
+        for index in ordered_indices
+    }
+    grid_shapes = [(count, 1), (1, count), (2, 2)]
+    candidates: list[tuple[tuple[float, float], dict[int, list[float]]]] = []
+    for columns, rows in grid_shapes:
+        cell_x = usable_x / float(columns)
+        cell_y = usable_y / float(rows)
+        cells = [
+            (
+                -usable_x * 0.5 + (column + 0.5) * cell_x,
+                -usable_y * 0.5 + (row + 0.5) * cell_y,
+            )
+            for row in range(rows)
+            for column in range(columns)
+        ][:count]
+        overflow = 0.0
+        min_clearance = float("inf")
+        offsets: dict[int, list[float]] = {}
+        for index, (x, y) in zip(ordered_indices, cells):
+            payload_x, payload_y = payload_extents[index]
+            clearance_x = cell_x - float(payload_x)
+            clearance_y = cell_y - float(payload_y)
+            overflow += max(0.0, _COORDINATED_GEOMETRY_MARGIN - clearance_x)
+            overflow += max(0.0, _COORDINATED_GEOMETRY_MARGIN - clearance_y)
+            min_clearance = min(min_clearance, clearance_x, clearance_y)
+            offsets[index] = [
+                round(float(x), 6),
+                round(float(y), 6),
+                _SIDE_RELEASE_Z_OFFSET,
+            ]
+        candidates.append(((round(overflow, 9), -min_clearance), offsets))
+    return min(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def _payload_aware_slot_distance(
+    indices: Sequence[int],
+    *,
+    axis: str,
+    default_distance: float,
+    placements: Sequence[_RelativePlacementStepSpec],
+    object_configs: Mapping[str, Mapping[str, Any]],
+) -> float:
+    if len(indices) != 2:
+        return default_distance
+    axis_index = 0 if axis == "x" else 1
+    extents = [
+        _mesh_config_world_xy_extents(
+            object_configs.get(placements[index].moved_runtime_uid, {})
+        )
+        for index in indices
+    ]
+    if any(extent is None for extent in extents):
+        return default_distance
+    resolved = [extent for extent in extents if extent is not None]
+    required_separation = (
+        float(resolved[0][axis_index]) * 0.5
+        + float(resolved[1][axis_index]) * 0.5
+        + _COORDINATED_GEOMETRY_MARGIN
+    )
+    return round(max(float(default_distance), required_separation * 0.5), 6)
 
 
 def _with_coordinated_side_release_height_offsets(
@@ -393,7 +500,7 @@ def _replace_relative_spec_placements(
     spec: _RelativePlacementSpec,
     placements: tuple[_RelativePlacementStepSpec, ...],
 ) -> _RelativePlacementSpec:
-    primary = placements[0]
+    primary = _relative_primary_placement(placements)
     return replace(
         spec,
         moved_source_uid=primary.moved_source_uid,
@@ -417,6 +524,147 @@ def _replace_relative_spec_placements(
         pickup_rotate_upright=primary.pickup_rotate_upright,
         surface_clearance=primary.surface_clearance,
     )
+
+
+def _with_coordinated_transport_geometry(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    """Resolve loaded-carrier capacity, slots, and the final transport target."""
+    if (
+        spec.intent != "coordinated_pickment"
+        or spec.coordinated_direction is None
+        or spec.coordinated_terminal_behavior is None
+    ):
+        return spec
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    carrier = _relative_primary_placement(spec.placements)
+    carrier_config = object_configs.get(carrier.moved_runtime_uid)
+    if carrier_config is None:
+        raise ValueError(
+            f"Generated config is missing coordinated carrier {carrier.moved_runtime_uid!r}."
+        )
+    initial_position = _clean_vector3(carrier_config.get("init_pos", [0.0, 0.0, 0.0]))
+    direction = _coordinated_direction_vector(spec.coordinated_direction)
+    distance = _coordinated_safe_transport_distance(
+        initial_position=initial_position,
+        direction=direction,
+        carrier_config=carrier_config,
+        table_config=_coordinated_table_config(spec, gym_config),
+    )
+    release_offset = [
+        round(direction[0] * distance, 6),
+        round(direction[1] * distance, 6),
+        0.0,
+    ]
+    release_position = _offset_position(initial_position, release_offset)
+    high_position = list(release_position)
+    high_position[2] = round(high_position[2] + float(carrier.hover_height), 6)
+    updated_carrier = replace(
+        carrier,
+        release_offset=release_offset,
+        high_offset=[release_offset[0], release_offset[1], carrier.hover_height],
+        release_position=release_position,
+        high_position=high_position,
+    )
+    placements = tuple(
+        updated_carrier if placement.intent == "coordinated_pickment" else placement
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _coordinated_table_config(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    backgrounds = gym_config.get("background", [])
+    if isinstance(backgrounds, Mapping):
+        backgrounds = [backgrounds]
+    if not isinstance(backgrounds, list):
+        return None
+    return next(
+        (
+            background
+            for background in backgrounds
+            if isinstance(background, Mapping)
+            and str(background.get("uid")) == spec.table_source_uid
+        ),
+        next(
+            (
+                background
+                for background in backgrounds
+                if isinstance(background, Mapping)
+            ),
+            None,
+        ),
+    )
+
+
+def _coordinated_direction_vector(direction: str) -> tuple[float, float]:
+    components = {
+        "front": (1.0, 0.0),
+        "back": (-1.0, 0.0),
+        "left": (0.0, 1.0),
+        "right": (0.0, -1.0),
+        "front_left": (1.0, 1.0),
+        "front_right": (1.0, -1.0),
+        "back_left": (-1.0, 1.0),
+        "back_right": (-1.0, -1.0),
+        "none": (0.0, 0.0),
+    }
+    x, y = components[direction]
+    norm = math.hypot(x, y)
+    if norm == 0.0:
+        return 0.0, 0.0
+    return x / norm, y / norm
+
+
+def _coordinated_safe_transport_distance(
+    *,
+    initial_position: Sequence[float],
+    direction: tuple[float, float],
+    carrier_config: Mapping[str, Any],
+    table_config: Mapping[str, Any] | None,
+) -> float:
+    if direction == (0.0, 0.0):
+        return 0.0
+    table_bounds = (
+        _mesh_config_world_xy_bounds(table_config) if table_config is not None else None
+    )
+    carrier_extents = _mesh_config_world_xy_extents(carrier_config)
+    if table_bounds is None or carrier_extents is None:
+        return _COORDINATED_TRANSPORT_DISTANCE
+
+    mins, maxs = table_bounds
+    half_extents = [float(carrier_extents[0]) * 0.5, float(carrier_extents[1]) * 0.5]
+    allowed = _COORDINATED_TRANSPORT_DISTANCE
+    for axis, component in enumerate(direction):
+        if abs(component) <= 1e-9:
+            continue
+        if component > 0.0:
+            boundary = (
+                float(maxs[axis]) - half_extents[axis] - _COORDINATED_GEOMETRY_MARGIN
+            )
+            axis_limit = (boundary - float(initial_position[axis])) / component
+        else:
+            boundary = (
+                float(mins[axis]) + half_extents[axis] + _COORDINATED_GEOMETRY_MARGIN
+            )
+            axis_limit = (boundary - float(initial_position[axis])) / component
+        allowed = min(allowed, axis_limit)
+    allowed = max(0.0, float(allowed))
+    if allowed < _COORDINATED_MIN_TRANSPORT_DISTANCE:
+        raise ValueError(
+            "Coordinated transport target cannot keep the carrier inside the table "
+            f"boundary with at least {_COORDINATED_MIN_TRANSPORT_DISTANCE:.2f} m movement."
+        )
+    return round(allowed, 6)
 
 
 def _with_on_surface_release_offsets(
@@ -956,6 +1204,14 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
             "orientation_axis": spec.orientation_axis,
             "orientation_align_to": spec.orientation_align_to_runtime_uid,
         }
+        if spec.coordinated_terminal_behavior is not None:
+            summary["direction"] = spec.coordinated_direction
+            summary["terminal_behavior"] = spec.coordinated_terminal_behavior
+            summary["payloads"] = [
+                placement.moved_runtime_uid
+                for placement in spec.placements
+                if placement.intent == "place_relative"
+            ]
         if spec.relation == "on" and not spec.reference_is_initial_pose:
             summary["surface_clearance"] = spec.surface_clearance
         return summary

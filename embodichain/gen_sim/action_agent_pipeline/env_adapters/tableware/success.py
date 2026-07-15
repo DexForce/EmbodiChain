@@ -83,6 +83,14 @@ def _evaluate_spec(
         return _object_lifted(env, spec)
     if term_type in {"object_held_by_gripper", "object_gripper_near"}:
         return _object_held_by_gripper(env, spec)
+    if term_type == "object_held_by_both_grippers":
+        return _object_held_by_both_grippers(env, spec)
+    if term_type == "both_grippers_open":
+        return _both_grippers_open(env)
+    if term_type == "grippers_clear_of_object":
+        return _grippers_clear_of_object(env, spec)
+    if term_type == "both_arms_at_initial_qpos":
+        return _both_arms_at_initial_qpos(env, spec)
     raise ValueError(f"Unsupported success term type: {term_type!r}.")
 
 
@@ -320,6 +328,126 @@ def _object_held_by_gripper(env, spec: Mapping[str, Any]) -> torch.Tensor:
     return near & _gripper_is_closed(env, arm_name, object_position.device)
 
 
+def _object_held_by_both_grippers(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    max_distance = float(spec.get("max_distance", 0.10))
+    distances = _gripper_to_object_surface_distances(env, _object_name(spec))
+    if distances is None:
+        return _constant(env, False)
+    left_distance, right_distance = distances
+    return (
+        (left_distance <= max_distance)
+        & (right_distance <= max_distance)
+        & _gripper_is_closed(env, "left_arm", env.device)
+        & _gripper_is_closed(env, "right_arm", env.device)
+    )
+
+
+def _both_grippers_open(env) -> torch.Tensor:
+    return _gripper_is_open(env, "left_arm", env.device) & _gripper_is_open(
+        env, "right_arm", env.device
+    )
+
+
+def _grippers_clear_of_object(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    min_distance = float(spec.get("min_distance", 0.05))
+    distances = _gripper_to_object_surface_distances(env, _object_name(spec))
+    if distances is None:
+        return _constant(env, False)
+    return (distances[0] >= min_distance) & (distances[1] >= min_distance)
+
+
+def _both_arms_at_initial_qpos(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    if not hasattr(env, "get_current_qpos_agent"):
+        return _constant(env, False)
+    left_initial = getattr(env, "left_arm_init_qpos", None)
+    right_initial = getattr(env, "right_arm_init_qpos", None)
+    if left_initial is None or right_initial is None:
+        return _constant(env, False)
+    try:
+        left_current, right_current = env.get_current_qpos_agent()
+    except (AttributeError, TypeError, ValueError):
+        return _constant(env, False)
+
+    tolerance = float(spec.get("tolerance", 0.05))
+    arm_results = []
+    for current, initial in (
+        (left_current, left_initial),
+        (right_current, right_initial),
+    ):
+        current_qpos = _batched_qpos(env, current)
+        initial_qpos = _batched_qpos(env, initial)
+        if (
+            current_qpos is None
+            or initial_qpos is None
+            or current_qpos.shape != initial_qpos.shape
+            or current_qpos.shape[-1] == 0
+        ):
+            return _constant(env, False)
+        arm_results.append(
+            torch.all(torch.abs(current_qpos - initial_qpos) <= tolerance, dim=-1)
+        )
+    return arm_results[0] & arm_results[1]
+
+
+def _batched_qpos(env, value: Any) -> torch.Tensor | None:
+    if value is None:
+        return None
+    qpos = torch.as_tensor(value, dtype=torch.float32, device=env.device)
+    if qpos.ndim == 1:
+        qpos = qpos.unsqueeze(0)
+    if qpos.ndim != 2:
+        return None
+    if qpos.shape[0] == 1 and env.num_envs > 1:
+        qpos = qpos.expand(env.num_envs, -1)
+    if qpos.shape[0] != env.num_envs:
+        return None
+    return qpos
+
+
+def _gripper_to_object_surface_distances(
+    env,
+    object_uid: str,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    obj = env.sim.get_rigid_object(object_uid)
+    if obj is None:
+        raise ValueError(f"Unknown rigid object uid: {object_uid!r}.")
+    left_pose = _arm_eef_pose(env, "left_arm")
+    right_pose = _arm_eef_pose(env, "right_arm")
+    if left_pose is None or right_pose is None:
+        return None
+    vertices = obj.get_vertices(env_ids=[0], scale=True)
+    if isinstance(vertices, (list, tuple)):
+        vertices = vertices[0]
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=env.device)
+    if vertices.ndim == 3 and vertices.shape[0] == 1:
+        vertices = vertices.squeeze(0)
+    if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+        raise ValueError(
+            "Success surface-distance check requires mesh vertices (N, 3)."
+        )
+    object_pose = _pose(env, object_uid).to(
+        dtype=vertices.dtype, device=vertices.device
+    )
+    world_vertices = (
+        torch.einsum("nij,vj->nvi", object_pose[:, :3, :3], vertices)
+        + object_pose[:, None, :3, 3]
+    )
+    bounds_min = world_vertices.min(dim=1).values
+    bounds_max = world_vertices.max(dim=1).values
+
+    def _distance(eef_pose: torch.Tensor) -> torch.Tensor:
+        eef_pose = eef_pose.to(dtype=vertices.dtype, device=vertices.device)
+        if eef_pose.ndim == 2:
+            eef_pose = eef_pose.unsqueeze(0)
+        if eef_pose.shape[0] == 1 and object_pose.shape[0] > 1:
+            eef_pose = eef_pose.expand(object_pose.shape[0], -1, -1)
+        point = eef_pose[:, :3, 3]
+        outside = torch.maximum(bounds_min - point, point - bounds_max).clamp_min(0.0)
+        return torch.linalg.norm(outside, dim=-1)
+
+    return _distance(left_pose), _distance(right_pose)
+
+
 def _arm_eef_pose(env, arm_name: str) -> torch.Tensor | None:
     if not hasattr(env, "get_current_xpos_agent"):
         return None
@@ -361,6 +489,30 @@ def _gripper_is_closed(env, arm_name: str, device: torch.device) -> torch.Tensor
     if close_tensor.shape[0] == 1 and state_tensor.shape[0] > 1:
         close_tensor = close_tensor.expand(state_tensor.shape[0], -1)
     return torch.linalg.norm(state_tensor - close_tensor, dim=-1) < 1e-3
+
+
+def _gripper_is_open(env, arm_name: str, device: torch.device) -> torch.Tensor:
+    if not hasattr(env, "get_current_gripper_state_agent"):
+        return _constant(env, False)
+    try:
+        left_state, right_state = env.get_current_gripper_state_agent()
+    except AttributeError:
+        return _constant(env, False)
+    state = right_state if "right" in arm_name else left_state
+    open_state = getattr(env, "open_state", None)
+    if state is None or open_state is None:
+        return _constant(env, False)
+    state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
+    state_tensor = (
+        state_tensor.reshape(1, -1) if state_tensor.ndim == 1 else state_tensor
+    )
+    if state_tensor.shape[0] == 1 and env.num_envs > 1:
+        state_tensor = state_tensor.expand(env.num_envs, -1)
+    open_tensor = torch.as_tensor(open_state, dtype=torch.float32, device=device)
+    open_tensor = open_tensor.reshape(1, -1) if open_tensor.ndim == 1 else open_tensor
+    if open_tensor.shape[0] == 1 and state_tensor.shape[0] > 1:
+        open_tensor = open_tensor.expand(state_tensor.shape[0], -1)
+    return torch.linalg.norm(state_tensor - open_tensor, dim=-1) < 1e-3
 
 
 def _axis_index(axis: str) -> int:
