@@ -81,6 +81,8 @@ def fit_table_to_clutter(
     object_output_paths: dict[str, Path] | None = None,
     margin_cm: float = 10.0,
     support_occupancy_ratio: float = 0.80,
+    min_table_side_cm: float = 150.0,
+    max_table_side_cm: float = 180.0,
     object_coverage_percent: int | None = None,
     gravity_settle_table: bool = True,
     gravity_settle_mode: str = "geometry",
@@ -111,6 +113,11 @@ def fit_table_to_clutter(
         str(key): path.expanduser().resolve()
         for key, path in (object_output_paths or {}).items()
     }
+    if not 0.0 < min_table_side_cm <= max_table_side_cm:
+        raise ValueError(
+            "Table-side limits must satisfy "
+            "0 < min_table_side_cm <= max_table_side_cm."
+        )
 
     # Resolve the table geometry.
     table_simready_path = _resolve_generated_path(
@@ -209,7 +216,12 @@ def fit_table_to_clutter(
         required_size_cm[1],
         support_size_cm[1],
     )
-    uniform_scale = max(scale_x, scale_y)
+    longest_initial_side_cm = max(float(np.max(support_size_cm)), 1.0e-6)
+    min_allowed_scale = float(min_table_side_cm) / longest_initial_side_cm
+    max_allowed_scale = float(max_table_side_cm) / longest_initial_side_cm
+    uniform_scale = float(
+        np.clip(max(scale_x, scale_y), min_allowed_scale, max_allowed_scale)
+    )
     if scale_method == "complete_table_sam3d_raw_relative_uniform_xyz":
         table_scale_transform = GeometryManager.table_fit_uniform_scale_transform(
             center_xy=np.asarray(initial_support["center_xy"], dtype=np.float64),
@@ -239,6 +251,17 @@ def fit_table_to_clutter(
         final_table_mesh,
         target_aspect=float(required_size_cm[0] / max(required_size_cm[1], 1.0e-6)),
     )
+    final_longest_side_cm = float(np.max(final_support["size_xy"])) * 100.0
+    if not (
+        min_table_side_cm - 1.0e-3
+        <= final_longest_side_cm
+        <= max_table_side_cm + 1.0e-3
+    ):
+        raise RuntimeError(
+            "Fitted table support length is outside the configured range: "
+            f"{final_longest_side_cm:.3f} cm not in "
+            f"[{min_table_side_cm:.3f}, {max_table_side_cm:.3f}] cm."
+        )
     support_center = np.asarray(final_support["center"], dtype=np.float64)
     table_bounds = np.asarray(final_table_mesh.bounds, dtype=np.float64)
     table_bottom_z = float(table_bounds[0, 2])
@@ -362,6 +385,11 @@ def fit_table_to_clutter(
             "scale_y_raw": scale_y,
             "support_size_before_scale_cm": support_size_cm.tolist(),
             "complete_table_relative_scale_hint": relative_scale_hint,
+        },
+        "table_side_constraint_cm": {
+            "min": min_table_side_cm,
+            "max": max_table_side_cm,
+            "actual_longest_side": final_longest_side_cm,
         },
         "fit_check": {
             "fits_width": float(final_clutter_aabb_cm["size_xy"][0])
