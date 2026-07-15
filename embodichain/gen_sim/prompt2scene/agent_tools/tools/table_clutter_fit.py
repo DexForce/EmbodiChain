@@ -32,6 +32,7 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager im
 from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager.schemas import (
     GravityDropRequest,
 )
+from embodichain.gen_sim.prompt2scene.utils.log import log_warning
 
 __all__ = ["fit_table_to_clutter"]
 
@@ -45,6 +46,88 @@ def _resolve_generated_path(value: Any, output_root: Path) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (output_root.expanduser().resolve() / path).resolve()
+
+
+def _support_hull_aabb_size_cm(support: dict[str, Any]) -> np.ndarray:
+    """Return the XY AABB size of a detected tabletop support hull, in cm."""
+    support_hull = np.asarray(support.get("support_hull_xy", []), dtype=np.float64)
+    if support_hull.ndim != 2 or support_hull.shape[0] < 3 or support_hull.shape[1] != 2:
+        raise ValueError("Detected table support hull must contain at least three XY points.")
+    size_cm = (support_hull.max(axis=0) - support_hull.min(axis=0)) * 100.0
+    if not np.all(np.isfinite(size_cm)) or np.any(size_cm <= 0.0):
+        raise ValueError(f"Detected table support-hull AABB is invalid: {size_cm!r}")
+    return size_cm
+
+
+def _render_table_support_scale_comparison(
+    *,
+    initial_support: dict[str, Any],
+    final_support: dict[str, Any],
+    initial_hull_size_cm: np.ndarray,
+    final_hull_size_cm: np.ndarray,
+    output_path: Path,
+) -> Path | None:
+    """Write a before/after XY support-hull visualization when matplotlib is present."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import Polygon, Rectangle
+    except Exception as exc:
+        log_warning(f"Skipping table scale comparison render: {exc}")
+        return None
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6), dpi=180)
+    for ax, support, size_cm, label in (
+        (axes[0], initial_support, initial_hull_size_cm, "Before scaling"),
+        (axes[1], final_support, final_hull_size_cm, "After scaling"),
+    ):
+        hull = np.asarray(support["support_hull_xy"], dtype=np.float64)
+        quad = np.asarray(support.get("corners_xy", []), dtype=np.float64)
+        lo, hi = hull.min(axis=0), hull.max(axis=0)
+        ax.add_patch(
+            Polygon(hull, closed=True, facecolor="#4c9be8", edgecolor="#155c9f", alpha=0.35)
+        )
+        ax.add_patch(
+            Rectangle(
+                lo,
+                *(hi - lo),
+                fill=False,
+                edgecolor="#d62728",
+                linewidth=1.8,
+                label="support-hull XY AABB",
+            )
+        )
+        if quad.shape == (4, 2):
+            ax.add_patch(
+                Polygon(
+                    quad,
+                    closed=True,
+                    fill=False,
+                    edgecolor="#222222",
+                    linestyle="--",
+                    linewidth=1.3,
+                    label="inscribed support quad",
+                )
+            )
+        padding = max(float(np.max(hi - lo)) * 0.08, 0.01)
+        ax.set_xlim(float(lo[0] - padding), float(hi[0] + padding))
+        ax.set_ylim(float(lo[1] - padding), float(hi[1] + padding))
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_title(
+            f"{label}\nXY AABB: {size_cm[0]:.1f} × {size_cm[1]:.1f} cm"
+        )
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.45)
+        ax.legend(loc="best")
+    fig.suptitle("Tabletop support region used for table-side scaling", fontsize=13)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
+    fig.savefig(output_path, facecolor="white")
+    plt.close(fig)
+    return output_path
 
 
 def _gravity_settle_table_fit_internal_z_scene(
@@ -209,7 +292,11 @@ def fit_table_to_clutter(
                 required_size_cm = clutter_size_cm * ratio_xy
                 scale_method = "complete_table_sam3d_raw_relative_uniform_xyz"
                 relative_scale_hint = hint
+    # Use the projected tabletop-support hull for physical table-size limits.
+    # ``initial_support['size_xy']`` is an inner rectangle sized for the clutter
+    # aspect ratio and can be much smaller than the actual tabletop.
     support_size_cm = np.asarray(initial_support["size_xy"], dtype=np.float64) * 100.0
+    initial_support_hull_size_cm = _support_hull_aabb_size_cm(initial_support)
     scale_x = GeometryManager.table_fit_safe_positive_ratio(
         required_size_cm[0],
         support_size_cm[0],
@@ -218,7 +305,9 @@ def fit_table_to_clutter(
         required_size_cm[1],
         support_size_cm[1],
     )
-    longest_initial_side_cm = max(float(np.max(support_size_cm)), 1.0e-6)
+    longest_initial_side_cm = max(
+        float(np.max(initial_support_hull_size_cm)), 1.0e-6
+    )
     min_allowed_scale = float(min_table_side_cm) / longest_initial_side_cm
     max_allowed_scale = float(max_table_side_cm) / longest_initial_side_cm
     uniform_scale = float(
@@ -253,7 +342,8 @@ def fit_table_to_clutter(
         final_table_mesh,
         target_aspect=float(required_size_cm[0] / max(required_size_cm[1], 1.0e-6)),
     )
-    final_longest_side_cm = float(np.max(final_support["size_xy"])) * 100.0
+    final_support_hull_size_cm = _support_hull_aabb_size_cm(final_support)
+    final_longest_side_cm = float(np.max(final_support_hull_size_cm))
     if not (
         min_table_side_cm - _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM
         <= final_longest_side_cm
@@ -266,6 +356,13 @@ def fit_table_to_clutter(
             f"[{min_table_side_cm - _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM:.3f}, "
             f"{max_table_side_cm + _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM:.3f}] cm."
         )
+    scale_comparison_path = _render_table_support_scale_comparison(
+        initial_support=initial_support,
+        final_support=final_support,
+        initial_hull_size_cm=initial_support_hull_size_cm,
+        final_hull_size_cm=final_support_hull_size_cm,
+        output_path=output_dir / "table_support_scale_comparison.png",
+    )
     support_center = np.asarray(final_support["center"], dtype=np.float64)
     table_bounds = np.asarray(final_table_mesh.bounds, dtype=np.float64)
     table_bottom_z = float(table_bounds[0, 2])
@@ -388,13 +485,19 @@ def fit_table_to_clutter(
             "scale_x_raw": scale_x,
             "scale_y_raw": scale_y,
             "support_size_before_scale_cm": support_size_cm.tolist(),
+            "support_hull_aabb_before_scale_cm": initial_support_hull_size_cm.tolist(),
+            "support_hull_aabb_after_scale_cm": final_support_hull_size_cm.tolist(),
             "complete_table_relative_scale_hint": relative_scale_hint,
         },
         "table_side_constraint_cm": {
             "min": min_table_side_cm,
             "max": max_table_side_cm,
             "actual_longest_side": final_longest_side_cm,
+            "reference": "support_hull_xy_aabb",
         },
+        "table_support_scale_comparison_path": (
+            str(scale_comparison_path) if scale_comparison_path is not None else None
+        ),
         "fit_check": {
             "fits_width": float(final_clutter_aabb_cm["size_xy"][0])
             <= float(np.asarray(final_support_centered["size_xy"])[0] * 100.0),
