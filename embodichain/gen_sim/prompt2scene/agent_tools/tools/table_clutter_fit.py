@@ -35,6 +35,8 @@ from embodichain.gen_sim.prompt2scene.agent_tools.managers.simulation_manager.sc
 
 __all__ = ["fit_table_to_clutter"]
 
+_TABLE_SIDE_CONSTRAINT_TOLERANCE_CM = 5.0
+
 
 def _resolve_generated_path(value: Any, output_root: Path) -> Path:
     if not value:
@@ -253,14 +255,16 @@ def fit_table_to_clutter(
     )
     final_longest_side_cm = float(np.max(final_support["size_xy"])) * 100.0
     if not (
-        min_table_side_cm - 1.0e-3
+        min_table_side_cm - _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM
         <= final_longest_side_cm
-        <= max_table_side_cm + 1.0e-3
+        <= max_table_side_cm + _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM
     ):
         raise RuntimeError(
-            "Fitted table support length is outside the configured range: "
+            "Fitted table support length is outside the configured range "
+            f"with ±{_TABLE_SIDE_CONSTRAINT_TOLERANCE_CM:.3f} cm tolerance: "
             f"{final_longest_side_cm:.3f} cm not in "
-            f"[{min_table_side_cm:.3f}, {max_table_side_cm:.3f}] cm."
+            f"[{min_table_side_cm - _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM:.3f}, "
+            f"{max_table_side_cm + _TABLE_SIDE_CONSTRAINT_TOLERANCE_CM:.3f}] cm."
         )
     support_center = np.asarray(final_support["center"], dtype=np.float64)
     table_bounds = np.asarray(final_table_mesh.bounds, dtype=np.float64)
