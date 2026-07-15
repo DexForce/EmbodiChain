@@ -99,6 +99,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config im
     generate_action_agent_config_from_project,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
+    _format_coordinated_pickment_spec,
     make_relative_atom_actions_prompt,
     make_relative_task_graph,
     make_relative_task_prompt,
@@ -1281,6 +1282,28 @@ def test_task_description_generates_relative_front_of_config(
     }
 
 
+def test_coordinated_pickment_spec_includes_world_y_angle_limit() -> None:
+    placement = _RelativePlacementStepSpec(
+        intent="coordinated_pickment",
+        moved_source_uid="bowl",
+        reference_source_uid="bowl",
+        moved_runtime_uid="bowl",
+        reference_runtime_uid="bowl",
+        relation="front_of",
+        active_side="left",
+        release_offset=[0.15, 0.0, 0.0],
+        high_offset=[0.15, 0.0, 0.1],
+        reference_is_initial_pose=True,
+        release_position=[0.15, 0.0, 0.7],
+    )
+
+    action = json.loads(_format_coordinated_pickment_spec(placement))
+
+    assert action["cfg"][
+        "max_grasp_separation_angle_to_world_y_degrees"
+    ] == pytest.approx(60.0)
+
+
 def test_task_description_generates_coordinated_pickment_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1329,6 +1352,11 @@ def test_task_description_generates_coordinated_pickment_config(
     assert "object_held_by_gripper" not in json.dumps(success_spec)
     task_prompt = paths.task_prompt.read_text(encoding="utf-8")
     atom_actions = paths.atom_actions.read_text(encoding="utf-8")
+    task_graph = json.loads(paths.task_graph.read_text(encoding="utf-8"))
+    coordinated_action = task_graph["edges"][0]["left_arm_action"]
+    assert coordinated_action["cfg"][
+        "max_grasp_separation_angle_to_world_y_degrees"
+    ] == pytest.approx(60.0)
     for text in (task_prompt, atom_actions):
         assert '"atomic_action_class":"CoordinatedPickment"' in text
         assert '"robot_name":"dual_arm"' in text

@@ -88,6 +88,7 @@ action:
   direct_place_cartesian_waypoint_count: 4
   release_only_place_sample_interval: 10
   empty_hand_retreat_sample_interval: 30
+  coordinated_max_grasp_separation_angle_to_world_y_degrees: 60.0
 
 physics:
   background:
