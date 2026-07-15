@@ -184,8 +184,8 @@ def _dual_ur_profile(
             "right": 0.0,
         },
         grasp_runtime_defaults={
-            "grasp_max_open_length": 0.1,
-            "grasp_min_open_length": 0.02,
+            "max_open_length": 0.115,
+            "min_open_length": 0.02,
             "grasp_finger_length": 0.13,
         },
         prompt_description=(
@@ -229,8 +229,8 @@ def _dual_franka_profile() -> RobotProfile:
             "right": 0.0,
         },
         grasp_runtime_defaults={
-            "grasp_max_open_length": 0.1,
-            "grasp_min_open_length": 0.02,
+            "max_open_length": 0.115,
+            "min_open_length": 0.02,
             "grasp_finger_length": 0.058,
         },
         prompt_description=(
