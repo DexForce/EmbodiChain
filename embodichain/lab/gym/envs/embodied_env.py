@@ -527,7 +527,10 @@ class EmbodiedEnv(BaseEnv):
 
         # Save dataset before clearing buffers for environments that are being reset
         if save_data and self.dataset_manager:
-            if "save" in self.dataset_manager.available_modes:
+            if (
+                self.current_rollout_step > 0
+                and "save" in self.dataset_manager.available_modes
+            ):
 
                 # Dataset collection normally keeps successful episodes only.
                 # Recorders can opt in to retain failed episodes for debugging,
