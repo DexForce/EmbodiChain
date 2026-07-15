@@ -120,7 +120,7 @@ grasp:
   affordance_stabilization_steps: 10
   antipodal_n_sample: 10000
   antipodal_max_angle_degrees: 15.0
-  max_open_length: 0.11
+  max_open_length: 0.115
   min_open_length: 0.02
   finger_length: 0.13
   point_sample_dense: 0.012

@@ -4120,7 +4120,7 @@ def _build_object_semantics(
             GripperCollisionCfg,
             {
                 "max_open_length": runtime_kwargs.get(
-                    "grasp_max_open_length",
+                    "max_open_length",
                     _GRASP_RUNTIME_DEFAULTS.max_open_length,
                 ),
                 "finger_length": runtime_kwargs.get(
