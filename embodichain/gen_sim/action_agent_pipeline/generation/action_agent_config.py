@@ -24,6 +24,7 @@ import math
 import warnings
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    CONVEX_HULL_DEFAULTS,
     DEFAULT_MAX_EPISODES,
     DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
@@ -843,7 +844,7 @@ def _build_arrangement_line_bundle(
                 max_convex_hull_num=(
                     _moved_rigid_object_max_convex_hull_num(obj)
                     if obj.source_uid in moved_source_uids
-                    else 1
+                    else CONVEX_HULL_DEFAULTS["extra_rigid"]
                 ),
                 mesh_normalizer=mesh_normalizer,
             )
@@ -1074,7 +1075,7 @@ def _build_stacking_bundle(
                     else (
                         _container_rigid_object_max_convex_hull_num(obj)
                         if obj.source_uid == spec.anchor_source_uid
-                        else 1
+                        else CONVEX_HULL_DEFAULTS["extra_rigid"]
                     )
                 ),
                 mesh_normalizer=mesh_normalizer,
