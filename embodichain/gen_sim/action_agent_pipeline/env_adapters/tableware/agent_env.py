@@ -57,6 +57,9 @@ class AgenticGenSimEnv(EmbodiedEnv):
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
+        if self._agent_runtime_state_ready:
+            # Preserve the completed episode result before reset invalidates runtime caches.
+            self.episode_success_status |= self.is_task_success()
         self._agent_runtime_state_ready = False
         obs, info = super().reset(seed=seed, options=options)
         self._draw_arrangement_debug_markers()
