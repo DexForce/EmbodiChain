@@ -22,11 +22,12 @@ task:
 visual_material:
   table:
     entity_uid: table
-    material_uid: action_agent_table_wood
-    base_color: [1.0, 1.0, 1.0, 1.0]
-    base_color_texture: templates/textures/table_wood.jpg
-    metallic: 0.0
-    roughness: 0.7
+    texture_path: templates/textures/table_randomized
+    expected_texture_count: 3
+    random_texture_prob: 1.0
+    base_color_range: [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+    metallic_range: [0.0, 0.0]
+    roughness_range: [0.7, 0.7]
 
 geometry:
   target_body_scale: 1.3
@@ -35,6 +36,10 @@ geometry:
   dual_ur5:
     legacy_init_z: 0.5
     arm_component_z: 0.4
+    tabletop_clearance: 0.05
+  dual_ur10:
+    legacy_init_z: 0.5
+    arm_component_z: 0.3
     tabletop_clearance: 0.05
   dual_franka:
     tabletop_clearance: 0.05
@@ -45,7 +50,7 @@ relative_placement:
   on_release_z_offset: 0.2
   container_slot_min_offset: 0.04
   container_slot_max_offset: 0.12
-  container_slot_fraction: 0.25
+  container_slot_fraction: 0.10
   container_slot_max_fraction: 0.40
   container_slot_axis_tie_ratio: 0.10
   staging_z_delta: 0.10
@@ -68,7 +73,7 @@ arrangement:
 
 stacking:
   staging_z_delta: 0.05
-  clearance: 0.03
+  clearance: 0.05
   max_approach_retract_z: 0.8
   nested_release_z_offset: 0.12
   anchor_offset: 0.15

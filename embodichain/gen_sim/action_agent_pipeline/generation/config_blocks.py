@@ -282,27 +282,43 @@ def _make_common_events_config(
 def _table_visual_material_event_config() -> dict[str, Any]:
     texture_path = (
         Path(__file__).resolve().parent
-        / str(_TABLE_VISUAL_MATERIAL_DEFAULTS["base_color_texture"])
+        / str(_TABLE_VISUAL_MATERIAL_DEFAULTS["texture_path"])
     ).resolve()
-    if not texture_path.is_file():
+    if not texture_path.is_dir():
         raise FileNotFoundError(
-            f"Table visual material texture not found: {texture_path}"
+            f"Table visual material texture directory not found: {texture_path}"
+        )
+    texture_files = [
+        path
+        for path in texture_path.iterdir()
+        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+    ]
+    expected_texture_count = int(
+        _TABLE_VISUAL_MATERIAL_DEFAULTS["expected_texture_count"]
+    )
+    if len(texture_files) != expected_texture_count:
+        raise ValueError(
+            "Table visual material texture directory must contain exactly "
+            f"{expected_texture_count} images, found {len(texture_files)}: "
+            f"{texture_path}"
         )
 
     return {
-        "func": "set_rigid_object_visual_material",
+        "func": "randomize_visual_material",
         "mode": "startup",
         "params": {
             "entity_cfg": {
                 "uid": str(_TABLE_VISUAL_MATERIAL_DEFAULTS["entity_uid"]),
             },
-            "mat_cfg": {
-                "uid": str(_TABLE_VISUAL_MATERIAL_DEFAULTS["material_uid"]),
-                "base_color": list(_TABLE_VISUAL_MATERIAL_DEFAULTS["base_color"]),
-                "base_color_texture": str(texture_path),
-                "metallic": float(_TABLE_VISUAL_MATERIAL_DEFAULTS["metallic"]),
-                "roughness": float(_TABLE_VISUAL_MATERIAL_DEFAULTS["roughness"]),
-            },
+            "texture_path": str(texture_path),
+            "random_texture_prob": float(
+                _TABLE_VISUAL_MATERIAL_DEFAULTS["random_texture_prob"]
+            ),
+            "base_color_range": list(
+                _TABLE_VISUAL_MATERIAL_DEFAULTS["base_color_range"]
+            ),
+            "metallic_range": list(_TABLE_VISUAL_MATERIAL_DEFAULTS["metallic_range"]),
+            "roughness_range": list(_TABLE_VISUAL_MATERIAL_DEFAULTS["roughness_range"]),
         },
     }
 

@@ -138,6 +138,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _relative_release_offset,
     _side_relation_xy_offsets,
     _with_coordinated_side_release_height_offsets,
+    _with_coordinated_transport_geometry,
     _with_final_auto_arm_sides,
     _with_inside_container_slot_offsets,
     _with_on_surface_release_offsets,
@@ -244,7 +245,7 @@ def generate_action_agent_config_from_project(
         llm_model: Optional model override for role refinement.
         robot_profile: Robot profile ID or profile instance used to generate the
             robot config, runtime arm-slot mapping, prompts, and dataset robot
-            metadata. Defaults to ``dual_ur5``.
+            metadata. Defaults to ``dual_ur10``.
         target_body_scale: Uniform or xyz scale applied to generated target
             objects. Basket-like containers keep their source ``body_scale``.
         preserve_source_target_body_scale: If true, moved target objects keep
@@ -270,9 +271,9 @@ def generate_action_agent_config_from_project(
             scales are unchanged.
         source_mesh_x_rotation_degrees: Deprecated compatibility option. GLB
             frame conversion is handled by the GLB geometry baker.
-        load_template_material: If true, add the packaged table visual-material
-            startup event to generated configs. If false, preserve the source
-            scene's table appearance without loading the packaged texture.
+        load_template_material: If true, add a startup event that randomly
+            selects a table texture from the packaged action-agent texture
+            set. If false, preserve the source scene's table appearance.
         inside_container_slot_distance_scale: Multiplier for automatically
             generated inside-container slot offsets when multiple moved objects
             share one container. Values below ``1`` place release points closer
@@ -1804,6 +1805,7 @@ def _build_relative_placement_bundle(
             slot_distance_scale=inside_container_slot_distance_scale,
         )
         spec = _with_on_surface_release_offsets(spec, gym_config)
+        spec = _with_coordinated_transport_geometry(spec, gym_config)
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
         robot_profile=robot_profile,

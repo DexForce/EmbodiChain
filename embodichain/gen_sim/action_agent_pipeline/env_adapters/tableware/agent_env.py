@@ -47,6 +47,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
     """Config-driven agent environment for atomic-action tasks."""
 
     def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
+        self._agent_runtime_state_ready = False
         env_kwargs, agent_kwargs = _split_env_and_agent_kwargs(kwargs)
         super().__init__(cfg, **env_kwargs)
         if bool(getattr(self, "ignore_terminations_during_agent", False)):
@@ -56,9 +57,11 @@ class AgenticGenSimEnv(EmbodiedEnv):
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
+        self._agent_runtime_state_ready = False
         obs, info = super().reset(seed=seed, options=options)
         self._draw_arrangement_debug_markers()
         self.get_states()
+        self._agent_runtime_state_ready = True
         return obs, info
 
     def _draw_arrangement_debug_markers(self) -> None:
@@ -108,6 +111,12 @@ class AgenticGenSimEnv(EmbodiedEnv):
         self._arrangement_debug_drawn = True
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
+        if not getattr(self, "_agent_runtime_state_ready", False):
+            return torch.zeros(
+                self.num_envs,
+                dtype=torch.bool,
+                device=self.device,
+            )
         return evaluate_configured_success(self)
 
     def compute_task_state(self, **kwargs) -> tuple[torch.Tensor, torch.Tensor, dict]:

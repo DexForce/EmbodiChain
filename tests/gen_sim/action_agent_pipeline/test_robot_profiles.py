@@ -64,7 +64,7 @@ _DUAL_FRANKA_HOME_QPOS = [
 
 
 def test_robot_profile_registry_exposes_default_and_switchable_profiles() -> None:
-    assert DEFAULT_ROBOT_PROFILE_ID == "dual_ur5"
+    assert DEFAULT_ROBOT_PROFILE_ID == "dual_ur10"
     assert set(available_robot_profile_ids()) == {
         "dual_ur3",
         "dual_ur5",
@@ -73,7 +73,8 @@ def test_robot_profile_registry_exposes_default_and_switchable_profiles() -> Non
     }
     assert "franka" in available_robot_profile_choices()
     assert "franka_v3" not in available_robot_profile_choices()
-    assert resolve_robot_profile(None).id == "dual_ur5"
+    assert resolve_robot_profile(None).id == "dual_ur10"
+    assert build_parser().parse_args([]).robot_profile == "dual_ur10"
     assert resolve_robot_profile("ur10").id == "dual_ur10"
     assert resolve_robot_profile("panda").id == "dual_franka"
 
@@ -81,6 +82,34 @@ def test_robot_profile_registry_exposes_default_and_switchable_profiles() -> Non
         resolve_robot_profile("dual_unknown")
     with pytest.raises(ValueError, match="Unknown robot profile"):
         resolve_robot_profile("franka_v3")
+
+
+@pytest.mark.parametrize(
+    ("profile_name", "expected_id", "expected_uid", "expected_ur_type"),
+    [
+        ("ur3", "dual_ur3", "DualUR3", "ur3"),
+        ("ur5", "dual_ur5", "DualUR5", "ur5"),
+        ("ur10", "dual_ur10", "DualUR10", "ur10"),
+    ],
+)
+def test_dual_ur_profile_factory_preserves_selected_robot_variant(
+    profile_name: str,
+    expected_id: str,
+    expected_uid: str,
+    expected_ur_type: str,
+) -> None:
+    profile = resolve_robot_profile(profile_name)
+    robot = profile.robot_config_factory(0.5)
+
+    assert profile.id == expected_id
+    assert robot["uid"] == expected_uid
+    assert robot["solver_cfg"]["left_arm"]["ur_type"] == expected_ur_type
+    assert robot["solver_cfg"]["right_arm"]["ur_type"] == expected_ur_type
+
+    arm_component = robot["urdf_cfg"]["components"][0]
+    assert profile.robot_init_z_from_table_top(0.75) + arm_component["transform"][2][
+        3
+    ] == pytest.approx(0.8)
 
 
 def test_dual_ur_robot_templates_switch_arm_variant_without_mutating_ur5() -> None:
@@ -92,6 +121,8 @@ def test_dual_ur_robot_templates_switch_arm_variant_without_mutating_ur5() -> No
     assert ur5["init_pos"] == pytest.approx([-2.0, 0.0, 0.42])
     assert ur5["solver_cfg"]["left_arm"]["ur_type"] == "ur5"
     assert ur5["drive_pros"]["max_effort"]["left_arm"] == pytest.approx(100000.0)
+    assert ur5["urdf_cfg"]["components"][0]["transform"][1][3] == pytest.approx(-1.45)
+    assert ur5["urdf_cfg"]["components"][0]["transform"][2][3] == pytest.approx(0.4)
 
     assert ur3["uid"] == "DualUR3"
     assert ur3["init_pos"] == pytest.approx([-2.0, 0.0, 0.43])
@@ -108,6 +139,9 @@ def test_dual_ur_robot_templates_switch_arm_variant_without_mutating_ur5() -> No
     assert _arm_urdf_paths(ur10) == {
         "UniversalRobots/UR10/UR10.urdf",
     }
+    assert ur10["urdf_cfg"]["components"][0]["transform"][1][3] == pytest.approx(-1.1)
+    assert ur10["urdf_cfg"]["components"][0]["transform"][2][3] == pytest.approx(0.3)
+    assert ur10["solver_cfg"]["left_arm"]["tcp"][2][3] == pytest.approx(0.19)
 
 
 def test_dual_ur_robotiq_tcp_rotates_grasp_x_onto_gripper_y_axis() -> None:
@@ -116,13 +150,13 @@ def test_dual_ur_robotiq_tcp_rotates_grasp_x_onto_gripper_y_axis() -> None:
     assert robot["solver_cfg"]["left_arm"]["tcp"] == [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.16],
+        [0.0, 0.0, 1.0, 0.17],
         [0.0, 0.0, 0.0, 1.0],
     ]
     assert robot["solver_cfg"]["right_arm"]["tcp"] == [
         [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.21],
+        [0.0, 0.0, 1.0, 0.17],
         [0.0, 0.0, 0.0, 1.0],
     ]
 

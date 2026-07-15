@@ -29,6 +29,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _DUAL_FRANKA_TABLETOP_CLEARANCE,
+    _DUAL_UR10_ARM_COMPONENT_Z,
+    _DUAL_UR10_LEGACY_INIT_Z,
+    _DUAL_UR10_TABLETOP_CLEARANCE,
     _DUAL_UR5_ARM_COMPONENT_Z,
     _DUAL_UR5_LEGACY_INIT_Z,
     _DUAL_UR5_TABLETOP_CLEARANCE,
@@ -42,7 +45,7 @@ __all__ = [
     "resolve_robot_profile",
 ]
 
-DEFAULT_ROBOT_PROFILE_ID = "dual_ur5"
+DEFAULT_ROBOT_PROFILE_ID = "dual_ur10"
 _PI = 3.141592653589793
 _ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 _ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
@@ -147,6 +150,9 @@ def _dual_ur_profile(
     profile_id: str,
     ur_type: str,
     display_name: str,
+    tabletop_clearance: float = _DUAL_UR5_TABLETOP_CLEARANCE,
+    arm_component_z: float = _DUAL_UR5_ARM_COMPONENT_Z,
+    legacy_init_z: float = _DUAL_UR5_LEGACY_INIT_Z,
 ) -> RobotProfile:
     return RobotProfile(
         id=profile_id,
@@ -158,6 +164,9 @@ def _dual_ur_profile(
                 robot_init_z=robot_init_z,
             )
         ),
+        tabletop_clearance=tabletop_clearance,
+        arm_component_z=arm_component_z,
+        legacy_init_z=legacy_init_z,
         agent_arm_slots={
             "left": {
                 "arm": "right_arm",
@@ -252,6 +261,9 @@ _ROBOT_PROFILES: dict[str, RobotProfile] = {
         profile_id="dual_ur10",
         ur_type="ur10",
         display_name="Dual UR10",
+        tabletop_clearance=_DUAL_UR10_TABLETOP_CLEARANCE,
+        arm_component_z=_DUAL_UR10_ARM_COMPONENT_Z,
+        legacy_init_z=_DUAL_UR10_LEGACY_INIT_Z,
     ),
     "dual_franka": _dual_franka_profile(),
 }
