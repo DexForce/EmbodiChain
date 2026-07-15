@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    CONVEX_HULL_DEFAULTS,
     DEFAULT_TASK_NAME,
     generation_defaults_section,
 )
@@ -81,22 +82,12 @@ _PHYSICS_DEFAULTS = generation_defaults_section("physics")
 _VISUAL_MATERIAL_DEFAULTS = generation_defaults_section("visual_material")
 _BACKGROUND_DEFAULTS = _PHYSICS_DEFAULTS["background"]
 _RIGID_OBJECT_DEFAULTS = _PHYSICS_DEFAULTS["rigid_object"]
-_CONVEX_HULL_DEFAULTS = _PHYSICS_DEFAULTS["convex_hulls"]
 _TABLE_VISUAL_MATERIAL_DEFAULTS = _VISUAL_MATERIAL_DEFAULTS["table"]
-_BACKGROUND_MAX_CONVEX_HULL_NUM = int(_BACKGROUND_DEFAULTS["max_convex_hull_num"])
-_TARGET_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["target"])
-_CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
-_MOVED_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["moved"])
-_EXTRA_RIGID_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["extra_rigid"])
 _ROBOT_VIEW_LABEL = "robot_view"
 _AUDIENCE_VIEW_LABEL = "audience_view"
 _AUDIENCE_VIEW_Z_ROTATION_DEGREES = 180.0
 
-_BACKGROUND_ATTRS = {
-    key: float(value)
-    for key, value in _BACKGROUND_DEFAULTS.items()
-    if key != "max_convex_hull_num"
-}
+_BACKGROUND_ATTRS = {key: float(value) for key, value in _BACKGROUND_DEFAULTS.items()}
 
 _RIGID_OBJECT_ATTRS = {
     key: (
@@ -705,10 +696,7 @@ def _make_background_config(
         "body_type": "kinematic",
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
-        "max_convex_hull_num": _role_limited_max_convex_hull_num(
-            obj,
-            _BACKGROUND_MAX_CONVEX_HULL_NUM,
-        ),
+        "max_convex_hull_num": CONVEX_HULL_DEFAULTS["table"],
     }
 
 
@@ -732,10 +720,7 @@ def _make_extra_background_config(
         "body_type": str(obj.config.get("body_type", "static")),
         "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
         "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
-        "max_convex_hull_num": _role_limited_max_convex_hull_num(
-            obj,
-            _BACKGROUND_MAX_CONVEX_HULL_NUM,
-        ),
+        "max_convex_hull_num": CONVEX_HULL_DEFAULTS["table"],
     }
     return config
 
@@ -753,7 +738,7 @@ def _make_target_object_config(
         obj,
         runtime_uid,
         target_scale,
-        max_convex_hull_num=_TARGET_MAX_CONVEX_HULL_NUM,
+        max_convex_hull_num=CONVEX_HULL_DEFAULTS["target"],
         mesh_fpath=replacement.mesh_path if replacement else None,
         mesh_normalizer=mesh_normalizer,
     )
@@ -773,10 +758,7 @@ def _make_container_object_config(
         obj,
         runtime_uid,
         body_scale,
-        max_convex_hull_num=_role_limited_max_convex_hull_num(
-            obj,
-            _CONTAINER_MAX_CONVEX_HULL_NUM,
-        ),
+        max_convex_hull_num=CONVEX_HULL_DEFAULTS["container"],
         mesh_normalizer=mesh_normalizer,
     )
 
@@ -850,10 +832,7 @@ def _make_extra_rigid_object_config(
         obj,
         runtime_uid or _normalize_runtime_uid(obj.source_uid),
         body_scale,
-        max_convex_hull_num=_role_limited_max_convex_hull_num(
-            obj,
-            _EXTRA_RIGID_MAX_CONVEX_HULL_NUM,
-        ),
+        max_convex_hull_num=CONVEX_HULL_DEFAULTS["extra_rigid"],
         mesh_normalizer=mesh_normalizer,
     )
     config["body_type"] = "dynamic"
@@ -869,19 +848,12 @@ def _make_relative_rigid_object_config(
     max_convex_hull_num: int,
     mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
-    if max_convex_hull_num == _TARGET_MAX_CONVEX_HULL_NUM:
-        resolved_max_convex_hull_num = max_convex_hull_num
-    else:
-        resolved_max_convex_hull_num = _role_limited_max_convex_hull_num(
-            obj,
-            max_convex_hull_num,
-        )
     config = _make_rigid_object_config(
         scene_dir,
         obj,
         runtime_uid,
         body_scale,
-        max_convex_hull_num=resolved_max_convex_hull_num,
+        max_convex_hull_num=max_convex_hull_num,
         mesh_normalizer=mesh_normalizer,
     )
     config["body_type"] = "dynamic"
@@ -919,24 +891,14 @@ def _make_rigid_object_config(
     return config
 
 
-def _role_limited_max_convex_hull_num(
-    obj: _SceneObject,
-    role_max_convex_hull_num: int,
-) -> int:
-    source_max_convex_hull_num = obj.config.get("max_convex_hull_num")
-    if source_max_convex_hull_num is None:
-        return role_max_convex_hull_num
-    return max(1, min(int(source_max_convex_hull_num), role_max_convex_hull_num))
-
-
-def _moved_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
+def _moved_rigid_object_max_convex_hull_num(_obj: _SceneObject) -> int:
     """Return the configured convex-decomposition limit for a moved object."""
-    return _role_limited_max_convex_hull_num(obj, _MOVED_MAX_CONVEX_HULL_NUM)
+    return CONVEX_HULL_DEFAULTS["moved"]
 
 
-def _container_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
+def _container_rigid_object_max_convex_hull_num(_obj: _SceneObject) -> int:
     """Return the configured convex-decomposition limit for a container."""
-    return _role_limited_max_convex_hull_num(obj, _CONTAINER_MAX_CONVEX_HULL_NUM)
+    return CONVEX_HULL_DEFAULTS["container"]
 
 
 def _relative_rigid_object_max_convex_hull_num(
@@ -948,15 +910,14 @@ def _relative_rigid_object_max_convex_hull_num(
             placement.relation == "inside"
             and runtime_uid == placement.reference_runtime_uid
         ):
-            return _CONTAINER_MAX_CONVEX_HULL_NUM
-    task_uids = {
-        uid
-        for placement in spec.placements
-        for uid in (placement.moved_runtime_uid, placement.reference_runtime_uid)
-    }
-    if runtime_uid in task_uids:
-        return _TARGET_MAX_CONVEX_HULL_NUM
-    return _EXTRA_RIGID_MAX_CONVEX_HULL_NUM
+            return CONVEX_HULL_DEFAULTS["container"]
+    if any(runtime_uid == placement.moved_runtime_uid for placement in spec.placements):
+        return CONVEX_HULL_DEFAULTS["moved"]
+    if any(
+        runtime_uid == placement.reference_runtime_uid for placement in spec.placements
+    ):
+        return CONVEX_HULL_DEFAULTS["target"]
+    return CONVEX_HULL_DEFAULTS["extra_rigid"]
 
 
 def _relative_static_background_max_convex_hull_num(
@@ -968,8 +929,8 @@ def _relative_static_background_max_convex_hull_num(
             placement.relation == "inside"
             and runtime_uid == placement.reference_runtime_uid
         ):
-            return _CONTAINER_MAX_CONVEX_HULL_NUM
-    return _BACKGROUND_MAX_CONVEX_HULL_NUM
+            return CONVEX_HULL_DEFAULTS["container"]
+    return CONVEX_HULL_DEFAULTS["table"]
 
 
 def _make_shape_config(

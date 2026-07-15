@@ -23,6 +23,7 @@ from embodichain.utils.utility import load_config
 
 __all__ = [
     "ACTION_AGENT_CONFIG_DEFAULTS",
+    "CONVEX_HULL_DEFAULTS",
     "DEFAULT_MAX_EPISODES",
     "DEFAULT_MAX_EPISODE_STEPS",
     "DEFAULT_SURFACE_RELEASE_CLEARANCE",
@@ -58,8 +59,33 @@ def generation_defaults_section(name: str) -> dict[str, Any]:
     return section
 
 
+def _load_convex_hull_defaults() -> dict[str, Any]:
+    physics = generation_defaults_section("physics")
+    convex_hulls = physics.get("convex_hulls")
+    if not isinstance(convex_hulls, dict):
+        raise ValueError("Generation default physics.convex_hulls must be a mapping.")
+    value_paths = (
+        ("target",),
+        ("container",),
+        ("moved",),
+        ("extra_rigid",),
+        ("table",),
+    )
+    for value_path in value_paths:
+        value: Any = convex_hulls
+        for key in value_path:
+            value = value.get(key) if isinstance(value, dict) else None
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            dotted_path = ".".join(("physics", "convex_hulls", *value_path))
+            raise ValueError(
+                f"Generation default {dotted_path} must be a positive integer."
+            )
+    return convex_hulls
+
+
 _TASK_DEFAULTS = generation_defaults_section("task")
 _GEOMETRY_DEFAULTS = generation_defaults_section("geometry")
+CONVEX_HULL_DEFAULTS = _load_convex_hull_defaults()
 
 DEFAULT_TASK_NAME = str(_TASK_DEFAULTS["default_name"])
 DEFAULT_MAX_EPISODES = int(_TASK_DEFAULTS["max_episodes"])

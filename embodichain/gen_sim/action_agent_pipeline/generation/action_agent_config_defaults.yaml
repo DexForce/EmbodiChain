@@ -95,7 +95,6 @@ physics:
     static_friction: 0.95
     dynamic_friction: 0.9
     restitution: 0.01
-    max_convex_hull_num: 1
   rigid_object:
     mass: 0.2
     static_friction: 0.95
@@ -115,6 +114,7 @@ physics:
     container: 24
     moved: 16
     extra_rigid: 1
+    table: 1
 
 grasp:
   affordance_stabilization_steps: 10

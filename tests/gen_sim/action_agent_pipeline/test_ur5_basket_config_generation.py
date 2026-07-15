@@ -26,6 +26,8 @@ import re
 import struct
 
 import pytest
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import CONVEX_HULL_DEFAULTS
 import torch
 
 from embodichain.lab.sim.cfg import RobotCfg
@@ -442,6 +444,18 @@ def test_action_agent_config_generator_uses_parallel_handoff(
     assert rigid_objects["right_apple"]["body_type"] == "dynamic"
     assert rigid_objects["wicker_basket"]["body_type"] == "dynamic"
     assert background_objects["table"]["body_scale"] == [1.0, 1.0, 1.0]
+    assert rigid_objects["left_apple"]["max_convex_hull_num"] == (
+        CONVEX_HULL_DEFAULTS["target"]
+    )
+    assert rigid_objects["right_apple"]["max_convex_hull_num"] == (
+        CONVEX_HULL_DEFAULTS["target"]
+    )
+    assert rigid_objects["wicker_basket"]["max_convex_hull_num"] == (
+        CONVEX_HULL_DEFAULTS["container"]
+    )
+    assert background_objects["table"]["max_convex_hull_num"] == (
+        CONVEX_HULL_DEFAULTS["table"]
+    )
     for obj in rigid_objects.values():
         assert obj["acd_method"] == "vhacd"
         assert obj["shape"]["acd_method"] == "vhacd"
@@ -4454,7 +4468,9 @@ def test_explicit_stack_uses_named_object_anchor(
     ]
     assert all(target["offset"][:2] == [0.0, 0.0] for target in place_targets)
     rigid_by_uid = {obj["uid"]: obj for obj in gym_config["rigid_object"]}
-    assert rigid_by_uid["red_cube"]["max_convex_hull_num"] == 32
+    assert rigid_by_uid["red_cube"]["max_convex_hull_num"] == (
+        CONVEX_HULL_DEFAULTS["container"]
+    )
     assert {
         (term["object"], term["support"])
         for term in gym_config["env"]["extensions"]["agent_success"]["terms"]
