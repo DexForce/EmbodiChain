@@ -1173,6 +1173,7 @@ def _make_stacking_dataset_config(
                     "task_description": spec.task_description,
                     "data_type": "sim",
                 },
+                "save_failed_episodes": True,
                 "use_videos": True,
             },
         }
