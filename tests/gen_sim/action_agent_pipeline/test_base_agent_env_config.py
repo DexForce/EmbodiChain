@@ -19,10 +19,21 @@ from __future__ import annotations
 from unittest.mock import Mock
 
 import pytest
+import torch
 
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (
     AgenticGenSimEnv,
 )
+
+
+class _SingleEnvAgenticGenSimEnv(AgenticGenSimEnv):
+    @property
+    def num_envs(self):
+        return 1
+
+    @property
+    def device(self):
+        return torch.device("cpu")
 
 
 def test_agentic_gen_sim_env_rejects_reserved_agent_config_keys() -> None:
@@ -30,6 +41,38 @@ def test_agentic_gen_sim_env_rejects_reserved_agent_config_keys() -> None:
 
     with pytest.raises(ValueError, match="reserved keys: task_name"):
         env._validate_agent_config_keys("TaskAgent", {"task_name": "bad"})
+
+
+def test_agentic_gen_sim_env_returns_false_before_runtime_state_is_ready() -> None:
+    env = _SingleEnvAgenticGenSimEnv.__new__(_SingleEnvAgenticGenSimEnv)
+    env._agent_runtime_state_ready = False
+    env.agent_success = {
+        "type": "object_lifted",
+        "object": "tray",
+        "min_height": 0.08,
+    }
+
+    success = env.is_task_success()
+
+    assert success.tolist() == [False]
+
+
+def test_agentic_gen_sim_env_preserves_success_validation_after_runtime_ready() -> None:
+    env = _SingleEnvAgenticGenSimEnv.__new__(_SingleEnvAgenticGenSimEnv)
+    env._agent_runtime_state_ready = True
+    env.agent_success = {
+        "type": "object_lifted",
+        "object": "tray",
+        "min_height": 0.08,
+    }
+    tray = Mock()
+    tray.get_local_pose.return_value = torch.eye(4).unsqueeze(0)
+    env.sim = Mock()
+    env.sim.get_rigid_object.return_value = tray
+    env.obj_info = {}
+
+    with pytest.raises(ValueError, match="requires an initial height"):
+        env.is_task_success()
 
 
 def test_agentic_gen_sim_env_rejects_reserved_common_agent_config_keys() -> None:

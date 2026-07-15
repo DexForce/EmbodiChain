@@ -50,7 +50,7 @@ relative_placement:
   on_release_z_offset: 0.2
   container_slot_min_offset: 0.04
   container_slot_max_offset: 0.12
-  container_slot_fraction: 0.25
+  container_slot_fraction: 0.10
   container_slot_max_fraction: 0.40
   container_slot_axis_tie_ratio: 0.10
   staging_z_delta: 0.10

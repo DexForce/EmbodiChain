@@ -59,6 +59,18 @@ class _FakeObject:
         pose[:, :3, 3] = self.position
         return pose
 
+    def get_vertices(self, env_ids=None, scale: bool = True):
+        vertices = torch.tensor(
+            [
+                [-0.5, -0.2, -0.05],
+                [-0.5, 0.2, 0.05],
+                [0.5, -0.2, 0.05],
+                [0.5, 0.2, -0.05],
+            ],
+            dtype=torch.float32,
+        )
+        return [vertices]
+
 
 def test_object_lifted_requires_initial_height() -> None:
     env = _FakeEnv()
@@ -91,3 +103,120 @@ def test_object_lifted_uses_recorded_initial_height() -> None:
     )
 
     assert success.tolist() == [True]
+
+
+def test_object_held_by_both_grippers_uses_surface_distance() -> None:
+    env = _FakeEnv()
+    env.sim = _FakeSim({"tray": _FakeObject([0.0, 0.0, 0.2])})
+    env.close_state = torch.tensor([0.0])
+    env.open_state = torch.tensor([0.05])
+    env.get_current_gripper_state_agent = lambda: (
+        torch.tensor([0.0]),
+        torch.tensor([0.0]),
+    )
+    left_pose = torch.eye(4).unsqueeze(0)
+    right_pose = torch.eye(4).unsqueeze(0)
+    left_pose[:, :3, 3] = torch.tensor([0.55, 0.0, 0.2])
+    right_pose[:, :3, 3] = torch.tensor([-0.55, 0.0, 0.2])
+    env.get_current_xpos_agent = lambda: (left_pose, right_pose)
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "type": "object_held_by_both_grippers",
+            "object": "tray",
+            "max_distance": 0.10,
+        },
+    )
+
+    assert success.tolist() == [True]
+    assert torch.linalg.norm(left_pose[0, :3, 3] - torch.tensor([0.0, 0.0, 0.2])) > 0.5
+
+
+def test_both_grippers_open_and_clear_of_object() -> None:
+    env = _FakeEnv()
+    env.sim = _FakeSim({"tray": _FakeObject([0.0, 0.0, 0.2])})
+    env.close_state = torch.tensor([0.0])
+    env.open_state = torch.tensor([0.05])
+    env.get_current_gripper_state_agent = lambda: (
+        torch.tensor([0.05]),
+        torch.tensor([0.05]),
+    )
+    left_pose = torch.eye(4).unsqueeze(0)
+    right_pose = torch.eye(4).unsqueeze(0)
+    left_pose[:, :3, 3] = torch.tensor([0.8, 0.0, 0.2])
+    right_pose[:, :3, 3] = torch.tensor([-0.8, 0.0, 0.2])
+    env.get_current_xpos_agent = lambda: (left_pose, right_pose)
+
+    success = evaluate_configured_success(
+        env,
+        {
+            "op": "all",
+            "terms": [
+                {"type": "both_grippers_open"},
+                {
+                    "type": "grippers_clear_of_object",
+                    "object": "tray",
+                    "min_distance": 0.05,
+                },
+            ],
+        },
+    )
+
+    assert success.tolist() == [True]
+
+
+def test_both_grippers_open_returns_false_before_gripper_cache_init() -> None:
+    env = _FakeEnv()
+
+    def get_uninitialized_gripper_state():
+        return (
+            env.left_arm_current_gripper_state,
+            env.right_arm_current_gripper_state,
+        )
+
+    env.get_current_gripper_state_agent = get_uninitialized_gripper_state
+
+    success = evaluate_configured_success(env, {"type": "both_grippers_open"})
+
+    assert success.tolist() == [False]
+
+
+def test_both_grippers_open_returns_false_before_open_state_init() -> None:
+    env = _FakeEnv()
+    env.get_current_gripper_state_agent = lambda: (
+        torch.tensor([0.05]),
+        torch.tensor([0.05]),
+    )
+
+    success = evaluate_configured_success(env, {"type": "both_grippers_open"})
+
+    assert success.tolist() == [False]
+
+
+def test_both_arms_at_initial_qpos_checks_each_arm() -> None:
+    env = _FakeEnv()
+    env.left_arm_init_qpos = torch.tensor([[0.1, 0.2]])
+    env.right_arm_init_qpos = torch.tensor([[-0.1, -0.2]])
+    env.get_current_qpos_agent = lambda: (
+        torch.tensor([[0.11, 0.19]]),
+        torch.tensor([[-0.12, -0.18]]),
+    )
+
+    success = evaluate_configured_success(
+        env,
+        {"type": "both_arms_at_initial_qpos", "tolerance": 0.05},
+    )
+
+    assert success.tolist() == [True]
+
+    env.get_current_qpos_agent = lambda: (
+        torch.tensor([[0.11, 0.19]]),
+        torch.tensor([[-0.2, -0.18]]),
+    )
+    success = evaluate_configured_success(
+        env,
+        {"type": "both_arms_at_initial_qpos", "tolerance": 0.05},
+    )
+
+    assert success.tolist() == [False]
