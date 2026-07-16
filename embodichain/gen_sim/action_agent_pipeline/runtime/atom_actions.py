@@ -75,7 +75,12 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     GRASP_ANNOTATOR_CACHE_DIR,
 )
 from embodichain.utils.logger import log_info, log_warning
-from embodichain.utils.math import get_offset_pose, pose_inv
+from embodichain.utils.math import (
+    get_offset_pose,
+    matrix_from_quat,
+    pose_inv,
+    quat_from_matrix,
+)
 
 __all__ = [
     "AtomicActionSpec",
@@ -2066,6 +2071,10 @@ def _resolve_coordinated_pickment_target(
         object_target_pose=object_target_pose,
         pre_grasp_distance=float(spec.cfg.get("pre_grasp_distance", 0.10)),
         lift_height=float(spec.cfg.get("lift_height", 0.08)),
+        sample_interval=int(spec.cfg.get("sample_interval", 120)),
+        hand_interp_steps=int(spec.cfg.get("hand_interp_steps", 10)),
+        hold_steps=int(spec.cfg.get("hold_steps", 4)),
+        object_motion_keyframes=int(spec.cfg.get("object_motion_keyframes", 6)),
         max_grasp_separation_angle_to_world_y_degrees=world_y_angle_limit,
         payload_uids=tuple(spec.target_object.get("payloads", [])),
         env=env,
@@ -2362,93 +2371,121 @@ def _default_coordinated_object_to_eef(
     object_target_pose: torch.Tensor | None = None,
     pre_grasp_distance: float = 0.10,
     lift_height: float = 0.08,
+    sample_interval: int = 120,
+    hand_interp_steps: int = 10,
+    hold_steps: int = 4,
+    object_motion_keyframes: int = 6,
     max_grasp_separation_angle_to_world_y_degrees: float | None = None,
     payload_uids: Sequence[str] = (),
     env=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    input_was_batched = object_initial_pose.ndim == 3
+    object_initial_pose = _ensure_batched_pose_tensor(object_initial_pose, device)
+    if object_target_pose is not None:
+        object_target_pose = _ensure_batched_pose_tensor(object_target_pose, device)
+        if object_target_pose.shape[0] != object_initial_pose.shape[0]:
+            raise ValueError(
+                "CoordinatedPickment initial and target pose batches must match."
+            )
     vertices = semantics.geometry.get("mesh_vertices")
     if vertices is None:
         vertices = semantics.entity.get_vertices(env_ids=[0], scale=True)[0]
     vertices = torch.as_tensor(vertices, dtype=torch.float32, device=device)
     if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
         raise ValueError("CoordinatedPickment mesh_vertices must have shape (N, 3).")
-    # Coordinated grasp selection is performed on a representative single env.
-    representative_initial_pose = (
-        object_initial_pose[0] if object_initial_pose.ndim == 3 else object_initial_pose
-    )
-    representative_target_pose = (
-        object_target_pose[0]
-        if object_target_pose is not None and object_target_pose.ndim == 3
-        else object_target_pose
-    )
-    candidates = _coordinated_grasp_pair_candidates(
-        vertices=vertices,
-        object_initial_pose=representative_initial_pose,
-        object_label=object_label,
-        max_grasp_separation_angle_to_world_y_degrees=(
-            max_grasp_separation_angle_to_world_y_degrees
-        ),
-        env=env,
-        device=device,
-    )
-    if not candidates:
-        if max_grasp_separation_angle_to_world_y_degrees is not None:
-            raise ValueError(
-                "No CoordinatedPickment grasp candidate satisfies the configured "
-                "world-Y separation-angle constraint."
-            )
-        raise ValueError("No CoordinatedPickment grasp candidate was generated.")
-    candidates = _filter_coordinated_payload_collision_candidates(
-        candidates,
-        payload_uids=payload_uids,
-        object_initial_pose=representative_initial_pose,
-        env=env,
-        device=device,
-    )
-    if not candidates:
-        raise ValueError(
-            "No CoordinatedPickment grasp candidate avoids the declared payloads."
+    left_transforms = []
+    right_transforms = []
+    for env_id in range(object_initial_pose.shape[0]):
+        env_context = "" if object_initial_pose.shape[0] == 1 else f" in env {env_id}"
+        initial_pose = object_initial_pose[env_id]
+        target_pose = None if object_target_pose is None else object_target_pose[env_id]
+        candidates = _coordinated_grasp_pair_candidates(
+            vertices=vertices,
+            object_initial_pose=initial_pose,
+            object_label=object_label,
+            max_grasp_separation_angle_to_world_y_degrees=(
+                max_grasp_separation_angle_to_world_y_degrees
+            ),
+            env=env,
+            device=device,
+            env_id=env_id,
         )
-    selected = _select_ik_feasible_coordinated_grasp_pair(
-        candidates,
-        object_initial_pose=representative_initial_pose,
-        object_target_pose=representative_target_pose,
-        pre_grasp_distance=pre_grasp_distance,
-        lift_height=lift_height,
-        env=env,
-        device=device,
-    )
-    if selected is not None:
-        if max_grasp_separation_angle_to_world_y_degrees is not None:
-            selected_angle = _coordinated_grasp_pair_world_y_angle_degrees(
-                selected,
-                object_initial_pose=representative_initial_pose,
-            )
-            if selected_angle > 1e-3:
-                log_warning(
-                    "Exact world-Y CoordinatedPickment grasp is unavailable; "
-                    f"using {selected_angle:.1f} degrees within the configured "
-                    f"{max_grasp_separation_angle_to_world_y_degrees:.1f}-degree "
-                    "limit."
+        if not candidates:
+            if max_grasp_separation_angle_to_world_y_degrees is not None:
+                raise ValueError(
+                    "No CoordinatedPickment grasp candidate satisfies the configured "
+                    f"world-Y separation-angle constraint in env {env_id}."
                 )
-        elif selected.axis_kind != "long_axis":
-            log_warning(
-                "Preferred long-axis CoordinatedPickment grasp is unavailable; "
-                f"using {selected.axis_kind} fallback."
-            )
-        return selected.left_object_to_eef, selected.right_object_to_eef
-    if _has_coordinated_ik_api(env):
-        if max_grasp_separation_angle_to_world_y_degrees is not None:
             raise ValueError(
-                "No IK-feasible CoordinatedPickment grasp candidate satisfies "
-                "the configured world-Y separation-angle constraint."
+                f"No CoordinatedPickment grasp candidate was generated in env {env_id}."
             )
-        log_warning(
-            "No IK-feasible CoordinatedPickment grasp candidate found; "
-            "falling back to the best heuristic candidate."
+        candidates = _filter_coordinated_payload_collision_candidates(
+            candidates,
+            payload_uids=payload_uids,
+            object_initial_pose=initial_pose,
+            env=env,
+            device=device,
+            env_id=env_id,
         )
-    fallback = min(candidates, key=lambda pair: (pair.priority, pair.score))
-    return fallback.left_object_to_eef, fallback.right_object_to_eef
+        if not candidates:
+            raise ValueError(
+                "No CoordinatedPickment grasp candidate avoids the declared "
+                f"payloads in env {env_id}."
+            )
+        selected = _select_ik_feasible_coordinated_grasp_pair(
+            candidates,
+            object_initial_pose=initial_pose,
+            object_target_pose=target_pose,
+            pre_grasp_distance=pre_grasp_distance,
+            lift_height=lift_height,
+            sample_interval=sample_interval,
+            hand_interp_steps=hand_interp_steps,
+            hold_steps=hold_steps,
+            object_motion_keyframes=object_motion_keyframes,
+            env=env,
+            device=device,
+            env_id=env_id,
+        )
+        if selected is not None:
+            if max_grasp_separation_angle_to_world_y_degrees is not None:
+                selected_angle = _coordinated_grasp_pair_world_y_angle_degrees(
+                    selected,
+                    object_initial_pose=initial_pose,
+                )
+                if selected_angle > 1e-3:
+                    log_warning(
+                        "Exact world-Y CoordinatedPickment grasp is unavailable"
+                        f"{env_context}; using {selected_angle:.1f} degrees within "
+                        "the configured "
+                        f"{max_grasp_separation_angle_to_world_y_degrees:.1f}-degree "
+                        "limit."
+                    )
+            elif selected.axis_kind != "long_axis":
+                log_warning(
+                    "Preferred long-axis CoordinatedPickment grasp is unavailable"
+                    f"{env_context}; using {selected.axis_kind} fallback."
+                )
+        else:
+            if _has_coordinated_ik_api(env):
+                if max_grasp_separation_angle_to_world_y_degrees is not None:
+                    raise ValueError(
+                        "No IK-feasible CoordinatedPickment grasp candidate satisfies "
+                        "the configured world-Y separation-angle constraint in "
+                        f"env {env_id}."
+                    )
+                log_warning(
+                    "No IK-feasible CoordinatedPickment grasp candidate found in "
+                    f"env {env_id}; falling back to the best heuristic candidate."
+                )
+            selected = min(candidates, key=lambda pair: (pair.priority, pair.score))
+        left_transforms.append(selected.left_object_to_eef)
+        right_transforms.append(selected.right_object_to_eef)
+
+    left_result = torch.stack(left_transforms)
+    right_result = torch.stack(right_transforms)
+    if not input_was_batched:
+        return left_result[0], right_result[0]
+    return left_result, right_result
 
 
 def _filter_coordinated_payload_collision_candidates(
@@ -2458,6 +2495,7 @@ def _filter_coordinated_payload_collision_candidates(
     object_initial_pose: torch.Tensor,
     env,
     device,
+    env_id: int = 0,
 ) -> list[_CoordinatedGraspPair]:
     if not payload_uids or env is None:
         return list(candidates)
@@ -2466,7 +2504,7 @@ def _filter_coordinated_payload_collision_candidates(
         payload = env.sim.get_rigid_object(str(payload_uid))
         if payload is None:
             raise ValueError(f"Unknown coordinated payload uid: {payload_uid!r}.")
-        vertices = _object_world_vertices(payload, device)
+        vertices = _object_world_vertices(payload, device, env_id=env_id)
         payload_bounds.append(
             (
                 vertices.min(dim=0).values - 0.02,
@@ -2496,6 +2534,7 @@ def _coordinated_grasp_pair_candidates(
     max_grasp_separation_angle_to_world_y_degrees: float | None = None,
     env,
     device,
+    env_id: int = 0,
 ) -> list[_CoordinatedGraspPair]:
     mins = vertices.min(dim=0).values
     maxs = vertices.max(dim=0).values
@@ -2524,6 +2563,7 @@ def _coordinated_grasp_pair_candidates(
                 priority=world_lateral_priority,
                 env=env,
                 device=device,
+                env_id=env_id,
             )
         )
     else:
@@ -2536,6 +2576,7 @@ def _coordinated_grasp_pair_candidates(
                 max_angle_degrees=(max_grasp_separation_angle_to_world_y_degrees),
                 env=env,
                 device=device,
+                env_id=env_id,
             )
         )
     principal_axis_pairs = _coordinated_novel_principal_axis_pairs(
@@ -2558,6 +2599,7 @@ def _coordinated_grasp_pair_candidates(
                 axis_kind="long_axis" if axis_rank == 0 else "short_axis",
                 env=env,
                 device=device,
+                env_id=env_id,
             )
         )
     local_priority_offset = len(principal_axis_pairs) * 20 + principal_priority_offset
@@ -2573,6 +2615,7 @@ def _coordinated_grasp_pair_candidates(
                 object_initial_pose=object_initial_pose,
                 env=env,
                 device=device,
+                env_id=env_id,
             )
         )
     side_axis_index = _coordinated_side_axis_index(extents)
@@ -2600,6 +2643,7 @@ def _coordinated_grasp_pair_candidates(
         object_initial_pose=object_initial_pose,
         env=env,
         device=device,
+        env_id=env_id,
     )
     candidates.append(
         _make_coordinated_grasp_pair(
@@ -2608,6 +2652,7 @@ def _coordinated_grasp_pair_candidates(
             object_initial_pose=object_initial_pose,
             env=env,
             device=device,
+            env_id=env_id,
             priority=len(top_down_axis_indices) * 20 + 10,
             score_bias=10.0,
             axis_kind="side",
@@ -2654,6 +2699,7 @@ def _coordinated_top_down_grasp_candidates(
     object_initial_pose: torch.Tensor,
     env,
     device,
+    env_id: int = 0,
 ) -> list[_CoordinatedGraspPair]:
     axis_local = torch.zeros(3, dtype=torch.float32, device=device)
     axis_local[axis_index] = 1.0
@@ -2674,6 +2720,7 @@ def _coordinated_top_down_grasp_candidates(
         axis_kind=axis_kind,
         env=env,
         device=device,
+        env_id=env_id,
     )
 
 
@@ -2689,6 +2736,7 @@ def _coordinated_projected_top_down_grasp_candidates(
     axis_kind: str,
     env,
     device,
+    env_id: int = 0,
 ) -> list[_CoordinatedGraspPair]:
     world_vertices = _world_vertices_from_local_vertices(object_initial_pose, vertices)
     world_bounds_min = world_vertices.min(dim=0).values
@@ -2730,6 +2778,7 @@ def _coordinated_projected_top_down_grasp_candidates(
                 object_initial_pose=object_initial_pose,
                 env=env,
                 device=device,
+                env_id=env_id,
                 priority=priority + inset_rank,
                 score_bias=0.0,
                 axis_kind=axis_kind,
@@ -2747,6 +2796,7 @@ def _coordinated_world_lateral_top_down_grasp_candidates(
     priority: int,
     env,
     device,
+    env_id: int = 0,
 ) -> list[_CoordinatedGraspPair]:
     world_bounds_min, world_bounds_max = _world_bounds_from_local_vertices(
         object_initial_pose,
@@ -2780,6 +2830,7 @@ def _coordinated_world_lateral_top_down_grasp_candidates(
                 object_initial_pose=object_initial_pose,
                 env=env,
                 device=device,
+                env_id=env_id,
                 priority=priority + inset_rank,
                 score_bias=0.0,
                 axis_kind="world_lateral",
@@ -2797,6 +2848,7 @@ def _coordinated_world_y_constrained_top_down_grasp_candidates(
     max_angle_degrees: float,
     env,
     device,
+    env_id: int = 0,
 ) -> list[_CoordinatedGraspPair]:
     angle_magnitudes = [0.0]
     if max_angle_degrees > 1e-6:
@@ -2838,6 +2890,7 @@ def _coordinated_world_y_constrained_top_down_grasp_candidates(
                     ),
                     env=env,
                     device=device,
+                    env_id=env_id,
                 )
             )
     return candidates
@@ -3059,6 +3112,7 @@ def _make_coordinated_top_down_world_grasp_pair(
     priority: int,
     score_bias: float,
     axis_kind: str,
+    env_id: int = 0,
 ) -> _CoordinatedGraspPair:
     z_axis = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
     x_axis = _orthogonalized_axis(closing_axis, z_axis)
@@ -3086,6 +3140,7 @@ def _make_coordinated_top_down_world_grasp_pair(
         second_world,
         env=env,
         device=device,
+        env_id=env_id,
     )
     return _make_coordinated_grasp_pair(
         _world_pose_to_object_pose(object_initial_pose, left_world),
@@ -3093,6 +3148,7 @@ def _make_coordinated_top_down_world_grasp_pair(
         object_initial_pose=object_initial_pose,
         env=env,
         device=device,
+        env_id=env_id,
         priority=priority,
         score_bias=score_bias,
         axis_kind=axis_kind,
@@ -3142,6 +3198,7 @@ def _make_coordinated_grasp_pair(
     priority: int,
     score_bias: float,
     axis_kind: str,
+    env_id: int = 0,
 ) -> _CoordinatedGraspPair:
     left_world = object_initial_pose @ left_object_to_eef
     right_world = object_initial_pose @ right_object_to_eef
@@ -3150,6 +3207,7 @@ def _make_coordinated_grasp_pair(
         right_world,
         env=env,
         device=device,
+        env_id=env_id,
     )
     return _CoordinatedGraspPair(
         left_object_to_eef=left_object_to_eef,
@@ -3185,12 +3243,13 @@ def _coordinated_grasp_pair_score(
     *,
     env,
     device,
+    env_id: int = 0,
 ) -> float:
     left_pos = left_world[:3, 3]
     right_pos = right_world[:3, 3]
     score = -0.2 * abs(float(left_pos[1] - right_pos[1]))
     score += 0.2 * abs(float(left_pos[0] - right_pos[0]))
-    arm_positions = _current_arm_positions(env, device)
+    arm_positions = _current_arm_positions(env, device, env_id=env_id)
     if arm_positions is not None:
         left_arm_pos, right_arm_pos = arm_positions
         score += float(torch.linalg.norm(left_arm_pos - left_pos))
@@ -3241,10 +3300,11 @@ def _assign_coordinated_world_grasp_pair_to_arms(
     *,
     env,
     device,
+    env_id: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     first_world = first_pose[:3, 3]
     second_world = second_pose[:3, 3]
-    arm_positions = _current_arm_positions(env, device)
+    arm_positions = _current_arm_positions(env, device, env_id=env_id)
     if arm_positions is not None:
         left_pos, right_pos = arm_positions
         direct_cost = torch.linalg.norm(left_pos - first_world) + torch.linalg.norm(
@@ -3270,10 +3330,11 @@ def _assign_coordinated_local_grasp_pair_to_arms(
     object_initial_pose: torch.Tensor,
     env,
     device,
+    env_id: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     first_world = _transform_local_point(object_initial_pose, first_pose[:3, 3])
     second_world = _transform_local_point(object_initial_pose, second_pose[:3, 3])
-    arm_positions = _current_arm_positions(env, device)
+    arm_positions = _current_arm_positions(env, device, env_id=env_id)
     if arm_positions is not None:
         left_pos, right_pos = arm_positions
         direct_cost = torch.linalg.norm(left_pos - first_world) + torch.linalg.norm(
@@ -3299,65 +3360,141 @@ def _select_ik_feasible_coordinated_grasp_pair(
     object_target_pose: torch.Tensor | None,
     pre_grasp_distance: float,
     lift_height: float,
+    sample_interval: int = 120,
+    hand_interp_steps: int = 10,
+    hold_steps: int = 4,
+    object_motion_keyframes: int = 6,
     env,
     device,
+    env_id: int = 0,
 ) -> _CoordinatedGraspPair | None:
     if not _has_coordinated_ik_api(env):
         return candidates[0] if candidates else None
     for candidate in candidates:
-        if _coordinated_grasp_pair_is_ik_feasible(
+        selected = _select_coordinated_grasp_pair_tcp_roll_variant(
             candidate,
             object_initial_pose=object_initial_pose,
             object_target_pose=object_target_pose,
             pre_grasp_distance=pre_grasp_distance,
             lift_height=lift_height,
+            sample_interval=sample_interval,
+            hand_interp_steps=hand_interp_steps,
+            hold_steps=hold_steps,
+            object_motion_keyframes=object_motion_keyframes,
             env=env,
             device=device,
-        ):
-            return candidate
+            env_id=env_id,
+        )
+        if selected is not None:
+            return selected
     return None
 
 
-def _coordinated_grasp_pair_is_ik_feasible(
+def _select_coordinated_grasp_pair_tcp_roll_variant(
     candidate: _CoordinatedGraspPair,
     *,
     object_initial_pose: torch.Tensor,
     object_target_pose: torch.Tensor | None,
     pre_grasp_distance: float,
     lift_height: float,
+    sample_interval: int = 120,
+    hand_interp_steps: int = 10,
+    hold_steps: int = 4,
+    object_motion_keyframes: int = 6,
     env,
     device,
-) -> bool:
-    left_sequence = _coordinated_grasp_ik_sequence(
+    env_id: int = 0,
+) -> _CoordinatedGraspPair | None:
+    left_seed, right_seed = _current_coordinated_arm_qpos(env, device, env_id=env_id)
+    left_object_to_eef = _select_coordinated_arm_tcp_roll_variant(
+        candidate.left_object_to_eef,
         object_initial_pose=object_initial_pose,
         object_target_pose=object_target_pose,
-        object_to_eef=candidate.left_object_to_eef,
         pre_grasp_distance=pre_grasp_distance,
         lift_height=lift_height,
-    )
-    right_sequence = _coordinated_grasp_ik_sequence(
-        object_initial_pose=object_initial_pose,
-        object_target_pose=object_target_pose,
-        object_to_eef=candidate.right_object_to_eef,
-        pre_grasp_distance=pre_grasp_distance,
-        lift_height=lift_height,
-    )
-    left_seed, right_seed = _current_coordinated_arm_qpos(env, device)
-    left_ok, _ = _coordinated_sequence_ik(
-        env,
-        left_sequence,
+        sample_interval=sample_interval,
+        hand_interp_steps=hand_interp_steps,
+        hold_steps=hold_steps,
+        object_motion_keyframes=object_motion_keyframes,
+        env=env,
         is_left=True,
         qpos_seed=left_seed,
+        env_id=env_id,
     )
-    if not left_ok:
-        return False
-    right_ok, _ = _coordinated_sequence_ik(
-        env,
-        right_sequence,
+    if left_object_to_eef is None:
+        return None
+    right_object_to_eef = _select_coordinated_arm_tcp_roll_variant(
+        candidate.right_object_to_eef,
+        object_initial_pose=object_initial_pose,
+        object_target_pose=object_target_pose,
+        pre_grasp_distance=pre_grasp_distance,
+        lift_height=lift_height,
+        sample_interval=sample_interval,
+        hand_interp_steps=hand_interp_steps,
+        hold_steps=hold_steps,
+        object_motion_keyframes=object_motion_keyframes,
+        env=env,
         is_left=False,
         qpos_seed=right_seed,
+        env_id=env_id,
     )
-    return right_ok
+    if right_object_to_eef is None:
+        return None
+    if (
+        left_object_to_eef is candidate.left_object_to_eef
+        and right_object_to_eef is candidate.right_object_to_eef
+    ):
+        return candidate
+    return _CoordinatedGraspPair(
+        left_object_to_eef=left_object_to_eef,
+        right_object_to_eef=right_object_to_eef,
+        priority=candidate.priority,
+        score=candidate.score,
+        axis_kind=candidate.axis_kind,
+    )
+
+
+def _select_coordinated_arm_tcp_roll_variant(
+    object_to_eef: torch.Tensor,
+    *,
+    object_initial_pose: torch.Tensor,
+    object_target_pose: torch.Tensor | None,
+    pre_grasp_distance: float,
+    lift_height: float,
+    sample_interval: int,
+    hand_interp_steps: int,
+    hold_steps: int,
+    object_motion_keyframes: int,
+    env,
+    is_left: bool,
+    qpos_seed: torch.Tensor | None,
+    env_id: int,
+) -> torch.Tensor | None:
+    mirrored_object_to_eef = object_to_eef.clone()
+    mirrored_object_to_eef[:3, 0] = -mirrored_object_to_eef[:3, 0]
+    mirrored_object_to_eef[:3, 1] = -mirrored_object_to_eef[:3, 1]
+    for variant in (object_to_eef, mirrored_object_to_eef):
+        sequence = _coordinated_grasp_ik_sequence(
+            object_initial_pose=object_initial_pose,
+            object_target_pose=object_target_pose,
+            object_to_eef=variant,
+            pre_grasp_distance=pre_grasp_distance,
+            lift_height=lift_height,
+            sample_interval=sample_interval,
+            hand_interp_steps=hand_interp_steps,
+            hold_steps=hold_steps,
+            object_motion_keyframes=object_motion_keyframes,
+        )
+        ok, _ = _coordinated_sequence_ik(
+            env,
+            sequence,
+            is_left=is_left,
+            qpos_seed=qpos_seed,
+            env_id=env_id,
+        )
+        if ok:
+            return variant
+    return None
 
 
 def _coordinated_grasp_ik_sequence(
@@ -3367,17 +3504,119 @@ def _coordinated_grasp_ik_sequence(
     object_to_eef: torch.Tensor,
     pre_grasp_distance: float,
     lift_height: float,
+    sample_interval: int = 120,
+    hand_interp_steps: int = 10,
+    hold_steps: int = 4,
+    object_motion_keyframes: int = 6,
 ) -> list[torch.Tensor]:
     grasp = object_initial_pose @ object_to_eef
     pre_grasp = grasp.clone()
     pre_grasp[:3, 3] = grasp[:3, 3] - grasp[:3, 2] * float(pre_grasp_distance)
     lift_object_pose = object_initial_pose.clone()
     lift_object_pose[2, 3] += float(lift_height)
-    lift = lift_object_pose @ object_to_eef
-    sequence = [pre_grasp, grasp, lift]
+    segments = _coordinated_pickment_segment_lengths(
+        sample_interval=sample_interval,
+        hand_interp_steps=hand_interp_steps,
+        hold_steps=hold_steps,
+    )
+    lift_object_poses = _interpolate_coordinated_object_pose(
+        object_initial_pose,
+        lift_object_pose,
+        segments["lift"],
+        include_orientation=False,
+    )
+    lift_keyframes = _coordinated_motion_keyframe_indices(
+        segments["lift"], object_motion_keyframes, object_initial_pose.device
+    )
+    sequence = [pre_grasp, grasp]
+    sequence.extend(
+        lift_object_poses[waypoint_idx] @ object_to_eef
+        for waypoint_idx in lift_keyframes.tolist()
+    )
     if object_target_pose is not None:
-        sequence.append(object_target_pose @ object_to_eef)
+        move_object_poses = _interpolate_coordinated_object_pose(
+            lift_object_pose,
+            object_target_pose,
+            segments["move"],
+            include_orientation=True,
+        )
+        move_keyframes = _coordinated_motion_keyframe_indices(
+            segments["move"], object_motion_keyframes, object_initial_pose.device
+        )
+        sequence.extend(
+            move_object_poses[waypoint_idx] @ object_to_eef
+            for waypoint_idx in move_keyframes.tolist()
+        )
     return sequence
+
+
+def _coordinated_pickment_segment_lengths(
+    *,
+    sample_interval: int,
+    hand_interp_steps: int,
+    hold_steps: int,
+) -> dict[str, int]:
+    n_close = max(2, int(hand_interp_steps))
+    n_hold = max(0, int(hold_steps))
+    n_motion = int(sample_interval) - n_close - n_hold
+    n_approach = n_motion // 3
+    n_lift = n_motion // 3
+    n_move = n_motion - n_approach - n_lift
+    if min(n_approach, n_lift, n_move) < 2:
+        raise ValueError("Not enough waypoints for CoordinatedPickment IK precheck.")
+    return {
+        "approach": n_approach,
+        "close": n_close,
+        "lift": n_lift,
+        "move": n_move,
+        "hold": n_hold,
+    }
+
+
+def _coordinated_motion_keyframe_indices(
+    n_waypoints: int,
+    object_motion_keyframes: int,
+    device,
+) -> torch.Tensor:
+    n_keyframes = min(max(2, int(object_motion_keyframes)), int(n_waypoints))
+    return (
+        torch.linspace(0, n_waypoints - 1, steps=n_keyframes, device=device)
+        .round()
+        .to(dtype=torch.long)
+    )
+
+
+def _interpolate_coordinated_object_pose(
+    start_pose: torch.Tensor,
+    end_pose: torch.Tensor,
+    n_waypoints: int,
+    *,
+    include_orientation: bool,
+) -> torch.Tensor:
+    weights = torch.linspace(
+        0.0,
+        1.0,
+        steps=n_waypoints,
+        device=start_pose.device,
+        dtype=start_pose.dtype,
+    )
+    poses = start_pose.unsqueeze(0).repeat(n_waypoints, 1, 1)
+    poses[:, :3, 3] = torch.lerp(
+        start_pose[None, :3, 3],
+        end_pose[None, :3, 3],
+        weights[:, None],
+    )
+    if not include_orientation:
+        return poses
+
+    start_quat = quat_from_matrix(start_pose[:3, :3])
+    end_quat = quat_from_matrix(end_pose[:3, :3])
+    if float(torch.sum(start_quat * end_quat)) < 0.0:
+        end_quat = -end_quat
+    quat = torch.lerp(start_quat[None], end_quat[None], weights[:, None])
+    quat = quat / torch.linalg.norm(quat, dim=-1, keepdim=True).clamp_min(1e-8)
+    poses[:, :3, :3] = matrix_from_quat(quat)
+    return poses
 
 
 def _coordinated_sequence_ik(
@@ -3386,6 +3625,7 @@ def _coordinated_sequence_ik(
     *,
     is_left: bool,
     qpos_seed: torch.Tensor | None,
+    env_id: int = 0,
 ) -> tuple[bool, torch.Tensor | None]:
     seed = qpos_seed
     for pose in poses:
@@ -3394,12 +3634,13 @@ def _coordinated_sequence_ik(
                 pose,
                 is_left=is_left,
                 qpos_seed=seed,
-                env_ids=[0],
+                env_ids=[env_id],
             )
         except Exception as exc:
             side = "left" if is_left else "right"
             log_warning(
-                f"CoordinatedPickment IK precheck failed for {side} arm in env 0: "
+                "CoordinatedPickment IK precheck failed for "
+                f"{side} arm in env {env_id}: "
                 f"{exc}"
             )
             return False, seed
@@ -3418,6 +3659,7 @@ def _has_coordinated_ik_api(env) -> bool:
 def _current_coordinated_arm_qpos(
     env,
     device,
+    env_id: int = 0,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     if env is None or not hasattr(env, "get_current_qpos_agent"):
         return None, None
@@ -3430,11 +3672,11 @@ def _current_coordinated_arm_qpos(
     if left_qpos.ndim == 1:
         left_qpos = left_qpos.unsqueeze(0)
     else:
-        left_qpos = left_qpos[0:1]
+        left_qpos = left_qpos[env_id : env_id + 1]
     if right_qpos.ndim == 1:
         right_qpos = right_qpos.unsqueeze(0)
     else:
-        right_qpos = right_qpos[0:1]
+        right_qpos = right_qpos[env_id : env_id + 1]
     return left_qpos, right_qpos
 
 
@@ -3448,7 +3690,9 @@ def _transform_local_point(object_pose: torch.Tensor, local_point: torch.Tensor)
     return (object_pose @ homogeneous)[:3]
 
 
-def _current_arm_positions(env, device) -> tuple[torch.Tensor, torch.Tensor] | None:
+def _current_arm_positions(
+    env, device, env_id: int = 0
+) -> tuple[torch.Tensor, torch.Tensor] | None:
     if env is None or not hasattr(env, "get_current_xpos_agent"):
         return None
     try:
@@ -3457,7 +3701,7 @@ def _current_arm_positions(env, device) -> tuple[torch.Tensor, torch.Tensor] | N
         right_pose = _ensure_batched_pose_tensor(right_pose, device)
     except Exception:
         return None
-    return left_pose[0, :3, 3], right_pose[0, :3, 3]
+    return left_pose[env_id, :3, 3], right_pose[env_id, :3, 3]
 
 
 def _resolve_pose_target(env, spec: AtomicActionSpec):
@@ -3657,14 +3901,14 @@ def _surface_support_top_z(env, support_uid: str, device) -> float:
     return float(world_vertices[:, 2].max())
 
 
-def _object_world_vertices(obj, device) -> torch.Tensor:
-    vertices = _object_mesh_vertices(obj, device)
+def _object_world_vertices(obj, device, env_id: int = 0) -> torch.Tensor:
+    vertices = _object_mesh_vertices(obj, device, env_id=env_id)
     pose = _ensure_batched_pose_tensor(obj.get_local_pose(to_matrix=True), device)
-    return (pose[0, :3, :3] @ vertices.T).T + pose[0, :3, 3]
+    return (pose[env_id, :3, :3] @ vertices.T).T + pose[env_id, :3, 3]
 
 
-def _object_mesh_vertices(obj, device) -> torch.Tensor:
-    vertices = obj.get_vertices(env_ids=[0], scale=True)
+def _object_mesh_vertices(obj, device, env_id: int = 0) -> torch.Tensor:
+    vertices = obj.get_vertices(env_ids=[env_id], scale=True)
     if isinstance(vertices, (list, tuple)):
         vertices = vertices[0]
     vertices = torch.as_tensor(vertices, dtype=torch.float32, device=device)
