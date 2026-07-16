@@ -3686,6 +3686,91 @@ def test_arrangement_plan_rejects_opposite_arm_for_outer_slot(
     assert by_slot[3].target_xy[1] == 0.3
 
 
+def test_arrangement_plan_falls_back_to_initial_side_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_y_by_uid = {
+        "bottle_right": -0.228926,
+        "cup_right": -0.115338,
+        "bottle_left": 0.077234,
+        "cup_left": 0.214809,
+    }
+    categories = {
+        "bottle_right": "bottle",
+        "bottle_left": "bottle",
+        "cup_right": "cup",
+        "cup_left": "cup",
+    }
+    steps = tuple(
+        _arrangement_test_step(uid, category=categories[uid])
+        for uid in (
+            "bottle_right",
+            "bottle_left",
+            "cup_right",
+            "cup_left",
+        )
+    )
+    spec = _ArrangementLineSpec(
+        table_source_uid="table",
+        task_description="arrange two bottles and two cups in a row",
+        task_prompt_summary="arrange objects by category",
+        basic_background_notes="",
+        order_by="explicit",
+        order_direction="given",
+        axis="world_y",
+        anchor="table_center",
+        steps=steps,
+        line_origin_xy=[0.0, 0.0],
+        spacing=0.12,
+        layout_clearance=0.025,
+        category_order=("bottle", "cup"),
+    )
+    rigid_configs = {
+        uid: {"init_pos": [0.0, initial_y, 0.5]}
+        for uid, initial_y in initial_y_by_uid.items()
+    }
+    objects = [
+        action_agent_config_generation._SceneObject(
+            source_uid=uid,
+            source_role="rigid_object",
+            config=config,
+        )
+        for uid, config in rigid_configs.items()
+    ]
+
+    def footprint(obj: _SceneObject, scene_dir: Path) -> _ArrangementFootprint:
+        del scene_dir
+        initial_y = initial_y_by_uid[obj.source_uid]
+        return _ArrangementFootprint(
+            xy_bounds=([-0.025, initial_y - 0.025], [0.025, initial_y + 0.025]),
+            half_extent=0.025,
+        )
+
+    monkeypatch.setattr(
+        arrangement_spec_generation,
+        "_arrangement_object_footprint",
+        footprint,
+    )
+
+    result = _arrangement_plan_execution(
+        spec,
+        [[0.0, -0.18], [0.0, -0.06], [0.0, 0.06], [0.0, 0.18]],
+        generated_objects=objects,
+        rigid_configs=rigid_configs,
+    )
+
+    assert result is not None
+    spatial_direction, execution_steps = result
+    assert spatial_direction == "initial_side_order"
+    assert all(not step.cross_side for step in execution_steps)
+    assert {step.runtime_uid: step.target_xy[1] for step in execution_steps} == {
+        "bottle_right": -0.18,
+        "cup_right": -0.06,
+        "bottle_left": 0.06,
+        "cup_left": 0.18,
+    }
+
+
 def test_arrangement_success_uses_semantic_slots_not_execution_order() -> None:
     slot_one = replace(
         _arrangement_test_step("slot_one", target_y=0.2),
