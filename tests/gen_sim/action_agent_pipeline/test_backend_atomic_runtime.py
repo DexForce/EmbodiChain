@@ -43,6 +43,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import (
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionResult,
+    AntipodalAffordance,
     CoordinatedHeldObjectState,
     CoordinatedPickmentCfg,
     CoordinatedPickmentTarget,
@@ -54,6 +55,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffectorCfg,
     MoveHeldObjectCfg,
     MoveJointsCfg,
+    ObjectSemantics,
     PickUpCfg,
     PlaceCfg,
     WorldState,
@@ -1699,7 +1701,7 @@ def test_coordinated_pickment_world_y_limit_uses_in_cone_ik_fallback() -> None:
     ) == pytest.approx(30.0, abs=1e-3)
 
 
-def test_coordinated_sequence_ik_scopes_multi_env_precheck_to_env_zero() -> None:
+def test_coordinated_sequence_ik_scopes_precheck_to_requested_env() -> None:
     env = SimpleNamespace(num_envs=4)
     requested_env_ids = []
 
@@ -1717,11 +1719,173 @@ def test_coordinated_sequence_ik_scopes_multi_env_precheck_to_env_zero() -> None
         poses,
         is_left=True,
         qpos_seed=torch.zeros(1, 2),
+        env_id=2,
     )
 
     assert success is True
     assert qpos.flatten().tolist() == pytest.approx([0.1, 0.2])
-    assert requested_env_ids == [[0], [0]]
+    assert requested_env_ids == [[2], [2]]
+
+
+def test_coordinated_grasp_precheck_covers_motion_keyframes() -> None:
+    object_initial_pose = torch.eye(4)
+    object_target_pose = torch.eye(4)
+    object_target_pose[0, 3] = 0.3
+
+    sequence = atom_actions._coordinated_grasp_ik_sequence(
+        object_initial_pose=object_initial_pose,
+        object_target_pose=object_target_pose,
+        object_to_eef=torch.eye(4),
+        pre_grasp_distance=0.1,
+        lift_height=0.1,
+        sample_interval=120,
+        hand_interp_steps=10,
+        hold_steps=20,
+        object_motion_keyframes=6,
+    )
+
+    assert len(sequence) == 14
+    assert sequence[0][:3, 3].tolist() == pytest.approx([0.0, 0.0, -0.1])
+    assert sequence[1][:3, 3].tolist() == pytest.approx([0.0, 0.0, 0.0])
+    assert sequence[2][:3, 3].tolist() == pytest.approx([0.0, 0.0, 0.0])
+    assert sequence[7][:3, 3].tolist() == pytest.approx([0.0, 0.0, 0.1])
+    assert sequence[8][:3, 3].tolist() == pytest.approx([0.0, 0.0, 0.1])
+    assert sequence[-1][:3, 3].tolist() == pytest.approx([0.3, 0.0, 0.0])
+
+
+def test_coordinated_grasp_selection_is_per_environment() -> None:
+    device = torch.device("cpu")
+    env = SimpleNamespace(robot=SimpleNamespace(device=device))
+    env.get_current_qpos_agent = lambda: (
+        torch.zeros(2, 2),
+        torch.zeros(2, 2),
+    )
+    left_xpos = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
+    right_xpos = left_xpos.clone()
+    left_xpos[:, 1, 3] = 0.4
+    right_xpos[:, 1, 3] = -0.4
+    env.get_current_xpos_agent = lambda: (left_xpos, right_xpos)
+    requested_env_ids = []
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        del target_xpos, is_left
+        assert qpos_seed.shape == (1, 2)
+        requested_env_ids.append(env_ids)
+        return True, torch.tensor([0.1, 0.2])
+
+    env.get_arm_ik = fake_get_arm_ik
+    initial_poses = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
+    yaw = torch.deg2rad(torch.tensor(35.0))
+    initial_poses[1, 0, 0] = torch.cos(yaw)
+    initial_poses[1, 0, 1] = -torch.sin(yaw)
+    initial_poses[1, 1, 0] = torch.sin(yaw)
+    initial_poses[1, 1, 1] = torch.cos(yaw)
+    target_poses = initial_poses.clone()
+    target_poses[:, 0, 3] += 0.2
+    vertices = torch.tensor(
+        [
+            [-0.25, -0.15, 0.0],
+            [0.25, -0.15, 0.0],
+            [-0.25, 0.15, 0.0],
+            [0.25, 0.15, 0.0],
+            [-0.25, -0.15, 0.08],
+            [0.25, -0.15, 0.08],
+            [-0.25, 0.15, 0.08],
+            [0.25, 0.15, 0.08],
+        ]
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={"mesh_vertices": vertices},
+        label="plastic_bowl",
+    )
+
+    left_object_to_eef, right_object_to_eef = (
+        atom_actions._default_coordinated_object_to_eef(
+            semantics,
+            device,
+            initial_poses,
+            object_target_pose=target_poses,
+            max_grasp_separation_angle_to_world_y_degrees=60.0,
+            env=env,
+        )
+    )
+
+    assert left_object_to_eef.shape == (2, 4, 4)
+    assert right_object_to_eef.shape == (2, 4, 4)
+    assert not torch.allclose(left_object_to_eef[0], left_object_to_eef[1])
+    assert {env_ids[0] for env_ids in requested_env_ids} == {0, 1}
+    for env_id in range(2):
+        left_world = initial_poses[env_id] @ left_object_to_eef[env_id]
+        right_world = initial_poses[env_id] @ right_object_to_eef[env_id]
+        separation = left_world[:2, 3] - right_world[:2, 3]
+        separation /= torch.linalg.norm(separation)
+        assert abs(float(separation[1])) == pytest.approx(1.0, abs=1e-4)
+
+
+def test_coordinated_grasp_selector_uses_feasible_tcp_roll_variant() -> None:
+    env = _FakeEnv()
+    ik_orientations = []
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
+        del qpos_seed
+        x_axis_sign = float(target_xpos[0, 0])
+        ik_orientations.append((is_left, x_axis_sign))
+        is_feasible = x_axis_sign > 0.0 if is_left else x_axis_sign < 0.0
+        return is_feasible, torch.tensor([0.1, 0.2])
+
+    env.get_arm_ik = fake_get_arm_ik
+    left_object_to_eef = torch.eye(4)
+    left_object_to_eef[1, 3] = 0.2
+    right_object_to_eef = torch.eye(4)
+    right_object_to_eef[1, 3] = -0.2
+    candidate = atom_actions._CoordinatedGraspPair(
+        left_object_to_eef=left_object_to_eef,
+        right_object_to_eef=right_object_to_eef,
+        priority=3,
+        score=1.5,
+        axis_kind="world_y",
+    )
+    object_pose = torch.eye(4)
+
+    selected = atom_actions._select_ik_feasible_coordinated_grasp_pair(
+        [candidate],
+        object_initial_pose=object_pose,
+        object_target_pose=None,
+        pre_grasp_distance=0.1,
+        lift_height=0.08,
+        env=env,
+        device=env.robot.device,
+    )
+
+    assert selected is not None
+    assert selected.left_object_to_eef is left_object_to_eef
+    assert selected.right_object_to_eef[:3, 0].tolist() == pytest.approx(
+        [-1.0, 0.0, 0.0]
+    )
+    assert selected.right_object_to_eef[:3, 1].tolist() == pytest.approx(
+        [0.0, -1.0, 0.0]
+    )
+    assert selected.left_object_to_eef[:3, 3].tolist() == pytest.approx(
+        candidate.left_object_to_eef[:3, 3].tolist()
+    )
+    assert selected.right_object_to_eef[:3, 3].tolist() == pytest.approx(
+        candidate.right_object_to_eef[:3, 3].tolist()
+    )
+    assert selected.priority == candidate.priority
+    assert selected.score == pytest.approx(candidate.score)
+    assert selected.axis_kind == candidate.axis_kind
+    assert atom_actions._coordinated_grasp_pair_world_y_angle_degrees(
+        selected,
+        object_initial_pose=object_pose,
+    ) == pytest.approx(
+        atom_actions._coordinated_grasp_pair_world_y_angle_degrees(
+            candidate,
+            object_initial_pose=object_pose,
+        )
+    )
+    assert ik_orientations == ([(True, 1.0)] * 8 + [(False, 1.0)] + [(False, -1.0)] * 8)
 
 
 def test_coordinated_pickment_world_y_limit_rejects_ik_infeasible_cone(
