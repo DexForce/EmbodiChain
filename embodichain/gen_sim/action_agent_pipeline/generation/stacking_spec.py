@@ -52,6 +52,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
     _pick_table,
 )
+from embodichain.utils.logger import log_warning
 
 __all__ = [
     "_build_stacking_spec_with_llm",
@@ -466,13 +467,12 @@ def _generated_stacking_anchor_xy(
         return center
 
     table_bounds = _mesh_config_world_xy_bounds(table_config)
-    local_front, local_left = _mesh_config_world_xy_axes(table_config)
+    local_front, _ = _mesh_config_world_xy_axes(table_config)
+    local_back = [-local_front[0], -local_front[1]]
     directions = (
         [0.0, 0.0],
+        local_back,
         local_front,
-        [-local_front[0], -local_front[1]],
-        [-local_left[0], -local_left[1]],
-        local_left,
     )
     obstacle_bounds = []
     for config in object_configs.values():
@@ -497,11 +497,15 @@ def _generated_stacking_anchor_xy(
         ):
             continue
         return candidate
-    raise ValueError(
-        "Unable to find an unoccupied stacking anchor at the table center or "
-        f"its {_ANCHOR_OFFSET:g} m front/left/right/back offsets with "
-        f"{_ANCHOR_CLEARANCE_RADIUS:g} m obstacle clearance."
+    fallback = [
+        round(center[0] + _ANCHOR_OFFSET * local_back[0], 6),
+        round(center[1] + _ANCHOR_OFFSET * local_back[1], 6),
+    ]
+    log_warning(
+        "No clear stacking anchor found at the table center, back, or front; "
+        f"forcing the table-back point {fallback}."
     )
+    return fallback
 
 
 def _xy_point_in_bounds(
