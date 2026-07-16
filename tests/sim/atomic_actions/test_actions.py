@@ -1359,7 +1359,7 @@ class TestCoordinatedPickmentAction:
             ),
             state,
         )
-        assert result.success is True
+        assert result.success_all
         assert result.trajectory.shape == (NUM_ENVS, 30, DUAL_TOTAL_DOF)
         assert torch.allclose(
             result.trajectory[:, -1, action.left_hand_joint_ids],
@@ -1374,6 +1374,62 @@ class TestCoordinatedPickmentAction:
             CoordinatedHeldObjectState,
         )
         assert result.next_state.held_object is None
+
+    def test_execute_preserves_successful_environments_after_partial_ik_failure(self):
+        cfg = CoordinatedPickmentCfg(
+            left_hand_open_qpos=_hand_open(),
+            left_hand_close_qpos=_hand_close(),
+            right_hand_open_qpos=_hand_open(),
+            right_hand_close_qpos=_hand_close(),
+            sample_interval=30,
+            hand_interp_steps=4,
+            hold_steps=2,
+            object_motion_keyframes=3,
+        )
+        action = CoordinatedPickment(self.mg, cfg)
+        original_compute_ik = self.mg.robot.compute_ik
+
+        def fail_second_env_during_move(
+            pose=None, name=None, joint_seed=None, qpos_seed=None
+        ):
+            success, qpos = original_compute_ik(
+                pose=pose,
+                name=name,
+                joint_seed=joint_seed,
+                qpos_seed=qpos_seed,
+            )
+            if name == "right_arm" and float(pose[1, 0, 3]) > 0.15:
+                success = success.clone()
+                success[1] = False
+            return success, qpos
+
+        self.mg.robot.compute_ik = fail_second_env_during_move
+        target_pose = torch.eye(4)
+        target_pose[0, 3] = 0.3
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF))
+        semantics = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="tray"
+        )
+
+        result = action.execute(
+            CoordinatedPickmentTarget(
+                object_target_pose=target_pose,
+                object_semantics=semantics,
+                left_object_to_eef=torch.eye(4),
+                right_object_to_eef=torch.eye(4),
+                object_initial_pose=torch.eye(4),
+            ),
+            state,
+        )
+
+        assert result.success.tolist() == [True, False]
+        assert result.trajectory.shape == (NUM_ENVS, 30, DUAL_TOTAL_DOF)
+        assert not torch.allclose(result.trajectory[0], state.last_qpos[0])
+        assert torch.allclose(
+            result.trajectory[1],
+            state.last_qpos[1].unsqueeze(0).repeat(30, 1),
+        )
+        assert torch.allclose(result.next_state.last_qpos[1], state.last_qpos[1])
 
     def test_execute_preserves_batched_object_to_eef_transforms(self):
         cfg = CoordinatedPickmentCfg(
