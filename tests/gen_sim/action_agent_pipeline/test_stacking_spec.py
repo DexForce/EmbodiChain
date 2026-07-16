@@ -244,37 +244,29 @@ def test_object_anchored_nested_stack_centers_each_inner_container() -> None:
     ("blocked_count", "expected_direction"),
     [
         (0, [0.0, 0.0]),
-        (1, [0.0, 1.0]),
-        (2, [0.0, -1.0]),
-        (3, [1.0, 0.0]),
-        (4, [-1.0, 0.0]),
+        (1, [-1.0, 0.0]),
+        (2, [1.0, 0.0]),
+        (3, [-1.0, 0.0]),
     ],
 )
-def test_stacking_anchor_uses_fixed_table_axis_candidate_order(
+def test_stacking_anchor_uses_robot_view_world_x_candidate_order(
     monkeypatch: pytest.MonkeyPatch,
     blocked_count: int,
     expected_direction: list[float],
 ) -> None:
-    table = {"uid": "table"}
+    table = {"uid": "table", "init_rot": [0.0, 0.0, -90.0]}
     obstacle = {"uid": "cup"}
     offset = stacking_spec._ANCHOR_OFFSET
     candidate_order = (
         [0.0, 0.0],
-        [0.0, offset],
-        [0.0, -offset],
-        [offset, 0.0],
         [-offset, 0.0],
+        [offset, 0.0],
     )
     blocked = candidate_order[:blocked_count]
     monkeypatch.setattr(
         stacking_spec,
         "_mesh_config_world_xy_center",
         lambda config: [0.0, 0.0],
-    )
-    monkeypatch.setattr(
-        stacking_spec,
-        "_mesh_config_world_xy_axes",
-        lambda config: ([0.0, 1.0], [-1.0, 0.0]),
     )
     monkeypatch.setattr(
         stacking_spec,
@@ -313,11 +305,6 @@ def test_stacking_anchor_treats_task_objects_as_obstacles(
     )
     monkeypatch.setattr(
         stacking_spec,
-        "_mesh_config_world_xy_axes",
-        lambda config: ([1.0, 0.0], [0.0, 1.0]),
-    )
-    monkeypatch.setattr(
-        stacking_spec,
         "_mesh_config_world_xy_bounds",
         lambda config: (
             ([-1.0, -1.0], [1.0, 1.0])
@@ -332,7 +319,7 @@ def test_stacking_anchor_treats_task_objects_as_obstacles(
         object_configs={"table": table, "cube": task_object},
     )
 
-    assert anchor == pytest.approx([stacking_spec._ANCHOR_OFFSET, 0.0])
+    assert anchor == pytest.approx([-stacking_spec._ANCHOR_OFFSET, 0.0])
 
 
 def test_stacking_anchor_uses_bounds_clearance_not_point_occupancy() -> None:
@@ -344,7 +331,7 @@ def test_stacking_anchor_uses_bounds_clearance_not_point_occupancy() -> None:
     assert distance == pytest.approx(0.19)
 
 
-def test_stacking_anchor_rejects_all_candidates_without_clearance(
+def test_stacking_anchor_falls_back_to_back_without_clearance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     table = {"uid": "table"}
@@ -354,11 +341,6 @@ def test_stacking_anchor_rejects_all_candidates_without_clearance(
         stacking_spec,
         "_mesh_config_world_xy_center",
         lambda config: [0.0, 0.0],
-    )
-    monkeypatch.setattr(
-        stacking_spec,
-        "_mesh_config_world_xy_axes",
-        lambda config: ([1.0, 0.0], [0.0, 1.0]),
     )
     monkeypatch.setattr(
         stacking_spec,
@@ -373,12 +355,13 @@ def test_stacking_anchor_rejects_all_candidates_without_clearance(
         ),
     )
 
-    with pytest.raises(ValueError, match="obstacle clearance"):
-        stacking_spec._generated_stacking_anchor_xy(
-            table,
-            [0.0, 0.0],
-            object_configs={"table": table, "cube": obstacle},
-        )
+    anchor = stacking_spec._generated_stacking_anchor_xy(
+        table,
+        [0.0, 0.0],
+        object_configs={"table": table, "cube": obstacle},
+    )
+
+    assert anchor == pytest.approx([-stacking_spec._ANCHOR_OFFSET, 0.0])
 
 
 def test_relative_placements_are_ordered_by_moved_object_dependency() -> None:
