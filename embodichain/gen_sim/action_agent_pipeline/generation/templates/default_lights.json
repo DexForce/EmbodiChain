@@ -1,26 +1,4 @@
 {
   "direct": [
-      {
-        "uid": "main_rect_light",
-        "light_type": "rect",
-        "color": [
-            1.0,
-            1.0,
-            1.0
-        ],
-        "intensity": 50.0,
-        "init_pos": [
-            0.0,
-            0.0,
-            2.2
-        ],
-        "direction": [
-            0.0,
-            0.0,
-            -1.0
-        ],
-        "rect_width": 2.0,
-        "rect_height": 2.0
-    }
   ]
 }

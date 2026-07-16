@@ -732,13 +732,13 @@ class SimulationManager:
         pointing downward along the -Z axis.
         """
         # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 80.0)
+        self.set_emission_light([1.0, 1.0, 1.0], 40.0)
 
         # Directional light as global scene light
         dir_light_cfg = LightCfg(
             uid="default_global_light",
             light_type="sun",
-            intensity=10.0,
+            intensity=2.0,
             direction=(0.0, 0.0, -1.0),
             color=(1.0, 0.95, 0.85),
             enable_shadow=True,
