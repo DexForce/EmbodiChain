@@ -236,6 +236,33 @@ def _single_env_pose(pose: torch.Tensor) -> torch.Tensor:
     return pose[0]
 
 
+def _world_y_constrained_coordinated_spec(
+    obj_name: str,
+    angle_limit: object,
+) -> dict:
+    return {
+        "atomic_action_class": "CoordinatedPickment",
+        "robot_name": "dual_arm",
+        "control": "arm",
+        "target_object": {
+            "obj_name": obj_name,
+            "affordance": "antipodal",
+        },
+        "target_object_pose": {
+            "reference": "relative",
+            "offset": [0.0, 0.0, 0.0],
+            "frame": "world",
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+        },
+        "cfg": {
+            "sample_interval": 120,
+            "hand_interp_steps": 10,
+            "max_grasp_separation_angle_to_world_y_degrees": angle_limit,
+        },
+    }
+
+
 class _FakeBackendAction:
     capture: list | None = None
 
@@ -470,7 +497,11 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
                 "orientation_goal": "preserve",
                 "orientation_axis": "none",
             },
-            "cfg": {"sample_interval": 120, "hand_interp_steps": 10},
+            "cfg": {
+                "sample_interval": 120,
+                "hand_interp_steps": 10,
+                "max_grasp_separation_angle_to_world_y_degrees": 60.0,
+            },
         }
     )
 
@@ -483,6 +514,37 @@ def test_normalize_atomic_action_spec_accepts_coordinated_pickment_targets() -> 
         "cup_right",
     ]
     assert normalized["target_object_pose"]["offset"] == [0.16, 0.0, 0.0]
+    assert normalized["cfg"][
+        "max_grasp_separation_angle_to_world_y_degrees"
+    ] == pytest.approx(60.0)
+
+
+@pytest.mark.parametrize("value", [-0.1, 90.1, float("nan"), True, "60"])
+def test_normalize_coordinated_pickment_rejects_invalid_world_y_angle_limit(
+    value,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="max_grasp_separation_angle_to_world_y_degrees",
+    ):
+        normalize_atomic_action_spec(
+            _world_y_constrained_coordinated_spec("tray", value)
+        )
+
+
+def test_normalize_rejects_world_y_angle_limit_for_other_actions() -> None:
+    with pytest.raises(ValueError, match="supported only for CoordinatedPickment"):
+        normalize_atomic_action_spec(
+            {
+                "atomic_action_class": "MoveJoints",
+                "robot_name": "left_arm",
+                "control": "arm",
+                "target_qpos": {"source": "initial"},
+                "cfg": {
+                    "max_grasp_separation_angle_to_world_y_degrees": 60.0,
+                },
+            }
+        )
 
 
 def test_normalize_atomic_action_spec_rejects_more_than_four_payloads() -> None:
@@ -1524,6 +1586,173 @@ def test_coordinated_pickment_prefers_yawed_top_down_grasps(
     assert abs(left_world[1, 3].item() - right_world[1, 3].item()) > 0.10
 
 
+def test_coordinated_pickment_world_y_limit_prefers_world_y(monkeypatch) -> None:
+    env = _FakeEnv()
+    capture = []
+    _FakeBackendAction.capture = capture
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_get_atomic_action_class",
+        lambda atomic_action_class: _FakeBackendAction,
+    )
+
+    execute_parallel_atomic_actions(
+        left_arm_action=_world_y_constrained_coordinated_spec(
+            "cooking_pot",
+            60.0,
+        ),
+        right_arm_action=None,
+        env=env,
+        return_result=True,
+    )
+
+    target = capture[0]["target"]
+    object_pose = env.sim.get_rigid_object("cooking_pot").get_local_pose(
+        to_matrix=True
+    )[0]
+    left_world = object_pose @ _single_env_pose(target.left_object_to_eef)
+    right_world = object_pose @ _single_env_pose(target.right_object_to_eef)
+    separation = left_world[:2, 3] - right_world[:2, 3]
+    separation = separation / torch.linalg.norm(separation)
+
+    assert abs(float(separation[1])) == pytest.approx(1.0)
+
+
+def test_coordinated_pickment_world_y_limit_generates_boundary_candidates() -> None:
+    env = _FakeEnv()
+    target_object = env.sim.get_rigid_object("cooking_pot")
+    object_pose = target_object.get_local_pose(to_matrix=True)[0]
+    vertices = target_object.get_vertices(env_ids=[0], scale=True)[0]
+
+    candidates = atom_actions._coordinated_grasp_pair_candidates(
+        vertices=vertices,
+        object_initial_pose=object_pose,
+        object_label="cooking_pot",
+        max_grasp_separation_angle_to_world_y_degrees=60.0,
+        env=None,
+        device=env.robot.device,
+    )
+    angles = [
+        atom_actions._coordinated_grasp_pair_world_y_angle_degrees(
+            candidate,
+            object_initial_pose=object_pose,
+        )
+        for candidate in candidates
+    ]
+
+    assert angles[0] == pytest.approx(0.0, abs=1e-3)
+    assert any(angle == pytest.approx(30.0, abs=1e-3) for angle in angles)
+    assert any(angle == pytest.approx(60.0, abs=1e-3) for angle in angles)
+    assert max(angles) <= 60.0 + 1e-4
+
+
+def test_coordinated_pickment_world_y_limit_uses_in_cone_ik_fallback() -> None:
+    env = _FakeEnv()
+    target_object = env.sim.get_rigid_object("cooking_pot")
+    object_pose = target_object.get_local_pose(to_matrix=True)[0]
+    vertices = target_object.get_vertices(env_ids=[0], scale=True)[0]
+    world_vertices = atom_actions._world_vertices_from_local_vertices(
+        object_pose,
+        vertices,
+    )
+    object_center_x = float(
+        (world_vertices[:, 0].min() + world_vertices[:, 0].max()) * 0.5
+    )
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
+        del qpos_seed
+        if abs(float(target_xpos[0, 3]) - object_center_x) < 0.01:
+            return False, torch.zeros(2)
+        qpos = torch.tensor([0.2, 0.3]) if is_left else torch.tensor([0.4, 0.5])
+        return True, qpos
+
+    env.get_arm_ik = fake_get_arm_ik
+    candidates = atom_actions._coordinated_grasp_pair_candidates(
+        vertices=vertices,
+        object_initial_pose=object_pose,
+        object_label="cooking_pot",
+        max_grasp_separation_angle_to_world_y_degrees=60.0,
+        env=env,
+        device=env.robot.device,
+    )
+
+    selected = atom_actions._select_ik_feasible_coordinated_grasp_pair(
+        candidates,
+        object_initial_pose=object_pose,
+        object_target_pose=None,
+        pre_grasp_distance=0.1,
+        lift_height=0.08,
+        env=env,
+        device=env.robot.device,
+    )
+
+    assert selected is not None
+    assert atom_actions._coordinated_grasp_pair_world_y_angle_degrees(
+        selected,
+        object_initial_pose=object_pose,
+    ) == pytest.approx(30.0, abs=1e-3)
+
+
+def test_coordinated_sequence_ik_scopes_multi_env_precheck_to_env_zero() -> None:
+    env = SimpleNamespace(num_envs=4)
+    requested_env_ids = []
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert target_xpos.shape == (4, 4)
+        assert qpos_seed.shape == (1, 2)
+        requested_env_ids.append(env_ids)
+        return True, torch.tensor([0.1, 0.2])
+
+    env.get_arm_ik = fake_get_arm_ik
+    poses = [torch.eye(4), torch.eye(4)]
+
+    success, qpos = atom_actions._coordinated_sequence_ik(
+        env,
+        poses,
+        is_left=True,
+        qpos_seed=torch.zeros(1, 2),
+    )
+
+    assert success is True
+    assert qpos.flatten().tolist() == pytest.approx([0.1, 0.2])
+    assert requested_env_ids == [[0], [0]]
+
+
+def test_coordinated_pickment_world_y_limit_rejects_ik_infeasible_cone(
+    monkeypatch,
+) -> None:
+    env = _FakeEnv()
+    env.get_arm_ik = lambda target_xpos, is_left, qpos_seed=None, env_ids=None: (
+        False,
+        torch.zeros(2),
+    )
+    monkeypatch.setattr(
+        atom_actions,
+        "_make_motion_generator",
+        lambda env: SimpleNamespace(robot=env.robot, device=env.robot.device),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="No IK-feasible CoordinatedPickment grasp candidate satisfies",
+    ):
+        execute_parallel_atomic_actions(
+            left_arm_action=_world_y_constrained_coordinated_spec(
+                "cooking_pot",
+                60.0,
+            ),
+            right_arm_action=None,
+            env=env,
+            return_result=True,
+        )
+
+
 def test_coordinated_pickment_aligns_gripper_to_baked_diagonal_mesh(
     monkeypatch,
 ) -> None:
@@ -1826,7 +2055,8 @@ def test_coordinated_pickment_falls_back_to_short_axis_for_container(
     warnings = []
     _FakeBackendAction.capture = capture
 
-    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
         del qpos_seed
         if abs(float(target_xpos[1, 3]) - 0.1) < 0.01:
             return False, torch.zeros(2)
@@ -1892,7 +2122,8 @@ def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> No
     capture = []
     _FakeBackendAction.capture = capture
 
-    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
         # Reject the first long-axis inset and force the selector to try the next.
         if any(
             abs(float(target_xpos[0, 3]) - rejected_x) < 0.015
