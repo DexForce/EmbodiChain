@@ -267,8 +267,8 @@ class Robotiq(EmbodiChainDataset):
 
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "Robotiq.zip"),
-            "9cc84f3a2bfc3a80f428b8ed6864fbeb",
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, eef_assets, "Robotiq_V2.zip"),
+            "9bcbf92946b200c903938d59323e7b2c",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

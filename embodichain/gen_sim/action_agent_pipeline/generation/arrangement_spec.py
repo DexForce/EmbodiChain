@@ -907,6 +907,9 @@ def _with_arrangement_generated_pose_targets(
         spacing=spacing,
         axis="world_y",
         spatial_direction=spatial_direction,
+        category_order=(
+            () if spatial_direction == "initial_side_order" else spec.category_order
+        ),
     )
 
 
@@ -1185,8 +1188,83 @@ def _arrangement_plan_execution(
             if best is None or candidate[0] < best[0]:
                 best = candidate
     if best is None:
-        return None
+        return _arrangement_initial_side_order_fallback(
+            spec,
+            slots,
+            rigid_configs=rigid_configs,
+            footprint_by_uid=footprint_by_uid,
+        )
     return best[1], best[2]
+
+
+def _arrangement_initial_side_order_fallback(
+    spec: _ArrangementLineSpec,
+    slots: Sequence[Sequence[float]],
+    *,
+    rigid_configs: Mapping[str, Mapping[str, Any]],
+    footprint_by_uid: Mapping[str, _ArrangementFootprint],
+) -> tuple[str, list[_ArrangementLineStepSpec]] | None:
+    """Match initial world-y order to slot order when category planning fails."""
+    categories = {step.category for step in spec.steps}
+    if spec.axis != "world_y" or spec.order_by != "explicit" or len(categories) < 2:
+        return None
+
+    ordered_steps = sorted(
+        spec.steps,
+        key=lambda step: (
+            float(
+                _clean_vector3(
+                    rigid_configs[step.runtime_uid].get("init_pos", [0.0, 0.0, 0.0])
+                )[1]
+            ),
+            step.runtime_uid,
+        ),
+    )
+    ordered_slots = sorted(
+        enumerate(slots),
+        key=lambda item: (float(item[1][1]), float(item[1][0]), item[0]),
+    )
+    assigned_steps = []
+    for step, (slot_index, target_xy) in zip(ordered_steps, ordered_slots):
+        init_position = _clean_vector3(
+            rigid_configs[step.runtime_uid].get("init_pos", [0.0, 0.0, 0.0])
+        )
+        active_side, cross_side, _ = _arrangement_motion_metadata(
+            init_position, target_xy
+        )
+        assigned_steps.append(
+            replace(
+                step,
+                slot_index=slot_index,
+                active_side=active_side,
+                target_xy=[float(target_xy[0]), float(target_xy[1])],
+                cross_side=cross_side,
+            )
+        )
+
+    scheduled = _arrangement_initial_occupancy_schedule(
+        assigned_steps,
+        rigid_configs=rigid_configs,
+        footprint_by_uid=footprint_by_uid,
+        clearance=spec.layout_clearance,
+    )
+    if scheduled is None:
+        # This last-resort plan deliberately ignores cyclic initial occupancy.
+        execution_steps = assigned_steps
+        blockers = {step.runtime_uid: () for step in assigned_steps}
+    else:
+        execution_steps, blockers, _ = scheduled
+    return (
+        "initial_side_order",
+        [
+            replace(
+                step,
+                execution_index=index,
+                blocked_by=blockers[step.runtime_uid],
+            )
+            for index, step in enumerate(execution_steps)
+        ],
+    )
 
 
 def _arrangement_initial_occupancy_schedule(

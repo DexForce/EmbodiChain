@@ -31,7 +31,7 @@ visual_material:
 
 geometry:
   target_body_scale: 1.3
-  surface_release_clearance: 0.025
+  surface_release_clearance: 0.05
   tabletop_object_clearance: 0.003
   dual_ur5:
     legacy_init_z: 0.5
