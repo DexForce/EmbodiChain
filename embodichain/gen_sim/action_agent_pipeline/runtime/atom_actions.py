@@ -97,6 +97,7 @@ SUPPORTED_ATOMIC_ACTION_CLASSES = {
     "Place",
 }
 SUPPORTED_CONTROLS = {"arm", "hand"}
+_COORDINATED_WORLD_Y_ANGLE_CFG_KEY = "max_grasp_separation_angle_to_world_y_degrees"
 TARGET_SPEC_FIELDS = (
     "target_object",
     "target_pose",
@@ -135,6 +136,7 @@ SUPPORTED_CFG_KEYS = {
     "rotate_upright",
     "approach_alignment_max_angle",
     "cartesian_waypoint_count",
+    _COORDINATED_WORLD_Y_ANGLE_CFG_KEY,
 }
 
 
@@ -386,6 +388,14 @@ def normalize_atomic_action_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
             f"Unsupported atomic action cfg keys: {', '.join(sorted(unknown_cfg))}."
         )
     _validate_cfg_values(cfg)
+    if (
+        _COORDINATED_WORLD_Y_ANGLE_CFG_KEY in cfg
+        and atomic_action_class != "CoordinatedPickment"
+    ):
+        raise ValueError(
+            f"{_COORDINATED_WORLD_Y_ANGLE_CFG_KEY} is supported only for "
+            "CoordinatedPickment."
+        )
 
     target_values = _normalize_action_target(
         spec,
@@ -1839,6 +1849,18 @@ def _build_action_cfg(
 
 
 def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
+    if _COORDINATED_WORLD_Y_ANGLE_CFG_KEY in cfg:
+        value = cfg[_COORDINATED_WORLD_Y_ANGLE_CFG_KEY]
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not np.isfinite(value)
+            or not 0.0 <= float(value) <= 90.0
+        ):
+            raise ValueError(
+                f"{_COORDINATED_WORLD_Y_ANGLE_CFG_KEY} must be a finite number "
+                "in [0, 90] degrees or null."
+            )
     if "max_approach_retract_z" in cfg:
         value = cfg["max_approach_retract_z"]
         if (
@@ -2032,6 +2054,10 @@ def _resolve_coordinated_pickment_target(
         env.robot.device,
     )
     num_envs = object_initial_pose.shape[0]
+    raw_world_y_angle_limit = spec.cfg.get(_COORDINATED_WORLD_Y_ANGLE_CFG_KEY)
+    world_y_angle_limit = (
+        None if raw_world_y_angle_limit is None else float(raw_world_y_angle_limit)
+    )
     left_object_to_eef, right_object_to_eef = _default_coordinated_object_to_eef(
         semantics,
         env.robot.device,
@@ -2040,6 +2066,7 @@ def _resolve_coordinated_pickment_target(
         object_target_pose=object_target_pose,
         pre_grasp_distance=float(spec.cfg.get("pre_grasp_distance", 0.10)),
         lift_height=float(spec.cfg.get("lift_height", 0.08)),
+        max_grasp_separation_angle_to_world_y_degrees=world_y_angle_limit,
         payload_uids=tuple(spec.target_object.get("payloads", [])),
         env=env,
     )
@@ -2335,6 +2362,7 @@ def _default_coordinated_object_to_eef(
     object_target_pose: torch.Tensor | None = None,
     pre_grasp_distance: float = 0.10,
     lift_height: float = 0.08,
+    max_grasp_separation_angle_to_world_y_degrees: float | None = None,
     payload_uids: Sequence[str] = (),
     env=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -2357,9 +2385,19 @@ def _default_coordinated_object_to_eef(
         vertices=vertices,
         object_initial_pose=representative_initial_pose,
         object_label=object_label,
+        max_grasp_separation_angle_to_world_y_degrees=(
+            max_grasp_separation_angle_to_world_y_degrees
+        ),
         env=env,
         device=device,
     )
+    if not candidates:
+        if max_grasp_separation_angle_to_world_y_degrees is not None:
+            raise ValueError(
+                "No CoordinatedPickment grasp candidate satisfies the configured "
+                "world-Y separation-angle constraint."
+            )
+        raise ValueError("No CoordinatedPickment grasp candidate was generated.")
     candidates = _filter_coordinated_payload_collision_candidates(
         candidates,
         payload_uids=payload_uids,
@@ -2381,13 +2419,30 @@ def _default_coordinated_object_to_eef(
         device=device,
     )
     if selected is not None:
-        if selected.axis_kind != "long_axis":
+        if max_grasp_separation_angle_to_world_y_degrees is not None:
+            selected_angle = _coordinated_grasp_pair_world_y_angle_degrees(
+                selected,
+                object_initial_pose=representative_initial_pose,
+            )
+            if selected_angle > 1e-3:
+                log_warning(
+                    "Exact world-Y CoordinatedPickment grasp is unavailable; "
+                    f"using {selected_angle:.1f} degrees within the configured "
+                    f"{max_grasp_separation_angle_to_world_y_degrees:.1f}-degree "
+                    "limit."
+                )
+        elif selected.axis_kind != "long_axis":
             log_warning(
                 "Preferred long-axis CoordinatedPickment grasp is unavailable; "
                 f"using {selected.axis_kind} fallback."
             )
         return selected.left_object_to_eef, selected.right_object_to_eef
     if _has_coordinated_ik_api(env):
+        if max_grasp_separation_angle_to_world_y_degrees is not None:
+            raise ValueError(
+                "No IK-feasible CoordinatedPickment grasp candidate satisfies "
+                "the configured world-Y separation-angle constraint."
+            )
         log_warning(
             "No IK-feasible CoordinatedPickment grasp candidate found; "
             "falling back to the best heuristic candidate."
@@ -2438,6 +2493,7 @@ def _coordinated_grasp_pair_candidates(
     vertices: torch.Tensor,
     object_initial_pose: torch.Tensor,
     object_label: str | None = None,
+    max_grasp_separation_angle_to_world_y_degrees: float | None = None,
     env,
     device,
 ) -> list[_CoordinatedGraspPair]:
@@ -2456,19 +2512,32 @@ def _coordinated_grasp_pair_candidates(
     use_edge_closing = grasp_style == _COORDINATED_GRASP_STYLE_CONTAINER
     top_down_axis_indices = _coordinated_top_down_axis_indices(extents)
     world_lateral_priority = _coordinated_world_lateral_priority(grasp_style)
-    candidates.extend(
-        _coordinated_world_lateral_top_down_grasp_candidates(
-            vertices=vertices,
-            center=center,
-            object_initial_pose=object_initial_pose,
-            inset_fractions=_coordinated_inset_fractions_for_style(
-                _COORDINATED_GRASP_STYLE_CONTAINER
-            ),
-            priority=world_lateral_priority,
-            env=env,
-            device=device,
+    if max_grasp_separation_angle_to_world_y_degrees is None:
+        candidates.extend(
+            _coordinated_world_lateral_top_down_grasp_candidates(
+                vertices=vertices,
+                center=center,
+                object_initial_pose=object_initial_pose,
+                inset_fractions=_coordinated_inset_fractions_for_style(
+                    _COORDINATED_GRASP_STYLE_CONTAINER
+                ),
+                priority=world_lateral_priority,
+                env=env,
+                device=device,
+            )
         )
-    )
+    else:
+        candidates.extend(
+            _coordinated_world_y_constrained_top_down_grasp_candidates(
+                vertices=vertices,
+                object_initial_pose=object_initial_pose,
+                inset_fractions=inset_fractions,
+                use_edge_closing=use_edge_closing,
+                max_angle_degrees=(max_grasp_separation_angle_to_world_y_degrees),
+                env=env,
+                device=device,
+            )
+        )
     principal_axis_pairs = _coordinated_novel_principal_axis_pairs(
         vertices,
         object_initial_pose,
@@ -2544,6 +2613,28 @@ def _coordinated_grasp_pair_candidates(
             axis_kind="side",
         )
     )
+    if max_grasp_separation_angle_to_world_y_degrees is not None:
+        angle_limit = float(max_grasp_separation_angle_to_world_y_degrees)
+        candidates = [
+            candidate
+            for candidate in candidates
+            if _coordinated_grasp_pair_world_y_angle_degrees(
+                candidate,
+                object_initial_pose=object_initial_pose,
+            )
+            <= angle_limit + 1e-4
+        ]
+        return sorted(
+            candidates,
+            key=lambda pair: (
+                _coordinated_grasp_pair_world_y_angle_degrees(
+                    pair,
+                    object_initial_pose=object_initial_pose,
+                ),
+                pair.priority,
+                pair.score,
+            ),
+        )
     return sorted(candidates, key=lambda pair: (pair.priority, pair.score))
 
 
@@ -2694,6 +2785,61 @@ def _coordinated_world_lateral_top_down_grasp_candidates(
                 axis_kind="world_lateral",
             )
         )
+    return candidates
+
+
+def _coordinated_world_y_constrained_top_down_grasp_candidates(
+    *,
+    vertices: torch.Tensor,
+    object_initial_pose: torch.Tensor,
+    inset_fractions: tuple[float, ...],
+    use_edge_closing: bool,
+    max_angle_degrees: float,
+    env,
+    device,
+) -> list[_CoordinatedGraspPair]:
+    angle_magnitudes = [0.0]
+    if max_angle_degrees > 1e-6:
+        half_angle = float(max_angle_degrees) * 0.5
+        if half_angle > 1e-6:
+            angle_magnitudes.append(half_angle)
+        if float(max_angle_degrees) - half_angle > 1e-6:
+            angle_magnitudes.append(float(max_angle_degrees))
+
+    candidates: list[_CoordinatedGraspPair] = []
+    for angle_rank, angle_magnitude in enumerate(angle_magnitudes):
+        signed_angles = (
+            (0.0,) if angle_magnitude == 0.0 else (-angle_magnitude, angle_magnitude)
+        )
+        for signed_angle in signed_angles:
+            angle_radians = float(np.deg2rad(signed_angle))
+            separation_axis = torch.tensor(
+                [np.sin(angle_radians), np.cos(angle_radians), 0.0],
+                dtype=torch.float32,
+                device=device,
+            )
+            lateral_axis = torch.tensor(
+                [np.cos(angle_radians), -np.sin(angle_radians), 0.0],
+                dtype=torch.float32,
+                device=device,
+            )
+            closing_axis = separation_axis if use_edge_closing else lateral_axis
+            candidates.extend(
+                _coordinated_projected_top_down_grasp_candidates(
+                    vertices=vertices,
+                    separation_axis=separation_axis,
+                    lateral_axis=lateral_axis,
+                    closing_axis=closing_axis,
+                    object_initial_pose=object_initial_pose,
+                    inset_fractions=inset_fractions,
+                    priority=angle_rank * 20,
+                    axis_kind=(
+                        "world_y" if angle_magnitude == 0.0 else "world_y_constrained"
+                    ),
+                    env=env,
+                    device=device,
+                )
+            )
     return candidates
 
 
@@ -3014,6 +3160,25 @@ def _make_coordinated_grasp_pair(
     )
 
 
+def _coordinated_grasp_pair_world_y_angle_degrees(
+    candidate: _CoordinatedGraspPair,
+    *,
+    object_initial_pose: torch.Tensor,
+) -> float:
+    left_world = object_initial_pose @ candidate.left_object_to_eef
+    right_world = object_initial_pose @ candidate.right_object_to_eef
+    separation = left_world[:2, 3] - right_world[:2, 3]
+    separation_norm = torch.linalg.norm(separation)
+    if float(separation_norm) <= 1e-8:
+        return 90.0
+    world_y_alignment = torch.clamp(
+        torch.abs(separation[1] / separation_norm),
+        min=0.0,
+        max=1.0,
+    )
+    return float(torch.rad2deg(torch.acos(world_y_alignment)))
+
+
 def _coordinated_grasp_pair_score(
     left_world: torch.Tensor,
     right_world: torch.Tensor,
@@ -3229,8 +3394,14 @@ def _coordinated_sequence_ik(
                 pose,
                 is_left=is_left,
                 qpos_seed=seed,
+                env_ids=[0],
             )
-        except Exception:
+        except Exception as exc:
+            side = "left" if is_left else "right"
+            log_warning(
+                f"CoordinatedPickment IK precheck failed for {side} arm in env 0: "
+                f"{exc}"
+            )
             return False, seed
         if not ok:
             return False, seed

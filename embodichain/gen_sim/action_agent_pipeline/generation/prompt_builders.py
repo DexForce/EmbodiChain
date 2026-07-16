@@ -73,6 +73,9 @@ _RELEASE_ONLY_PLACE_SAMPLE_INTERVAL = int(
 _EMPTY_HAND_RETREAT_SAMPLE_INTERVAL = int(
     _ACTION_DEFAULTS["empty_hand_retreat_sample_interval"]
 )
+_COORDINATED_MAX_GRASP_SEPARATION_ANGLE_TO_WORLD_Y_DEGREES = float(
+    _ACTION_DEFAULTS["coordinated_max_grasp_separation_angle_to_world_y_degrees"]
+)
 _STACKING_DEFAULTS = generation_defaults_section("stacking")
 _STACKING_NESTED_RELEASE_Z_OFFSET = float(_STACKING_DEFAULTS["nested_release_z_offset"])
 _STACKING_SURFACE_CLEARANCE = float(_STACKING_DEFAULTS["clearance"])
@@ -2814,6 +2817,9 @@ def _format_coordinated_pickment_spec(
         "pre_grasp_distance": 0.1,
         "sample_interval": sample_interval,
         "hand_interp_steps": 10,
+        "max_grasp_separation_angle_to_world_y_degrees": (
+            _COORDINATED_MAX_GRASP_SEPARATION_ANGLE_TO_WORLD_Y_DEGREES
+        ),
     }
     if target_hover:
         cfg["lift_height"] = float(placement.hover_height)
