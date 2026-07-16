@@ -106,8 +106,8 @@ physics:
     rest_offset: 0.001
     restitution: 0.05
     max_depenetration_velocity: 0.8
-    max_linear_velocity: 1.0
-    max_angular_velocity: 1.0
+    max_linear_velocity: 5.0
+    max_angular_velocity: 5.0
     min_position_iters: 32
     min_velocity_iters: 8
   convex_hulls:
