@@ -410,10 +410,13 @@ class AgenticGenSimEnv(EmbodiedEnv):
             self.right_arm_current_gripper_state = arm_gripper_state
 
     # -------------------- IK / FK --------------------
-    def get_arm_ik(self, target_xpos, is_left, qpos_seed=None):
+    def get_arm_ik(self, target_xpos, is_left, qpos_seed=None, env_ids=None):
         control_part = self.get_agent_arm_control_part(is_left)
         ret, qpos = self.robot.compute_ik(
-            name=control_part, pose=target_xpos, joint_seed=qpos_seed
+            name=control_part,
+            pose=target_xpos,
+            joint_seed=qpos_seed,
+            env_ids=env_ids,
         )
         if isinstance(ret, torch.Tensor):
             success = bool(torch.all(ret).item())

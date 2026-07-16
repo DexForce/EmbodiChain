@@ -1664,7 +1664,8 @@ def test_coordinated_pickment_world_y_limit_uses_in_cone_ik_fallback() -> None:
         (world_vertices[:, 0].min() + world_vertices[:, 0].max()) * 0.5
     )
 
-    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
         del qpos_seed
         if abs(float(target_xpos[0, 3]) - object_center_x) < 0.01:
             return False, torch.zeros(2)
@@ -1698,11 +1699,36 @@ def test_coordinated_pickment_world_y_limit_uses_in_cone_ik_fallback() -> None:
     ) == pytest.approx(30.0, abs=1e-3)
 
 
+def test_coordinated_sequence_ik_scopes_multi_env_precheck_to_env_zero() -> None:
+    env = SimpleNamespace(num_envs=4)
+    requested_env_ids = []
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert target_xpos.shape == (4, 4)
+        assert qpos_seed.shape == (1, 2)
+        requested_env_ids.append(env_ids)
+        return True, torch.tensor([0.1, 0.2])
+
+    env.get_arm_ik = fake_get_arm_ik
+    poses = [torch.eye(4), torch.eye(4)]
+
+    success, qpos = atom_actions._coordinated_sequence_ik(
+        env,
+        poses,
+        is_left=True,
+        qpos_seed=torch.zeros(1, 2),
+    )
+
+    assert success is True
+    assert qpos.flatten().tolist() == pytest.approx([0.1, 0.2])
+    assert requested_env_ids == [[0], [0]]
+
+
 def test_coordinated_pickment_world_y_limit_rejects_ik_infeasible_cone(
     monkeypatch,
 ) -> None:
     env = _FakeEnv()
-    env.get_arm_ik = lambda target_xpos, is_left, qpos_seed=None: (
+    env.get_arm_ik = lambda target_xpos, is_left, qpos_seed=None, env_ids=None: (
         False,
         torch.zeros(2),
     )
@@ -2029,7 +2055,8 @@ def test_coordinated_pickment_falls_back_to_short_axis_for_container(
     warnings = []
     _FakeBackendAction.capture = capture
 
-    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
         del qpos_seed
         if abs(float(target_xpos[1, 3]) - 0.1) < 0.01:
             return False, torch.zeros(2)
@@ -2095,7 +2122,8 @@ def test_coordinated_pickment_skips_ik_failed_grasp_candidate(monkeypatch) -> No
     capture = []
     _FakeBackendAction.capture = capture
 
-    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None):
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
         # Reject the first long-axis inset and force the selector to try the next.
         if any(
             abs(float(target_xpos[0, 3]) - rejected_x) < 0.015

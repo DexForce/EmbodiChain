@@ -3394,8 +3394,14 @@ def _coordinated_sequence_ik(
                 pose,
                 is_left=is_left,
                 qpos_seed=seed,
+                env_ids=[0],
             )
-        except Exception:
+        except Exception as exc:
+            side = "left" if is_left else "right"
+            log_warning(
+                f"CoordinatedPickment IK precheck failed for {side} arm in env 0: "
+                f"{exc}"
+            )
             return False, seed
         if not ok:
             return False, seed

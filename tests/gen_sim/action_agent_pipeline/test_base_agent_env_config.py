@@ -76,6 +76,33 @@ def test_agentic_gen_sim_env_preserves_success_validation_after_runtime_ready() 
         env.is_task_success()
 
 
+def test_agentic_gen_sim_env_scopes_arm_ik_to_requested_env_ids() -> None:
+    env = AgenticGenSimEnv.__new__(AgenticGenSimEnv)
+    env.robot = Mock()
+    env.robot.compute_ik.return_value = (
+        torch.tensor([True]),
+        torch.tensor([[0.1, 0.2]]),
+    )
+    env.get_agent_arm_control_part = Mock(return_value="left_arm")
+    target_xpos = torch.eye(4)
+    qpos_seed = torch.tensor([[0.0, 0.0]])
+
+    success, qpos = env.get_arm_ik(
+        target_xpos,
+        is_left=True,
+        qpos_seed=qpos_seed,
+        env_ids=[0],
+    )
+
+    assert success is True
+    assert qpos.tolist() == pytest.approx([0.1, 0.2])
+    call_kwargs = env.robot.compute_ik.call_args.kwargs
+    assert call_kwargs["name"] == "left_arm"
+    assert call_kwargs["pose"] is target_xpos
+    assert call_kwargs["joint_seed"] is qpos_seed
+    assert call_kwargs["env_ids"] == [0]
+
+
 def test_agentic_gen_sim_env_reset_latches_success_before_invalidating_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -130,16 +157,39 @@ def test_agentic_gen_sim_env_rejects_missing_agent_sections() -> None:
         )
 
 
-def test_agentic_gen_sim_env_rejects_batched_state_init() -> None:
+def test_agentic_gen_sim_env_initializes_batched_state() -> None:
     class BatchedAgenticGenSimEnv(AgenticGenSimEnv):
         @property
         def num_envs(self):
             return 2
 
     env = BatchedAgenticGenSimEnv.__new__(BatchedAgenticGenSimEnv)
+    env.robot = Mock()
+    env.robot.control_parts = {
+        "left_arm": [0, 1],
+        "left_eef": [2],
+        "right_arm": [3, 4],
+        "right_eef": [5],
+    }
+    env.robot.get_qpos.return_value = torch.zeros(2, 6)
+    env.robot.get_joint_ids.side_effect = lambda name: env.robot.control_parts[name]
+    env.robot.compute_fk.side_effect = lambda qpos, **kwargs: (
+        torch.eye(4).unsqueeze(0).repeat(qpos.shape[0], 1, 1)
+    )
+    env.robot.get_control_part_base_pose.return_value = (
+        torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
+    )
+    env.agent_open_state = [0.05]
+    env.agent_close_state = [0.0]
+    env.update_obj_info = Mock()
 
-    with pytest.raises(ValueError, match="supports num_envs=1 only"):
-        env.get_states()
+    env.get_states()
+
+    assert env.init_qpos.shape == (2, 6)
+    assert env.left_arm_current_qpos.shape == (2, 2)
+    assert env.right_arm_current_qpos.shape == (2, 2)
+    assert env.left_arm_current_gripper_state.shape == (2, 1)
+    assert env.right_arm_current_gripper_state.shape == (2, 1)
 
 
 def test_agentic_gen_sim_env_draws_arrangement_target_and_high_markers() -> None:
