@@ -39,7 +39,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _iter_generated_scene_object_configs,
     _mesh_config_local_zmin_after_rotation,
     _mesh_config_world_xy_center,
-    _mesh_config_world_xy_axes,
     _mesh_config_world_xy_bounds,
     _mesh_config_world_z_bounds,
 )
@@ -467,12 +466,12 @@ def _generated_stacking_anchor_xy(
         return center
 
     table_bounds = _mesh_config_world_xy_bounds(table_config)
-    local_front, _ = _mesh_config_world_xy_axes(table_config)
-    local_back = [-local_front[0], -local_front[1]]
+    robot_front = [1.0, 0.0]
+    robot_back = [-1.0, 0.0]
     directions = (
         [0.0, 0.0],
-        local_back,
-        local_front,
+        robot_back,
+        robot_front,
     )
     obstacle_bounds = []
     for config in object_configs.values():
@@ -498,8 +497,8 @@ def _generated_stacking_anchor_xy(
             continue
         return candidate
     fallback = [
-        round(center[0] + _ANCHOR_OFFSET * local_back[0], 6),
-        round(center[1] + _ANCHOR_OFFSET * local_back[1], 6),
+        round(center[0] + _ANCHOR_OFFSET * robot_back[0], 6),
+        round(center[1] + _ANCHOR_OFFSET * robot_back[1], 6),
     ]
     log_warning(
         "No clear stacking anchor found at the table center, back, or front; "
