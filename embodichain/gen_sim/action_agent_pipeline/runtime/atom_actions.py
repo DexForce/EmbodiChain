@@ -3305,7 +3305,7 @@ def _select_ik_feasible_coordinated_grasp_pair(
     if not _has_coordinated_ik_api(env):
         return candidates[0] if candidates else None
     for candidate in candidates:
-        if _coordinated_grasp_pair_is_ik_feasible(
+        selected = _select_coordinated_grasp_pair_tcp_roll_variant(
             candidate,
             object_initial_pose=object_initial_pose,
             object_target_pose=object_target_pose,
@@ -3313,12 +3313,13 @@ def _select_ik_feasible_coordinated_grasp_pair(
             lift_height=lift_height,
             env=env,
             device=device,
-        ):
-            return candidate
+        )
+        if selected is not None:
+            return selected
     return None
 
 
-def _coordinated_grasp_pair_is_ik_feasible(
+def _select_coordinated_grasp_pair_tcp_roll_variant(
     candidate: _CoordinatedGraspPair,
     *,
     object_initial_pose: torch.Tensor,
@@ -3327,37 +3328,77 @@ def _coordinated_grasp_pair_is_ik_feasible(
     lift_height: float,
     env,
     device,
-) -> bool:
-    left_sequence = _coordinated_grasp_ik_sequence(
-        object_initial_pose=object_initial_pose,
-        object_target_pose=object_target_pose,
-        object_to_eef=candidate.left_object_to_eef,
-        pre_grasp_distance=pre_grasp_distance,
-        lift_height=lift_height,
-    )
-    right_sequence = _coordinated_grasp_ik_sequence(
-        object_initial_pose=object_initial_pose,
-        object_target_pose=object_target_pose,
-        object_to_eef=candidate.right_object_to_eef,
-        pre_grasp_distance=pre_grasp_distance,
-        lift_height=lift_height,
-    )
+) -> _CoordinatedGraspPair | None:
     left_seed, right_seed = _current_coordinated_arm_qpos(env, device)
-    left_ok, _ = _coordinated_sequence_ik(
-        env,
-        left_sequence,
+    left_object_to_eef = _select_coordinated_arm_tcp_roll_variant(
+        candidate.left_object_to_eef,
+        object_initial_pose=object_initial_pose,
+        object_target_pose=object_target_pose,
+        pre_grasp_distance=pre_grasp_distance,
+        lift_height=lift_height,
+        env=env,
         is_left=True,
         qpos_seed=left_seed,
     )
-    if not left_ok:
-        return False
-    right_ok, _ = _coordinated_sequence_ik(
-        env,
-        right_sequence,
+    if left_object_to_eef is None:
+        return None
+    right_object_to_eef = _select_coordinated_arm_tcp_roll_variant(
+        candidate.right_object_to_eef,
+        object_initial_pose=object_initial_pose,
+        object_target_pose=object_target_pose,
+        pre_grasp_distance=pre_grasp_distance,
+        lift_height=lift_height,
+        env=env,
         is_left=False,
         qpos_seed=right_seed,
     )
-    return right_ok
+    if right_object_to_eef is None:
+        return None
+    if (
+        left_object_to_eef is candidate.left_object_to_eef
+        and right_object_to_eef is candidate.right_object_to_eef
+    ):
+        return candidate
+    return _CoordinatedGraspPair(
+        left_object_to_eef=left_object_to_eef,
+        right_object_to_eef=right_object_to_eef,
+        priority=candidate.priority,
+        score=candidate.score,
+        axis_kind=candidate.axis_kind,
+    )
+
+
+def _select_coordinated_arm_tcp_roll_variant(
+    object_to_eef: torch.Tensor,
+    *,
+    object_initial_pose: torch.Tensor,
+    object_target_pose: torch.Tensor | None,
+    pre_grasp_distance: float,
+    lift_height: float,
+    env,
+    is_left: bool,
+    qpos_seed: torch.Tensor | None,
+) -> torch.Tensor | None:
+    mirrored_object_to_eef = object_to_eef.clone()
+    mirrored_object_to_eef[:3, 0] = -mirrored_object_to_eef[:3, 0]
+    mirrored_object_to_eef[:3, 1] = -mirrored_object_to_eef[:3, 1]
+    for variant in (object_to_eef, mirrored_object_to_eef):
+        sequence = _coordinated_grasp_ik_sequence(
+            object_initial_pose=object_initial_pose,
+            object_target_pose=object_target_pose,
+            object_to_eef=variant,
+            pre_grasp_distance=pre_grasp_distance,
+            lift_height=lift_height,
+        )
+        ok, _ = _coordinated_sequence_ik(
+            env,
+            sequence,
+            is_left=is_left,
+            qpos_seed=qpos_seed,
+        )
+        if ok:
+            return variant
+    return None
 
 
 def _coordinated_grasp_ik_sequence(

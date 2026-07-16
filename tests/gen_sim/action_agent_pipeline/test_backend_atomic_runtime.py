@@ -1724,6 +1724,79 @@ def test_coordinated_sequence_ik_scopes_multi_env_precheck_to_env_zero() -> None
     assert requested_env_ids == [[0], [0]]
 
 
+def test_coordinated_grasp_selector_uses_feasible_tcp_roll_variant() -> None:
+    env = _FakeEnv()
+    ik_orientations = []
+
+    def fake_get_arm_ik(target_xpos, is_left, qpos_seed=None, env_ids=None):
+        assert env_ids == [0]
+        del qpos_seed
+        x_axis_sign = float(target_xpos[0, 0])
+        ik_orientations.append((is_left, x_axis_sign))
+        is_feasible = x_axis_sign > 0.0 if is_left else x_axis_sign < 0.0
+        return is_feasible, torch.tensor([0.1, 0.2])
+
+    env.get_arm_ik = fake_get_arm_ik
+    left_object_to_eef = torch.eye(4)
+    left_object_to_eef[1, 3] = 0.2
+    right_object_to_eef = torch.eye(4)
+    right_object_to_eef[1, 3] = -0.2
+    candidate = atom_actions._CoordinatedGraspPair(
+        left_object_to_eef=left_object_to_eef,
+        right_object_to_eef=right_object_to_eef,
+        priority=3,
+        score=1.5,
+        axis_kind="world_y",
+    )
+    object_pose = torch.eye(4)
+
+    selected = atom_actions._select_ik_feasible_coordinated_grasp_pair(
+        [candidate],
+        object_initial_pose=object_pose,
+        object_target_pose=None,
+        pre_grasp_distance=0.1,
+        lift_height=0.08,
+        env=env,
+        device=env.robot.device,
+    )
+
+    assert selected is not None
+    assert selected.left_object_to_eef is left_object_to_eef
+    assert selected.right_object_to_eef[:3, 0].tolist() == pytest.approx(
+        [-1.0, 0.0, 0.0]
+    )
+    assert selected.right_object_to_eef[:3, 1].tolist() == pytest.approx(
+        [0.0, -1.0, 0.0]
+    )
+    assert selected.left_object_to_eef[:3, 3].tolist() == pytest.approx(
+        candidate.left_object_to_eef[:3, 3].tolist()
+    )
+    assert selected.right_object_to_eef[:3, 3].tolist() == pytest.approx(
+        candidate.right_object_to_eef[:3, 3].tolist()
+    )
+    assert selected.priority == candidate.priority
+    assert selected.score == pytest.approx(candidate.score)
+    assert selected.axis_kind == candidate.axis_kind
+    assert atom_actions._coordinated_grasp_pair_world_y_angle_degrees(
+        selected,
+        object_initial_pose=object_pose,
+    ) == pytest.approx(
+        atom_actions._coordinated_grasp_pair_world_y_angle_degrees(
+            candidate,
+            object_initial_pose=object_pose,
+        )
+    )
+    assert ik_orientations == [
+        (True, 1.0),
+        (True, 1.0),
+        (True, 1.0),
+        (False, 1.0),
+        (False, -1.0),
+        (False, -1.0),
+        (False, -1.0),
+    ]
+
+
 def test_coordinated_pickment_world_y_limit_rejects_ik_infeasible_cone(
     monkeypatch,
 ) -> None:
