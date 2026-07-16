@@ -28,6 +28,68 @@ from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_t
 from embodichain.utils import logger, configclass
 
 
+# Shared camera groups, keyed by (width, height), populated by plan_camera_groups()
+# and consumed by Camera._build_sensor_from_config(). Empty unless
+# RenderCfg.merge_camera_groups is on, in which case each Camera claims a layer
+# slice of the group for its resolution rather than creating its own group.
+_SHARED_GROUPS: dict = {}
+
+
+def plan_camera_groups(sensor_cfgs: Sequence[SensorCfg], enabled: bool) -> None:
+    """Pre-allocate one shared camera group per distinct Camera resolution.
+
+    Must be called after the arenas exist and before any sensor is constructed,
+    because a group's layer count is fixed at creation and the cameras are then
+    created into it in order.
+
+    A group is a single layered image (identical extent on every layer), so only
+    cameras with the same resolution can share one. Resolutions used by a single
+    camera are skipped -- a group of one is what we already do.
+
+    Args:
+        sensor_cfgs: every sensor config that will be built, in build order.
+        enabled: RenderCfg.merge_camera_groups. When False this clears the
+            registry and each Camera falls back to its own group.
+    """
+    _SHARED_GROUPS.clear()
+    if not enabled:
+        return
+
+    world = dexsim.default_world()
+    env = world.get_env()
+    arenas = env.get_all_arenas()
+    num_instances = len(arenas) if len(arenas) > 0 else 1
+
+    counts: dict = {}
+    for cfg in sensor_cfgs:
+        if getattr(cfg, "sensor_type", "Camera") != "Camera":
+            continue  # StereoCamera already packs its two cameras into one group
+        counts.setdefault((cfg.width, cfg.height), 0)
+        counts[(cfg.width, cfg.height)] += 1
+
+    for (width, height), count in counts.items():
+        if count < 2:
+            continue
+        _SHARED_GROUPS[(width, height)] = {
+            "frame_buffer": world.create_camera_group(
+                [width, height], num_instances * count, True
+            ),
+            "next_offset": 0,
+            "capacity": num_instances * count,
+            "num_instances": num_instances,
+        }
+        logger.log_info(
+            f"[camera] merged {count} x {width}x{height} cameras into one camera group "
+            f"({num_instances * count} layers)"
+        )
+    if _SHARED_GROUPS:
+        merged = sum(c for (r, c) in counts.items() if c >= 2)
+        logger.log_info(
+            f"[camera] merge_camera_groups: {len(counts)} resolutions, "
+            f"{merged} of {sum(counts.values())} cameras share {len(_SHARED_GROUPS)} group(s)"
+        )
+
+
 @configclass
 class CameraCfg(SensorCfg):
     """Configuration class for Camera."""
@@ -143,9 +205,30 @@ class Camera(BaseSensor):
             arenas = [env]
         num_instances = len(arenas)
 
-        self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], num_instances, True
-        )
+        # Claim a layer slice of the group shared by every camera at this
+        # resolution, if plan_camera_groups() reserved one. Otherwise keep the
+        # one-group-per-camera behaviour.
+        #
+        # The capacity check matters: a group's layers are fixed at creation for
+        # the cameras plan_camera_groups() knew about, but cameras are also added
+        # outside that pass (e.g. the recording camera in gym managers/record.py).
+        # An unplanned camera must get its own group rather than claim a layer
+        # the group does not have.
+        slot = _SHARED_GROUPS.get((config.width, config.height))
+        if slot is not None and slot["next_offset"] + num_instances <= slot["capacity"]:
+            self._frame_buffer = slot["frame_buffer"]
+            self._layer_offset = slot["next_offset"]
+            slot["next_offset"] += num_instances
+        else:
+            if slot is not None:
+                logger.log_info(
+                    f"[camera] {config.uid}: shared {config.width}x{config.height} group is "
+                    "full (camera added outside plan_camera_groups); using its own group"
+                )
+            self._frame_buffer = self._world.create_camera_group(
+                [config.width, config.height], num_instances, True
+            )
+            self._layer_offset = 0
 
         view_attrib = config.get_view_attrib()
         for i, arena in enumerate(arenas):
@@ -236,31 +319,39 @@ class Camera(BaseSensor):
             self._frame_buffer.apply()
         self.cfg: CameraCfg
 
+        # When the group is shared with other cameras it holds every camera's
+        # layers, so take only this camera's slice. Unshared groups have
+        # _layer_offset == 0 and exactly num_instances layers, so this is a no-op.
+        lo = self._layer_offset
+        hi = lo + self.num_instances
+
         if self.cfg.enable_color:
             self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
                 self.device
-            )
+            )[lo:hi, ...]
 
         if self.cfg.enable_depth:
             self._data_buffer["depth"] = self._frame_buffer.get_depth_gpu_buffer().to(
                 self.device
-            )
+            )[lo:hi, ...]
 
         if self.cfg.enable_mask:
             self._data_buffer[
                 "mask"
             ] = self._frame_buffer.get_visible_mask_gpu_buffer().to(
                 self.device, torch.int32
-            )
+            )[lo:hi, ...]
 
         if self.cfg.enable_normal:
             self._data_buffer["normal"] = self._frame_buffer.get_normal_gpu_buffer().to(
                 self.device
-            )[..., :3]
+            )[lo:hi, ..., :3]
 
         if self.cfg.enable_position:
             self._data_buffer["position"] = (
-                self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
+                self._frame_buffer.get_position_gpu_buffer().to(self.device)[
+                    lo:hi, ..., :3
+                ]
             )
 
     def _attach_to_entity(self) -> None:

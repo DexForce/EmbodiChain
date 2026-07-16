@@ -39,7 +39,7 @@ from embodichain.lab.gym.envs.action_bank.configurable_action import (
     ActionBank,
 )
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, SensorCfg, plan_camera_groups
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs.managers import (
@@ -916,6 +916,13 @@ class EmbodiedEnv(BaseEnv):
         """
 
         # TODO: support sensor attachment to the robot.
+
+        # Reserve shared camera groups before building anything: a group's layer
+        # count is fixed at creation, so every camera that will share one has to
+        # be known first. No-op unless RenderCfg.merge_camera_groups is on.
+        plan_camera_groups(
+            self.cfg.sensor, self.sim_cfg.render_cfg.merge_camera_groups
+        )
 
         sensors = {}
         for cfg in self.cfg.sensor:

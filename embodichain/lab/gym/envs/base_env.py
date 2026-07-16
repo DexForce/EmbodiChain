@@ -234,12 +234,18 @@ class BaseEnv(gym.Env):
     def add_camera_group_id(self, group_id: int) -> None:
         """Add a camera group ID for rendering.
 
+        Ignores a group that is already registered: with
+        RenderCfg.merge_camera_groups several cameras report the same group, and
+        each id in this list is rendered once, so a duplicate would render that
+        group twice.
+
         Args:
             group_id: The camera group ID to be added.
         """
         if not hasattr(self, "_camera_group_ids"):
             self._camera_group_ids: List[int] = []
-        self._camera_group_ids.append(group_id)
+        if group_id not in self._camera_group_ids:
+            self._camera_group_ids.append(group_id)
 
     def _setup_scene(self, **kwargs):
         # Init sim manager.

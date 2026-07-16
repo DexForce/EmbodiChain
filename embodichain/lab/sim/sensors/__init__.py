@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from .base_sensor import BaseSensor, SensorCfg
-from .camera import Camera, CameraCfg
+from .camera import Camera, CameraCfg, plan_camera_groups
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact_sensor import (
     ContactSensor,
