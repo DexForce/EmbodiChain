@@ -75,6 +75,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
+    DLSSCfg,
     RenderCfg,
     PhysicsCfg,
     MarkerCfg,
@@ -97,6 +98,7 @@ from embodichain.utils.math import look_at_to_pose, pose_inv
 __all__ = [
     "SimulationManager",
     "SimulationManagerCfg",
+    "DLSSCfg",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
@@ -484,6 +486,37 @@ class SimulationManager:
         world_config.raytrace_config.render_iterations_per_frame = (
             sim_config.render_cfg.spp
         )
+
+        # Configure DLSS 3.5 (Ray Reconstruction + Super Resolution).
+        # Only effective with OfflineRT renderer in windowed mode.
+        dlss_cfg = sim_config.render_cfg.dlss
+        if dlss_cfg.dlss_enabled:
+            if sim_config.render_cfg.renderer != "rt":
+                logger.log_warning(
+                    f"DLSS is enabled but renderer is '{sim_config.render_cfg.renderer}', "
+                    f"not 'rt' (OfflineRT). DLSS only works with the OfflineRT renderer. "
+                    f"DLSS settings will be ignored."
+                )
+            else:
+                world_config.dlss_config = dlss_cfg.to_dexsim_cfg(
+                    window_width=sim_config.width,
+                    window_height=sim_config.height,
+                )
+                dlss = world_config.dlss_config
+                world_config.raytrace_config.window_taa_enabled = False
+
+                # Align the window size with the effective target resolution.
+                # Rule: win_config.width/height == target_width/target_height.
+                win_config.width = dlss.target_width
+                win_config.height = dlss.target_height
+
+                logger.log_info(
+                    f"DLSS enabled with renderer='{sim_config.render_cfg.renderer}': "
+                    f"render={dlss.render_width}x{dlss.render_height}, "
+                    f"target={dlss.target_width}x{dlss.target_height}, "
+                    f"upsample_ratio={dlss_cfg.upsample_ratio}, "
+                    f"quality={dlss.dlss_quality}."
+                )
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)

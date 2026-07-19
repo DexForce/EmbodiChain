@@ -103,6 +103,79 @@ sim_config = SimulationManagerCfg(
 )
 ```
 
+### DLSS 3.5 (OfflineRT Only)
+
+When `render_cfg.renderer="rt"` (OfflineRT) and the simulation is running with a visible window, you can enable NVIDIA DLSS 3.5 for AI-powered denoising and upscaling through `render_cfg.dlss`.
+
+DLSS 3.5 combines two features:
+
+- **Ray Reconstruction (RR)** — replaces the OptiX denoiser for the window camera.
+- **Super Resolution (SR)** — upscales the RR output from render resolution to the target/display resolution.
+
+Both features are enabled together when `dlss_enabled=True`. The exact upscale ratio can be controlled either with the `dlss_quality` preset or with the `upsample_ratio` convenience parameter.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `dlss_enabled` | `bool` | `True` | Master DLSS enable toggle. |
+| `dlss_quality` | `int` | `-1` | DLSS quality preset. `-1`=auto, `0`=UltraPerformance (~3.0×), `1`=Performance (~2.25×), `2`=Balanced (~1.75×), `3`=Quality (~1.5×), `4`=UltraQuality (~1.3×), `5`=DLAA (1.0×). |
+| `upsample_ratio` | `float` | `1.0` | Convenience ratio `target_width / render_width` (and height). When `render_width`/`render_height` are `0`, the render resolution is computed as `target / upsample_ratio`. Defaults to `1.0` (1:1 / DLAA mode). Must be `>= 1.0`. |
+| `render_width` | `int` | `0` | Internal render resolution width. `0` means use the effective target width. |
+| `render_height` | `int` | `0` | Internal render resolution height. `0` means use the effective target height. |
+| `target_width` | `int` | `0` | Target/display resolution width. `0` means use the window width. |
+| `target_height` | `int` | `0` | Target/display resolution height. `0` means use the window height. |
+| `exposure_compensation` | `float` | `1.0` | Multiplier on the DLSS-RR pre-exposure scalar. `>1` brightens the HDR input to RR, which helps reject ghosting in dark areas; `<1` darkens. Typical range `0.5–8.0`. |
+
+#### Resolution selection rules
+
+- The **target** resolution defaults to the window size unless `target_width`/`target_height` are set explicitly.
+- The **render** resolution defaults to the target resolution (1:1 / DLAA mode) unless overridden.
+- If `upsample_ratio > 1.0` and `render_width`/`render_height` are `0`, the render resolution is computed as `target / upsample_ratio`. At `1.0`, render defaults to the target resolution (1:1 / DLAA mode).
+- Explicit `render_width`/`render_height` or `target_width`/`target_height` take precedence over computed values.
+- The window is always resized to match the effective target resolution when DLSS is active.
+
+#### Examples
+
+Use the `upsample_ratio` shortcut to render at half resolution and upscale to the window size:
+
+```python
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DLSSCfg, RenderCfg
+
+sim_config = SimulationManagerCfg(
+    width=1920,
+    height=1080,
+    render_cfg=RenderCfg(
+        renderer="rt",
+        dlss=DLSSCfg(
+            dlss_enabled=True,
+            upsample_ratio=2.0,  # render at 960x540, upscale to 1920x1080
+        ),
+    ),
+)
+```
+
+Set explicit render and target resolutions:
+
+```python
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DLSSCfg, RenderCfg
+
+sim_config = SimulationManagerCfg(
+    render_cfg=RenderCfg(
+        renderer="rt",
+        dlss=DLSSCfg(
+            dlss_enabled=True,
+            render_width=1280,
+            render_height=720,
+            target_width=1920,
+            target_height=1080,
+        ),
+    ),
+)
+```
+
+> **Note:** Offscreen cameras always use the OptiX denoiser regardless of DLSS settings. DLSS only affects the interactive viewer window when the OfflineRT renderer is used.
+
 
 ## Initialization
 
