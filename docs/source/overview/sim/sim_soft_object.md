@@ -105,7 +105,7 @@ if materials[0] is not None:
     materials[0].set_base_color([0.8, 0.3, 0.2, 1.0])
 ```
 
-`get_visual_material_inst(env_ids=None)` returns one `VisualMaterialInst | None` per selected environment. Soft objects currently expose and mutate existing instances; they do not provide `set_visual_material()`.
+`set_visual_material(mat, env_ids=None, shared=False)` assigns a replacement material, while `restore_visual_material(env_ids=None)` restores the original per-segment assignments. `get_visual_material_inst(env_ids=None)` returns one representative `VisualMaterialInst | None` per selected environment. `reset()` restores the original material before resetting the selected soft bodies.
 
 #### Pose Management
 You can set the global pose of a soft object (which transforms all its vertices), but getting a single "pose" from a deformed object is not supported.

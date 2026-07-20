@@ -622,9 +622,17 @@ class randomize_visual_material(Functor):
         self._shared = bool(cfg.params.get("shared", False))
         self._new_mode = False
         self._reuse_state = None
+        self._legacy_mat = None
         self._library_textures: list = []
         self._solid_textures: list = []
         self._working_attachments: set[tuple[int, int]] = set()
+        self._seen_material_reset_generation = list(
+            getattr(
+                getattr(self, "entity", None),
+                "_visual_material_reset_generation",
+                [],
+            )
+        )
         self._texture_key = (
             os.path.basename(texture_path) if texture_path is not None else ""
         )
@@ -713,7 +721,7 @@ class randomize_visual_material(Functor):
         dexsim_env = env.sim.get_env()
         self._solid_textures = [
             dexsim_env.create_color_texture(
-                color.view(1, 1, 4).expand(2, 2, 4).numpy(), has_alpha=True
+                color.view(1, 1, 4).repeat(2, 2, 1).numpy(), has_alpha=True
             )
             for color in colors
         ]
@@ -765,6 +773,7 @@ class randomize_visual_material(Functor):
                     uid=f"{self.entity_cfg.uid}_random_mat",
                 )
             )
+            self._legacy_mat = mat
             if isinstance(self.entity, RigidObject):
                 self.entity.set_visual_material(mat)
             elif isinstance(self.entity, Articulation):
@@ -882,37 +891,68 @@ class randomize_visual_material(Functor):
     ) -> None:
         if self.entity is None:
             return
+        self._sync_material_resets()
         if env_ids is None:
             env_ids = torch.arange(env.num_envs, device="cpu")
         else:
             env_ids = env_ids.cpu()
 
+        selected_env_ids = [int(env_idx) for env_idx in env_ids]
         num_reuse = len(self._reuse_state)  # 1 if shared, else num_envs
-        if num_reuse == 0:
+        if num_reuse == 0 or not selected_env_ids:
             return
+        num_plan = 1 if self._shared else len(selected_env_ids)
         plan = self._sample_plan(
-            num_reuse, base_color_range, metallic_range, roughness_range, ior_range
+            num_plan, base_color_range, metallic_range, roughness_range, ior_range
         )
-        tiers = self._sample_tiers(num_reuse)
-
         is_articulation = isinstance(self.entity, Articulation)
+        tiers = None if is_articulation else self._sample_tiers(num_plan)
+        articulation_tiers = (
+            self._sample_articulation_tiers() if is_articulation else None
+        )
 
-        def _apply(reuse_i: int, env_idx: int) -> None:
-            tier = int(tiers[reuse_i].item())
+        def _apply(reuse_i: int, env_idx: int, plan_i: int) -> None:
             if is_articulation:
-                self._apply_tier_articulation(reuse_i, env_idx, tier, plan)
+                self._apply_tier_articulation(
+                    reuse_i,
+                    env_idx,
+                    articulation_tiers[reuse_i],
+                    plan,
+                    plan_i,
+                )
             else:
+                tier = int(tiers[plan_i].item())
                 self._apply_tier_rigid(
-                    self._reuse_state[reuse_i], env_idx, tier, plan, reuse_i
+                    self._reuse_state[reuse_i], env_idx, tier, plan, plan_i
                 )
 
         if self._shared:
             # single reuse state applied to every env
-            for env_idx in env_ids.tolist():
-                _apply(0, int(env_idx))
+            for env_idx in selected_env_ids:
+                _apply(0, env_idx, 0)
         else:
-            for reuse_i in range(num_reuse):
-                _apply(reuse_i, int(env_ids[reuse_i]))
+            for plan_i, env_idx in enumerate(selected_env_ids):
+                reuse_i = env_idx if env_idx < num_reuse else 0
+                _apply(reuse_i, env_idx, plan_i)
+
+    def _sync_material_resets(self) -> None:
+        """Forget working attachments detached by an asset reset."""
+        generations = getattr(self.entity, "_visual_material_reset_generation", None)
+        if generations is None:
+            return
+        changed_envs = {
+            env_idx
+            for env_idx, generation in enumerate(generations)
+            if env_idx >= len(self._seen_material_reset_generation)
+            or generation != self._seen_material_reset_generation[env_idx]
+        }
+        if changed_envs:
+            self._working_attachments = {
+                attachment
+                for attachment in self._working_attachments
+                if attachment[1] not in changed_envs
+            }
+        self._seen_material_reset_generation = list(generations)
 
     def _sample_plan(
         self, num, base_color_range, metallic_range, roughness_range, ior_range
@@ -951,6 +991,15 @@ class randomize_visual_material(Functor):
             [self._p_original, self._p_library, self._p_solid], dtype=torch.float32
         )
         return torch.multinomial(probs, num_samples=num_reuse, replacement=True)
+
+    def _sample_articulation_tiers(self) -> list[dict[str, int]]:
+        """Sample an independent material tier for every articulation link."""
+        tier_plans = []
+        for link_map in self._reuse_state:
+            link_names = list(link_map)
+            sampled = self._sample_tiers(len(link_names)).tolist()
+            tier_plans.append(dict(zip(link_names, sampled)))
+        return tier_plans
 
     def _apply_inst(self, env_idx, mat_inst, mesh_id, link_name=None) -> None:
         """Swap a MaterialInst onto the render body (link-aware for Articulation)."""
@@ -1014,18 +1063,19 @@ class randomize_visual_material(Functor):
         if "ior" in plan:
             working_inst.set_ior(plan["ior"][idx].item())
 
-    def _apply_tier_articulation(self, reuse_i, env_idx, tier, plan) -> None:
+    def _apply_tier_articulation(self, reuse_i, env_idx, tiers, plan, plan_i) -> None:
         link_map = self._reuse_state[reuse_i]  # Dict[str, List[ReuseSegmentState]]
         for link_name, segments in link_map.items():
             if not segments:
                 continue
+            tier = tiers[link_name]
             if tier == 0:  # original
                 self._restore_original(segments, env_idx, link_name)
                 continue
             if tier == 1 and self._library_textures:  # library
-                self._apply_library_props(segments[0].working_inst, plan, reuse_i)
+                self._apply_library_props(segments[0].working_inst, plan, plan_i)
             else:  # solid
-                self._apply_solid_props(segments[0].working_inst, plan, reuse_i)
+                self._apply_solid_props(segments[0].working_inst, plan, plan_i)
             self._attach_working(segments, env_idx, link_name)
 
     def _call_legacy(
@@ -1093,6 +1143,23 @@ class randomize_visual_material(Functor):
             if clean:
                 env.sim.get_env().clean_materials()
             return
+
+        selected_env_ids = [int(env_idx) for env_idx in env_ids]
+        if isinstance(self.entity, RigidObject):
+            self.entity.set_visual_material(self._legacy_mat, env_ids=selected_env_ids)
+            self._mat_insts = self.entity.get_visual_material_inst(
+                env_ids=selected_env_ids
+            )
+        elif isinstance(self.entity, Articulation):
+            self.entity.set_visual_material(
+                self._legacy_mat,
+                env_ids=selected_env_ids,
+                link_names=self.entity_cfg.link_names,
+            )
+            self._mat_insts = self.entity.get_visual_material_inst(
+                env_ids=selected_env_ids,
+                link_names=self.entity_cfg.link_names,
+            )
 
         for i, data in enumerate(self._mat_insts):
             if isinstance(self.entity, RigidObject):

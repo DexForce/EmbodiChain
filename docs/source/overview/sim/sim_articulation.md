@@ -206,10 +206,11 @@ if base_material is not None:
 | Method | Return / Args | Description |
 | :--- | :--- | :--- |
 | `set_visual_material(mat, env_ids=None, link_names=None, shared=False)` | `mat: VisualMaterial` | Create and assign material instances to selected links. |
+| `restore_visual_material(env_ids=None, link_names=None)` | - | Restore the asset's original per-link, per-segment materials. |
 | `get_visual_material_inst(env_ids=None, link_names=None)` | `List[Dict[str, VisualMaterialInst]]` | Get representative materials by environment and link. Missing materials are omitted from each dictionary. |
 | `get_existing_visual_material(env_ids=None, link_names=None, shared=False)` | `List[Dict[str, List[ReuseSegmentState]]]` | Build original and working material state for every selected link segment. |
 
-For links with multiple mesh segments, `get_visual_material_inst()` exposes the first valid material. Use `get_existing_visual_material()` for per-segment operations.
+For links with multiple mesh segments, `get_visual_material_inst()` exposes the first valid material. Use `get_existing_visual_material()` for per-segment operations. `reset()` restores the original materials for every link in each selected environment before resetting articulation state.
 
 ### Control & Dynamics
 You can control the articulation by setting target states or directly applying forces.

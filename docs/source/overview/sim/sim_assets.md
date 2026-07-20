@@ -37,7 +37,9 @@ A {class}`~material.VisualMaterialInst` can come from either of two sources:
 
 When a rigid object, articulation, soft object, or cloth object is constructed, EmbodiChain inspects its render body and automatically wraps an existing material. If no material exists, list-based assets return `None`, while an articulation omits that link from its material dictionary. For render bodies with multiple mesh segments, this compatibility API exposes the first valid material as the representative instance. Rigid objects and articulations additionally provide `get_existing_visual_material()` for per-segment access.
 
-For batched simulation, `set_visual_material()` creates an instance per environment by default. Pass `shared=True` on rigid objects or articulations to reuse one instance across environments.
+For batched simulation, `set_visual_material()` creates an instance per environment by default. Pass `shared=True` to reuse one instance across environments.
+
+Rigid objects, articulations, soft objects, and cloth objects retain their construction-time per-segment material assignments. Call `restore_visual_material()` explicitly to restore them; each asset's `reset()` method performs the same restoration for the selected environments.
 
 ### Code 
 

@@ -30,9 +30,13 @@ from dexsim.types import (
     ArticulationGPUAPIWriteType,
     ArticulationGPUAPIReadType,
 )
-from dexsim.engine import CudaArray, PhysicsScene
+from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
 
 from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
+from embodichain.lab.sim.material import (
+    _capture_render_materials,
+    _restore_render_materials,
+)
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
@@ -711,6 +715,14 @@ class Articulation(BatchEntity):
         self._visual_material: List[Dict[str, VisualMaterialInst]] = [
             {} for _ in range(len(entities))
         ]
+        self._original_visual_material: List[Dict[str, list[MaterialInst | None]]] = [
+            {} for _ in range(len(entities))
+        ]
+        self._original_visual_material_inst: List[Dict[str, VisualMaterialInst]] = [
+            {} for _ in range(len(entities))
+        ]
+        self._has_original_visual_material = False
+        self._visual_material_reset_generation = [0] * len(entities)
         self.is_shared_visual_material = False
 
         # Stores mimic information for joints.
@@ -1897,6 +1909,9 @@ class Articulation(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
+
+        self.restore_visual_material(env_ids=local_env_ids)
+
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
         )
@@ -2238,13 +2253,16 @@ class Articulation(BatchEntity):
         material is registered. Segment-specific materials remain available
         through :meth:`get_existing_visual_material`.
         """
+        self._original_visual_material = [{} for _ in self._entities]
+        self._original_visual_material_inst = [{} for _ in self._entities]
         for env_idx, entity in enumerate(self._entities):
             for link_name in self.link_names:
                 render_body = entity.get_render_body(link_name)
                 if render_body is None:
                     continue
-                for mesh_id in range(render_body.get_mesh_count()):
-                    mat_inst = render_body.get_material(mesh_id)
+                original_materials = _capture_render_materials(render_body)
+                self._original_visual_material[env_idx][link_name] = original_materials
+                for mesh_id, mat_inst in enumerate(original_materials):
                     if mat_inst is None:
                         continue
                     try:
@@ -2257,7 +2275,45 @@ class Articulation(BatchEntity):
                         )
                         continue
                     self._visual_material[env_idx][link_name] = wrapped
+                    self._original_visual_material_inst[env_idx][link_name] = wrapped
                     break
+        self._has_original_visual_material = True
+
+    def restore_visual_material(
+        self,
+        env_ids: Sequence[int] | None = None,
+        link_names: List[str] | None = None,
+    ) -> None:
+        """Restore visual materials captured when the articulation was created.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are restored.
+            link_names: Links to restore. If None, all links are restored.
+        """
+        if not self._has_original_visual_material:
+            return
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        local_link_names = self.link_names if link_names is None else link_names
+        for env_idx in local_env_ids:
+            for link_name in local_link_names:
+                original_materials = self._original_visual_material[env_idx].get(
+                    link_name
+                )
+                if original_materials is None:
+                    continue
+                render_body = self._entities[env_idx].get_render_body(link_name)
+                if render_body is None:
+                    continue
+                _restore_render_materials(render_body, original_materials)
+                original_inst = self._original_visual_material_inst[env_idx].get(
+                    link_name
+                )
+                if original_inst is None:
+                    self._visual_material[env_idx].pop(link_name, None)
+                else:
+                    self._visual_material[env_idx][link_name] = original_inst
+            self._visual_material_reset_generation[env_idx] += 1
+        self.is_shared_visual_material = False
 
     def get_existing_visual_material(
         self,
@@ -2288,20 +2344,31 @@ class Articulation(BatchEntity):
             local_env_ids = self._all_indices if env_ids is None else list(env_ids)
         link_names = self.link_names if link_names is None else list(link_names)
 
+        if not hasattr(self, "_original_visual_material"):
+            self._original_visual_material = [{} for _ in self._entities]
+        for env_idx in local_env_ids:
+            for link_name in link_names:
+                if link_name in self._original_visual_material[env_idx]:
+                    continue
+                render_body = self._entities[env_idx].get_render_body(link_name)
+                if render_body is not None:
+                    self._original_visual_material[env_idx][link_name] = (
+                        _capture_render_materials(render_body)
+                    )
+
         per_env: List[Dict[str, List[ReuseSegmentState]]] = []
         for env_idx in local_env_ids:
             link_map: Dict[str, List[ReuseSegmentState]] = {}
             for link_name in link_names:
-                render_body = self._entities[env_idx].get_render_body(link_name)
-                if render_body is None:
+                if self._entities[env_idx].get_render_body(link_name) is None:
                     raise ValueError(
                         f"Articulation '{self.uid}' link '{link_name}' has no render body."
                     )
-                mesh_count = render_body.get_mesh_count()
                 segments: List[ReuseSegmentState] = []
                 working_inst = None
-                for mesh_id in range(mesh_count):
-                    original_inst = render_body.get_material(mesh_id)
+                for mesh_id, original_inst in enumerate(
+                    self._original_visual_material[env_idx][link_name]
+                ):
                     if original_inst is None:
                         raise ValueError(
                             f"Articulation '{self.uid}' link '{link_name}' segment {mesh_id} has no material."

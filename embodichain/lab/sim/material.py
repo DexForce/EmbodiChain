@@ -463,3 +463,60 @@ class ReuseSegmentState:
     mesh_id: int
     original_inst: MaterialInst
     working_inst: VisualMaterialInst
+
+
+def _capture_render_materials(render_body) -> list[MaterialInst | None]:
+    """Capture the material attached to every render-body mesh segment."""
+    return [
+        render_body.get_material(mesh_id)
+        for mesh_id in range(render_body.get_mesh_count())
+    ]
+
+
+def _is_same_material_inst(
+    current_inst: MaterialInst | None, original_inst: MaterialInst | None
+) -> bool:
+    """Return whether two handles refer to the same material instance."""
+    if current_inst is original_inst:
+        return True
+    if current_inst is None or original_inst is None:
+        return False
+    if current_inst.get_name() != original_inst.get_name():
+        return False
+
+    current_template = current_inst.get_template()
+    original_template = original_inst.get_template()
+    if current_template is original_template:
+        return True
+    if current_template is None or original_template is None:
+        return False
+    return current_template.get_name() == original_template.get_name()
+
+
+def _restore_render_materials(
+    render_body, original_materials: list[MaterialInst | None]
+) -> None:
+    """Restore a render body's captured per-segment material assignments."""
+    current_materials = [
+        render_body.get_material(mesh_id) for mesh_id in range(len(original_materials))
+    ]
+
+    # A null original can only be recovered through the render body's default
+    # material. Cleaning is unnecessary when every null segment is already null.
+    if any(
+        original_inst is None and current_inst is not None
+        for current_inst, original_inst in zip(current_materials, original_materials)
+    ):
+        render_body.clean_material()
+        current_materials = [
+            render_body.get_material(mesh_id)
+            for mesh_id in range(len(original_materials))
+        ]
+
+    for mesh_id, (current_inst, original_inst) in enumerate(
+        zip(current_materials, original_materials)
+    ):
+        if _is_same_material_inst(current_inst, original_inst):
+            continue
+        if original_inst is not None:
+            render_body.set_material(mesh_id, original_inst)

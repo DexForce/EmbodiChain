@@ -54,6 +54,7 @@ class _MockRigidObject(RigidObject):
         self._all_indices = list(range(num_envs))
         self._entities = [MagicMock(name=f"mesh{i}") for i in range(num_envs)]
         self._visual_material = [None] * num_envs
+        self._visual_material_reset_generation = [0] * num_envs
         self.is_shared_visual_material = False
         self.set_visual_material = MagicMock()
         self.get_visual_material_inst = MagicMock(
@@ -132,8 +133,10 @@ def test_legacy_call_runs_clean_materials():
     cfg = _make_cfg({"entity_cfg": entity_cfg, "fallback_to_new": True})
     functor = randomize_visual_material(cfg, env)
     env.sim.env.clean_materials = MagicMock()
+    env.sim.get_asset("obj").set_visual_material.reset_mock()
     functor(env, torch.arange(env.num_envs), entity_cfg=entity_cfg)
     env.sim.env.clean_materials.assert_called_once()
+    env.sim.get_asset("obj").set_visual_material.assert_called_once()
 
 
 def _seg(mesh_id, orig, tmpl):
@@ -203,8 +206,46 @@ def test_new_call_no_clean_and_swaps():
     obj.apply_render_material_inst.assert_called()
 
 
-def _art_asset(uid="art"):
+def test_new_call_reattaches_working_material_after_asset_reset():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    seg = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
+    obj.get_existing_visual_material = MagicMock(return_value=[[seg]])
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 0.0, 1.0
+
+    selected_env_ids = torch.tensor([0])
+    functor(env, selected_env_ids, entity_cfg=SceneEntityCfg(uid="obj"))
+    obj._visual_material_reset_generation[0] += 1
+    functor(env, selected_env_ids, entity_cfg=SceneEntityCfg(uid="obj"))
+
+    assert obj.apply_render_material_inst.call_count == 2
+
+
+def test_new_call_supports_partial_environment_selection():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    states = [
+        [_seg(0, MagicMock(name="orig0"), MagicMock(name="tmpl0"))],
+        [_seg(1, MagicMock(name="orig1"), MagicMock(name="tmpl1"))],
+    ]
+    obj.get_existing_visual_material = MagicMock(return_value=states)
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 0.0, 1.0
+
+    functor(env, torch.tensor([1]), entity_cfg=SceneEntityCfg(uid="obj"))
+
+    apply_call = obj.apply_render_material_inst.call_args
+    assert apply_call.args[0] == 1
+    assert apply_call.args[2] == 1
+
+
+def _art_asset(uid="art", link_names=None):
     from embodichain.lab.sim.objects.articulation import Articulation
+
+    link_names = ["link0"] if link_names is None else link_names
 
     class _A(Articulation):
         def __init__(self):
@@ -213,11 +254,20 @@ def _art_asset(uid="art"):
             self.uid = uid
             # num_instances is a read-only property; not set here.
             self.is_shared_visual_material = False
-            self.link_names = ["link0"]
+            self.link_names = link_names
 
     obj = _A()
-    seg = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
-    obj.get_existing_visual_material = MagicMock(return_value=[{"link0": [seg]}])
+    link_map = {
+        link_name: [
+            _seg(
+                0,
+                MagicMock(name=f"orig_{link_name}"),
+                MagicMock(name=f"tmpl_{link_name}"),
+            )
+        ]
+        for link_name in link_names
+    }
+    obj.get_existing_visual_material = MagicMock(return_value=[link_map])
     obj.apply_render_material_inst = MagicMock()
     return obj
 
@@ -250,6 +300,34 @@ def test_new_call_articulation_swaps_per_link():
     )
 
     art.apply_render_material_inst.assert_called()
+
+
+def test_articulation_samples_library_and_solid_tiers_per_link():
+    env = _MockEnv(num_envs=1)
+    link_names = ["library_link", "solid_link"]
+    art = _art_asset(link_names=link_names)
+    env.sim.get_asset = lambda uid: art
+    env.sim.asset_uids = ["art"]
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="art", link_names=link_names)})
+    functor = randomize_visual_material(cfg, env)
+    library_texture = MagicMock(name="library_texture")
+    functor._library_textures = [library_texture]
+    # Tier IDs: 1 = library, 2 = solid.
+    functor._sample_tiers = MagicMock(return_value=torch.tensor([1, 2]))
+
+    functor(
+        env,
+        torch.tensor([0]),
+        entity_cfg=SceneEntityCfg(uid="art", link_names=link_names),
+    )
+
+    link_map = art.get_existing_visual_material.return_value[0]
+    library_call = link_map["library_link"][
+        0
+    ].working_inst.set_base_color_texture.call_args
+    solid_call = link_map["solid_link"][0].working_inst.set_base_color_texture.call_args
+    assert library_call.kwargs["texture_obj"] is library_texture
+    assert solid_call.kwargs["texture_obj"] in functor._solid_textures
 
 
 def test_plane_new_mode_uses_legacy_inplace_no_clean():
@@ -411,6 +489,7 @@ def test_solid_palette_stores_color_in_texture_pixels():
 
     texture_data = env.sim.get_env().create_color_texture.call_args.args[0]
     expected_rgba = torch.tensor([51, 102, 153, 255], dtype=torch.uint8).numpy()
+    assert texture_data.flags.c_contiguous
     assert (texture_data == expected_rgba).all()
 
 

@@ -26,7 +26,7 @@ from functools import cached_property
 
 from dexsim.models import MeshObject
 from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
-from dexsim.engine import CudaArray, PhysicsScene
+from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
 from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
@@ -34,6 +34,10 @@ from embodichain.lab.sim import (
     VisualMaterialInst,
     ReuseSegmentState,
     BatchEntity,
+)
+from embodichain.lab.sim.material import (
+    _capture_render_materials,
+    _restore_render_materials,
 )
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
@@ -264,6 +268,14 @@ class RigidObject(BatchEntity):
 
         # For rendering purposes, each instance can have its own material.
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
+        self._original_visual_material: List[list[MaterialInst | None]] = [
+            [] for _ in entities
+        ]
+        self._original_visual_material_inst: List[VisualMaterialInst | None] = [
+            None
+        ] * len(entities)
+        self._has_original_visual_material = False
+        self._visual_material_reset_generation = [0] * len(entities)
         self.is_shared_visual_material = False
 
         # Determine if we should use USD properties or cfg properties.
@@ -903,25 +915,51 @@ class RigidObject(BatchEntity):
         valid material is registered. Segment-specific materials remain
         available through :meth:`get_existing_visual_material`.
         """
+        self._original_visual_material = [[] for _ in self._entities]
+        self._original_visual_material_inst = [None] * len(self._entities)
         for env_idx, entity in enumerate(self._entities):
             render_body = entity.get_render_body()
             if render_body is None:
                 continue
-            for mesh_id in range(render_body.get_mesh_count()):
-                mat_inst = render_body.get_material(mesh_id)
+            original_materials = _capture_render_materials(render_body)
+            self._original_visual_material[env_idx] = original_materials
+            for mesh_id, mat_inst in enumerate(original_materials):
                 if mat_inst is None:
                     continue
                 try:
-                    self._visual_material[env_idx] = VisualMaterialInst.from_existing(
-                        mat_inst
-                    )
+                    wrapped = VisualMaterialInst.from_existing(mat_inst)
                 except ValueError as exc:
                     logger.log_warning(
                         f"Cannot initialize visual material for RigidObject "
                         f"'{self.uid}' env {env_idx} segment {mesh_id}: {exc}"
                     )
                     continue
+                self._visual_material[env_idx] = wrapped
+                self._original_visual_material_inst[env_idx] = wrapped
                 break
+        self._has_original_visual_material = True
+
+    def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore the visual materials captured when the rigid object was created.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are restored.
+        """
+        if not self._has_original_visual_material:
+            return
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            render_body = self._entities[env_idx].get_render_body()
+            if render_body is None:
+                continue
+            _restore_render_materials(
+                render_body, self._original_visual_material[env_idx]
+            )
+            self._visual_material[env_idx] = self._original_visual_material_inst[
+                env_idx
+            ]
+            self._visual_material_reset_generation[env_idx] += 1
+        self.is_shared_visual_material = False
 
     def get_existing_visual_material(
         self,
@@ -949,14 +987,21 @@ class RigidObject(BatchEntity):
         else:
             local_env_ids = self._all_indices if env_ids is None else list(env_ids)
 
+        if not hasattr(self, "_original_visual_material"):
+            self._original_visual_material = [None] * len(self._entities)
+        for env_idx in local_env_ids:
+            if self._original_visual_material[env_idx] is None:
+                self._original_visual_material[env_idx] = _capture_render_materials(
+                    self._entities[env_idx].get_render_body()
+                )
+
         per_env: List[List[ReuseSegmentState]] = []
         for env_idx in local_env_ids:
-            render_body = self._entities[env_idx].get_render_body()
-            mesh_count = render_body.get_mesh_count()
             segments: List[ReuseSegmentState] = []
             working_inst = None
-            for mesh_id in range(mesh_count):
-                original_inst = render_body.get_material(mesh_id)
+            for mesh_id, original_inst in enumerate(
+                self._original_visual_material[env_idx]
+            ):
                 if original_inst is None:
                     raise ValueError(
                         f"RigidObject '{self.uid}' env {env_idx} segment {mesh_id} has no material."
@@ -1272,6 +1317,8 @@ class RigidObject(BatchEntity):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
+
+        self.restore_visual_material(env_ids=local_env_ids)
 
         self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
