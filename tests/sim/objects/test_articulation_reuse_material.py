@@ -51,7 +51,7 @@ def _make_entity(links, segs_per_link=1):
 
 def test_get_existing_visual_material_per_link():
     links = ["base", "gripper"]
-    entity, rbs = _make_entity(links, segs_per_link=1)
+    entity, rbs = _make_entity(links, segs_per_link=3)
     obj = _MockArticulation([entity], "art", links)
 
     states = obj.get_existing_visual_material(link_names=links)
@@ -59,10 +59,14 @@ def test_get_existing_visual_material_per_link():
     assert len(states) == 1
     assert set(states[0].keys()) == set(links)
     for link in links:
-        assert len(states[0][link]) == 1
+        assert len(states[0][link]) == 3
         seg = states[0][link][0]
         assert isinstance(seg, ReuseSegmentState)
         assert isinstance(seg.working_inst, VisualMaterialInst)
+        assert all(item.working_inst is seg.working_inst for item in states[0][link])
+        rbs[
+            link
+        ].get_material.return_value.get_template.return_value.create_inst.assert_called_once()
 
 
 def test_get_existing_visual_material_raises_when_no_material():

@@ -455,8 +455,9 @@ class ReuseSegmentState:
         mesh_id: The render-body segment index.
         original_inst: The dexsim ``MaterialInst`` parsed from the asset. Kept immutable
             and swapped back onto the render body for the "original" tier.
-        working_inst: A ``VisualMaterialInst`` created from ``original_inst``'s template;
-            mutated in place for the "library"/"solid" tiers.
+        working_inst: A ``VisualMaterialInst`` created from the first segment's
+            template and shared by sibling segments; mutated in place for the
+            "library"/"solid" tiers.
     """
 
     mesh_id: int

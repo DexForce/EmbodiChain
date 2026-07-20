@@ -623,6 +623,8 @@ class randomize_visual_material(Functor):
         self._new_mode = False
         self._reuse_state = None
         self._library_textures: list = []
+        self._solid_textures: list = []
+        self._working_attachments: set[tuple[int, int]] = set()
         self._texture_key = (
             os.path.basename(texture_path) if texture_path is not None else ""
         )
@@ -660,6 +662,7 @@ class randomize_visual_material(Functor):
                 link_names=link_names, shared=self._shared
             )
         self._build_library_textures(env)
+        self._build_solid_textures(env)
         self._resolve_tier_probs()
 
     def _build_library_textures(self, env: EmbodiedEnv) -> None:
@@ -679,6 +682,42 @@ class randomize_visual_material(Functor):
             for t in self.textures
         ]
         sim.set_texture_cache(tex_key, self._library_textures)
+
+    def _build_solid_textures(self, env: EmbodiedEnv) -> None:
+        """Create a bounded, shared palette for solid-color randomization.
+
+        DexSim's hybrid renderer uses a base-color texture in place of the material
+        base-color factor, so a white texture cannot be tinted through
+        :meth:`VisualMaterialInst.set_base_color`. A small palette keeps the colors
+        in the textures themselves without allocating on every interval.
+        """
+        base_color_range = self.cfg.params.get(
+            "base_color_range", ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+        )
+        palette_size = max(1, int(self.cfg.params.get("solid_texture_count", 32)))
+        lower = tuple(float(value) for value in base_color_range[0])
+        upper = tuple(float(value) for value in base_color_range[1])
+        tex_key = f"__randomize_visual_material_solid_{lower}_{upper}_{palette_size}"
+        cache = env.sim.get_texture_cache()
+        if tex_key in cache:
+            self._solid_textures = cache[tex_key]
+            return
+
+        colors = sample_uniform(
+            lower=torch.tensor(lower, dtype=torch.float32),
+            upper=torch.tensor(upper, dtype=torch.float32),
+            size=(palette_size, 3),
+        )
+        alpha = torch.ones((palette_size, 1), dtype=torch.float32)
+        colors = (torch.cat((colors, alpha), dim=1) * 255).to(torch.uint8)
+        dexsim_env = env.sim.get_env()
+        self._solid_textures = [
+            dexsim_env.create_color_texture(
+                color.view(1, 1, 4).expand(2, 2, 4).numpy(), has_alpha=True
+            )
+            for color in colors
+        ]
+        env.sim.set_texture_cache(tex_key, self._solid_textures)
 
     def _resolve_tier_probs(self) -> None:
         """Resolve p_original/p_library/p_solid with backward-compat derivation."""
@@ -814,6 +853,7 @@ class randomize_visual_material(Functor):
         p_original: float | None = None,
         p_library: float | None = None,
         p_solid: float | None = None,
+        solid_texture_count: int = 32,
         shared: bool | None = None,
     ):
         if self._new_mode:
@@ -862,8 +902,9 @@ class randomize_visual_material(Functor):
             if is_articulation:
                 self._apply_tier_articulation(reuse_i, env_idx, tier, plan)
             else:
-                for seg in self._reuse_state[reuse_i]:
-                    self._apply_tier_rigid(seg, env_idx, tier, plan, reuse_i)
+                self._apply_tier_rigid(
+                    self._reuse_state[reuse_i], env_idx, tier, plan, reuse_i
+                )
 
         if self._shared:
             # single reuse state applied to every env
@@ -920,30 +961,48 @@ class randomize_visual_material(Functor):
                 env_idx, mat_inst, link_name, mesh_id
             )
 
-    def _apply_tier_rigid(self, seg, env_idx, tier, plan, idx) -> None:
+    def _apply_tier_rigid(self, segments, env_idx, tier, plan, idx) -> None:
+        if not segments:
+            return
         if tier == 0:  # original
-            self._apply_inst(env_idx, seg.original_inst, seg.mesh_id)
+            self._restore_original(segments, env_idx)
             return
         if tier == 1 and self._library_textures:  # library
-            self._apply_library_tier(seg, env_idx, plan, idx)
+            self._apply_library_props(segments[0].working_inst, plan, idx)
         else:  # solid (or library with empty library)
-            self._apply_solid_tier(seg, env_idx)
+            self._apply_solid_props(segments[0].working_inst, plan, idx)
+        self._attach_working(segments, env_idx)
 
-    def _apply_library_tier(self, seg, env_idx, plan, idx, link_name=None) -> None:
+    def _apply_library_props(self, working_inst, plan, idx) -> None:
         tex_idx = torch.randint(0, len(self._library_textures), (1,)).item()
-        seg.working_inst.set_base_color_texture(
-            texture_obj=self._library_textures[tex_idx]
-        )
-        self._apply_plan_props(seg.working_inst, plan, idx)
-        self._apply_inst(env_idx, seg.working_inst.mat, seg.mesh_id, link_name)
+        working_inst.set_base_color_texture(texture_obj=self._library_textures[tex_idx])
+        self._apply_plan_props(working_inst, plan, idx)
 
-    def _apply_solid_tier(self, seg, env_idx, link_name=None) -> None:
-        seg.working_inst.set_base_color([1.0, 1.0, 1.0, 1.0])
-        seg.working_inst.set_metallic(0.0)
-        seg.working_inst.set_roughness(0.7)
-        solid = randomize_visual_material.gen_random_base_color_texture(2, 2)
-        seg.working_inst.set_base_color_texture(texture_data=solid)
-        self._apply_inst(env_idx, seg.working_inst.mat, seg.mesh_id, link_name)
+    def _apply_solid_props(self, working_inst, plan, idx) -> None:
+        texture_idx = torch.randint(0, len(self._solid_textures), (1,)).item()
+        working_inst.set_base_color([1.0, 1.0, 1.0, 1.0])
+        working_inst.set_metallic(0.0)
+        working_inst.set_roughness(0.7)
+        working_inst.set_base_color_texture(
+            texture_obj=self._solid_textures[texture_idx]
+        )
+
+    def _attach_working(self, segments, env_idx, link_name=None) -> None:
+        working_mat = segments[0].working_inst.mat
+        for seg in segments:
+            attachment = (id(seg), env_idx)
+            if attachment in self._working_attachments:
+                continue
+            self._apply_inst(env_idx, working_mat, seg.mesh_id, link_name)
+            self._working_attachments.add(attachment)
+
+    def _restore_original(self, segments, env_idx, link_name=None) -> None:
+        for seg in segments:
+            attachment = (id(seg), env_idx)
+            if attachment not in self._working_attachments:
+                continue
+            self._apply_inst(env_idx, seg.original_inst, seg.mesh_id, link_name)
+            self._working_attachments.remove(attachment)
 
     def _apply_plan_props(self, working_inst, plan, idx) -> None:
         if "base_color" in plan:
@@ -958,14 +1017,16 @@ class randomize_visual_material(Functor):
     def _apply_tier_articulation(self, reuse_i, env_idx, tier, plan) -> None:
         link_map = self._reuse_state[reuse_i]  # Dict[str, List[ReuseSegmentState]]
         for link_name, segments in link_map.items():
-            for seg in segments:
-                if tier == 0:  # original
-                    self._apply_inst(env_idx, seg.original_inst, seg.mesh_id, link_name)
-                    continue
-                if tier == 1 and self._library_textures:  # library
-                    self._apply_library_tier(seg, env_idx, plan, reuse_i, link_name)
-                else:  # solid
-                    self._apply_solid_tier(seg, env_idx, link_name)
+            if not segments:
+                continue
+            if tier == 0:  # original
+                self._restore_original(segments, env_idx, link_name)
+                continue
+            if tier == 1 and self._library_textures:  # library
+                self._apply_library_props(segments[0].working_inst, plan, reuse_i)
+            else:  # solid
+                self._apply_solid_props(segments[0].working_inst, plan, reuse_i)
+            self._attach_working(segments, env_idx, link_name)
 
     def _call_legacy(
         self,

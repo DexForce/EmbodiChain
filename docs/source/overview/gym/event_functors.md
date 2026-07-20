@@ -63,10 +63,11 @@ This page lists all available event functors that can be used with the Event Man
                 "p_original": 0.2,
                 "p_library": 0.5,
                 "p_solid": 0.3,
+                "solid_texture_count": 32,
                 "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]}}
     ```
 
-    If all three `p_*` values are omitted, `random_texture_prob` remains the backward-compatible source for the library/solid split. The probabilities are normalized when their sum differs from one.
+    If all three `p_*` values are omitted, `random_texture_prob` remains the backward-compatible source for the library/solid split. The probabilities are normalized when their sum differs from one. Solid colors are sampled into a bounded texture palette at initialization because the hybrid renderer does not tint base-color textures with the material base-color factor. `solid_texture_count` controls the palette size and defaults to 32.
 * - {func}`~randomization.visual.randomize_light`
   - Vary light position, color, intensity, and direction within specified ranges.
 

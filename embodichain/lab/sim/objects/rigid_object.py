@@ -930,9 +930,9 @@ class RigidObject(BatchEntity):
     ) -> List[List[ReuseSegmentState]]:
         """Build reuse state from the material dexsim parsed onto each env's render body.
 
-        For each env (first only if ``shared``) and each render-body segment, the existing
-        ``MaterialInst`` is captured as an immutable original and a working instance is
-        created from its template and wrapped as ``VisualMaterialInst``.
+        For each env (first only if ``shared``), every render-body segment's existing
+        ``MaterialInst`` is captured as an immutable original. One working instance is
+        shared by all segments so randomized updates have constant material-update cost.
 
         Args:
             env_ids: Environment indices. If None, all instances are used.
@@ -954,6 +954,7 @@ class RigidObject(BatchEntity):
             render_body = self._entities[env_idx].get_render_body()
             mesh_count = render_body.get_mesh_count()
             segments: List[ReuseSegmentState] = []
+            working_inst = None
             for mesh_id in range(mesh_count):
                 original_inst = render_body.get_material(mesh_id)
                 if original_inst is None:
@@ -965,9 +966,10 @@ class RigidObject(BatchEntity):
                     raise ValueError(
                         f"RigidObject '{self.uid}' segment {mesh_id} material has no template."
                     )
-                working_name = f"{self.uid}_reuse_{env_idx}_{mesh_id}"
-                template.create_inst(working_name)
-                working_inst = VisualMaterialInst(working_name, template)
+                if working_inst is None:
+                    working_name = f"{self.uid}_reuse_{env_idx}"
+                    template.create_inst(working_name)
+                    working_inst = VisualMaterialInst(working_name, template)
                 segments.append(
                     ReuseSegmentState(
                         mesh_id=mesh_id,

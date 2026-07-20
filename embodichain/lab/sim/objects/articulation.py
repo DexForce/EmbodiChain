@@ -2267,6 +2267,10 @@ class Articulation(BatchEntity):
     ) -> List[Dict[str, List[ReuseSegmentState]]]:
         """Build reuse state from materials dexsim parsed onto each link's render body.
 
+        Each segment keeps its original material for restoration. Segments on the
+        same link share one working material so randomized property updates happen
+        once per link instead of once per mesh segment.
+
         Args:
             env_ids: Environment indices. If None, all instances are used.
             link_names: Links to include. If None, all links are used.
@@ -2295,6 +2299,7 @@ class Articulation(BatchEntity):
                     )
                 mesh_count = render_body.get_mesh_count()
                 segments: List[ReuseSegmentState] = []
+                working_inst = None
                 for mesh_id in range(mesh_count):
                     original_inst = render_body.get_material(mesh_id)
                     if original_inst is None:
@@ -2306,9 +2311,10 @@ class Articulation(BatchEntity):
                         raise ValueError(
                             f"Articulation '{self.uid}' link '{link_name}' material has no template."
                         )
-                    working_name = f"{self.uid}_reuse_{env_idx}_{link_name}_{mesh_id}"
-                    template.create_inst(working_name)
-                    working_inst = VisualMaterialInst(working_name, template)
+                    if working_inst is None:
+                        working_name = f"{self.uid}_reuse_{env_idx}_{link_name}"
+                        template.create_inst(working_name)
+                        working_inst = VisualMaterialInst(working_name, template)
                     segments.append(
                         ReuseSegmentState(
                             mesh_id=mesh_id,

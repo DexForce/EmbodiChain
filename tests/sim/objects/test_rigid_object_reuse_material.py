@@ -61,7 +61,9 @@ def test_get_existing_visual_material_builds_state_per_segment():
         assert isinstance(seg, ReuseSegmentState)
         assert seg.original_inst is orig
         assert isinstance(seg.working_inst, VisualMaterialInst)
-        tmpl.create_inst.assert_called_once()  # working instance created from template
+    assert states[0][0].working_inst is states[0][1].working_inst
+    seg_mats[0][1].create_inst.assert_called_once()
+    seg_mats[1][1].create_inst.assert_not_called()
 
 
 def test_get_existing_visual_material_shared_returns_single_env():

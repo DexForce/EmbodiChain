@@ -194,8 +194,8 @@ def test_new_call_no_clean_and_swaps():
     functor = randomize_visual_material(cfg, env)
 
     env.sim.env.clean_materials.reset_mock()
-    # force original tier (p_original=1)
-    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+    # Force the solid tier so the working material must be attached.
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 0.0, 1.0
 
     functor(env, torch.arange(env.num_envs), entity_cfg=SceneEntityCfg(uid="obj"))
 
@@ -241,7 +241,7 @@ def test_new_call_articulation_swaps_per_link():
     env.sim.asset_uids = ["art"]
     cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="art", link_names=["link0"])})
     functor = randomize_visual_material(cfg, env)
-    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 0.0, 1.0
 
     functor(
         env,
@@ -341,6 +341,7 @@ def test_library_textures_cached_across_functors():
     )
     cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
     functor = randomize_visual_material(cfg, env)
+    env.sim.get_env().create_color_texture.reset_mock()
 
     # Simulate a non-empty texture library and run _build_library_textures directly.
     fake_tex = torch.zeros((2, 2, 4), dtype=torch.uint8)
@@ -355,6 +356,105 @@ def test_library_textures_cached_across_functors():
     functor2._texture_key = "texA"
     functor2._build_library_textures(env)
     assert env.sim.get_env().create_color_texture.call_count == 1
+
+
+def test_repeated_multi_segment_solid_calls_reuse_one_texture():
+    env = _MockEnv(num_envs=1)
+    obj = env.sim.get_asset("obj")
+    segment_count = 32  # Enough segments to expose per-segment allocation behavior.
+    segments = [
+        _seg(mesh_id, MagicMock(name=f"orig{mesh_id}"), MagicMock(name="tmpl"))
+        for mesh_id in range(segment_count)
+    ]
+    obj.get_existing_visual_material = MagicMock(return_value=[segments])
+    palette_size = 4
+    cfg = _make_cfg(
+        {
+            "entity_cfg": SceneEntityCfg(uid="obj"),
+            "p_solid": 1.0,
+            "solid_texture_count": palette_size,
+        }
+    )
+
+    functor = randomize_visual_material(cfg, env)
+    allocation_count_after_init = env.sim.get_env().create_color_texture.call_count
+    repeated_calls = 20
+
+    for _ in range(repeated_calls):
+        functor(env, torch.tensor([0]), entity_cfg=SceneEntityCfg(uid="obj"))
+
+    assert allocation_count_after_init == palette_size
+    assert env.sim.get_env().create_color_texture.call_count == palette_size
+    assert obj.apply_render_material_inst.call_count == segment_count
+    assert segments[0].working_inst.set_base_color.call_count == repeated_calls
+    assert all(
+        segment.working_inst.set_base_color.call_count == 0 for segment in segments[1:]
+    )
+
+
+def test_solid_palette_stores_color_in_texture_pixels():
+    env = _MockEnv(num_envs=1)
+    obj = env.sim.get_asset("obj")
+    obj.get_existing_visual_material = MagicMock(
+        return_value=[[_seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))]]
+    )
+    fixed_color = [0.2, 0.4, 0.6]
+    cfg = _make_cfg(
+        {
+            "entity_cfg": SceneEntityCfg(uid="obj"),
+            "base_color_range": [fixed_color, fixed_color],
+            "solid_texture_count": 1,
+        }
+    )
+
+    randomize_visual_material(cfg, env)
+
+    texture_data = env.sim.get_env().create_color_texture.call_args.args[0]
+    expected_rgba = torch.tensor([51, 102, 153, 255], dtype=torch.uint8).numpy()
+    assert (texture_data == expected_rgba).all()
+
+
+def test_library_tier_without_color_range_does_not_tint_texture():
+    env = _MockEnv(num_envs=1)
+    obj = env.sim.get_asset("obj")
+    segment = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
+    obj.get_existing_visual_material = MagicMock(return_value=[[segment]])
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+    functor._library_textures = [MagicMock(name="library_texture")]
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 1.0, 0.0
+
+    functor(env, torch.tensor([0]), entity_cfg=SceneEntityCfg(uid="obj"))
+
+    segment.working_inst.set_base_color.assert_not_called()
+
+
+def test_original_tier_restores_each_segment_after_randomization():
+    env = _MockEnv(num_envs=1)
+    obj = env.sim.get_asset("obj")
+    segments = [
+        _seg(mesh_id, MagicMock(name=f"orig{mesh_id}"), MagicMock(name="tmpl"))
+        for mesh_id in range(2)
+    ]
+    obj.get_existing_visual_material = MagicMock(return_value=[segments])
+    cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
+    functor = randomize_visual_material(cfg, env)
+
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 0.0, 1.0
+    functor(env, torch.tensor([0]), entity_cfg=SceneEntityCfg(uid="obj"))
+    obj.apply_render_material_inst.reset_mock()
+
+    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+    functor(env, torch.tensor([0]), entity_cfg=SceneEntityCfg(uid="obj"))
+
+    restored = {
+        (call.args[1], call.args[2])
+        for call in obj.apply_render_material_inst.call_args_list
+    }
+    assert restored == {
+        (segments[0].original_inst, 0),
+        (segments[1].original_inst, 1),
+    }
 
 
 def test_fallback_to_new_preserves_legacy():
@@ -381,7 +481,7 @@ def test_multi_segment_all_swapped():
     obj.get_existing_visual_material = MagicMock(return_value=[segs])
     cfg = _make_cfg({"entity_cfg": SceneEntityCfg(uid="obj")})
     functor = randomize_visual_material(cfg, env)
-    functor._p_original, functor._p_library, functor._p_solid = 1.0, 0.0, 0.0
+    functor._p_original, functor._p_library, functor._p_solid = 0.0, 0.0, 1.0
 
     functor(env, torch.arange(env.num_envs), entity_cfg=SceneEntityCfg(uid="obj"))
 
