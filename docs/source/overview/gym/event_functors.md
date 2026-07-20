@@ -53,16 +53,20 @@ This page lists all available event functors that can be used with the Event Man
 * - Functor Name
   - Description
 * - {class}`~randomization.visual.randomize_visual_material`
-  - Randomize textures, base colors, and material properties (metallic, roughness, IOR). Implemented as a Functor class. Supports both RigidObject and Articulation assets.
+  - Randomize textures, base colors, and material properties (metallic, roughness, IOR). Supports RigidObject and Articulation assets. By default it reuses the material parsed from the asset and switches between original, texture-library, and solid-color instances. Set `fallback_to_new` to use the legacy create-and-replace path.
 
     ```json
     {"func": "randomize_visual_material",
      "mode": "interval", "interval_step": 10,
      "params": {"entity_cfg": {"uid": "table"},
-                "random_texture_prob": 0.5,
                 "texture_path": "CocoBackground/coco",
+                "p_original": 0.2,
+                "p_library": 0.5,
+                "p_solid": 0.3,
                 "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]}}
     ```
+
+    If all three `p_*` values are omitted, `random_texture_prob` remains the backward-compatible source for the library/solid split. The probabilities are normalized when their sum differs from one.
 * - {func}`~randomization.visual.randomize_light`
   - Vary light position, color, intensity, and direction within specified ranges.
 

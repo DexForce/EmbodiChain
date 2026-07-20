@@ -149,6 +149,19 @@ print(f"vertices positions: {vert_position}")
 vert_velocity = cloth_object.get_current_vertex_velocity()
 print(f"Vertex Velocities: {vert_velocity}")
 ```
+
+#### Visual Material
+
+When a cloth object is constructed, EmbodiChain wraps the first valid material already attached to each environment's render body. The original dexsim material instance is retained.
+
+```python
+materials = cloth_object.get_visual_material_inst()
+if materials[0] is not None:
+    materials[0].set_roughness(0.8)
+```
+
+`get_visual_material_inst(env_ids=None)` returns one `VisualMaterialInst | None` per selected environment. Cloth objects currently expose and mutate existing instances; they do not provide `set_visual_material()`.
+
 #### Pose Management
 You can set the global pose of a cloth object (which transforms all its vertices), but getting a single "pose" from a deformed surface object is not supported.
 
