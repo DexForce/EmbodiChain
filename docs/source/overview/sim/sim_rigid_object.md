@@ -166,10 +166,13 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
 | `set_visual_material(mat, env_ids=None, shared=False)` | `mat: VisualMaterial` | Change visual appearance at runtime. |
-| `get_visual_material_inst(env_ids=None)` | `List[VisualMaterialInst]` | Get material instances for the rigid object. |
+| `get_visual_material_inst(env_ids=None)` | `List[VisualMaterialInst \| None]` | Get the existing or explicitly assigned representative material for each environment. |
+| `get_existing_visual_material(env_ids=None, shared=False)` | `List[List[ReuseSegmentState]]` | Build original and working material state for every mesh segment. |
 | `share_visual_material_inst(mat_insts)` | `mat_insts: List[VisualMaterialInst]` | Share material instances between objects. |
 | `set_visible(visible)` | `visible: bool` | Set visibility of the rigid object. |
 | `set_physical_visible(visible, rgba=None)` | `visible: bool`, `rgba: (4,)` | Set collision body render visibility. |
+
+When a rigid object is loaded, an existing asset material is wrapped automatically without replacing the underlying dexsim instance. If a render body has multiple mesh segments, `get_visual_material_inst()` returns the first valid material; use `get_existing_visual_material()` when every segment must be addressed independently.
 
 ### Utility & Identification
 

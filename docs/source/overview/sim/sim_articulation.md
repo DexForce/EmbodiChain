@@ -192,6 +192,25 @@ print(f"Current Joint Positions: {articulation.get_qpos()}")
 print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
 ```
 
+### Visual Appearance
+
+Asset materials are wrapped automatically during articulation construction. Materials are organized by environment and link:
+
+```python
+materials = articulation.get_visual_material_inst()
+base_material = materials[0].get("base_link")
+if base_material is not None:
+    base_material.set_roughness(0.5)
+```
+
+| Method | Return / Args | Description |
+| :--- | :--- | :--- |
+| `set_visual_material(mat, env_ids=None, link_names=None, shared=False)` | `mat: VisualMaterial` | Create and assign material instances to selected links. |
+| `get_visual_material_inst(env_ids=None, link_names=None)` | `List[Dict[str, VisualMaterialInst]]` | Get representative materials by environment and link. Missing materials are omitted from each dictionary. |
+| `get_existing_visual_material(env_ids=None, link_names=None, shared=False)` | `List[Dict[str, List[ReuseSegmentState]]]` | Build original and working material state for every selected link segment. |
+
+For links with multiple mesh segments, `get_visual_material_inst()` exposes the first valid material. Use `get_existing_visual_material()` for per-segment operations.
+
 ### Control & Dynamics
 You can control the articulation by setting target states or directly applying forces.
 

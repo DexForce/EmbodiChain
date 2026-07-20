@@ -94,6 +94,19 @@ print(f"Simulation Vertices Shape: {sim_verts.shape}")
 velocities = soft_object.get_current_sim_vertex_velocities()
 print(f"Vertex Velocities: {velocities}")
 ```
+
+#### Visual Material
+
+When a soft object is constructed, EmbodiChain wraps the first valid material already attached to each environment's render body. The original dexsim material instance is retained.
+
+```python
+materials = soft_object.get_visual_material_inst()
+if materials[0] is not None:
+    materials[0].set_base_color([0.8, 0.3, 0.2, 1.0])
+```
+
+`get_visual_material_inst(env_ids=None)` returns one `VisualMaterialInst | None` per selected environment. Soft objects currently expose and mutate existing instances; they do not provide `set_visual_material()`.
+
 #### Pose Management
 You can set the global pose of a soft object (which transforms all its vertices), but getting a single "pose" from a deformed object is not supported.
 
