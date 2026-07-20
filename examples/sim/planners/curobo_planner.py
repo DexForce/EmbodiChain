@@ -63,9 +63,10 @@ __all__ = ["main"]
 ROBOT_UID = "curobo_franka"
 CONTROL_PART = "arm"
 DEMO_BLOCK_DIMS = [0.18, 0.40, 0.36]
-DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
+DEMO_BLOCK_POS = (0.45, 0.0, 0.18)
 DEFAULT_RECORD_FPS = 20
 DEFAULT_RECORD_MAX_MEMORY = 2048
+DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_RECORD_LOOK_AT = (
     (1.8, -1.8, 1.35),
     (0.35, 0.10, 0.40),
@@ -99,9 +100,17 @@ def parse_args() -> argparse.Namespace:
         help="Simulation updates to hold before and after trajectory playback.",
     )
     parser.add_argument(
-        "--no-warmup",
+        "--warmup",
+        dest="warmup",
         action="store_true",
-        help="Skip cuRobo planner warmup (useful for iteration/debugging).",
+        default=False,
+        help="Run cuRobo planner warmup before planning. Slower startup, but useful for cached repeated planning.",
+    )
+    parser.add_argument(
+        "--no-warmup",
+        dest="warmup",
+        action="store_false",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--cuda-graph",
@@ -109,6 +118,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Enable cuRobo CUDA graphs. Disabled by default because graph capture "
             "can conflict with DexSim's GPU physics stream."
+        ),
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=DEFAULT_MAX_ATTEMPTS,
+        help=(
+            "cuRobo planning attempts per request. Lower values are faster; "
+            "increase this if a harder scene fails to find a path."
         ),
     )
     parser.add_argument(
@@ -186,6 +204,8 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
     robot = sim.add_robot(
         cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
     )
+    if robot is None:
+        raise RuntimeError(f"Failed to add robot '{ROBOT_UID}' to the cuRobo demo.")
     # Keep this geometry synchronized with collision_franka_demo.yml.
     sim.add_rigid_object(
         cfg=RigidObjectCfg(
@@ -194,7 +214,7 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
             attrs=RigidBodyAttributesCfg(),
             body_type="kinematic",
             init_pos=DEMO_BLOCK_POS,
-            init_rot=[0.0, 0.0, 0.0],
+            init_rot=(0.0, 0.0, 0.0),
         )
     )
     return sim, robot
@@ -285,6 +305,8 @@ def main() -> None:
         raise ValueError("--step-repeat must be at least 1.")
     if args.hold_steps < 0:
         raise ValueError("--hold-steps must be non-negative.")
+    if args.max_attempts < 1:
+        raise ValueError("--max-attempts must be at least 1.")
     if args.record_fps < 1:
         raise ValueError("--record-fps must be at least 1.")
     _check_runtime()
@@ -304,7 +326,8 @@ def main() -> None:
                     robot_uid=ROBOT_UID,
                     robot_profiles={CONTROL_PART: _franka_profile()},
                     world=CuroboWorldCfg(world_config_path=_demo_world_path()),
-                    warmup=not args.no_warmup,
+                    warmup=args.warmup,
+                    max_attempts=args.max_attempts,
                     use_cuda_graph=args.cuda_graph,
                 )
             )
