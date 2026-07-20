@@ -473,6 +473,16 @@ def _capture_render_materials(render_body) -> list[MaterialInst | None]:
     ]
 
 
+def _wrap_first_render_material(
+    materials: list[MaterialInst | None],
+) -> VisualMaterialInst | None:
+    """Wrap the first material instance that has a template."""
+    for mat_inst in materials:
+        if mat_inst is not None and mat_inst.get_template() is not None:
+            return VisualMaterialInst.from_existing(mat_inst)
+    return None
+
+
 def _is_same_material_inst(
     current_inst: MaterialInst | None, original_inst: MaterialInst | None
 ) -> bool:
@@ -481,42 +491,35 @@ def _is_same_material_inst(
         return True
     if current_inst is None or original_inst is None:
         return False
-    if current_inst.get_name() != original_inst.get_name():
-        return False
-
     current_template = current_inst.get_template()
     original_template = original_inst.get_template()
-    if current_template is original_template:
-        return True
-    if current_template is None or original_template is None:
-        return False
-    return current_template.get_name() == original_template.get_name()
+    return (
+        current_inst.get_name() == original_inst.get_name()
+        and current_template is not None
+        and original_template is not None
+        and current_template.get_name() == original_template.get_name()
+    )
+
+
+def _set_render_material(render_body, mesh_id: int, mat_inst: MaterialInst) -> None:
+    """Set a segment material only when it is not already attached."""
+    if _is_same_material_inst(render_body.get_material(mesh_id), mat_inst):
+        return
+    render_body.set_material(mesh_id, mat_inst)
 
 
 def _restore_render_materials(
     render_body, original_materials: list[MaterialInst | None]
 ) -> None:
     """Restore a render body's captured per-segment material assignments."""
-    current_materials = [
-        render_body.get_material(mesh_id) for mesh_id in range(len(original_materials))
-    ]
-
     # A null original can only be recovered through the render body's default
     # material. Cleaning is unnecessary when every null segment is already null.
     if any(
-        original_inst is None and current_inst is not None
-        for current_inst, original_inst in zip(current_materials, original_materials)
+        original_inst is None and render_body.get_material(mesh_id) is not None
+        for mesh_id, original_inst in enumerate(original_materials)
     ):
         render_body.clean_material()
-        current_materials = [
-            render_body.get_material(mesh_id)
-            for mesh_id in range(len(original_materials))
-        ]
 
-    for mesh_id, (current_inst, original_inst) in enumerate(
-        zip(current_materials, original_materials)
-    ):
-        if _is_same_material_inst(current_inst, original_inst):
-            continue
+    for mesh_id, original_inst in enumerate(original_materials):
         if original_inst is not None:
-            render_body.set_material(mesh_id, original_inst)
+            _set_render_material(render_body, mesh_id, original_inst)

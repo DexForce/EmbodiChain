@@ -36,6 +36,8 @@ from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegment
 from embodichain.lab.sim.material import (
     _capture_render_materials,
     _restore_render_materials,
+    _set_render_material,
+    _wrap_first_render_material,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -715,14 +717,6 @@ class Articulation(BatchEntity):
         self._visual_material: List[Dict[str, VisualMaterialInst]] = [
             {} for _ in range(len(entities))
         ]
-        self._original_visual_material: List[Dict[str, list[MaterialInst | None]]] = [
-            {} for _ in range(len(entities))
-        ]
-        self._original_visual_material_inst: List[Dict[str, VisualMaterialInst]] = [
-            {} for _ in range(len(entities))
-        ]
-        self._has_original_visual_material = False
-        self._visual_material_reset_generation = [0] * len(entities)
         self.is_shared_visual_material = False
 
         # Stores mimic information for joints.
@@ -2262,22 +2256,10 @@ class Articulation(BatchEntity):
                     continue
                 original_materials = _capture_render_materials(render_body)
                 self._original_visual_material[env_idx][link_name] = original_materials
-                for mesh_id, mat_inst in enumerate(original_materials):
-                    if mat_inst is None:
-                        continue
-                    try:
-                        wrapped = VisualMaterialInst.from_existing(mat_inst)
-                    except ValueError as exc:
-                        logger.log_warning(
-                            f"Cannot initialize visual material for Articulation "
-                            f"'{self.uid}' link '{link_name}' env {env_idx} "
-                            f"segment {mesh_id}: {exc}"
-                        )
-                        continue
+                wrapped = _wrap_first_render_material(original_materials)
+                if wrapped is not None:
                     self._visual_material[env_idx][link_name] = wrapped
                     self._original_visual_material_inst[env_idx][link_name] = wrapped
-                    break
-        self._has_original_visual_material = True
 
     def restore_visual_material(
         self,
@@ -2290,7 +2272,7 @@ class Articulation(BatchEntity):
             env_ids: Environment indices. If None, all instances are restored.
             link_names: Links to restore. If None, all links are restored.
         """
-        if not self._has_original_visual_material:
+        if not hasattr(self, "_original_visual_material"):
             return
         local_env_ids = self._all_indices if env_ids is None else env_ids
         local_link_names = self.link_names if link_names is None else link_names
@@ -2312,7 +2294,6 @@ class Articulation(BatchEntity):
                     self._visual_material[env_idx].pop(link_name, None)
                 else:
                     self._visual_material[env_idx][link_name] = original_inst
-            self._visual_material_reset_generation[env_idx] += 1
         self.is_shared_visual_material = False
 
     def get_existing_visual_material(
@@ -2396,7 +2377,7 @@ class Articulation(BatchEntity):
     def apply_render_material_inst(
         self,
         env_idx: int,
-        mat_inst,
+        mat_inst: MaterialInst,
         link_name: str,
         mesh_id: int = 0,
     ) -> None:
@@ -2408,8 +2389,8 @@ class Articulation(BatchEntity):
             link_name: Link whose render body receives the material.
             mesh_id: Render-body segment index.
         """
-        self._entities[env_idx].get_render_body(link_name).set_material(
-            mesh_id, mat_inst
+        _set_render_material(
+            self._entities[env_idx].get_render_body(link_name), mesh_id, mat_inst
         )
 
     def set_physical_visible(

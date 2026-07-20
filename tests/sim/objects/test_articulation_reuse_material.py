@@ -88,3 +88,15 @@ def test_apply_render_material_inst_swaps_on_link_render_body():
     obj.apply_render_material_inst(0, inst, link_name="base", mesh_id=2)
 
     rbs["base"].set_material.assert_called_once_with(2, inst)
+
+
+def test_apply_render_material_inst_skips_attached_material():
+    links = ["base"]
+    entity, rbs = _make_entity(links)
+    obj = _MockArticulation([entity], "art", links)
+    inst = MagicMock(name="MaterialInst")
+    rbs["base"].get_material.return_value = inst
+
+    obj.apply_render_material_inst(0, inst, link_name="base")
+
+    rbs["base"].set_material.assert_not_called()

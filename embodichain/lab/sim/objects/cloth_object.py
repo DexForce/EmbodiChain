@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
-from dexsim.engine import ClothBody, MaterialInst, PhysicsScene
+from dexsim.engine import ClothBody, PhysicsScene
 from dexsim.types import ClothBodyGPUAPIReadWriteType
 from embodichain.lab.sim.common import (
     BatchEntity,
@@ -35,6 +35,7 @@ from embodichain.lab.sim.material import (
     VisualMaterialInst,
     _capture_render_materials,
     _restore_render_materials,
+    _wrap_first_render_material,
 )
 from embodichain.utils.math import (
     matrix_from_euler,
@@ -134,14 +135,6 @@ class ClothObject(BatchEntity):
         self._world.update(0.001)
 
         self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
-        self._original_visual_material: List[list[MaterialInst | None]] = [
-            [] for _ in entities
-        ]
-        self._original_visual_material_inst: List[VisualMaterialInst | None] = [
-            None
-        ] * len(entities)
-        self._has_original_visual_material = False
-        self._visual_material_reset_generation = [0] * len(entities)
         self.is_shared_visual_material = False
 
         super().__init__(cfg=cfg, entities=entities, device=device)
@@ -164,21 +157,10 @@ class ClothObject(BatchEntity):
                 continue
             original_materials = _capture_render_materials(render_body)
             self._original_visual_material[env_idx] = original_materials
-            for mesh_id, mat_inst in enumerate(original_materials):
-                if mat_inst is None:
-                    continue
-                try:
-                    wrapped = VisualMaterialInst.from_existing(mat_inst)
-                except ValueError as exc:
-                    logger.log_warning(
-                        f"Cannot initialize visual material for ClothObject "
-                        f"'{self.uid}' env {env_idx} segment {mesh_id}: {exc}"
-                    )
-                    continue
+            wrapped = _wrap_first_render_material(original_materials)
+            if wrapped is not None:
                 self._visual_material[env_idx] = wrapped
                 self._original_visual_material_inst[env_idx] = wrapped
-                break
-        self._has_original_visual_material = True
 
     def set_visual_material(
         self,
@@ -215,7 +197,7 @@ class ClothObject(BatchEntity):
         Args:
             env_ids: Environment indices. If None, all instances are restored.
         """
-        if not self._has_original_visual_material:
+        if not hasattr(self, "_original_visual_material"):
             return
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for env_idx in local_env_ids:
@@ -228,7 +210,6 @@ class ClothObject(BatchEntity):
             self._visual_material[env_idx] = self._original_visual_material_inst[
                 env_idx
             ]
-            self._visual_material_reset_generation[env_idx] += 1
         self.is_shared_visual_material = False
 
     def get_visual_material_inst(

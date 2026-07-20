@@ -625,14 +625,6 @@ class randomize_visual_material(Functor):
         self._legacy_mat = None
         self._library_textures: list = []
         self._solid_textures: list = []
-        self._working_attachments: set[tuple[int, int]] = set()
-        self._seen_material_reset_generation = list(
-            getattr(
-                getattr(self, "entity", None),
-                "_visual_material_reset_generation",
-                [],
-            )
-        )
         self._texture_key = (
             os.path.basename(texture_path) if texture_path is not None else ""
         )
@@ -891,7 +883,6 @@ class randomize_visual_material(Functor):
     ) -> None:
         if self.entity is None:
             return
-        self._sync_material_resets()
         if env_ids is None:
             env_ids = torch.arange(env.num_envs, device="cpu")
         else:
@@ -934,25 +925,6 @@ class randomize_visual_material(Functor):
             for plan_i, env_idx in enumerate(selected_env_ids):
                 reuse_i = env_idx if env_idx < num_reuse else 0
                 _apply(reuse_i, env_idx, plan_i)
-
-    def _sync_material_resets(self) -> None:
-        """Forget working attachments detached by an asset reset."""
-        generations = getattr(self.entity, "_visual_material_reset_generation", None)
-        if generations is None:
-            return
-        changed_envs = {
-            env_idx
-            for env_idx, generation in enumerate(generations)
-            if env_idx >= len(self._seen_material_reset_generation)
-            or generation != self._seen_material_reset_generation[env_idx]
-        }
-        if changed_envs:
-            self._working_attachments = {
-                attachment
-                for attachment in self._working_attachments
-                if attachment[1] not in changed_envs
-            }
-        self._seen_material_reset_generation = list(generations)
 
     def _sample_plan(
         self, num, base_color_range, metallic_range, roughness_range, ior_range
@@ -1039,19 +1011,11 @@ class randomize_visual_material(Functor):
     def _attach_working(self, segments, env_idx, link_name=None) -> None:
         working_mat = segments[0].working_inst.mat
         for seg in segments:
-            attachment = (id(seg), env_idx)
-            if attachment in self._working_attachments:
-                continue
             self._apply_inst(env_idx, working_mat, seg.mesh_id, link_name)
-            self._working_attachments.add(attachment)
 
     def _restore_original(self, segments, env_idx, link_name=None) -> None:
         for seg in segments:
-            attachment = (id(seg), env_idx)
-            if attachment not in self._working_attachments:
-                continue
             self._apply_inst(env_idx, seg.original_inst, seg.mesh_id, link_name)
-            self._working_attachments.remove(attachment)
 
     def _apply_plan_props(self, working_inst, plan, idx) -> None:
         if "base_color" in plan:

@@ -38,6 +38,8 @@ from embodichain.lab.sim import (
 from embodichain.lab.sim.material import (
     _capture_render_materials,
     _restore_render_materials,
+    _set_render_material,
+    _wrap_first_render_material,
 )
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
@@ -268,14 +270,6 @@ class RigidObject(BatchEntity):
 
         # For rendering purposes, each instance can have its own material.
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
-        self._original_visual_material: List[list[MaterialInst | None]] = [
-            [] for _ in entities
-        ]
-        self._original_visual_material_inst: List[VisualMaterialInst | None] = [
-            None
-        ] * len(entities)
-        self._has_original_visual_material = False
-        self._visual_material_reset_generation = [0] * len(entities)
         self.is_shared_visual_material = False
 
         # Determine if we should use USD properties or cfg properties.
@@ -923,21 +917,10 @@ class RigidObject(BatchEntity):
                 continue
             original_materials = _capture_render_materials(render_body)
             self._original_visual_material[env_idx] = original_materials
-            for mesh_id, mat_inst in enumerate(original_materials):
-                if mat_inst is None:
-                    continue
-                try:
-                    wrapped = VisualMaterialInst.from_existing(mat_inst)
-                except ValueError as exc:
-                    logger.log_warning(
-                        f"Cannot initialize visual material for RigidObject "
-                        f"'{self.uid}' env {env_idx} segment {mesh_id}: {exc}"
-                    )
-                    continue
+            wrapped = _wrap_first_render_material(original_materials)
+            if wrapped is not None:
                 self._visual_material[env_idx] = wrapped
                 self._original_visual_material_inst[env_idx] = wrapped
-                break
-        self._has_original_visual_material = True
 
     def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore the visual materials captured when the rigid object was created.
@@ -945,7 +928,7 @@ class RigidObject(BatchEntity):
         Args:
             env_ids: Environment indices. If None, all instances are restored.
         """
-        if not self._has_original_visual_material:
+        if not hasattr(self, "_original_visual_material"):
             return
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for env_idx in local_env_ids:
@@ -958,7 +941,6 @@ class RigidObject(BatchEntity):
             self._visual_material[env_idx] = self._original_visual_material_inst[
                 env_idx
             ]
-            self._visual_material_reset_generation[env_idx] += 1
         self.is_shared_visual_material = False
 
     def get_existing_visual_material(
@@ -1028,7 +1010,7 @@ class RigidObject(BatchEntity):
     def apply_render_material_inst(
         self,
         env_idx: int,
-        mat_inst,
+        mat_inst: MaterialInst,
         mesh_id: int = 0,
     ) -> None:
         """Swap a dexsim MaterialInst onto a render-body segment for the given env.
@@ -1038,7 +1020,9 @@ class RigidObject(BatchEntity):
             mat_inst: dexsim ``MaterialInst`` to attach.
             mesh_id: Render-body segment index.
         """
-        self._entities[env_idx].get_render_body().set_material(mesh_id, mat_inst)
+        _set_render_material(
+            self._entities[env_idx].get_render_body(), mesh_id, mat_inst
+        )
 
     def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
         """Share material instances for the rigid object.

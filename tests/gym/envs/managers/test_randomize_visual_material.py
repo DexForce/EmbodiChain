@@ -54,7 +54,6 @@ class _MockRigidObject(RigidObject):
         self._all_indices = list(range(num_envs))
         self._entities = [MagicMock(name=f"mesh{i}") for i in range(num_envs)]
         self._visual_material = [None] * num_envs
-        self._visual_material_reset_generation = [0] * num_envs
         self.is_shared_visual_material = False
         self.set_visual_material = MagicMock()
         self.get_visual_material_inst = MagicMock(
@@ -206,7 +205,7 @@ def test_new_call_no_clean_and_swaps():
     obj.apply_render_material_inst.assert_called()
 
 
-def test_new_call_reattaches_working_material_after_asset_reset():
+def test_new_call_checks_working_material_attachment_each_time():
     env = _MockEnv()
     obj = env.sim.get_asset("obj")
     seg = _seg(0, MagicMock(name="orig"), MagicMock(name="tmpl"))
@@ -217,7 +216,6 @@ def test_new_call_reattaches_working_material_after_asset_reset():
 
     selected_env_ids = torch.tensor([0])
     functor(env, selected_env_ids, entity_cfg=SceneEntityCfg(uid="obj"))
-    obj._visual_material_reset_generation[0] += 1
     functor(env, selected_env_ids, entity_cfg=SceneEntityCfg(uid="obj"))
 
     assert obj.apply_render_material_inst.call_count == 2
@@ -463,7 +461,6 @@ def test_repeated_multi_segment_solid_calls_reuse_one_texture():
 
     assert allocation_count_after_init == palette_size
     assert env.sim.get_env().create_color_texture.call_count == palette_size
-    assert obj.apply_render_material_inst.call_count == segment_count
     assert segments[0].working_inst.set_base_color.call_count == repeated_calls
     assert all(
         segment.working_inst.set_base_color.call_count == 0 for segment in segments[1:]

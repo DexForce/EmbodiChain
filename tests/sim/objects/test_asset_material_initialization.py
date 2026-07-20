@@ -42,8 +42,6 @@ def _make_asset(asset_type, material):
     asset = asset_type.__new__(asset_type)
     asset._entities = [entity]
     asset._all_indices = [0]
-    asset._visual_material_reset_generation = [0]
-    asset._has_original_visual_material = False
     asset.is_shared_visual_material = False
     asset.uid = asset_type.__name__
     if asset_type is Articulation:
@@ -119,7 +117,6 @@ def test_asset_types_restore_original_material_after_replacement():
             call(mesh_id, original) for mesh_id, original in enumerate(originals)
         ]
         assert _get_registered_material(asset).mat is originals[0]
-        assert asset._visual_material_reset_generation == [1]
         assert asset.is_shared_visual_material is False
 
 

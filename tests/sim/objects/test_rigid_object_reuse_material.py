@@ -92,3 +92,15 @@ def test_apply_render_material_inst_swaps_on_render_body():
     obj.apply_render_material_inst(0, inst, mesh_id=3)
 
     render_body.set_material.assert_called_once_with(3, inst)
+
+
+def test_apply_render_material_inst_skips_attached_material():
+    entity, render_body, _ = _make_entity(num_segments=1)
+    obj = _MockRigidObject([entity], "obj")
+    inst = MagicMock(name="MaterialInst")
+    render_body.get_material.side_effect = None
+    render_body.get_material.return_value = inst
+
+    obj.apply_render_material_inst(0, inst)
+
+    render_body.set_material.assert_not_called()
