@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -28,6 +30,7 @@ from dexsim.types import SoftBodyGPUAPIReadWriteType
 from embodichain.lab.sim.common import (
     BatchEntity,
 )
+from embodichain.lab.sim.material import VisualMaterialInst
 from embodichain.utils.math import (
     matrix_from_euler,
 )
@@ -157,10 +160,54 @@ class SoftObject(BatchEntity):
 
         self._world.update(0.001)
 
+        self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
+
         super().__init__(cfg=cfg, entities=entities, device=device)
+
+        self._initialize_existing_visual_material()
 
         # set default collision filter
         self._set_default_collision_filter()
+
+    def _initialize_existing_visual_material(self) -> None:
+        """Wrap asset-parsed materials during soft-object construction.
+
+        For a multi-segment render body, the first segment with a valid
+        material is registered as the environment's representative material.
+        """
+        for env_idx, entity in enumerate(self._entities):
+            render_body = entity.get_render_body()
+            if render_body is None:
+                continue
+            for mesh_id in range(render_body.get_mesh_count()):
+                mat_inst = render_body.get_material(mesh_id)
+                if mat_inst is None:
+                    continue
+                try:
+                    self._visual_material[env_idx] = VisualMaterialInst.from_existing(
+                        mat_inst
+                    )
+                except ValueError as exc:
+                    logger.log_warning(
+                        f"Cannot initialize visual material for SoftObject "
+                        f"'{self.uid}' env {env_idx} segment {mesh_id}: {exc}"
+                    )
+                    continue
+                break
+
+    def get_visual_material_inst(
+        self, env_ids: Sequence[int] | None = None
+    ) -> List[VisualMaterialInst | None]:
+        """Get the material instance registered for each selected environment.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are returned.
+
+        Returns:
+            The existing material wrappers, or None where an asset has no material.
+        """
+        ids = env_ids if env_ids is not None else range(self.num_instances)
+        return [self._visual_material[i] for i in ids]
 
     def _set_default_collision_filter(self) -> None:
         collision_filter_data = torch.zeros(

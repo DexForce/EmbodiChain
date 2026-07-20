@@ -197,9 +197,15 @@ class VisualMaterial:
 class VisualMaterialInst:
     """Instance of a visual material in the simulation environment."""
 
-    def __init__(self, uid: str, mat: Material):
+    def __init__(
+        self,
+        uid: str,
+        mat: Material,
+        mat_inst: MaterialInst | None = None,
+    ) -> None:
         self.uid = uid
         self._mat = mat
+        self._mat_inst = mat_inst
 
         # Init properties with default values
         self.base_color = [0.5, 0.5, 0.5, 1.0]
@@ -215,8 +221,29 @@ class VisualMaterialInst:
         self.ior = 1.5
         # self.subsurface = 0.0
 
+    @classmethod
+    def from_existing(cls, mat_inst: MaterialInst) -> VisualMaterialInst:
+        """Wrap an existing dexsim material instance without copying it.
+
+        Args:
+            mat_inst: Existing dexsim material instance parsed from an asset.
+
+        Returns:
+            The EmbodiChain wrapper for the existing instance.
+
+        Raises:
+            ValueError: If the material instance has no template.
+        """
+        mat = mat_inst.get_template()
+        if mat is None:
+            raise ValueError("Cannot wrap a material instance without a template.")
+        return cls(uid=mat_inst.get_name(), mat=mat, mat_inst=mat_inst)
+
     @property
     def mat(self) -> MaterialInst:
+        existing_inst = getattr(self, "_mat_inst", None)
+        if existing_inst is not None:
+            return existing_inst
         return self._mat.get_inst(self.uid)
 
     def set_base_color(self, color: list) -> None:

@@ -724,6 +724,8 @@ class Articulation(BatchEntity):
 
         super().__init__(cfg, entities, device)
 
+        self._initialize_existing_visual_material()
+
         # set default collision filter
         self._set_default_collision_filter()
 
@@ -2227,6 +2229,35 @@ class Articulation(BatchEntity):
                 }
                 result.append(mat_dict)
         return result
+
+    def _initialize_existing_visual_material(self) -> None:
+        """Wrap asset-parsed materials during articulation construction.
+
+        The public material mapping stores one representative material per link.
+        For links with multiple mesh segments, the first segment with a valid
+        material is registered. Segment-specific materials remain available
+        through :meth:`get_existing_visual_material`.
+        """
+        for env_idx, entity in enumerate(self._entities):
+            for link_name in self.link_names:
+                render_body = entity.get_render_body(link_name)
+                if render_body is None:
+                    continue
+                for mesh_id in range(render_body.get_mesh_count()):
+                    mat_inst = render_body.get_material(mesh_id)
+                    if mat_inst is None:
+                        continue
+                    try:
+                        wrapped = VisualMaterialInst.from_existing(mat_inst)
+                    except ValueError as exc:
+                        logger.log_warning(
+                            f"Cannot initialize visual material for Articulation "
+                            f"'{self.uid}' link '{link_name}' env {env_idx} "
+                            f"segment {mesh_id}: {exc}"
+                        )
+                        continue
+                    self._visual_material[env_idx][link_name] = wrapped
+                    break
 
     def get_existing_visual_material(
         self,
