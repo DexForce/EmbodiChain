@@ -566,7 +566,10 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.rewards:
             self.reward_manager.reset(env_ids=env_ids)
 
-        if self.cfg.dataset:
+        # Dataset saving can be disabled while the dataset configuration remains
+        # present.  In that mode no DatasetManager is created in __init__, so
+        # reset must not dereference the optional manager.
+        if self.cfg.dataset and self.dataset_manager is not None:
             self.dataset_manager.reset(env_ids=env_ids)
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
