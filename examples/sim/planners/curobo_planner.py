@@ -33,10 +33,19 @@ https://nvlabs.github.io/curobo/latest/getting-started/installation.html
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
 import torch
+
+# Prefer the in-repo source over any installed (possibly stale) embodichain
+# package, so this example exercises the current code. The demo relies on the
+# cuRobo adapter's URDF-based robot-YAML auto-generation, which lives in the
+# source tree and may not be present in an older installed copy.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from embodichain import data as _data
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -173,24 +182,6 @@ def _demo_world_path() -> str:
     )
 
 
-def _franka_profile() -> CuroboRobotProfileCfg:
-    """Build the explicit Franka joint and TCP-frame mapping for cuRobo."""
-    return CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names={
-            f"fr3_joint{i}": f"panda_joint{i}" for i in range(1, 8)
-        },
-        base_link_name="panda_link0",
-        tool_frame_name="panda_hand",
-        tool_frame_to_tcp=[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.1034],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-    )
-
-
 def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
@@ -324,7 +315,7 @@ def main() -> None:
             MotionGenCfg(
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=ROBOT_UID,
-                    robot_profiles={CONTROL_PART: _franka_profile()},
+                    robot_profiles={CONTROL_PART: CuroboRobotProfileCfg()},
                     world=CuroboWorldCfg(world_config_path=_demo_world_path()),
                     warmup=args.warmup,
                     max_attempts=args.max_attempts,

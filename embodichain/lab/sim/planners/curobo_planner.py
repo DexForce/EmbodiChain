@@ -28,9 +28,11 @@ trajectories, and maps the result back into the standard ``PlanResult`` shape.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+import os
 from copy import deepcopy
-from dataclasses import MISSING, dataclass
+from dataclasses import MISSING, dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     from typing import Any
 
 __all__ = [
+    "CuroboAutoGenCfg",
     "CuroboPlanOptions",
     "CuroboPlanner",
     "CuroboPlannerCfg",
@@ -83,11 +86,25 @@ class CuroboRobotProfileCfg:
     joints in the full-DoF atomic-action output.
     """
 
-    robot_config_path: str = MISSING
-    """Path/identifier of the cuRobo V2 robot profile (e.g. ``"franka.yml"``)."""
+    robot_config_path: str | None = None
+    """Path/identifier of the cuRobo V2 robot profile (e.g. ``"franka.yml"``).
 
-    sim_to_curobo_joint_names: dict[str, str] = MISSING
-    """Mapping from simulator joint names to cuRobo joint names for this part."""
+    ``None`` (default) auto-generates a robot YAML from the robot's URDF on the
+    first plan and caches it on disk; see :class:`CuroboAutoGenCfg`. The
+    auto-generated profile uses the simulator's own URDF and joint names, so
+    :attr:`sim_to_curobo_joint_names`, :attr:`tool_frame_name`,
+    :attr:`tool_frame_to_tcp`, and :attr:`base_link_name` are derived from the
+    robot's solver and need not be specified.
+    """
+
+    sim_to_curobo_joint_names: dict[str, str] | None = None
+    """Mapping from simulator joint names to cuRobo joint names for this part.
+
+    ``None`` (default) is resolved to an identity mapping when
+    :attr:`robot_config_path` is also ``None`` (the auto-generated YAML reuses
+    the simulator's joint names). Required when an explicit
+    :attr:`robot_config_path` is provided.
+    """
 
     active_joint_names: list[str] | None = None
     """Optional explicit cuRobo active-joint ordering, validated against the backend."""
@@ -162,6 +179,50 @@ class CuroboWorldCfg:
 
 
 @configclass
+class CuroboAutoGenCfg:
+    """Auto-generation of the cuRobo robot YAML from the robot's URDF.
+
+     When a :class:`CuroboRobotProfileCfg` leaves ``robot_config_path`` unset,
+     the adapter generates a cuRobo robot configuration YAML from the robot's
+     URDF (fitting collision spheres to each link mesh) on the first plan and
+     caches it on disk so subsequent inits skip regeneration. The TCP, tool
+     frame, and base link are read from the robot's solver, so nothing robot
+    -specific needs to be hardcoded.
+    """
+
+    cache_dir: str | None = None
+    """Directory for cached robot YAMLs.
+
+    ``None`` (default) uses ``$XDG_CACHE_HOME/embodichain_curobo`` or
+    ``~/.cache/embodichain_curobo``. The cache key hashes the URDF path, URDF
+    content, control part, tool frame, and fit parameters, so editing the URDF
+    or changing the fit settings regenerates automatically.
+    """
+
+    fit_type: str = "voxel"
+    """cuRobo sphere-fit strategy for auto-generation: ``"voxel"`` (default,
+    fast), ``"morphit"`` (best, slower), or ``"surface"`` (crude)."""
+
+    num_spheres: int | None = None
+    """Per-link sphere count. ``None`` auto-estimates from bounding-box volume."""
+
+    sphere_density: float = 1.0
+    """Multiplier on the auto sphere count (ignored when ``num_spheres`` is set)."""
+
+    surface_radius: float = 0.005
+    """Fixed radius used only by the ``surface`` strategy."""
+
+    iterations: int = 200
+    """Adam iterations for the ``morphit`` strategy."""
+
+    collision_sphere_buffer: float = 0.0
+    """Padding added to every fitted sphere's radius (m)."""
+
+    force: bool = False
+    """Bypass the cache and regenerate the robot YAML on the next plan."""
+
+
+@configclass
 class CuroboPlannerCfg(BasePlannerCfg):
     """Configuration for the cuRobo V2 planner backend."""
 
@@ -172,6 +233,13 @@ class CuroboPlannerCfg(BasePlannerCfg):
 
     world: CuroboWorldCfg = CuroboWorldCfg()
     """Static collision-world configuration."""
+
+    auto_gen: CuroboAutoGenCfg = CuroboAutoGenCfg()
+    """Auto-generation settings for the cuRobo robot YAML from the robot's URDF.
+
+    Only used when a profile's ``robot_config_path`` is ``None``; explicit
+    ``robot_config_path`` values bypass auto-generation entirely.
+    """
 
     warmup: bool = True
     """Whether to warm each cached planner once at construction time."""
@@ -573,6 +641,146 @@ class CuroboPlanner(BasePlanner):
         )
         raise AssertionError("unreachable")
 
+    def _materialize_profile(
+        self, profile: CuroboRobotProfileCfg, control_part: str
+    ) -> CuroboRobotProfileCfg:
+        """Fill auto-derived profile fields from the robot's solver + URDF.
+
+        When the profile leaves ``robot_config_path`` / ``sim_to_curobo_joint_names``
+        unset, derive them from the robot's URDF and solver so callers need not
+        hardcode robot-specific TCP / joint / base info. Returns a copy; the
+        input profile is not mutated. Explicit fields always pass through.
+        """
+        robot = self.robot
+        assert (
+            robot is not None
+        ), "cuRobo planner has no robot; cannot materialize the profile."
+        solver = None
+        solvers = getattr(robot, "_solvers", None) or {}
+        if solvers and control_part in solvers:
+            solver = solvers[control_part]
+
+        robot_config_path = profile.robot_config_path
+        auto_generate = robot_config_path is None
+
+        # Derive tool/TCP/base from the robot's solver when available. Fields that
+        # remain None (no solver, explicit robot_config_path) flow through the
+        # existing validation/resolution paths unchanged, preserving backward
+        # compatibility for explicit profiles.
+        tool_frame = profile.tool_frame_name
+        if tool_frame is None and solver is not None:
+            tool_frame = getattr(solver, "end_link_name", None)
+        if tool_frame is None and auto_generate:
+            # Auto-generation needs a concrete tool frame for the YAML.
+            part_links = robot.get_control_part_link_names(control_part) or []
+            if not part_links:
+                logger.log_error(
+                    f"Control part {control_part!r} has no links and no solver "
+                    "end_link_name; set CuroboRobotProfileCfg.tool_frame_name.",
+                    ValueError,
+                )
+            tool_frame = part_links[-1]
+
+        tool_frame_to_tcp = profile.tool_frame_to_tcp
+        if tool_frame_to_tcp is None and solver is not None:
+            tcp_xpos = getattr(solver, "tcp_xpos", None)
+            if tcp_xpos is not None:
+                tool_frame_to_tcp = tcp_xpos.tolist()
+
+        base_link = profile.base_link_name
+        if base_link is None and solver is not None:
+            base_link = getattr(solver, "root_link_name", None)
+
+        sim_base_link = profile.sim_base_link_name or (
+            getattr(solver, "root_link_name", None) if solver is not None else None
+        )
+
+        sim_to_curobo = profile.sim_to_curobo_joint_names
+        if sim_to_curobo is None and auto_generate:
+            sim_joints = self._resolve_sim_joint_names(control_part)
+            sim_to_curobo = {j: j for j in sim_joints}
+
+        if auto_generate:
+            robot_config_path = self._auto_generate_robot_yaml(control_part, tool_frame)
+
+        return replace(
+            profile,
+            robot_config_path=robot_config_path,
+            sim_to_curobo_joint_names=sim_to_curobo,
+            tool_frame_name=tool_frame,
+            tool_frame_to_tcp=tool_frame_to_tcp,
+            base_link_name=base_link,
+            sim_base_link_name=sim_base_link,
+        )
+
+    def _auto_generate_robot_yaml(
+        self, control_part: str, tool_frame: str | None
+    ) -> str:
+        """Return a cached cuRobo robot YAML path, generating it from the URDF if needed."""
+        from .curobo_yaml import generate_curobo_robot_yaml
+
+        robot = self.robot
+        assert (
+            robot is not None
+        ), "cuRobo planner has no robot; cannot auto-generate its YAML."
+        auto = self.cfg.auto_gen
+        solvers = getattr(robot, "_solvers", None) or {}
+        solver = solvers.get(control_part) if solvers else None
+        urdf_path = (
+            getattr(solver, "urdf_path", None) if solver is not None else None
+        ) or robot.cfg.fpath
+        cache_dir = auto.cache_dir or os.path.join(
+            os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+            "embodichain_curobo",
+        )
+        cache_key = self._robot_yaml_cache_key(
+            urdf_path, control_part, tool_frame, auto
+        )
+        cache_path = os.path.join(cache_dir, f"{cache_key}.yml")
+        if not auto.force and os.path.exists(cache_path):
+            logger.log_info(f"cuRobo robot YAML cache hit: {cache_path}")
+            return cache_path
+        logger.log_info(
+            f"Auto-generating cuRobo robot YAML from URDF ({urdf_path}) -> {cache_path}"
+        )
+        return generate_curobo_robot_yaml(
+            robot,
+            control_part,
+            cache_path,
+            tool_frame=tool_frame,
+            fit_type=auto.fit_type,
+            num_spheres=auto.num_spheres,
+            sphere_density=auto.sphere_density,
+            surface_radius=auto.surface_radius,
+            iterations=auto.iterations,
+            collision_sphere_buffer=auto.collision_sphere_buffer,
+        )
+
+    def _robot_yaml_cache_key(
+        self,
+        urdf_path: str,
+        control_part: str,
+        tool_frame: str | None,
+        auto: CuroboAutoGenCfg,
+    ) -> str:
+        """Hash the URDF path/content and fit parameters into a stable cache key."""
+        hasher = hashlib.md5()
+        hasher.update(urdf_path.encode("utf-8"))
+        try:
+            with open(urdf_path, "rb") as urdf_file:
+                hasher.update(urdf_file.read())
+        except OSError:
+            pass
+        hasher.update(control_part.encode("utf-8"))
+        hasher.update((tool_frame or "").encode("utf-8"))
+        hasher.update(auto.fit_type.encode("utf-8"))
+        hasher.update(str(auto.num_spheres).encode("utf-8"))
+        hasher.update(str(auto.sphere_density).encode("utf-8"))
+        hasher.update(str(auto.surface_radius).encode("utf-8"))
+        hasher.update(str(auto.iterations).encode("utf-8"))
+        hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
+        return hasher.hexdigest()
+
     def _get_backend(
         self,
         profile: CuroboRobotProfileCfg,
@@ -585,6 +793,7 @@ class CuroboPlanner(BasePlanner):
         if key in self._backend_cache:
             return self._backend_cache[key]
 
+        profile = self._materialize_profile(profile, control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
         world_cfg = self.cfg.world
         collision_cache = (
@@ -655,6 +864,12 @@ class CuroboPlanner(BasePlanner):
     ) -> None:
         """Validate the profile mapping before a CUDA planning call."""
         sim_to_curobo = profile.sim_to_curobo_joint_names
+        if sim_to_curobo is None:
+            logger.log_error(
+                "sim_to_curobo_joint_names is not set; the profile must be "
+                "materialized (or provide an explicit mapping) before planning.",
+                ValueError,
+            )
         if set(sim_to_curobo) != set(sim_joint_names):
             logger.log_error(
                 "sim_to_curobo_joint_names keys must exactly match the robot "
@@ -899,6 +1114,12 @@ class CuroboPlanner(BasePlanner):
     ) -> torch.Tensor:
         """Map a full cuRobo trajectory to simulator control-part joint order."""
         sim_to_curobo = backend.profile.sim_to_curobo_joint_names
+        if sim_to_curobo is None:
+            logger.log_error(
+                "sim_to_curobo_joint_names is not set on the cuRobo backend "
+                "profile; the profile was not materialized before planning.",
+                ValueError,
+            )
         cols: list[int] = []
         for sim_name in backend.sim_joint_names:
             cu_name = sim_to_curobo[sim_name]
@@ -1030,6 +1251,12 @@ class CuroboPlanner(BasePlanner):
         profile = backend.profile
         curobo_names = list(backend.planner.joint_names)
         sim_to_curobo = profile.sim_to_curobo_joint_names
+        if sim_to_curobo is None:
+            logger.log_error(
+                "sim_to_curobo_joint_names is not set on the cuRobo backend "
+                "profile; the profile was not materialized before planning.",
+                ValueError,
+            )
         curobo_to_sim_idx = {
             cu_name: idx
             for idx, sim_name in enumerate(backend.sim_joint_names)

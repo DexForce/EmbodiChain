@@ -39,9 +39,12 @@ instructions when the CUDA or PyTorch version differs from this example.
 ## Configure a control part
 
 Create one CuroboRobotProfileCfg for each EmbodiChain control part that may use
-cuRobo. sim_to_curobo_joint_names is required: it maps the simulator's joint
-names to the names in the cuRobo V2 robot profile, so no numeric joint ordering
-is assumed. Lock non-controlled joints in the cuRobo robot profile itself so
+cuRobo. sim_to_curobo_joint_names is required for an explicit `robot_config_path`:
+it maps the simulator's joint names to the names in the cuRobo V2 robot profile,
+so no numeric joint ordering is assumed. Omit both `robot_config_path` and
+`sim_to_curobo_joint_names` to auto-derive the whole profile from the robot's URDF
+and solver (see [Auto-generated robot YAML](#auto-generated-robot-yaml) below).
+Lock non-controlled joints in the cuRobo robot profile itself so
 they are not exposed in the loaded planner's active joint list. To plan a
 gripper or another extra active joint, define a control part that includes it.
 The retained simulator value of every such joint must equal the corresponding
@@ -126,6 +129,39 @@ either one entry (cloned) or exactly the active batch size. An empty configured
 world is likewise materialized once per row so its per-environment cache is
 allocated. Dynamic pose updates still require the named geometry to already
 exist in every scene; the adapter does not insert new geometry at runtime.
+
+## Auto-generated robot YAML
+
+A profile with the default `CuroboRobotProfileCfg()` (no `robot_config_path`, no
+`sim_to_curobo_joint_names`) is fully auto-derived from the robot's URDF and
+solver on the first plan, so nothing robot-specific needs to be hardcoded:
+
+- `robot_config_path` is produced by `generate_curobo_robot_yaml`, which fits
+  collision spheres to each link mesh and writes a cuRobo V2 robot YAML.
+- The TCP, tool frame, and base link are read from the robot's solver
+  (`robot._solvers[control_part]`): `tool_frame_name` <- `solver.end_link_name`,
+  `tool_frame_to_tcp` <- `solver.tcp_xpos`, `base_link_name` <-
+  `solver.root_link_name`.
+- `sim_to_curobo_joint_names` is the identity mapping, since the generated YAML
+  reuses the simulator's own URDF joint names.
+
+The generated YAML is cached on disk (default `$XDG_CACHE_HOME/embodichain_curobo`
+or `~/.cache/embodichain_curobo`) keyed by the URDF path, URDF content, control
+part, tool frame, and fit parameters, so editing the URDF or changing the fit
+settings regenerates automatically and subsequent inits reuse the cache. Tune the
+fit with `CuroboPlannerCfg.auto_gen` (`fit_type="voxel"` by default for fast
+first-generation; `"morphit"` for best quality; `force=True` to bypass the cache).
+
+~~~python
+planner_cfg = CuroboPlannerCfg(
+    robot_uid="my_franka",
+    robot_profiles={"arm": CuroboRobotProfileCfg()},  # auto-derived
+    world=CuroboWorldCfg(world_config_path="path/to/collision_world.yml"),
+)
+~~~
+
+Explicit profiles (`robot_config_path="franka.yml"` + `sim_to_curobo_joint_names`)
+bypass auto-generation entirely and remain fully supported.
 
 ## Generate a motion
 
