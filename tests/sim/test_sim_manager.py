@@ -73,9 +73,13 @@ class FakeWorld:
 
     def __init__(self) -> None:
         self.thread_runtime = FakeThreadRuntime()
+        self.window_closed = False
 
     def thread_rt(self) -> FakeThreadRuntime:
         return self.thread_runtime
+
+    def close_window(self) -> None:
+        self.window_closed = True
 
 
 class FakeEnv:
@@ -90,6 +94,49 @@ class FakeEnv:
         return camera
 
 
+class FakeWindow:
+    """Window stub that records registered input controls."""
+
+    def __init__(self) -> None:
+        self.controls: list[object] = []
+
+    def add_input_control(self, control: object) -> None:
+        self.controls.append(control)
+
+
+class FakeRigidEntity:
+    """DexSim entity stub identified by its raycast user ID."""
+
+    def __init__(self, user_id: int) -> None:
+        self._user_id = user_id
+
+    def get_user_id(self) -> int:
+        return self._user_id
+
+
+class FakeRigidObject:
+    """Rigid-object stub that records runtime body-type transitions."""
+
+    def __init__(self, body_type: str, user_id: int) -> None:
+        self.body_type = body_type
+        self._entities = [FakeRigidEntity(user_id)]
+        self.body_type_history: list[str] = []
+
+    def set_body_type(self, body_type: str) -> None:
+        self.body_type = body_type
+        self.body_type_history.append(body_type)
+
+
+class FakeGizmo:
+    """Gizmo stub that exposes whether cleanup ran."""
+
+    def __init__(self) -> None:
+        self.destroyed = False
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
 def _make_sim_manager(window: object | None = None) -> SimulationManager:
     """Create a minimally initialized simulation manager for recorder tests."""
     sim = object.__new__(SimulationManager)
@@ -99,9 +146,37 @@ def _make_sim_manager(window: object | None = None) -> SimulationManager:
     sim._window_record_state = None
     sim._window_record_camera = None
     sim._window_record_save_threads = []
+    sim._window_record_input_control = None
+    sim._window_camera_pose_input_control = None
+    sim._window_gizmo_hotkey_enabled = True
+    sim._window_gizmo_input_control = None
+    sim._window_gizmo_state = None
+    sim._gizmo_controller = None
+    sim._gizmos = {}
+    sim._rigid_objects = {}
+    sim._robots = {}
+    sim._sensors = {}
+    sim._arenas = []
     sim._env = FakeEnv()
     sim._world = FakeWorld()
+    sim.is_window_opened = window is not None
     return sim
+
+
+def _add_fake_rigid_object(
+    sim: SimulationManager, body_type: str = "dynamic", user_id: int = 17
+) -> FakeRigidObject:
+    """Add one fake rigid object and replace gizmo creation with a stub."""
+    rigid_object = FakeRigidObject(body_type=body_type, user_id=user_id)
+    sim._rigid_objects["cube"] = rigid_object
+
+    def enable_fake_gizmo(uid: str, *args, **kwargs) -> FakeGizmo:
+        gizmo = FakeGizmo()
+        sim._gizmos[uid] = gizmo
+        return gizmo
+
+    sim.enable_gizmo = enable_fake_gizmo
+    return rigid_object
 
 
 def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
@@ -195,3 +270,105 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
     assert save_call["frame_count"] == 1
     assert save_call["save_kwargs"] == {"fps": 5}
     assert sim._window_record_save_threads == []
+
+
+def test_window_gizmo_toggles_dynamic_object_and_restores_body_type() -> None:
+    sim = _make_sim_manager()
+    rigid_object = _add_fake_rigid_object(sim)
+    selected_object = FakeRigidEntity(user_id=17)
+
+    assert sim.toggle_selected_rigid_object_gizmo(selected_object) is True
+    assert rigid_object.body_type == "kinematic"
+    assert sim.has_gizmo("cube") is True
+
+    gizmo = sim.get_gizmo("cube")
+    assert sim.toggle_selected_rigid_object_gizmo(None) is False
+    assert rigid_object.body_type == "dynamic"
+    assert sim.has_gizmo("cube") is False
+    assert gizmo.destroyed is True
+
+
+def test_window_gizmo_preserves_original_kinematic_body_type() -> None:
+    sim = _make_sim_manager()
+    rigid_object = _add_fake_rigid_object(sim, body_type="kinematic")
+
+    assert sim.toggle_selected_rigid_object_gizmo(FakeRigidEntity(17)) is True
+    sim.disable_gizmo("cube")
+
+    assert rigid_object.body_type == "kinematic"
+    assert rigid_object.body_type_history == ["kinematic", "kinematic"]
+
+
+def test_window_gizmo_rejects_missing_unregistered_and_static_selections() -> None:
+    sim = _make_sim_manager()
+    rigid_object = _add_fake_rigid_object(sim, body_type="static")
+
+    assert sim.toggle_selected_rigid_object_gizmo(None) is False
+    assert sim.toggle_selected_rigid_object_gizmo(FakeRigidEntity(99)) is False
+    assert sim.toggle_selected_rigid_object_gizmo(FakeRigidEntity(17)) is False
+
+    assert rigid_object.body_type == "static"
+    assert rigid_object.body_type_history == []
+    assert sim._window_gizmo_state is None
+
+
+def test_window_gizmo_rolls_back_body_type_when_enable_fails() -> None:
+    sim = _make_sim_manager()
+    rigid_object = _add_fake_rigid_object(sim)
+    sim.enable_gizmo = lambda uid, *args, **kwargs: None
+
+    assert sim.toggle_selected_rigid_object_gizmo(FakeRigidEntity(17)) is False
+
+    assert rigid_object.body_type == "dynamic"
+    assert rigid_object.body_type_history == ["kinematic", "dynamic"]
+    assert sim._window_gizmo_state is None
+
+
+def test_enable_gizmo_returns_none_when_creation_fails(monkeypatch) -> None:
+    import embodichain.lab.sim.sim_manager as sim_manager_module
+
+    sim = _make_sim_manager()
+    _add_fake_rigid_object(sim)
+    del sim.enable_gizmo
+
+    class FailingGizmo:
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("gizmo creation failed")
+
+    monkeypatch.setattr(sim_manager_module, "Gizmo", FailingGizmo)
+
+    assert sim.enable_gizmo("cube") is None
+    assert sim.has_gizmo("cube") is False
+
+
+def test_close_window_disables_gizmo_and_restores_body_type() -> None:
+    sim = _make_sim_manager(window=FakeWindow())
+    rigid_object = _add_fake_rigid_object(sim)
+    assert sim.toggle_selected_rigid_object_gizmo(FakeRigidEntity(17)) is True
+
+    sim.close_window()
+
+    assert rigid_object.body_type == "dynamic"
+    assert sim.has_gizmo("cube") is False
+    assert sim._window_gizmo_state is None
+    assert sim._world.window_closed is True
+
+
+def test_window_gizmo_hotkey_registration_is_idempotent(monkeypatch) -> None:
+    from dexsim.types import InputKey
+
+    window = FakeWindow()
+    sim = _make_sim_manager(window=window)
+    toggle_calls: list[object | None] = []
+    monkeypatch.setattr(
+        sim,
+        "toggle_selected_rigid_object_gizmo",
+        lambda selected: toggle_calls.append(selected),
+    )
+
+    assert sim.enable_window_gizmo_hotkey() is True
+    assert sim.enable_window_gizmo_hotkey() is True
+    assert len(window.controls) == 1
+
+    window.controls[0].on_key_down(InputKey.SCANCODE_G.value)
+    assert toggle_calls == [None]

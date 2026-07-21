@@ -169,6 +169,15 @@ Gizmo lifecycle is managed by SimulationManager:
 
 There is no need to manually create or destroy Gizmo instances. All resources are managed by SimulationManager.
 
+Window Control for Rigid Objects
+--------------------------------
+
+In a single-environment simulation, left-click a dynamic or kinematic rigid
+object in the viewer and press ``G`` to enable its gizmo. Press ``G`` again to
+exit. Dynamic objects are made kinematic while they are controlled and return
+to their original body type when the gizmo is disabled. Static objects are not
+eligible for window gizmo control.
+
 Available Gizmo Methods
 -----------------------
 

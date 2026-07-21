@@ -17,6 +17,8 @@
 Gizmo: A reusable controller for interactive manipulation of simulation elements (object, robot, camera, etc.)
 """
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 import dexsim
@@ -41,6 +43,8 @@ from dexsim.types import (
 )
 
 from embodichain.lab.sim.utility.gizmo_utils import create_gizmo_callback
+
+__all__ = ["Gizmo", "GizmoCfg"]
 
 
 @configclass
@@ -501,13 +505,15 @@ class Gizmo:
             # Other target types
             pass
 
-    def destroy(self):
+    def destroy(self) -> None:
         """Clean up gizmo resources and release references."""
+        gizmo = getattr(self, "_gizmo", None)
+
         # Clear transform callback first to avoid bad_function_call
-        if hasattr(self, "_gizmo") and self._gizmo and hasattr(self._gizmo, "node"):
+        if gizmo is not None and hasattr(gizmo, "node"):
             try:
                 # Clear transform callback before any other cleanup
-                self._gizmo.node.set_flush_transform_callback(None)
+                gizmo.node.set_flush_transform_callback(None)
                 logger.log_info("Cleared gizmo transform callback")
             except Exception as e:
                 logger.log_warning(f"Failed to clear gizmo callback: {e}")
@@ -516,12 +522,8 @@ class Gizmo:
         if hasattr(self, "_proxy_cube") and self._proxy_cube:
             try:
                 # Detach gizmo from proxy cube first
-                if (
-                    hasattr(self, "_gizmo")
-                    and self._gizmo
-                    and hasattr(self._gizmo, "node")
-                ):
-                    self._gizmo.detach_parent()
+                if gizmo is not None and hasattr(gizmo, "node"):
+                    gizmo.detach_parent()
                 # Then remove the proxy cube
                 self._env.remove_actor(self._proxy_cube)
                 logger.log_info("Successfully removed proxy cube from environment")
@@ -530,16 +532,26 @@ class Gizmo:
             self._proxy_cube = None
 
         # Final gizmo cleanup
-        if hasattr(self, "_gizmo") and self._gizmo and hasattr(self._gizmo, "node"):
+        if gizmo is not None and hasattr(gizmo, "node"):
             try:
                 # Ensure detach_parent is called if not done above
                 if self._target_type in ["robot", "camera"]:
                     pass  # Already detached above
                 else:
-                    self._gizmo.node.detach_parent()
+                    gizmo.node.detach_parent()
                 logger.log_info("Successfully cleaned up gizmo node")
             except Exception as e:
                 logger.log_warning(f"Failed to cleanup gizmo node: {e}")
+
+        # Detaching only removes the parent relationship. The arena keeps a
+        # strong reference to every created gizmo until remove_gizmo() is
+        # called, so explicitly remove it from the scene as well.
+        if gizmo is not None:
+            try:
+                self._env.remove_gizmo(gizmo)
+                logger.log_info("Successfully removed gizmo from environment")
+            except Exception as e:
+                logger.log_warning(f"Failed to remove gizmo from environment: {e}")
 
         # Clear pending transform
         if hasattr(self, "_pending_target_transform"):

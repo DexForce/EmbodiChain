@@ -81,6 +81,7 @@ from embodichain.lab.sim.cfg import (
     GPUMemoryCfg,
     WindowRecordCfg,
     WindowCameraPoseCfg,
+    WindowGizmoCfg,
     LightCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -159,6 +160,9 @@ class SimulationManagerCfg:
     window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
     """Interactive viewer camera-pose printing settings."""
 
+    window_gizmo: WindowGizmoCfg = field(default_factory=WindowGizmoCfg)
+    """Interactive rigid-object gizmo settings."""
+
 
 @dataclass
 class _WindowRecordState:
@@ -179,6 +183,14 @@ class _WindowRecordState:
     capture_from_sim_update: bool = False
     task_status: int = TASK_RETURN.TASK_LOOP
     loop_handle: object | None = None
+
+
+@dataclass
+class _WindowGizmoState:
+    """State captured while a rigid object is controlled from the window."""
+
+    uid: str
+    original_body_type: str
 
 
 class SimulationManager:
@@ -271,6 +283,9 @@ class SimulationManager:
             else None
         )
         self._window_camera_pose_input_control: ObjectManipulator | None = None
+        self._window_gizmo_hotkey_enabled = sim_config.window_gizmo.enable_hotkey
+        self._window_gizmo_input_control: ObjectManipulator | None = None
+        self._window_gizmo_state: _WindowGizmoState | None = None
 
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
@@ -291,6 +306,7 @@ class SimulationManager:
 
         # gizmo management
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
+        self._gizmo_controller: GizmoController | None = None
 
         # marker management
         self._markers: Dict[str, MeshObject] = dict()
@@ -326,6 +342,8 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+            if self._window_gizmo_hotkey_enabled:
+                self.enable_window_gizmo_hotkey()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -634,16 +652,25 @@ class SimulationManager:
             and self._window_camera_pose_input_control is None
         ):
             self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
+        if (
+            self._window_gizmo_hotkey_enabled
+            and self._window_gizmo_input_control is None
+        ):
+            self.enable_window_gizmo_hotkey()
         self.is_window_opened = True
 
     def close_window(self) -> None:
         """Close the simulation window."""
+        if self._window_gizmo_state is not None:
+            self.disable_gizmo(self._window_gizmo_state.uid)
         if self.is_window_recording():
             self.stop_window_record()
         self._world.close_window()
         self._window = None
         self._window_record_input_control = None
         self._window_camera_pose_input_control = None
+        self._window_gizmo_input_control = None
+        self._gizmo_controller = None
         self.is_window_opened = False
 
     def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
@@ -1625,7 +1652,7 @@ class SimulationManager:
 
     def enable_gizmo(
         self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
-    ) -> Gizmo:
+    ) -> Gizmo | None:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
@@ -1641,7 +1668,7 @@ class SimulationManager:
             logger.log_warning(
                 f"Gizmo for '{uid}' with control_part '{control_part}' already exists."
             )
-            return
+            return self._gizmos[gizmo_key]
 
         # Search for target object in different collections
         target = None
@@ -1658,37 +1685,50 @@ class SimulationManager:
             object_type = "sensor"
 
         else:
-            logger.log_error(
+            logger.log_warning(
                 f"Object with uid '{uid}' not found in any collection (robots, rigid_objects, sensors, articulations)."
             )
-            return
+            return None
 
+        gizmo = None
         try:
             gizmo = Gizmo(target, gizmo_cfg, control_part)
-            self._gizmos[gizmo_key] = gizmo
-            logger.log_info(
-                f"Gizmo enabled for {object_type} '{uid}' with control_part '{control_part}'"
-            )
 
             # Initialize GizmoController if not already done.
-            if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
+            if self._gizmo_controller is None:
                 window = (
                     self._world.get_windows()
                     if hasattr(self._world, "get_windows")
                     else None
                 )
-                self._gizmo_controller = GizmoController()
-                window.add_input_control(self._gizmo_controller)
+                if window is None:
+                    raise RuntimeError("No simulation window is available.")
+                gizmo_controller = GizmoController()
+                window.add_input_control(gizmo_controller)
+                self._gizmo_controller = gizmo_controller
+
+            self._gizmos[gizmo_key] = gizmo
+            logger.log_info(
+                f"Gizmo enabled for {object_type} '{uid}' with control_part '{control_part}'"
+            )
 
         except Exception as e:
-            logger.log_error(
+            if gizmo is not None:
+                try:
+                    gizmo.destroy()
+                except Exception as cleanup_error:
+                    logger.log_warning(
+                        f"Failed to clean up gizmo for '{uid}' after creation failed: {cleanup_error}"
+                    )
+            logger.log_warning(
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
+            return None
 
         return gizmo
 
     def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
-        """Disable and remove gizmo for a robot.
+        """Disable and remove a gizmo.
 
         Args:
             uid (str): Object UID to disable gizmo for
@@ -1698,31 +1738,152 @@ class SimulationManager:
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
 
         if gizmo_key not in self._gizmos:
-            from embodichain.utils import logger
-
             logger.log_warning(
                 f"No gizmo found for '{uid}' with control_part '{control_part}'."
             )
+            self._restore_window_gizmo_body_type(uid, control_part)
             return
 
         try:
-            gizmo = self._gizmos[gizmo_key]
+            gizmo = self._gizmos.pop(gizmo_key)
             if gizmo is not None:
                 gizmo.destroy()
-            del self._gizmos[gizmo_key]
-
-            from embodichain.utils import logger
 
             logger.log_info(
                 f"Gizmo disabled for '{uid}' with control_part '{control_part}'"
             )
 
         except Exception as e:
-            from embodichain.utils import logger
-
-            logger.log_error(
+            logger.log_warning(
                 f"Failed to disable gizmo for '{uid}' with control_part '{control_part}': {e}"
             )
+        finally:
+            self._restore_window_gizmo_body_type(uid, control_part)
+
+    def _restore_window_gizmo_body_type(
+        self, uid: str, control_part: str | None = None
+    ) -> None:
+        """Restore physics state owned by the window gizmo interaction."""
+        state = self._window_gizmo_state
+        if state is None or control_part is not None or state.uid != uid:
+            return
+
+        rigid_object = self._rigid_objects.get(uid)
+        if rigid_object is None:
+            self._window_gizmo_state = None
+            logger.log_warning(
+                f"Cannot restore body type for removed rigid object '{uid}'."
+            )
+            return
+
+        try:
+            rigid_object.set_body_type(state.original_body_type)
+            self._window_gizmo_state = None
+            logger.log_info(
+                f"Restored rigid object '{uid}' to body type '{state.original_body_type}'."
+            )
+        except Exception as e:
+            logger.log_warning(
+                f"Failed to restore body type '{state.original_body_type}' for rigid object '{uid}': {e}"
+            )
+
+    def _resolve_selected_rigid_object_uid(self, selected_object: object) -> str | None:
+        """Resolve a raycast-selected DexSim object to a rigid-object UID."""
+        get_user_id = getattr(selected_object, "get_user_id", None)
+        if get_user_id is None:
+            return None
+
+        try:
+            selected_user_id = int(get_user_id())
+        except (TypeError, ValueError, RuntimeError):
+            return None
+
+        for uid, rigid_object in self._rigid_objects.items():
+            for entity in rigid_object._entities:
+                try:
+                    if int(entity.get_user_id()) == selected_user_id:
+                        return uid
+                except (TypeError, ValueError, RuntimeError):
+                    continue
+        return None
+
+    def toggle_selected_rigid_object_gizmo(
+        self, selected_object: object | None
+    ) -> bool:
+        """Toggle gizmo control for the rigid object selected by window raycast.
+
+        The first call enables a gizmo for the selected object after temporarily
+        making it kinematic. The next call disables that gizmo and restores the
+        object's original body type, regardless of the current selection.
+
+        Args:
+            selected_object: DexSim object retained by an
+                :class:`ObjectManipulator` raycast selection.
+
+        Returns:
+            Whether the window-controlled gizmo is active after the call.
+        """
+        if self._window_gizmo_state is not None:
+            self.disable_gizmo(self._window_gizmo_state.uid)
+            return False
+
+        if selected_object is None:
+            logger.log_warning(
+                "No rigid object selected. Left-click a rigid object before pressing 'g'."
+            )
+            return False
+
+        if self.num_envs != 1:
+            logger.log_warning(
+                "Window gizmo control is only supported when num_envs=1."
+            )
+            return False
+
+        uid = self._resolve_selected_rigid_object_uid(selected_object)
+        if uid is None:
+            logger.log_warning(
+                "The raycast selection is not a registered rigid object."
+            )
+            return False
+
+        rigid_object = self._rigid_objects[uid]
+        if rigid_object.body_type == "static":
+            logger.log_warning(
+                f"Static rigid object '{uid}' cannot be controlled by a gizmo."
+            )
+            return False
+        if self.has_gizmo(uid):
+            logger.log_warning(
+                f"Rigid object '{uid}' already has a gizmo that is not owned by the window hotkey."
+            )
+            return False
+
+        original_body_type = rigid_object.body_type
+        try:
+            rigid_object.set_body_type("kinematic")
+            gizmo = self.enable_gizmo(uid)
+            if gizmo is None or not self.has_gizmo(uid):
+                rigid_object.set_body_type(original_body_type)
+                return False
+        except Exception as e:
+            try:
+                rigid_object.set_body_type(original_body_type)
+            except Exception as restore_error:
+                logger.log_warning(
+                    f"Failed to restore rigid object '{uid}' after gizmo enable failed: {restore_error}"
+                )
+            logger.log_warning(
+                f"Failed to enable window gizmo for rigid object '{uid}': {e}"
+            )
+            return False
+
+        self._window_gizmo_state = _WindowGizmoState(
+            uid=uid, original_body_type=original_body_type
+        )
+        logger.log_info(
+            f"Window gizmo enabled for rigid object '{uid}'. Press 'g' again to exit."
+        )
+        return True
 
     def get_gizmo(self, uid: str, control_part: str | None = None) -> object:
         """Get gizmo instance for a robot.
@@ -2552,6 +2713,40 @@ class SimulationManager:
         )
         return True
 
+    def enable_window_gizmo_hotkey(self) -> bool:
+        """Register ``g`` to toggle gizmo control for a raycast-selected object.
+
+        Returns:
+            Whether the control is registered on an available window.
+        """
+        self._window_gizmo_hotkey_enabled = True
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The rigid-object gizmo "
+                "hotkey will be registered after `open_window()`."
+            )
+            return False
+        if self._window_gizmo_input_control is not None:
+            return True
+
+        from dexsim.types import InputKey
+
+        sim = self
+
+        class WindowGizmoEvent(ObjectManipulator):
+            def on_key_down(self, key):
+                if key == InputKey.SCANCODE_G.value:
+                    sim.toggle_selected_rigid_object_gizmo(self.selected_object)
+
+        self._window_gizmo_input_control = WindowGizmoEvent()
+        self._window_gizmo_input_control.enable_selection_cache(True)
+        self._window.add_input_control(self._window_gizmo_input_control)
+        logger.log_info(
+            "Rigid-object gizmo hotkey registered. Left-click an object and "
+            "press 'g' to enter or exit gizmo control."
+        )
+        return True
+
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.
 
@@ -2696,6 +2891,9 @@ class SimulationManager:
 
     def _deferred_destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
+        if self._window_gizmo_state is not None:
+            self.disable_gizmo(self._window_gizmo_state.uid)
+
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)

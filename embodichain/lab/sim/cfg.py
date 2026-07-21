@@ -43,6 +43,35 @@ from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
 
+__all__ = [
+    "DEFAULT_RENDERER",
+    "RenderCfg",
+    "PhysicsCfg",
+    "MarkerCfg",
+    "WindowRecordCfg",
+    "WindowCameraPoseCfg",
+    "WindowGizmoCfg",
+    "GPUMemoryCfg",
+    "RigidBodyAttributesCfg",
+    "RigidBodyAttributesOverrideCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "SoftbodyVoxelAttributesCfg",
+    "SoftbodyPhysicalAttributesCfg",
+    "ClothPhysicalAttributesCfg",
+    "JointDrivePropertiesCfg",
+    "ObjectBaseCfg",
+    "LightCfg",
+    "RigidObjectCfg",
+    "SoftObjectCfg",
+    "ClothObjectCfg",
+    "RigidObjectGroupCfg",
+    "RigidConstraintCfg",
+    "URDFCfg",
+    "ArticulationCfg",
+    "RobotCfg",
+]
+
 # Global default renderer settings for simulation.
 #
 # The sentinel value ``"auto"`` defers the choice to GPU-based auto-selection
@@ -206,6 +235,14 @@ class WindowCameraPoseCfg:
 
     convert_to_look_at: bool = True
     """Whether the hotkey prints a ``set_look_at`` call instead of a matrix."""
+
+
+@configclass
+class WindowGizmoCfg:
+    """Configuration for interactive rigid-object gizmo control."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``g`` hotkey when the window opens."""
 
 
 @configclass

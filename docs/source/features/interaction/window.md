@@ -39,10 +39,13 @@ In ORBIT mode, plain `W/A/S/D/Q/E` does not move the view. Hold **Left Ctrl** wh
 |-------|-----------|
 | **Viewer recording (toggle)** | Press **`r`** to **start** recording what the interactive viewer shows, and press **`r`** again to **stop** and save as MP4 videos. Recording uses a hidden camera that follows the live viewer camera pose, so the exported videos match the on-screen view. Useful for debugging and recording demos. |
 | **Print camera pose** | Press **`p`** to print the current viewer pose as an executable `window.set_look_at(...)` call. |
+| **Rigid-object gizmo (toggle)** | Left-click a rigid object, then press **`g`** to enable its gizmo. Press **`g`** again to disable the gizmo. |
 
 Recording hotkey registration is controlled by `SimConfig.window_record.enable_hotkey` (enabled by default). You can also call `SimulationManager.start_window_record()`, `stop_window_record()`, or `toggle_window_record()` programmatically.
 
 The camera-pose hotkey is controlled by `SimulationManagerCfg.window_camera_pose.enable_hotkey` and prints look-at form by default. Set `SimulationManagerCfg.window_camera_pose.convert_to_look_at=False` to print the raw 4x4 pose matrix instead. The same output can be requested programmatically with `SimulationManager.print_window_camera_pose()`.
+
+The rigid-object gizmo hotkey is controlled by `SimulationManagerCfg.window_gizmo.enable_hotkey` and is enabled by default. Gizmo control supports one environment and dynamic or kinematic rigid objects. A dynamic object is temporarily changed to kinematic while its gizmo is active, then restored to its original body type when `g` is pressed again, the gizmo is disabled programmatically, the window closes, or the simulation is destroyed. Static objects are not modified.
 
 ## Customizing Window Events
 
