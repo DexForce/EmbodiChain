@@ -14,28 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
 
 
-@dataclass
-class Asset:
-    """A scene asset identified during scene understanding."""
+_LOGGER = logging.getLogger("embodichain.scene_engine")
+if not _LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [EmbodiChain Scene Engine] %(message)s")
+    )
+    _LOGGER.addHandler(handler)
+    _LOGGER.propagate = False
+_LOGGER.setLevel(logging.INFO)
 
-    id: str
-    category: str
-    name: str
-    description: str
-    # Path to a binary mask image aligned with the input image. White pixels
-    # identify this asset; black pixels identify the background.
-    mask_path: str | None = None
 
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "id": self.id,
-            "category": self.category,
-            "name": self.name,
-            "description": self.description,
-            "mask_path": self.mask_path,
-        }
+def log_stage_start(stage_name: str) -> None:
+    _LOGGER.info("Starting %s", stage_name)
+
+
+def log_stage_end(stage_name: str) -> None:
+    _LOGGER.info("Completed %s", stage_name)

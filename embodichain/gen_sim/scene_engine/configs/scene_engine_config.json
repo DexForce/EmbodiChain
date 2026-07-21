@@ -1,0 +1,18 @@
+{
+  "llm": {
+    "openai_compatible": {
+      "api_key": "",
+      "model": "",
+      "base_url": "",
+      "default_query": {},
+      "max_attempts": 3
+    }
+  },
+  "image_segmentation": {
+    "base_url": "",
+    "timeout_s": 1200,
+    "health_path": "/health",
+    "segment_single_object_path": "/predict"
+  }
+}
+

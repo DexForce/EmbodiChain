@@ -16,26 +16,4 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
-@dataclass
-class Asset:
-    """A scene asset identified during scene understanding."""
-
-    id: str
-    category: str
-    name: str
-    description: str
-    # Path to a binary mask image aligned with the input image. White pixels
-    # identify this asset; black pixels identify the background.
-    mask_path: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "id": self.id,
-            "category": self.category,
-            "name": self.name,
-            "description": self.description,
-            "mask_path": self.mask_path,
-        }
+__all__: list[str] = []

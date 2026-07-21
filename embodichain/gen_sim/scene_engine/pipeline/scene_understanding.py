@@ -57,15 +57,19 @@ Rules:
 6. name contains only color, material, texture, shape, and object description.
    It must not contain position or relations, such as left, right, on, in, or
    near.
-7. description may include all visible details, including location and spatial
-   context.
+7. For table, description contains only its category, material, color, texture,
+   shape, and visible structural details. Do not mention image coverage, image
+   position, camera framing, or viewpoint. For example, do not write "occupying
+   most of the image" or "at the center of the image".
+8. For assets, description may include all visible details, including location
+   and spatial context.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
   "table": {
     "category": "coffee_table",
     "name": "light wood coffee table",
-    "description": "low rectangular light wood coffee table at the center"
+    "description": "low rectangular light wood coffee table with a smooth wood surface"
   },
   "assets": [
     {
@@ -86,6 +90,7 @@ _USER_PROMPT = (
 
 
 def understand_scene(
+    scene: Scene,
     image_path: str | Path,
     output_root: str | Path,
     *,
@@ -112,7 +117,10 @@ def understand_scene(
             user_prompt=_USER_PROMPT,
         )
         try:
-            scene = validate_scene_understanding_json(response_text)
+            understood_scene = validate_scene_understanding_json(response_text)
+            scene.table = understood_scene.table
+            scene.assets = understood_scene.assets
+            validate_scene_understanding(scene)
         except ValueError as exc:
             last_validation_error = exc
             continue
@@ -163,6 +171,24 @@ def validate_scene_understanding_json(response_text: str) -> Scene:
         )
 
     return Scene(table=table, assets=assets)
+
+
+def validate_scene_understanding(scene: Scene) -> None:
+    """Validate that scene understanding produced a complete semantic scene."""
+    if scene.table is None:
+        raise ValueError("Scene understanding must identify a table.")
+    if scene.table.id != "table": # Currently it will always return true. For we hardcode the table id to "table".
+        raise ValueError("Scene table id must be 'table'.")
+
+    asset_ids = [asset.id for asset in scene.assets]
+    if len(asset_ids) != len(set(asset_ids)):
+        raise ValueError("Scene asset ids must be unique.")
+
+    for obj in [scene.table, *scene.assets]:
+        if not obj.category or not obj.name or not obj.description:
+            raise ValueError(
+                "Every scene object must contain category, name, and description."
+            )
 
 
 def _strip_json_code_fence(response_text: str) -> str:

@@ -26,11 +26,11 @@ from embodichain.gen_sim.scene_engine.core.table import Table
 class Scene:
     """A scene containing a table and zero or more assets."""
 
-    table: Table
+    table: Table | None = None
     assets: list[Asset] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "table": self.table.to_dict(),
+            "table": self.table.to_dict() if self.table is not None else None,
             "assets": [asset.to_dict() for asset in self.assets],
         }

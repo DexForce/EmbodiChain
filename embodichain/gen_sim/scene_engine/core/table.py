@@ -27,6 +27,9 @@ class Table:
     category: str
     name: str
     description: str
+    # Path to a binary mask image aligned with the input image. White pixels
+    # identify the table; black pixels identify the background.
+    mask_path: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -34,4 +37,5 @@ class Table:
             "category": self.category,
             "name": self.name,
             "description": self.description,
+            "mask_path": self.mask_path,
         }
