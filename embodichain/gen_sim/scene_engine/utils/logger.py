@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 
-
 _LOGGER = logging.getLogger("embodichain.scene_engine")
 if not _LOGGER.handlers:
     handler = logging.StreamHandler()

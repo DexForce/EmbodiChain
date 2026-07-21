@@ -61,11 +61,15 @@ def decode_rle_mask(mask_rle: dict[str, Any]) -> Image.Image:
         raise ValueError("Image Segmentation Server RLE starts_with must be 0 or 1.")
 
     pixels = bytearray(pixel_count)
-    is_foreground = bool(starts_with) # True for white foreground, False for black background.
-    offset = 0 # How many pixels have been filled so far.
+    is_foreground = bool(
+        starts_with
+    )  # True for white foreground, False for black background.
+    offset = 0  # How many pixels have been filled so far.
     for raw_count in counts:
         if isinstance(raw_count, bool):
-            raise ValueError("Image Segmentation Server RLE counts must contain integers.")
+            raise ValueError(
+                "Image Segmentation Server RLE counts must contain integers."
+            )
         try:
             count = int(raw_count)
         except (TypeError, ValueError) as exc:
@@ -77,7 +81,9 @@ def decode_rle_mask(mask_rle: dict[str, Any]) -> Image.Image:
                 "Image Segmentation Server RLE counts do not match its declared size."
             )
         if is_foreground:
-            pixels[offset : offset + count] = b"\xff" * count # Write white pixels for the foreground.
+            pixels[offset : offset + count] = (
+                b"\xff" * count
+            )  # Write white pixels for the foreground.
         offset += count
         is_foreground = not is_foreground
 
@@ -91,8 +97,7 @@ def union_overlapping_mask_candidates(
     *,
     min_iou: float = 0.8,
 ) -> list[MaskCandidate]:
-    """Union candidate masks with IOU >= min_iou into one mask candidate.
-    """
+    """Union candidate masks with IOU >= min_iou into one mask candidate."""
     if not 0 < min_iou <= 1:
         raise ValueError("min_iou must be greater than 0 and at most 1.")
     if not candidates:
@@ -103,11 +108,15 @@ def union_overlapping_mask_candidates(
     for mask in masks:
         _require_image_size(mask, image_size)
 
-    parents = list(range(len(candidates))) # Initialize the Union-Find data structure for candidates.
+    parents = list(
+        range(len(candidates))
+    )  # Initialize the Union-Find data structure for candidates.
     for first_index, first_mask in enumerate(masks):
         for second_index in range(first_index + 1, len(masks)):
             if _mask_iou(first_mask, masks[second_index]) >= min_iou:
-                _union_parent(parents, first_index, second_index) # Union the two candidates into one.
+                _union_parent(
+                    parents, first_index, second_index
+                )  # Union the two candidates into one.
 
     grouped_indices: dict[int, list[int]] = {}
     for index in range(len(candidates)):
@@ -137,7 +146,7 @@ def save_binary_mask(
 ) -> Path:
     """Save one candidate as a white-foreground, black-background PNG mask."""
     mask = decode_rle_mask(candidate.mask_rle)
-    _require_image_size(mask, image_size) # Check whether the image size == mask size.
+    _require_image_size(mask, image_size)  # Check whether the image size == mask size.
 
     resolved_output_path = Path(output_path).expanduser().resolve()
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,14 +212,14 @@ def render_numbered_mask_candidates(
             "RGBA", image.size, colors[(candidate.index - 1) % len(colors)]
         )
         transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        rendered_mask = ( # If weuse outline, then need to do some another processings.
+        rendered_mask = (  # If weuse outline, then need to do some another processings.
             mask if mask_style == "fill" else _mask_outer_outline(mask, image.size)
         )
         overlay.alpha_composite(
             Image.composite(color_layer, transparent_layer, rendered_mask)
         )
 
-    draw = ImageDraw.Draw(overlay) # Initialize a draw object.
+    draw = ImageDraw.Draw(overlay)  # Initialize a draw object.
     font = _load_label_font(image.size)
     for candidate, mask in decoded_masks:
         bbox = mask.getbbox()
@@ -258,7 +267,9 @@ def _mask_iou(first_mask: Image.Image, second_mask: Image.Image) -> float:
 
 
 def _encode_binary_mask_rle(mask: Image.Image) -> dict[str, Any]:
-    binary_mask = mask.convert("L").point(lambda value: 255 if value else 0) # Force translate an image into a binary mask.
+    binary_mask = mask.convert("L").point(
+        lambda value: 255 if value else 0
+    )  # Force translate an image into a binary mask.
     width, height = binary_mask.size
     counts: list[int] = []
     current_value = 0
@@ -316,7 +327,12 @@ def _draw_number_label(
     x = center[0] - label_width / 2
     y = center[1] - label_height / 2
     draw.rectangle(
-        (x - padding, y - padding, x + label_width + padding, y + label_height + padding),
+        (
+            x - padding,
+            y - padding,
+            x + label_width + padding,
+            y + label_height + padding,
+        ),
         fill=(220, 0, 0, 255),
         outline=(255, 255, 255, 255),
         width=max(1, padding // 3),

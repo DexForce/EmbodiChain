@@ -102,8 +102,10 @@ def segment_scene(
     if stage_output_root.exists():
         shutil.rmtree(stage_output_root)
     stage_output_root.mkdir(parents=True, exist_ok=True)
-    debug_output_root = stage_output_root / "debug" # Keeps the mask debug images.
-    masks_output_root = stage_output_root / "masks" # Keeps the validated masked images of each assets (include the table)
+    debug_output_root = stage_output_root / "debug"  # Keeps the mask debug images.
+    masks_output_root = (
+        stage_output_root / "masks"
+    )  # Keeps the validated masked images of each assets (include the table)
     debug_output_root.mkdir()
     masks_output_root.mkdir()
 
@@ -145,6 +147,7 @@ def segment_scene(
     )
     return scene
 
+
 def _segment_table(
     image_path: str | Path,
     validation_image_path: str | Path,
@@ -174,7 +177,7 @@ def _segment_table(
                     prompt=prompt,
                 )
             ),
-            min_iou=0.8, # Union masks who have iou > 0.8
+            min_iou=0.8,  # Union masks who have iou > 0.8
         )
         # If do not have candidate, then try segment the table with description, "table", "plane"...
         # Notice that, this part could be extended with other segmentation prompt like
@@ -189,7 +192,8 @@ def _segment_table(
             image_path=validation_image_path,
             candidates=candidates,
             output_path=(
-                Path(debug_output_root) / f"table_candidates_{prompt_label}.png" # Render with prompt label, for easily debug.
+                Path(debug_output_root)
+                / f"table_candidates_{prompt_label}.png"  # Render with prompt label, for easily debug.
             ),
         )
         selected_mask_index = _validate_table_candidates_with_vlm(
@@ -270,7 +274,9 @@ def _parse_table_validation_response(
     selected_mask_index = payload["selected_mask_index"]
     if selected_mask_index is None:
         return None
-    if isinstance(selected_mask_index, bool) or not isinstance(selected_mask_index, int):
+    if isinstance(selected_mask_index, bool) or not isinstance(
+        selected_mask_index, int
+    ):
         raise ValueError("selected_mask_index must be an integer or null.")
     _candidate_by_index(candidates, selected_mask_index)
     return selected_mask_index
@@ -301,6 +307,7 @@ def _image_size(image_path: str | Path) -> tuple[int, int]:
 
     with Image.open(image_path) as image:
         return image.size
+
 
 def _segment_assets(
     image_path: str | Path,
@@ -461,6 +468,7 @@ def _parse_asset_assignment_response(
     if set(assignments) != expected_asset_ids:
         raise ValueError("VLM assignments must cover every asset in the group.")
     return assignments
+
 
 def _validate_image_path(image_path: str | Path) -> Path:
     resolved_image_path = Path(image_path).expanduser().resolve()

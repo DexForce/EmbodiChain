@@ -29,7 +29,6 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
 
-
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _LOCATION_WORD_PATTERN = re.compile(
@@ -84,9 +83,7 @@ name, and use their descriptions to state left/right or front/back. Do not
 infer objects that are not visible. Use an empty assets array when no objects
 are visible. Every field must be a non-empty string."""
 
-_USER_PROMPT = (
-      "Analyze the provided image and return only the required JSON object."
-)
+_USER_PROMPT = "Analyze the provided image and return only the required JSON object."
 
 
 def understand_scene(
@@ -102,7 +99,7 @@ def understand_scene(
         raise ValueError("json_max_attempts must be at least 1.")
 
     resolved_image_path = _validate_image_path(image_path)
-    # The output in this stage will keep a JSON which contains 
+    # The output in this stage will keep a JSON which contains
     # the Scene data structure for debugging.
     stage_output_root = Path(output_root).expanduser().resolve() / "scene_understanding"
     if stage_output_root.exists():
@@ -177,7 +174,9 @@ def validate_scene_understanding(scene: Scene) -> None:
     """Validate that scene understanding produced a complete semantic scene."""
     if scene.table is None:
         raise ValueError("Scene understanding must identify a table.")
-    if scene.table.id != "table": # Currently it will always return true. For we hardcode the table id to "table".
+    if (
+        scene.table.id != "table"
+    ):  # Currently it will always return true. For we hardcode the table id to "table".
         raise ValueError("Scene table id must be 'table'.")
 
     asset_ids = [asset.id for asset in scene.assets]
@@ -239,7 +238,9 @@ def _parse_scene_object_fields(
             f"VLM JSON key {field_name}.category must be a lower-case snake_case "
             "class name."
         )
-    if _LOCATION_WORD_PATTERN.search(fields["name"]): # Check whether the name contains location.
+    if _LOCATION_WORD_PATTERN.search(
+        fields["name"]
+    ):  # Check whether the name contains location.
         raise ValueError(
             f"VLM JSON key {field_name}.name must not contain location or "
             "relationship words."

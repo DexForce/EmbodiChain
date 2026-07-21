@@ -23,7 +23,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_LLM_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
 )
@@ -50,7 +49,9 @@ def load_llm_config(config_path: str | Path | None = None) -> LLMConfig:
     try:
         raw_config = json.loads(resolved_config_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"LLM config is not valid JSON: {resolved_config_path}") from exc
+        raise ValueError(
+            f"LLM config is not valid JSON: {resolved_config_path}"
+        ) from exc
 
     llm_config = raw_config.get("llm", {}).get("openai_compatible", {})
     if not isinstance(llm_config, dict):
@@ -60,9 +61,7 @@ def load_llm_config(config_path: str | Path | None = None) -> LLMConfig:
     model = os.getenv("OPENAI_MODEL") or llm_config.get("model", "")
     base_url = os.getenv("OPENAI_BASE_URL") or llm_config.get("base_url", "")
     default_query = llm_config.get("default_query", {})
-    max_attempts = os.getenv("OPENAI_MAX_ATTEMPTS") or llm_config.get(
-        "max_attempts", 3
-    )
+    max_attempts = os.getenv("OPENAI_MAX_ATTEMPTS") or llm_config.get("max_attempts", 3)
 
     if not isinstance(default_query, dict):
         raise ValueError("LLM config key default_query must be an object.")

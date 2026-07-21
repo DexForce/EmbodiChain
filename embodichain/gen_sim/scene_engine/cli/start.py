@@ -21,8 +21,8 @@ from pathlib import Path
 
 from embodichain.gen_sim.scene_engine.pipeline.generate import generate_scene_from_image
 
-
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+
 
 def cli_scene_engine(image: str | Path, output_root: str | Path) -> None:
     resolved_image_path = Path(image).expanduser().resolve()

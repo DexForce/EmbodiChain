@@ -37,6 +37,7 @@ from embodichain.gen_sim.scene_engine.pipeline.scene_segmentation import (
     segment_scene,
 )
 from embodichain.gen_sim.scene_engine.utils.logger import log_stage_end, log_stage_start
+
 # from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
 #     generate_geometries_and_coarse_layout,
 # )
@@ -73,7 +74,7 @@ def generate_scene_from_image(
     image_segmentation_client = ImageSegmentationClient.from_config(
         image_segmentation_config_path
     )
-    image_segmentation_client.check_health() # Error raising will happen internally.
+    image_segmentation_client.check_health()  # Error raising will happen internally.
     scene = segment_scene(
         image_path=image_path,
         output_root=resolved_output_root,
@@ -81,7 +82,7 @@ def generate_scene_from_image(
         vlm_client=vlm_client,
         image_segmentation_client=image_segmentation_client,
     )
-    image_segmentation_client.close() # Kill the session.
+    image_segmentation_client.close()  # Kill the session.
     log_stage_end("Scene Segmentation")
 
     # 3. Objects + Coarse Layout Generation

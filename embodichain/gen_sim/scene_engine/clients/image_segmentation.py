@@ -23,7 +23,6 @@ from typing import Any
 
 import requests
 
-
 _DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
 )
@@ -94,9 +93,13 @@ class ImageSegmentationClient:
         try:
             response_data = response.json()
         except ValueError as exc:
-            raise ValueError("Image Segmentation Server response is not valid JSON.") from exc
+            raise ValueError(
+                "Image Segmentation Server response is not valid JSON."
+            ) from exc
         if not isinstance(response_data, dict):
-            raise ValueError("Image Segmentation Server response must be a JSON object.")
+            raise ValueError(
+                "Image Segmentation Server response must be a JSON object."
+            )
         if response_data.get("ok") is False:
             raise RuntimeError(
                 "Image Segmentation Server request failed: "
@@ -136,9 +139,13 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     try:
         timeout_s = int(config["timeout_s"])
     except (TypeError, ValueError) as exc:
-        raise ValueError("Image Segmentation Server config timeout_s must be an integer.") from exc
+        raise ValueError(
+            "Image Segmentation Server config timeout_s must be an integer."
+        ) from exc
     if timeout_s < 1:
-        raise ValueError("Image Segmentation Server config timeout_s must be at least 1.")
+        raise ValueError(
+            "Image Segmentation Server config timeout_s must be at least 1."
+        )
 
     string_keys = ("base_url", "health_path", "segment_single_object_path")
     for key in string_keys:
@@ -151,9 +158,7 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         "base_url": config["base_url"].strip(),
         "timeout_s": timeout_s,
         "health_path": config["health_path"].strip(),
-        "segment_single_object_path": config[
-            "segment_single_object_path"
-        ].strip(),
+        "segment_single_object_path": config["segment_single_object_path"].strip(),
     }
 
 

@@ -26,7 +26,6 @@ from urllib.request import Request, urlopen
 
 from embodichain.gen_sim.scene_engine.llms.load_config import LLMConfig, load_llm_config
 
-
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _RETRYABLE_HTTP_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 
@@ -113,9 +112,7 @@ class OpenAICompatibleVLM:
             except URLError as exc:
                 last_error = RuntimeError(f"VLM request failed: {exc.reason}")
             except (json.JSONDecodeError, ValueError):
-                last_error = RuntimeError(
-                    "VLM API returned a malformed response."
-                )
+                last_error = RuntimeError("VLM API returned a malformed response.")
 
         assert last_error is not None
         raise last_error
@@ -123,9 +120,7 @@ class OpenAICompatibleVLM:
 
 def _image_data_url(image_path: Path) -> str:
     mime_type = (
-        "image/jpeg"
-        if image_path.suffix.lower() in {".jpg", ".jpeg"}
-        else "image/png"
+        "image/jpeg" if image_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
     )
     encoded_image = base64.b64encode(image_path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded_image}"
@@ -141,7 +136,9 @@ def _extract_response_text(response_payload: object) -> str:
     try:
         content = response_payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError("VLM response does not contain choices[0].message.content.") from exc
+        raise ValueError(
+            "VLM response does not contain choices[0].message.content."
+        ) from exc
     if not isinstance(content, str):
         raise ValueError("VLM response content must be a string.")
     return content
