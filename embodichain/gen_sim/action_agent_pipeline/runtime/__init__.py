@@ -16,4 +16,6 @@
 
 from __future__ import annotations
 
+"""Runtime graph compilation and atomic-action execution."""
+
 __all__: list[str] = []

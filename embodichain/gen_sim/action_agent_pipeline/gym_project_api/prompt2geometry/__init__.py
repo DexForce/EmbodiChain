@@ -16,4 +16,42 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .pipeline import (
+    Prompt2GeometryRequest,
+    run_prompt2geometry,
+)
+from .config import (
+    Prompt2GeometryConfig,
+    load_prompt2geometry_config,
+)
+from .llm_client import (
+    OpenAICompatibleClient,
+    OpenAICompatibleClientError,
+)
+from .sam3_client import (
+    SAM3Client,
+    SAM3ClientError,
+)
+from .sam3d_client import (
+    SAM3DClient,
+    SAM3DClientError,
+)
+from .zimage_client import (
+    ZImageClient,
+    ZImageClientError,
+)
+
+__all__ = [
+    "Prompt2GeometryRequest",
+    "Prompt2GeometryConfig",
+    "OpenAICompatibleClient",
+    "OpenAICompatibleClientError",
+    "SAM3Client",
+    "SAM3ClientError",
+    "SAM3DClient",
+    "SAM3DClientError",
+    "ZImageClient",
+    "ZImageClientError",
+    "run_prompt2geometry",
+    "load_prompt2geometry_config",
+]

@@ -16,4 +16,6 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .task_prompt import TaskPrompt
+
+__all__ = ["TaskPrompt"]

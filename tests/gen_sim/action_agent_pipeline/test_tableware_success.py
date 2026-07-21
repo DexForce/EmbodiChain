@@ -16,4 +16,32 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+import pytest
+import torch
+
+from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
+    evaluate_configured_success,
+)
+
+
+class _FakeSim:
+    def get_rigid_object(self, uid: str):
+        return None
+
+
+class _FakeEnv:
+    num_envs = 1
+    device = torch.device("cpu")
+    sim = _FakeSim()
+
+
+def test_success_unknown_rigid_object_uid_raises_clear_error() -> None:
+    with pytest.raises(ValueError, match="Unknown rigid object uid: 'missing'"):
+        evaluate_configured_success(
+            _FakeEnv(),
+            {
+                "type": "object_xy_near",
+                "object": "missing",
+                "target_xy": [0.0, 0.0],
+            },
+        )

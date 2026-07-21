@@ -1,0 +1,18 @@
+{
+  "services": {
+    "zimage": {
+      "base_url": ""
+    },
+    "sam3": {
+      "base_url": ""
+    },
+    "sam3d": {
+      "base_url": ""
+    }
+  },
+  "llm": {
+    "openai_compatible": {
+      "timeout_s": 120
+    }
+  }
+}
