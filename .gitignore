@@ -203,3 +203,6 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+# Local gym project workspace
+/gym_project/
