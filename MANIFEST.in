@@ -1,2 +1,3 @@
 include VERSION
 recursive-include configs/ *
+recursive-include embodichain/gen_sim *.json *.yaml *.txt *.jpg

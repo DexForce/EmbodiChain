@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 from typing import Union, Tuple, List, TYPE_CHECKING
@@ -382,9 +384,7 @@ class PytorchSolver(BaseSolver):
         tcp_xpos = torch.as_tensor(
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
-        tcp_xpos_inv = tcp_xpos.clone()
-        tcp_xpos_inv[:3, :3] = tcp_xpos_inv[:3, :3].T
-        tcp_xpos_inv[:3, 3] = -tcp_xpos_inv[:3, :3] @ tcp_xpos_inv[:3, 3]
+        tcp_xpos_inv = torch.linalg.inv(tcp_xpos)
         target_xpos = target_xpos @ tcp_xpos_inv
 
         # Get joint limits and ensure shape matches dof
