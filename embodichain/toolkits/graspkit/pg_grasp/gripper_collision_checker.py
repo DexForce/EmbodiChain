@@ -76,13 +76,6 @@ class GripperCollisionCfg:
     approximation of the object shape but will increase computational cost.
     """
 
-    convex_decomposition_method: str = "coacd"
-    """Convex decomposition backend used by the grasp collision checker.
-
-    ``visacd`` is accepted as an alias of ``vhacd`` for compatibility with
-    environment configuration.
-    """
-
     open_check_margin: float = 0.01
     """ Additional margin added to the gripper open length when checking for collisions. This can help account for 
     uncertainties in the gripper pose or object geometry, and can be set based on the specific requirements of the application.
@@ -100,7 +93,6 @@ class GripperCollisionChecker:
             base_mesh_verts=object_mesh_verts,
             base_mesh_faces=object_mesh_faces,
             max_decomposition_hulls=cfg.max_decomposition_hulls,
-            convex_decomposition_method=cfg.convex_decomposition_method,
         )
         self.obj_mesh_verts = object_mesh_verts
         self.device = object_mesh_verts.device

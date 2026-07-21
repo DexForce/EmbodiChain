@@ -83,7 +83,6 @@ class record_camera_data(Functor):
         env.add_camera_group_id(self.camera.group_id)
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
-        self._video_name = cfg.params.get("video_name")
         self._current_episode = 0
         self._frames: List[np.ndarray] = []
 
@@ -134,18 +133,11 @@ class record_camera_data(Functor):
         a reset inside :meth:`__call__`.
         """
         if len(self._frames) > 0:
-            video_name = self._resolve_video_name()
+            video_name = f"episode_{self._current_episode}_{self._name}"
             images_to_video(self._frames, self._save_path, video_name, fps=20)
 
             self._current_episode += 1
             self._frames = []
-
-    def _resolve_video_name(self) -> str:
-        if not self._video_name:
-            return f"episode_{self._current_episode}_{self._name}"
-        if self._current_episode == 0:
-            return str(self._video_name)
-        return f"{self._video_name}_episode_{self._current_episode}"
 
     def __call__(
         self,
@@ -164,7 +156,6 @@ class record_camera_data(Functor):
         ),
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
-        video_name: str | None = None,
     ):
         self.camera.update(fetch_only=True)
         data = self.camera.get_data()

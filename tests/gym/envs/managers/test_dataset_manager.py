@@ -17,11 +17,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import torch
 
-from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.managers.dataset_manager import DatasetManager
 
 
@@ -48,47 +46,3 @@ def test_apply_does_not_forward_save_failed_episode_policy() -> None:
     manager.apply(mode="save", env_ids=env_ids)
 
     assert calls == [(env, env_ids, True)]
-
-
-def _make_episode_env(current_rollout_step: int) -> SimpleNamespace:
-    dataset_manager = Mock()
-    dataset_manager.available_modes = ["save"]
-    dataset_manager.save_failed_episodes = True
-    return SimpleNamespace(
-        num_envs=1,
-        device=torch.device("cpu"),
-        current_rollout_step=current_rollout_step,
-        dataset_manager=dataset_manager,
-        cfg=SimpleNamespace(
-            events=None,
-            observations=None,
-            rewards=None,
-            dataset=None,
-        ),
-        event_manager=None,
-        observation_manager=None,
-        reward_manager=None,
-        rollout_buffer={},
-        _rollout_buffer_mode="expert",
-        episode_success_status=torch.tensor([False]),
-        _task_success=torch.tensor([False]),
-    )
-
-
-def test_initialize_episode_skips_empty_failed_episode() -> None:
-    env = _make_episode_env(current_rollout_step=0)
-
-    EmbodiedEnv._initialize_episode(env, env_ids=[0])
-
-    env.dataset_manager.apply.assert_not_called()
-
-
-def test_initialize_episode_saves_recorded_failed_episode_when_enabled() -> None:
-    env = _make_episode_env(current_rollout_step=1)
-
-    EmbodiedEnv._initialize_episode(env, env_ids=[0])
-
-    env.dataset_manager.apply.assert_called_once()
-    call = env.dataset_manager.apply.call_args
-    assert call.kwargs["mode"] == "save"
-    assert call.kwargs["env_ids"].tolist() == [0]

@@ -14,8 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from __future__ import annotations
-
 import trimesh
 import numpy as np
 import torch
@@ -27,6 +25,8 @@ import pickle
 import open3d as o3d
 
 from typing import List, Tuple, Union
+from dexsim.kit.meshproc import convex_decomposition_coacd
+
 from embodichain.utils.warp import convex_signed_distance_kernel
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.math import transform_points_mat
@@ -57,7 +57,6 @@ class ConvexCollisionChecker:
         base_mesh_verts: torch.Tensor,
         base_mesh_faces: torch.Tensor,
         max_decomposition_hulls: int = 32,
-        convex_decomposition_method: str = "coacd",
     ):
         """Initialize the ConvexCollisionChecker by performing convex decomposition on the input mesh and extracting plane equations for the convex hulls. The plane equations are cached to disk to avoid redundant computation in future runs.
 
@@ -73,9 +72,6 @@ class ConvexCollisionChecker:
         self.device = base_mesh_verts.device
         base_mesh_verts_np = base_mesh_verts.cpu().numpy()
         base_mesh_faces_np = base_mesh_faces.cpu().numpy()
-        convex_decomposition_method = _normalize_convex_decomposition_method(
-            convex_decomposition_method
-        )
         mesh_hash = hashlib.md5(
             (base_mesh_verts_np.tobytes() + base_mesh_faces_np.tobytes())
         ).hexdigest()
@@ -88,11 +84,7 @@ class ConvexCollisionChecker:
         self.mesh.compute_vertex_normals()
 
         self.cache_path = os.path.join(
-            CONVEX_DECOMP_DIR,
-            (
-                f"{mesh_hash}_{max_decomposition_hulls}_"
-                f"{convex_decomposition_method}.pkl"
-            ),
+            CONVEX_DECOMP_DIR, f"{mesh_hash}_{max_decomposition_hulls}.pkl"
         )
 
         if not os.path.isfile(self.cache_path):
@@ -101,10 +93,7 @@ class ConvexCollisionChecker:
 
             # generate convex hulls and extract plane equations, then cache to disk
             plane_equations_np = ConvexCollisionChecker._compute_plane_equations(
-                base_mesh_verts_np,
-                base_mesh_faces_np,
-                max_decomposition_hulls,
-                convex_decomposition_method,
+                base_mesh_verts_np, base_mesh_faces_np, max_decomposition_hulls
             )
             # pack as a single tensor
             n_convex = len(plane_equations_np)
@@ -283,10 +272,7 @@ class ConvexCollisionChecker:
 
     @staticmethod
     def _compute_plane_equations(
-        vertices: np.ndarray,
-        faces: np.ndarray,
-        max_decomposition_hulls: int,
-        convex_decomposition_method: str = "coacd",
+        vertices: np.ndarray, faces: np.ndarray, max_decomposition_hulls: int
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Convex decomposition and extract plane equations given mesh vertices and triangles.
@@ -305,30 +291,9 @@ class ConvexCollisionChecker:
         mesh = o3d.t.geometry.TriangleMesh()
         mesh.vertex.positions = o3d.core.Tensor(vertices, dtype=o3d.core.Dtype.Float32)
         mesh.triangle.indices = o3d.core.Tensor(faces, dtype=o3d.core.Dtype.Int32)
-        convex_decomposition_method = _normalize_convex_decomposition_method(
-            convex_decomposition_method
+        is_success, out_mesh_list = convex_decomposition_coacd(
+            mesh, max_convex_hull_num=max_decomposition_hulls
         )
-        if convex_decomposition_method == "vhacd":
-            from dexsim.kit.meshproc import convex_decomposition_vhacd
-
-            is_success, out_mesh_list = convex_decomposition_vhacd(
-                mesh, max_convex_hull_num=max_decomposition_hulls
-            )
-        elif convex_decomposition_method == "coacd":
-            from dexsim.kit.meshproc import convex_decomposition_coacd
-
-            is_success, out_mesh_list = convex_decomposition_coacd(
-                mesh, max_convex_hull_num=max_decomposition_hulls
-            )
-        else:
-            raise ValueError(
-                "convex_decomposition_method must be one of: "
-                "'vhacd', 'visacd', 'coacd'"
-            )
-        if not is_success:
-            raise RuntimeError(
-                f"{convex_decomposition_method} convex decomposition failed."
-            )
         convex_vert_face_list = []
         for out_mesh in out_mesh_list:
             verts = out_mesh.vertex.positions.numpy()
@@ -372,17 +337,6 @@ def extract_plane_equations(
             (face_normals.astype(np.float32), offsets_i.astype(np.float32))
         )
     return convex_plane_data
-
-
-def _normalize_convex_decomposition_method(method: str) -> str:
-    method = str(method).lower()
-    if method == "visacd":
-        return "vhacd"
-    if method in {"vhacd", "coacd"}:
-        return method
-    raise ValueError(
-        "convex_decomposition_method must be one of: 'vhacd', 'visacd', 'coacd'"
-    )
 
 
 def sample_surface_points(mesh_path: str, num_points: int = 4096) -> np.ndarray:

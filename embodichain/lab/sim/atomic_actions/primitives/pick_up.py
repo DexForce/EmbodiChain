@@ -259,15 +259,9 @@ class PickUp(AtomicAction):
         self, semantics: ObjectSemantics, start_qpos: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
-        alignment_angle = (
-            None
-            if self.cfg.rotate_upright is not None
-            else self.cfg.approach_alignment_max_angle
-        )
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses,
             approach_direction=self.approach_direction,
-            max_approach_alignment_angle=alignment_angle,
         )
         n_envs = obj_poses.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
