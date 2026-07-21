@@ -89,7 +89,6 @@ _CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
 _MOVED_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["moved"])
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["extra_rigid"])
 _ROBOT_VIEW_LABEL = "robot_view"
-_AUDIENCE_VIEW_LABEL = "audience_view"
 _AUDIENCE_VIEW_Z_ROTATION_DEGREES = 180.0
 
 _BACKGROUND_ATTRS = {
@@ -338,7 +337,6 @@ def _record_camera_event_configs(
         "record_camera": _record_camera_event_config(
             audience_camera,
             name="record_cam_audience_view",
-            video_name=_recording_video_name(task_name, _AUDIENCE_VIEW_LABEL),
         )
     }
 
@@ -347,7 +345,6 @@ def _record_camera_event_config(
     camera: Mapping[str, Any],
     *,
     name: str,
-    video_name: str,
 ) -> dict[str, Any]:
     extrinsics = camera["extrinsics"]
     return {
@@ -356,7 +353,6 @@ def _record_camera_event_config(
         "interval_step": 1,
         "params": {
             "name": name,
-            "video_name": video_name,
             "resolution": [camera["width"], camera["height"]],
             "intrinsics": camera["intrinsics"],
             "eye": extrinsics["eye"],
@@ -364,10 +360,6 @@ def _record_camera_event_config(
             "up": extrinsics["up"],
         },
     }
-
-
-def _recording_video_name(task_name: str, view_label: str) -> str:
-    return f"{task_name}_{view_label}"
 
 
 def _rotate_camera_extrinsics_around_target_z(
