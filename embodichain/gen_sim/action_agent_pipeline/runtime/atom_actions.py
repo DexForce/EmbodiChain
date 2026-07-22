@@ -36,8 +36,12 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import 
     resolve_arm_side,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
-    GraspCollisionCachePreparationError,
+    GraspCollisionCachePreparationError as CoacdCachePreparationError,
     ensure_grasp_collision_cache_from_env_coacd,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.grasp_collision_cache import (
+    GraspCollisionCachePreparationError as VhacdCachePreparationError,
+    ensure_vhacd_grasp_collision_cache,
 )
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
     match_asset_orientation_keyword,
@@ -4519,7 +4523,7 @@ def _build_object_semantics(
     )
     source_mesh_path = _rigid_object_mesh_path(target_obj)
     body_scale = _rigid_object_body_scale(target_obj)
-    _prepare_grasp_collision_cache_from_env_coacd(
+    _prepare_grasp_collision_cache(
         obj_name=obj_name,
         mesh_vertices=mesh_vertices,
         mesh_triangles=mesh_triangles,
@@ -4547,9 +4551,6 @@ def _build_object_semantics(
                     _GRASP_RUNTIME_DEFAULTS.point_sample_dense,
                 ),
                 "max_decomposition_hulls": max_decomposition_hulls,
-                "convex_decomposition_method": convex_decomposition_method,
-                "env_coacd_source_mesh_path": source_mesh_path,
-                "env_coacd_body_scale": body_scale,
             },
         )
     )
@@ -4577,7 +4578,7 @@ def _build_object_semantics(
     )
 
 
-def _prepare_grasp_collision_cache_from_env_coacd(
+def _prepare_grasp_collision_cache(
     *,
     obj_name: str,
     mesh_vertices: torch.Tensor,
@@ -4588,8 +4589,27 @@ def _prepare_grasp_collision_cache_from_env_coacd(
     body_scale: list[float] | None,
     runtime_kwargs: Mapping[str, Any],
 ) -> None:
-    if convex_decomposition_method != "coacd":
+    if convex_decomposition_method == "vhacd":
+        try:
+            result = ensure_vhacd_grasp_collision_cache(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                max_decomposition_hulls=max_decomposition_hulls,
+            )
+        except VhacdCachePreparationError as exc:
+            raise VhacdCachePreparationError(
+                f"Failed to prepare V-HACD grasp collision cache for "
+                f"target={obj_name}: {exc}"
+            ) from exc
+        if result.get("status") != "hit":
+            log_info(
+                "Prepared Main-compatible V-HACD grasp collision cache: "
+                f"target={obj_name}, cache={result.get('grasp_cache_path')}.",
+                color="green",
+            )
         return
+    if convex_decomposition_method != "coacd":
+        raise ValueError("convex_decomposition_method must be one of: 'vhacd', 'coacd'")
     if not bool(runtime_kwargs.get("reuse_env_coacd_for_grasp", True)):
         return
 
@@ -4605,7 +4625,7 @@ def _prepare_grasp_collision_cache_from_env_coacd(
         ImportError,
         ModuleNotFoundError,
         OSError,
-        GraspCollisionCachePreparationError,
+        CoacdCachePreparationError,
     ) as exc:
         log_warning(
             "Failed to prepare grasp collision cache from environment CoACD cache; "
