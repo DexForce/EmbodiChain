@@ -80,6 +80,7 @@ from embodichain.lab.sim.cfg import (
     MarkerCfg,
     GPUMemoryCfg,
     WindowRecordCfg,
+    WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -154,6 +155,9 @@ class SimulationManagerCfg:
 
     window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
     """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
+
+    window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
+    """Interactive viewer camera-pose printing settings."""
 
 
 @dataclass
@@ -260,6 +264,13 @@ class SimulationManager:
         )
         self._window_record_input_control: ObjectManipulator | None = None
         self._window_record_save_threads: list[threading.Thread] = []
+        wcp = sim_config.window_camera_pose
+        self._window_camera_pose_hotkey_cfg: dict[str, object] | None = (
+            {"convert_to_look_at": wcp.convert_to_look_at}
+            if wcp.enable_hotkey
+            else None
+        )
+        self._window_camera_pose_input_control: ObjectManipulator | None = None
 
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
@@ -306,6 +317,7 @@ class SimulationManager:
 
         self._create_default_plane()
         self.set_default_background()
+        self.set_default_global_lighting()
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
@@ -617,6 +629,11 @@ class SimulationManager:
             and self._window_record_input_control is None
         ):
             self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            self._window_camera_pose_hotkey_cfg is not None
+            and self._window_camera_pose_input_control is None
+        ):
+            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
         self.is_window_opened = True
 
     def close_window(self) -> None:
@@ -626,6 +643,7 @@ class SimulationManager:
         self._world.close_window()
         self._window = None
         self._window_record_input_control = None
+        self._window_camera_pose_input_control = None
         self.is_window_opened = False
 
     def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
@@ -701,6 +719,17 @@ class SimulationManager:
 
         # TODO: add default physics attributes for the plane.
 
+    def set_default_global_lighting(self) -> None:
+        """Set default global lighting for the scene.
+
+        Configures both the environment emission (ambient) light and a
+        directional light to provide default scene illumination. The
+        directional light is a global scene light (infinite distance)
+        pointing downward along the -Z axis.
+        """
+        # Environment emission light
+        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
+
     def set_default_background(self) -> None:
         """Set default background."""
 
@@ -714,11 +743,9 @@ class SimulationManager:
                 uid=mat_name,
                 base_color_texture=color_texture,
                 roughness_texture=roughness_texture,
-                roughness=0.7,
+                roughness=1.0,
             )
         )
-
-        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
 
         self._default_plane.set_material(mat.get_instance("plane_mat").mat)
         self._visual_materials[mat_name] = mat
@@ -797,14 +824,42 @@ class SimulationManager:
         logger.log_warning(f"Asset {uid} not found.")
         return None
 
+    # Light type string → dexsim LightType enum mapping
+    _LIGHT_TYPE_MAP: dict[str, LightType] = {
+        "point": LightType.POINT,
+        "sun": LightType.SUN,
+        "direction": LightType.DIRECTION,
+        "spot": LightType.SPOT,
+        "rect": LightType.RECT,
+        "mesh": LightType.MESH,
+    }
+
+    # Light types that are created as a single global scene light (not per-environment).
+    _GLOBAL_LIGHT_TYPES: tuple[str, ...] = ("sun", "direction")
+
     def add_light(self, cfg: LightCfg) -> Light:
         """Create a light in the scene.
 
+        Supports six light types: ``"point"``, ``"sun"``, ``"direction"``,
+        ``"spot"``, ``"rect"``, and ``"mesh"``. See :class:`LightCfg` for
+        type-specific configuration fields.
+
+        .. attention::
+            ``"sun"`` and ``"direction"`` lights are global scene lights
+            (infinite-distance directional light sources). They are created
+            as a single instance on the root environment, not batched per
+            environment. All other types are created as per-environment
+            batched lights.
+
         Args:
-            cfg (LightCfg): Configuration for the light, including type, color, intensity, and radius.
+            cfg (LightCfg): Configuration for the light, including type, color,
+                intensity, and type-specific properties.
 
         Returns:
             Light: The created light instance.
+
+        Raises:
+            RuntimeError: If ``cfg.light_type`` is not one of the supported types.
         """
         if cfg.uid is None:
             uid = "light"
@@ -815,22 +870,42 @@ class SimulationManager:
         if uid in self._lights:
             logger.log_error(f"Light {uid} already exists.")
 
-        light_type = cfg.light_type
-        if light_type == "point":
-            light_type = LightType.POINT
-        else:
+        light_type_str = cfg.light_type
+        light_type = self._LIGHT_TYPE_MAP.get(light_type_str)
+        if light_type is None:
+            supported = ", ".join(self._LIGHT_TYPE_MAP.keys())
             logger.log_error(
-                f"Unsupported light type: {light_type}. Supported types: point."
+                f"Unsupported light type: '{light_type_str}'. "
+                f"Supported types: {supported}."
             )
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        light_list = []
-        for i, env in enumerate(env_list):
-            light_name = f"{uid}_{i}"
-            light = env.create_light(light_name, light_type)
-            light_list.append(light)
+        # Validation warnings for type-specific constraints
+        if light_type_str == "mesh" and not cfg.mesh_path:
+            logger.log_warning(
+                f"Mesh light '{uid}' has no mesh_path set. "
+                f"Use set_mesh() to assign a MeshObject."
+            )
+        if light_type_str == "rect" and (cfg.rect_width <= 0 or cfg.rect_height <= 0):
+            logger.log_warning(
+                f"Rect light '{uid}' has zero or negative dimensions "
+                f"(width={cfg.rect_width}, height={cfg.rect_height})."
+            )
 
-        batch_lights = Light(cfg=cfg, entities=light_list)
+        if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
+            # Global scene light: create a single instance on the root
+            # environment. Infinite-distance lights (sun, direction) are
+            # physically scene-global and should not be duplicated per arena.
+            light = self._env.create_light(uid, light_type)
+            batch_lights = Light(cfg=cfg, entities=[light])
+        else:
+            # Per-environment batched light: one instance per arena.
+            env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+            light_list = []
+            for i, env in enumerate(env_list):
+                light_name = f"{uid}_{i}"
+                light = env.create_light(light_name, light_type)
+                light_list.append(light)
+            batch_lights = Light(cfg=cfg, entities=light_list)
 
         self._lights[uid] = batch_lights
 
@@ -2338,6 +2413,145 @@ class SimulationManager:
         )
         return True
 
+    @staticmethod
+    def _window_camera_pose_to_look_at(
+        pose: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Convert a DexSim window model matrix to look-at vectors.
+
+        DexSim stores the viewer camera model matrix with columns
+        ``[right, up, -forward]``. The local camera up axis changes while the
+        viewer orbits, but ``Windows.set_look_at`` uses a world-up reference.
+        Always use DexSim's default Z-up vector so a captured snippet retains
+        the standard viewer controls.
+
+        Args:
+            pose: A 4x4 homogeneous viewer camera pose matrix.
+
+        Returns:
+            The ``(eye, look_at, up)`` vectors accepted by
+            ``Windows.set_look_at``.
+
+        Raises:
+            ValueError: If ``pose`` is not a 4x4 homogeneous matrix.
+        """
+        matrix = np.asarray(pose, dtype=np.float64)
+        if matrix.shape != (4, 4):
+            raise ValueError(
+                f"Window camera pose must have shape (4, 4), got {matrix.shape}."
+            )
+        eye = matrix[:3, 3]
+        look_at = eye - matrix[:3, 2]
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        return eye, look_at, up
+
+    @staticmethod
+    def _format_window_camera_pose(
+        pose: np.ndarray, convert_to_look_at: bool = True
+    ) -> str:
+        """Format a DexSim window pose as an executable Python snippet.
+
+        Args:
+            pose: A 4x4 homogeneous viewer camera pose matrix.
+            convert_to_look_at: Print a ``set_look_at`` call when true;
+                otherwise print the raw pose matrix.
+
+        Returns:
+            An executable Python snippet containing the camera pose.
+
+        Raises:
+            ValueError: If ``pose`` is not a 4x4 homogeneous matrix.
+        """
+        matrix = np.asarray(pose, dtype=np.float64)
+        if matrix.shape != (4, 4):
+            raise ValueError(
+                f"Window camera pose must have shape (4, 4), got {matrix.shape}."
+            )
+
+        def _format_float(value: float) -> str:
+            if abs(value) < 1e-12:
+                return "0.0"
+            formatted = format(value, ".8g")
+            if "e" not in formatted and "." not in formatted:
+                formatted += ".0"
+            return formatted
+
+        def _vector_literal(vector: np.ndarray) -> str:
+            values = ", ".join(_format_float(float(value)) for value in vector)
+            return f"np.array([{values}], dtype=np.float32)"
+
+        if convert_to_look_at:
+            eye, look_at, up = SimulationManager._window_camera_pose_to_look_at(matrix)
+            return (
+                "window.set_look_at("
+                f"eye={_vector_literal(eye)}, "
+                f"look_at={_vector_literal(look_at)}, "
+                f"up={_vector_literal(up)})"
+            )
+
+        rows = ",\n    ".join(
+            "[" + ", ".join(_format_float(float(value)) for value in row) + "]"
+            for row in matrix
+        )
+        return f"window_pose = np.array([\n    {rows}\n], dtype=np.float32)"
+
+    def print_window_camera_pose(self, convert_to_look_at: bool = True) -> str | None:
+        """Print the current viewer camera pose as reusable Python code.
+
+        Args:
+            convert_to_look_at: Print ``window.set_look_at(...)`` by default.
+                Set false to print the raw 4x4 pose matrix instead.
+
+        Returns:
+            The printed snippet, or ``None`` when no viewer window is open.
+        """
+        if self._window is None:
+            logger.log_warning("No simulation window available to print its pose.")
+            return None
+
+        pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        snippet = self._format_window_camera_pose(pose, convert_to_look_at)
+        print(snippet)
+        return snippet
+
+    def enable_window_camera_pose_hotkey(self, convert_to_look_at: bool = True) -> bool:
+        """Register ``p`` to print the current viewer camera pose.
+
+        Args:
+            convert_to_look_at: Print a ``window.set_look_at(...)`` call when
+                true, which is the default. Set false to print the raw matrix.
+
+        Returns:
+            Whether the control is registered on an available window.
+        """
+        self._window_camera_pose_hotkey_cfg = {"convert_to_look_at": convert_to_look_at}
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The camera pose print "
+                "hotkey will be registered after `open_window()`."
+            )
+            return False
+        if self._window_camera_pose_input_control is not None:
+            return True
+
+        from dexsim.types import InputKey
+
+        sim = self
+        hotkey_cfg = dict(self._window_camera_pose_hotkey_cfg)
+
+        class WindowCameraPoseEvent(ObjectManipulator):
+            def on_key_down(self, key):
+                if key == InputKey.SCANCODE_P.value:
+                    sim.print_window_camera_pose(**hotkey_cfg)
+
+        self._window_camera_pose_input_control = WindowCameraPoseEvent()
+        self._window.add_input_control(self._window_camera_pose_input_control)
+        logger.log_info(
+            "Camera pose print hotkey registered. Press 'p' to print the "
+            "current viewer pose."
+        )
+        return True
+
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.
 
@@ -2401,6 +2615,12 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, soft_obj in self._soft_objects.items():
+            if uid not in excluded_uids:
+                soft_obj.reset(env_ids)
+        for uid, cloth_obj in self._cloth_objects.items():
+            if uid not in excluded_uids:
+                cloth_obj.reset(env_ids)
         for uid, light in self._lights.items():
             if uid not in excluded_uids:
                 light.reset(env_ids)

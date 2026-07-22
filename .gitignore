@@ -186,7 +186,6 @@ embodichain/database/train/*
 Log/
 
 # tensorboard logs
-embodichain/agents/policy/runs/*
 *.pth
 outputs
 test_configs/*
@@ -203,3 +202,6 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+# Local gym project workspace
+/gym_project/

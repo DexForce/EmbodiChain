@@ -21,7 +21,7 @@ import os
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any, Optional
+from typing import Sequence, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
@@ -198,6 +198,17 @@ class WindowRecordCfg:
 
 
 @configclass
+class WindowCameraPoseCfg:
+    """Configuration for printing the interactive viewer camera pose."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``p`` hotkey when the window opens."""
+
+    convert_to_look_at: bool = True
+    """Whether the hotkey prints a ``set_look_at`` call instead of a matrix."""
+
+
+@configclass
 class GPUMemoryCfg:
     """A gpu memory configuration dataclass that neatly holds all parameters that configure physics GPU memory for simulation"""
 
@@ -300,6 +311,8 @@ class RigidBodyAttributesCfg:
         attr.sleep_threshold = self.sleep_threshold
         attr.restitution = self.restitution
         attr.enable_ccd = self.enable_ccd
+        attr.max_linear_velocity = self.max_linear_velocity
+        attr.max_angular_velocity = self.max_angular_velocity
         attr.max_depenetration_velocity = self.max_depenetration_velocity
         attr.min_position_iters = self.min_position_iters
         attr.min_velocity_iters = self.min_velocity_iters
@@ -307,7 +320,7 @@ class RigidBodyAttributesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int]]
+        cls, init_dict: Dict[str, str | float | int]
     ) -> RigidBodyAttributesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -360,7 +373,7 @@ class RigidBodyAttributesOverrideCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int, bool]]
+        cls, init_dict: Dict[str, str | float | int | bool]
     ) -> RigidBodyAttributesOverrideCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -678,7 +691,7 @@ class JointDrivePropertiesCfg:
     If the drive type is "none", then no force will be applied to joint.
     """
 
-    stiffness: Union[Dict[str, float], float] = 1e4
+    stiffness: Dict[str, float] | float = 1e4
     """Stiffness of the joint drive.
 
     The unit depends on the joint model:
@@ -687,7 +700,7 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s^2/rad (N-m/rad).
     """
 
-    damping: Union[Dict[str, float], float] = 1e3
+    damping: Dict[str, float] | float = 1e3
     """Damping of the joint drive.
 
     The unit depends on the joint model:
@@ -696,20 +709,20 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
     """
 
-    max_effort: Union[Dict[str, float], float] = 1e10
+    max_effort: Dict[str, float] | float = 1e10
     """Maximum effort that can be applied to the joint (in kg-m^2/s^2)."""
 
-    max_velocity: Union[Dict[str, float], float] = 1e10
+    max_velocity: Dict[str, float] | float = 1e10
     """Maximum velocity that the joint can reach (in rad/s or m/s).
 
     For linear joints, this is the maximum linear velocity with unit m/s.
     For angular joints, this is the maximum angular velocity with unit rad/s.
     """
 
-    friction: Union[Dict[str, float], float] = 0.0
+    friction: Dict[str, float] | float = 0.0
     """Friction coefficient of the joint"""
 
-    armature: Union[Dict[str, float], float] = 0.0
+    armature: Dict[str, float] | float = 0.0
     """Joint armature added to joint-space spatial inertia.
 
     Units depend on the joint model:
@@ -720,7 +733,7 @@ class JointDrivePropertiesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int]]
+        cls, init_dict: Dict[str, str | float | int]
     ) -> JointDrivePropertiesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -742,7 +755,7 @@ class ObjectBaseCfg:
     It is used as a base class for specific asset configurations.
     """
 
-    uid: Union[str, None] = None
+    uid: str | None = None
 
     init_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0)."""
@@ -754,7 +767,7 @@ class ObjectBaseCfg:
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
     @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, tuple]]) -> ObjectBaseCfg:
+    def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
@@ -795,19 +808,108 @@ class ObjectBaseCfg:
 class LightCfg(ObjectBaseCfg):
     """Configuration for a light asset in the simulation.
 
-    This class extends the base asset configuration to include specific properties for lights,
+    Supports six light types matching the dexsim rendering backend:
+
+    - ``"point"``: Per-environment omnidirectional point light with position
+      and falloff radius. Created as a batched light (one per environment).
+    - ``"sun"``: Global directional sun light (infinite distance). Created as
+      a single scene-level instance. Uses direction only; position is ignored.
+      Sun-specific fields (``angular_radius``, ``halo_size``, ``halo_falloff``)
+      are reserved for future backend support.
+    - ``"direction"``: Global pure directional light at infinite distance.
+      Created as a single scene-level instance. Direction only; no position.
+    - ``"spot"``: Per-environment spotlight with position, direction, and
+      inner/outer cone angles. Created as a batched light.
+    - ``"rect"``: Per-environment rectangular area light with position,
+      direction, width, and height. Created as a batched light.
+    - ``"mesh"``: Per-environment mesh-based emissive light. Requires a
+      :class:`~dexsim.models.MeshObject` via
+      :meth:`embodichain.lab.sim.objects.light.Light.set_mesh`
+      (not tensor-batched). Created as a batched light.
+
+    .. attention::
+        The ``angular_radius``, ``halo_size``, and ``halo_falloff`` fields are
+        reserved for future use. The dexsim Python bindings do not yet expose
+        setters for these sun-specific properties.
     """
 
-    # TODO: to be added more light type, such as spot, sun, etc.
-    light_type: Literal["point"] = "point"
+    light_type: Literal["point", "sun", "direction", "spot", "rect", "mesh"] = "point"
+    """Light type. Supported: ``"point"``, ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``."""
+
+    # ------------------------------------------------------------------
+    # Universal properties (apply to all light types)
+    # ------------------------------------------------------------------
 
     color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    """RGB color of the light source. Defaults to white ``(1.0, 1.0, 1.0)``."""
 
-    intensity: float = 50.0
-    """Intensity of the light source with unit of watts/m^2."""
+    intensity: float = 30.0
+    """Intensity of the light source in watts/m^2. Defaults to ``30.0``."""
 
-    radius: float = 1e2
-    """Falloff of the light, only used for point light."""
+    enable_shadow: bool = True
+    """Whether the light casts shadows. Defaults to ``True``."""
+
+    # ------------------------------------------------------------------
+    # Point light
+    # ------------------------------------------------------------------
+
+    radius: float = 10.0
+    """Falloff radius for point lights. Only used when ``light_type="point"``. Defaults to ``10.0``."""
+
+    # ------------------------------------------------------------------
+    # Directional properties (sun, direction, spot, rect, mesh)
+    # ------------------------------------------------------------------
+
+    direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
+    """Direction vector for directional, spot, rect, and mesh lights.
+    Defaults to ``(0.0, 0.0, -1.0)`` (pointing down along -Z)."""
+
+    # ------------------------------------------------------------------
+    # Sun light (reserved — Python bindings not yet available)
+    # ------------------------------------------------------------------
+
+    angular_radius: float = 0.5
+    """Angular radius of the sun disc in degrees. Reserved for future use."""
+
+    halo_size: float = 10.0
+    """Halo size for sun light. Reserved for future use."""
+
+    halo_falloff: float = 3.0
+    """Halo falloff for sun light. Reserved for future use."""
+
+    # ------------------------------------------------------------------
+    # Spot light
+    # ------------------------------------------------------------------
+
+    spot_angle_inner: float = 30.0
+    """Inner cone angle of the spotlight in degrees. Only used when ``light_type="spot"``.
+    Defaults to ``30.0``."""
+
+    spot_angle_outer: float = 45.0
+    """Outer cone angle of the spotlight in degrees. Only used when ``light_type="spot"``.
+    Defaults to ``45.0``."""
+
+    # ------------------------------------------------------------------
+    # Rect light
+    # ------------------------------------------------------------------
+
+    rect_width: float = 1.0
+    """Width of the rectangular area light. Only used when ``light_type="rect"``.
+    Defaults to ``1.0``."""
+
+    rect_height: float = 1.0
+    """Height of the rectangular area light. Only used when ``light_type="rect"``.
+    Defaults to ``1.0``."""
+
+    # ------------------------------------------------------------------
+    # Mesh light
+    # ------------------------------------------------------------------
+
+    mesh_path: str = ""
+    """Asset path for mesh-based emissive lights. Only used when ``light_type="mesh"``.
+    The actual mesh assignment is done via
+    :meth:`embodichain.lab.sim.objects.light.Light.set_mesh` which accepts a
+    :class:`dexsim.models.MeshObject`. This field stores the path for reference."""
 
 
 @configclass
@@ -827,20 +929,43 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
 
-    max_convex_hull_num: int = 1
+    max_convex_hull_num: int = MISSING
     """The maximum number of convex hulls that will be created for the rigid body.
 
-    If `max_convex_hull_num` is set to larger than 1, the rigid body will be decomposed into multiple convex hulls using coacd alogorithm.
+    .. deprecated::
+        Use :attr:`MeshCfg.max_convex_hull_num` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
+    using the approximate convex decomposition method specified by :attr:`acd_method`.
     Reference: https://github.com/SarahWeiii/CoACD
     """
 
-    sdf_resolution: int = 0
-    """Resolution for the signed distance field (SDF) of the rigid body.
-    The spacing of the uniformly sampled SDF is equal to the largest AABB extent of the mesh, divided by the resolution.
-    if `sdf_resolution` is set to larger than 0, a SDF will be generated for collision detection.
-    SDF will increase the accuracy of collision, but also take more time to initialize and simulate."""
+    acd_method: str = MISSING
+    """The method used for approximate convex decomposition (ACD) of the mesh.
 
-    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    .. deprecated::
+        Use :attr:`MeshCfg.acd_method` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1.
+    """
+
+    sdf_resolution: int = MISSING
+    """Resolution for the signed distance field (SDF) of the rigid body.
+
+    .. deprecated::
+        Use :attr:`MeshCfg.sdf_resolution` instead. This field is kept for
+        backward compatibility and overrides the shape-level value when explicitly set.
+
+    The spacing of the uniformly sampled SDF is equal to the largest AABB extent
+    of the mesh, divided by the resolution. If ``sdf_resolution`` is set to larger
+    than 0, an SDF will be generated for collision detection. SDF will increase the
+    accuracy of collision, but also takes more time to initialize and simulate.
+    """
+
+    body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
     use_usd_properties: bool = False
@@ -922,7 +1047,7 @@ class RigidObjectGroupCfg:
     )
     """
 
-    uid: Union[str, None] = None
+    uid: str | None = None
 
     rigid_objects: Dict[str, RigidObjectCfg] = MISSING
     """Configuration for the rigid objects in the group."""
@@ -1053,12 +1178,12 @@ class RigidConstraintCfg:
 class URDFCfg:
     """Standalone configuration class for URDF assembly."""
 
-    components: Dict[str, Dict[str, Union[str, Dict, np.ndarray]]] = field(
+    components: Dict[str, Dict[str, str | Dict | np.ndarray]] = field(
         default_factory=dict
     )
     """Dictionary of robot components to be assembled."""
 
-    sensors: Dict[str, Dict[str, Union[str, np.ndarray]]] = field(default_factory=dict)
+    sensors: Dict[str, Dict[str, str | np.ndarray]] = field(default_factory=dict)
     """Dictionary of sensors to be attached to the robot."""
 
     use_signature_check: bool = True
@@ -1076,7 +1201,7 @@ class URDFCfg:
     fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
     """Output directory prefix for the assembled URDF file."""
 
-    component_prefix: List[tuple[str, Union[str, None]]] = field(
+    component_prefix: List[tuple[str, str | None]] = field(
         default_factory=lambda: [
             ("chassis", None),
             ("legs", None),
@@ -1443,7 +1568,7 @@ class ArticulationCfg(ObjectBaseCfg):
     drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="none")
     """Properties to define the drive mechanism of a joint."""
 
-    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the articulation in the simulation world frame."""
 
     attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
@@ -1468,11 +1593,26 @@ class ArticulationCfg(ObjectBaseCfg):
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
 
-    init_qpos: Union[torch.Tensor, np.ndarray, Sequence[float]] = None
-    """Initial joint positions of the articulation. 
-    
+    init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
+    """Initial joint positions of the articulation.
+
     If None, the joint positions will be set to zero.
     If provided, it should be a array of shape (num_joints,).
+    """
+
+    qpos_limits: (
+        torch.Tensor | np.ndarray | Sequence[float] | Dict[str, List[float]] | None
+    ) = None
+    """Override joint position limits of the articulation.
+
+    If None, the joint position limits from the asset file (URDF/USD) are used.
+    If provided as a tensor/array of shape (num_joints, 2), it is applied to all
+    joints in the order of ``joint_names``.
+    If provided as a dictionary, keys are joint names or regular expressions and
+    values are ``[min, max]`` limits.
+
+    This field replaces the asset limits for the articulation and can be used to
+    either tighten or expand the allowed range.
     """
 
     sleep_threshold: float = 0.005
@@ -1503,7 +1643,7 @@ class ArticulationCfg(ObjectBaseCfg):
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, tuple, dict]]
+        cls, init_dict: Dict[str, str | float | tuple | dict]
     ) -> ArticulationCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -1570,12 +1710,12 @@ class RobotCfg(ArticulationCfg):
     """
 
     # TODO: how to support one solver for multiple parts?
-    solver_cfg: Union[SolverCfg, Dict[str, SolverCfg], None] = None
+    solver_cfg: SolverCfg | Dict[str, SolverCfg] | None = None
     """Solver is used to compute forward and inverse kinematics for the robot.
     """
 
     @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, tuple]]) -> RobotCfg:
+    def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
         if isinstance(init_dict, cls):
             return init_dict

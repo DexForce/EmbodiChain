@@ -60,6 +60,12 @@ class PlaceCfg(ActionCfg):
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
 
+    max_approach_retract_z: float | None = None
+    """Optional maximum world-frame TCP z for approach and retract poses (m)."""
+
+    cartesian_waypoint_count: int = 1
+    """Number of fixed-orientation Cartesian keyframes per translation segment."""
+
 
 class Place(AtomicAction):
     """Lower the held object to a place pose, open the gripper, retract.
@@ -96,6 +102,8 @@ class Place(AtomicAction):
             )
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+        if self.cfg.cartesian_waypoint_count < 1:
+            logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
 
     def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
@@ -112,7 +120,6 @@ class Place(AtomicAction):
             place_xpos = self._select_tcp_symmetric_place_variant(
                 place_xpos, start_arm_qpos
             )
-        n_waypoint = place_xpos.shape[1]
         n_down, n_open, n_back = self.builder.split_three_phase(
             self.cfg.sample_interval,
             self.cfg.hand_interp_steps,
@@ -120,15 +127,21 @@ class Place(AtomicAction):
             third_phase_name="back",
         )
 
-        lift_offset = torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height
-        approach_xpos = self.builder.apply_local_offset(place_xpos[:, 0], lift_offset)
-        retract_xpos = self.builder.apply_local_offset(place_xpos[:, -1], lift_offset)
+        approach_xpos = self._lifted_pose(place_xpos[:, 0])
+        retract_xpos = self._lifted_pose(place_xpos[:, -1])
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_arm_qpos,
+            name=self.cfg.control_part,
+            to_matrix=True,
+        )
+        down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
+        down_xpos = self._translation_keyframes(start_xpos, down_xpos)
 
         target_states_list = [
-            [PlanState(xpos=approach_xpos[i], move_type=MoveType.EEF_MOVE)]
-            + [
-                PlanState(xpos=place_xpos[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(n_waypoint)
+            [
+                PlanState(xpos=down_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(down_xpos.shape[1])
             ]
             for i in range(self.n_envs)
         ]
@@ -142,8 +155,14 @@ class Place(AtomicAction):
         )
         reach_arm_qpos = down_arm[:, -1, :]
 
+        back_xpos = self._translation_keyframes(
+            place_xpos[:, -1], retract_xpos.unsqueeze(1)
+        )
         target_states_list = [
-            [PlanState(xpos=retract_xpos[i], move_type=MoveType.EEF_MOVE)]
+            [
+                PlanState(xpos=back_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(back_xpos.shape[1])
+            ]
             for i in range(self.n_envs)
         ]
         back_success, back_arm = self.builder.plan_arm_traj(
@@ -184,6 +203,49 @@ class Place(AtomicAction):
                 coordinated_held_object=state.coordinated_held_object,
             ),
         )
+
+    def _lifted_pose(self, release_xpos: torch.Tensor) -> torch.Tensor:
+        """Build an above-release pose while respecting the optional TCP z cap."""
+        lifted_xpos = release_xpos.clone()
+        lifted_z = release_xpos[:, 2, 3] + self.cfg.lift_height
+        if self.cfg.max_approach_retract_z is not None:
+            max_z = torch.as_tensor(
+                self.cfg.max_approach_retract_z,
+                dtype=release_xpos.dtype,
+                device=release_xpos.device,
+            )
+            lifted_z = torch.maximum(
+                release_xpos[:, 2, 3],
+                torch.clamp_max(lifted_z, max_z),
+            )
+        lifted_xpos[:, 2, 3] = lifted_z
+        return lifted_xpos
+
+    def _translation_keyframes(
+        self, start_xpos: torch.Tensor, target_xpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Interpolate translations while holding each segment's target rotation."""
+        count = self.cfg.cartesian_waypoint_count
+        if count == 1:
+            return target_xpos
+
+        segment_starts = torch.cat(
+            [start_xpos.unsqueeze(1), target_xpos[:, :-1]], dim=1
+        )
+        alpha = torch.linspace(
+            1.0 / count,
+            1.0,
+            count,
+            dtype=target_xpos.dtype,
+            device=self.device,
+        )
+        keyframes = target_xpos.unsqueeze(2).repeat(1, 1, count, 1, 1)
+        start_position = segment_starts[..., :3, 3].unsqueeze(2)
+        target_position = target_xpos[..., :3, 3].unsqueeze(2)
+        keyframes[..., :3, 3] = start_position + alpha[None, None, :, None] * (
+            target_position - start_position
+        )
+        return keyframes.flatten(1, 2)
 
     def _fail(self, state: WorldState) -> ActionResult:
         return ActionResult(

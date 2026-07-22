@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
@@ -331,8 +333,7 @@ class BaseRigidObjectTest:
         sdf = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="duck_sdf",
-                shape=MeshCfg(fpath=duck_path),
-                sdf_resolution=128,
+                shape=MeshCfg(fpath=duck_path, sdf_resolution=128),
                 body_type="dynamic",
             )
         )
