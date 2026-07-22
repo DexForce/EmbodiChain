@@ -1,0 +1,209 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+    DEFAULT_TARGET_BODY_SCALE,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.agent_run_stage import (
+    run_agent_command,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
+    PIPELINE_HISTORY_SCHEMA_VERSION,
+    PIPELINE_MANIFEST_FILENAME,
+    REPO_ROOT,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_records import (
+    write_pipeline_manifests,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_timing import (
+    configure_pipeline_timing,
+    write_pipeline_timing_summary,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_usage import (
+    configure_llm_usage_tracking,
+    write_llm_usage_summary,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.project_resolution import (
+    PROMPT2SCENE_PROJECT_MODES,
+    resolve_gym_project,
+    resolve_task_description_for_generation,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
+    resolve_target_replacements,
+)
+
+__all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
+
+PIPELINE_RUNNER_REQUIRED_ARGS = (
+    "acd_method",
+    "config_output_dir",
+    "headless",
+    "inside_container_slot_distance_scale",
+    "overwrite_config",
+    "prompt2scene_scene_z_rotation_degrees",
+    "regenerate",
+    "reuse_target_replacements",
+    "skip_run_agent",
+    "surface_release_clearance",
+    "sync_replacement_names",
+    "target_body_scale",
+    "target_body_scale_mode",
+    "task_description",
+    "task_name",
+)
+
+
+def run_pipeline(args: argparse.Namespace) -> int:
+    """Run image/project resolution, config generation, and optional task execution."""
+    _ensure_repo_on_pythonpath()
+    from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+        TargetReplacementSpec,
+    )
+
+    timing_paths = configure_pipeline_timing(args)
+    try:
+        with timing_scope(
+            "pipeline.total",
+            metadata={"task_name": args.task_name},
+        ):
+            return _run_pipeline(args, TargetReplacementSpec)
+    finally:
+        write_pipeline_timing_summary(timing_paths)
+
+
+def _run_pipeline(
+    args: argparse.Namespace,
+    TargetReplacementSpec,
+) -> int:
+    from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
+    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
+        generate_action_agent_config_from_project,
+    )
+
+    with timing_scope("pipeline.resolve_gym_project"):
+        resolution = resolve_gym_project(args)
+    usage_paths = configure_llm_usage_tracking(args)
+    with timing_scope(
+        "pipeline.resolve_target_replacements",
+        metadata={"source_mode": resolution.mode},
+    ):
+        target_replacements = resolve_target_replacements(
+            args,
+            TargetReplacementSpec,
+            resolution.path,
+        )
+    with timing_scope("pipeline.resolve_task_description"):
+        task_description = resolve_task_description_for_generation(args)
+    args.task_description = task_description or ""
+    target_body_scale = args.target_body_scale
+    target_body_scale_mode = getattr(args, "target_body_scale_mode", None)
+    uses_prompt2scene_alignment = resolution.mode in PROMPT2SCENE_PROJECT_MODES
+    if uses_prompt2scene_alignment:
+        source_scene_body_scale_mode = (
+            target_body_scale_mode if target_body_scale_mode is not None else "multiply"
+        )
+        effective_target_body_scale = (
+            DEFAULT_TARGET_BODY_SCALE
+            if target_body_scale is None
+            else target_body_scale
+        )
+        args.target_body_scale_mode = source_scene_body_scale_mode
+    else:
+        source_scene_body_scale_mode = None
+        effective_target_body_scale = (
+            DEFAULT_TARGET_BODY_SCALE
+            if target_body_scale is None
+            else target_body_scale
+        )
+    args.target_body_scale = effective_target_body_scale
+
+    with timing_scope(
+        "pipeline.generate_action_agent_config",
+        metadata={"source_mode": resolution.mode},
+    ):
+        paths = generate_action_agent_config_from_project(
+            gym_project=resolution.path,
+            output_dir=args.config_output_dir,
+            task_name=args.task_name,
+            task_description=task_description,
+            robot_profile=getattr(args, "robot_profile", None),
+            target_body_scale=effective_target_body_scale,
+            source_scene_body_scale_mode=source_scene_body_scale_mode,
+            preserve_source_scene_geometry=uses_prompt2scene_alignment,
+            load_source_meshes_directly=uses_prompt2scene_alignment,
+            source_scene_z_rotation_degrees=(
+                args.prompt2scene_scene_z_rotation_degrees
+                if uses_prompt2scene_alignment
+                else 0.0
+            ),
+            load_template_material=getattr(args, "load_template_material", False),
+            inside_container_slot_distance_scale=(
+                args.inside_container_slot_distance_scale
+            ),
+            surface_release_clearance=getattr(
+                args,
+                "surface_release_clearance",
+                DEFAULT_SURFACE_RELEASE_CLEARANCE,
+            ),
+            target_replacements=target_replacements,
+            sync_replacement_names=args.sync_replacement_names,
+            reuse_target_replacements=args.reuse_target_replacements,
+            acd_method=args.acd_method,
+            overwrite=args.overwrite_config,
+        )
+    with timing_scope("pipeline.write_manifests"):
+        write_pipeline_manifests(
+            args=args,
+            resolution=resolution,
+            generated_paths=paths,
+            target_replacements=target_replacements,
+            repo_root=REPO_ROOT,
+            schema_version=PIPELINE_HISTORY_SCHEMA_VERSION,
+            manifest_filename=PIPELINE_MANIFEST_FILENAME,
+        )
+
+    print(f"Using gym project/config: {resolution.path}", flush=True)
+    print(f"Generated gym config: {paths.gym_config}", flush=True)
+    print(f"Generated agent config: {paths.agent_config}", flush=True)
+    task_graph_path = getattr(paths, "task_graph", None)
+    if task_graph_path is not None:
+        print(f"Generated task graph: {task_graph_path}", flush=True)
+    if args.skip_run_agent:
+        write_llm_usage_summary(usage_paths)
+        return 0
+
+    with timing_scope("pipeline.run_agent_subprocess"):
+        return_code = run_agent_command(
+            task_name=args.task_name,
+            gym_config=paths.gym_config,
+            agent_config=paths.agent_config,
+            regenerate=args.regenerate,
+            headless=getattr(args, "headless", False),
+        )
+    write_llm_usage_summary(usage_paths)
+    return return_code
+
+
+def _ensure_repo_on_pythonpath() -> None:
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))

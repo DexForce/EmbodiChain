@@ -1,0 +1,376 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+import json
+import re
+
+from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _SceneObject,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
+    _base_name,
+    _string_list,
+)
+
+__all__ = [
+    "_TASK_ROUTE_ARRANGEMENT_LINE",
+    "_TASK_ROUTE_OBJECT_MANIPULATION",
+    "_TASK_ROUTE_STACKING",
+    "_TASK_ROUTE_UNSUPPORTED",
+    "_TaskRouteSpec",
+    "_call_task_router_llm",
+    "_make_task_router_scene_summary",
+    "_route_task_with_llm",
+]
+
+_TASK_ROUTE_STACKING = "stacking"
+_TASK_ROUTE_ARRANGEMENT_LINE = "arrangement_line"
+_TASK_ROUTE_OBJECT_MANIPULATION = "object_manipulation"
+_TASK_ROUTE_UNSUPPORTED = "unsupported"
+_TASK_ROUTES = {
+    _TASK_ROUTE_STACKING,
+    _TASK_ROUTE_ARRANGEMENT_LINE,
+    _TASK_ROUTE_OBJECT_MANIPULATION,
+    _TASK_ROUTE_UNSUPPORTED,
+}
+_TASK_ROUTE_ALIASES = {
+    "arrangement": _TASK_ROUTE_ARRANGEMENT_LINE,
+    "line_arrangement": _TASK_ROUTE_ARRANGEMENT_LINE,
+    "line": _TASK_ROUTE_ARRANGEMENT_LINE,
+    "relative": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "relative_placement": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "manipulation": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "object": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "object_manipulation": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "bimanual_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "cooperative_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "coordinated_pickment": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "coordinated_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "dual_arm_transport": _TASK_ROUTE_OBJECT_MANIPULATION,
+    "stack": _TASK_ROUTE_STACKING,
+    "stacking": _TASK_ROUTE_STACKING,
+    "unsupported": _TASK_ROUTE_UNSUPPORTED,
+}
+_STACKING_DOWNGRADE_WARNING = (
+    "Downgraded stacking route to object_manipulation because the task describes "
+    "one moved object being placed relative to a support object."
+)
+_SINGLE_OBJECT_ON_SUPPORT_PATTERNS = (
+    re.compile(
+        r"\b(?:place|put|move|set|stack)\b.+\b(?:on|onto|on_top_of|on_top|above)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bon\s+top\s+of\b", re.IGNORECASE),
+    re.compile(
+        r"把.+(?:放到|放在|放置到|放置在|移到|移动到|摆到|摆在)" r".+(?:上|上方|顶部)"
+    ),
+)
+_GLOBAL_STACKING_PATTERNS = (
+    re.compile(
+        r"\b(?:stack|pile|nest)\s+(?:all|these|those|the selected|the listed)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:nested|nesting|vertical stack)\b", re.IGNORECASE),
+    re.compile(r"(?:叠放|堆叠|叠成|堆成|摞成|叠起来|堆起来|摞起来|堆叠起来)"),
+)
+_EXPLICIT_STACKING_GOAL_PATTERNS = (
+    re.compile(
+        r"(?:叠放|堆叠|叠到|叠在|叠成|叠起来|堆成|摞到|摞在|摞起来|码放|套叠|嵌套)"
+    ),
+    re.compile(r"(?<!折)(?<!重)叠(?!加)"),
+    re.compile(r"\b(?:stack|pile|nest)(?:ed|ing|s)?\b", re.IGNORECASE),
+)
+_NEGATED_STACKING_GOAL_PATTERNS = (
+    re.compile(
+        r"(?:不要|禁止|避免|无需|不用).{0,12}"
+        r"(?:叠放|堆叠|叠到|叠在|叠成|叠起来|堆成|叠|摞|码放|套叠|嵌套)"
+    ),
+    re.compile(
+        r"\b(?:do not|don't|avoid|without)\s+(?:stack|pile|nest)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:已经|已|原本|当前).{0,8}" r"(?:叠放|堆叠|叠在|叠|摞在|码放|套叠|嵌套)"
+    ),
+    re.compile(r"\balready\s+(?:stacked|piled|nested)\b", re.IGNORECASE),
+)
+_STACKING_ROUTE_OVERRIDE_WARNING = (
+    "Overrode the task-router result because the goal contains an explicit "
+    "stacking instruction."
+)
+
+
+@dataclass(frozen=True)
+class _TaskRouteSpec:
+    route: str
+    confidence: float
+    reason: str
+    candidate_objects: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def to_summary(self) -> dict[str, Any]:
+        return {
+            "route": self.route,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "candidate_objects": list(self.candidate_objects),
+            "warnings": list(self.warnings),
+        }
+
+
+def _route_task_with_llm(
+    *,
+    scene_objects: Sequence[_SceneObject],
+    project_name: str,
+    task_description: str,
+    model: str | None,
+    task_router_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
+) -> _TaskRouteSpec:
+    scene_summary = _make_task_router_scene_summary(scene_objects)
+    if task_router_llm_caller is None:
+        task_router_llm_caller = _call_task_router_llm
+    response = task_router_llm_caller(
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=scene_summary,
+        model=model,
+    )
+    return _normalize_task_route_response(
+        response,
+        scene_objects=scene_objects,
+        task_description=task_description,
+    )
+
+
+def _call_task_router_llm(
+    *,
+    project_name: str,
+    task_description: str,
+    scene_summary: list[dict[str, Any]],
+    model: str | None,
+) -> dict[str, Any]:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
+        extract_json_object,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.utils.mllm import (
+        create_chat_openai,
+    )
+
+    prompt = (
+        "Classify a tabletop robot task into exactly one action-agent config "
+        "generation route. This router only chooses the route; it must not "
+        "generate atomic actions, task graphs, target poses, offsets, robot "
+        "configs, or success specs.\n\n"
+        "Return exactly one JSON object with this schema:\n"
+        "{\n"
+        '  "route": "stacking|arrangement_line|object_manipulation|unsupported",\n'
+        '  "confidence": 0.0,\n'
+        '  "reason": "<short route rationale>",\n'
+        '  "candidate_objects": ["<source_uid from rigid_object>", "..."],\n'
+        '  "warnings": ["<optional warning>", "..."]\n'
+        "}\n\n"
+        "Route rules:\n"
+        "- Base the route primarily on the task description. Use scene objects "
+        "only to understand available object names/counts and to add warnings.\n"
+        "- Choose arrangement_line when multiple tabletop objects should form "
+        "one global row, line, column, left-to-right order, color order, size "
+        "order, or other one-dimensional arrangement. This includes Chinese "
+        "phrases such as 摆成一排, 排成一行, 排列, 排序, 从左到右, 由大到小, "
+        "and mixed object types such as bottles, blocks, boxes, or cans in one "
+        "line.\n"
+        "- Choose stacking only when the task asks to build, reorder, or move "
+        "a selected set of multiple objects into one vertical stack, pile, or "
+        "nested stack. Examples include stacking all blocks, nesting bowls "
+        "large-to-small, or Chinese phrases such as 把这些物体叠起来, 堆叠这些物体, "
+        "叠成一列, 摞起来.\n"
+        "- Explicit positive stacking verbs such as 叠放, 堆叠, 摞, stack, "
+        "pile, or nest always select stacking, including when one moved object "
+        "is stacked onto a named passive support.\n"
+        "- Do not choose stacking for a single moved object placed/put/moved "
+        "on top of a support object, even when the final contact is vertical; "
+        "choose object_manipulation for that case.\n"
+        "- Choose object_manipulation for one or two moved objects with a "
+        "relative placement, insertion, support-surface placement, directional "
+        "move, upright/lay-flat adjustment, pick-up, hold, or hover task. This "
+        "includes tasks such as placing A on top of B where A is the only moved "
+        "object and B is a support/reference. Also "
+        "choose object_manipulation for cooperative/bimanual transport where "
+        "both arms move one shared rigid object such as a pot, tray, long "
+        "object, large cuboid, closed umbrella-like cylinder, or object-loaded "
+        "tray; the downstream object-manipulation spec will decide whether to "
+        "use CoordinatedPickment.\n"
+        "- Choose unsupported when none of the existing routes can represent "
+        "the task, for example pouring, opening articulated objects, cutting, "
+        "deformable manipulation, or long tool-use workflows that are not a "
+        "single shared-object cooperative transport.\n"
+        "- candidate_objects should list source_uid values that appear central "
+        "to the task. It may be empty if the object set is ambiguous.\n"
+        "- Do not use markdown.\n\n"
+        f"Project: {project_name}\n"
+        f"Task description:\n{task_description}\n"
+        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    )
+    llm = create_chat_openai(
+        temperature=0.0,
+        model=model,
+        usage_stage="config_generation.task_router",
+    )
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "You are a strict JSON router for simulation config "
+                    "generation. Return only the requested JSON object."
+                )
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
+    content = getattr(response, "content", response)
+    return extract_json_object(content)
+
+
+def _make_task_router_scene_summary(
+    scene_objects: Sequence[_SceneObject],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_uid": obj.source_uid,
+            "role": obj.source_role,
+            "object_type": _base_name(obj),
+            "description": str(obj.config.get("description", "")).strip(),
+            "init_pos": obj.config.get("init_pos"),
+        }
+        for obj in scene_objects
+    ]
+
+
+def _normalize_task_route_response(
+    response: Mapping[str, Any],
+    *,
+    scene_objects: Sequence[_SceneObject],
+    task_description: str,
+) -> _TaskRouteSpec:
+    route = _normalize_task_route(response.get("route"))
+    confidence = _normalize_confidence(response.get("confidence", 0.0))
+    reason = str(response.get("reason", "")).strip()
+    candidate_objects = tuple(_string_list(response.get("candidate_objects")))
+    warnings = tuple(_string_list(response.get("warnings")))
+    explicit_stacking_goal = _has_explicit_stacking_goal(task_description)
+    if route != _TASK_ROUTE_STACKING and explicit_stacking_goal:
+        route = _TASK_ROUTE_STACKING
+        reason = "The task goal contains an explicit stacking instruction."
+        warnings = (*warnings, _STACKING_ROUTE_OVERRIDE_WARNING)
+    if (
+        route == _TASK_ROUTE_STACKING
+        and not explicit_stacking_goal
+        and _is_single_object_on_support_task(task_description)
+    ):
+        route = _TASK_ROUTE_OBJECT_MANIPULATION
+        warnings = (*warnings, _STACKING_DOWNGRADE_WARNING)
+    _validate_candidate_objects(candidate_objects, scene_objects)
+    _validate_route_feasibility(route, scene_objects)
+    if not reason:
+        reason = f"Task router selected {route}."
+    return _TaskRouteSpec(
+        route=route,
+        confidence=confidence,
+        reason=reason,
+        candidate_objects=candidate_objects,
+        warnings=warnings,
+    )
+
+
+def _has_explicit_stacking_goal(task_description: str) -> bool:
+    text = task_description.strip()
+    if not text:
+        return False
+    positive_text = text
+    for pattern in _NEGATED_STACKING_GOAL_PATTERNS:
+        positive_text = pattern.sub("", positive_text)
+    return any(
+        pattern.search(positive_text) for pattern in _EXPLICIT_STACKING_GOAL_PATTERNS
+    )
+
+
+def _is_single_object_on_support_task(task_description: str) -> bool:
+    """Return whether text describes one moved object placed onto a support."""
+    text = task_description.strip()
+    if not text:
+        return False
+    if any(pattern.search(text) for pattern in _GLOBAL_STACKING_PATTERNS):
+        return False
+    return any(pattern.search(text) for pattern in _SINGLE_OBJECT_ON_SUPPORT_PATTERNS)
+
+
+def _normalize_task_route(value: Any) -> str:
+    route = str(value or "").strip().lower()
+    route = _TASK_ROUTE_ALIASES.get(route, route)
+    if route not in _TASK_ROUTES:
+        raise ValueError(
+            f"Unsupported task route {value!r}; expected one of "
+            f"{', '.join(sorted(_TASK_ROUTES))}."
+        )
+    return route
+
+
+def _normalize_confidence(value: Any) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Task router confidence must be a number.") from exc
+    if confidence < 0.0 or confidence > 1.0:
+        raise ValueError("Task router confidence must be between 0.0 and 1.0.")
+    return confidence
+
+
+def _validate_candidate_objects(
+    candidate_objects: Sequence[str],
+    scene_objects: Sequence[_SceneObject],
+) -> None:
+    known_uids = {obj.source_uid for obj in scene_objects}
+    unknown = sorted(set(candidate_objects) - known_uids)
+    if unknown:
+        raise ValueError(
+            "Task router returned unknown candidate object(s): "
+            f"{', '.join(unknown)}."
+        )
+
+
+def _validate_route_feasibility(
+    route: str,
+    scene_objects: Sequence[_SceneObject],
+) -> None:
+    rigid_count = sum(1 for obj in scene_objects if obj.source_role == "rigid_object")
+    if (
+        route in {_TASK_ROUTE_ARRANGEMENT_LINE, _TASK_ROUTE_STACKING}
+        and rigid_count < 2
+    ):
+        raise ValueError(
+            f"Task route {route!r} requires at least two movable rigid objects."
+        )
+    if route == _TASK_ROUTE_OBJECT_MANIPULATION and rigid_count < 1:
+        raise ValueError(
+            "Task route 'object_manipulation' requires at least one movable "
+            "rigid object."
+        )

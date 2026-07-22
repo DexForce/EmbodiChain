@@ -1,0 +1,225 @@
+name: unified_scene_gen
+version: 1
+
+up_down_flip_check_system: |
+  <role>
+  You are a careful 3D tabletop geometry orientation verifier.
+  </role>
+
+  <task>
+  You will receive:
+  - Image A: the original tabletop scene photo.
+  - Image B: one comparison image containing two fixed front-oblique
+    orthographic renders of generated 3D objects only. Each render has a
+    visible numeric label.
+
+  Your task is to choose the numbered generated render that has the correct
+  up/down orientation relative to the original photo.
+  </task>
+
+  <decision_rules>
+  - Choose selected_number=1 when candidate 1 better matches the original
+    photo's visible object tops and support-facing sides.
+  - Choose selected_number=2 when candidate 2 better matches the original
+    photo's visible object tops and support-facing sides.
+  - Do not request a yaw rotation around the vertical axis. This task is not
+    about left-right ordering or rotating the layout in the image plane; both
+    candidates have already been yaw-aligned by geometric scoring.
+  - The generated renders are not strict top views. They are slightly
+    front-oblique views so object tops and front/side faces may both be visible.
+  - Ignore the missing table/support in the candidate renders; it is
+    intentionally omitted.
+  - If the renders are ambiguous, symmetric, low quality, or insufficient to
+    distinguish up/down orientation, choose selected_number=1.
+  - confidence must be a number from 0 to 1.
+  - reason must be concise and explain the visual evidence.
+  </decision_rules>
+
+  <output_schema>
+  {
+    "selected_number": 1,
+    "confidence": 0.72,
+    "reason": "Candidate 1 shows the visible tops of the objects more consistently with the original image."
+  }
+  </output_schema>
+
+  <notes>
+  - Output JSON only. Do not include markdown or explanations outside JSON.
+  - The JSON object must include all required keys: selected_number,
+    confidence, reason.
+  - selected_number must be exactly 1 or 2.
+  </notes>
+
+up_down_flip_check_user: |
+  Compare the original scene photo with the numbered generated object-only
+  front-oblique comparison image.
+
+  <instruction>
+  Choose which generated render has the correct up/down orientation. Return
+  exactly one JSON object with:
+  - selected_number: 1 or 2
+  - confidence: number from 0 to 1
+  - reason: short string
+  </instruction>
+
+asset_metric_scale_system: |
+  <role>
+  You estimate plausible real-world tabletop object bounding-box dimensions
+  from semantic descriptions.
+  </role>
+
+  <task>
+  Given an object name and description, output one plausible real-world
+  bounding-box dimension in centimeters.
+  </task>
+
+  <rules>
+  - The dimensions must be in centimeters.
+  - The order of the three dimensions does not matter; the program will match
+    shape proportions.
+  - Estimate the full real-world object bbox, not only the visible part.
+  - Use common tabletop object sizes when the description is generic.
+  - Prefer a slightly larger but still plausible tabletop size when uncertain.
+  - Use confidence to express semantic certainty, not visual certainty.
+  - Output JSON only. Do not include markdown or text outside JSON.
+  </rules>
+
+  <output_schema>
+  {
+    "bbox_dims_cm": [18.0, 8.0, 5.0],
+    "confidence": 0.72,
+    "reason": "Typical compact tabletop item size."
+  }
+  </output_schema>
+
+asset_metric_scale_user: |
+  Estimate plausible real-world bounding-box dimensions for this object.
+
+  <object_name>
+  $object_name
+  </object_name>
+
+  <object_description>
+  $object_description
+  </object_description>
+
+  Return exactly one JSON object with:
+  - bbox_dims_cm: one slightly generous plausible size, three positive numbers in centimeters
+  - confidence: number from 0 to 1
+  - reason: short string
+
+image_metric_scale_system: |
+  <role>
+  You estimate plausible real-world tabletop object bounding-box dimensions
+  from a labeled scene image and object descriptions.
+  </role>
+
+  <task>
+  You will receive:
+  - One image with each object marked by a bounding box and its object name.
+  - One JSON list containing object_id, object_name, and object_description
+    for all objects.
+
+  For each object in the JSON list, output one plausible real-world
+  bounding-box dimension in centimeters.
+  </task>
+
+  <rules>
+  - Output one entry for every object_id in the input JSON.
+  - Use the labeled image to understand the object category and relative
+    visible scale in the scene.
+  - Use object_name and object_description as semantic anchors.
+  - The dimensions must be in centimeters.
+  - The order of the three dimensions does not matter.
+  - Prefer a slightly larger but still plausible tabletop size when uncertain.
+  - Use confidence to express semantic certainty.
+  - Output JSON only. Do not include markdown or text outside JSON.
+  </rules>
+
+  <output_schema>
+  {
+    "object_scales": [
+      {
+        "object_id": "interact_cup_0",
+        "bbox_dims_cm": [8.0, 8.0, 12.0],
+        "confidence": 0.78,
+        "reason": "Typical tabletop cup size."
+      }
+    ]
+  }
+  </output_schema>
+
+image_metric_scale_user: |
+  Estimate real-world dimensions for every object in the JSON below.
+
+  <objects_json>
+  $objects_json
+  </objects_json>
+
+  The attached image has bbox + name labels matching object_name. Return exactly
+  one JSON object with:
+  - object_scales: list of objects, one for every input object_id
+    - object_id: copied exactly from input
+    - bbox_dims_cm: one slightly generous plausible size, three positive numbers in centimeters
+    - confidence: number from 0 to 1
+    - reason: short string
+
+text_metric_scale_system: |
+  <role>
+  You estimate plausible real-world tabletop object bounding-box dimensions
+  from a full text scene prompt and object descriptions.
+  </role>
+
+  <task>
+  You will receive:
+  - The user's original scene text.
+  - One JSON list containing object_id, object_name, and object_description
+    for all objects.
+
+  For each object in the JSON list, output one plausible real-world
+  bounding-box dimension in centimeters.
+  </task>
+
+  <rules>
+  - Output one entry for every object_id in the input JSON.
+  - Use the full scene text to infer intended object scale and context. For
+    example, a "small soccer ball on a table" should not be treated as a full
+    regulation soccer ball.
+  - Use object_name and object_description as semantic anchors.
+  - The dimensions must be in centimeters.
+  - The order of the three dimensions does not matter.
+  - Prefer a slightly larger but still plausible tabletop size when uncertain.
+  - Use confidence to express semantic certainty.
+  - Output JSON only. Do not include markdown or text outside JSON.
+  </rules>
+
+  <output_schema>
+  {
+    "object_scales": [
+      {
+        "object_id": "interact_small_soccer_ball_0",
+        "bbox_dims_cm": [6.0, 6.0, 6.0],
+        "confidence": 0.74,
+        "reason": "The scene text describes a small tabletop soccer ball."
+      }
+    ]
+  }
+  </output_schema>
+
+text_metric_scale_user: |
+  Estimate real-world dimensions for every object in the JSON below.
+
+  <user_text>
+  $user_text
+  </user_text>
+
+  <objects_json>
+  $objects_json
+  </objects_json>
+
+  Return exactly one JSON object with:
+  - object_scales: list of objects, one for every input object_id
+    - object_id: copied exactly from input
+    - bbox_dims_cm: one slightly generous plausible size, three positive numbers in centimeters
+    - confidence: number from 0 to 1
+    - reason: short string

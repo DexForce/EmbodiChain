@@ -1,0 +1,1272 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+import math
+from pathlib import Path
+from typing import Any
+
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
+
+from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
+    _RelativePlacementSpec,
+    _RelativePlacementStepSpec,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+    _clean_vector3,
+    _iter_generated_scene_object_configs,
+    _load_mesh_vertices,
+    _mesh_config_local_zmin_after_rotation,
+    _mesh_config_transform_matrix,
+    _mesh_config_world_xy_bounds,
+    _mesh_config_world_zmax,
+    _mesh_config_world_xy_extents,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
+    _SIDE_RELATIONS,
+    _normalize_relative_relation,
+    _relative_primary_placement,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    _arm_side_for_position,
+)
+from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
+    match_asset_orientation_keyword,
+)
+
+__all__ = [
+    "_POSE_SENSITIVE_STAGING_Z_DELTA",
+    "_STAGING_Z_DELTA",
+    "_inside_container_axis_offsets",
+    "_inside_container_slot_axis_and_distance",
+    "_make_relative_summary",
+    "_offset_position",
+    "_relative_release_offset",
+    "_side_relation_xy_offsets",
+    "_with_on_surface_release_offsets",
+    "_with_inside_container_slot_offsets",
+    "_with_coordinated_side_release_height_offsets",
+    "_with_coordinated_transport_geometry",
+    "_with_final_auto_arm_sides",
+    "_with_self_relative_absolute_targets",
+]
+
+_DEFAULTS = generation_defaults_section("relative_placement")
+_SIDE_RELATION_DISTANCE = float(_DEFAULTS["side_relation_distance"])
+_SIDE_RELEASE_Z_OFFSET = float(_DEFAULTS["side_release_z_offset"])
+_CONTAINER_SLOT_MIN_OFFSET = float(_DEFAULTS["container_slot_min_offset"])
+_CONTAINER_SLOT_MAX_OFFSET = float(_DEFAULTS["container_slot_max_offset"])
+_CONTAINER_SLOT_FRACTION = float(_DEFAULTS["container_slot_fraction"])
+_CONTAINER_SLOT_MAX_FRACTION = float(_DEFAULTS["container_slot_max_fraction"])
+_CONTAINER_SLOT_AXIS_TIE_RATIO = float(_DEFAULTS["container_slot_axis_tie_ratio"])
+_STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
+_POSE_SENSITIVE_STAGING_Z_DELTA = float(_DEFAULTS["pose_sensitive_staging_z_delta"])
+_ON_RELEASE_Z_OFFSET = float(_DEFAULTS["on_release_z_offset"])
+_PICKUP_UPRIGHT_ROTATE_RADIANS = math.radians(
+    float(_DEFAULTS["pickup_upright_rotate_degrees"])
+)
+_ROBOT_VIEW_LEFT_WORLD_Y_SIGN = 1.0
+_ROBOT_VIEW_FRONT_WORLD_X_SIGN = 1.0
+_DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER = {"right": 0, "left": 1}
+_COORDINATED_TRANSPORT_DISTANCE = 0.15
+_COORDINATED_MIN_TRANSPORT_DISTANCE = 0.05
+_COORDINATED_GEOMETRY_MARGIN = 0.02
+
+
+def _relative_release_offset(relation: str) -> list[float]:
+    relation = _normalize_relative_relation(relation)
+    if relation == "inside":
+        return [0.0, 0.0, _SIDE_RELEASE_Z_OFFSET]
+    if relation == "on":
+        return [0.0, 0.0, _ON_RELEASE_Z_OFFSET]
+    if relation in _SIDE_RELATIONS:
+        x_offset, y_offset = _side_relation_xy_offsets(relation)
+        return [x_offset, y_offset, _SIDE_RELEASE_Z_OFFSET]
+    raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
+
+
+def _side_relation_xy_offsets(relation: str) -> tuple[float, float]:
+    relation = _normalize_relative_relation(relation)
+    left_y = _ROBOT_VIEW_LEFT_WORLD_Y_SIGN * _SIDE_RELATION_DISTANCE
+    right_y = -_ROBOT_VIEW_LEFT_WORLD_Y_SIGN * _SIDE_RELATION_DISTANCE
+    front_x = _ROBOT_VIEW_FRONT_WORLD_X_SIGN * _SIDE_RELATION_DISTANCE
+    behind_x = -_ROBOT_VIEW_FRONT_WORLD_X_SIGN * _SIDE_RELATION_DISTANCE
+    if relation == "left_of":
+        return 0.0, left_y
+    if relation == "right_of":
+        return 0.0, right_y
+    if relation == "front_of":
+        return front_x, 0.0
+    if relation == "behind":
+        return behind_x, 0.0
+    if relation == "front_left_of":
+        return front_x, left_y
+    if relation == "back_left_of":
+        return behind_x, left_y
+    if relation == "front_right_of":
+        return front_x, right_y
+    if relation == "back_right_of":
+        return behind_x, right_y
+    raise ValueError(f"Unsupported side relation: {relation!r}.")
+
+
+def _with_self_relative_absolute_targets(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    if not any(placement.reference_is_initial_pose for placement in spec.placements):
+        return spec
+
+    generated_positions = {
+        str(obj.get("uid")): _clean_vector3(obj.get("init_pos", [0.0, 0.0, 0.0]))
+        for obj in gym_config.get("rigid_object", [])
+    }
+    placements = tuple(
+        _with_self_relative_absolute_target(placement, generated_positions)
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _with_final_auto_arm_sides(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    if spec.intent == "coordinated_pickment" or not spec.placements:
+        return spec
+
+    placements = list(spec.placements)
+    object_positions = _generated_object_positions(gym_config)
+    inferred_sides = {
+        index: _arm_side_for_position(
+            _require_generated_object_position(
+                object_positions,
+                placements[index].moved_runtime_uid,
+            )
+        )
+        for index, placement in enumerate(placements)
+        if placement.intent != "coordinated_pickment"
+    }
+
+    for index, active_side in inferred_sides.items():
+        placements[index] = replace(placements[index], active_side=active_side)
+    return _replace_relative_spec_placements(spec, tuple(placements))
+
+
+def _generated_object_positions(
+    gym_config: Mapping[str, Any],
+) -> dict[str, list[float]]:
+    return {
+        str(obj.get("uid")): _clean_vector3(obj.get("init_pos", [0.0, 0.0, 0.0]))
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+
+
+def _require_generated_object_position(
+    object_positions: Mapping[str, list[float]],
+    runtime_uid: str,
+) -> list[float]:
+    position = object_positions.get(runtime_uid)
+    if position is None:
+        raise ValueError(
+            "Generated relative config missing moved object "
+            f"{runtime_uid!r} for auto arm assignment."
+        )
+    return position
+
+
+def _with_self_relative_absolute_target(
+    placement: _RelativePlacementStepSpec,
+    generated_positions: Mapping[str, list[float]],
+) -> _RelativePlacementStepSpec:
+    if not placement.reference_is_initial_pose:
+        return placement
+    initial_position = generated_positions.get(placement.moved_runtime_uid)
+    if initial_position is None:
+        raise ValueError(
+            "Generated relative config missing self-relative moved object "
+            f"{placement.moved_runtime_uid!r}."
+        )
+    release_position = _offset_position(initial_position, placement.release_offset)
+    high_position = _offset_position(initial_position, placement.high_offset)
+    return replace(
+        placement,
+        reference_is_initial_pose=True,
+        release_position=release_position,
+        high_position=high_position,
+    )
+
+
+def _with_inside_container_slot_offsets(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+    *,
+    slot_distance_scale: float = 1.0,
+) -> _RelativePlacementSpec:
+    slotted_relations = {"inside"}
+    if spec.intent == "coordinated_pickment":
+        slotted_relations.add("on")
+    inside_groups: dict[str, list[int]] = {}
+    for index, placement in enumerate(spec.placements):
+        if (
+            placement.relation not in slotted_relations
+            or placement.reference_is_initial_pose
+        ):
+            continue
+        inside_groups.setdefault(placement.reference_runtime_uid, []).append(index)
+
+    inside_groups = {
+        reference_uid: indices
+        for reference_uid, indices in inside_groups.items()
+        if len(indices) > 1
+    }
+    if not inside_groups:
+        return spec
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    slot_offsets_by_index: dict[int, list[float]] = {}
+    for reference_uid, indices in inside_groups.items():
+        container_config = object_configs.get(reference_uid)
+        if spec.intent == "coordinated_pickment" and len(indices) >= 3:
+            slot_offsets_by_index.update(
+                _coordinated_payload_grid_offsets(
+                    indices,
+                    placements=spec.placements,
+                    object_configs=object_configs,
+                    container_config=container_config,
+                )
+            )
+            continue
+        axis, slot_distance = _inside_container_slot_axis_and_distance(
+            container_config,
+            slot_distance_scale=slot_distance_scale,
+        )
+        slot_distance = _payload_aware_slot_distance(
+            indices,
+            axis=axis,
+            default_distance=slot_distance,
+            placements=spec.placements,
+            object_configs=object_configs,
+        )
+        ordered_indices = _order_inside_container_slot_indices(
+            indices,
+            placements=spec.placements,
+            axis=axis,
+            object_configs=object_configs,
+            container_config=container_config,
+        )
+        for index, axis_offset in zip(
+            ordered_indices,
+            _inside_container_axis_offsets(len(ordered_indices), slot_distance),
+        ):
+            release_offset = [0.0, 0.0, _SIDE_RELEASE_Z_OFFSET]
+            release_offset[0 if axis == "x" else 1] = axis_offset
+            slot_offsets_by_index[index] = [
+                round(float(value), 6) for value in release_offset
+            ]
+
+    if not slot_offsets_by_index:
+        return spec
+
+    placements = tuple(
+        (
+            _with_relative_release_offset(placement, slot_offsets_by_index[index])
+            if index in slot_offsets_by_index
+            else placement
+        )
+        for index, placement in enumerate(spec.placements)
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _coordinated_payload_grid_offsets(
+    indices: Sequence[int],
+    *,
+    placements: Sequence[_RelativePlacementStepSpec],
+    object_configs: Mapping[str, Mapping[str, Any]],
+    container_config: Mapping[str, Any] | None,
+) -> dict[int, list[float]]:
+    """Choose a deterministic best-effort grid for three or four payloads."""
+    count = len(indices)
+    carrier_extents = (
+        _mesh_config_world_xy_extents(container_config)
+        if container_config is not None
+        else None
+    )
+    if carrier_extents is None:
+        carrier_extents = (
+            2.0 * _CONTAINER_SLOT_MAX_OFFSET,
+            2.0 * _CONTAINER_SLOT_MAX_OFFSET,
+        )
+    usable_x = max(0.02, float(carrier_extents[0]) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
+    usable_y = max(0.02, float(carrier_extents[1]) - 2.0 * _COORDINATED_GEOMETRY_MARGIN)
+    ordered_indices = sorted(
+        indices,
+        key=lambda index: (
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=1,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=0,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            index,
+        ),
+    )
+    payload_extents = {
+        index: _mesh_config_world_xy_extents(
+            object_configs.get(placements[index].moved_runtime_uid, {})
+        )
+        or (0.0, 0.0)
+        for index in ordered_indices
+    }
+    grid_shapes = [(count, 1), (1, count), (2, 2)]
+    candidates: list[tuple[tuple[float, float], dict[int, list[float]]]] = []
+    for columns, rows in grid_shapes:
+        cell_x = usable_x / float(columns)
+        cell_y = usable_y / float(rows)
+        cells = [
+            (
+                -usable_x * 0.5 + (column + 0.5) * cell_x,
+                -usable_y * 0.5 + (row + 0.5) * cell_y,
+            )
+            for row in range(rows)
+            for column in range(columns)
+        ][:count]
+        overflow = 0.0
+        min_clearance = float("inf")
+        offsets: dict[int, list[float]] = {}
+        for index, (x, y) in zip(ordered_indices, cells):
+            payload_x, payload_y = payload_extents[index]
+            clearance_x = cell_x - float(payload_x)
+            clearance_y = cell_y - float(payload_y)
+            overflow += max(0.0, _COORDINATED_GEOMETRY_MARGIN - clearance_x)
+            overflow += max(0.0, _COORDINATED_GEOMETRY_MARGIN - clearance_y)
+            min_clearance = min(min_clearance, clearance_x, clearance_y)
+            offsets[index] = [
+                round(float(x), 6),
+                round(float(y), 6),
+                _SIDE_RELEASE_Z_OFFSET,
+            ]
+        candidates.append(((round(overflow, 9), -min_clearance), offsets))
+    return min(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def _payload_aware_slot_distance(
+    indices: Sequence[int],
+    *,
+    axis: str,
+    default_distance: float,
+    placements: Sequence[_RelativePlacementStepSpec],
+    object_configs: Mapping[str, Mapping[str, Any]],
+) -> float:
+    if len(indices) != 2:
+        return default_distance
+    axis_index = 0 if axis == "x" else 1
+    extents = [
+        _mesh_config_world_xy_extents(
+            object_configs.get(placements[index].moved_runtime_uid, {})
+        )
+        for index in indices
+    ]
+    if any(extent is None for extent in extents):
+        return default_distance
+    resolved = [extent for extent in extents if extent is not None]
+    required_separation = (
+        float(resolved[0][axis_index]) * 0.5
+        + float(resolved[1][axis_index]) * 0.5
+        + _COORDINATED_GEOMETRY_MARGIN
+    )
+    return round(max(float(default_distance), required_separation * 0.5), 6)
+
+
+def _with_coordinated_side_release_height_offsets(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+    *,
+    table_reference_mode: str = "include",
+) -> _RelativePlacementSpec:
+    if spec.intent not in {"place_relative", "coordinated_pickment"}:
+        return spec
+    placements = tuple(
+        (
+            _with_coordinated_side_release_height_offset(placement, gym_config)
+            if _matches_table_reference_mode(
+                placement,
+                table_source_uid=spec.table_source_uid,
+                table_reference_mode=table_reference_mode,
+            )
+            else placement
+        )
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _matches_table_reference_mode(
+    placement: _RelativePlacementStepSpec,
+    *,
+    table_source_uid: str,
+    table_reference_mode: str,
+) -> bool:
+    is_table_reference = placement.reference_source_uid == table_source_uid
+    if table_reference_mode == "include":
+        return True
+    if table_reference_mode == "skip":
+        return not is_table_reference
+    if table_reference_mode == "only":
+        return is_table_reference
+    raise ValueError(f"Unsupported table reference mode: {table_reference_mode!r}.")
+
+
+def _with_coordinated_side_release_height_offset(
+    placement: _RelativePlacementStepSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementStepSpec:
+    if placement.relation not in _SIDE_RELATIONS or placement.reference_is_initial_pose:
+        return placement
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    reference_config = object_configs.get(placement.reference_runtime_uid)
+    moved_config = object_configs.get(placement.moved_runtime_uid)
+    if reference_config is None or moved_config is None:
+        return placement
+
+    reference_origin = _clean_vector3(reference_config.get("init_pos", [0, 0, 0]))
+    moved_origin = _clean_vector3(moved_config.get("init_pos", [0, 0, 0]))
+    release_offset = list(placement.release_offset)
+    release_offset[2] = round(float(moved_origin[2] - reference_origin[2]), 6)
+    high_offset = list(release_offset)
+    staging_z_delta = (
+        _POSE_SENSITIVE_STAGING_Z_DELTA
+        if placement.orientation_goal != "preserve"
+        else _STAGING_Z_DELTA
+    )
+    high_offset[2] = round(release_offset[2] + staging_z_delta, 6)
+    return replace(
+        placement,
+        release_offset=release_offset,
+        high_offset=high_offset,
+    )
+
+
+def _with_relative_release_offset(
+    placement: _RelativePlacementStepSpec,
+    release_offset: Sequence[float],
+) -> _RelativePlacementStepSpec:
+    clean_release_offset = [round(float(value), 6) for value in release_offset]
+    high_offset = list(clean_release_offset)
+    high_offset[2] = round(high_offset[2] + _STAGING_Z_DELTA, 6)
+    return replace(
+        placement,
+        release_offset=clean_release_offset,
+        high_offset=high_offset,
+    )
+
+
+def _replace_relative_spec_placements(
+    spec: _RelativePlacementSpec,
+    placements: tuple[_RelativePlacementStepSpec, ...],
+) -> _RelativePlacementSpec:
+    primary = _relative_primary_placement(placements)
+    return replace(
+        spec,
+        moved_source_uid=primary.moved_source_uid,
+        reference_source_uid=primary.reference_source_uid,
+        moved_runtime_uid=primary.moved_runtime_uid,
+        reference_runtime_uid=primary.reference_runtime_uid,
+        relation=primary.relation,
+        active_side=primary.active_side,
+        release_offset=primary.release_offset,
+        high_offset=primary.high_offset,
+        placements=placements,
+        reference_is_initial_pose=primary.reference_is_initial_pose,
+        release_position=primary.release_position,
+        high_position=primary.high_position,
+        orientation_goal=primary.orientation_goal,
+        orientation_axis=primary.orientation_axis,
+        orientation_align_to_runtime_uid=primary.orientation_align_to_runtime_uid,
+        hover_height=primary.hover_height,
+        upright_in_place=primary.upright_in_place,
+        pickup_upright_direction=primary.pickup_upright_direction,
+        pickup_rotate_upright=primary.pickup_rotate_upright,
+        surface_clearance=primary.surface_clearance,
+    )
+
+
+def _with_coordinated_transport_geometry(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    """Resolve loaded-carrier capacity, slots, and the final transport target."""
+    if (
+        spec.intent != "coordinated_pickment"
+        or spec.coordinated_direction is None
+        or spec.coordinated_terminal_behavior is None
+    ):
+        return spec
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    carrier = _relative_primary_placement(spec.placements)
+    carrier_config = object_configs.get(carrier.moved_runtime_uid)
+    if carrier_config is None:
+        raise ValueError(
+            f"Generated config is missing coordinated carrier {carrier.moved_runtime_uid!r}."
+        )
+    initial_position = _clean_vector3(carrier_config.get("init_pos", [0.0, 0.0, 0.0]))
+    direction = _coordinated_direction_vector(spec.coordinated_direction)
+    distance = _coordinated_safe_transport_distance(
+        initial_position=initial_position,
+        direction=direction,
+        carrier_config=carrier_config,
+        table_config=_coordinated_table_config(spec, gym_config),
+    )
+    release_offset = [
+        round(direction[0] * distance, 6),
+        round(direction[1] * distance, 6),
+        0.0,
+    ]
+    release_position = _offset_position(initial_position, release_offset)
+    high_position = list(release_position)
+    high_position[2] = round(high_position[2] + float(carrier.hover_height), 6)
+    updated_carrier = replace(
+        carrier,
+        release_offset=release_offset,
+        high_offset=[release_offset[0], release_offset[1], carrier.hover_height],
+        release_position=release_position,
+        high_position=high_position,
+    )
+    placements = tuple(
+        updated_carrier if placement.intent == "coordinated_pickment" else placement
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _coordinated_table_config(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    backgrounds = gym_config.get("background", [])
+    if isinstance(backgrounds, Mapping):
+        backgrounds = [backgrounds]
+    if not isinstance(backgrounds, list):
+        return None
+    return next(
+        (
+            background
+            for background in backgrounds
+            if isinstance(background, Mapping)
+            and str(background.get("uid")) == spec.table_source_uid
+        ),
+        next(
+            (
+                background
+                for background in backgrounds
+                if isinstance(background, Mapping)
+            ),
+            None,
+        ),
+    )
+
+
+def _coordinated_direction_vector(direction: str) -> tuple[float, float]:
+    components = {
+        "front": (1.0, 0.0),
+        "back": (-1.0, 0.0),
+        "left": (0.0, 1.0),
+        "right": (0.0, -1.0),
+        "front_left": (1.0, 1.0),
+        "front_right": (1.0, -1.0),
+        "back_left": (-1.0, 1.0),
+        "back_right": (-1.0, -1.0),
+        "none": (0.0, 0.0),
+    }
+    x, y = components[direction]
+    norm = math.hypot(x, y)
+    if norm == 0.0:
+        return 0.0, 0.0
+    return x / norm, y / norm
+
+
+def _coordinated_safe_transport_distance(
+    *,
+    initial_position: Sequence[float],
+    direction: tuple[float, float],
+    carrier_config: Mapping[str, Any],
+    table_config: Mapping[str, Any] | None,
+) -> float:
+    if direction == (0.0, 0.0):
+        return 0.0
+    table_bounds = (
+        _mesh_config_world_xy_bounds(table_config) if table_config is not None else None
+    )
+    carrier_extents = _mesh_config_world_xy_extents(carrier_config)
+    if table_bounds is None or carrier_extents is None:
+        return _COORDINATED_TRANSPORT_DISTANCE
+
+    mins, maxs = table_bounds
+    half_extents = [float(carrier_extents[0]) * 0.5, float(carrier_extents[1]) * 0.5]
+    allowed = _COORDINATED_TRANSPORT_DISTANCE
+    for axis, component in enumerate(direction):
+        if abs(component) <= 1e-9:
+            continue
+        if component > 0.0:
+            boundary = (
+                float(maxs[axis]) - half_extents[axis] - _COORDINATED_GEOMETRY_MARGIN
+            )
+            axis_limit = (boundary - float(initial_position[axis])) / component
+        else:
+            boundary = (
+                float(mins[axis]) + half_extents[axis] + _COORDINATED_GEOMETRY_MARGIN
+            )
+            axis_limit = (boundary - float(initial_position[axis])) / component
+        allowed = min(allowed, axis_limit)
+    allowed = max(0.0, float(allowed))
+    if allowed < _COORDINATED_MIN_TRANSPORT_DISTANCE:
+        raise ValueError(
+            "Coordinated transport target cannot keep the carrier inside the table "
+            f"boundary with at least {_COORDINATED_MIN_TRANSPORT_DISTANCE:.2f} m movement."
+        )
+    return round(allowed, 6)
+
+
+def _with_on_surface_release_offsets(
+    spec: _RelativePlacementSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementSpec:
+    placements = tuple(
+        _with_on_surface_release_offset(placement, gym_config)
+        for placement in spec.placements
+    )
+    return _replace_relative_spec_placements(spec, placements)
+
+
+def _with_on_surface_release_offset(
+    placement: _RelativePlacementStepSpec,
+    gym_config: Mapping[str, Any],
+) -> _RelativePlacementStepSpec:
+    if placement.relation != "on" or placement.reference_is_initial_pose:
+        return placement
+
+    object_configs = {
+        str(obj.get("uid")): obj
+        for obj in _iter_generated_scene_object_configs(gym_config)
+        if obj.get("uid") is not None
+    }
+    reference_config = object_configs.get(placement.reference_runtime_uid)
+    moved_config = object_configs.get(placement.moved_runtime_uid)
+    if reference_config is None or moved_config is None:
+        return placement
+
+    reference_top_z = _mesh_config_world_zmax(reference_config)
+    moved_bottom_offset = _target_local_zmin_for_orientation(
+        moved_config,
+        placement.orientation_goal,
+    )
+    if reference_top_z is None or moved_bottom_offset is None:
+        return placement
+
+    reference_origin = _clean_vector3(reference_config.get("init_pos", [0, 0, 0]))
+    moved_origin = _clean_vector3(moved_config.get("init_pos", [0, 0, 0]))
+    release_offset = list(placement.release_offset)
+    if placement.upright_in_place:
+        release_offset[0] = round(float(moved_origin[0] - reference_origin[0]), 6)
+        release_offset[1] = round(float(moved_origin[1] - reference_origin[1]), 6)
+    release_offset[2] = round(
+        float(reference_top_z)
+        - float(reference_origin[2])
+        + float(placement.surface_clearance)
+        - float(moved_bottom_offset),
+        6,
+    )
+    high_offset = list(release_offset)
+    high_offset[2] = round(
+        release_offset[2]
+        + (
+            _POSE_SENSITIVE_STAGING_Z_DELTA
+            if placement.orientation_goal != "preserve"
+            else _STAGING_Z_DELTA
+        ),
+        6,
+    )
+    update_kwargs: dict[str, Any] = {
+        "release_offset": release_offset,
+        "high_offset": high_offset,
+    }
+    if placement.upright_in_place:
+        release_position = _offset_position(reference_origin, release_offset)
+        high_position = _offset_position(reference_origin, high_offset)
+        update_kwargs["release_position"] = release_position
+        update_kwargs["high_position"] = high_position
+        pickup_upright_direction = _pickup_upright_direction(moved_config)
+        if pickup_upright_direction is not None:
+            update_kwargs["pickup_upright_direction"] = pickup_upright_direction
+            update_kwargs["pickup_rotate_upright"] = _PICKUP_UPRIGHT_ROTATE_RADIANS
+    return replace(placement, **update_kwargs)
+
+
+def _pickup_upright_direction(obj_config: Mapping[str, Any]) -> list[float] | None:
+    if _mesh_config_local_z_is_upright_semantic(obj_config):
+        return [0.0, 0.0, 1.0]
+    vertices = _mesh_config_scaled_vertices(obj_config)
+    if not vertices:
+        return None
+    return [round(float(value), 6) for value in _principal_local_axes(vertices)[0]]
+
+
+def _target_local_zmin_for_orientation(
+    obj_config: Mapping[str, Any],
+    orientation_goal: str,
+) -> float | None:
+    if orientation_goal in {"preserve", "axis_align"}:
+        return _mesh_config_local_zmin_after_rotation(obj_config)
+    if orientation_goal == "upright":
+        return _upright_local_zmin(obj_config)
+    if orientation_goal == "lay_flat":
+        return _lay_flat_local_zmin(obj_config)
+    return _mesh_config_local_zmin_after_rotation(obj_config)
+
+
+def _upright_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
+    vertices = _mesh_config_scaled_vertices(obj_config)
+    if not vertices:
+        return None
+
+    preview_rotation = _mesh_config_rotation_basis(obj_config)
+    if _mesh_config_local_z_is_upright_semantic(obj_config):
+        rotation = _semantic_local_z_upright_rotation(preview_rotation)
+    else:
+        rotation = _preview_aware_upright_rotation(
+            vertices,
+            preview_rotation,
+        )
+    return min(_matrix_vector_mul(rotation, vertex)[2] for vertex in vertices)
+
+
+def _mesh_config_local_z_is_upright_semantic(obj_config: Mapping[str, Any]) -> bool:
+    uid = str(obj_config.get("uid", ""))
+    description = str(obj_config.get("description", ""))
+    shape = obj_config.get("shape", {})
+    mesh_name = ""
+    if isinstance(shape, Mapping):
+        mesh_path = shape.get("fpath")
+        if isinstance(mesh_path, str):
+            mesh_name = Path(mesh_path).stem
+    return (
+        match_asset_orientation_keyword(
+            object_id=uid,
+            name=" ".join([uid, mesh_name]),
+            description=description,
+        )
+        is not None
+    )
+
+
+def _mesh_config_scaled_vertices(
+    obj_config: Mapping[str, Any],
+) -> list[tuple[float, float, float]] | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+    scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    return [
+        (
+            float(vertex[0]) * float(scale[0]),
+            float(vertex[1]) * float(scale[1]),
+            float(vertex[2]) * float(scale[2]),
+        )
+        for vertex in vertices
+    ]
+
+
+def _mesh_config_rotation_basis(
+    obj_config: Mapping[str, Any],
+) -> list[list[float]]:
+    matrix = _mesh_config_transform_matrix(obj_config, translation=[0.0, 0.0, 0.0])
+    columns = []
+    for index in range(3):
+        column = [float(matrix[row][index]) for row in range(3)]
+        columns.append(_normalize_vector(column))
+    return _columns_to_matrix(columns)
+
+
+def _preview_aware_upright_rotation(
+    vertices: Sequence[Sequence[float]],
+    preview_rotation: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    axes = _principal_local_axes(vertices)
+    long_axis = axes[0]
+    secondary_axes = list(axes[1:])
+    candidates: list[tuple[float, list[list[float]]]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[_scale_vector(axis, -1.0) for axis in secondary_axes],
+    ]:
+        preview_secondary = _matrix_vector_mul(preview_rotation, secondary_axis)
+        world_secondary = [preview_secondary[0], preview_secondary[1], 0.0]
+        if _vector_norm(world_secondary) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=long_axis,
+            world_primary=[0.0, 0.0, 1.0],
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, preview_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=long_axis,
+        world_primary=[0.0, 0.0, 1.0],
+        local_secondary=axes[2],
+        world_secondary=[1.0, 0.0, 0.0],
+    )
+
+
+def _semantic_local_z_upright_rotation(
+    preview_rotation: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    local_z = [0.0, 0.0, 1.0]
+    secondary_axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    candidates: list[tuple[float, list[list[float]]]] = []
+    for secondary_axis in [
+        *secondary_axes,
+        *[_scale_vector(axis, -1.0) for axis in secondary_axes],
+    ]:
+        preview_secondary = _matrix_vector_mul(preview_rotation, secondary_axis)
+        world_secondary = [preview_secondary[0], preview_secondary[1], 0.0]
+        if _vector_norm(world_secondary) < 1e-6:
+            continue
+        rotation = _rotation_from_axis_targets(
+            local_primary=local_z,
+            world_primary=[0.0, 0.0, 1.0],
+            local_secondary=secondary_axis,
+            world_secondary=world_secondary,
+        )
+        candidates.append(
+            (_rotation_distance_score(rotation, preview_rotation), rotation)
+        )
+    if candidates:
+        return min(candidates, key=lambda item: item[0])[1]
+    return _rotation_from_axis_targets(
+        local_primary=local_z,
+        world_primary=[0.0, 0.0, 1.0],
+        local_secondary=[1.0, 0.0, 0.0],
+        world_secondary=[1.0, 0.0, 0.0],
+    )
+
+
+def _principal_local_axes(
+    vertices: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    mins = [min(float(vertex[index]) for vertex in vertices) for index in range(3)]
+    maxs = [max(float(vertex[index]) for vertex in vertices) for index in range(3)]
+    extents = [maxs[index] - mins[index] for index in range(3)]
+    order = sorted(range(3), key=lambda index: extents[index], reverse=True)
+    return [[1.0 if axis == index else 0.0 for axis in range(3)] for index in order]
+
+
+def _rotation_from_axis_targets(
+    *,
+    local_primary: Sequence[float],
+    world_primary: Sequence[float],
+    local_secondary: Sequence[float],
+    world_secondary: Sequence[float],
+) -> list[list[float]]:
+    local_primary = _normalize_vector(local_primary)
+    world_primary = _normalize_vector(world_primary)
+    local_secondary = _orthogonalized_axis(local_secondary, local_primary)
+    world_secondary = _orthogonalized_axis(world_secondary, world_primary)
+    local_basis = _columns_to_matrix(
+        [
+            local_primary,
+            local_secondary,
+            _normalize_vector(_cross(local_primary, local_secondary)),
+        ]
+    )
+    world_basis = _columns_to_matrix(
+        [
+            world_primary,
+            world_secondary,
+            _normalize_vector(_cross(world_primary, world_secondary)),
+        ]
+    )
+    return _matrix_multiply(world_basis, _matrix_transpose(local_basis))
+
+
+def _orthogonalized_axis(
+    axis: Sequence[float],
+    reference: Sequence[float],
+) -> list[float]:
+    dot = _dot(axis, reference)
+    projected = [
+        float(axis[index]) - dot * float(reference[index]) for index in range(3)
+    ]
+    if _vector_norm(projected) < 1e-6:
+        fallback = [1.0, 0.0, 0.0]
+        if abs(_dot(fallback, reference)) > 0.9:
+            fallback = [0.0, 1.0, 0.0]
+        fallback_dot = _dot(fallback, reference)
+        projected = [
+            fallback[index] - fallback_dot * float(reference[index])
+            for index in range(3)
+        ]
+    return _normalize_vector(projected)
+
+
+def _rotation_distance_score(
+    rotation: Sequence[Sequence[float]],
+    preview_rotation: Sequence[Sequence[float]],
+) -> float:
+    delta = _matrix_multiply(rotation, _matrix_transpose(preview_rotation))
+    return -sum(float(delta[index][index]) for index in range(3))
+
+
+def _columns_to_matrix(columns: Sequence[Sequence[float]]) -> list[list[float]]:
+    return [[float(columns[col][row]) for col in range(3)] for row in range(3)]
+
+
+def _matrix_multiply(
+    left: Sequence[Sequence[float]],
+    right: Sequence[Sequence[float]],
+) -> list[list[float]]:
+    return [
+        [
+            sum(float(left[row][k]) * float(right[k][col]) for k in range(3))
+            for col in range(3)
+        ]
+        for row in range(3)
+    ]
+
+
+def _matrix_transpose(matrix: Sequence[Sequence[float]]) -> list[list[float]]:
+    return [[float(matrix[col][row]) for col in range(3)] for row in range(3)]
+
+
+def _matrix_vector_mul(
+    matrix: Sequence[Sequence[float]],
+    vector: Sequence[float],
+) -> list[float]:
+    return [
+        sum(float(matrix[row][col]) * float(vector[col]) for col in range(3))
+        for row in range(3)
+    ]
+
+
+def _normalize_vector(vector: Sequence[float]) -> list[float]:
+    norm = _vector_norm(vector)
+    if norm < 1e-6:
+        raise ValueError("Cannot normalize a near-zero vector.")
+    return [float(value) / norm for value in vector]
+
+
+def _scale_vector(vector: Sequence[float], scale: float) -> list[float]:
+    return [float(value) * float(scale) for value in vector]
+
+
+def _dot(left: Sequence[float], right: Sequence[float]) -> float:
+    return sum(float(left[index]) * float(right[index]) for index in range(3))
+
+
+def _cross(left: Sequence[float], right: Sequence[float]) -> list[float]:
+    return [
+        float(left[1]) * float(right[2]) - float(left[2]) * float(right[1]),
+        float(left[2]) * float(right[0]) - float(left[0]) * float(right[2]),
+        float(left[0]) * float(right[1]) - float(left[1]) * float(right[0]),
+    ]
+
+
+def _vector_norm(vector: Sequence[float]) -> float:
+    return math.sqrt(sum(float(value) * float(value) for value in vector))
+
+
+def _lay_flat_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
+    shape = obj_config.get("shape", {})
+    if not isinstance(shape, Mapping):
+        return None
+    mesh_path = shape.get("fpath")
+    if not isinstance(mesh_path, str):
+        return None
+
+    from pathlib import Path
+
+    from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
+        _load_mesh_vertices,
+    )
+
+    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+    if not vertices:
+        return None
+    scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
+    extents = [
+        (
+            max(vertex[index] for vertex in vertices)
+            - min(vertex[index] for vertex in vertices)
+        )
+        * scale[index]
+        for index in range(3)
+    ]
+    sorted_extents = sorted(float(extent) for extent in extents)
+    return -0.5 * sorted_extents[1]
+
+
+def _inside_container_slot_axis_and_distance(
+    container_config: Mapping[str, Any] | None,
+    *,
+    slot_distance_scale: float = 1.0,
+) -> tuple[str, float]:
+    slot_distance_scale = _validate_slot_distance_scale(slot_distance_scale)
+    extents = (
+        _mesh_config_world_xy_extents(container_config)
+        if container_config is not None
+        else None
+    )
+    if extents is None:
+        return "y", _CONTAINER_SLOT_MIN_OFFSET
+
+    x_extent, y_extent = extents
+    axis = _inside_container_slot_axis(x_extent, y_extent)
+    axis_extent = x_extent if axis == "x" else y_extent
+    if axis_extent <= 0.0:
+        return "y", _CONTAINER_SLOT_MIN_OFFSET
+
+    slot_distance = min(
+        max(axis_extent * _CONTAINER_SLOT_FRACTION, _CONTAINER_SLOT_MIN_OFFSET),
+        axis_extent * _CONTAINER_SLOT_MAX_FRACTION,
+        _CONTAINER_SLOT_MAX_OFFSET,
+    )
+    return axis, round(float(slot_distance) * slot_distance_scale, 6)
+
+
+def _validate_slot_distance_scale(slot_distance_scale: float) -> float:
+    try:
+        scale = float(slot_distance_scale)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "inside_container_slot_distance_scale must be a positive number."
+        ) from exc
+    if scale <= 0.0:
+        raise ValueError(
+            "inside_container_slot_distance_scale must be a positive number."
+        )
+    return scale
+
+
+def _inside_container_slot_axis(x_extent: float, y_extent: float) -> str:
+    max_extent = max(float(x_extent), float(y_extent))
+    if max_extent <= 0.0:
+        return "y"
+    if abs(float(x_extent) - float(y_extent)) <= (
+        max_extent * _CONTAINER_SLOT_AXIS_TIE_RATIO
+    ):
+        return "y"
+    return "x" if float(x_extent) > float(y_extent) else "y"
+
+
+def _order_inside_container_slot_indices(
+    indices: list[int],
+    *,
+    placements: Sequence[_RelativePlacementStepSpec],
+    axis: str,
+    object_configs: Mapping[str, Mapping[str, Any]],
+    container_config: Mapping[str, Any] | None,
+    side_order: Mapping[str, int] | None = None,
+) -> list[int]:
+    if axis == "y":
+        resolved_side_order = dict(side_order or _DEFAULT_Y_AXIS_ARM_SLOT_SIDE_ORDER)
+        return sorted(
+            indices,
+            key=lambda index: (
+                resolved_side_order.get(placements[index].active_side, 1),
+                _relative_initial_axis_value(
+                    placements[index],
+                    axis_index=1,
+                    object_configs=object_configs,
+                    container_config=container_config,
+                ),
+                index,
+            ),
+        )
+
+    return sorted(
+        indices,
+        key=lambda index: (
+            _relative_initial_axis_value(
+                placements[index],
+                axis_index=0,
+                object_configs=object_configs,
+                container_config=container_config,
+            ),
+            index,
+        ),
+    )
+
+
+def _relative_initial_axis_value(
+    placement: _RelativePlacementStepSpec,
+    *,
+    axis_index: int,
+    object_configs: Mapping[str, Mapping[str, Any]],
+    container_config: Mapping[str, Any] | None,
+) -> float:
+    moved_config = object_configs.get(placement.moved_runtime_uid)
+    moved_position = _scene_config_init_position(moved_config)
+    container_position = _scene_config_init_position(container_config)
+    return float(moved_position[axis_index] - container_position[axis_index])
+
+
+def _scene_config_init_position(
+    obj_config: Mapping[str, Any] | None,
+) -> list[float]:
+    if obj_config is None:
+        return [0.0, 0.0, 0.0]
+    return _clean_vector3(obj_config.get("init_pos", [0.0, 0.0, 0.0]))
+
+
+def _inside_container_axis_offsets(count: int, slot_distance: float) -> list[float]:
+    if count <= 1:
+        return [0.0]
+    if count == 2:
+        return [
+            round(-float(slot_distance), 6),
+            round(float(slot_distance), 6),
+        ]
+    step = (2.0 * float(slot_distance)) / float(count - 1)
+    return [round(-float(slot_distance) + step * index, 6) for index in range(count)]
+
+
+def _offset_position(
+    position: Sequence[float],
+    offset: Sequence[float],
+) -> list[float]:
+    return [
+        round(float(position[index]) + float(offset[index]), 6) for index in range(3)
+    ]
+
+
+def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
+    if spec.intent == "coordinated_pickment":
+        summary = {
+            "mode": "coordinated_pickment",
+            "intent": spec.intent,
+            "moved_object": spec.moved_runtime_uid,
+            "reference_object": spec.reference_runtime_uid,
+            "relation": spec.relation,
+            "active_arm": "dual_arm",
+            "release_offset": spec.release_offset,
+            "target_position": spec.release_position,
+            "orientation_goal": spec.orientation_goal,
+            "orientation_axis": spec.orientation_axis,
+            "orientation_align_to": spec.orientation_align_to_runtime_uid,
+        }
+        if spec.coordinated_terminal_behavior is not None:
+            summary["direction"] = spec.coordinated_direction
+            summary["terminal_behavior"] = spec.coordinated_terminal_behavior
+            summary["payloads"] = [
+                placement.moved_runtime_uid
+                for placement in spec.placements
+                if placement.intent == "place_relative"
+            ]
+        if spec.relation == "on" and not spec.reference_is_initial_pose:
+            summary["surface_clearance"] = spec.surface_clearance
+        return summary
+    if len(spec.placements) == 1:
+        summary = {
+            "mode": "object_manipulation",
+            "intent": spec.intent,
+            "moved_object": spec.moved_runtime_uid,
+            "reference_object": spec.reference_runtime_uid,
+            "relation": spec.relation,
+            "active_arm": f"{spec.active_side}_arm",
+            "release_offset": spec.release_offset,
+            "hover_height": spec.hover_height,
+            "orientation_goal": spec.orientation_goal,
+            "orientation_axis": spec.orientation_axis,
+            "orientation_align_to": spec.orientation_align_to_runtime_uid,
+        }
+        if spec.relation == "on" and not spec.reference_is_initial_pose:
+            summary["surface_clearance"] = spec.surface_clearance
+        if spec.upright_in_place:
+            summary["upright_in_place"] = True
+        if spec.pickup_upright_direction is not None:
+            summary["pickup_upright_direction"] = spec.pickup_upright_direction
+        if spec.pickup_rotate_upright is not None:
+            summary["pickup_rotate_upright"] = spec.pickup_rotate_upright
+        return summary
+    return {
+        "mode": "dual_arm_object_manipulation",
+        "manipulations": [
+            _relative_placement_summary(placement) for placement in spec.placements
+        ],
+    }
+
+
+def _relative_placement_summary(
+    placement: _RelativePlacementStepSpec,
+) -> dict[str, Any]:
+    summary = {
+        "intent": placement.intent,
+        "moved_object": placement.moved_runtime_uid,
+        "reference_object": placement.reference_runtime_uid,
+        "relation": placement.relation,
+        "active_arm": f"{placement.active_side}_arm",
+        "release_offset": placement.release_offset,
+        "hover_height": placement.hover_height,
+        "orientation_goal": placement.orientation_goal,
+        "orientation_axis": placement.orientation_axis,
+        "orientation_align_to": placement.orientation_align_to_runtime_uid,
+    }
+    if placement.relation == "on" and not placement.reference_is_initial_pose:
+        summary["surface_clearance"] = placement.surface_clearance
+    if placement.upright_in_place:
+        summary["upright_in_place"] = True
+    if placement.pickup_upright_direction is not None:
+        summary["pickup_upright_direction"] = placement.pickup_upright_direction
+    if placement.pickup_rotate_upright is not None:
+        summary["pickup_rotate_upright"] = placement.pickup_rotate_upright
+    return summary

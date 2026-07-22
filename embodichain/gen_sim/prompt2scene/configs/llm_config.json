@@ -1,0 +1,11 @@
+{
+  "llm": {
+    "openai_compatible": {
+      "api_key": "",
+      "model": "",
+      "base_url": "",
+      "default_query": {},
+      "max_attempts": 5
+    }
+  }
+}

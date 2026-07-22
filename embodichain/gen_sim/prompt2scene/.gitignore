@@ -1,0 +1,7 @@
+cli/preview*
+cli/export*
+agent_tools/servers/geometry_generation_server/*
+
+# Python cache
+__pycache__/
+*.py[cod]
