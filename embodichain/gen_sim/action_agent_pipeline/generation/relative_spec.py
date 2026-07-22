@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any
 import json
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    MANIPULATION_INTENTS as _SUPPORTED_MANIPULATION_INTENTS,
+    MAX_COORDINATED_PAYLOADS as _MAX_COORDINATED_PAYLOADS,
+    RELATIVE_RELATIONS as _RELATIVE_RELATIONS,
+    SIDE_RELATIONS as _SIDE_RELATIONS,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
@@ -40,6 +46,18 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _pick_table,
     _position_side_axis_value,
 )
+from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
+    render_prompt_template,
+)
+from embodichain.gen_sim.action_agent_pipeline.semantics import (
+    BOTTLE_LIKE_KEYWORDS as _BOTTLE_LIKE_KEYWORDS,
+    CUP_LIKE_KEYWORDS as _CUP_LIKE_KEYWORDS,
+    FLAT_CARRIER_KEYWORDS as _FLAT_CARRIER_KEYWORDS,
+    SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
+    SHORT_CUP_LIKE_KEYWORDS as _SHORT_CUP_LIKE_KEYWORDS,
+    UPRIGHTABLE_KEYWORDS as _UPRIGHTABLE_KEYWORDS,
+    relative_relation_phrase as _canonical_relative_relation_phrase,
+)
 
 __all__ = [
     "_SIDE_RELATIONS",
@@ -51,25 +69,6 @@ __all__ = [
     "_relative_scene_runtime_uid_mapping",
 ]
 
-_RELATIVE_RELATIONS = {
-    "inside",
-    "on",
-    "left_of",
-    "right_of",
-    "front_of",
-    "behind",
-    "front_left_of",
-    "back_left_of",
-    "front_right_of",
-    "back_right_of",
-}
-
-_SIDE_RELATIONS = _RELATIVE_RELATIONS - {"inside", "on"}
-_SUPPORTED_MANIPULATION_INTENTS = {
-    "place_relative",
-    "hold_hover",
-    "coordinated_pickment",
-}
 _COORDINATED_DUAL_ARM_KEYWORDS = (
     "双臂",
     "两臂",
@@ -77,32 +76,6 @@ _COORDINATED_DUAL_ARM_KEYWORDS = (
     "both arms",
     "two arms",
 )
-_BOTTLE_LIKE_KEYWORDS = (
-    "bottle",
-    "can",
-    "jar",
-    "tin",
-    "soda",
-    "cola",
-    "罐头",
-    "易拉罐",
-    "瓶",
-    "瓶子",
-)
-_CUP_LIKE_KEYWORDS = (
-    "cup",
-    "mug",
-    "paper cup",
-    "water cup",
-    "纸杯",
-    "水杯",
-    "杯子",
-    "马克杯",
-    "茶杯",
-)
-_SHORT_BOTTLE_LIKE_KEYWORDS = {"can", "jar", "tin"}
-_SHORT_CUP_LIKE_KEYWORDS = {"cup", "mug"}
-_UPRIGHTABLE_KEYWORDS = (*_BOTTLE_LIKE_KEYWORDS, *_CUP_LIKE_KEYWORDS)
 _SHORT_UPRIGHTABLE_KEYWORDS = _SHORT_BOTTLE_LIKE_KEYWORDS | _SHORT_CUP_LIKE_KEYWORDS
 _UPRIGHT_TASK_KEYWORDS = (
     "upright",
@@ -127,9 +100,6 @@ _COORDINATED_DIRECTIONS = {
     "none",
 }
 _COORDINATED_TERMINAL_BEHAVIORS = {"hold", "place"}
-_MAX_COORDINATED_PAYLOADS = 4
-_FLAT_CARRIER_KEYWORDS = ("plate", "dish", "platter", "盘", "盘子")
-
 _SELF_REFERENCE_VALUES = {
     "self",
     "initial_self",
@@ -314,92 +284,13 @@ def _call_relative_task_llm(
         create_chat_openai,
     )
 
-    prompt = (
-        "Parse a simple dual-arm tabletop relative-placement task and produce "
-        "a constrained config-level JSON spec. This JSON is used to generate "
-        "task_prompt.txt, basic_background.txt, atom_actions.txt, and "
-        "agent_success; a second LLM will later read those prompts to generate "
-        "the executable graph JSON.\n\n"
-        "Return exactly one JSON object with this schema:\n"
-        "{\n"
-        '  "placements": [\n'
-        "    {\n"
-        '      "moved_object": "<source_uid from rigid_object>",\n'
-        '      "reference_object": "<source_uid from scene objects, or moved_object/self for initial-position moves>",\n'
-        '      "goal_relation": '
-        '"inside|on|left_of|right_of|front_of|behind|front_left_of|back_left_of|front_right_of|back_right_of",\n'
-        '      "arm": "left|right|auto",\n'
-        '      "orientation_goal": "preserve|upright|lay_flat|axis_align",\n'
-        '      "orientation_reference": "none|world_axes|reference_object",\n'
-        '      "orientation_axis": "none|x|y|long_axis|short_axis"\n'
-        "    }\n"
-        "  ],\n"
-        '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
-        '  "basic_background_notes": "<short scene/task notes>",\n'
-        '  "action_sketch": [\n'
-        '    "grasp moved_object",\n'
-        '    "move above the relation target pose",\n'
-        '    "place at the release pose with Place"\n'
-        "  ]\n"
-        "}\n\n"
-        "Rules:\n"
-        "- Use only source_uid values from the scene objects listed below.\n"
-        "- Return one placement for a single-arm task and exactly two placements "
-        "for a dual-arm task.\n"
-        "- Treat the task as dual-arm when it explicitly says 双臂, 两臂, both "
-        "arms, two arms, or when it describes separate work for the left arm and "
-        "the right arm even if it does not literally say 双臂.\n"
-        "- Do not invent a second placement when the task only moves one object.\n"
-        "- moved_object is the object to grasp and move.\n"
-        "- reference_object is the object used as the spatial reference, "
-        "container, or support.\n"
-        "- reference_object may be a rigid_object or a background object such as "
-        "a pad, tray, basket, or container.\n"
-        "- For single-object directional tasks such as moving the only object "
-        "forward, left, front-left, or back-right from its initial position, set "
-        "reference_object to the same source_uid as moved_object (or 'self'). "
-        "This means the generator will use the object's initial position as a "
-        "fixed anchor, not the object's moving runtime pose.\n"
-        "- Within each placement, moved_object and reference_object must be "
-        "different unless the task is an initial-position directional move.\n"
-        "- For dual-arm tasks, the placements must use two different moved_object "
-        "values and one left arm plus one right arm. Use arm='auto' only when "
-        "the user did not specify which arm handles that placement.\n"
-        "- arm selects the single robot arm that should manipulate moved_object. "
-        "Use arm='left' for explicit left-arm instructions such as 左臂, 左机械臂, "
-        "left arm, or left robot arm; use arm='right' for explicit right-arm "
-        "instructions such as 右臂, 右机械臂, right arm, or right robot arm; use "
-        "arm='auto' when the task does not specify an arm.\n"
-        "- For Chinese/English left/right/front/back, use the relation enums "
-        "from the rotated robot-view perspective. front_of means positive "
-        "world-x; behind means negative world-x; left_of means positive "
-        "world-y; right_of means negative world-y. Diagonal relations combine "
-        "both axes: front_left_of, back_left_of, front_right_of, back_right_of.\n"
-        "- If the task says to release an object above a basket/container so it "
-        "falls into it, use goal_relation='inside'.\n"
-        "- If the task says to stack/place one object on another non-container "
-        "support, use goal_relation='on'.\n"
-        "- orientation_goal captures the held object's intended pose before "
-        "release. Use 'upright' for tasks like 扶正, 竖起来, or stand upright. "
-        "Use 'lay_flat' for tasks like 平放, 横放, or lay flat. Use "
-        "'axis_align' for tasks like 水平摆正, 摆正, or aligning an object to a "
-        "pad, box, container, or support axis. Use 'preserve' when no "
-        "orientation change is requested.\n"
-        "- For axis_align, set orientation_reference='reference_object' and "
-        "orientation_axis='long_axis' when aligning an object such as a stapler "
-        "or shoe to the long side of a pad, box, or container. Use "
-        "orientation_axis='short_axis' only when the task explicitly asks for "
-        "the short side. Use orientation_reference='world_axes' with "
-        "orientation_axis='x' or 'y' only when the task explicitly specifies a "
-        "world/table axis.\n"
-        "- For preserve, upright, and lay_flat, use orientation_reference='none' "
-        "and orientation_axis='none'.\n"
-        "- Do not return numeric offsets, object poses, scales, success JSON, "
-        "robot config, or full prompt files. The generator computes those "
-        "deterministically.\n\n"
-        f"Project: {project_name}\n"
-        f"Task description:\n{task_description}\n"
-        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    # The template owns model-facing prose; this module remains authoritative
+    # for schema normalization and all deterministic geometry decisions.
+    prompt = render_prompt_template(
+        "relative_placement_spec.txt",
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
     )
     llm = create_chat_openai(
         temperature=0.0,
@@ -437,87 +328,13 @@ def _call_object_manipulation_task_llm(
         create_chat_openai,
     )
 
-    prompt = (
-        "Parse a simple dual-arm tabletop object-manipulation task and produce "
-        "one constrained config-level JSON spec. The generator computes offsets, "
-        "robot config, success JSON, and action prompts deterministically.\n\n"
-        "Return exactly one JSON object with this schema:\n"
-        "{\n"
-        '  "manipulations": [\n'
-        "    {\n"
-        '      "intent": "place_relative|hold_hover|coordinated_pickment",\n'
-        '      "moved_object": "<source_uid from rigid_object>",\n'
-        '      "arm": "left|right|auto",\n'
-        '      "reference_object": "<source_uid from scene objects, or moved_object/self for initial-position moves>",\n'
-        '      "goal_relation": "inside|on|left_of|right_of|front_of|behind|front_left_of|back_left_of|front_right_of|back_right_of",\n'
-        '      "hover_height": 0.10,\n'
-        '      "orientation_goal": "preserve|upright|lay_flat|axis_align",\n'
-        '      "orientation_reference": "none|world_axes|reference_object",\n'
-        '      "orientation_axis": "none|x|y|long_axis|short_axis",\n'
-        '      "payloads": [{"object": "<source_uid>", "arm": "left|right|auto", "slot": "left|right|center"}],\n'
-        '      "direction": "front|back|left|right|front_left|front_right|back_left|back_right|none",\n'
-        '      "terminal_behavior": "hold|place"\n'
-        "    }\n"
-        "  ],\n"
-        '  "task_prompt_summary": "<one or two sentences for task_prompt>",\n'
-        '  "basic_background_notes": "<short scene/task notes>",\n'
-        '  "action_sketch": ["<short deterministic action sketch>"]\n'
-        "}\n\n"
-        "Rules:\n"
-        "- Use only source_uid values from the scene objects listed below.\n"
-        "- Use intent='coordinated_pickment' when the task asks both arms to "
-        "pick, lift, carry, or move one shared object such as a pot, tray, "
-        "roller, or other large object. Return exactly one manipulation for "
-        "this case.\n"
-        "- A coordinated_pickment manipulation may contain zero to four payloads. "
-        "Use payloads when objects must first be placed on or inside the shared "
-        "carrier before both arms lift it. Payloads must be distinct from the "
-        "shared object. Use their scene side for arm and slot when unspecified.\n"
-        "- For coordinated_pickment, direction describes the carrier motion. Use "
-        "direction='none' for lifting in place. Use terminal_behavior='hold' for "
-        "端起/举起/悬空/保持/hold and 'place' for 放下/place. A move or transport "
-        "without an explicit terminal behavior defaults to place.\n"
-        "- Use intent='hold_hover' when the task asks one arm, or each arm for "
-        "its own object, to pick up, lift, hold, "
-        "or suspend an object in the air without placing or releasing it. For "
-        "hold_hover, omit reference_object and goal_relation, use "
-        "orientation_goal='preserve', orientation_reference='none', "
-        "orientation_axis='none', and hover_height=0.10 unless the user gives a "
-        "specific height.\n"
-        "- Use intent='place_relative' for tasks that ask to place, put, stack "
-        "onto, move beside, move into, or release an object at a spatial target. "
-        "For place_relative, include reference_object and goal_relation.\n"
-        "- Return exactly two manipulations for a dual-arm task that moves two "
-        "different objects. Treat the task as dual-arm when it explicitly says "
-        "双臂, 两臂, both arms, two arms, 一只机械臂...另一只机械臂, or separate "
-        "work for left and right arms. If the dual-arm task moves one shared "
-        "object, use exactly one coordinated_pickment manipulation instead.\n"
-        "- Do not mix top-level hold_hover, place_relative, and "
-        "coordinated_pickment manipulations. Payloads must be nested inside the "
-        "single coordinated_pickment manipulation.\n"
-        "- For dual-arm tasks with two objects, use two different moved_object "
-        "values and one left arm plus one right arm. Use arm='auto' only when "
-        "the user did not specify which arm handles that manipulation. For "
-        "coordinated_pickment, set arm='auto'.\n"
-        "- For place_relative, reference_object may be a rigid_object or a "
-        "background object such as a pad, tray, basket, or container. For "
-        "single-object directional tasks from the object's initial position, "
-        "set reference_object to the moved object or 'self'.\n"
-        "- If the task says to release an object above a basket/container so it "
-        "falls into it, use goal_relation='inside'. If it says to place on a "
-        "non-container support, use goal_relation='on'.\n"
-        "- orientation_goal captures the held object's intended pose before "
-        "release. Use 'upright' for 扶正/竖起来, 'lay_flat' for 平放/横放, "
-        "'axis_align' for 水平摆正/摆正/alignment, and 'preserve' otherwise.\n"
-        "- For axis_align, use orientation_reference='reference_object' with "
-        "orientation_axis='long_axis' for aligning to a pad/box/container long "
-        "side, or orientation_reference='world_axes' with orientation_axis='x' "
-        "or 'y' only when a world/table axis is explicit.\n"
-        "- Do not return numeric offsets, object poses, robot config, success "
-        "JSON, or full prompt files.\n\n"
-        f"Project: {project_name}\n"
-        f"Task description:\n{task_description}\n"
-        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    # Keep the LLM boundary narrow: it selects semantic intent, while numeric
+    # targets and runtime action contracts are computed and validated locally.
+    prompt = render_prompt_template(
+        "object_manipulation_spec.txt",
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
     )
     llm = create_chat_openai(
         temperature=0.0,
@@ -1696,28 +1513,7 @@ def _default_relative_action_sketch(
 
 
 def _relative_relation_phrase(relation: str) -> str:
-    relation = _normalize_relative_relation(relation)
-    if relation == "inside":
-        return "inside"
-    if relation == "on":
-        return "on top of"
-    if relation == "left_of":
-        return "to the left of"
-    if relation == "right_of":
-        return "to the right of"
-    if relation == "front_of":
-        return "in front of"
-    if relation == "behind":
-        return "behind"
-    if relation == "front_left_of":
-        return "to the front-left of"
-    if relation == "back_left_of":
-        return "to the back-left of"
-    if relation == "front_right_of":
-        return "to the front-right of"
-    if relation == "back_right_of":
-        return "to the back-right of"
-    raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
+    return _canonical_relative_relation_phrase(_normalize_relative_relation(relation))
 
 
 def _vector3(value: Any) -> list[float]:

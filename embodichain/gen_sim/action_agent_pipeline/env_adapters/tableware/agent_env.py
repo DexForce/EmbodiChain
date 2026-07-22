@@ -22,6 +22,10 @@ from typing import Any
 
 import torch
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ROBOTIQ_ARG2F_140_CLOSE_QPOS as _ROBOTIQ_ARG2F_140_CLOSE_QPOS,
+    ROBOTIQ_ARG2F_140_OPEN_QPOS as _ROBOTIQ_ARG2F_140_OPEN_QPOS,
+)
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
@@ -41,8 +45,6 @@ _AGENT_RESERVED_KEYS = frozenset({"task_name", "config_dir"})
 _REQUIRED_AGENT_KWARGS = frozenset({"agent_config", "task_name"})
 _OPTIONAL_AGENT_KWARGS = frozenset({"agent_config_path"})
 _AGENT_KWARGS = _REQUIRED_AGENT_KWARGS | _OPTIONAL_AGENT_KWARGS
-_ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-_ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
 
 
 @register_env("AtomicActionsAgent-v3", max_episode_steps=600)

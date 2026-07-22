@@ -23,6 +23,10 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ROBOTIQ_ARG2F_140_CLOSE_QPOS as _ROBOTIQ_ARG2F_140_CLOSE_QPOS,
+    ROBOTIQ_ARG2F_140_OPEN_QPOS as _ROBOTIQ_ARG2F_140_OPEN_QPOS,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
     make_dual_franka_panda_robot_config,
     make_dual_ur_dh_pgi_robot_config,
@@ -47,8 +51,6 @@ __all__ = [
 
 DEFAULT_ROBOT_PROFILE_ID = "dual_ur10"
 _PI = 3.141592653589793
-_ROBOTIQ_ARG2F_140_OPEN_QPOS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-_ROBOTIQ_ARG2F_140_CLOSE_QPOS = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
 
 
 @dataclass(frozen=True)

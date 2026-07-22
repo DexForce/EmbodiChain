@@ -1,0 +1,32 @@
+Parse a tabletop object stacking task and produce one strict config-level JSON spec. The generator computes all center positions, heights, robot config, and action graphs deterministically.
+
+Return exactly one JSON object with this schema:
+{
+  "objects": ["<source_uid from rigid_object>", "..."],
+  "stack_mode": "on_top|nested",
+  "bottom_to_top": ["<source_uid bottom>", "..."],
+  "order_by": "explicit|size",
+  "object_attributes": {"<source_uid>": {"color": "red"}},
+  "anchor": "table_center" | {"type": "object", "object": "<source_uid>"},
+  "task_prompt_summary": "<short execution summary>",
+  "basic_background_notes": "<short notes>"
+}
+
+Rules:
+- Use only source_uid values from rigid_object scene items.
+- This route is only for building, reordering, or moving a selected set of multiple objects into one vertical stack, pile, or nested stack.
+- Include every object that must be actively moved as part of the stack in objects. A passive base/support belongs in anchor.object and must not be added to objects.
+- Use stack_mode='on_top' for blocks, cubes, books, and solid objects that should be vertically stacked.
+- Use stack_mode='nested' for bowls or cup-like containers that should be nested into each other.
+- For explicit statements like blue on green and green on red, return bottom_to_top=[red, green, blue] and order_by='explicit'.
+- For 'A stack on B, then B stack on C', C is the passive object anchor and bottom_to_top=[B, A].
+- When successive instructions stack A and then B onto the same named root C, treat C as the stack anchor and append in instruction order: bottom_to_top=[A, B]. The second object rests on the current stack top, not directly on C.
+- If no order is specified for nested bowls, return order_by='size' and leave bottom_to_top empty; the generator sorts large-to-small.
+- Use anchor='table_center' only for a free stack with no named root support. Use anchor={"type":"object","object":C} when the task names C as the root support/container.
+- Do not return target positions, robot config, success JSON, or action graphs.
+
+Project: $project_name
+Task description:
+$task_description
+Scene objects:
+$scene_summary

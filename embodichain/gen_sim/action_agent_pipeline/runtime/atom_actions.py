@@ -27,6 +27,14 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ATOMIC_ACTION_CLASSES as SUPPORTED_ATOMIC_ACTION_CLASSES,
+    MAX_COORDINATED_PAYLOADS as _MAX_COORDINATED_PAYLOADS,
+    OBJECT_ORIENTATION_AXES as SUPPORTED_OBJECT_ORIENTATION_AXES,
+    OBJECT_ORIENTATION_GOALS as SUPPORTED_OBJECT_ORIENTATION_GOALS,
+    POSE_REFERENCES as SUPPORTED_POSE_REFERENCES,
+    SUPPORTED_CONTROLS,
+)
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     generation_defaults_section,
@@ -42,6 +50,12 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import
 from embodichain.gen_sim.action_agent_pipeline.runtime.grasp_collision_cache import (
     GraspCollisionCachePreparationError as VhacdCachePreparationError,
     ensure_vhacd_grasp_collision_cache,
+)
+from embodichain.gen_sim.action_agent_pipeline.semantics import (
+    BOTTLE_LIKE_KEYWORDS as _BOTTLE_LIKE_KEYWORDS,
+    CONTAINER_LIKE_KEYWORDS as _COORDINATED_CONTAINER_LIKE_KEYWORDS,
+    ROD_LIKE_KEYWORDS as _COORDINATED_ROD_LIKE_KEYWORDS,
+    SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
 )
 from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
     match_asset_orientation_keyword,
@@ -97,15 +111,6 @@ __all__ = [
 ]
 
 
-SUPPORTED_ATOMIC_ACTION_CLASSES = {
-    "CoordinatedPickment",
-    "PickUp",
-    "MoveEndEffector",
-    "MoveJoints",
-    "MoveHeldObject",
-    "Place",
-}
-SUPPORTED_CONTROLS = {"arm", "hand"}
 _COORDINATED_WORLD_Y_ANGLE_CFG_KEY = "max_grasp_separation_angle_to_world_y_degrees"
 TARGET_SPEC_FIELDS = (
     "target_object",
@@ -120,10 +125,6 @@ ACTION_SPEC_FIELDS = {
     "cfg",
     *TARGET_SPEC_FIELDS,
 }
-SUPPORTED_POSE_REFERENCES = {"object", "absolute", "relative"}
-SUPPORTED_OBJECT_ORIENTATION_GOALS = {"preserve", "upright", "lay_flat", "axis_align"}
-SUPPORTED_OBJECT_ORIENTATION_AXES = {"none", "x", "y", "long_axis", "short_axis"}
-_MAX_COORDINATED_PAYLOADS = 4
 SUPPORTED_SURFACE_Z_POLICIES = {"preserve", "object_on_surface", "surface_release"}
 SURFACE_Z_POLICY_FIELDS = {
     "z_policy",
@@ -290,70 +291,6 @@ class _GraspRuntimeDefaults:
 
 
 _GRASP_RUNTIME_DEFAULTS = _GraspRuntimeDefaults()
-_BOTTLE_LIKE_KEYWORDS = (
-    "bottle",
-    "can",
-    "jar",
-    "tin",
-    "soda",
-    "cola",
-    "罐头",
-    "易拉罐",
-    "瓶",
-    "瓶子",
-)
-_SHORT_BOTTLE_LIKE_KEYWORDS = {"can", "jar", "tin"}
-_COORDINATED_CONTAINER_LIKE_KEYWORDS = (
-    "pot",
-    "pan",
-    "wok",
-    "skillet",
-    "saucepan",
-    "tray",
-    "plate",
-    "bowl",
-    "basket",
-    "container",
-    "dish",
-    "basin",
-    "cup",
-    "mug",
-    "锅",
-    "平底锅",
-    "炒锅",
-    "托盘",
-    "盘",
-    "盘子",
-    "碗",
-    "篮",
-    "篮子",
-    "容器",
-    "盆",
-    "杯",
-)
-_COORDINATED_ROD_LIKE_KEYWORDS = (
-    "umbrella",
-    "rod",
-    "bar",
-    "stick",
-    "tube",
-    "cylinder",
-    "cylindrical",
-    "pole",
-    "baton",
-    "rectangular",
-    "cuboid",
-    "雨伞",
-    "伞",
-    "杆",
-    "棒",
-    "棍",
-    "柱",
-    "圆柱",
-    "长方体",
-    "矩形",
-    "木条",
-)
 _COORDINATED_GRASP_STYLE_CONTAINER = "container_like"
 _COORDINATED_GRASP_STYLE_ROD = "rod_like"
 _COORDINATED_GRASP_STYLE_GENERIC = "generic"

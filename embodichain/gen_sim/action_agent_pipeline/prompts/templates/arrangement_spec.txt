@@ -1,0 +1,33 @@
+Parse a tabletop multi-object line arrangement task and produce one strict config-level JSON spec. The generator computes all target slot coordinates deterministically from this spec.
+
+Return exactly one JSON object with this schema:
+{
+  "objects": ["<source_uid from rigid_object>", "..."],
+  "category_order": ["<category>", "..."],
+  "object_categories": {"<source_uid>": "<category>"},
+  "order_by": "size|color|explicit",
+  "order_direction": "ascending|descending|given",
+  "ordered_attributes": ["red", "green", "blue"],
+  "object_attributes": {"<source_uid>": {"color": "red"}},
+  "anchor": "table_center",
+  "line_axis": "table_long_axis|world_x|world_y",
+  "task_prompt_summary": "<short execution summary>",
+  "basic_background_notes": "<short notes>"
+}
+
+Rules:
+- Use only source_uid values from rigid_object scene items.
+- Use each rigid object's source_uid and description to distinguish task categories from unrelated distractors.
+- category_order is the semantic category order requested by the task.
+- object_categories annotates every selected object. Include every instance of each requested category, and exclude unrelated objects.
+- objects contains exactly the selected task objects grouped in category_order.
+- Use order_by='size' for large/small ordering. Use order_direction='descending' for large-to-small and 'ascending' for small-to-large.
+- Use order_by='color' when the task specifies a color sequence such as red-green-blue. Put that sequence in ordered_attributes and include a color attribute for each object.
+- Always use line_axis='world_y' for one-line arrangement tasks.
+- Do not return target positions, robot config, success JSON, or action graphs.
+
+Project: $project_name
+Task description:
+$task_description
+Scene objects:
+$scene_summary

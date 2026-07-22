@@ -21,6 +21,13 @@ from typing import Any
 
 import torch
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    LEFT_ARM_NAME,
+    RIGHT_ARM_NAME,
+    SUCCESS_TERM_ALIASES,
+    SuccessTerm,
+)
+
 __all__ = ["evaluate_configured_success"]
 
 
@@ -60,36 +67,39 @@ def _evaluate_spec(
             raise ValueError("Success op 'not' requires exactly one term.")
         return ~_evaluate_spec(env, term)
 
-    term_type = str(spec.get("type", spec.get("func", ""))).lower()
-    if term_type in {"object_position_near", "object_near_position"}:
+    raw_term_type = str(spec.get("type", spec.get("func", ""))).lower()
+    # Normalize legacy spellings before dispatch. Generation emits canonical
+    # names, but old recorded configs must remain replayable.
+    term_type = SUCCESS_TERM_ALIASES.get(raw_term_type, raw_term_type)
+    if term_type == SuccessTerm.OBJECT_POSITION_NEAR:
         return _object_position_near(env, spec)
-    if term_type in {"object_xy_near", "object_near_xy"}:
+    if term_type == SuccessTerm.OBJECT_XY_NEAR:
         return _object_xy_near(env, spec)
-    if term_type == "object_in_container":
+    if term_type == SuccessTerm.OBJECT_IN_CONTAINER:
         return _object_in_container(env, spec)
-    if term_type in {"object_on_object", "object_on", "on_object"}:
+    if term_type == SuccessTerm.OBJECT_ON_OBJECT:
         return _object_on_object(env, spec)
-    if term_type in {"object_not_fallen", "not_fallen"}:
+    if term_type == SuccessTerm.OBJECT_NOT_FALLEN:
         return _object_not_fallen(env, spec)
-    if term_type in {"object_axis_offset_near", "object_relative_axis_near"}:
+    if term_type == SuccessTerm.OBJECT_AXIS_OFFSET_NEAR:
         return _object_axis_offset_near(env, spec)
-    if term_type in {"object_axis_near", "object_coordinate_near"}:
+    if term_type == SuccessTerm.OBJECT_AXIS_NEAR:
         return _object_axis_near(env, spec)
-    if term_type == "objects_collinear":
+    if term_type == SuccessTerm.OBJECTS_COLLINEAR:
         return _objects_collinear(env, spec)
-    if term_type == "objects_ordered":
+    if term_type == SuccessTerm.OBJECTS_ORDERED:
         return _objects_ordered(env, spec)
-    if term_type in {"object_lifted", "object_height_above_initial"}:
+    if term_type == SuccessTerm.OBJECT_LIFTED:
         return _object_lifted(env, spec)
-    if term_type in {"object_held_by_gripper", "object_gripper_near"}:
+    if term_type == SuccessTerm.OBJECT_HELD_BY_GRIPPER:
         return _object_held_by_gripper(env, spec)
-    if term_type == "object_held_by_both_grippers":
+    if term_type == SuccessTerm.OBJECT_HELD_BY_BOTH_GRIPPERS:
         return _object_held_by_both_grippers(env, spec)
-    if term_type == "both_grippers_open":
+    if term_type == SuccessTerm.BOTH_GRIPPERS_OPEN:
         return _both_grippers_open(env)
-    if term_type == "grippers_clear_of_object":
+    if term_type == SuccessTerm.GRIPPERS_CLEAR_OF_OBJECT:
         return _grippers_clear_of_object(env, spec)
-    if term_type == "both_arms_at_initial_qpos":
+    if term_type == SuccessTerm.BOTH_ARMS_AT_INITIAL_QPOS:
         return _both_arms_at_initial_qpos(env, spec)
     raise ValueError(f"Unsupported success term type: {term_type!r}.")
 
@@ -337,14 +347,14 @@ def _object_held_by_both_grippers(env, spec: Mapping[str, Any]) -> torch.Tensor:
     return (
         (left_distance <= max_distance)
         & (right_distance <= max_distance)
-        & _gripper_is_closed(env, "left_arm", env.device)
-        & _gripper_is_closed(env, "right_arm", env.device)
+        & _gripper_is_closed(env, LEFT_ARM_NAME, env.device)
+        & _gripper_is_closed(env, RIGHT_ARM_NAME, env.device)
     )
 
 
 def _both_grippers_open(env) -> torch.Tensor:
-    return _gripper_is_open(env, "left_arm", env.device) & _gripper_is_open(
-        env, "right_arm", env.device
+    return _gripper_is_open(env, LEFT_ARM_NAME, env.device) & _gripper_is_open(
+        env, RIGHT_ARM_NAME, env.device
     )
 
 
@@ -411,8 +421,8 @@ def _gripper_to_object_surface_distances(
     obj = env.sim.get_rigid_object(object_uid)
     if obj is None:
         raise ValueError(f"Unknown rigid object uid: {object_uid!r}.")
-    left_pose = _arm_eef_pose(env, "left_arm")
-    right_pose = _arm_eef_pose(env, "right_arm")
+    left_pose = _arm_eef_pose(env, LEFT_ARM_NAME)
+    right_pose = _arm_eef_pose(env, RIGHT_ARM_NAME)
     if left_pose is None or right_pose is None:
         return None
     vertices = obj.get_vertices(env_ids=[0], scale=True)

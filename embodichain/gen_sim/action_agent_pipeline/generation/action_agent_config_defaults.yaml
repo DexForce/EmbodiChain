@@ -130,3 +130,29 @@ grasp:
   coordinated_rod_like_inset_fractions: [0.18, 0.22, 0.26, 0.30]
   coordinated_container_like_inset_fractions: [0.08, 0.12, 0.20, 0.28]
   coordinated_generic_inset_fractions: [0.28, 0.35, 0.20]
+
+# Success thresholds are generation policy rather than evaluator mechanics.
+# Keeping them here makes experiments auditable while preserving one JSON schema.
+success:
+  container_xy_radius: 0.2
+  container_min_z_offset: -0.05
+  container_max_z_offset: 0.35
+  stacking_anchor_xy_tolerance: 0.03
+  stacking_support_xy_radius: 0.06
+  support_min_z_offset: 0.02
+  support_max_z_offset: 0.35
+  object_max_tilt: 0.9
+  arrangement_max_xy_tolerance: 0.03
+  arrangement_spacing_tolerance_fraction: 0.35
+  coordinated_position_tolerance: 0.05
+  coordinated_lift_height: 0.08
+  coordinated_gripper_distance: 0.10
+  coordinated_max_tilt: 0.174533
+  coordinated_clear_distance: 0.05
+  arm_initial_qpos_tolerance: 0.05
+  hold_lift_height: 0.08
+  hold_gripper_distance: 0.12
+  relative_support_xy_radius: 0.08
+  absolute_axis_tolerance: 0.05
+  relative_axis_tolerance: 0.05
+  relative_zero_offset_tolerance: 0.06

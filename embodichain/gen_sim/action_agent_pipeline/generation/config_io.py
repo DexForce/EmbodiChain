@@ -21,6 +21,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    AGENT_CONFIG_FILENAME,
+    ATOM_ACTIONS_FILENAME,
+    BASIC_BACKGROUND_FILENAME,
+    FAST_GYM_CONFIG_FILENAME,
+    TASK_GRAPH_FILENAME,
+    TASK_PROMPT_FILENAME,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     GeneratedActionAgentConfigPaths,
 )
@@ -42,12 +50,12 @@ def write_config_bundle(
 ) -> GeneratedActionAgentConfigPaths:
     paths = GeneratedActionAgentConfigPaths(
         output_dir=output_dir,
-        gym_config=output_dir / "fast_gym_config.json",
-        agent_config=output_dir / "agent_config.json",
-        task_prompt=output_dir / "task_prompt.txt",
-        task_graph=output_dir / "task_graph.json",
-        basic_background=output_dir / "basic_background.txt",
-        atom_actions=output_dir / "atom_actions.txt",
+        gym_config=output_dir / FAST_GYM_CONFIG_FILENAME,
+        agent_config=output_dir / AGENT_CONFIG_FILENAME,
+        task_prompt=output_dir / TASK_PROMPT_FILENAME,
+        task_graph=output_dir / TASK_GRAPH_FILENAME,
+        basic_background=output_dir / BASIC_BACKGROUND_FILENAME,
+        atom_actions=output_dir / ATOM_ACTIONS_FILENAME,
         summary=dict(bundle.get("summary", {})),
     )
     raise_if_generated_files_exist(output_dir, overwrite)
@@ -66,12 +74,12 @@ def raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
     if overwrite:
         return
     output_files = [
-        output_dir / "fast_gym_config.json",
-        output_dir / "agent_config.json",
-        output_dir / "task_prompt.txt",
-        output_dir / "task_graph.json",
-        output_dir / "basic_background.txt",
-        output_dir / "atom_actions.txt",
+        output_dir / FAST_GYM_CONFIG_FILENAME,
+        output_dir / AGENT_CONFIG_FILENAME,
+        output_dir / TASK_PROMPT_FILENAME,
+        output_dir / TASK_GRAPH_FILENAME,
+        output_dir / BASIC_BACKGROUND_FILENAME,
+        output_dir / ATOM_ACTIONS_FILENAME,
     ]
     existing = [path for path in output_files if path.exists()]
     if existing:

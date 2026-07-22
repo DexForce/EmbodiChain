@@ -51,6 +51,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
     _pick_table,
 )
+from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
+    render_prompt_template,
+)
 from embodichain.utils.logger import log_warning
 
 __all__ = [
@@ -141,51 +144,13 @@ def _call_stacking_task_llm(
         create_chat_openai,
     )
 
-    prompt = (
-        "Parse a tabletop object stacking task and produce one strict "
-        "config-level JSON spec. The generator computes all center positions, "
-        "heights, robot config, and action graphs deterministically.\n\n"
-        "Return exactly one JSON object with this schema:\n"
-        "{\n"
-        '  "objects": ["<source_uid from rigid_object>", "..."],\n'
-        '  "stack_mode": "on_top|nested",\n'
-        '  "bottom_to_top": ["<source_uid bottom>", "..."],\n'
-        '  "order_by": "explicit|size",\n'
-        '  "object_attributes": {"<source_uid>": {"color": "red"}},\n'
-        '  "anchor": "table_center" | {"type": "object", "object": "<source_uid>"},\n'
-        '  "task_prompt_summary": "<short execution summary>",\n'
-        '  "basic_background_notes": "<short notes>"\n'
-        "}\n\n"
-        "Rules:\n"
-        "- Use only source_uid values from rigid_object scene items.\n"
-        "- This route is only for building, reordering, or moving a selected "
-        "set of multiple objects into one vertical stack, pile, or nested "
-        "stack.\n"
-        "- Include every object that must be actively moved as part of the "
-        "stack in objects. A passive base/support belongs in anchor.object and "
-        "must not be added to objects.\n"
-        "- Use stack_mode='on_top' for blocks, cubes, books, and solid objects "
-        "that should be vertically stacked.\n"
-        "- Use stack_mode='nested' for bowls or cup-like containers that should "
-        "be nested into each other.\n"
-        "- For explicit statements like blue on green and green on red, return "
-        "bottom_to_top=[red, green, blue] and order_by='explicit'.\n"
-        "- For 'A stack on B, then B stack on C', C is the passive object "
-        "anchor and bottom_to_top=[B, A].\n"
-        "- When successive instructions stack A and then B onto the same named "
-        "root C, treat C as the stack anchor and append in instruction order: "
-        "bottom_to_top=[A, B]. The second object rests on the current stack top, "
-        "not directly on C.\n"
-        "- If no order is specified for nested bowls, return order_by='size' "
-        "and leave bottom_to_top empty; the generator sorts large-to-small.\n"
-        "- Use anchor='table_center' only for a free stack with no named root "
-        'support. Use anchor={"type":"object","object":C} when the task '
-        "names C as the root support/container.\n"
-        "- Do not return target positions, robot config, success JSON, or action "
-        "graphs.\n\n"
-        f"Project: {project_name}\n"
-        f"Task description:\n{task_description}\n"
-        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    # The model chooses semantic order and mode only. Stack positions and
+    # support heights remain deterministic so runs are reproducible.
+    prompt = render_prompt_template(
+        "stacking_spec.txt",
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
     )
     llm = create_chat_openai(
         temperature=0.0,

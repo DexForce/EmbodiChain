@@ -23,6 +23,12 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ATOM_ACTIONS_FILENAME,
+    BASIC_BACKGROUND_FILENAME,
+    TASK_GRAPH_FILENAME,
+    TASK_PROMPT_FILENAME,
+)
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     generation_defaults_section,
@@ -35,6 +41,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
     DEFAULT_ROBOT_PROFILE_ID,
     RobotProfile,
     resolve_robot_profile,
+)
+from embodichain.gen_sim.action_agent_pipeline.semantics import (
+    relative_relation_phrase as _canonical_relative_relation_phrase,
 )
 
 __all__ = [
@@ -200,22 +209,22 @@ def make_agent_config() -> dict[str, Any]:
     return {
         "TaskAgent": {
             "prompt_name": "generate_task_graph",
-            "precomputed_task_graph": "task_graph.json",
+            "precomputed_task_graph": TASK_GRAPH_FILENAME,
         },
         "CompileAgent": {},
         "Agent": {
             "prompt_kwargs": {
                 "task_prompt": {
                     "type": "text",
-                    "name": "task_prompt.txt",
+                    "name": TASK_PROMPT_FILENAME,
                 },
                 "basic_background": {
                     "type": "text",
-                    "name": "basic_background.txt",
+                    "name": BASIC_BACKGROUND_FILENAME,
                 },
                 "atom_actions": {
                     "type": "text",
-                    "name": "atom_actions.txt",
+                    "name": ATOM_ACTIONS_FILENAME,
                 },
             }
         },
@@ -3366,27 +3375,9 @@ def _dual_relative_final_planning_rule(
 
 
 def _relative_relation_phrase(relation: str) -> str:
-    if relation == "inside":
-        return "inside"
-    if relation == "on":
-        return "on top of"
-    if relation == "left_of":
-        return "to the left of"
-    if relation == "right_of":
-        return "to the right of"
-    if relation == "front_of":
-        return "in front of"
-    if relation == "behind":
-        return "behind"
-    if relation == "front_left_of":
-        return "to the front-left of"
-    if relation == "back_left_of":
-        return "to the back-left of"
-    if relation == "front_right_of":
-        return "to the front-right of"
-    if relation == "back_right_of":
-        return "to the back-right of"
-    raise ValueError(f"Unsupported relative placement relation: {relation!r}.")
+    # Keep this private wrapper for compatibility with existing imports while
+    # delegating the vocabulary to the shared generation/runtime contract.
+    return _canonical_relative_relation_phrase(relation)
 
 
 def _left_target_text(roles: _BasketRolesLike) -> str:

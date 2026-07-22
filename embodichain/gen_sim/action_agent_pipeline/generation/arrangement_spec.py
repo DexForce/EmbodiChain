@@ -52,6 +52,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
     _pick_table,
 )
+from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
+    render_prompt_template,
+)
 
 __all__ = [
     "_apply_arrangement_task_response",
@@ -198,45 +201,13 @@ def _call_arrangement_task_llm(
         create_chat_openai,
     )
 
-    prompt = (
-        "Parse a tabletop multi-object line arrangement task and produce one "
-        "strict config-level JSON spec. The generator computes all target slot "
-        "coordinates deterministically from this spec.\n\n"
-        "Return exactly one JSON object with this schema:\n"
-        "{\n"
-        '  "objects": ["<source_uid from rigid_object>", "..."],\n'
-        '  "category_order": ["<category>", "..."],\n'
-        '  "object_categories": {"<source_uid>": "<category>"},\n'
-        '  "order_by": "size|color|explicit",\n'
-        '  "order_direction": "ascending|descending|given",\n'
-        '  "ordered_attributes": ["red", "green", "blue"],\n'
-        '  "object_attributes": {"<source_uid>": {"color": "red"}},\n'
-        '  "anchor": "table_center",\n'
-        '  "line_axis": "table_long_axis|world_x|world_y",\n'
-        '  "task_prompt_summary": "<short execution summary>",\n'
-        '  "basic_background_notes": "<short notes>"\n'
-        "}\n\n"
-        "Rules:\n"
-        "- Use only source_uid values from rigid_object scene items.\n"
-        "- Use each rigid object's source_uid and description to distinguish "
-        "task categories from unrelated distractors.\n"
-        "- category_order is the semantic category order requested by the task.\n"
-        "- object_categories annotates every selected object. Include every "
-        "instance of each requested category, and exclude unrelated objects.\n"
-        "- objects contains exactly the selected task objects grouped in "
-        "category_order.\n"
-        "- Use order_by='size' for large/small ordering. Use "
-        "order_direction='descending' for large-to-small and 'ascending' for "
-        "small-to-large.\n"
-        "- Use order_by='color' when the task specifies a color sequence such as "
-        "red-green-blue. Put that sequence in ordered_attributes and include a "
-        "color attribute for each object.\n"
-        "- Always use line_axis='world_y' for one-line arrangement tasks.\n"
-        "- Do not return target positions, robot config, success JSON, or action "
-        "graphs.\n\n"
-        f"Project: {project_name}\n"
-        f"Task description:\n{task_description}\n"
-        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    # Model-facing instructions live in a reviewable text asset. Slot geometry
+    # and collision-aware scheduling intentionally remain deterministic code.
+    prompt = render_prompt_template(
+        "arrangement_spec.txt",
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
     )
     llm = create_chat_openai(
         temperature=0.0,

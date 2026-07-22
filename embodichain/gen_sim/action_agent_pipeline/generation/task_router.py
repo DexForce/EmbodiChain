@@ -22,12 +22,22 @@ from typing import Any
 import json
 import re
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    TASK_ROUTE_ARRANGEMENT_LINE as _TASK_ROUTE_ARRANGEMENT_LINE,
+    TASK_ROUTE_OBJECT_MANIPULATION as _TASK_ROUTE_OBJECT_MANIPULATION,
+    TASK_ROUTE_STACKING as _TASK_ROUTE_STACKING,
+    TASK_ROUTE_UNSUPPORTED as _TASK_ROUTE_UNSUPPORTED,
+    TASK_ROUTES as _TASK_ROUTES,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _base_name,
     _string_list,
+)
+from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
+    render_prompt_template,
 )
 
 __all__ = [
@@ -41,16 +51,6 @@ __all__ = [
     "_route_task_with_llm",
 ]
 
-_TASK_ROUTE_STACKING = "stacking"
-_TASK_ROUTE_ARRANGEMENT_LINE = "arrangement_line"
-_TASK_ROUTE_OBJECT_MANIPULATION = "object_manipulation"
-_TASK_ROUTE_UNSUPPORTED = "unsupported"
-_TASK_ROUTES = {
-    _TASK_ROUTE_STACKING,
-    _TASK_ROUTE_ARRANGEMENT_LINE,
-    _TASK_ROUTE_OBJECT_MANIPULATION,
-    _TASK_ROUTE_UNSUPPORTED,
-}
 _TASK_ROUTE_ALIASES = {
     "arrangement": _TASK_ROUTE_ARRANGEMENT_LINE,
     "line_arrangement": _TASK_ROUTE_ARRANGEMENT_LINE,
@@ -176,59 +176,13 @@ def _call_task_router_llm(
         create_chat_openai,
     )
 
-    prompt = (
-        "Classify a tabletop robot task into exactly one action-agent config "
-        "generation route. This router only chooses the route; it must not "
-        "generate atomic actions, task graphs, target poses, offsets, robot "
-        "configs, or success specs.\n\n"
-        "Return exactly one JSON object with this schema:\n"
-        "{\n"
-        '  "route": "stacking|arrangement_line|object_manipulation|unsupported",\n'
-        '  "confidence": 0.0,\n'
-        '  "reason": "<short route rationale>",\n'
-        '  "candidate_objects": ["<source_uid from rigid_object>", "..."],\n'
-        '  "warnings": ["<optional warning>", "..."]\n'
-        "}\n\n"
-        "Route rules:\n"
-        "- Base the route primarily on the task description. Use scene objects "
-        "only to understand available object names/counts and to add warnings.\n"
-        "- Choose arrangement_line when multiple tabletop objects should form "
-        "one global row, line, column, left-to-right order, color order, size "
-        "order, or other one-dimensional arrangement. This includes Chinese "
-        "phrases such as 摆成一排, 排成一行, 排列, 排序, 从左到右, 由大到小, "
-        "and mixed object types such as bottles, blocks, boxes, or cans in one "
-        "line.\n"
-        "- Choose stacking only when the task asks to build, reorder, or move "
-        "a selected set of multiple objects into one vertical stack, pile, or "
-        "nested stack. Examples include stacking all blocks, nesting bowls "
-        "large-to-small, or Chinese phrases such as 把这些物体叠起来, 堆叠这些物体, "
-        "叠成一列, 摞起来.\n"
-        "- Explicit positive stacking verbs such as 叠放, 堆叠, 摞, stack, "
-        "pile, or nest always select stacking, including when one moved object "
-        "is stacked onto a named passive support.\n"
-        "- Do not choose stacking for a single moved object placed/put/moved "
-        "on top of a support object, even when the final contact is vertical; "
-        "choose object_manipulation for that case.\n"
-        "- Choose object_manipulation for one or two moved objects with a "
-        "relative placement, insertion, support-surface placement, directional "
-        "move, upright/lay-flat adjustment, pick-up, hold, or hover task. This "
-        "includes tasks such as placing A on top of B where A is the only moved "
-        "object and B is a support/reference. Also "
-        "choose object_manipulation for cooperative/bimanual transport where "
-        "both arms move one shared rigid object such as a pot, tray, long "
-        "object, large cuboid, closed umbrella-like cylinder, or object-loaded "
-        "tray; the downstream object-manipulation spec will decide whether to "
-        "use CoordinatedPickment.\n"
-        "- Choose unsupported when none of the existing routes can represent "
-        "the task, for example pouring, opening articulated objects, cutting, "
-        "deformable manipulation, or long tool-use workflows that are not a "
-        "single shared-object cooperative transport.\n"
-        "- candidate_objects should list source_uid values that appear central "
-        "to the task. It may be empty if the object set is ambiguous.\n"
-        "- Do not use markdown.\n\n"
-        f"Project: {project_name}\n"
-        f"Task description:\n{task_description}\n"
-        f"Scene objects:\n{json.dumps(scene_summary, ensure_ascii=False, indent=2)}"
+    # Prompt prose is data, while route correction below remains reviewed code.
+    # This separation lets prompt wording evolve without hiding route invariants.
+    prompt = render_prompt_template(
+        "task_router.txt",
+        project_name=project_name,
+        task_description=task_description,
+        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
     )
     llm = create_chat_openai(
         temperature=0.0,

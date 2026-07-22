@@ -21,6 +21,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    COMPILED_GRAPH_FILENAME,
+)
 from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
     extract_json_object,
@@ -49,7 +52,7 @@ class CompileAgent(AgentBase):
         log_dir = kwargs.get(
             "log_dir", Path(database_agent_prompt_dir) / self.task_name
         )
-        file_path = Path(log_dir) / "agent_compiled_graph.json"
+        file_path = Path(log_dir) / COMPILED_GRAPH_FILENAME
         task_graph = extract_json_object(kwargs["task_graph"])
         task_graph_hash = _stable_json_hash(task_graph)
 

@@ -19,6 +19,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import SuccessTerm
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
     _BasketTaskRoles,
@@ -44,6 +48,36 @@ __all__ = [
     "_validate_stacking_bundle",
     "_validate_success_uids",
 ]
+
+_SUCCESS_DEFAULTS = generation_defaults_section("success")
+_CONTAINER_XY_RADIUS = float(_SUCCESS_DEFAULTS["container_xy_radius"])
+_CONTAINER_MIN_Z_OFFSET = float(_SUCCESS_DEFAULTS["container_min_z_offset"])
+_CONTAINER_MAX_Z_OFFSET = float(_SUCCESS_DEFAULTS["container_max_z_offset"])
+_STACKING_ANCHOR_XY_TOLERANCE = float(_SUCCESS_DEFAULTS["stacking_anchor_xy_tolerance"])
+_STACKING_SUPPORT_XY_RADIUS = float(_SUCCESS_DEFAULTS["stacking_support_xy_radius"])
+_SUPPORT_MIN_Z_OFFSET = float(_SUCCESS_DEFAULTS["support_min_z_offset"])
+_SUPPORT_MAX_Z_OFFSET = float(_SUCCESS_DEFAULTS["support_max_z_offset"])
+_OBJECT_MAX_TILT = float(_SUCCESS_DEFAULTS["object_max_tilt"])
+_ARRANGEMENT_MAX_XY_TOLERANCE = float(_SUCCESS_DEFAULTS["arrangement_max_xy_tolerance"])
+_ARRANGEMENT_SPACING_TOLERANCE_FRACTION = float(
+    _SUCCESS_DEFAULTS["arrangement_spacing_tolerance_fraction"]
+)
+_COORDINATED_POSITION_TOLERANCE = float(
+    _SUCCESS_DEFAULTS["coordinated_position_tolerance"]
+)
+_COORDINATED_LIFT_HEIGHT = float(_SUCCESS_DEFAULTS["coordinated_lift_height"])
+_COORDINATED_GRIPPER_DISTANCE = float(_SUCCESS_DEFAULTS["coordinated_gripper_distance"])
+_COORDINATED_MAX_TILT = float(_SUCCESS_DEFAULTS["coordinated_max_tilt"])
+_COORDINATED_CLEAR_DISTANCE = float(_SUCCESS_DEFAULTS["coordinated_clear_distance"])
+_ARM_INITIAL_QPOS_TOLERANCE = float(_SUCCESS_DEFAULTS["arm_initial_qpos_tolerance"])
+_HOLD_LIFT_HEIGHT = float(_SUCCESS_DEFAULTS["hold_lift_height"])
+_HOLD_GRIPPER_DISTANCE = float(_SUCCESS_DEFAULTS["hold_gripper_distance"])
+_RELATIVE_SUPPORT_XY_RADIUS = float(_SUCCESS_DEFAULTS["relative_support_xy_radius"])
+_ABSOLUTE_AXIS_TOLERANCE = float(_SUCCESS_DEFAULTS["absolute_axis_tolerance"])
+_RELATIVE_AXIS_TOLERANCE = float(_SUCCESS_DEFAULTS["relative_axis_tolerance"])
+_RELATIVE_ZERO_OFFSET_TOLERANCE = float(
+    _SUCCESS_DEFAULTS["relative_zero_offset_tolerance"]
+)
 
 
 def _make_extensions_config(
@@ -74,12 +108,12 @@ def _make_extensions_config(
 
 def _object_in_container_success(object_uid: str, container_uid: str) -> dict[str, Any]:
     return {
-        "type": "object_in_container",
+        "type": SuccessTerm.OBJECT_IN_CONTAINER,
         "object": object_uid,
         "container": container_uid,
-        "radius": 0.2,
-        "min_z_offset": -0.05,
-        "max_z_offset": 0.35,
+        "radius": _CONTAINER_XY_RADIUS,
+        "min_z_offset": _CONTAINER_MIN_Z_OFFSET,
+        "max_z_offset": _CONTAINER_MAX_Z_OFFSET,
     }
 
 
@@ -143,13 +177,13 @@ def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
         if step.support_runtime_uid is None:
             terms.append(
                 {
-                    "type": "object_xy_near",
+                    "type": SuccessTerm.OBJECT_XY_NEAR,
                     "object": step.runtime_uid,
                     "target_xy": [
                         float(spec.anchor_xy[0]),
                         float(spec.anchor_xy[1]),
                     ],
-                    "tolerance": 0.03,
+                    "tolerance": _STACKING_ANCHOR_XY_TOLERANCE,
                 }
             )
         elif spec.stack_mode == "nested":
@@ -162,19 +196,19 @@ def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
         else:
             terms.append(
                 {
-                    "type": "object_on_object",
+                    "type": SuccessTerm.OBJECT_ON_OBJECT,
                     "object": step.runtime_uid,
                     "support": step.support_runtime_uid,
-                    "xy_radius": 0.06,
-                    "min_z_offset": 0.02,
-                    "max_z_offset": 0.35,
+                    "xy_radius": _STACKING_SUPPORT_XY_RADIUS,
+                    "min_z_offset": _SUPPORT_MIN_Z_OFFSET,
+                    "max_z_offset": _SUPPORT_MAX_Z_OFFSET,
                 }
             )
         terms.append(
             {
-                "type": "object_not_fallen",
+                "type": SuccessTerm.OBJECT_NOT_FALLEN,
                 "object": step.runtime_uid,
-                "max_tilt": 0.9,
+                "max_tilt": _OBJECT_MAX_TILT,
             }
         )
     return {"op": "all", "terms": terms}
@@ -182,20 +216,25 @@ def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
 
 def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
-    xy_tolerance = min(0.03, float(spec.spacing) * 0.35)
+    # Scale the tolerance with slot spacing, but cap it so adjacent slots can
+    # never satisfy each other's success region in a dense arrangement.
+    xy_tolerance = min(
+        _ARRANGEMENT_MAX_XY_TOLERANCE,
+        float(spec.spacing) * _ARRANGEMENT_SPACING_TOLERANCE_FRACTION,
+    )
     semantic_steps = sorted(spec.steps, key=lambda step: step.slot_index)
     ordered_objects = [step.runtime_uid for step in semantic_steps]
     arrangement_axis = _arrangement_success_axis(spec)
     terms.extend(
         [
             {
-                "type": "objects_collinear",
+                "type": SuccessTerm.OBJECTS_COLLINEAR,
                 "objects": ordered_objects,
                 "axis": arrangement_axis,
                 "tolerance": xy_tolerance,
             },
             {
-                "type": "objects_ordered",
+                "type": SuccessTerm.OBJECTS_ORDERED,
                 "objects": ordered_objects,
                 "axis": arrangement_axis,
                 "direction": "ascending",
@@ -207,15 +246,15 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
         terms.extend(
             [
                 {
-                    "type": "object_xy_near",
+                    "type": SuccessTerm.OBJECT_XY_NEAR,
                     "object": step.runtime_uid,
                     "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
                     "tolerance": xy_tolerance,
                 },
                 {
-                    "type": "object_not_fallen",
+                    "type": SuccessTerm.OBJECT_NOT_FALLEN,
                     "object": step.runtime_uid,
-                    "max_tilt": 0.9,
+                    "max_tilt": _OBJECT_MAX_TILT,
                 },
             ]
         )
@@ -265,25 +304,25 @@ def _make_relative_success_spec(
                 "op": "all",
                 "terms": [
                     {
-                        "type": "object_position_near",
+                        "type": SuccessTerm.OBJECT_POSITION_NEAR,
                         "object": carrier.moved_runtime_uid,
                         "target_position": hover_position,
-                        "tolerance": 0.05,
+                        "tolerance": _COORDINATED_POSITION_TOLERANCE,
                     },
                     {
-                        "type": "object_lifted",
+                        "type": SuccessTerm.OBJECT_LIFTED,
                         "object": carrier.moved_runtime_uid,
-                        "min_height": 0.08,
+                        "min_height": _COORDINATED_LIFT_HEIGHT,
                     },
                     {
-                        "type": "object_held_by_both_grippers",
+                        "type": SuccessTerm.OBJECT_HELD_BY_BOTH_GRIPPERS,
                         "object": carrier.moved_runtime_uid,
-                        "max_distance": 0.10,
+                        "max_distance": _COORDINATED_GRIPPER_DISTANCE,
                     },
                     {
-                        "type": "object_not_fallen",
+                        "type": SuccessTerm.OBJECT_NOT_FALLEN,
                         "object": carrier.moved_runtime_uid,
-                        "max_tilt": 0.174533,
+                        "max_tilt": _COORDINATED_MAX_TILT,
                     },
                 ],
             }
@@ -296,25 +335,25 @@ def _make_relative_success_spec(
                 "op": "all",
                 "terms": [
                     {
-                        "type": "object_position_near",
+                        "type": SuccessTerm.OBJECT_POSITION_NEAR,
                         "object": carrier.moved_runtime_uid,
                         "target_position": carrier.release_position,
-                        "tolerance": 0.05,
+                        "tolerance": _COORDINATED_POSITION_TOLERANCE,
                     },
                     {
-                        "type": "object_not_fallen",
+                        "type": SuccessTerm.OBJECT_NOT_FALLEN,
                         "object": carrier.moved_runtime_uid,
-                        "max_tilt": 0.174533,
+                        "max_tilt": _COORDINATED_MAX_TILT,
                     },
-                    {"type": "both_grippers_open"},
+                    {"type": SuccessTerm.BOTH_GRIPPERS_OPEN},
                     {
-                        "type": "grippers_clear_of_object",
+                        "type": SuccessTerm.GRIPPERS_CLEAR_OF_OBJECT,
                         "object": carrier.moved_runtime_uid,
-                        "min_distance": 0.05,
+                        "min_distance": _COORDINATED_CLEAR_DISTANCE,
                     },
                     {
-                        "type": "both_arms_at_initial_qpos",
-                        "tolerance": 0.05,
+                        "type": SuccessTerm.BOTH_ARMS_AT_INITIAL_QPOS,
+                        "tolerance": _ARM_INITIAL_QPOS_TOLERANCE,
                     },
                 ],
             }
@@ -355,15 +394,15 @@ def _make_relative_placement_success_spec(
             "op": "all",
             "terms": [
                 {
-                    "type": "object_lifted",
+                    "type": SuccessTerm.OBJECT_LIFTED,
                     "object": placement.moved_runtime_uid,
-                    "min_height": 0.08,
+                    "min_height": _HOLD_LIFT_HEIGHT,
                 },
                 {
-                    "type": "object_held_by_gripper",
+                    "type": SuccessTerm.OBJECT_HELD_BY_GRIPPER,
                     "object": placement.moved_runtime_uid,
                     "arm": f"{placement.active_side}_arm",
-                    "max_distance": 0.12,
+                    "max_distance": _HOLD_GRIPPER_DISTANCE,
                 },
             ],
         }
@@ -385,20 +424,20 @@ def _make_relative_placement_success_spec(
                     placement.release_position,
                 ),
                 {
-                    "type": "object_not_fallen",
+                    "type": SuccessTerm.OBJECT_NOT_FALLEN,
                     "object": placement.moved_runtime_uid,
-                    "max_tilt": 0.9,
+                    "max_tilt": _OBJECT_MAX_TILT,
                 },
             ],
         }
     if placement.relation == "on":
         return {
-            "type": "object_on_object",
+            "type": SuccessTerm.OBJECT_ON_OBJECT,
             "object": placement.moved_runtime_uid,
             "support": placement.reference_runtime_uid,
-            "xy_radius": 0.08,
-            "min_z_offset": 0.02,
-            "max_z_offset": 0.35,
+            "xy_radius": _RELATIVE_SUPPORT_XY_RADIUS,
+            "min_z_offset": _SUPPORT_MIN_Z_OFFSET,
+            "max_z_offset": _SUPPORT_MAX_Z_OFFSET,
         }
 
     if placement.reference_is_initial_pose:
@@ -414,9 +453,9 @@ def _make_relative_placement_success_spec(
                     placement.release_position,
                 ),
                 {
-                    "type": "object_not_fallen",
+                    "type": SuccessTerm.OBJECT_NOT_FALLEN,
                     "object": placement.moved_runtime_uid,
-                    "max_tilt": 0.9,
+                    "max_tilt": _OBJECT_MAX_TILT,
                 },
             ],
         }
@@ -429,9 +468,9 @@ def _make_relative_placement_success_spec(
                 side_relation_xy_offsets=side_relation_xy_offsets,
             ),
             {
-                "type": "object_not_fallen",
+                "type": SuccessTerm.OBJECT_NOT_FALLEN,
                 "object": placement.moved_runtime_uid,
-                "max_tilt": 0.9,
+                "max_tilt": _OBJECT_MAX_TILT,
             },
         ],
     }
@@ -460,11 +499,11 @@ def _absolute_xy_success_terms(
 ) -> list[dict[str, Any]]:
     return [
         {
-            "type": "object_axis_near",
+            "type": SuccessTerm.OBJECT_AXIS_NEAR,
             "object": object_uid,
             "axis": axis,
             "target": float(position[index]),
-            "tolerance": 0.05,
+            "tolerance": _ABSOLUTE_AXIS_TOLERANCE,
         }
         for index, axis in enumerate(("x", "y"))
     ]
@@ -478,12 +517,14 @@ def _relative_xy_success_terms(
     x_offset, y_offset = side_relation_xy_offsets(placement.relation)
     return [
         {
-            "type": "object_axis_offset_near",
+            "type": SuccessTerm.OBJECT_AXIS_OFFSET_NEAR,
             "object": placement.moved_runtime_uid,
             "reference": placement.reference_runtime_uid,
             "axis": axis,
             "offset": offset,
-            "tolerance": 0.05 if offset else 0.06,
+            "tolerance": (
+                _RELATIVE_AXIS_TOLERANCE if offset else _RELATIVE_ZERO_OFFSET_TOLERANCE
+            ),
         }
         for axis, offset in (("x", x_offset), ("y", y_offset))
     ]
