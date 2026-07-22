@@ -19,6 +19,12 @@ embodichain.lab.sim.objects
     Articulation
     ArticulationData
     ArticulationCfg
+    SoftObject
+    SoftBodyData
+    SoftObjectCfg
+    ClothObject
+    ClothBodyData
+    ClothObjectCfg
     Robot
     RobotCfg
 
@@ -95,6 +101,42 @@ Articulation
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
+Soft Object
+-----------
+
+.. autoclass:: SoftObject
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: SoftBodyData
+    :members:
+    :show-inheritance:
+
+.. autoclass:: SoftObjectCfg
+    :members:
+    :inherited-members:
+    :show-inheritance:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
+Cloth Object
+------------
+
+.. autoclass:: ClothObject
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+.. autoclass:: ClothBodyData
+    :members:
+    :show-inheritance:
+
+.. autoclass:: ClothObjectCfg
+    :members:
+    :inherited-members:
+    :show-inheritance:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
 Robot
 -----
 
@@ -108,4 +150,3 @@ Robot
     :inherited-members:
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
-    

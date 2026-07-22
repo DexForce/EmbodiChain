@@ -166,17 +166,21 @@ Rigid objects are observed and controlled via single poses and linear/angular ve
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
 | `set_visual_material(mat, env_ids=None, shared=False)` | `mat: VisualMaterial` | Change visual appearance at runtime. |
-| `get_visual_material_inst(env_ids=None)` | `List[VisualMaterialInst]` | Get material instances for the rigid object. |
+| `restore_visual_material(env_ids=None)` | - | Restore the asset materials captured at construction, including per-segment assignments. |
+| `get_visual_material_inst(env_ids=None)` | `List[VisualMaterialInst \| None]` | Get the existing or explicitly assigned representative material for each environment. |
+| `get_existing_visual_material(env_ids=None, shared=False)` | `List[List[ReuseSegmentState]]` | Retain each original segment instance and create a working instance from its existing material template. |
 | `share_visual_material_inst(mat_insts)` | `mat_insts: List[VisualMaterialInst]` | Share material instances between objects. |
 | `set_visible(visible)` | `visible: bool` | Set visibility of the rigid object. |
 | `set_physical_visible(visible, rgba=None)` | `visible: bool`, `rgba: (4,)` | Set collision body render visibility. |
+
+When a rigid object is loaded, its material assignment is captured without replacing the underlying dexsim instances. If a render body has multiple mesh segments, `get_visual_material_inst()` returns the first valid material; use `get_existing_visual_material()` when every segment must be addressed independently. All segments in one returned environment state share the same working instance, while their original instances remain distinct. `shared=True` builds the state from the first environment for reuse across the batch. `reset()` calls `restore_visual_material()` for the selected environments before resetting their physical state.
 
 ### Utility & Identification
 
 | Method / Property | Return / Args | Description |
 | :--- | :--- | :--- |
 | `get_user_ids()` | `(N,)` | Get the user IDs of the rigid bodies. |
-| `reset(env_ids=None)` | - | Reset objects to initial configuration. |
+| `reset(env_ids=None)` | - | Restore original materials and reset objects to their initial configuration. |
 | `destroy()` | - | Destroy and remove the rigid object from simulation. |
 
 ### Observation Shapes

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -27,6 +29,13 @@ from dexsim.engine import PhysicsScene, SoftBody
 from dexsim.types import SoftBodyGPUAPIReadWriteType
 from embodichain.lab.sim.common import (
     BatchEntity,
+)
+from embodichain.lab.sim.material import (
+    VisualMaterial,
+    VisualMaterialInst,
+    _capture_render_materials,
+    _restore_render_materials,
+    _wrap_first_render_material,
 )
 from embodichain.utils.math import (
     matrix_from_euler,
@@ -157,10 +166,98 @@ class SoftObject(BatchEntity):
 
         self._world.update(0.001)
 
+        self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
+        self.is_shared_visual_material = False
+
         super().__init__(cfg=cfg, entities=entities, device=device)
+
+        self._initialize_existing_visual_material()
 
         # set default collision filter
         self._set_default_collision_filter()
+
+    def _initialize_existing_visual_material(self) -> None:
+        """Wrap asset-parsed materials during soft-object construction.
+
+        For a multi-segment render body, the first segment with a valid
+        material is registered as the environment's representative material.
+        """
+        self._original_visual_material = [[] for _ in self._entities]
+        self._original_visual_material_inst = [None] * len(self._entities)
+        for env_idx, entity in enumerate(self._entities):
+            render_body = entity.get_render_body()
+            if render_body is None:
+                continue
+            original_materials = _capture_render_materials(render_body)
+            self._original_visual_material[env_idx] = original_materials
+            wrapped = _wrap_first_render_material(original_materials)
+            if wrapped is not None:
+                self._visual_material[env_idx] = wrapped
+                self._original_visual_material_inst[env_idx] = wrapped
+
+    def set_visual_material(
+        self,
+        mat: VisualMaterial,
+        env_ids: Sequence[int] | None = None,
+        shared: bool = False,
+    ) -> None:
+        """Set visual material for the soft object.
+
+        Args:
+            mat: The material template to assign.
+            env_ids: Environment indices. If None, all instances are used.
+            shared: Whether selected environments share one material instance.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        if shared:
+            if len(local_env_ids) != self.num_instances:
+                logger.log_error("Cannot share material instance for partial env_ids.")
+            mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}")
+            for env_idx in local_env_ids:
+                self._entities[env_idx].set_material(mat_inst.mat)
+                self._visual_material[env_idx] = mat_inst
+            self.is_shared_visual_material = True
+        else:
+            for env_idx in local_env_ids:
+                mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
+                self._entities[env_idx].set_material(mat_inst.mat)
+                self._visual_material[env_idx] = mat_inst
+            self.is_shared_visual_material = False
+
+    def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore visual materials captured when the soft object was created.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are restored.
+        """
+        if not hasattr(self, "_original_visual_material"):
+            return
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            render_body = self._entities[env_idx].get_render_body()
+            if render_body is None:
+                continue
+            _restore_render_materials(
+                render_body, self._original_visual_material[env_idx]
+            )
+            self._visual_material[env_idx] = self._original_visual_material_inst[
+                env_idx
+            ]
+        self.is_shared_visual_material = False
+
+    def get_visual_material_inst(
+        self, env_ids: Sequence[int] | None = None
+    ) -> List[VisualMaterialInst | None]:
+        """Get the material instance registered for each selected environment.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are returned.
+
+        Returns:
+            The existing material wrappers, or None where an asset has no material.
+        """
+        ids = env_ids if env_ids is not None else range(self.num_instances)
+        return [self._visual_material[i] for i in ids]
 
     def _set_default_collision_filter(self) -> None:
         collision_filter_data = torch.zeros(
@@ -325,6 +422,8 @@ class SoftObject(BatchEntity):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
+
+        self.restore_visual_material(env_ids=local_env_ids)
 
         # TODO: set attr for soft body after loading in physics scene.
 
