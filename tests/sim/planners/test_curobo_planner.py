@@ -25,18 +25,18 @@ the actionable error raised when cuRobo is absent.
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 
 from embodichain.lab.sim.planners import CuroboPlannerCfg, PlanState
+from embodichain.lab.sim.planners import curobo_yaml as _curobo_yaml_mod
 from embodichain.lab.sim.planners.curobo_planner import (
+    CuroboAutoGenCfg,
     CuroboPlanOptions,
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
-    CuroboRobotProfileCfg,
     CuroboWorldCfg,
     _matrix_to_position_quaternion,
     _require_curobo,
@@ -117,6 +117,10 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.max_attempts == 5
     assert cfg.use_cuda_graph is False
     assert isinstance(cfg.world, CuroboWorldCfg)
+    # No external-YAML / profile config; the base-frame override defaults to None.
+    assert cfg.sim_base_to_curobo_base is None
+    assert not hasattr(cfg, "robot_profiles")
+    assert not hasattr(cfg.world, "world_config_path")
 
 
 def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
@@ -125,13 +129,11 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
     assert cache == {"cuboid": 8, "mesh": 2}
 
 
-def test_curobo_robot_profile_cfg_requires_joint_map():
-    cfg = CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names={"a": "b"},
-    )
-    assert cfg.robot_config_path == "franka.yml"
-    assert cfg.sim_to_curobo_joint_names == {"a": "b"}
+def test_auto_gen_defaults_keep_sphere_count_low():
+    """The voxel sphere estimate must be scaled down so planning stays fast."""
+    auto = CuroboPlannerCfg(robot_uid="franka").auto_gen
+    assert auto.fit_type == "voxel"
+    assert auto.sphere_density == 0.1
 
 
 def test_curobo_planner_class_is_lazy_import_safe():
@@ -193,7 +195,7 @@ class _FakeCollisionChecker:
 
 
 class _FakeKinematics:
-    def __init__(self, joint_names, base_link="base"):
+    def __init__(self, joint_names, base_link="sim_base"):
         self.joint_names = list(joint_names)
         self.base_link = base_link
 
@@ -348,7 +350,16 @@ class _FakeRobot:
         self.num_instances = num_instances
         self.dof = dof
         self.control_parts = {"arm": ["sim_a", "sim_b"]}
-        self._solver = SimpleNamespace(root_link_name="sim_base")
+        self.joint_names = ["sim_a", "sim_b"]
+        # Solver attributes consumed by _materialize_profile (auto-derive path).
+        self._solver = SimpleNamespace(
+            end_link_name="tool",
+            root_link_name="sim_base",
+            urdf_path="/fake.urdf",
+            tcp_xpos=None,
+        )
+        self._solvers = {"arm": self._solver}
+        self.cfg = SimpleNamespace(fpath="/fake.urdf", init_qpos=None)
         self.base_poses = torch.eye(4, device=self.device).repeat(num_instances, 1, 1)
 
     def get_qpos(self, name=None):
@@ -360,6 +371,10 @@ class _FakeRobot:
     def get_solver(self, name=None):
         assert name == "arm"
         return self._solver
+
+    def get_control_part_link_names(self, control_part):
+        assert control_part == "arm"
+        return list(self.joint_names)
 
     def get_link_pose(self, link_name, env_ids=None, to_matrix=False):
         assert link_name == self._solver.root_link_name
@@ -377,27 +392,21 @@ class _FakeSim:
         return self.robot
 
 
-def _default_profile():
-    return CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names={"sim_a": "cu_a", "sim_b": "cu_b"},
-    )
-
-
 def _make_planner(
     fake_curobo,
     fake_sim,
     *,
-    profiles=None,
     world=None,
     **cfg_kw,
 ):
-    """Construct a CuroboPlanner against fake bindings + fake sim."""
-    if profiles is None:
-        profiles = {"arm": _default_profile()}
+    """Construct a CuroboPlanner against fake bindings + fake sim.
+
+    The robot YAML is auto-generated, but ``generate_curobo_robot_yaml`` is
+    monkeypatched (in the ``fake_curobo`` fixture) to a stub so no CUDA/URDF
+    sphere fitting runs here. The cuRobo bindings are fakes too.
+    """
     cfg = CuroboPlannerCfg(
         robot_uid="fake_robot",
-        robot_profiles=profiles,
         world=world if world is not None else CuroboWorldCfg(),
         **cfg_kw,
     )
@@ -418,8 +427,14 @@ def fake_sim(monkeypatch):
 def fake_curobo(monkeypatch):
     if not torch.cuda.is_available():
         pytest.skip("cuRobo backend requires a CUDA device")
-    bindings = _FakeCuroboBindings(full_joint_names=["cu_a", "cu_b"])
+    # Identity joint mapping: the auto-generated robot YAML reuses the
+    # simulator's joint names, so the cuRobo planner exposes the same names.
+    bindings = _FakeCuroboBindings(full_joint_names=["sim_a", "sim_b"])
     monkeypatch.setattr(_curobo_mod, "_require_curobo", lambda: bindings)
+    # Stub robot-YAML generation so unit tests need no URDF / CUDA sphere fitting.
+    monkeypatch.setattr(
+        _curobo_yaml_mod, "generate_curobo_robot_yaml", lambda *a, **k: "fake_robot.yml"
+    )
     return bindings
 
 
@@ -499,7 +514,7 @@ def test_malformed_trajectory_joint_names_raise(fake_curobo, fake_sim):
 
 def test_unknown_control_part_raises(fake_curobo, fake_sim):
     planner = _make_planner(fake_curobo, fake_sim)
-    with pytest.raises(ValueError, match="No cuRobo profile"):
+    with pytest.raises(ValueError, match="no control part"):
         planner.plan(
             [PlanState.from_xpos(torch.eye(4).unsqueeze(0))],
             CuroboPlanOptions(start_qpos=torch.zeros(1, 2), control_part="leg"),
@@ -507,10 +522,11 @@ def test_unknown_control_part_raises(fake_curobo, fake_sim):
 
 
 def test_profile_base_link_must_match_curobo_model(fake_curobo, fake_sim):
-    """A configured base frame must not silently disagree with the V2 model."""
-    profile = _default_profile()
-    profile.base_link_name = "unexpected_base"
-    planner = _make_planner(fake_curobo, fake_sim, profiles={"arm": profile})
+    """An auto-derived base frame must not silently disagree with the V2 model."""
+    # The solver's root link becomes the cuRobo base_link_name; make it disagree
+    # with the fake planner's kinematics.base_link ("sim_base").
+    fake_sim.robot._solver.root_link_name = "unexpected_base"
+    planner = _make_planner(fake_curobo, fake_sim)
 
     with pytest.raises(ValueError, match="base_link_name"):
         planner.plan(
@@ -546,9 +562,8 @@ def test_target_batch_must_match_planning_start_batch(fake_curobo, fake_sim):
 def test_pose_goal_is_expressed_in_curobo_base_frame(fake_curobo, fake_sim):
     """Simulator-world targets must be rebased before cuRobo sees them."""
     fake_sim.robot.base_poses[0, 0, 3] = 10.0
-    profile = _default_profile()
-    planner = _make_planner(fake_curobo, fake_sim, profiles={"arm": profile})
-    backend = planner._get_backend(profile, "arm", batch_size=1)
+    planner = _make_planner(fake_curobo, fake_sim)
+    backend = planner._get_backend("arm", batch_size=1)
     world_target = torch.eye(4).unsqueeze(0)
     world_target[0, 0, 3] = 10.5
 
@@ -559,18 +574,20 @@ def test_pose_goal_is_expressed_in_curobo_base_frame(fake_curobo, fake_sim):
     )
 
 
-def test_profile_fixed_base_transform_is_applied(fake_curobo, fake_sim):
-    """A profile-specific simulator-base to cuRobo-base transform is composed."""
+def test_sim_base_to_curobo_base_transform_is_applied(fake_curobo, fake_sim):
+    """The cfg-level simulator-base to cuRobo-base transform is composed."""
     fake_sim.robot.base_poses[0, 0, 3] = 10.0
-    profile = _default_profile()
-    profile.sim_base_to_curobo_base = [
-        [1.0, 0.0, 0.0, 1.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-    planner = _make_planner(fake_curobo, fake_sim, profiles={"arm": profile})
-    backend = planner._get_backend(profile, "arm", batch_size=1)
+    planner = _make_planner(
+        fake_curobo,
+        fake_sim,
+        sim_base_to_curobo_base=[
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    backend = planner._get_backend("arm", batch_size=1)
     world_target = torch.eye(4).unsqueeze(0)
     world_target[0, 0, 3] = 10.5
 
@@ -581,28 +598,12 @@ def test_profile_fixed_base_transform_is_applied(fake_curobo, fake_sim):
     )
 
 
-def test_profile_sim_base_link_works_without_local_solver(fake_curobo, fake_sim):
-    """A profile can provide the simulator base link without an IK solver."""
-    fake_sim.robot.get_solver = lambda name=None: None
-    profile = _default_profile()
-    profile.sim_base_link_name = "sim_base"
-    planner = _make_planner(fake_curobo, fake_sim, profiles={"arm": profile})
-    backend = planner._get_backend(profile, "arm", batch_size=1)
-
-    goal = planner._to_curobo_pose_goal(torch.eye(4).unsqueeze(0), backend)
-
-    assert torch.allclose(
-        goal.pose_dict["tool"].position.cpu(), torch.tensor([[0.0, 0.0, 0.0]])
-    )
-
-
 def test_dynamic_obstacle_pose_is_expressed_in_curobo_base_frame(fake_curobo, fake_sim):
     """Dynamic simulator-world obstacle poses use the same base conversion."""
     fake_sim.robot.base_poses[0, 0, 3] = 10.0
     world = CuroboWorldCfg(dynamic_obstacle_names=["block"])
     planner = _make_planner(fake_curobo, fake_sim, world=world)
-    profile = planner.cfg.robot_profiles["arm"]
-    backend = planner._get_backend(profile, "arm", batch_size=1)
+    backend = planner._get_backend("arm", batch_size=1)
     world_pose = torch.eye(4).unsqueeze(0)
     world_pose[0, 0, 3] = 10.5
 
@@ -616,14 +617,12 @@ def test_batched_pose_goals_rebase_each_simulator_arena(fake_curobo, fake_sim):
     """Parallel arenas retain one common local cuRobo target per environment."""
     fake_sim.robot = _FakeRobot(num_instances=2)
     fake_sim.robot.base_poses[1, 0, 3] = 10.0
-    profile = _default_profile()
     planner = _make_planner(
         fake_curobo,
         fake_sim,
-        profiles={"arm": profile},
         world=CuroboWorldCfg(multi_env=True),
     )
-    backend = planner._get_backend(profile, "arm", batch_size=2)
+    backend = planner._get_backend("arm", batch_size=2)
     world_targets = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
     world_targets[:, 0, 3] = torch.tensor([0.5, 10.5])
 
@@ -633,27 +632,55 @@ def test_batched_pose_goals_rebase_each_simulator_arena(fake_curobo, fake_sim):
     assert torch.allclose(goal.pose_dict["tool"].position.cpu(), expected)
 
 
+class _FakeRigidObject:
+    """Minimal stand-in for a RigidObject (mesh + pose) for world-YAML tests."""
+
+    def __init__(self, uid="block"):
+        self.uid = uid
+        s = 0.05
+        self._verts = torch.tensor(
+            [
+                [-s, -s, -s],
+                [s, -s, -s],
+                [s, s, -s],
+                [-s, s, -s],
+                [-s, -s, s],
+                [s, -s, s],
+                [s, s, s],
+                [-s, s, s],
+            ],
+            dtype=torch.float32,
+        )
+        self._faces = torch.tensor(
+            [[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]], dtype=torch.int32
+        )
+        self._pose = torch.tensor(
+            [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=torch.float32
+        )
+
+    def get_vertices(self, env_ids=None, scale=False):  # noqa: ARG002
+        return self._verts.unsqueeze(0)
+
+    def get_triangles(self, env_ids=None):  # noqa: ARG002
+        return self._faces.unsqueeze(0)
+
+    def get_local_pose(self, to_matrix=False):  # noqa: ARG002
+        return self._pose.unsqueeze(0)
+
+
 def test_multi_env_materializes_one_scene_mapping_per_batch_row(
     fake_curobo, fake_sim, tmp_path
 ):
     """V2 needs a list of B scene mappings, not a singleton scene path."""
-    scene_path = Path(tmp_path) / "world.yml"
-    scene_path.write_text(
-        "cuboid:\n"
-        "  block:\n"
-        "    dims: [0.1, 0.1, 0.1]\n"
-        "    pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]\n",
-        encoding="utf-8",
-    )
     fake_sim.robot = _FakeRobot(num_instances=2)
     planner = _make_planner(
         fake_curobo,
         fake_sim,
-        world=CuroboWorldCfg(world_config_path=str(scene_path), multi_env=True),
+        world=CuroboWorldCfg(rigid_objects=[_FakeRigidObject()], multi_env=True),
+        auto_gen=CuroboAutoGenCfg(cache_dir=str(tmp_path)),
     )
-    profile = planner.cfg.robot_profiles["arm"]
 
-    planner._get_backend(profile, "arm", batch_size=2)
+    planner._get_backend("arm", batch_size=2)
 
     scene_models = fake_curobo.create_kwargs["scene_model"]
     assert len(scene_models) == 2
@@ -670,9 +697,8 @@ def test_multi_env_materializes_empty_scene_for_every_batch_row(fake_curobo, fak
         fake_sim,
         world=CuroboWorldCfg(multi_env=True),
     )
-    profile = planner.cfg.robot_profiles["arm"]
 
-    planner._get_backend(profile, "arm", batch_size=2)
+    planner._get_backend("arm", batch_size=2)
 
     assert fake_curobo.create_kwargs["scene_model"] == [{}, {}]
 
@@ -683,9 +709,8 @@ def test_dynamic_update_requires_explicit_backend_for_mixed_batch_caches(
     """Avoid partially updating incompatible multi-env cuRobo cache entries."""
     world = CuroboWorldCfg(multi_env=True, dynamic_obstacle_names=["block"])
     planner = _make_planner(fake_curobo, fake_sim, world=world)
-    profile = planner.cfg.robot_profiles["arm"]
-    planner._get_backend(profile, "arm", batch_size=1)
-    planner._get_backend(profile, "arm", batch_size=2)
+    planner._get_backend("arm", batch_size=1)
+    planner._get_backend("arm", batch_size=2)
 
     with pytest.raises(ValueError, match="different cached batch sizes"):
         planner.update_dynamic_obstacles({"block": torch.eye(4).unsqueeze(0)})
@@ -823,32 +848,19 @@ def test_scalar_v2_dt_expands_over_trajectory_intervals(fake_curobo, fake_sim):
     assert torch.allclose(result.duration.cpu(), torch.tensor([0.05]))
 
 
-def test_joint_mapping_uses_control_part_order_not_dict_insertion_order(
+def test_auto_derived_profile_uses_identity_joint_mapping_and_tool_frame(
     fake_curobo, fake_sim
 ):
-    profile = CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names={"sim_b": "cu_b", "sim_a": "cu_a"},
-    )
-    planner = _make_planner(fake_curobo, fake_sim, profiles={"arm": profile})
-    backend = planner._get_backend(profile, "arm", batch_size=1)
+    """The auto-generated robot YAML reuses sim joint names and the solver tool frame."""
+    planner = _make_planner(fake_curobo, fake_sim)
+    backend = planner._get_backend("arm", batch_size=1)
 
+    # Identity mapping: the control-part qpos passes through to cuRobo unchanged.
     state = planner._to_curobo_joint_state(torch.tensor([[10.0, 20.0]]), backend)
-
     assert torch.allclose(state.position.cpu(), torch.tensor([[10.0, 20.0]]))
 
-
-def test_missing_tool_frame_uses_single_backend_tool_frame(fake_curobo, fake_sim):
-    profile = CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names={"sim_a": "cu_a", "sim_b": "cu_b"},
-        tool_frame_name=None,
-    )
-    planner = _make_planner(fake_curobo, fake_sim, profiles={"arm": profile})
-    backend = planner._get_backend(profile, "arm", batch_size=1)
-
+    # Tool frame is derived from the solver's end_link_name ("tool").
     goal = planner._to_curobo_pose_goal(torch.eye(4).unsqueeze(0), backend)
-
     assert goal.ordered_tool_frames == ["tool"]
     assert list(goal.pose_dict) == ["tool"]
 

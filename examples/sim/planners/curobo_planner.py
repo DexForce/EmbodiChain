@@ -47,7 +47,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from embodichain import data as _data
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -56,11 +55,10 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffectorCfg,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-from embodichain.lab.sim.objects import RigidObjectCfg, Robot
+from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo_planner import (
     CuroboPlannerCfg,
-    CuroboRobotProfileCfg,
     CuroboWorldCfg,
 )
 from embodichain.lab.sim.robots import FrankaPandaCfg
@@ -175,14 +173,7 @@ def _check_runtime() -> None:
         ) from exc
 
 
-def _demo_world_path() -> str:
-    """Return the static collision scene shared by the simulator and cuRobo."""
-    return str(
-        Path(_data.__file__).parent / "assets" / "curobo" / "collision_franka_demo.yml"
-    )
-
-
-def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
+def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -197,8 +188,10 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
     )
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{ROBOT_UID}' to the cuRobo demo.")
-    # Keep this geometry synchronized with collision_franka_demo.yml.
-    sim.add_rigid_object(
+    # This object is also exported into the cuRobo collision world below via
+    # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
+    # automatically (no hand-authored collision YAML to keep in sync).
+    demo_block = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
@@ -208,7 +201,8 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
             init_rot=(0.0, 0.0, 0.0),
         )
     )
-    return sim, robot
+
+    return sim, robot, demo_block
 
 
 def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) -> bool:
@@ -304,7 +298,7 @@ def main() -> None:
 
     sim: SimulationManager | None = None
     try:
-        sim, robot = _build_scene(args.headless)
+        sim, robot, demo_block = _build_scene(args.headless)
         if not args.headless:
             sim.open_window()
         _start_headless_recording(sim, args)
@@ -315,8 +309,7 @@ def main() -> None:
             MotionGenCfg(
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=ROBOT_UID,
-                    robot_profiles={CONTROL_PART: CuroboRobotProfileCfg()},
-                    world=CuroboWorldCfg(world_config_path=_demo_world_path()),
+                    world=CuroboWorldCfg(rigid_objects=[demo_block]),
                     warmup=args.warmup,
                     max_attempts=args.max_attempts,
                     use_cuda_graph=args.cuda_graph,

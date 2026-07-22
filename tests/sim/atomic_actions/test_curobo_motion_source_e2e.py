@@ -24,8 +24,6 @@ collision-aware trajectory that reaches the target after playback.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import torch
 
@@ -34,7 +32,6 @@ pytest.importorskip("curobo")
 if not torch.cuda.is_available():
     pytest.skip("cuRobo V2 requires CUDA", allow_module_level=True)
 
-from embodichain import data as _data  # noqa: E402
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
@@ -46,7 +43,6 @@ from embodichain.lab.sim.planners import (  # noqa: E402
 )
 from embodichain.lab.sim.planners.curobo_planner import (  # noqa: E402
     CuroboPlannerCfg,
-    CuroboRobotProfileCfg,
     CuroboWorldCfg,
 )
 from embodichain.lab.sim.atomic_actions import AtomicActionEngine  # noqa: E402
@@ -63,28 +59,6 @@ DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
 POS_TOL = 0.02
 
 
-def _demo_world_path() -> str:
-    return str(
-        Path(_data.__file__).parent / "assets" / "curobo" / "collision_franka_demo.yml"
-    )
-
-
-def _franka_profile() -> CuroboRobotProfileCfg:
-    sim_to_curobo = {f"fr3_joint{i}": f"panda_joint{i}" for i in range(1, 8)}
-    return CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names=sim_to_curobo,
-        base_link_name="panda_link0",
-        tool_frame_name="panda_hand",
-        tool_frame_to_tcp=[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.1034],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-    )
-
-
 def _make_franka_curobo_engine():
     sim = SimulationManager(
         SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=1)
@@ -92,7 +66,7 @@ def _make_franka_curobo_engine():
     robot = sim.add_robot(
         cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
     )
-    sim.add_rigid_object(
+    block = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
@@ -106,8 +80,7 @@ def _make_franka_curobo_engine():
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=ROBOT_UID,
-                robot_profiles={CONTROL_PART: _franka_profile()},
-                world=CuroboWorldCfg(world_config_path=_demo_world_path()),
+                world=CuroboWorldCfg(rigid_objects=[block]),
                 warmup=False,
                 use_cuda_graph=False,
             )

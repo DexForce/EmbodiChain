@@ -38,19 +38,21 @@ instructions when the CUDA or PyTorch version differs from this example.
 
 ## Configure a control part
 
-Create one CuroboRobotProfileCfg for each EmbodiChain control part that may use
-cuRobo. sim_to_curobo_joint_names is required for an explicit `robot_config_path`:
-it maps the simulator's joint names to the names in the cuRobo V2 robot profile,
-so no numeric joint ordering is assumed. Omit both `robot_config_path` and
-`sim_to_curobo_joint_names` to auto-derive the whole profile from the robot's URDF
-and solver (see [Auto-generated robot YAML](#auto-generated-robot-yaml) below).
-Lock non-controlled joints in the cuRobo robot profile itself so
-they are not exposed in the loaded planner's active joint list. To plan a
-gripper or another extra active joint, define a control part that includes it.
-The retained simulator value of every such joint must equal the corresponding
-cuRobo V2 `lock_joints` value throughout planning and playback. Atomic actions
-preserve non-control joints in their full-DoF trajectory; they do not infer or
-drive the profile's locked joints. For example, the stock Panda V2 profile
+The cuRobo robot model and the per-control-part profile are both auto-generated
+internally - no external cuRobo robot YAML (e.g. `franka.yml`) and no
+`robot_profiles` config are needed. On the first plan, the adapter fits collision
+spheres to each link of the robot's URDF and writes a cuRobo V2 robot YAML (see
+[Auto-generated robot YAML](#auto-generated-robot-yaml)). The tool frame, TCP
+offset, and base link are read from the control part's IK solver, and the
+simulator->cuRobo joint mapping is identity (the generated YAML reuses the
+URDF's own joint names). The control part is selected at plan time through
+`CuroboPlanOptions.control_part` and validated against `robot.control_parts`.
+
+Lock non-controlled joints (for example gripper joints) in the cuRobo robot
+profile so they are not exposed as active planner joints. The simulator values of
+those joints must remain equal to the V2 profile's `lock_joints` values while a
+plan is executed; the adapter intentionally preserves non-control simulator
+joints in the full-DoF atomic-action output. For example, the Panda V2 profile
 locks both fingers at `0.04`, so use the same simulated finger state or include
 the fingers in the planned control part. A mismatch means cuRobo validates a
 different collision geometry from the one replayed in DexSim.
@@ -58,83 +60,65 @@ different collision geometry from the one replayed in DexSim.
 ~~~python
 from embodichain.lab.sim.planners import (
     CuroboPlannerCfg,
-    CuroboRobotProfileCfg,
     CuroboWorldCfg,
     MotionGenCfg,
     MotionGenerator,
 )
 
-franka_profile = CuroboRobotProfileCfg(
-    robot_config_path="franka.yml",
-    sim_to_curobo_joint_names={
-        f"fr3_joint{index}": f"panda_joint{index}" for index in range(1, 8)
-    },
-    base_link_name="panda_link0",
-    tool_frame_name="panda_hand",
-    # DexSim's Panda TCP is 103.4 mm along +Z from cuRobo's panda_hand.
-    tool_frame_to_tcp=[
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.1034],
-        [0.0, 0.0, 0.0, 1.0],
-    ],
-)
-
 planner_cfg = CuroboPlannerCfg(
     robot_uid="my_franka",
     planner_type="curobo",
-    robot_profiles={"arm": franka_profile},
-    world=CuroboWorldCfg(world_config_path="path/to/collision_world.yml"),
+    world=CuroboWorldCfg(rigid_objects=[demo_block]),
 )
 motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 ~~~
 
 The robot configuration must be a cuRobo V2 robot profile with collision
-spheres and self-collision data. Generate or update that profile with V2
-RobotBuilder; a plain URDF alone is not sufficient for collision planning. The
-mapped simulator joints must match the selected control part, and
-tool_frame_name must name the cuRobo end-effector frame.
+spheres and self-collision data; the adapter generates this from the robot's
+URDF automatically. A plain URDF alone is not sufficient for collision planning
+without that sphere-fitting step.
 
-`base_link_name`, when supplied, is checked against the loaded cuRobo model.
 The adapter automatically rebases simulator-world Cartesian goals and dynamic
 obstacle poses through the live simulator control-part base, so parallel arena
 offsets and a moved robot base are handled. If the simulator and cuRobo base
-frames use different fixed conventions, set `sim_base_to_curobo_base` to the
-transform from the simulator base to the cuRobo base. Static collision YAML is
-always authored in the cuRobo base/world frame. `tool_frame_to_tcp` is
-different: it converts an EmbodiChain TCP goal into the chosen cuRobo tool
-frame. Omit it only when both frames are identical. By convention, the adapter
-uses `T_curobo,X = T_curobo,sim_base @ inv(T_world,sim_base) @ T_world,X`.
-It obtains the simulator base from the control part's IK solver root; if that
-part intentionally has no local solver, provide `sim_base_link_name` in the
-profile instead.
+frames use different fixed conventions, set
+`CuroboPlannerCfg.sim_base_to_curobo_base` to the transform from the simulator
+base to the cuRobo base. Collision-world poses are authored in the cuRobo
+base/world frame. `tool_frame_to_tcp` (read from `solver.tcp_xpos`) converts an
+EmbodiChain TCP goal into the chosen cuRobo tool frame when the solver's end link
+is not itself the TCP. By convention, the adapter uses
+`T_curobo,X = T_curobo,sim_base @ inv(T_world,sim_base) @ T_world,X`. It obtains
+the simulator base from the control part's IK solver root.
 
 `CuroboPlannerCfg.use_cuda_graph` defaults to `False` for the same DexSim GPU
 stream-safety reason. Enable it explicitly only after validating the local
 simulation stack.
 
-CuroboWorldCfg.world_config_path names an explicit collision world. The initial
-release accepts cuRobo cuboid, mesh, and voxel geometry. If obstacle poses
-change at runtime, declare their names in
-CuroboWorldCfg.dynamic_obstacle_names, provision
-CuroboWorldCfg.collision_cache before planning, and pass their batched
-(B, 4, 4) poses through CuroboPlanOptions.dynamic_obstacle_poses. Geometry is
-not extracted automatically from DexSim. With the default shared world
+The collision world is always auto-generated from live `RigidObject` meshes via
+`CuroboWorldCfg.rigid_objects`: the adapter reads each object's mesh
+(`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and writes a
+cached cuRobo scene YAML on the first plan, using
+`CuroboWorldCfg.obstacle_representation` (`"cuboid"` by default - a local-frame
+AABB placed as an OBB via the object pose; also `"mesh"` for the exact triangle
+mesh, or `"sphere"` to fit spheres with cuRobo's `fit_spheres_to_mesh`).
+Generated poses are authored in the cuRobo base/world frame, so this is exact
+when the robot base sits at the simulator world origin. For obstacles that move
+or live in an offset base frame, also declare their names in
+`CuroboWorldCfg.dynamic_obstacle_names` and update poses at plan time through
+`CuroboPlanOptions.dynamic_obstacle_poses` (provision
+`CuroboWorldCfg.collision_cache` before planning). With the default shared world
 (`multi_env=False`), all batch rows must provide the same obstacle pose; set
 `multi_env=True` when each environment needs its own collision-world instance
-(for example, different dynamic obstacle poses). In that mode a single mapping
-YAML (including the supplied demo scene) is cloned into one V2 scene per batch
-row. A top-level YAML list may instead define one mapping per row; it must have
-either one entry (cloned) or exactly the active batch size. An empty configured
-world is likewise materialized once per row so its per-environment cache is
-allocated. Dynamic pose updates still require the named geometry to already
+(for example, different dynamic obstacle poses). In that mode the generated world
+YAML is cloned into one V2 scene per batch row. An empty world (`rigid_objects`
+left `None`) is likewise materialized once per row so its per-environment cache
+is allocated. Dynamic pose updates still require the named geometry to already
 exist in every scene; the adapter does not insert new geometry at runtime.
 
 ## Auto-generated robot YAML
 
-A profile with the default `CuroboRobotProfileCfg()` (no `robot_config_path`, no
-`sim_to_curobo_joint_names`) is fully auto-derived from the robot's URDF and
-solver on the first plan, so nothing robot-specific needs to be hardcoded:
+On the first plan, the adapter auto-derives the cuRobo robot profile from the
+robot's URDF and solver, so nothing robot-specific needs to be hardcoded:
 
 - `robot_config_path` is produced by `generate_curobo_robot_yaml`, which fits
   collision spheres to each link mesh and writes a cuRobo V2 robot YAML.
@@ -151,17 +135,8 @@ part, tool frame, and fit parameters, so editing the URDF or changing the fit
 settings regenerates automatically and subsequent inits reuse the cache. Tune the
 fit with `CuroboPlannerCfg.auto_gen` (`fit_type="voxel"` by default for fast
 first-generation; `"morphit"` for best quality; `force=True` to bypass the cache).
-
-~~~python
-planner_cfg = CuroboPlannerCfg(
-    robot_uid="my_franka",
-    robot_profiles={"arm": CuroboRobotProfileCfg()},  # auto-derived
-    world=CuroboWorldCfg(world_config_path="path/to/collision_world.yml"),
-)
-~~~
-
-Explicit profiles (`robot_config_path="franka.yml"` + `sim_to_curobo_joint_names`)
-bypass auto-generation entirely and remain fully supported.
+The default `sphere_density=0.1` keeps the per-link sphere count low (~80 for a
+Panda) so planning stays fast; raise it for tighter collision coverage.
 
 ## Generate a motion
 
@@ -202,12 +177,13 @@ This first release intentionally has the following limits:
 
 - Only one configured control part is planned per request; coordinated dual-arm
   planning and CoordinatedPickment are unsupported.
-- Static cuboid, mesh, and voxel worlds plus named dynamic pose updates are
-  supported. Automatic scene extraction, arbitrary geometry insertion, and
-  removal are unsupported.
-- A static collision YAML is for a fixed-base robot. With a moving base,
-  publish each relevant world obstacle as a named dynamic pose for every plan;
-  automatic reprojection of static YAML obstacles is unsupported.
+- Collision worlds are generated from `RigidObject` meshes (cuboid/mesh/sphere)
+  plus named dynamic pose updates. Arbitrary geometry insertion and removal at
+  runtime are unsupported.
+- The generated collision world assumes a fixed-base robot at the simulator
+  origin. With a moving base, publish each relevant world obstacle as a named
+  dynamic pose for every plan; automatic reprojection of static obstacles is
+  unsupported.
 - attached-object collision geometry, automatic attachment/detachment, and
   collision-aware carrying of a held object are unsupported.
 - Non-control joints must remain at the matching cuRobo V2 `lock_joints`
@@ -225,9 +201,10 @@ the Panda obstacle-avoidance demo from the repository root:
 python examples/sim/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1
 ~~~
 
-The demo mirrors a cuboid in DexSim and the cuRobo collision world, prints the
-result status and trajectory shape, then replays the returned full-DoF
-trajectory. It disables cuRobo CUDA graph capture by default because graph
+The demo exports the DexSim `demo_block` into the cuRobo collision world via
+`CuroboWorldCfg.rigid_objects` (the robot and world YAMLs are both
+auto-generated), prints the result status and trajectory shape, then replays the
+returned full-DoF trajectory. It disables cuRobo CUDA graph capture by default because graph
 capture can conflict with DexSim GPU physics; pass `--cuda-graph` only after
 validating that the local simulator stream setup supports it. Headless runs
 automatically record this fixed offscreen camera view to an MP4. Set an explicit
