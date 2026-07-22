@@ -7,5 +7,5 @@ The Interactive Simulation module provides tools and interfaces for interacting 
    :maxdepth: 2
 
    Window interaction <window.md>
+   Rigid-object gizmo implementation <rigid_object_gizmo_implementation.md>
    Asset preview <preview_asset.md>
-   
