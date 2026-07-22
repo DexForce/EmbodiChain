@@ -53,16 +53,27 @@ This page lists all available event functors that can be used with the Event Man
 * - Functor Name
   - Description
 * - {class}`~randomization.visual.randomize_visual_material`
-  - Randomize textures, base colors, and material properties (metallic, roughness, IOR). Implemented as a Functor class. Supports both RigidObject and Articulation assets.
+  - Randomize textures, base colors, and material properties (metallic, roughness, IOR) for rigid objects and articulations. The default path retains each asset's original material instance and creates a working instance from the same material template; randomization swaps the render body between those instances without creating a new `VisualMaterial` template.
 
     ```json
     {"func": "randomize_visual_material",
      "mode": "interval", "interval_step": 10,
      "params": {"entity_cfg": {"uid": "table"},
-                "random_texture_prob": 0.5,
                 "texture_path": "CocoBackground/coco",
+                "p_original": 0.2,
+                "p_library": 0.5,
+                "p_solid": 0.3,
+                "solid_texture_count": 32,
+                "texture_sampling": "without_replacement",
+                "shared": false,
                 "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]}}
     ```
+
+    `p_original`, `p_library`, and `p_solid` select the original instance, a library texture on the working instance, or a solid-color texture on the working instance. When all three are omitted, the defaults are `0`, `random_texture_prob`, and `1 - random_texture_prob`; the default `random_texture_prob` is `0.5`. If no texture library is loaded, the library probability is added to the solid probability. Explicit probabilities are normalized, and any omitted member of an explicit set is treated as zero.
+
+    Rigid-object mesh segments share one working instance per environment. Articulations use one working instance and sample one tier per selected link. Set `shared=true` to reuse one state, plan, and link-tier selection across all environments. Solid textures come from a bounded palette created during initialization; `solid_texture_count` controls its size and defaults to 32. Set `fallback_to_new=true` to force the legacy create-and-replace path. The functor also falls back automatically when the asset material cannot be reused. The default plane is always randomized in place.
+
+    `texture_sampling` controls library-texture selection. The default `random` mode preserves independent random selection. `without_replacement` assigns a unique texture to each selected environment, `cycle` assigns textures in order, and `fixed` uses the global environment-to-texture mapping supplied by `texture_indices` (for example, `{"0": 2, "1": 0}` in JSON). Deterministic selections are reused across all selected articulation links in an environment.
 * - {func}`~randomization.visual.randomize_light`
   - Vary light position, color, intensity, and direction within specified ranges.
 

@@ -21,11 +21,19 @@ import torch
 import dexsim
 import numpy as np
 
+from dataclasses import dataclass
 from typing import Dict, Union
 from functools import cached_property
 
 from dexsim.engine import MaterialInst, Material
 from embodichain.utils import configclass, logger
+
+__all__ = [
+    "VisualMaterialCfg",
+    "VisualMaterial",
+    "VisualMaterialInst",
+    "ReuseSegmentState",
+]
 
 
 @configclass
@@ -189,9 +197,15 @@ class VisualMaterial:
 class VisualMaterialInst:
     """Instance of a visual material in the simulation environment."""
 
-    def __init__(self, uid: str, mat: Material):
+    def __init__(
+        self,
+        uid: str,
+        mat: Material,
+        mat_inst: MaterialInst | None = None,
+    ) -> None:
         self.uid = uid
         self._mat = mat
+        self._mat_inst = mat_inst
 
         # Init properties with default values
         self.base_color = [0.5, 0.5, 0.5, 1.0]
@@ -207,8 +221,29 @@ class VisualMaterialInst:
         self.ior = 1.5
         # self.subsurface = 0.0
 
+    @classmethod
+    def from_existing(cls, mat_inst: MaterialInst) -> VisualMaterialInst:
+        """Wrap an existing dexsim material instance without copying it.
+
+        Args:
+            mat_inst: Existing dexsim material instance parsed from an asset.
+
+        Returns:
+            The EmbodiChain wrapper for the existing instance.
+
+        Raises:
+            ValueError: If the material instance has no template.
+        """
+        mat = mat_inst.get_template()
+        if mat is None:
+            raise ValueError("Cannot wrap a material instance without a template.")
+        return cls(uid=mat_inst.get_name(), mat=mat, mat_inst=mat_inst)
+
     @property
     def mat(self) -> MaterialInst:
+        existing_inst = getattr(self, "_mat_inst", None)
+        if existing_inst is not None:
+            return existing_inst
         return self._mat.get_inst(self.uid)
 
     def set_base_color(self, color: list) -> None:
@@ -244,38 +279,31 @@ class VisualMaterialInst:
         self,
         texture_path: str = None,
         texture_data: torch.Tensor | None = None,
-        texture_ref: object | None = None,
+        texture_obj=None,
     ) -> None:
-        """Set base color texture from a file path, data, or existing texture.
+        """Set base color texture from file path, tensor data, or a pre-created Texture.
 
         Args:
-            texture_path: Path to texture file
-            texture_data: Texture data as a torch.Tensor
-            texture_ref: Existing DexSim texture reference to assign directly.
+            texture_path: Path to texture file.
+            texture_data: Texture data as a torch.Tensor (uploaded each call).
+            texture_obj: A pre-created dexsim ``Texture`` object. When provided, it is
+                bound directly without re-uploading (priority over ``texture_data``).
         """
-        if texture_ref is not None and (
-            texture_path is not None or texture_data is not None
+        if texture_path is not None and (
+            texture_data is not None or texture_obj is not None
         ):
             logger.log_warning(
-                "texture_ref provided with texture_path or texture_data. "
-                "Using texture_ref."
-            )
-
-        if texture_ref is not None:
-            self.base_color_texture = texture_ref
-            inst = self._mat.get_inst(self.uid)
-            inst.set_base_color_map(texture_ref)
-            return
-
-        if texture_path is not None and texture_data is not None:
-            logger.log_warning(
-                "Both texture_path and texture_data are provided. Using texture_path."
+                "Both texture_path and another texture source are provided. Using texture_path."
             )
 
         if texture_path is not None:
             self.base_color_texture = texture_path
             inst = self._mat.get_inst(self.uid)
             inst.set_base_color_map(texture_path)
+        elif texture_obj is not None:
+            self.base_color_texture = texture_obj
+            inst = self._mat.get_inst(self.uid)
+            inst.set_base_color_map(texture_obj)
         elif texture_data is not None:
             self.base_color_texture = texture_data
             inst = self._mat.get_inst(self.uid)
@@ -414,3 +442,85 @@ class VisualMaterialInst:
         self.ior = ior
         inst = self._mat.get_inst(self.uid)
         inst.set_pbr_param("ior", ior)
+
+
+@dataclass
+class ReuseSegmentState:
+    """Reuse state for one render-body segment of a parsed object.
+
+    Used by ``randomize_visual_material`` to randomize on top of the material dexsim
+    parsed from the asset. It creates a working material instance from the existing
+    template, but does not create a new material template.
+
+    Attributes:
+        mesh_id: The render-body segment index.
+        original_inst: The dexsim ``MaterialInst`` parsed from the asset. Kept immutable
+            and swapped back onto the render body for the "original" tier.
+        working_inst: A ``VisualMaterialInst`` created from the first segment's
+            template and shared by sibling segments; mutated in place for the
+            "library"/"solid" tiers.
+    """
+
+    mesh_id: int
+    original_inst: MaterialInst
+    working_inst: VisualMaterialInst
+
+
+def _capture_render_materials(render_body) -> list[MaterialInst | None]:
+    """Capture the material attached to every render-body mesh segment."""
+    return [
+        render_body.get_material(mesh_id)
+        for mesh_id in range(render_body.get_mesh_count())
+    ]
+
+
+def _wrap_first_render_material(
+    materials: list[MaterialInst | None],
+) -> VisualMaterialInst | None:
+    """Wrap the first material instance that has a template."""
+    for mat_inst in materials:
+        if mat_inst is not None and mat_inst.get_template() is not None:
+            return VisualMaterialInst.from_existing(mat_inst)
+    return None
+
+
+def _is_same_material_inst(
+    current_inst: MaterialInst | None, original_inst: MaterialInst | None
+) -> bool:
+    """Return whether two handles refer to the same material instance."""
+    if current_inst is original_inst:
+        return True
+    if current_inst is None or original_inst is None:
+        return False
+    current_template = current_inst.get_template()
+    original_template = original_inst.get_template()
+    return (
+        current_inst.get_name() == original_inst.get_name()
+        and current_template is not None
+        and original_template is not None
+        and current_template.get_name() == original_template.get_name()
+    )
+
+
+def _set_render_material(render_body, mesh_id: int, mat_inst: MaterialInst) -> None:
+    """Set a segment material only when it is not already attached."""
+    if _is_same_material_inst(render_body.get_material(mesh_id), mat_inst):
+        return
+    render_body.set_material(mesh_id, mat_inst)
+
+
+def _restore_render_materials(
+    render_body, original_materials: list[MaterialInst | None]
+) -> None:
+    """Restore a render body's captured per-segment material assignments."""
+    # A null original can only be recovered through the render body's default
+    # material. Cleaning is unnecessary when every null segment is already null.
+    if any(
+        original_inst is None and render_body.get_material(mesh_id) is not None
+        for mesh_id, original_inst in enumerate(original_materials)
+    ):
+        render_body.clean_material()
+
+    for mesh_id, original_inst in enumerate(original_materials):
+        if original_inst is not None:
+            _set_render_material(render_body, mesh_id, original_inst)

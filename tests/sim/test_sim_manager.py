@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -195,3 +196,20 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
     assert save_call["frame_count"] == 1
     assert save_call["save_kwargs"] == {"fps": 5}
     assert sim._window_record_save_threads == []
+
+
+def test_reset_objects_state_includes_soft_and_cloth_assets() -> None:
+    sim = object.__new__(SimulationManager)
+    sim._robots = {}
+    sim._articulations = {}
+    sim._rigid_objects = {}
+    sim._rigid_object_groups = {}
+    sim._lights = {}
+    sim._sensors = {}
+    sim._soft_objects = {"soft": MagicMock()}
+    sim._cloth_objects = {"cloth": MagicMock()}
+
+    sim.reset_objects_state(env_ids=[1])
+
+    sim._soft_objects["soft"].reset.assert_called_once_with([1])
+    sim._cloth_objects["cloth"].reset.assert_called_once_with([1])

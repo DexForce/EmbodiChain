@@ -25,6 +25,7 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
+    build_env_cfg_from_args,
     config_to_cfg,
     DEFAULT_MANAGER_MODULES,
     merge_args_with_gym_config,
@@ -383,7 +384,7 @@ def test_different_max_episode_steps():
     assert buffer["obs"]["extra_data"].shape == (4, 200, 2)
 
 
-class TestConfigToCfgFromYaml:
+class TestConfigToCfgFromFile:
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
@@ -417,6 +418,92 @@ class TestConfigToCfgFromYaml:
 
         assert cfg.max_episode_steps == 100
         assert cfg.robot.uid == "TestRobot"
+
+    def test_json_dataset_save_failed_episodes_parses_from_top_level(self, tmp_path):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {
+                "events": {},
+                "observations": {},
+                "rewards": {},
+                "dataset": {
+                    "lerobot": {
+                        "func": "LeRobotRecorder",
+                        "mode": "save",
+                        "save_failed_episodes": True,
+                        "params": {},
+                    }
+                },
+            },
+            "robot": {
+                "uid": "TestRobot",
+                "urdf_cfg": {
+                    "components": [
+                        {
+                            "component_type": "arm",
+                            "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+                        }
+                    ]
+                },
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "init_qpos": [0.0] * 6,
+            },
+        }
+
+        config_path = tmp_path / "gym_config.json"
+        save_config(config_path, config)
+
+        loaded = load_config(config_path)
+        cfg = config_to_cfg(loaded, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert cfg.dataset.lerobot.save_failed_episodes is True
+        assert "save_failed_episodes" not in cfg.dataset.lerobot.params
+
+    def test_build_env_cfg_applies_modifier_before_parsing(self, tmp_path):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "max_episode_steps": 100,
+            "env": {"events": {}, "observations": {}, "rewards": {}},
+            "robot": {
+                "uid": "TestRobot",
+                "urdf_cfg": {
+                    "components": [
+                        {
+                            "component_type": "arm",
+                            "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+                        }
+                    ]
+                },
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "init_qpos": [0.0] * 6,
+            },
+        }
+        config_path = tmp_path / "gym_config.yaml"
+        save_config(config_path, config)
+        args = argparse.Namespace(
+            gym_config=str(config_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer="rasterization",
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            action_config=None,
+        )
+
+        cfg, merged_config, _ = build_env_cfg_from_args(
+            args,
+            gym_config_modifier=lambda value: value.update(max_episode_steps=321),
+        )
+
+        assert merged_config["max_episode_steps"] == 321
+        assert cfg.max_episode_steps == 321
 
 
 if __name__ == "__main__":

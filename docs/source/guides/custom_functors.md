@@ -4,37 +4,6 @@ Functors are the building blocks of EmbodiChain's manager system. They define ho
 
 This guide explains the two functor styles (function and class), how to register them in manager configs, and provides examples for each functor type.
 
-## Per-instance visual texture randomization
-
-The `randomize_visual_material` event functor can assign base-color textures independently to vectorized environment instances. Add these options to its `params` mapping:
-
-| Option | Values | Purpose |
-|---|---|---|
-| `texture_sampling` | `random`, `without_replacement`, `cycle`, `fixed` | Selects how textures are assigned to target environments. |
-| `texture_indices` | `dict[int, int]` | Maps global environment IDs to texture indices when using `fixed`. |
-| `texture_scope` | `per_material`, `per_instance` | For articulations, choose per-link textures or one texture shared by all selected links in each environment. |
-
-For unique assignments in a reset batch, use `without_replacement` (there must be at least as many source textures as target environments):
-
-```yaml
-params:
-  entity_cfg: {uid: bottle}
-  texture_path: DexsimMaterials/Bottle
-  texture_sampling: without_replacement
-  texture_scope: per_instance
-```
-
-For deterministic assignments, use `fixed` and provide an index for every environment that may be reset:
-
-```yaml
-params:
-  entity_cfg: {uid: bottle}
-  texture_path: DexsimMaterials/Bottle
-  texture_sampling: fixed
-  texture_indices: {0: 2, 1: 0, 2: 3, 3: 1}
-  texture_scope: per_instance
-```
-
 ---
 
 ## Functor Basics

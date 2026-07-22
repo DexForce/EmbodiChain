@@ -14,207 +14,420 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Tests for visual-material randomization reuse and fallback behavior."""
+
 from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 import pytest
 import torch
-import embodichain.lab.gym.envs.managers.randomization.visual as visual
-import dexsim
 
-from embodichain.lab.sim.material import VisualMaterialInst
+from embodichain.lab.gym.envs.managers import FunctorCfg
+from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.randomization.visual import (
-    _normalize_env_ids,
     _select_texture_indices,
     randomize_visual_material,
 )
+from embodichain.lab.sim.material import ReuseSegmentState, VisualMaterialInst
+from embodichain.lab.sim.objects.articulation import Articulation
+from embodichain.lab.sim.objects.rigid_object import RigidObject
 
 
-class FakeMaterialInstance:
-    def __init__(self):
-        self.base_color_map = None
-
-    def set_base_color_map(self, texture):
-        self.base_color_map = texture
-
-
-class FakeMaterial:
-    def __init__(self):
-        self.instances = {}
-
-    def get_inst(self, uid):
-        return self.instances.setdefault(uid, FakeMaterialInstance())
+@pytest.fixture(autouse=True)
+def _patch_get_data_path(monkeypatch):
+    monkeypatch.setattr(
+        "embodichain.lab.gym.envs.managers.randomization.visual.get_data_path",
+        lambda path: path,
+    )
 
 
-def test_set_base_color_texture_uses_texture_ref():
-    material = FakeMaterial()
-    instance = VisualMaterialInst("instance", material)
-    texture_ref = object()
+class _MockRigidObject(RigidObject):
+    """Rigid object with only the state used by the functor."""
 
-    instance.set_base_color_texture(texture_ref=texture_ref)
+    def __init__(self, uid: str = "obj", num_envs: int = 1):
+        self.uid = uid
+        self._all_indices = list(range(num_envs))
+        self._entities = [MagicMock(name=f"entity_{i}") for i in self._all_indices]
+        self._visual_material = [None] * num_envs
+        self.is_shared_visual_material = False
+        self.set_visual_material = MagicMock()
+        self.get_visual_material_inst = MagicMock(
+            return_value=[MagicMock(name=f"inst_{i}") for i in self._all_indices]
+        )
+        self.get_existing_visual_material = MagicMock(return_value=[])
+        self.apply_render_material_inst = MagicMock()
 
-    assert material.get_inst("instance").base_color_map is texture_ref
-    assert instance.base_color_texture is texture_ref
+
+class _MockArticulation(Articulation):
+    """Articulation with only the state used by the functor."""
+
+    def __init__(self, link_names: list[str], num_envs: int = 1):
+        self.uid = "art"
+        self._entities = []
+        self._all_indices = list(range(num_envs))
+        self.is_shared_visual_material = False
+        self.link_names = link_names
+        self.apply_render_material_inst = MagicMock()
 
 
-def test_normalize_env_ids_supports_all_input_forms():
-    assert _normalize_env_ids(None, 3) == [0, 1, 2]
-    assert _normalize_env_ids(torch.tensor([2, 0]), 3) == [2, 0]
-    assert _normalize_env_ids([1], 3) == [1]
-    assert _normalize_env_ids(slice(None), 3) == [0, 1, 2]
+class _MockSim:
+    def __init__(self, num_envs: int = 1):
+        self.textures = {}
+        self.created_visual_materials = []
+        self.env = MagicMock(name="dexsim_env")
+        self.env.create_color_texture.return_value = MagicMock(name="Texture")
+        self.asset_uids = ["obj"]
+        self._asset = _MockRigidObject(num_envs=num_envs)
+
+    def get_texture_cache(self, key=None):
+        return self.textures if key is None else self.textures.get(key)
+
+    def set_texture_cache(self, key, value):
+        self.textures[key] = value
+
+    def create_visual_material(self, cfg):
+        self.created_visual_materials.append(cfg.uid)
+        return MagicMock(name="VisualMaterial")
+
+    def get_visual_material(self, uid):
+        material = MagicMock(name=f"{uid}_material")
+        material.get_default_instance.return_value = MagicMock(name=f"{uid}_inst")
+        return material
+
+    def get_asset(self, uid):
+        return self._asset
+
+    def get_env(self):
+        return self.env
+
+
+class _MockEnv:
+    def __init__(self, num_envs: int = 1):
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        self.sim = _MockSim(num_envs=num_envs)
+
+
+def _make_cfg(params: dict | None = None, *, uid: str = "obj") -> FunctorCfg:
+    cfg = FunctorCfg(func=randomize_visual_material)
+    cfg.params = {"entity_cfg": SceneEntityCfg(uid=uid), **(params or {})}
+    return cfg
+
+
+def _segment(mesh_id: int = 0, original=None) -> ReuseSegmentState:
+    working = MagicMock(spec=VisualMaterialInst, name=f"working_{mesh_id}")
+    working.mat = MagicMock(name=f"working_mat_{mesh_id}")
+    return ReuseSegmentState(
+        mesh_id=mesh_id,
+        original_inst=(
+            original if original is not None else MagicMock(name=f"original_{mesh_id}")
+        ),
+        working_inst=working,
+    )
+
+
+def _make_rigid_functor(
+    params: dict | None = None,
+    *,
+    num_envs: int = 1,
+    states: list | None = None,
+):
+    env = _MockEnv(num_envs=num_envs)
+    obj = env.sim.get_asset("obj")
+    if states is None:
+        states = [[_segment()] for _ in range(num_envs)]
+    obj.get_existing_visual_material.return_value = states
+    return env, obj, randomize_visual_material(_make_cfg(params), env)
+
+
+def _make_articulation_functor(link_names: list[str]):
+    env = _MockEnv()
+    art = _MockArticulation(link_names)
+    link_map = {link_name: [_segment()] for link_name in link_names}
+    art.get_existing_visual_material = MagicMock(return_value=[link_map])
+    env.sim.asset_uids = ["art"]
+    env.sim._asset = art
+    cfg = _make_cfg(uid="art")
+    cfg.params["entity_cfg"].link_names = link_names
+    return env, art, randomize_visual_material(cfg, env)
+
+
+def _force_tier(functor, tier: int) -> None:
+    probabilities = [0.0, 0.0, 0.0]
+    probabilities[tier] = 1.0
+    functor._p_original, functor._p_library, functor._p_solid = probabilities
+
+
+def _run(functor, env, env_ids: torch.Tensor | None = None) -> None:
+    env_ids = torch.arange(env.num_envs) if env_ids is None else env_ids
+    functor(env, env_ids, entity_cfg=functor.entity_cfg)
 
 
 def test_texture_selection_modes():
+    assert _select_texture_indices("cycle", [3, 1, 2], 2, None) == [0, 1, 0]
+    assert _select_texture_indices("fixed", [3, 1], 4, {"1": 2, "3": 0}) == [0, 2]
     assert sorted(
         _select_texture_indices("without_replacement", [0, 1, 2], 3, None)
     ) == [0, 1, 2]
-    assert _select_texture_indices("fixed", [3, 1], 4, {1: 2, 3: 0}) == [0, 2]
-    with pytest.raises(ValueError, match="without_replacement"):
+
+    with pytest.raises(ValueError, match="at least one texture per target"):
         _select_texture_indices("without_replacement", [0, 1], 1, None)
 
 
-def test_partial_reset_targets_only_selected_environment_ids(monkeypatch):
-    class Obj:
-        is_shared_visual_material = False
+def test_fixed_texture_selection_uses_global_environment_ids():
+    states = [[_segment(env_id)] for env_id in range(4)]
+    env, _, functor = _make_rigid_functor(num_envs=4, states=states)
+    textures = [MagicMock(name=f"texture_{i}") for i in range(3)]
+    functor._library_textures = textures
+    _force_tier(functor, tier=1)
 
-        def __init__(self):
-            self.mats = [FakeMat() for _ in range(4)]
-
-        def get_visual_material_inst(self, env_ids=None, **kwargs):
-            return [self.mats[i] for i in env_ids]
-
-    functor = object.__new__(randomize_visual_material)
-    functor.entity_cfg = type("C", (), {"uid": "x", "link_names": None})()
-    functor.entity = Obj()
-    functor.textures = []
-    monkeypatch.setattr(visual, "RigidObject", Obj)
-
-    def mark(*, mat_inst, **kwargs):
-        mat_inst.set_base_color([1, 1, 1, 1])
-
-    functor._randomize_mat_inst = mark
-    env = type("E", (), {"num_envs": 4})()
-    functor.__call__(
-        env, torch.tensor([1, 3]), functor.entity_cfg, random_texture_prob=0
-    )
-    assert functor.entity.mats[0].color is None and functor.entity.mats[2].color is None
-    assert (
-        functor.entity.mats[1].color is not None
-        and functor.entity.mats[3].color is not None
-    )
-
-
-def test_fixed_assignment_maps_global_environment_ids(monkeypatch):
-    class Obj:
-        is_shared_visual_material = False
-
-        def get_visual_material_inst(self, env_ids=None, **kwargs):
-            return [{"l": FakeMat()} for _ in env_ids]
-
-    f = object.__new__(randomize_visual_material)
-    f.entity_cfg = type("C", (), {"uid": "x", "link_names": None})()
-    f.entity = Obj()
-    f.textures = ["a", "b", "c"]
-    monkeypatch.setattr(visual, "RigidObject", Obj)
-    seen = []
-
-    def record(*, texture_idx, **kwargs):
-        seen.append(texture_idx)
-
-    f._randomize_mat_inst = record
-    f.__call__(
-        type("E", (), {"num_envs": 4})(),
+    functor(
+        env,
         torch.tensor([1, 3]),
-        f.entity_cfg,
+        entity_cfg=functor.entity_cfg,
         texture_sampling="fixed",
         texture_indices={1: 2, 3: 0},
     )
-    assert seen == [2, 0]
+
+    assert (
+        states[1][0].working_inst.set_base_color_texture.call_args.kwargs["texture_obj"]
+        is textures[2]
+    )
+    assert (
+        states[3][0].working_inst.set_base_color_texture.call_args.kwargs["texture_obj"]
+        is textures[0]
+    )
 
 
-def test_per_instance_selection_is_reused_for_all_links(monkeypatch):
-    class Obj:
-        is_shared_visual_material = False
+def test_fixed_texture_selection_is_reused_for_articulation_links():
+    env, art, functor = _make_articulation_functor(["left", "right"])
+    textures = [MagicMock(name=f"texture_{i}") for i in range(2)]
+    functor._library_textures = textures
+    _force_tier(functor, tier=1)
 
-        def get_visual_material_inst(self, env_ids=None, **kwargs):
-            return [{"a": FakeMat(), "b": FakeMat()} for _ in env_ids]
-
-    f = object.__new__(randomize_visual_material)
-    f.entity_cfg = type("C", (), {"uid": "x", "link_names": None})()
-    f.entity = Obj()
-    f.textures = ["a", "b"]
-    monkeypatch.setattr(visual, "RigidObject", type("Other", (), {}))
-    monkeypatch.setattr(visual, "Articulation", Obj)
-    seen = []
-
-    def record(*, texture_idx, **kwargs):
-        seen.append(texture_idx)
-
-    f._randomize_mat_inst = record
-    f.__call__(
-        type("E", (), {"num_envs": 4})(),
-        torch.tensor([1, 3]),
-        f.entity_cfg,
+    functor(
+        env,
+        torch.tensor([0]),
+        entity_cfg=functor.entity_cfg,
         texture_sampling="fixed",
-        texture_indices={1: 1, 3: 0},
-        texture_scope="per_instance",
+        texture_indices={0: 1},
     )
-    assert seen == [1, 1, 0, 0]
+
+    link_map = art.get_existing_visual_material.return_value[0]
+    for segments in link_map.values():
+        assert (
+            segments[0].working_inst.set_base_color_texture.call_args.kwargs[
+                "texture_obj"
+            ]
+            is textures[1]
+        )
 
 
-class FakeMat:
-    def __init__(self):
-        self.color = None
+def test_fallback_to_new_preserves_legacy_path():
+    env = _MockEnv(num_envs=2)
+    obj = env.sim.get_asset("obj")
+    functor = randomize_visual_material(_make_cfg({"fallback_to_new": True}), env)
+    obj.set_visual_material.reset_mock()
 
-    def set_base_color(self, value):
-        self.color = value
+    _run(functor, env)
+
+    assert functor._new_mode is False
+    assert env.sim.created_visual_materials == ["obj_random_mat"]
+    obj.set_visual_material.assert_called_once()
+    env.sim.env.clean_materials.assert_called_once()
 
 
-def test_generated_color_branch_sets_texture_without_unbound_error():
-    functor = object.__new__(randomize_visual_material)
-    texture = object()
+def test_reuse_init_does_not_create_visual_material():
+    env, _, functor = _make_rigid_functor()
+
+    assert functor._new_mode is True
+    assert env.sim.created_visual_materials == []
+
+
+def test_reuse_init_degrades_to_legacy_on_failure():
+    env = _MockEnv()
+    env.sim.get_asset("obj").get_existing_visual_material.side_effect = ValueError(
+        "no material"
+    )
+
+    functor = randomize_visual_material(_make_cfg(), env)
+
+    assert functor._new_mode is False
+    assert env.sim.created_visual_materials == ["obj_random_mat"]
+
+
+def test_reuse_call_reattaches_without_cleaning():
+    env, obj, functor = _make_rigid_functor()
+    _force_tier(functor, tier=2)
+    env.sim.env.clean_materials.reset_mock()
+
+    _run(functor, env)
+    _run(functor, env)
+
+    assert obj.apply_render_material_inst.call_count == 2
+    env.sim.env.clean_materials.assert_not_called()
+
+
+def test_reuse_call_supports_partial_environment_selection():
+    states = [[_segment(0)], [_segment(1)]]
+    env, obj, functor = _make_rigid_functor(num_envs=2, states=states)
+    _force_tier(functor, tier=2)
+
+    _run(functor, env, torch.tensor([1]))
+
+    call_args = obj.apply_render_material_inst.call_args.args
+    assert (call_args[0], call_args[2]) == (1, 1)
+
+
+def test_articulation_reuses_and_swaps_link_material():
+    env, art, functor = _make_articulation_functor(["link"])
+    _force_tier(functor, tier=2)
+
+    _run(functor, env)
+
+    assert functor._new_mode is True
+    assert env.sim.created_visual_materials == []
+    art.apply_render_material_inst.assert_called_once()
+
+
+def test_articulation_samples_tier_per_link():
+    env, art, functor = _make_articulation_functor(["library", "solid"])
+    library_texture = MagicMock(name="library_texture")
+    functor._library_textures = [library_texture]
+    functor._sample_tiers = MagicMock(return_value=torch.tensor([1, 2]))
+
+    _run(functor, env)
+
+    link_map = art.get_existing_visual_material.return_value[0]
+    library_call = link_map["library"][0].working_inst.set_base_color_texture.call_args
+    solid_call = link_map["solid"][0].working_inst.set_base_color_texture.call_args
+    assert library_call.kwargs["texture_obj"] is library_texture
+    assert solid_call.kwargs["texture_obj"] in functor._solid_textures
+
+
+def test_default_plane_randomizes_in_place_without_cleaning():
+    env = _MockEnv()
+    functor = randomize_visual_material(_make_cfg(uid="default_plane"), env)
+    env.sim.env.clean_materials.reset_mock()
+
+    _run(functor, env)
+
+    assert functor._new_mode is False
+    assert env.sim.created_visual_materials == []
+    env.sim.env.clean_materials.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("params", "has_library", "expected"),
+    [
+        ({"random_texture_prob": 0.3}, True, (0.0, 0.3, 0.7)),
+        (
+            {"p_original": 1.0, "p_library": 1.0, "p_solid": 2.0},
+            True,
+            (0.25, 0.25, 0.5),
+        ),
+        (
+            {"p_original": 0.0, "p_library": 0.5, "p_solid": 0.5},
+            False,
+            (0.0, 0.0, 1.0),
+        ),
+    ],
+    ids=["legacy-split", "normalized", "empty-library"],
+)
+def test_tier_probability_resolution(params, has_library, expected):
+    _, _, functor = _make_rigid_functor(params)
+    functor._library_textures = [MagicMock(name="Texture")] if has_library else []
+
+    functor._resolve_tier_probs()
+
+    actual = (functor._p_original, functor._p_library, functor._p_solid)
+    assert actual == pytest.approx(expected)
+
+
+def test_library_textures_are_cached_across_functors():
+    env, _, functor = _make_rigid_functor()
+    env.sim.env.create_color_texture.reset_mock()
+    texture = torch.zeros((2, 2, 4), dtype=torch.uint8)
     functor.textures = [texture]
+    functor._texture_key = "library"
 
-    class Instance:
-        texture = None
+    functor._build_library_textures(env)
+    second = randomize_visual_material(_make_cfg(), env)
+    second.textures = [texture]
+    second._texture_key = "library"
+    second._build_library_textures(env)
 
-        def set_base_color_texture(self, texture_data=None, **kwargs):
-            self.texture = texture_data
-
-    instance = Instance()
-    functor._randomize_mat_inst(instance, {}, random_texture_prob=1.0)
-    assert instance.texture is texture
+    env.sim.env.create_color_texture.assert_called_once()
 
 
-def test_texture_references_are_created_once(monkeypatch):
-    calls = []
-
-    class Sim:
-        def __init__(self):
-            self.cache = {}
-
-        def get_texture_ref_cache(self, key):
-            return self.cache.get(key)
-
-        def set_texture_ref_cache(self, key, refs):
-            self.cache[key] = refs
-
-    class E:
-        def create_color_texture(self, image, has_alpha):
-            calls.append(image)
-            return object()
-
-    monkeypatch.setattr(
-        dexsim, "default_world", lambda: type("W", (), {"get_env": lambda s: E()})()
+def test_solid_randomization_reuses_bounded_palette_for_all_segments():
+    segment_count = 3
+    repeat_count = 3
+    palette_size = 2
+    segments = [_segment(mesh_id) for mesh_id in range(segment_count)]
+    env, obj, functor = _make_rigid_functor(
+        {"p_solid": 1.0, "solid_texture_count": palette_size}, states=[segments]
     )
-    sim = Sim()
-    images = [torch.zeros((2, 2, 4), dtype=torch.uint8)]
-    visual._get_texture_refs(sim, "/tmp/source", images)
-    visual._get_texture_refs(sim, "/tmp/source", images)
-    assert len(calls) == 1
+
+    for _ in range(repeat_count):
+        _run(functor, env)
+
+    assert env.sim.env.create_color_texture.call_count == palette_size
+    assert segments[0].working_inst.set_base_color.call_count == repeat_count
+    assert all(
+        segment.working_inst.set_base_color.call_count == 0 for segment in segments[1:]
+    )
+    mesh_ids = {call.args[2] for call in obj.apply_render_material_inst.call_args_list}
+    assert mesh_ids == set(range(segment_count))
 
 
-def test_four_environment_fake_assignments_cover_reset_cases():
-    first = _select_texture_indices("without_replacement", [0, 1, 2, 3], 4, None)
-    assert len(set(first)) == 4
-    assert _select_texture_indices("fixed", [1, 3], 4, {1: 2, 3: 0}) == [2, 0]
-    assert _select_texture_indices("fixed", [3], 4, {3: 1}) == [1]
+def test_solid_palette_stores_color_in_texture_pixels():
+    fixed_color = [0.2, 0.4, 0.6]
+    env, _, _ = _make_rigid_functor(
+        {"base_color_range": [fixed_color, fixed_color], "solid_texture_count": 1}
+    )
+
+    texture_data = env.sim.env.create_color_texture.call_args.args[0]
+    expected_rgba = torch.tensor([51, 102, 153, 255], dtype=torch.uint8).numpy()
+    assert texture_data.flags.c_contiguous
+    assert (texture_data == expected_rgba).all()
+
+
+def test_library_tier_without_color_range_does_not_tint_texture():
+    segment = _segment()
+    env, _, functor = _make_rigid_functor(states=[[segment]])
+    functor._library_textures = [MagicMock(name="library_texture")]
+    _force_tier(functor, tier=1)
+
+    _run(functor, env)
+
+    segment.working_inst.set_base_color.assert_not_called()
+
+
+def test_original_tier_restores_each_segment():
+    segments = [_segment(mesh_id) for mesh_id in range(2)]
+    env, obj, functor = _make_rigid_functor(states=[segments])
+    _force_tier(functor, tier=2)
+    _run(functor, env)
+    obj.apply_render_material_inst.reset_mock()
+
+    _force_tier(functor, tier=0)
+    _run(functor, env)
+
+    restored = {
+        (call.args[1], call.args[2])
+        for call in obj.apply_render_material_inst.call_args_list
+    }
+    assert restored == {
+        (segment.original_inst, segment.mesh_id) for segment in segments
+    }
+
+
+def test_empty_reuse_state_is_a_noop():
+    env, obj, functor = _make_rigid_functor(states=[])
+
+    _run(functor, env)
+
+    assert functor._new_mode is True
+    obj.apply_render_material_inst.assert_not_called()

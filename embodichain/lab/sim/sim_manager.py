@@ -312,7 +312,6 @@ class SimulationManager:
         # Global texture cache for material creation or randomization.
         # The structure is keys to the loaded texture data. The keys represent the texture group.
         self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
-        self._texture_ref_cache: Dict[str, List[object]] = dict()
 
         self._init_sim_resources()
 
@@ -729,18 +728,7 @@ class SimulationManager:
         pointing downward along the -Z axis.
         """
         # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
-
-        # Directional light as global scene light
-        dir_light_cfg = LightCfg(
-            uid="default_global_light",
-            light_type="sun",
-            intensity=8.0,
-            direction=(0.0, 0.0, -1.0),
-            color=(1.0, 0.95, 0.85),
-            enable_shadow=True,
-        )
-        self.add_light(dir_light_cfg)
+        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
 
     def set_default_background(self) -> None:
         """Set default background."""
@@ -802,14 +790,6 @@ class SimulationManager:
             logger.log_warning(f"Texture {key} not found in global texture cache.")
             return None
         return self._texture_cache[key]
-
-    def get_texture_ref_cache(self, key: str) -> List[object] | None:
-        """Return cached GPU texture references for a canonical source key."""
-        return self._texture_ref_cache.get(key)
-
-    def set_texture_ref_cache(self, key: str, refs: List[object]) -> None:
-        """Cache GPU texture references for a canonical source key."""
-        self._texture_ref_cache[key] = refs
 
     def get_asset(
         self, uid: str
@@ -2635,6 +2615,12 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, soft_obj in self._soft_objects.items():
+            if uid not in excluded_uids:
+                soft_obj.reset(env_ids)
+        for uid, cloth_obj in self._cloth_objects.items():
+            if uid not in excluded_uids:
+                cloth_obj.reset(env_ids)
         for uid, light in self._lights.items():
             if uid not in excluded_uids:
                 light.reset(env_ids)
@@ -2778,7 +2764,6 @@ class SimulationManager:
 
         self._visual_materials.clear()
         self._texture_cache.clear()
-        self._texture_ref_cache.clear()
         self._arenas.clear()
         self._markers.clear()
         self._gizmos.clear()
