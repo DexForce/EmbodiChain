@@ -16,31 +16,22 @@
 
 from __future__ import annotations
 
-from .material import (
-    VisualMaterialCfg,
-    VisualMaterial,
-    VisualMaterialInst,
-    ReuseSegmentState,
-)
-from .common import BatchEntity
+from unittest.mock import MagicMock
 
-from .sim_manager import *
-
-__all__ = [
-    "VisualMaterialCfg",
-    "VisualMaterial",
-    "VisualMaterialInst",
-    "ReuseSegmentState",
-    "BatchEntity",
-    "SimulationManager",
-    "SimulationManagerCfg",
-    "SIM_CACHE_DIR",
-    "MATERIAL_CACHE_DIR",
-    "CONVEX_DECOMP_DIR",
-    "REACHABLE_XPOS_DIR",
-]
+from embodichain.lab.sim.material import VisualMaterialInst
 
 
-from .utility.dynamic_pybind import init_dynamic_pybind
+def test_texture_object_is_bound_directly_and_takes_priority_over_data():
+    material = MagicMock(name="Material")
+    instance = VisualMaterialInst("instance", material)
+    texture = MagicMock(name="Texture")
+    texture_data = MagicMock(name="texture_data")
 
-init_dynamic_pybind()
+    instance.set_base_color_texture(
+        texture_data=texture_data,
+        texture_obj=texture,
+    )
+
+    material.get_inst.return_value.set_base_color_map.assert_called_once_with(texture)
+    texture_data.cpu.assert_not_called()
+    assert instance.base_color_texture is texture

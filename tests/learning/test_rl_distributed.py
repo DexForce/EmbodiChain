@@ -68,6 +68,11 @@ def test_distributed_training_via_torchrun():
     """
     config_path = _create_minimal_distributed_config()
     nproc = 2 if torch.cuda.device_count() >= 2 else 1
+    child_env = os.environ.copy()
+    # conftest disables process exit so in-process simulation tests can defer
+    # DexSim cleanup to the top-level pytest fixture. This child is a standalone
+    # training process and must use the normal runtime shutdown path instead.
+    child_env["EMBODICHAIN_SIM_EXIT_PROCESS"] = "1"
     try:
         result = subprocess.run(
             [
@@ -86,6 +91,7 @@ def test_distributed_training_via_torchrun():
             text=True,
             timeout=120,
             cwd=Path(__file__).resolve().parents[2],
+            env=child_env,
         )
         assert (
             result.returncode == 0

@@ -2615,6 +2615,12 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, soft_obj in self._soft_objects.items():
+            if uid not in excluded_uids:
+                soft_obj.reset(env_ids)
+        for uid, cloth_obj in self._cloth_objects.items():
+            if uid not in excluded_uids:
+                cloth_obj.reset(env_ids)
         for uid, light in self._lights.items():
             if uid not in excluded_uids:
                 light.reset(env_ids)
