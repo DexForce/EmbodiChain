@@ -2320,3 +2320,30 @@ def get_offset_pose(
         return pose_to_change
 
     return offset_pose
+
+
+def get_relative_rotation(
+    rotation1: torch.Tensor | np.ndarray,
+    rotation2: torch.Tensor | np.ndarray,
+) -> torch.Tensor:
+    r"""Compute the relative rotation angle between two rotation matrices.
+
+    The relative rotation is :math:`R_1 R_2^\top`, and its angle is recovered
+    from the trace as :math:`\theta = \arccos((\mathrm{tr}(R) - 1) / 2)`.
+
+    Args:
+        rotation1: First rotation matrix with shape (..., 3, 3).
+        rotation2: Second rotation matrix with shape (..., 3, 3).
+
+    Returns:
+        Relative rotation angle(s) in radians, in :math:`[0, \pi]`, with shape
+        equal to the batch dimensions of the inputs.
+    """
+    rotation1 = torch.as_tensor(rotation1)
+    rotation2 = torch.as_tensor(
+        rotation2, device=rotation1.device, dtype=rotation1.dtype
+    )
+    relative_rotation = torch.matmul(rotation1, rotation2.transpose(-1, -2))
+    cos_v = (relative_rotation.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2
+    cos_v = torch.clamp(cos_v, -1.0, 1.0)
+    return torch.abs(torch.arccos(cos_v))

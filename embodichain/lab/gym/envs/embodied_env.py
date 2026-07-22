@@ -521,20 +521,32 @@ class EmbodiedEnv(BaseEnv):
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
-        env_ids_to_process = list(range(self.num_envs)) if env_ids is None else env_ids
+        status_device = self.episode_success_status.device
+        if env_ids is None:
+            env_ids_to_process = torch.arange(self.num_envs, device=status_device)
+        elif isinstance(env_ids, torch.Tensor):
+            env_ids_to_process = env_ids.to(device=status_device, dtype=torch.long)
+        else:
+            env_ids_to_process = torch.tensor(
+                list(env_ids), device=status_device, dtype=torch.long
+            )
 
         # Save dataset before clearing buffers for environments that are being reset
         if save_data and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
 
-                # Filter to only save successful episodes
-                successful_env_ids = self.episode_success_status | self._task_success
+                if self.dataset_manager.save_failed_episodes:
+                    env_ids_to_save = env_ids_to_process
+                else:
+                    successful_envs = self.episode_success_status | self._task_success
+                    env_ids_to_save = env_ids_to_process[
+                        successful_envs[env_ids_to_process]
+                    ]
 
-                if successful_env_ids.any():
-
+                if env_ids_to_save.numel() > 0:
                     self.dataset_manager.apply(
                         mode="save",
-                        env_ids=successful_env_ids.nonzero(as_tuple=True)[0],
+                        env_ids=env_ids_to_save,
                     )
 
         # Save recorded camera data before resetting

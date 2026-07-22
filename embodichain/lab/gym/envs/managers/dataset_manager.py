@@ -56,6 +56,7 @@ class DatasetManager(ManagerBase):
         >>>     dataset: dict = {
         >>>         "lerobot": DatasetFunctorCfg(
         >>>             func=LeRobotRecorder,
+        >>>             save_failed_episodes=True,
         >>>             params={
         >>>                 "robot_meta": {...},
         >>>                 "instruction": {"lang": "pick and place"},
@@ -179,6 +180,14 @@ class DatasetManager(ManagerBase):
     def available_modes(self) -> list[str]:
         """List of available modes for the dataset manager."""
         return list(self._mode_functor_names.keys())
+
+    @property
+    def save_failed_episodes(self) -> bool:
+        """Whether any configured dataset recorder should keep failed episodes."""
+        return any(
+            functor_cfg.save_failed_episodes
+            for functor_cfg in self._mode_functor_cfgs.get("save", [])
+        )
 
     """
     Operations.

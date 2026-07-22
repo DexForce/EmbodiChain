@@ -373,3 +373,10 @@ class DatasetFunctorCfg(FunctorCfg):
     """
 
     mode: Literal["save"] = "save"
+
+    save_failed_episodes: bool = False
+    """Whether to save failed episodes.
+
+    If enabled for any dataset functor, all save-mode dataset functors receive
+    both successful and failed episodes.
+    """
