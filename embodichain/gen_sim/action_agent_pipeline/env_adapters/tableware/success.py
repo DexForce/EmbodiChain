@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import math
 from typing import Any
 
 import torch
@@ -27,8 +28,31 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
     SUCCESS_TERM_ALIASES,
     SuccessTerm,
 )
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    generation_defaults_section,
+)
 
 __all__ = ["evaluate_configured_success"]
+
+_FALLBACKS = generation_defaults_section("success_evaluator_fallbacks")
+_POSITION_TOLERANCE = float(_FALLBACKS["position_tolerance"])
+_XY_TOLERANCE = float(_FALLBACKS["xy_tolerance"])
+_CONTAINER_XY_RADIUS = float(_FALLBACKS["container_xy_radius"])
+_CONTAINER_MIN_Z_OFFSET = float(_FALLBACKS["container_min_z_offset"])
+_CONTAINER_MAX_Z_OFFSET = float(_FALLBACKS["container_max_z_offset"])
+_SUPPORT_XY_RADIUS = float(_FALLBACKS["support_xy_radius"])
+_SUPPORT_MIN_Z_OFFSET = float(_FALLBACKS["support_min_z_offset"])
+_SUPPORT_MAX_Z_OFFSET = float(_FALLBACKS["support_max_z_offset"])
+_MAX_TILT = math.radians(float(_FALLBACKS["max_tilt_degrees"]))
+_AXIS_TOLERANCE = float(_FALLBACKS["axis_tolerance"])
+_COLLINEARITY_TOLERANCE = float(_FALLBACKS["collinearity_tolerance"])
+_ORDERING_TOLERANCE = float(_FALLBACKS["ordering_tolerance"])
+_MINIMUM_LIFT_HEIGHT = float(_FALLBACKS["minimum_lift_height"])
+_SINGLE_GRIPPER_MAX_DISTANCE = float(_FALLBACKS["single_gripper_max_distance"])
+_DUAL_GRIPPER_MAX_DISTANCE = float(_FALLBACKS["dual_gripper_max_distance"])
+_GRIPPER_CLEAR_MIN_DISTANCE = float(_FALLBACKS["gripper_clear_min_distance"])
+_INITIAL_QPOS_TOLERANCE = float(_FALLBACKS["initial_qpos_tolerance"])
+_GRIPPER_STATE_TOLERANCE = float(_FALLBACKS["gripper_state_tolerance"])
 
 
 def evaluate_configured_success(
@@ -167,7 +191,7 @@ def _object_position_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
         return _object_xy_near(env, {**spec, "target_xy": target})
     target = target.reshape(1, 3)
     return torch.linalg.norm(position - target, dim=-1) <= float(
-        spec.get("tolerance", 0.05)
+        _success_default(env, spec, "tolerance", _POSITION_TOLERANCE)
     )
 
 
@@ -178,7 +202,15 @@ def _object_xy_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
         dtype=position.dtype,
         device=position.device,
     ).flatten()[:2]
-    tolerance = float(spec.get("tolerance", spec.get("xy_tolerance", 0.05)))
+    tolerance = float(
+        _success_default(
+            env,
+            spec,
+            "tolerance",
+            _XY_TOLERANCE,
+            aliases=("xy_tolerance",),
+        )
+    )
     return (
         torch.linalg.norm(position[:, :2] - target_xy.reshape(1, 2), dim=-1)
         <= tolerance
@@ -199,10 +231,28 @@ def _object_in_container(env, spec: Mapping[str, Any]) -> torch.Tensor:
     return (
         (
             xy_distance
-            <= float(_success_default(env, spec, "xy_radius", spec.get("radius", 0.1)))
+            <= float(
+                _success_default(
+                    env,
+                    spec,
+                    "xy_radius",
+                    _CONTAINER_XY_RADIUS,
+                    aliases=("radius",),
+                )
+            )
         )
-        & (z_offset >= float(_success_default(env, spec, "min_z_offset", -0.03)))
-        & (z_offset <= float(_success_default(env, spec, "max_z_offset", 0.25)))
+        & (
+            z_offset
+            >= float(
+                _success_default(env, spec, "min_z_offset", _CONTAINER_MIN_Z_OFFSET)
+            )
+        )
+        & (
+            z_offset
+            <= float(
+                _success_default(env, spec, "max_z_offset", _CONTAINER_MAX_Z_OFFSET)
+            )
+        )
     )
 
 
@@ -225,10 +275,24 @@ def _object_on_object(env, spec: Mapping[str, Any]) -> torch.Tensor:
     return (
         (
             xy_distance
-            <= float(_success_default(env, spec, "xy_radius", spec.get("radius", 0.08)))
+            <= float(
+                _success_default(
+                    env,
+                    spec,
+                    "xy_radius",
+                    _SUPPORT_XY_RADIUS,
+                    aliases=("radius",),
+                )
+            )
         )
-        & (z_offset >= float(_success_default(env, spec, "min_z_offset", 0.02)))
-        & (z_offset <= float(_success_default(env, spec, "max_z_offset", 0.35)))
+        & (
+            z_offset
+            >= float(_success_default(env, spec, "min_z_offset", _SUPPORT_MIN_Z_OFFSET))
+        )
+        & (
+            z_offset
+            <= float(_success_default(env, spec, "max_z_offset", _SUPPORT_MAX_Z_OFFSET))
+        )
     )
 
 
@@ -237,7 +301,9 @@ def _object_not_fallen(env, spec: Mapping[str, Any]) -> torch.Tensor:
     pose_z_axis = pose[:, :3, 2]
     world_z_axis = torch.tensor([0, 0, 1], dtype=pose.dtype, device=pose.device)
     dot_product = torch.sum(pose_z_axis * world_z_axis, dim=-1).clamp(-1.0, 1.0)
-    return torch.arccos(dot_product) < float(spec.get("max_tilt", torch.pi / 4))
+    return torch.arccos(dot_product) < float(
+        _success_default(env, spec, "max_tilt", _MAX_TILT)
+    )
 
 
 def _object_axis_offset_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
@@ -249,7 +315,7 @@ def _object_axis_offset_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
     axis = _axis_index(str(spec.get("axis", "y")))
     target_value = reference_position[:, axis] + float(spec.get("offset", 0.0))
     return torch.abs(object_position[:, axis] - target_value) <= float(
-        spec.get("tolerance", 0.02)
+        _success_default(env, spec, "tolerance", _AXIS_TOLERANCE)
     )
 
 
@@ -258,7 +324,7 @@ def _object_axis_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
     axis = _axis_index(str(spec.get("axis", "y")))
     target_value = float(spec.get("target", spec.get("value")))
     return torch.abs(object_position[:, axis] - target_value) <= float(
-        spec.get("tolerance", 0.02)
+        _success_default(env, spec, "tolerance", _AXIS_TOLERANCE)
     )
 
 
@@ -275,7 +341,9 @@ def _objects_collinear(env, spec: Mapping[str, Any]) -> torch.Tensor:
     spread = (
         perpendicular_values.max(dim=1).values - perpendicular_values.min(dim=1).values
     )
-    return spread <= float(spec.get("tolerance", 0.02))
+    return spread <= float(
+        _success_default(env, spec, "tolerance", _COLLINEARITY_TOLERANCE)
+    )
 
 
 def _objects_ordered(env, spec: Mapping[str, Any]) -> torch.Tensor:
@@ -289,7 +357,7 @@ def _objects_ordered(env, spec: Mapping[str, Any]) -> torch.Tensor:
     direction = str(spec.get("direction", "ascending")).lower()
     values = positions[:, :, line_axis]
     diffs = values[:, 1:] - values[:, :-1]
-    tolerance = float(spec.get("tolerance", 0.02))
+    tolerance = float(_success_default(env, spec, "tolerance", _ORDERING_TOLERANCE))
     if direction == "ascending":
         return torch.all(diffs >= -tolerance, dim=1)
     if direction == "descending":
@@ -314,7 +382,9 @@ def _object_lifted(env, spec: Mapping[str, Any]) -> torch.Tensor:
         dtype=position.dtype,
         device=position.device,
     )
-    return position[:, 2] >= initial_height + float(spec.get("min_height", 0.1))
+    return position[:, 2] >= initial_height + float(
+        _success_default(env, spec, "min_height", _MINIMUM_LIFT_HEIGHT)
+    )
 
 
 def _object_held_by_gripper(env, spec: Mapping[str, Any]) -> torch.Tensor:
@@ -333,13 +403,20 @@ def _object_held_by_gripper(env, spec: Mapping[str, Any]) -> torch.Tensor:
         eef_pose = eef_pose.expand(object_position.shape[0], -1, -1)
     eef_position = eef_pose[:, :3, 3]
     near = torch.linalg.norm(object_position - eef_position, dim=-1) <= float(
-        spec.get("max_distance", 0.12)
+        _success_default(
+            env,
+            spec,
+            "max_distance",
+            _SINGLE_GRIPPER_MAX_DISTANCE,
+        )
     )
     return near & _gripper_is_closed(env, arm_name, object_position.device)
 
 
 def _object_held_by_both_grippers(env, spec: Mapping[str, Any]) -> torch.Tensor:
-    max_distance = float(spec.get("max_distance", 0.10))
+    max_distance = float(
+        _success_default(env, spec, "max_distance", _DUAL_GRIPPER_MAX_DISTANCE)
+    )
     distances = _gripper_to_object_surface_distances(env, _object_name(spec))
     if distances is None:
         return _constant(env, False)
@@ -359,7 +436,9 @@ def _both_grippers_open(env) -> torch.Tensor:
 
 
 def _grippers_clear_of_object(env, spec: Mapping[str, Any]) -> torch.Tensor:
-    min_distance = float(spec.get("min_distance", 0.05))
+    min_distance = float(
+        _success_default(env, spec, "min_distance", _GRIPPER_CLEAR_MIN_DISTANCE)
+    )
     distances = _gripper_to_object_surface_distances(env, _object_name(spec))
     if distances is None:
         return _constant(env, False)
@@ -378,7 +457,7 @@ def _both_arms_at_initial_qpos(env, spec: Mapping[str, Any]) -> torch.Tensor:
     except (AttributeError, TypeError, ValueError):
         return _constant(env, False)
 
-    tolerance = float(spec.get("tolerance", 0.05))
+    tolerance = float(_success_default(env, spec, "tolerance", _INITIAL_QPOS_TOLERANCE))
     arm_results = []
     for current, initial in (
         (left_current, left_initial),
@@ -498,7 +577,10 @@ def _gripper_is_closed(env, arm_name: str, device: torch.device) -> torch.Tensor
     )
     if close_tensor.shape[0] == 1 and state_tensor.shape[0] > 1:
         close_tensor = close_tensor.expand(state_tensor.shape[0], -1)
-    return torch.linalg.norm(state_tensor - close_tensor, dim=-1) < 1e-3
+    return (
+        torch.linalg.norm(state_tensor - close_tensor, dim=-1)
+        < _GRIPPER_STATE_TOLERANCE
+    )
 
 
 def _gripper_is_open(env, arm_name: str, device: torch.device) -> torch.Tensor:
@@ -522,7 +604,9 @@ def _gripper_is_open(env, arm_name: str, device: torch.device) -> torch.Tensor:
     open_tensor = open_tensor.reshape(1, -1) if open_tensor.ndim == 1 else open_tensor
     if open_tensor.shape[0] == 1 and state_tensor.shape[0] > 1:
         open_tensor = open_tensor.expand(state_tensor.shape[0], -1)
-    return torch.linalg.norm(state_tensor - open_tensor, dim=-1) < 1e-3
+    return (
+        torch.linalg.norm(state_tensor - open_tensor, dim=-1) < _GRIPPER_STATE_TOLERANCE
+    )
 
 
 def _axis_index(axis: str) -> int:
@@ -537,9 +621,19 @@ def _success_default(
     spec: Mapping[str, Any],
     key: str,
     fallback: Any,
+    *,
+    aliases: Sequence[str] = (),
 ) -> Any:
+    """Resolve predicate values before environment and packaged fallbacks.
+
+    Alias fields are part of the predicate itself, so they intentionally take
+    precedence over environment-wide defaults just like the canonical key.
+    """
     if key in spec:
         return spec[key]
+    for alias in aliases:
+        if alias in spec:
+            return spec[alias]
     defaults = getattr(env, "agent_success_defaults", {}) or {}
     if isinstance(defaults, Mapping) and key in defaults:
         return defaults[key]

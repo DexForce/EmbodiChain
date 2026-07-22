@@ -26,6 +26,9 @@ from embodichain.gen_sim.action_agent_pipeline.cli import (
 from embodichain.gen_sim.action_agent_pipeline.cli.run_agent import (
     build_parser as build_run_agent_parser,
 )
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_MAX_EPISODE_STEPS,
+)
 
 
 def test_documented_config_generation_command_remains_accepted(
@@ -97,6 +100,7 @@ def test_documented_config_generation_command_remains_accepted(
     assert received["task_description"] == "将罐头摆成一排"
     assert received["robot_profile"] == "franka"
     assert received["overwrite"] is True
+    assert received["max_episode_steps"] == DEFAULT_MAX_EPISODE_STEPS == 2000
 
 
 def test_documented_run_agent_command_remains_accepted() -> None:

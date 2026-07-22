@@ -21,6 +21,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ARM_ACTION_KEYS,
+    LEFT_ARM_ACTION_KEY,
+    RIGHT_ARM_ACTION_KEY,
+)
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import extract_json_object
 
 __all__ = [
@@ -39,7 +44,7 @@ _RECOVERY_KEYS = {
     "recoveries",
 }
 _COMPILED_BUNDLE_KEYS = {"task_graph", "metadata"}
-_EDGE_KEYS = {"id", "source", "target", "left_arm_action", "right_arm_action"}
+_EDGE_KEYS = {"id", "source", "target", *ARM_ACTION_KEYS}
 
 
 def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
@@ -101,9 +106,11 @@ def compile_agent_graph_spec(
             edge["id"],
             edge["source"],
             edge["target"],
-            left_arm_action=_compile_action(edge.get("left_arm_action"), action_module),
+            left_arm_action=_compile_action(
+                edge.get(LEFT_ARM_ACTION_KEY), action_module
+            ),
             right_arm_action=_compile_action(
-                edge.get("right_arm_action"), action_module
+                edge.get(RIGHT_ARM_ACTION_KEY), action_module
             ),
         )
 
@@ -154,9 +161,9 @@ def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
         if edge_id in edge_ids:
             raise ValueError(f"Duplicate graph edge id '{edge_id}'.")
         edge_ids.add(edge_id)
-        if _is_empty_action_spec(edge.get("left_arm_action")) and _is_empty_action_spec(
-            edge.get("right_arm_action")
-        ):
+        if _is_empty_action_spec(
+            edge.get(LEFT_ARM_ACTION_KEY)
+        ) and _is_empty_action_spec(edge.get(RIGHT_ARM_ACTION_KEY)):
             raise ValueError(f"Nominal edge '{edge_id}' must define an arm action.")
         _validate_edge_action_slots(edge, edge_id)
 
@@ -246,8 +253,8 @@ def _compile_action(spec: Any, action_module: Any) -> Any:
 
 
 def _validate_edge_action_slots(edge: Mapping[str, Any], edge_id: str) -> None:
-    left_action = edge.get("left_arm_action")
-    right_action = edge.get("right_arm_action")
+    left_action = edge.get(LEFT_ARM_ACTION_KEY)
+    right_action = edge.get(RIGHT_ARM_ACTION_KEY)
     left_is_coordinated = _is_coordinated_action_spec(left_action)
     right_is_coordinated = _is_coordinated_action_spec(right_action)
     if left_is_coordinated and right_is_coordinated:
@@ -267,8 +274,8 @@ def _validate_edge_action_slots(edge: Mapping[str, Any], edge_id: str) -> None:
         )
 
     for slot_name, expected_side, action in (
-        ("left_arm_action", "left", left_action),
-        ("right_arm_action", "right", right_action),
+        (LEFT_ARM_ACTION_KEY, "left", left_action),
+        (RIGHT_ARM_ACTION_KEY, "right", right_action),
     ):
         action_side = _action_robot_side(action)
         if action_side is not None and action_side != expected_side:

@@ -23,6 +23,7 @@ from typing import Any
 import math
 import warnings
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import ACTION_AGENT_ENV_ID
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_MAX_EPISODES,
     DEFAULT_MAX_EPISODE_STEPS,
@@ -612,7 +613,7 @@ def _build_basket_bundle(
     sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
-        "id": "AtomicActionsAgent-v3",
+        "id": ACTION_AGENT_ENV_ID,
         "max_episodes": int(max_episodes),
         "max_episode_steps": int(max_episode_steps),
         "env": {
@@ -809,7 +810,7 @@ def _build_arrangement_line_bundle(
     sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
-        "id": "AtomicActionsAgent-v3",
+        "id": ACTION_AGENT_ENV_ID,
         "max_episodes": int(max_episodes),
         "max_episode_steps": int(max_episode_steps),
         "env": {
@@ -1032,7 +1033,7 @@ def _build_stacking_bundle(
     sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
-        "id": "AtomicActionsAgent-v3",
+        "id": ACTION_AGENT_ENV_ID,
         "max_episodes": int(max_episodes),
         "max_episode_steps": int(max_episode_steps),
         "env": {
@@ -1722,7 +1723,7 @@ def _build_relative_placement_bundle(
     sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
 
     gym_config = {
-        "id": "AtomicActionsAgent-v3",
+        "id": ACTION_AGENT_ENV_ID,
         "max_episodes": int(max_episodes),
         "max_episode_steps": int(max_episode_steps),
         "env": {

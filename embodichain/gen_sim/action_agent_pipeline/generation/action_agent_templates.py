@@ -22,6 +22,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    DEFAULT_VIEWER_CAMERA_UID,
+)
+
 __all__ = [
     "make_dual_franka_panda_robot_config",
     "make_dual_ur_dh_pgi_robot_config",
@@ -106,7 +110,13 @@ def make_dual_franka_panda_robot_config(*, robot_init_z: float) -> dict[str, Any
 
 def make_sensor_config() -> list[dict[str, Any]]:
     """Return a fresh default sensor config template."""
-    return _load_template("default_sensors.json")
+    sensors = _load_template("default_sensors.json")
+    if not sensors:
+        raise ValueError("Default sensor template must define a viewer camera.")
+    # The template owns camera geometry, while the cross-stage UID contract is
+    # injected here so runtime observation lookup cannot drift from generation.
+    sensors[0]["uid"] = DEFAULT_VIEWER_CAMERA_UID
+    return sensors
 
 
 def make_light_config() -> dict[str, Any]:

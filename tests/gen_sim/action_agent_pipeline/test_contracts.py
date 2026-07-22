@@ -17,11 +17,17 @@
 from __future__ import annotations
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ACTION_AGENT_ENV_ID,
     AGENT_CONFIG_FILENAME,
+    ARM_ACTION_KEYS,
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,
+    DEFAULT_VIEWER_CAMERA_UID,
+    DUAL_ARM_NAME,
     FAST_GYM_CONFIG_FILENAME,
+    LEFT_ARM_ACTION_KEY,
     MAX_COORDINATED_PAYLOADS,
+    RIGHT_ARM_ACTION_KEY,
     SUCCESS_TERM_TYPES,
     TASK_GRAPH_FILENAME,
     TASK_PROMPT_FILENAME,
@@ -62,6 +68,15 @@ def test_domain_contract_contains_supported_pipeline_values() -> None:
     assert "arrangement_line" in TASK_ROUTES
     assert MAX_COORDINATED_PAYLOADS == 4
     assert SuccessTerm.OBJECTS_ORDERED in SUCCESS_TERM_TYPES
+
+
+def test_runtime_and_graph_protocol_values_remain_backward_compatible() -> None:
+    assert ACTION_AGENT_ENV_ID == "AtomicActionsAgent-v3"
+    assert DEFAULT_VIEWER_CAMERA_UID == "cam_high"
+    assert DUAL_ARM_NAME == "dual_arm"
+    assert LEFT_ARM_ACTION_KEY == "left_arm_action"
+    assert RIGHT_ARM_ACTION_KEY == "right_arm_action"
+    assert ARM_ACTION_KEYS == {LEFT_ARM_ACTION_KEY, RIGHT_ARM_ACTION_KEY}
 
 
 def test_task4_arrangement_route_stays_compatible_with_shared_contract() -> None:

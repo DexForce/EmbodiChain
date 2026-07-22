@@ -156,3 +156,25 @@ success:
   absolute_axis_tolerance: 0.05
   relative_axis_tolerance: 0.05
   relative_zero_offset_tolerance: 0.06
+
+# These values preserve the historical behavior of incomplete or hand-written
+# success specs. Generated configs normally provide explicit predicate values.
+success_evaluator_fallbacks:
+  position_tolerance: 0.05
+  xy_tolerance: 0.05
+  container_xy_radius: 0.1
+  container_min_z_offset: -0.03
+  container_max_z_offset: 0.25
+  support_xy_radius: 0.08
+  support_min_z_offset: 0.02
+  support_max_z_offset: 0.35
+  max_tilt_degrees: 45.0
+  axis_tolerance: 0.02
+  collinearity_tolerance: 0.02
+  ordering_tolerance: 0.02
+  minimum_lift_height: 0.1
+  single_gripper_max_distance: 0.12
+  dual_gripper_max_distance: 0.10
+  gripper_clear_min_distance: 0.05
+  initial_qpos_tolerance: 0.05
+  gripper_state_tolerance: 0.001

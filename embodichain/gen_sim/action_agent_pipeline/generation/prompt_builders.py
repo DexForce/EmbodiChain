@@ -26,6 +26,9 @@ from typing import Any, Protocol
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,
+    DUAL_ARM_NAME,
+    LEFT_ARM_ACTION_KEY,
+    RIGHT_ARM_ACTION_KEY,
     TASK_GRAPH_FILENAME,
     TASK_PROMPT_FILENAME,
 )
@@ -1084,7 +1087,7 @@ def make_relative_task_prompt(
 
     active_arm = f"{spec.active_side}_arm"
     inactive_slot = (
-        "right_arm_action" if spec.active_side == "left" else "left_arm_action"
+        RIGHT_ARM_ACTION_KEY if spec.active_side == "left" else LEFT_ARM_ACTION_KEY
     )
     active_slot = f"{spec.active_side}_arm_action"
     action_sketch = _format_action_sketch(spec.action_sketch)
@@ -1189,7 +1192,7 @@ def _single_relative_graph_steps(
 ) -> list[NominalGraphStep]:
     active_arm = f"{spec.active_side}_arm"
     inactive_slot = (
-        "right_arm_action" if spec.active_side == "left" else "left_arm_action"
+        RIGHT_ARM_ACTION_KEY if spec.active_side == "left" else LEFT_ARM_ACTION_KEY
     )
     active_slot = f"{spec.active_side}_arm_action"
     pick_spec = _format_pick_up_spec(
@@ -1385,7 +1388,7 @@ def _coordinated_pickment_graph_steps(
             _nominal_step(
                 f"Coordinated lift and transport `{carrier.moved_runtime_uid}`",
                 {
-                    "left_arm_action": _format_coordinated_pickment_spec(
+                    LEFT_ARM_ACTION_KEY: _format_coordinated_pickment_spec(
                         carrier,
                         payload_runtime_uids=[
                             payload.moved_runtime_uid for payload in payloads
@@ -1393,7 +1396,7 @@ def _coordinated_pickment_graph_steps(
                         target_hover=True,
                         hold_steps=20,
                     ),
-                    "right_arm_action": None,
+                    RIGHT_ARM_ACTION_KEY: None,
                 },
             )
         )
@@ -1404,13 +1407,13 @@ def _coordinated_pickment_graph_steps(
                 _nominal_step(
                     f"Lower `{carrier.moved_runtime_uid}` vertically onto the support",
                     {
-                        "left_arm_action": _format_relative_eef_move_spec(
+                        LEFT_ARM_ACTION_KEY: _format_relative_eef_move_spec(
                             "left_arm",
                             offset=[0.0, 0.0, -float(carrier.hover_height)],
                             sample_interval=50,
                             post_hold_steps=20,
                         ),
-                        "right_arm_action": _format_relative_eef_move_spec(
+                        RIGHT_ARM_ACTION_KEY: _format_relative_eef_move_spec(
                             "right_arm",
                             offset=[0.0, 0.0, -float(carrier.hover_height)],
                             sample_interval=50,
@@ -1421,10 +1424,10 @@ def _coordinated_pickment_graph_steps(
                 _nominal_step(
                     f"Release `{carrier.moved_runtime_uid}` from both grippers",
                     {
-                        "left_arm_action": _format_gripper_spec(
+                        LEFT_ARM_ACTION_KEY: _format_gripper_spec(
                             "left_arm", "open", sample_interval=10, post_hold_steps=20
                         ),
-                        "right_arm_action": _format_gripper_spec(
+                        RIGHT_ARM_ACTION_KEY: _format_gripper_spec(
                             "right_arm", "open", sample_interval=10, post_hold_steps=20
                         ),
                     },
@@ -1432,8 +1435,10 @@ def _coordinated_pickment_graph_steps(
                 _nominal_step(
                     "Retreat both empty arms vertically",
                     {
-                        "left_arm_action": _format_empty_hand_retreat_spec("left_arm"),
-                        "right_arm_action": _format_empty_hand_retreat_spec(
+                        LEFT_ARM_ACTION_KEY: _format_empty_hand_retreat_spec(
+                            "left_arm"
+                        ),
+                        RIGHT_ARM_ACTION_KEY: _format_empty_hand_retreat_spec(
                             "right_arm"
                         ),
                     },
@@ -1441,10 +1446,10 @@ def _coordinated_pickment_graph_steps(
                 _nominal_step(
                     "Return both empty arms to their initial poses",
                     {
-                        "left_arm_action": _format_initial_qpos_spec(
+                        LEFT_ARM_ACTION_KEY: _format_initial_qpos_spec(
                             "left_arm", sample_interval=30
                         ),
-                        "right_arm_action": _format_initial_qpos_spec(
+                        RIGHT_ARM_ACTION_KEY: _format_initial_qpos_spec(
                             "right_arm", sample_interval=30
                         ),
                     },
@@ -1456,20 +1461,20 @@ def _coordinated_pickment_graph_steps(
         _nominal_step(
             f"Coordinated pick and move `{spec.moved_runtime_uid}`",
             {
-                "left_arm_action": _format_coordinated_pickment_spec(spec),
-                "right_arm_action": None,
+                LEFT_ARM_ACTION_KEY: _format_coordinated_pickment_spec(spec),
+                RIGHT_ARM_ACTION_KEY: None,
             },
         ),
         _nominal_step(
             f"Release `{spec.moved_runtime_uid}` from both grippers",
             {
-                "left_arm_action": _format_gripper_spec(
+                LEFT_ARM_ACTION_KEY: _format_gripper_spec(
                     "left_arm",
                     "open",
                     sample_interval=10,
                     post_hold_steps=20,
                 ),
-                "right_arm_action": _format_gripper_spec(
+                RIGHT_ARM_ACTION_KEY: _format_gripper_spec(
                     "right_arm",
                     "open",
                     sample_interval=10,
@@ -1480,11 +1485,11 @@ def _coordinated_pickment_graph_steps(
         _nominal_step(
             "Return both empty arms to their initial poses",
             {
-                "left_arm_action": _format_initial_qpos_spec(
+                LEFT_ARM_ACTION_KEY: _format_initial_qpos_spec(
                     "left_arm",
                     sample_interval=30,
                 ),
-                "right_arm_action": _format_initial_qpos_spec(
+                RIGHT_ARM_ACTION_KEY: _format_initial_qpos_spec(
                     "right_arm",
                     sample_interval=30,
                 ),
@@ -1675,7 +1680,9 @@ def _serial_relative_edge_blocks(
         active_arm = f"{placement.active_side}_arm"
         active_slot = f"{placement.active_side}_arm_action"
         inactive_slot = (
-            "right_arm_action" if placement.active_side == "left" else "left_arm_action"
+            RIGHT_ARM_ACTION_KEY
+            if placement.active_side == "left"
+            else LEFT_ARM_ACTION_KEY
         )
         edge_blocks.append(
             (
@@ -1927,7 +1934,7 @@ def _nominal_step(
     title: str,
     actions: Mapping[str, str | Mapping[str, Any] | None],
 ) -> NominalGraphStep:
-    unknown_slots = set(actions) - {"left_arm_action", "right_arm_action"}
+    unknown_slots = set(actions) - {LEFT_ARM_ACTION_KEY, RIGHT_ARM_ACTION_KEY}
     if unknown_slots:
         raise ValueError(
             "Nominal graph actions contain unsupported slots: "
@@ -1935,8 +1942,8 @@ def _nominal_step(
         )
     return NominalGraphStep(
         semantic=title,
-        left_arm_action=_action_dict(actions.get("left_arm_action")),
-        right_arm_action=_action_dict(actions.get("right_arm_action")),
+        left_arm_action=_action_dict(actions.get(LEFT_ARM_ACTION_KEY)),
+        right_arm_action=_action_dict(actions.get(RIGHT_ARM_ACTION_KEY)),
     )
 
 
@@ -2558,44 +2565,44 @@ def make_basket_task_graph(
         _nominal_step(
             "Pick up both target objects simultaneously",
             {
-                "left_arm_action": left_pick_spec,
-                "right_arm_action": right_pick_spec,
+                LEFT_ARM_ACTION_KEY: left_pick_spec,
+                RIGHT_ARM_ACTION_KEY: right_pick_spec,
             },
         ),
         _nominal_step(
             "Move the held left target object above the container while the "
             "right arm keeps holding its target",
             {
-                "left_arm_action": left_high_spec,
-                "right_arm_action": right_close_spec,
+                LEFT_ARM_ACTION_KEY: left_high_spec,
+                RIGHT_ARM_ACTION_KEY: right_close_spec,
             },
         ),
         _nominal_step(
             "Place the held left target object inside the container",
             {
-                "left_arm_action": left_place_spec,
-                "right_arm_action": right_close_spec,
+                LEFT_ARM_ACTION_KEY: left_place_spec,
+                RIGHT_ARM_ACTION_KEY: right_close_spec,
             },
         ),
         _nominal_step(
             "Return the left arm to initial while staging the held right target",
             {
-                "left_arm_action": left_initial_spec,
-                "right_arm_action": right_high_spec,
+                LEFT_ARM_ACTION_KEY: left_initial_spec,
+                RIGHT_ARM_ACTION_KEY: right_high_spec,
             },
         ),
         _nominal_step(
             "Place the held right target object inside the container",
             {
-                "left_arm_action": None,
-                "right_arm_action": right_place_spec,
+                LEFT_ARM_ACTION_KEY: None,
+                RIGHT_ARM_ACTION_KEY: right_place_spec,
             },
         ),
         _nominal_step(
             "Return the right arm to its initial pose after release",
             {
-                "left_arm_action": None,
-                "right_arm_action": right_initial_spec,
+                LEFT_ARM_ACTION_KEY: None,
+                RIGHT_ARM_ACTION_KEY: right_initial_spec,
             },
         ),
     ]
@@ -2837,7 +2844,7 @@ def _format_coordinated_pickment_spec(
     return _compact_json(
         {
             "atomic_action_class": "CoordinatedPickment",
-            "robot_name": "dual_arm",
+            "robot_name": DUAL_ARM_NAME,
             "control": "arm",
             "target_object": target_object,
             "target_object_pose": target_object_pose,

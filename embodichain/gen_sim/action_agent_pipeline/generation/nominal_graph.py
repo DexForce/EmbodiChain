@@ -24,6 +24,11 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    LEFT_ARM_ACTION_KEY,
+    RIGHT_ARM_ACTION_KEY,
+)
+
 __all__ = [
     "NominalGraphStep",
     "build_nominal_task_graph",
@@ -74,8 +79,8 @@ def build_nominal_task_graph(
                 "id": f"e{index:02d}_{slug}",
                 "source": previous_node_id,
                 "target": target_node_id,
-                "left_arm_action": _copy_action(step.left_arm_action),
-                "right_arm_action": _copy_action(step.right_arm_action),
+                LEFT_ARM_ACTION_KEY: _copy_action(step.left_arm_action),
+                RIGHT_ARM_ACTION_KEY: _copy_action(step.right_arm_action),
             }
         )
         previous_node_id = target_node_id

@@ -29,10 +29,13 @@ from tqdm import tqdm
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
     ATOMIC_ACTION_CLASSES as SUPPORTED_ATOMIC_ACTION_CLASSES,
+    DUAL_ARM_NAME,
+    LEFT_ARM_ACTION_KEY,
     MAX_COORDINATED_PAYLOADS as _MAX_COORDINATED_PAYLOADS,
     OBJECT_ORIENTATION_AXES as SUPPORTED_OBJECT_ORIENTATION_AXES,
     OBJECT_ORIENTATION_GOALS as SUPPORTED_OBJECT_ORIENTATION_GOALS,
     POSE_REFERENCES as SUPPORTED_POSE_REFERENCES,
+    RIGHT_ARM_ACTION_KEY,
     SUPPORTED_CONTROLS,
 )
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
@@ -1010,11 +1013,11 @@ def build_parallel_action_stream(
 
     left_action_np = _as_2d_action(
         _executed_action_array(left_arm_action),
-        "left_arm_action",
+        LEFT_ARM_ACTION_KEY,
     )
     right_action_np = _as_2d_action(
         _executed_action_array(right_arm_action),
-        "right_arm_action",
+        RIGHT_ARM_ACTION_KEY,
     )
     arm_actions = {"left": left_action_np, "right": right_action_np}
 
@@ -1584,9 +1587,9 @@ def _dual_arm_control_part(
         env,
         right_arm_part,
     )
-    if "dual_arm" in control_parts:
-        _sync_control_part_joint_ids(env, "dual_arm", expected)
-        return "dual_arm"
+    if DUAL_ARM_NAME in control_parts:
+        _sync_control_part_joint_ids(env, DUAL_ARM_NAME, expected)
+        return DUAL_ARM_NAME
     for name, _ in control_parts.items():
         if list(env.robot.get_joint_ids(name=name)) == expected:
             return str(name)
@@ -1594,9 +1597,9 @@ def _dual_arm_control_part(
         left_joint_names = list(control_parts.get(left_arm_part, []))
         right_joint_names = list(control_parts.get(right_arm_part, []))
         if left_joint_names and right_joint_names:
-            control_parts["dual_arm"] = left_joint_names + right_joint_names
-            _sync_control_part_joint_ids(env, "dual_arm", expected)
-            return "dual_arm"
+            control_parts[DUAL_ARM_NAME] = left_joint_names + right_joint_names
+            _sync_control_part_joint_ids(env, DUAL_ARM_NAME, expected)
+            return DUAL_ARM_NAME
     raise ValueError(
         "CoordinatedPickment requires a dual-arm control part containing both "
         f"{left_arm_part!r} and {right_arm_part!r}."

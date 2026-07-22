@@ -27,15 +27,20 @@ from __future__ import annotations
 from typing import Final
 
 __all__ = [
+    "ACTION_AGENT_ENV_ID",
     "AGENT_CONFIG_FILENAME",
+    "ARM_ACTION_KEYS",
     "ATOM_ACTIONS_FILENAME",
     "ATOMIC_ACTION_CLASSES",
     "BASIC_BACKGROUND_FILENAME",
     "COMPILED_GRAPH_FILENAME",
     "CONTROL_ARM",
     "CONTROL_HAND",
+    "DEFAULT_VIEWER_CAMERA_UID",
+    "DUAL_ARM_NAME",
     "FAST_GYM_CONFIG_FILENAME",
     "LEFT_ARM_NAME",
+    "LEFT_ARM_ACTION_KEY",
     "MANIPULATION_INTENTS",
     "MAX_COORDINATED_PAYLOADS",
     "OBJECT_ORIENTATION_AXES",
@@ -43,6 +48,7 @@ __all__ = [
     "POSE_REFERENCES",
     "RELATIVE_RELATIONS",
     "RIGHT_ARM_NAME",
+    "RIGHT_ARM_ACTION_KEY",
     "ROBOTIQ_ARG2F_140_CLOSE_QPOS",
     "ROBOTIQ_ARG2F_140_OPEN_QPOS",
     "SIDE_RELATIONS",
@@ -71,8 +77,17 @@ ATOM_ACTIONS_FILENAME: Final = "atom_actions.txt"
 TASK_GRAPH_CACHE_FILENAME: Final = "agent_task_graph.json"
 COMPILED_GRAPH_FILENAME: Final = "agent_compiled_graph.json"
 
+# These identifiers cross Gym registration, generated configs, sensor templates,
+# graph generation, and runtime dispatch. They must change as one protocol.
+ACTION_AGENT_ENV_ID: Final = "AtomicActionsAgent-v3"
+DEFAULT_VIEWER_CAMERA_UID: Final = "cam_high"
+
 LEFT_ARM_NAME: Final = "left_arm"
 RIGHT_ARM_NAME: Final = "right_arm"
+DUAL_ARM_NAME: Final = "dual_arm"
+LEFT_ARM_ACTION_KEY: Final = "left_arm_action"
+RIGHT_ARM_ACTION_KEY: Final = "right_arm_action"
+ARM_ACTION_KEYS: Final = frozenset({LEFT_ARM_ACTION_KEY, RIGHT_ARM_ACTION_KEY})
 
 # Keep the Robotiq fallback in one place. Robot profiles remain authoritative;
 # the environment uses these values only for legacy configs without profile data.

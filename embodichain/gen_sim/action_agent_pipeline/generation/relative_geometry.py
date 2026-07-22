@@ -22,6 +22,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
@@ -1197,7 +1198,7 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
             "moved_object": spec.moved_runtime_uid,
             "reference_object": spec.reference_runtime_uid,
             "relation": spec.relation,
-            "active_arm": "dual_arm",
+            "active_arm": DUAL_ARM_NAME,
             "release_offset": spec.release_offset,
             "target_position": spec.release_position,
             "orientation_goal": spec.orientation_goal,

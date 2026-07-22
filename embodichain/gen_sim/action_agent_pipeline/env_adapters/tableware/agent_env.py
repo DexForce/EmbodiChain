@@ -23,8 +23,13 @@ from typing import Any
 import torch
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ACTION_AGENT_ENV_ID,
+    DEFAULT_VIEWER_CAMERA_UID,
     ROBOTIQ_ARG2F_140_CLOSE_QPOS as _ROBOTIQ_ARG2F_140_CLOSE_QPOS,
     ROBOTIQ_ARG2F_140_OPEN_QPOS as _ROBOTIQ_ARG2F_140_OPEN_QPOS,
+)
+from embodichain.gen_sim.action_agent_pipeline.defaults import (
+    DEFAULT_MAX_EPISODE_STEPS,
 )
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
@@ -47,7 +52,7 @@ _OPTIONAL_AGENT_KWARGS = frozenset({"agent_config_path"})
 _AGENT_KWARGS = _REQUIRED_AGENT_KWARGS | _OPTIONAL_AGENT_KWARGS
 
 
-@register_env("AtomicActionsAgent-v3", max_episode_steps=600)
+@register_env(ACTION_AGENT_ENV_ID, max_episode_steps=DEFAULT_MAX_EPISODE_STEPS)
 class AgenticGenSimEnv(EmbodiedEnv):
     """Config-driven agent environment for atomic-action tasks."""
 
@@ -371,7 +376,35 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     def get_obs_for_agent(self):
         obs = self.get_obs()
-        rgb = obs["sensor"]["cam_high"]["color"]
+        camera_uid = str(
+            getattr(self, "viewer_camera_uid", DEFAULT_VIEWER_CAMERA_UID)
+            or DEFAULT_VIEWER_CAMERA_UID
+        )
+        sensor_observations = obs.get("sensor", {})
+        if (
+            not isinstance(sensor_observations, Mapping)
+            or camera_uid not in sensor_observations
+        ):
+            available = (
+                sorted(str(uid) for uid in sensor_observations)
+                if isinstance(sensor_observations, Mapping)
+                else []
+            )
+            raise KeyError(
+                f"Viewer camera {camera_uid!r} is unavailable; available sensor "
+                f"UIDs: {available}."
+            )
+        camera_observation = sensor_observations[camera_uid]
+        if (
+            not isinstance(camera_observation, Mapping)
+            or "color" not in camera_observation
+        ):
+            raise KeyError(
+                f"Viewer camera {camera_uid!r} must provide a 'color' observation."
+            )
+        # The generated viewer_camera_uid extension selects the same sensor used
+        # for the agent's visual prompt, rather than assuming a template UID.
+        rgb = camera_observation["color"]
         if rgb.ndim == 4 and rgb.shape[0] > 1:
             rgb = rgb[0]
         else:

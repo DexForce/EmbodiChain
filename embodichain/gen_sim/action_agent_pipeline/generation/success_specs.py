@@ -19,7 +19,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import SuccessTerm
+from embodichain.gen_sim.action_agent_pipeline.contracts import (
+    ACTION_AGENT_ENV_ID,
+    DEFAULT_VIEWER_CAMERA_UID,
+    SuccessTerm,
+)
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
@@ -89,7 +93,7 @@ def _make_extensions_config(
     return {
         **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
-        "viewer_camera_uid": "cam_high",
+        "viewer_camera_uid": DEFAULT_VIEWER_CAMERA_UID,
         "agent_success": {
             "op": "all",
             "terms": [
@@ -131,7 +135,7 @@ def _make_relative_extensions_config(
     extensions = {
         **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
-        "viewer_camera_uid": "cam_high",
+        "viewer_camera_uid": DEFAULT_VIEWER_CAMERA_UID,
         "agent_success": _make_relative_success_spec(
             spec,
             side_relation_xy_offsets=side_relation_xy_offsets,
@@ -152,7 +156,7 @@ def _make_arrangement_extensions_config(
     return {
         **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
-        "viewer_camera_uid": "cam_high",
+        "viewer_camera_uid": DEFAULT_VIEWER_CAMERA_UID,
         "agent_success": _make_arrangement_success_spec(spec),
     }
 
@@ -166,7 +170,7 @@ def _make_stacking_extensions_config(
     return {
         **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
-        "viewer_camera_uid": "cam_high",
+        "viewer_camera_uid": DEFAULT_VIEWER_CAMERA_UID,
         "agent_success": _make_stacking_success_spec(spec),
     }
 
@@ -532,8 +536,8 @@ def _relative_xy_success_terms(
 
 def _validate_bundle(bundle: Mapping[str, Any], roles: _BasketTaskRoles) -> None:
     gym_config = bundle["gym_config"]
-    if gym_config.get("id") != "AtomicActionsAgent-v3":
-        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("id") != ACTION_AGENT_ENV_ID:
+        raise ValueError(f"Generated gym config must use {ACTION_AGENT_ENV_ID}.")
     _validate_robot_control_parts(gym_config)
 
     rigid_uids = {obj["uid"] for obj in gym_config.get("rigid_object", [])}
@@ -566,8 +570,8 @@ def _validate_relative_bundle(
     spec: _RelativePlacementSpec,
 ) -> None:
     gym_config = bundle["gym_config"]
-    if gym_config.get("id") != "AtomicActionsAgent-v3":
-        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("id") != ACTION_AGENT_ENV_ID:
+        raise ValueError(f"Generated gym config must use {ACTION_AGENT_ENV_ID}.")
     _validate_robot_control_parts(gym_config)
 
     rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
@@ -612,8 +616,8 @@ def _validate_arrangement_bundle(
     spec: _ArrangementLineSpec,
 ) -> None:
     gym_config = bundle["gym_config"]
-    if gym_config.get("id") != "AtomicActionsAgent-v3":
-        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("id") != ACTION_AGENT_ENV_ID:
+        raise ValueError(f"Generated gym config must use {ACTION_AGENT_ENV_ID}.")
     _validate_robot_control_parts(gym_config)
 
     rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]
@@ -647,8 +651,8 @@ def _validate_stacking_bundle(
     spec: _StackingSpec,
 ) -> None:
     gym_config = bundle["gym_config"]
-    if gym_config.get("id") != "AtomicActionsAgent-v3":
-        raise ValueError("Generated gym config must use AtomicActionsAgent-v3.")
+    if gym_config.get("id") != ACTION_AGENT_ENV_ID:
+        raise ValueError(f"Generated gym config must use {ACTION_AGENT_ENV_ID}.")
     _validate_robot_control_parts(gym_config)
 
     rigid_uid_list = [obj["uid"] for obj in gym_config.get("rigid_object", [])]

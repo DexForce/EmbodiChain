@@ -1,7 +1,6 @@
 [
   {
     "sensor_type": "Camera",
-    "uid": "cam_high",
     "width": 960,
     "height": 540,
     "intrinsics": [420, 420, 480, 270],
