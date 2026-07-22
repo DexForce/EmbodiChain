@@ -25,6 +25,9 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
     evaluate_configured_success,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.pytorch_solver_compat import (
+    install_action_agent_pytorch_solver_compat,
+)
 from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
@@ -50,6 +53,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
         self._agent_runtime_state_ready = False
         env_kwargs, agent_kwargs = _split_env_and_agent_kwargs(kwargs)
         super().__init__(cfg, **env_kwargs)
+        install_action_agent_pytorch_solver_compat(self.robot)
         if bool(getattr(self, "ignore_terminations_during_agent", False)):
             self.cfg.ignore_terminations = True
         self._init_agents(**agent_kwargs)
