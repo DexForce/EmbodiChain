@@ -22,7 +22,6 @@ The following modules are available in the core ``embodichain`` framework:
 .. autosummary::
    :toctree: embodichain
 
-   agents
    data
    data_pipeline
    lab

@@ -19,7 +19,6 @@ from __future__ import annotations
 # Tableware task environments
 from embodichain.lab.gym.envs.tasks.tableware.pour_water.pour_water import (
     PourWaterEnv,
-    PourWaterAgentEnv,
 )
 from embodichain.lab.gym.envs.tasks.tableware.scoop_ice import ScoopIce
 from embodichain.lab.gym.envs.tasks.tableware.stack_blocks_two import StackBlocksTwoEnv
@@ -40,7 +39,6 @@ from embodichain.lab.gym.envs.tasks.tableware.match_object_container import (
 )
 from embodichain.lab.gym.envs.tasks.tableware.rearrangement import (
     RearrangementEnv,
-    RearrangementAgentEnv,
 )
 
 # Reinforcement learning environments
@@ -52,7 +50,6 @@ from embodichain.lab.gym.envs.tasks.special.simple_task import SimpleTaskEnv
 
 __all__ = [
     "PourWaterEnv",
-    "PourWaterAgentEnv",
     "ScoopIce",
     "StackBlocksTwoEnv",
     "BlocksRankingRGBEnv",
@@ -61,7 +58,6 @@ __all__ = [
     "StackCupsEnv",
     "MatchObjectContainerEnv",
     "RearrangementEnv",
-    "RearrangementAgentEnv",
     "PushCubeEnv",
     "CartPoleEnv",
     "SimpleTaskEnv",
