@@ -28,7 +28,7 @@ __all__ = ["download_neural_planner_checkpoint"]
 
 
 def download_neural_planner_checkpoint(
-    repo_id: str = "dexforce/neural_motion_generator",
+    repo_id: str = "DexForceAI/neural_motion_generator",
     filename: str = "franka/franka.pt",
     token: str | None = None,
     endpoint: str = _HF_ENDPOINT,
@@ -83,7 +83,7 @@ def download_neural_planner_checkpoint(
             f"Failed to download '{filename}' from '{repo_id}'.\n"
             "The repository is gated and requires an authenticated HuggingFace account.\n"
             "To fix this:\n"
-            "  1. Accept the model license at https://huggingface.co/dexforce/neural_motion_generator\n"
+            "  1. Accept the model license at https://huggingface.co/DexForceAI/neural_motion_generator\n"
             "  2. Create an access token at https://huggingface.co/settings/tokens\n"
             "  3. Export the token:  export HF_TOKEN=<your_token>\n"
             "     or run:            huggingface-cli login\n"
