@@ -110,7 +110,30 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _modify_gym_config_for_run_agent(gym_config: dict[str, Any]) -> None:
+    _normalize_legacy_dataset_functor_config(gym_config)
     _add_vectorized_reset_randomization(gym_config)
+
+
+def _normalize_legacy_dataset_functor_config(gym_config: dict[str, Any]) -> None:
+    """Move legacy manager-only dataset options out of functor parameters."""
+    env_config = gym_config.get("env")
+    if not isinstance(env_config, dict):
+        return
+
+    dataset_config = env_config.get("dataset")
+    if not isinstance(dataset_config, dict):
+        return
+
+    for functor_config in dataset_config.values():
+        if not isinstance(functor_config, dict) or "func" not in functor_config:
+            continue
+
+        params = functor_config.get("params")
+        if not isinstance(params, dict) or "save_failed_episodes" not in params:
+            continue
+
+        legacy_value = params.pop("save_failed_episodes")
+        functor_config.setdefault("save_failed_episodes", legacy_value)
 
 
 def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:

@@ -1156,6 +1156,7 @@ def _make_stacking_dataset_config(
         "lerobot": {
             "func": "LeRobotRecorder",
             "mode": "save",
+            "save_failed_episodes": True,
             "params": {
                 "robot_meta": {
                     "robot_type": robot_profile.robot_meta_type,
@@ -1172,7 +1173,6 @@ def _make_stacking_dataset_config(
                     "task_description": spec.task_description,
                     "data_type": "sim",
                 },
-                "save_failed_episodes": True,
                 "use_videos": True,
             },
         }
