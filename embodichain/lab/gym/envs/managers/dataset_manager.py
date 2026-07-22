@@ -33,9 +33,6 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
-_MANAGER_ONLY_PARAMS = frozenset({"save_failed_episodes"})
-
-
 class DatasetManager(ManagerBase):
     """Manager for orchestrating dataset collection and saving using functors.
 
@@ -59,6 +56,7 @@ class DatasetManager(ManagerBase):
         >>>     dataset: dict = {
         >>>         "lerobot": DatasetFunctorCfg(
         >>>             func=LeRobotRecorder,
+        >>>             save_failed_episodes=True,
         >>>             params={
         >>>                 "robot_meta": {...},
         >>>                 "instruction": {"lang": "pick and place"},
@@ -187,9 +185,8 @@ class DatasetManager(ManagerBase):
     def save_failed_episodes(self) -> bool:
         """Whether any configured dataset recorder should keep failed episodes."""
         return any(
-            bool(functor_cfg.params.get("save_failed_episodes", False))
-            for mode_cfgs in self._mode_functor_cfgs.values()
-            for functor_cfg in mode_cfgs
+            functor_cfg.save_failed_episodes
+            for functor_cfg in self._mode_functor_cfgs.get("save", [])
         )
 
     """
@@ -239,15 +236,10 @@ class DatasetManager(ManagerBase):
 
         # iterate over all the dataset functors for this mode
         for functor_cfg in self._mode_functor_cfgs[mode]:
-            functor_params = {
-                key: value
-                for key, value in functor_cfg.params.items()
-                if key not in _MANAGER_ONLY_PARAMS
-            }
             functor_cfg.func(
                 self._env,
                 env_ids,
-                **functor_params,
+                **functor_cfg.params,
             )
 
     def finalize(self) -> Optional[str]:

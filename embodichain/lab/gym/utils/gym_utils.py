@@ -515,6 +515,9 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
                 dataset = DatasetFunctorCfg(
                     func=dataset_func,
                     mode=dataset_params_modified["mode"],
+                    save_failed_episodes=dataset_params_modified.get(
+                        "save_failed_episodes", False
+                    ),
                     params=dataset_params_modified["params"],
                 )
 
