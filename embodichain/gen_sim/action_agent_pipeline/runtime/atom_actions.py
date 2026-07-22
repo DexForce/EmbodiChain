@@ -4246,17 +4246,6 @@ def _normalize_vector(vector: torch.Tensor) -> torch.Tensor:
     return vector / norm
 
 
-def _ensure_pose_tensor(pose, device) -> torch.Tensor:
-    pose = torch.as_tensor(pose, dtype=torch.float32, device=device)
-    if pose.shape == (1, 4, 4):
-        pose = pose.squeeze(0)
-    if pose.shape != (4, 4):
-        raise ValueError(
-            f"Pose target must have shape (4, 4), got {tuple(pose.shape)}."
-        )
-    return pose.clone()
-
-
 def _ensure_batched_pose_tensor(pose, device) -> torch.Tensor:
     """Ensure a pose tensor has shape (n_envs, 4, 4)."""
     pose = torch.as_tensor(pose, dtype=torch.float32, device=device)
@@ -4924,18 +4913,6 @@ def _sync_agent_states_from_coordinated_action(env, action_np) -> None:
                 ),
                 is_left=is_left,
             )
-
-
-def _current_arm_qpos(env, is_left: bool, arm_joints: list[int]) -> torch.Tensor:
-    source = env.left_arm_current_qpos if is_left else env.right_arm_current_qpos
-    qpos = torch.as_tensor(
-        source,
-        dtype=torch.float32,
-        device=env.robot.device,
-    )
-    if qpos.ndim == 1:
-        qpos = qpos.unsqueeze(0)
-    return qpos
 
 
 def _state_to_hand_qpos(state, hand_dof: int, device):

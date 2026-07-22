@@ -59,20 +59,10 @@ from embodichain.utils.logger import log_warning
 __all__ = [
     "_build_stacking_spec_with_llm",
     "_call_stacking_task_llm",
-    "_is_stacking_task_description",
     "_make_stacking_summary",
     "_with_stacking_generated_targets",
 ]
 
-_STACKING_KEYWORDS = (
-    "stack",
-    "stacking",
-    "pile",
-    "叠",
-    "叠放",
-    "堆叠",
-    "摞",
-)
 _SUPPORTED_STACK_MODES = {"on_top", "nested"}
 _SUPPORTED_ORDER_BY = {"explicit", "size"}
 _STACKING_ANCHOR = "table_center"
@@ -83,11 +73,6 @@ _STACK_CLEARANCE = float(_DEFAULTS["clearance"])
 _NESTED_RELEASE_Z_OFFSET = float(_DEFAULTS["nested_release_z_offset"])
 _ANCHOR_OFFSET = float(_DEFAULTS["anchor_offset"])
 _ANCHOR_CLEARANCE_RADIUS = float(_DEFAULTS["anchor_clearance_radius"])
-
-
-def _is_stacking_task_description(task_description: str) -> bool:
-    text = task_description.strip().lower()
-    return any(keyword in text for keyword in _STACKING_KEYWORDS)
 
 
 def _build_stacking_spec_with_llm(

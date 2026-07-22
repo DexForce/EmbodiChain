@@ -61,29 +61,10 @@ __all__ = [
     "_arrangement_line_slot_positions",
     "_build_arrangement_line_spec_with_llm",
     "_call_arrangement_task_llm",
-    "_is_arrangement_task_description",
     "_make_arrangement_scene_summary",
     "_with_arrangement_generated_pose_targets",
-    "_with_arrangement_generated_z_targets",
 ]
 
-_ARRANGEMENT_KEYWORDS = (
-    "arrange",
-    "sort",
-    "order",
-    "line",
-    "left to right",
-    "left-to-right",
-    "从左到右",
-    "由大到小",
-    "从大到小",
-    "由小到大",
-    "从小到大",
-    "排序",
-    "排列",
-    "排成",
-    "一行",
-)
 _DEFAULTS = generation_defaults_section("arrangement")
 _DEFAULT_RELEASE_Z = float(_DEFAULTS["release_z"])
 _SLOT_MARGIN = float(_DEFAULTS["slot_margin"])
@@ -134,11 +115,6 @@ _COLOR_NAMES = (
     "black",
     "white",
 )
-
-
-def _is_arrangement_task_description(task_description: str) -> bool:
-    text = task_description.strip().lower()
-    return any(keyword in text for keyword in _ARRANGEMENT_KEYWORDS)
 
 
 def _build_arrangement_line_spec_with_llm(
@@ -754,13 +730,6 @@ def _arrangement_config_orientation(
     if _mesh_config_has_distinct_xy_axis(obj_config):
         return "axis_align", orientation_axis
     return "preserve", "none"
-
-
-def _with_arrangement_generated_z_targets(
-    spec: _ArrangementLineSpec,
-    gym_config: Mapping[str, Any],
-) -> _ArrangementLineSpec:
-    return _with_arrangement_generated_pose_targets(spec, gym_config)
 
 
 def _with_arrangement_generated_pose_targets(

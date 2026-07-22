@@ -30,7 +30,6 @@ __all__ = [
     "_candidate_relative_runtime_uid",
     "_container_runtime_uid",
     "_display_noun",
-    "_generic_target_text",
     "_is_container_like",
     "_left_target_text",
     "_normalize_runtime_uid",
@@ -152,14 +151,6 @@ def _target_plural_text(roles: _BasketTaskRoles) -> str:
     if left_text == right_text:
         return _plural(left_text)
     return "target objects"
-
-
-def _generic_target_text(roles: _BasketTaskRoles) -> str:
-    left_text = _left_target_text(roles)
-    right_text = _right_target_text(roles)
-    if left_text == right_text:
-        return left_text
-    return "target object"
 
 
 def _target_task_description_text(roles: _BasketTaskRoles) -> str:

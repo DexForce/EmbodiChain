@@ -27,8 +27,6 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 __all__ = [
     "_ArrangementLineSpec",
     "_ArrangementLineStepSpec",
-    "_ObjectManipulationSpec",
-    "_ObjectManipulationStepSpec",
     "_StackingSpec",
     "_StackingStepSpec",
     "GeneratedActionAgentConfigPaths",
@@ -151,10 +149,6 @@ class _RelativePlacementSpec:
     surface_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE
     coordinated_direction: str | None = None
     coordinated_terminal_behavior: str | None = None
-
-
-_ObjectManipulationStepSpec = _RelativePlacementStepSpec
-_ObjectManipulationSpec = _RelativePlacementSpec
 
 
 @dataclass(frozen=True)

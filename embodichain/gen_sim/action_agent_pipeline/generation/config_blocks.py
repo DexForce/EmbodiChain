@@ -59,12 +59,9 @@ __all__ = [
     "_make_arrangement_events_config",
     "_make_dataset_config",
     "_make_events_config",
-    "_make_extra_background_config",
     "_make_extra_rigid_object_config",
     "_make_observations_config",
-    "_make_container_background_config",
     "_make_container_rigid_object_config",
-    "_make_relative_background_object_config",
     "_make_relative_dataset_config",
     "_make_relative_events_config",
     "_make_relative_rigid_object_config",
@@ -72,7 +69,6 @@ __all__ = [
     "_container_rigid_object_max_convex_hull_num",
     "_moved_rigid_object_max_convex_hull_num",
     "_relative_rigid_object_max_convex_hull_num",
-    "_relative_static_background_max_convex_hull_num",
     "_source_body_scale",
     "_target_body_scale_vector",
 ]
@@ -88,7 +84,6 @@ _TARGET_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["target"])
 _CONTAINER_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["container"])
 _MOVED_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["moved"])
 _EXTRA_RIGID_MAX_CONVEX_HULL_NUM = int(_CONVEX_HULL_DEFAULTS["extra_rigid"])
-_ROBOT_VIEW_LABEL = "robot_view"
 _AUDIENCE_VIEW_Z_ROTATION_DEGREES = 180.0
 
 _BACKGROUND_ATTRS = {
@@ -707,34 +702,6 @@ def _make_background_config(
     }
 
 
-def _make_extra_background_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    mesh_normalizer: GlbGeometryNormalizer,
-    body_scale: Any | None = None,
-    runtime_uid: str | None = None,
-) -> dict[str, Any]:
-    shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
-    config = {
-        "uid": runtime_uid or _normalize_runtime_uid(obj.source_uid),
-        "shape": shape,
-        "attrs": copy.deepcopy(dict(obj.config.get("attrs", _BACKGROUND_ATTRS))),
-        "body_scale": _clean_vector3(
-            obj.config.get("body_scale", [1.0, 1.0, 1.0])
-            if body_scale is None
-            else body_scale
-        ),
-        "body_type": str(obj.config.get("body_type", "static")),
-        "init_pos": _clean_vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0])),
-        "init_rot": _clean_vector3(obj.config.get("init_rot", [0.0, 0.0, 0.0])),
-        "max_convex_hull_num": _role_limited_max_convex_hull_num(
-            obj,
-            _BACKGROUND_MAX_CONVEX_HULL_NUM,
-        ),
-    }
-    return config
-
-
 def _make_target_object_config(
     scene_dir: Path,
     obj: _SceneObject,
@@ -776,24 +743,6 @@ def _make_container_object_config(
     )
 
 
-def _make_container_background_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    runtime_uid: str,
-    body_scale: Any,
-    mesh_normalizer: GlbGeometryNormalizer,
-) -> dict[str, Any]:
-    config = _make_container_object_config(
-        scene_dir,
-        obj,
-        runtime_uid,
-        body_scale,
-        mesh_normalizer,
-    )
-    config["body_type"] = "kinematic"
-    return config
-
-
 def _make_container_rigid_object_config(
     scene_dir: Path,
     obj: _SceneObject,
@@ -809,27 +758,6 @@ def _make_container_rigid_object_config(
         mesh_normalizer,
     )
     config["body_type"] = "dynamic"
-    return config
-
-
-def _make_relative_background_object_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    runtime_uid: str,
-    *,
-    body_scale: Any | None = None,
-    max_convex_hull_num: int,
-    mesh_normalizer: GlbGeometryNormalizer,
-) -> dict[str, Any]:
-    config = _make_rigid_object_config(
-        scene_dir,
-        obj,
-        runtime_uid,
-        _source_body_scale(obj) if body_scale is None else body_scale,
-        max_convex_hull_num=max_convex_hull_num,
-        mesh_normalizer=mesh_normalizer,
-    )
-    config["body_type"] = "kinematic"
     return config
 
 
@@ -952,19 +880,6 @@ def _relative_rigid_object_max_convex_hull_num(
     if runtime_uid in task_uids:
         return _TARGET_MAX_CONVEX_HULL_NUM
     return _EXTRA_RIGID_MAX_CONVEX_HULL_NUM
-
-
-def _relative_static_background_max_convex_hull_num(
-    runtime_uid: str,
-    spec: _RelativePlacementSpec,
-) -> int:
-    for placement in spec.placements:
-        if (
-            placement.relation == "inside"
-            and runtime_uid == placement.reference_runtime_uid
-        ):
-            return _CONTAINER_MAX_CONVEX_HULL_NUM
-    return _BACKGROUND_MAX_CONVEX_HULL_NUM
 
 
 def _make_shape_config(

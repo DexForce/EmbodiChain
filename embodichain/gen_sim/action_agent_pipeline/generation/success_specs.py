@@ -121,10 +121,6 @@ def _object_in_container_success(object_uid: str, container_uid: str) -> dict[st
     }
 
 
-def _make_dual_ur5_arm_slot_config() -> dict[str, Any]:
-    return resolve_robot_profile("dual_ur5").runtime_extensions()
-
-
 def _make_relative_extensions_config(
     spec: _RelativePlacementSpec,
     *,

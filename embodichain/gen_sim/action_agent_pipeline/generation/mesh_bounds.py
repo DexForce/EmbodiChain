@@ -36,12 +36,10 @@ __all__ = [
     "_GLTF_TO_SIM_FRAME_KEY",
     "_apply_tabletop_z_placement",
     "_clean_vector3",
-    "_dual_ur5_init_z_from_table_top",
     "_iter_generated_scene_object_configs",
     "_mesh_config_has_distinct_xy_axis",
     "_mesh_config_world_xy_bounds",
     "_mesh_config_world_xy_center",
-    "_mesh_config_world_xy_axes",
     "_mesh_config_world_xy_extents",
     "_mesh_config_world_z_bounds",
     "_mesh_config_world_zmax",
@@ -87,14 +85,6 @@ _GLTF_NORMALIZED_SIGNED_MAX = {
     5120: 127.0,
     5122: 32767.0,
 }
-
-
-def _dual_ur5_init_z_from_table_top(table_top_z: float | None) -> float:
-    if table_top_z is None:
-        return _DUAL_UR5_LEGACY_INIT_Z
-
-    init_z = table_top_z + _DUAL_UR5_TABLETOP_CLEARANCE - _DUAL_UR5_ARM_COMPONENT_Z
-    return round(init_z, 6)
 
 
 def _apply_tabletop_z_placement(
@@ -203,22 +193,6 @@ def _mesh_config_world_xy_center(
         round((float(mins[0]) + float(maxs[0])) / 2.0, 6),
         round((float(mins[1]) + float(maxs[1])) / 2.0, 6),
     ]
-
-
-def _mesh_config_world_xy_axes(
-    obj_config: Mapping[str, Any],
-) -> tuple[list[float], list[float]]:
-    """Return normalized local X/Y axes projected into the world XY plane."""
-    matrix = _mesh_config_transform_matrix(obj_config)
-    axes = []
-    for column in (0, 1):
-        x_value = float(matrix[0][column])
-        y_value = float(matrix[1][column])
-        norm = math.hypot(x_value, y_value)
-        if norm <= 1e-9:
-            raise ValueError("Object local XY axis has no world XY projection.")
-        axes.append([x_value / norm, y_value / norm])
-    return axes[0], axes[1]
 
 
 def _mesh_config_world_xy_bounds(
