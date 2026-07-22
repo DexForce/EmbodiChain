@@ -165,6 +165,32 @@ _GRASP_DEFAULTS = generation_defaults_section("grasp")
 _DEFAULT_PICKUP_LIFT_HEIGHT = float(
     _ACTION_DEFAULTS["runtime_default_pickup_lift_height"]
 )
+_DEFAULT_PICKUP_APPROACH_ALIGNMENT_MAX_ANGLE = float(np.pi / 36)
+_GRASP_ALIGNMENT_CONFIG_KEY = "action_agent_max_approach_alignment_angle"
+
+
+class _ActionAgentAntipodalAffordance(AntipodalAffordance):
+    """Apply Action Agent grasp alignment without changing the shared affordance."""
+
+    def get_valid_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        if self._generator is None:
+            self._init_generator()
+        alignment_angle = self.get_custom_config(_GRASP_ALIGNMENT_CONFIG_KEY)
+        if alignment_angle is None:
+            return super().get_valid_grasp_poses(obj_poses, approach_direction)
+
+        previous_angle = self._generator.cfg.max_deviation_angle
+        self._generator.cfg.max_deviation_angle = float(alignment_angle)
+        try:
+            return super().get_valid_grasp_poses(obj_poses, approach_direction)
+        finally:
+            self._generator.cfg.max_deviation_angle = previous_angle
 
 
 @dataclass(frozen=True)
@@ -1813,6 +1839,10 @@ def _build_action_cfg(
         if spec.control != "arm":
             raise ValueError("PickUp atomic action requires control='arm'.")
         cfg_values.setdefault("lift_height", _DEFAULT_PICKUP_LIFT_HEIGHT)
+        cfg_values.setdefault(
+            "approach_alignment_max_angle",
+            _DEFAULT_PICKUP_APPROACH_ALIGNMENT_MAX_ANGLE,
+        )
         _normalize_pickup_cfg_values(cfg_values, device)
         return PickUpCfg(
             control_part=arm_part,
@@ -1951,7 +1981,22 @@ def _resolve_pickup_target(
 ):
     if not spec.target_object:
         raise ValueError("PickUp requires target_object.")
-    return _build_object_semantics(env, spec.target_object, runtime_kwargs)
+    return _build_object_semantics(
+        env,
+        spec.target_object,
+        runtime_kwargs,
+        max_approach_alignment_angle=_pickup_approach_alignment_angle(spec.cfg),
+    )
+
+
+def _pickup_approach_alignment_angle(cfg: Mapping[str, Any]) -> float | None:
+    if cfg.get("rotate_upright") is not None:
+        return None
+    value = cfg.get(
+        "approach_alignment_max_angle",
+        _DEFAULT_PICKUP_APPROACH_ALIGNMENT_MAX_ANGLE,
+    )
+    return None if value is None else float(value)
 
 
 def _resolve_pickup_downstream_object_targets(
@@ -4443,6 +4488,8 @@ def _build_object_semantics(
     env,
     target: Mapping[str, Any],
     runtime_kwargs: dict[str, Any],
+    *,
+    max_approach_alignment_angle: float | None = None,
 ):
     obj_name = target.get("obj_name")
     if target.get("affordance", "antipodal") != "antipodal":
@@ -4514,6 +4561,7 @@ def _build_object_semantics(
                     "grasp_max_deviation_angle",
                     _GRASP_RUNTIME_DEFAULTS.max_deviation_angle,
                 ),
+                "n_deviated_approach_directions": 1,
             },
         )
     )
@@ -4554,13 +4602,17 @@ def _build_object_semantics(
             },
         )
     )
-    affordance = AntipodalAffordance(
+    affordance = _ActionAgentAntipodalAffordance(
         object_label=obj_name,
         mesh_vertices=mesh_vertices,
         mesh_triangles=mesh_triangles,
         generator_cfg=generator_cfg,
         gripper_collision_cfg=gripper_collision_cfg,
         force_reannotate=force_reannotate,
+    )
+    affordance.set_custom_config(
+        _GRASP_ALIGNMENT_CONFIG_KEY,
+        max_approach_alignment_angle,
     )
     grasp_pose_overrides = getattr(env, "agent_grasp_pose_overrides", {}) or {}
     if isinstance(grasp_pose_overrides, Mapping):
