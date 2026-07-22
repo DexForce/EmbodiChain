@@ -37,6 +37,8 @@ A {class}`~material.VisualMaterialInst` can come from either of two sources:
 
 When a rigid object, articulation, soft object, or cloth object is constructed, EmbodiChain inspects its render body and automatically wraps an existing material. If no material exists, list-based assets return `None`, while an articulation omits that link from its material dictionary. For render bodies with multiple mesh segments, this compatibility API exposes the first valid material as the representative instance. Rigid objects and articulations additionally provide `get_existing_visual_material()` for per-segment access.
 
+`get_existing_visual_material()` retains every original dexsim `MaterialInst` and creates a separate working `MaterialInst` from the first segment's existing material template. Randomizers can therefore modify and attach the working instance while keeping the original instance available for restoration. This creates an instance, not a new `VisualMaterial` template.
+
 For batched simulation, `set_visual_material()` creates an instance per environment by default. Pass `shared=True` to reuse one instance across environments.
 
 Rigid objects, articulations, soft objects, and cloth objects retain their construction-time per-segment material assignments. Call `restore_visual_material()` explicitly to restore them; each asset's `reset()` method performs the same restoration for the selected environments.
@@ -60,7 +62,8 @@ object.set_visual_material(mat)
 mat_inst: list[VisualMaterialInst | None] = object.get_visual_material_inst()
 
 # Modify one instance without changing the other environments.
-mat_inst[0].set_base_color([1.0, 0.0, 0.0, 1.0])  
+if mat_inst[0] is not None:
+    mat_inst[0].set_base_color([1.0, 0.0, 0.0, 1.0])
 ```
 
 To modify a material already contained in a loaded asset, no replacement call is needed:

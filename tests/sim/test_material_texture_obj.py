@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -20,35 +21,17 @@ from unittest.mock import MagicMock
 from embodichain.lab.sim.material import VisualMaterialInst
 
 
-def _make_inst():
-    mat = MagicMock(name="Material")
-    inst = VisualMaterialInst("uid_test", mat)
-    return inst, mat
-
-
-def test_texture_obj_sets_map_without_upload():
-    inst, mat = MagicMock(), MagicMock()
-    obj = VisualMaterialInst.__new__(VisualMaterialInst)
-    obj.uid = "u"
-    obj._mat = mat
-    obj.base_color_texture = None
-
+def test_texture_object_is_bound_directly_and_takes_priority_over_data():
+    material = MagicMock(name="Material")
+    instance = VisualMaterialInst("instance", material)
     texture = MagicMock(name="Texture")
-    obj.set_base_color_texture(texture_obj=texture)
+    texture_data = MagicMock(name="texture_data")
 
-    dexsim_inst = mat.get_inst.return_value
-    dexsim_inst.set_base_color_map.assert_called_once_with(texture)
-    assert obj.base_color_texture is texture
+    instance.set_base_color_texture(
+        texture_data=texture_data,
+        texture_obj=texture,
+    )
 
-
-def test_texture_obj_takes_priority_over_data():
-    obj = VisualMaterialInst.__new__(VisualMaterialInst)
-    obj.uid = "u"
-    mat = MagicMock()
-    obj._mat = mat
-    obj.base_color_texture = None
-
-    obj.set_base_color_texture(texture_data=MagicMock(), texture_obj=MagicMock())
-
-    # texture_obj branch used, create_color_texture never called
-    mat.get_inst.assert_called_with("u")
+    material.get_inst.return_value.set_base_color_map.assert_called_once_with(texture)
+    texture_data.cpu.assert_not_called()
+    assert instance.base_color_texture is texture

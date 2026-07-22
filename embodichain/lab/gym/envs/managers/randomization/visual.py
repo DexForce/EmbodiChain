@@ -536,17 +536,16 @@ def randomize_camera_intrinsics(
 
 
 class randomize_visual_material(Functor):
-    """Randomize the the visual material properties of a RigidObject or an Articulation.
+    """Randomize the visual material properties of a RigidObject or Articulation.
 
-    Note:
-        1. Currently supported randomized properties include:
-            - base_color: RGB color of the material. Value should be in [0, 1], shape of (3,)
-            - base_color_texture: Texture image for the base color of the material.
-                The textures will be preloaded from the given texture_path during initialization.
-            - metallic: Metallic property of the material. Value should be in [0, 1].
-            - roughness: Roughness property of the material. Value should be in [0, 1].
-            - ior: Index of Refraction of the material (only supported in ray tracing mode).
-        2. The default ground plane can also be randomized by setting entity_cfg.uid to "default_plane".
+    Supported properties are base color, base-color texture, metallic factor,
+    roughness, and index of refraction. Textures from ``texture_path`` are
+    preloaded during initialization. The default ground plane can be selected
+    with ``entity_cfg.uid="default_plane"``.
+
+    By default, the functor retains the asset's original material instances and
+    creates working instances from their existing templates. Set
+    ``fallback_to_new=True`` to force the legacy new-material path.
     """
 
     def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):

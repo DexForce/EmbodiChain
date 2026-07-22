@@ -449,7 +449,8 @@ class ReuseSegmentState:
     """Reuse state for one render-body segment of a parsed object.
 
     Used by ``randomize_visual_material`` to randomize on top of the material dexsim
-    parsed from the asset, instead of creating a new material.
+    parsed from the asset. It creates a working material instance from the existing
+    template, but does not create a new material template.
 
     Attributes:
         mesh_id: The render-body segment index.
