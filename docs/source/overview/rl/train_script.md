@@ -34,7 +34,7 @@ This module provides the RL training entry script, responsible for parsing confi
 
 ## Usage Example
 ```bash
-python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 ```
 
 ## Extension and Customization

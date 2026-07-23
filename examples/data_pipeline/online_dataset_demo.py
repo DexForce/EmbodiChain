@@ -67,7 +67,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     """Construct and start an OnlineDataEngine from the given CLI args."""
-    config_path = Path("configs/gym/special/simple_task_ur10.json")
+    config_path = Path("embodichain_tasks/configs/gym/special/simple_task_ur10.json")
     if not config_path.exists():
         raise FileNotFoundError(
             f"Gym config not found: {config_path}. "

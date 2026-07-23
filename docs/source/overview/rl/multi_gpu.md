@@ -21,7 +21,7 @@ torchrun --nproc_per_node=2 -m embodichain train-rl --config <config_path> --dis
 Example:
 
 ```bash
-torchrun --nproc_per_node=2 -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.yaml --distributed
+torchrun --nproc_per_node=2 -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml --distributed
 ```
 
 No config file changes needed; `device` and `gpu_id` are overridden automatically per rank.

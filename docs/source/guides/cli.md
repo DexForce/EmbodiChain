@@ -169,21 +169,21 @@ Launch reinforcement learning training from a JSON or YAML config file.
 
 ```bash
 # Train with a config file (JSON or YAML)
-python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 
 # JSON configs remain supported
-python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
+python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config configs/agents/rl/push_cube/train_config.yaml \
+    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml \
     --distributed
 ```
 
 The direct module entry point remains available:
 
 ```bash
-python -m embodichain.learning.rl.train --config configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 ```
 
 ### Arguments

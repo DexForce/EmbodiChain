@@ -32,8 +32,8 @@ class TestRLTraining:
     def setup_method(self):
         """Set up test configuration before each test method."""
         # Load the existing push_cube config
-        train_config_path = "configs/agents/rl/push_cube/train_config.json"
-        gym_config_path = "configs/agents/rl/push_cube/gym_config.json"
+        train_config_path = "embodichain_tasks/configs/agents/rl/push_cube/train_config.json"
+        gym_config_path = "embodichain_tasks/configs/agents/rl/push_cube/gym_config.json"
 
         with open(train_config_path, "r") as f:
             train_config = json.load(f)
