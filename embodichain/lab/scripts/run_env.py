@@ -25,6 +25,10 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
 )
+from embodichain.lab.gym.utils.registration import (
+    discover_task_packages,
+    execute_init_hooks,
+)
 from embodichain.utils.logger import log_warning, log_info, log_error
 
 
@@ -186,6 +190,12 @@ def cli():
     add_env_launcher_args_to_parser(parser)
 
     args = parser.parse_args()
+
+    # Step 1: Discover all task packages via entry_points
+    discover_task_packages()
+
+    # Step 2: Execute init hooks (register managers, asset resolvers, etc.)
+    execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
 

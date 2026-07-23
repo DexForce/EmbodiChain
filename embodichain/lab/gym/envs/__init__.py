@@ -16,5 +16,10 @@
 
 from .base_env import *
 from .embodied_env import *
-from .tasks import *
 from .wrapper import *
+
+# Task environments have moved to the separate ``embodichain_tasks`` package
+# (and any third-party package declaring an ``embodichain.tasks`` entry point).
+# They are no longer re-exported here so that importing the core envs package
+# stays warning-free. Direct imports from ``embodichain.lab.gym.envs.tasks``
+# still work via the deprecation shim in ``tasks/__init__.py``.

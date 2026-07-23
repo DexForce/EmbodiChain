@@ -42,19 +42,19 @@ Training is configured via a JSON or YAML file that defines runtime settings, en
 Example Configuration
 ---------------------   
 
-The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is located in ``configs/agents/rl/push_cube`` or ``configs/agents/rl/basic/cart_pole``:
+The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is located in ``embodichain_tasks/configs/agents/rl/push_cube`` or ``embodichain_tasks/configs/agents/rl/basic/cart_pole``:
 
 .. dropdown:: Example: train_config.json
    :icon: code
 
-   .. literalinclude:: ../../../configs/agents/rl/push_cube/train_config.json
+   .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/push_cube/train_config.json
       :language: json
       :linenos:
 
 .. dropdown:: Example: train_config.yaml (CartPole)
    :icon: code
 
-   .. literalinclude:: ../../../configs/agents/rl/basic/cart_pole/train_config.yaml
+   .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
       :language: yaml
       :linenos:
 
@@ -226,13 +226,13 @@ To start training, run:
 
 .. code-block:: bash
 
-   python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+   python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 
 JSON configs are also supported:
 
 .. code-block:: bash
 
-   python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
+   python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
 
 Outputs
 -------

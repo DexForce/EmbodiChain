@@ -98,7 +98,7 @@ def _sim_worker_fn(
     import gymnasium as gym
     from embodichain.lab.gym.utils.gym_utils import (
         config_to_cfg,
-        DEFAULT_MANAGER_MODULES,
+        get_manager_modules,
     )
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.utils.logger import log_info, log_warning, log_error
@@ -107,7 +107,7 @@ def _sim_worker_fn(
     action_config: dict = cfg.action_config
 
     # Build env config from the gym configuration dictionary.
-    env_cfg = config_to_cfg(gym_config, manager_modules=DEFAULT_MANAGER_MODULES)
+    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
     env_cfg.filter_dataset_saving = True
     env_cfg.init_rollout_buffer = False
     env_cfg.sim_cfg = SimulationManagerCfg(

@@ -3,7 +3,7 @@ env_id: CartPoleRL
 success_threshold: 0.8
 base_config:
   trainer:
-    gym_config: configs/agents/rl/basic/cart_pole/gym_config.json
+    gym_config: embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.json
     exp_name: cart_pole
     device: cpu
     headless: true
