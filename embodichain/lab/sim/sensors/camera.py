@@ -19,6 +19,7 @@ from __future__ import annotations
 import dexsim
 import torch
 import dexsim.render as dr
+import torch.nn.functional as F
 
 from functools import cached_property
 from typing import Tuple, Sequence, List
@@ -28,28 +29,38 @@ from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_t
 from embodichain.utils import logger, configclass
 
 
-# Shared camera groups, keyed by (width, height), populated by plan_camera_groups()
-# and consumed by Camera._build_sensor_from_config(). Empty unless
-# RenderCfg.merge_camera_groups is on, in which case each Camera claims a layer
-# slice of the group for its resolution rather than creating its own group.
+# Shared camera groups, populated by plan_camera_groups() and consumed by
+# Camera._build_sensor_from_config(). Each slot owns one fixed-size layered
+# framebuffer; mixed-resolution slots render at their largest camera resolution.
 _SHARED_GROUPS: dict = {}
+_MIXED_RESOLUTION_GROUP = "mixed_resolution"
 
 
-def plan_camera_groups(sensor_cfgs: Sequence[SensorCfg], enabled: bool) -> None:
+def plan_camera_groups(
+    sensor_cfgs: Sequence[SensorCfg],
+    enabled: bool,
+    merge_different_resolutions: bool = False,
+) -> None:
     """Pre-allocate one shared camera group per distinct Camera resolution.
 
     Must be called after the arenas exist and before any sensor is constructed,
     because a group's layer count is fixed at creation and the cameras are then
     created into it in order.
 
-    A group is a single layered image (identical extent on every layer), so only
-    cameras with the same resolution can share one. Resolutions used by a single
-    camera are skipped -- a group of one is what we already do.
+    A group is a single layered image with one extent on every layer. By
+    default, only same-resolution cameras share a group. When
+    ``merge_different_resolutions`` is enabled, all Camera sensors share one
+    group at the largest requested extent. Smaller cameras render with scaled
+    intrinsics and their returned tensors are resized back to their configured
+    size.
 
     Args:
         sensor_cfgs: every sensor config that will be built, in build order.
         enabled: RenderCfg.merge_camera_groups. When False this clears the
             registry and each Camera falls back to its own group.
+        merge_different_resolutions: RenderCfg.merge_different_resolution_camera_groups.
+            This is opt-in because it trades small-camera render cost for fewer
+            group submissions.
     """
     _SHARED_GROUPS.clear()
     if not enabled:
@@ -60,10 +71,31 @@ def plan_camera_groups(sensor_cfgs: Sequence[SensorCfg], enabled: bool) -> None:
     arenas = env.get_all_arenas()
     num_instances = len(arenas) if len(arenas) > 0 else 1
 
+    cameras = [
+        cfg
+        for cfg in sensor_cfgs
+        if getattr(cfg, "sensor_type", "Camera") == "Camera"
+    ]
+    if merge_different_resolutions and len(cameras) >= 2:
+        width = max(cfg.width for cfg in cameras)
+        height = max(cfg.height for cfg in cameras)
+        _SHARED_GROUPS[_MIXED_RESOLUTION_GROUP] = {
+            "frame_buffer": world.create_camera_group(
+                [width, height], num_instances * len(cameras), True
+            ),
+            "next_offset": 0,
+            "capacity": num_instances * len(cameras),
+            "num_instances": num_instances,
+            "resolution": (width, height),
+        }
+        logger.log_info(
+            f"[camera] merged {len(cameras)} cameras across resolutions into one "
+            f"{width}x{height} group ({num_instances * len(cameras)} layers)"
+        )
+        return
+
     counts: dict = {}
-    for cfg in sensor_cfgs:
-        if getattr(cfg, "sensor_type", "Camera") != "Camera":
-            continue  # StereoCamera already packs its two cameras into one group
+    for cfg in cameras:
         counts.setdefault((cfg.width, cfg.height), 0)
         counts[(cfg.width, cfg.height)] += 1
 
@@ -77,6 +109,7 @@ def plan_camera_groups(sensor_cfgs: Sequence[SensorCfg], enabled: bool) -> None:
             "next_offset": 0,
             "capacity": num_instances * count,
             "num_instances": num_instances,
+            "resolution": (width, height),
         }
         logger.log_info(
             f"[camera] merged {count} x {width}x{height} cameras into one camera group "
@@ -88,6 +121,35 @@ def plan_camera_groups(sensor_cfgs: Sequence[SensorCfg], enabled: bool) -> None:
             f"[camera] merge_camera_groups: {len(counts)} resolutions, "
             f"{merged} of {sum(counts.values())} cameras share {len(_SHARED_GROUPS)} group(s)"
         )
+
+
+def _resize_camera_output(
+    output: torch.Tensor,
+    height: int,
+    width: int,
+    mode: str,
+    normalize: bool = False,
+) -> torch.Tensor:
+    """Resize a camera-group layer while preserving its channel-last layout."""
+    if tuple(output.shape[1:3]) == (height, width):
+        return output
+
+    dtype = output.dtype
+    kwargs = {} if mode == "nearest" else {"align_corners": False}
+    if output.ndim == 4:
+        source = output.permute(0, 3, 1, 2).float()
+        resized = F.interpolate(source, size=(height, width), mode=mode, **kwargs)
+        resized = resized.permute(0, 2, 3, 1)
+        if normalize:
+            resized = F.normalize(resized, dim=-1)
+    else:
+        source = output.unsqueeze(1).float()
+        resized = F.interpolate(source, size=(height, width), mode=mode, **kwargs)
+        resized = resized[:, 0]
+
+    if dtype == torch.uint8:
+        return resized.round().clamp_(0, 255).to(dtype)
+    return resized.to(dtype)
 
 
 @configclass
@@ -214,11 +276,14 @@ class Camera(BaseSensor):
         # outside that pass (e.g. the recording camera in gym managers/record.py).
         # An unplanned camera must get its own group rather than claim a layer
         # the group does not have.
-        slot = _SHARED_GROUPS.get((config.width, config.height))
+        slot = _SHARED_GROUPS.get(_MIXED_RESOLUTION_GROUP)
+        if slot is None:
+            slot = _SHARED_GROUPS.get((config.width, config.height))
         if slot is not None and slot["next_offset"] + num_instances <= slot["capacity"]:
             self._frame_buffer = slot["frame_buffer"]
             self._layer_offset = slot["next_offset"]
             slot["next_offset"] += num_instances
+            self._render_width, self._render_height = slot["resolution"]
         else:
             if slot is not None:
                 logger.log_info(
@@ -229,19 +294,30 @@ class Camera(BaseSensor):
                 [config.width, config.height], num_instances, True
             )
             self._layer_offset = 0
+            self._render_width, self._render_height = config.width, config.height
 
         view_attrib = config.get_view_attrib()
+        scale_x = self._render_width / config.width
+        scale_y = self._render_height / config.height
+        self._intrinsic_scale_x = scale_x
+        self._intrinsic_scale_y = scale_y
+        render_intrinsics = (
+            config.intrinsics[0] * scale_x,
+            config.intrinsics[1] * scale_y,
+            config.intrinsics[2] * scale_x,
+            config.intrinsics[3] * scale_y,
+        )
         for i, arena in enumerate(arenas):
             view_name = f"{self.uid}_view{i + 1}"
             view = arena.create_camera(
                 view_name,
-                config.width,
-                config.height,
+                self._render_width,
+                self._render_height,
                 True,
                 view_attrib,
                 self._frame_buffer,
             )
-            view.set_intrinsic(config.intrinsics)
+            view.set_intrinsic(render_intrinsics)
             view.set_near(config.near)
             view.set_far(config.far)
             self._entities[i] = view
@@ -326,32 +402,50 @@ class Camera(BaseSensor):
         hi = lo + self.num_instances
 
         if self.cfg.enable_color:
-            self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
-                self.device
-            )[lo:hi, ...]
+            self._data_buffer["color"] = _resize_camera_output(
+                self._frame_buffer.get_rgb_gpu_buffer().to(self.device)[lo:hi, ...],
+                self.cfg.height,
+                self.cfg.width,
+                "bilinear",
+            )
 
         if self.cfg.enable_depth:
-            self._data_buffer["depth"] = self._frame_buffer.get_depth_gpu_buffer().to(
-                self.device
-            )[lo:hi, ...]
+            self._data_buffer["depth"] = _resize_camera_output(
+                self._frame_buffer.get_depth_gpu_buffer().to(self.device)[lo:hi, ...],
+                self.cfg.height,
+                self.cfg.width,
+                "bilinear",
+            )
 
         if self.cfg.enable_mask:
-            self._data_buffer[
-                "mask"
-            ] = self._frame_buffer.get_visible_mask_gpu_buffer().to(
-                self.device, torch.int32
-            )[lo:hi, ...]
+            self._data_buffer["mask"] = _resize_camera_output(
+                self._frame_buffer.get_visible_mask_gpu_buffer().to(
+                    self.device, torch.int32
+                )[lo:hi, ...],
+                self.cfg.height,
+                self.cfg.width,
+                "nearest",
+            )
 
         if self.cfg.enable_normal:
-            self._data_buffer["normal"] = self._frame_buffer.get_normal_gpu_buffer().to(
-                self.device
-            )[lo:hi, ..., :3]
+            self._data_buffer["normal"] = _resize_camera_output(
+                self._frame_buffer.get_normal_gpu_buffer().to(self.device)[
+                    lo:hi, ..., :3
+                ],
+                self.cfg.height,
+                self.cfg.width,
+                "bilinear",
+                normalize=True,
+            )
 
         if self.cfg.enable_position:
-            self._data_buffer["position"] = (
+            self._data_buffer["position"] = _resize_camera_output(
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[
                     lo:hi, ..., :3
-                ]
+                ],
+                self.cfg.height,
+                self.cfg.width,
+                "bilinear",
             )
 
     def _attach_to_entity(self) -> None:
@@ -498,12 +592,22 @@ class Camera(BaseSensor):
                 f"Invalid intrinsics shape {intrinsics.shape} for {len(ids)} environments."
             )
 
+        scaled_intrinsics = intrinsics.clone()
+        if scaled_intrinsics.shape[1] == 3:
+            scaled_intrinsics[:, 0, :] *= self._intrinsic_scale_x
+            scaled_intrinsics[:, 1, :] *= self._intrinsic_scale_y
+        else:
+            scaled_intrinsics[:, 0] *= self._intrinsic_scale_x
+            scaled_intrinsics[:, 1] *= self._intrinsic_scale_y
+            scaled_intrinsics[:, 2] *= self._intrinsic_scale_x
+            scaled_intrinsics[:, 3] *= self._intrinsic_scale_y
+
         for i, env_id in enumerate(ids):
             entity = self._entities[env_id]
-            if intrinsics.shape[1] == 3:
-                entity.set_intrinsic(intrinsics[i].cpu().numpy())
+            if scaled_intrinsics.shape[1] == 3:
+                entity.set_intrinsic(scaled_intrinsics[i].cpu().numpy())
             else:
-                entity.set_intrinsic(intrinsics[i].cpu().tolist())
+                entity.set_intrinsic(scaled_intrinsics[i].cpu().tolist())
 
     def get_intrinsics(self) -> torch.Tensor:
         """
@@ -518,7 +622,10 @@ class Camera(BaseSensor):
                 torch.as_tensor(entity.get_intrinsic(), dtype=torch.float32)
             )
 
-        return torch.stack(intrinsics, dim=0).to(self.device)
+        result = torch.stack(intrinsics, dim=0).to(self.device)
+        result[:, 0, :] /= self._intrinsic_scale_x
+        result[:, 1, :] /= self._intrinsic_scale_y
+        return result
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg

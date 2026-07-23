@@ -16,12 +16,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from embodichain.lab.sim.sim_manager import SimulationManager, _WindowRecordState
+from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim.sim_manager import (
+    SimulationManager,
+    SimulationManagerCfg,
+    _WindowRecordState,
+)
 
 DEFAULT_LOOK_AT = (
     (2.6, -2.2, 1.6),
@@ -102,6 +108,34 @@ def _make_sim_manager(window: object | None = None) -> SimulationManager:
     sim._env = FakeEnv()
     sim._world = FakeWorld()
     return sim
+
+
+def test_convert_sim_config_maps_batched_camera_group_render(monkeypatch) -> None:
+    """The public simulation setting must reach DexSim's WorldConfig."""
+
+    class FakeWorldConfig:
+        def __init__(self) -> None:
+            self.raytrace_config = SimpleNamespace()
+
+    class FakeWindowsConfig:
+        pass
+
+    import embodichain.lab.sim.sim_manager as sim_manager_module
+
+    monkeypatch.setattr(sim_manager_module.dexsim, "WorldConfig", FakeWorldConfig)
+    monkeypatch.setattr(sim_manager_module.dexsim, "WindowsConfig", FakeWindowsConfig)
+
+    sim = object.__new__(SimulationManager)
+    sim._material_cache_dir = Path("/tmp/embodichain-test-cache")
+    config = SimulationManagerCfg(
+        headless=True,
+        render_cfg=RenderCfg(renderer="fast-rt"),
+        batch_camera_group_render=True,
+    )
+
+    world_config = sim._convert_sim_config(config)
+
+    assert world_config.batch_camera_group_render is True
 
 
 def test_start_window_record_rejects_invalid_parameters() -> None:

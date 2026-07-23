@@ -119,6 +119,14 @@ class SimulationManagerCfg:
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
     """The rendering configuration parameters."""
 
+    batch_camera_group_render: bool = False
+    """Submit all camera groups together so hybrid can overlap raster and ray tracing.
+
+    This is opt-in because it changes render scheduling. It is most useful for
+    multi-sensor, multi-environment workloads that render more than one group
+    in a single simulation step.
+    """
+
     gpu_id: int = 0
     """The gpu index that the simulation engine will be used. 
     
@@ -469,6 +477,9 @@ class SimulationManager:
             sim_config.render_cfg.renderer = resolved_renderer
 
         world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
+        world_config.batch_camera_group_render = (
+            sim_config.batch_camera_group_render
+        )
         world_config.raytrace_config.render_iterations_per_frame = (
             sim_config.render_cfg.spp
         )

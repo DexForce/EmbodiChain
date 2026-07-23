@@ -921,7 +921,9 @@ class EmbodiedEnv(BaseEnv):
         # count is fixed at creation, so every camera that will share one has to
         # be known first. No-op unless RenderCfg.merge_camera_groups is on.
         plan_camera_groups(
-            self.cfg.sensor, self.sim_cfg.render_cfg.merge_camera_groups
+            self.cfg.sensor,
+            self.sim_cfg.render_cfg.merge_camera_groups,
+            self.sim_cfg.render_cfg.merge_different_resolution_camera_groups,
         )
 
         sensors = {}

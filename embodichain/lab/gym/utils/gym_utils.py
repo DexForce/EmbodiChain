@@ -889,7 +889,16 @@ def build_env_cfg_from_args(
     cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config["headless"],
         sim_device=gym_config["device"],
-        render_cfg=RenderCfg(renderer=gym_config["renderer"]),
+        render_cfg=RenderCfg(
+            renderer=gym_config["renderer"],
+            merge_camera_groups=gym_config.get("merge_camera_groups", False),
+            merge_different_resolution_camera_groups=gym_config.get(
+                "merge_different_resolution_camera_groups", False
+            ),
+        ),
+        batch_camera_group_render=gym_config.get(
+            "batch_camera_group_render", False
+        ),
         gpu_id=gym_config["gpu_id"],
         arena_space=gym_config["arena_space"],
     )

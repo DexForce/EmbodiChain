@@ -72,18 +72,30 @@ class RenderCfg:
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
     merge_camera_groups: bool = False
-    """Render Camera sensors that share an identical resolution through a single
-    dexsim camera group instead of one group per sensor.
+    """Render Camera sensors through shared dexsim camera groups instead of one
+    group per sensor.
 
     dexsim renders camera groups strictly serially, and each group costs a fixed
     per-group overhead (for 'hybrid': a Vulkan G-buffer pass plus a CUDA wait on
     it). One group per sensor therefore pays that overhead once per camera. A
-    group is a single layered image, so only cameras with an identical width and
-    height can share one; differing resolutions still get their own group.
+    group is a single layered image. By default, only cameras with an identical
+    width and height share one; use
+    :attr:`merge_different_resolution_camera_groups` to opt in to one shared
+    maximum-resolution group.
 
     Rendered output is unchanged -- each camera keeps its own intrinsics, pose and
     resolution, and only the layer it occupies changes. Off by default; enable to
     opt in.
+    """
+
+    merge_different_resolution_camera_groups: bool = False
+    """Merge Camera sensors with different resolutions into one max-resolution
+    group when :attr:`merge_camera_groups` is enabled.
+
+    Smaller cameras render at the group's largest extent with scaled intrinsics,
+    then their outputs are resized to the configured resolution. This reduces
+    group submission overhead, but can cost more pixels than separate rendering;
+    it is therefore off by default.
     """
 
     def to_dexsim_flags(self):
