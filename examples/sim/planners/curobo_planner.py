@@ -214,14 +214,6 @@ def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) 
     return True
 
 
-def _target_beyond_block(robot: Robot) -> torch.Tensor:
-    """Return a reachable TCP target whose route must pass around the cuboid."""
-    qpos = robot.get_qpos(name=CONTROL_PART)
-    target = robot.compute_fk(qpos=qpos, name=CONTROL_PART, to_matrix=True)[0].clone()
-    target[:3, 3] = torch.tensor([0.55, 0.30, 0.45], device=robot.device)
-    return target
-
-
 def _replay_full_dof_trajectory(
     sim: SimulationManager,
     robot: Robot,
@@ -321,7 +313,12 @@ def main() -> None:
             name="move_end_effector",
         )
 
-        # target = _target_beyond_block(robot)
+        initial_qpos = robot.get_qpos(name=CONTROL_PART)
+        initial_xpos = robot.compute_fk(
+            qpos=initial_qpos,
+            name=CONTROL_PART,
+            to_matrix=True,
+        )
         target_xpos = torch.tensor(
             [
                 [
@@ -341,7 +338,7 @@ def main() -> None:
 
         print(f"cuRobo atomic-action success: {bool(success.item())}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"atomic-action planning duration: {planning_duration:.3f} s")
+        print(f"[warp-up] atomic-action planning duration: {planning_duration:.3f} s")
 
         if not bool(success.item()):
             raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
@@ -355,6 +352,22 @@ def main() -> None:
         if args.hold_steps:
             sim.update(step=args.hold_steps)
         print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
+
+        plan_start = time.perf_counter()
+        success, trajectory, _ = engine.run(
+            [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
+        )
+        planning_duration = time.perf_counter() - plan_start
+        print(f"cuRobo atomic-action success: {bool(success.item())}")
+        print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
+        print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
+        _replay_full_dof_trajectory(
+            sim,
+            robot,
+            trajectory,
+            step_repeat=args.step_repeat,
+        )
+
     finally:
         if sim is not None:
             if sim.is_window_recording():
