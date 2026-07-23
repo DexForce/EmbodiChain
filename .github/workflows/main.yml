@@ -162,6 +162,10 @@ jobs:
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
+          # Install the task package so its `embodichain.tasks` entry point is
+          # registered and discover_task_packages() can find task environments
+          # during tests.
+          pip install -e embodichain_tasks/
           pip install pytest-xdist
 
       - name: Run default tests
