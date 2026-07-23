@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -138,6 +139,18 @@ def test_convert_sim_config_maps_batched_camera_group_render(monkeypatch) -> Non
     assert world_config.batch_camera_group_render is True
 
 
+def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
+    """Captured look-at snippets preserve DexSim's default Z-up controls."""
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+
+    eye, look_at, up = SimulationManager._window_camera_pose_to_look_at(pose)
+
+    np.testing.assert_allclose(eye, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(look_at, [1.0, 2.0, 2.0])
+    np.testing.assert_allclose(up, [0.0, 0.0, 1.0])
+
+
 def test_start_window_record_rejects_invalid_parameters() -> None:
     sim = _make_sim_manager()
 
@@ -217,3 +230,20 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
     assert save_call["frame_count"] == 1
     assert save_call["save_kwargs"] == {"fps": 5}
     assert sim._window_record_save_threads == []
+
+
+def test_reset_objects_state_includes_soft_and_cloth_assets() -> None:
+    sim = object.__new__(SimulationManager)
+    sim._robots = {}
+    sim._articulations = {}
+    sim._rigid_objects = {}
+    sim._rigid_object_groups = {}
+    sim._lights = {}
+    sim._sensors = {}
+    sim._soft_objects = {"soft": MagicMock()}
+    sim._cloth_objects = {"cloth": MagicMock()}
+
+    sim.reset_objects_state(env_ids=[1])
+
+    sim._soft_objects["soft"].reset.assert_called_once_with([1])
+    sim._cloth_objects["cloth"].reset.assert_called_once_with([1])

@@ -16,7 +16,7 @@ The {class}`~material.VisualMaterialCfg` class defines the visual appearance of 
 | `uid` | `str` | `"default_mat"` | Unique identifier for the material. |
 | `base_color` | `list` | `[0.5, 0.5, 0.5, 1.0]` | Base color/diffuse color (RGBA). |
 | `metallic` | `float` | `0.0` | Metallic factor (0.0 = dielectric, 1.0 = metallic). |
-| `roughness` | `float` | `0.5` | Surface roughness (0.0 = smooth, 1.0 = rough). |
+| `roughness` | `float` | `0.7` | Surface roughness (0.0 = smooth, 1.0 = rough). |
 | `emissive` | `list` | `[0.0, 0.0, 0.0]` | Emissive color (RGB). |
 | `emissive_intensity` | `float` | `1.0` | Emissive intensity multiplier. |
 | `base_color_texture` | `str` | `None` | Path to base color texture map. |
@@ -28,11 +28,20 @@ The {class}`~material.VisualMaterialCfg` class defines the visual appearance of 
 
 ### Visual Material and Visual Material Instance
 
-A visual material is defined using the {class}`~material.VisualMaterialCfg` class. It is actually a material template that can be used to create multiple instances with different parameters.
+A visual material is defined using the {class}`~material.VisualMaterialCfg` class. It is a material template that can create multiple instances with independent parameters.
 
-A visual material instance is created from a visual material using the method {meth}`~material.VisualMaterial.create_instance()`. User can set different properties for each instance. For details API usage, please refer to the [VisualMaterialInst](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.material.VisualMaterialInst) documentation.
+A {class}`~material.VisualMaterialInst` can come from either of two sources:
 
-For batch simualtion scenarios, when user set a material to a object (eg, a rigid object with `num_envs` instances), the material instance will be created for each simulation instance automatically. 
+- {meth}`~material.VisualMaterial.create_instance` creates a new dexsim material instance from an EmbodiChain material template.
+- {meth}`~material.VisualMaterialInst.from_existing` wraps a dexsim material instance parsed from an asset without copying or replacing it.
+
+When a rigid object, articulation, soft object, or cloth object is constructed, EmbodiChain inspects its render body and automatically wraps an existing material. If no material exists, list-based assets return `None`, while an articulation omits that link from its material dictionary. For render bodies with multiple mesh segments, this compatibility API exposes the first valid material as the representative instance. Rigid objects and articulations additionally provide `get_existing_visual_material()` for per-segment access.
+
+`get_existing_visual_material()` retains every original dexsim `MaterialInst` and creates a separate working `MaterialInst` from the first segment's existing material template. Randomizers can therefore modify and attach the working instance while keeping the original instance available for restoration. This creates an instance, not a new `VisualMaterial` template.
+
+For batched simulation, `set_visual_material()` creates an instance per environment by default. Pass `shared=True` to reuse one instance across environments.
+
+Rigid objects, articulations, soft objects, and cloth objects retain their construction-time per-segment material assignments. Call `restore_visual_material()` explicitly to restore them; each asset's `reset()` method performs the same restoration for the selected environments.
 
 ### Code 
 
@@ -49,12 +58,24 @@ mat: VisualMaterial = sim.create_visual_material(
 object: RigidObject
 object.set_visual_material(mat)
 
-# Get all material instances created for this object in the simulation. If `num_envs` is N, there will be N instances.
-mat_inst: List[VisualMaterialInst] = object.get_visual_material_inst()
+# Get the material registered for each environment.
+mat_inst: list[VisualMaterialInst | None] = object.get_visual_material_inst()
 
-# We can then modify the properties of each material instance separately.
-mat_inst[0].set_base_color([1.0, 0.0, 0.0, 1.0])  
+# Modify one instance without changing the other environments.
+if mat_inst[0] is not None:
+    mat_inst[0].set_base_color([1.0, 0.0, 0.0, 1.0])
 ```
+
+To modify a material already contained in a loaded asset, no replacement call is needed:
+
+```python
+object: RigidObject = sim.add_rigid_object(cfg=object_cfg)
+asset_inst = object.get_visual_material_inst()[0]
+if asset_inst is not None:
+    asset_inst.set_roughness(0.4)
+```
+
+`VisualMaterialInst.set_base_color_texture()` accepts a file path, a tensor, or a pre-created dexsim `Texture`. Reusing a pre-created texture avoids uploading the same image on every material update.
 
 
 ## Objects
@@ -112,14 +133,27 @@ For Rigid Object tutorial, please refer to the [Create Scene](https://dexforce.g
 
 ### Lights
 
-Configured via `LightCfg`.
+Configured via `LightCfg`. Supports six light types matching the dexsim rendering backend.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `light_type` | `Literal` | `"point"` | Type of light (currently only "point"). |
-| `color` | `tuple` | `(1.0, 1.0, 1.0)` | RGB color. |
-| `intensity` | `float` | `50.0` | Intensity in watts/m^2. |
-| `radius` | `float` | `1e2` | Falloff radius. |
+| `light_type` | `Literal` | `"point"` | Light type: ``"point"``, ``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, or ``"mesh"``. |
+| `color` | `tuple` | `(1.0, 1.0, 1.0)` | RGB color of the light source. |
+| `intensity` | `float` | `30.0` | Intensity of the light source in watts/m^2. |
+| `enable_shadow` | `bool` | `True` | Whether the light casts shadows. |
+| `radius` | `float` | `10.0` | Falloff radius (only for ``"point"``). |
+| `direction` | `tuple` | `(0.0, 0.0, -1.0)` | Direction vector for directional types (``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``). |
+| `spot_angle_inner` | `float` | `30.0` | Inner cone angle in degrees (only for ``"spot"``). |
+| `spot_angle_outer` | `float` | `45.0` | Outer cone angle in degrees (only for ``"spot"``). |
+| `rect_width` | `float` | `1.0` | Width of rectangular area light (only for ``"rect"``). |
+| `rect_height` | `float` | `1.0` | Height of rectangular area light (only for ``"rect"``). |
+| `mesh_path` | `str` | `""` | Asset path for mesh-based emissive lights (only for ``"mesh"``). |
+
+.. attention::
+    ``"sun"`` and ``"direction"`` are **global scene lights** (infinite-distance directional light
+    sources). They are created as a single instance on the root environment, not batched per
+    environment. Use :meth:`Light.set_direction` instead of :meth:`Light.set_local_pose` for
+    these types.
 
 
 ```{toctree}

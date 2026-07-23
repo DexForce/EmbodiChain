@@ -24,6 +24,7 @@ import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..core import (
@@ -49,6 +50,12 @@ class MoveHeldObjectCfg(ActionCfg):
 
     hand_close_qpos: torch.Tensor | None = None
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+
+    obj_upright_direction: torch.Tensor | None = None
+    """Optional object-local direction to align with world up while moving."""
+
+    pick_rotate_upright: float | None = None
+    """Optional rotation in radians used by the legacy upright transport mode."""
 
 
 class MoveHeldObject(AtomicAction):
@@ -84,6 +91,21 @@ class MoveHeldObject(AtomicAction):
         object_target_pose = resolve_object_target(
             target.object_target_pose, n_envs=self.n_envs, device=self.device
         )
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            arm_qpos_from_state(state, self.arm_joint_ids),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+        end_arm_xpos = self.robot.compute_fk(
+            start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+        )
+        if self.cfg.pick_rotate_upright is not None:
+            self._apply_configured_upright_rotation(
+                object_target_pose,
+                end_arm_xpos,
+                state.held_object.semantics.entity.get_local_pose(to_matrix=True),
+            )
         object_to_eef = state.held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
@@ -91,12 +113,8 @@ class MoveHeldObject(AtomicAction):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
-        )
+        if self.cfg.pick_rotate_upright is None:
+            self._apply_automatic_transport_rotation(move_eef_xpos, end_arm_xpos)
 
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
@@ -128,6 +146,85 @@ class MoveHeldObject(AtomicAction):
                 held_object=state.held_object,
                 coordinated_held_object=state.coordinated_held_object,
             ),
+        )
+
+    def _apply_configured_upright_rotation(
+        self,
+        object_target_pose: torch.Tensor,
+        end_arm_xpos: torch.Tensor,
+        held_object_xpos: torch.Tensor,
+    ) -> None:
+        if self.cfg.obj_upright_direction is None:
+            upright_direction = torch.tensor(
+                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
+            )
+        else:
+            upright_direction = self.cfg.obj_upright_direction.to(
+                device=self.device, dtype=torch.float32
+            )
+        object_upright = torch.matmul(held_object_xpos[:, :3, :3], upright_direction)
+        dot_result = torch.sum(end_arm_xpos[:, :3, 1] * object_upright, dim=-1)
+        revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+        axis_angle = (
+            -float(self.cfg.pick_rotate_upright)
+            * revert_flag.unsqueeze(-1)
+            * end_arm_xpos[:, :3, 0]
+        )
+        rotation_offset = axis_angle_to_rotation_matrix(axis_angle)
+        object_target_pose[:, :3, :3] = torch.bmm(
+            rotation_offset, held_object_xpos[:, :3, :3]
+        )
+
+    def _apply_automatic_transport_rotation(
+        self,
+        move_eef_xpos: torch.Tensor,
+        end_arm_xpos: torch.Tensor,
+    ) -> None:
+        down_z = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
+        arm_dot_angle = torch.acos(
+            torch.clamp(torch.sum(end_arm_xpos[:, :3, 2] * down_z, dim=-1), -1.0, 1.0)
+        )
+        adjust_mask = arm_dot_angle > torch.pi * 0.25
+        if not adjust_mask.any():
+            return
+
+        revert_flag = torch.where(end_arm_xpos[:, 2, 1] > 0, 1.0, -1.0)
+        rotation_axis = torch.tensor(
+            [1.0, 0.0, 0.0], device=self.device, dtype=torch.float32
+        ).repeat(self.n_envs, 1)
+        axis_angle = (
+            (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1)
+            * rotation_axis
+            * revert_flag.unsqueeze(-1)
+        )
+        rotation_offset = axis_angle_to_rotation_matrix(axis_angle)
+        template_rotation_a = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+            device=self.device,
+            dtype=torch.float32,
+        ).repeat(self.n_envs, 1, 1)
+        template_rotation_b = torch.tensor(
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+            device=self.device,
+            dtype=torch.float32,
+        ).repeat(self.n_envs, 1, 1)
+        target_rotation_a = torch.bmm(template_rotation_a, rotation_offset)
+        target_rotation_b = torch.bmm(template_rotation_b, rotation_offset)
+        relative_rotation_a = get_relative_rotation(
+            target_rotation_a, end_arm_xpos[:, :3, :3]
+        )
+        relative_rotation_b = get_relative_rotation(
+            target_rotation_b, end_arm_xpos[:, :3, :3]
+        )
+        target_rotation = torch.where(
+            (relative_rotation_a < relative_rotation_b)[:, None, None],
+            target_rotation_a,
+            target_rotation_b,
+        )
+        move_eef_xpos[:, :3, :3] = torch.where(
+            adjust_mask[:, None, None],
+            target_rotation,
+            move_eef_xpos[:, :3, :3],
         )
 
     def _fail(self, state: WorldState) -> ActionResult:

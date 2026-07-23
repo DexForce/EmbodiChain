@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import pytest
 import numpy as np
@@ -189,6 +191,7 @@ class BaseSolverTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        SimulationManager.flush_cleanup_queue()
 
 
 class TestOPWSolver(BaseSolverTest):
