@@ -50,13 +50,13 @@ from .shapes import ShapeCfg, MeshCfg
 # :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`). Assigning a
 # concrete renderer here (e.g. in test fixtures) forces that renderer and takes
 # precedence over auto-selection.
-DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt", "raster"] = "auto"
 
 
 @configclass
 class RenderCfg:
-    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
-    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "hybrid", "fast-rt", "rt", "raster"] = "auto"
+    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', 'rt', and 'raster'.
 
     Note:
     - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
@@ -66,6 +66,8 @@ class RenderCfg:
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
+    - 'raster' is a pure-Vulkan rasterizer (no ray tracing); materials and lights are mocked (no shading).
+        Intended for performance/diagnostic runs where ray-traced fidelity is not required.
     """
 
     spp: int = 1
@@ -105,6 +107,8 @@ class RenderCfg:
             return Renderer.FASTRT
         elif self.renderer == "rt":
             return Renderer.OFFLINERT
+        elif self.renderer == "raster":
+            return Renderer.RASTER
         elif self.renderer == "auto":
             # 'auto' is normally resolved by the SimulationManager before this is
             # called. If it reaches here (e.g. used standalone), fall back safely.
@@ -115,7 +119,7 @@ class RenderCfg:
             return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', 'rt', or 'raster'."
             )
 
 

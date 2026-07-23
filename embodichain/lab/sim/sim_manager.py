@@ -393,7 +393,7 @@ class SimulationManager:
         from embodichain.lab.sim import cfg
         from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
-        valid = {"auto", "hybrid", "fast-rt", "rt"}
+        valid = {"auto", "hybrid", "fast-rt", "rt", "raster"}
         if renderer not in valid:
             logger.log_error(
                 f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
