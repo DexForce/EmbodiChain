@@ -25,8 +25,8 @@ Run from the repository root::
 
     python examples/sim/planners/curobo_planner.py --headless
 
-Requirements: an NVIDIA CUDA device and cuRobo V2 installed with CUDA/PyTorch
-extras compatible with the active environment.  Installation instructions:
+Requirements: an NVIDIA CUDA device and the CUDA-matched EmbodiChain cuRobo V2
+extra installed in the active environment.  Installation instructions:
 https://nvlabs.github.io/curobo/latest/getting-started/installation.html
 """
 
@@ -147,8 +147,10 @@ def _check_runtime() -> None:
         import curobo  # noqa: F401
     except ImportError as exc:
         raise ImportError(
-            "cuRobo V2 is not installed. Install NVIDIA's CUDA-matched extras, "
-            "for example `pip install .[cu12]` or `pip install .[cu13]` "
+            "cuRobo V2 is not installed. From the EmbodiChain repository root, "
+            "install the extra matching the CUDA environment: "
+            '`uv pip install ".[curobo-cu12]"` for CUDA 12.x or '
+            '`uv pip install ".[curobo-cu13]"` for CUDA 13.x '
             f"(see {CUROBO_INSTALL_URL})."
         ) from exc
 

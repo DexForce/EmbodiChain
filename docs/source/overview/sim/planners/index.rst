@@ -25,7 +25,7 @@ The `embodichain` project provides a unified interface for robot trajectory plan
 - **CuroboPlanner** (optional): A CUDA-only cuRobo V2 backend for collision-aware single-arm Cartesian and joint-space planning.
 - **TrajectorySampleMethod**: An enumeration for trajectory sampling strategies, supporting sampling by time, quantity, or distance.
 
-These tools can be used to generate smooth and dynamically feasible robot trajectories. Install cuRobo separately when collision-aware planning against an explicit cuRobo world is required.
+These tools can be used to generate smooth and dynamically feasible robot trajectories. Install a CUDA-matched EmbodiChain cuRobo extra when collision-aware planning against an explicit cuRobo world is required.
 
 Use NeuralPlanner (experimental) when you have a trained APG checkpoint and need
 learned EEF waypoint rollout on Franka Panda.

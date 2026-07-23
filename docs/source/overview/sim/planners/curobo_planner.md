@@ -12,29 +12,30 @@ cuRobo, and constructing this planner requires a CUDA-capable NVIDIA GPU.
 
 ## Install cuRobo V2
 
-Follow [NVIDIA's official cuRobo installation
-guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
-to install the V2 release that matches the CUDA driver and PyTorch environment.
-The official flow clones cuRobo and uses a CUDA-matched extra:
+EmbodiChain exposes cuRobo V2 as CUDA-matched optional dependencies. From the
+EmbodiChain repository root, select exactly one extra:
 
 ~~~bash
-git clone https://github.com/NVlabs/curobo.git
-cd curobo
-uv venv --python 3.11
-source .venv/bin/activate
+# Recommended for the normal EmbodiChain environment, where PyTorch is present.
+uv pip install ".[curobo-cu12]"  # CUDA 12.x
+uv pip install ".[curobo-cu13]"  # CUDA 13.x
 
-# Choose exactly one command for the installed CUDA/PyTorch environment.
-uv pip install .[cu12]        # CUDA 12.x when PyTorch is already installed
-uv pip install .[cu12-torch]  # CUDA 12.x fresh environment, installs PyTorch
-uv pip install .[cu13]        # CUDA 13.x when PyTorch is already installed
-uv pip install .[cu13-torch]  # CUDA 13.x fresh environment, installs PyTorch
+# For a fresh environment that also needs PyTorch.
+uv pip install ".[curobo-cu12-torch]"  # CUDA 12.x
+uv pip install ".[curobo-cu13-torch]"  # CUDA 13.x
 
 python -c "import curobo; print(curobo.__version__)"
+pytest --pyargs curobo.tests
 ~~~
 
-EmbodiChain does not install cuRobo transitively. Keep the cuRobo installation
-in the same Python environment that runs the simulator, and use NVIDIA's
-instructions when the CUDA or PyTorch version differs from this example.
+The extras follow [NVIDIA's official cuRobo installation
+guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
+and pin the source dependency to the cuRobo V2 `v0.8.0` release. Use a Python
+3.10--3.13 environment on Linux with a supported NVIDIA GPU and driver. The
+non-`torch` extras are preferred for EmbodiChain because the simulation
+environment normally already provides PyTorch; the `-torch` variants delegate
+the PyTorch version requirement to cuRobo. Keep cuRobo in the same Python
+environment that runs the simulator.
 
 ## Configure a control part
 
