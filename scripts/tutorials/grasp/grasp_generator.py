@@ -31,6 +31,7 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from dexsim.utility.path import get_resources_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -145,11 +146,11 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
     return sim.add_robot(cfg=cfg)
 
 
-def create_mug(sim: SimulationManager):
+def create_obj(sim: SimulationManager):
     mug_cfg = RigidObjectCfg(
         uid="table",
         shape=MeshCfg(
-            fpath=get_data_path("CoffeeCup/cup.ply"),
+            fpath=get_resources_data_path("Model", "BakeTexture", "hdr_color_mesh.ply"),
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.01,
@@ -158,9 +159,8 @@ def create_mug(sim: SimulationManager):
         ),
         max_convex_hull_num=16,
         acd_method="vhacd",
-        init_pos=[0.55, 0.0, 0.01],
-        init_rot=[0.0, 0.0, -90],
-        body_scale=(4, 4, 4),
+        init_pos=[0.55, 0.0, 0.08],
+        init_rot=[0.0, 0.0, 0.0],
     )
     mug = sim.add_rigid_object(cfg=mug_cfg)
     return mug
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     args = parse_arguments()
     sim = initialize_simulation(args)
     robot = create_robot(sim, position=[0.0, 0.0, 0.0])
-    mug = create_mug(sim)
+    obj = create_obj(sim)
 
     # get mug grasp pose
     grasp_cfg = GraspGeneratorCfg(
@@ -245,8 +245,8 @@ if __name__ == "__main__":
     )
 
     # Extract mesh data from the mug and create grasp generator
-    vertices = mug.get_vertices(env_ids=[0], scale=True)[0]
-    triangles = mug.get_triangles(env_ids=[0])[0]
+    vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
+    triangles = obj.get_triangles(env_ids=[0])[0]
     grasp_generator = GraspGenerator(
         vertices=vertices,
         triangles=triangles,
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     approach_direction = torch.tensor(
         [0, 0, -1], dtype=torch.float32, device=sim.device
     )
-    obj_poses = mug.get_local_pose(to_matrix=True)
+    obj_poses = obj.get_local_pose(to_matrix=True)
     grasp_xpos_list = []
 
     rest_xpos = robot.compute_fk(

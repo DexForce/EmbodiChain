@@ -14,6 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from langchain_openai import AzureChatOpenAI
-from langchain_openai import ChatOpenAI
-import os
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+from embodichain.lab.sim.material import VisualMaterialInst
+
+
+def test_texture_object_is_bound_directly_and_takes_priority_over_data():
+    material = MagicMock(name="Material")
+    instance = VisualMaterialInst("instance", material)
+    texture = MagicMock(name="Texture")
+    texture_data = MagicMock(name="texture_data")
+
+    instance.set_base_color_texture(
+        texture_data=texture_data,
+        texture_obj=texture,
+    )
+
+    material.get_inst.return_value.set_base_color_map.assert_called_once_with(texture)
+    texture_data.cpu.assert_not_called()
+    assert instance.base_color_texture is texture
