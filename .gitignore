@@ -186,7 +186,6 @@ embodichain/database/train/*
 Log/
 
 # tensorboard logs
-embodichain/agents/policy/runs/*
 *.pth
 outputs
 test_configs/*
@@ -207,3 +206,5 @@ scripts/benchmark/rl/reports/*
 # Local agent execution state and isolated worktrees
 .superpowers/
 .worktrees/
+# Local gym project workspace
+/gym_project/
