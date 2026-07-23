@@ -107,27 +107,6 @@ def parse_args() -> argparse.Namespace:
         help="Simulation updates to hold before and after trajectory playback.",
     )
     parser.add_argument(
-        "--warmup",
-        dest="warmup",
-        action="store_true",
-        default=False,
-        help="Run cuRobo planner warmup before planning. Slower startup, but useful for cached repeated planning.",
-    )
-    parser.add_argument(
-        "--no-warmup",
-        dest="warmup",
-        action="store_false",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--cuda-graph",
-        action="store_true",
-        help=(
-            "Enable cuRobo CUDA graphs. Disabled by default because graph capture "
-            "can conflict with DexSim's GPU physics stream."
-        ),
-    )
-    parser.add_argument(
         "--max-attempts",
         type=int,
         default=DEFAULT_MAX_ATTEMPTS,
@@ -310,9 +289,7 @@ def main() -> None:
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=ROBOT_UID,
                     world=CuroboWorldCfg(rigid_objects=[demo_block]),
-                    warmup=args.warmup,
                     max_attempts=args.max_attempts,
-                    use_cuda_graph=args.cuda_graph,
                 )
             )
         )

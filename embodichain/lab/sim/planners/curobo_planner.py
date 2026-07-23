@@ -31,14 +31,13 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
-from copy import deepcopy
+import queue
+import time
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
-import yaml
 
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import quat_from_matrix
@@ -238,10 +237,13 @@ class CuroboAutoGenCfg:
 class CuroboPlannerCfg(BasePlannerCfg):
     """Configuration for the cuRobo V2 planner backend.
 
-    Both the cuRobo robot YAML and the collision-world YAML are auto-generated
-    internally (from the robot's URDF and from :attr:`world.rigid_objects`
-    respectively); no external YAML is used. The per-control-part profile is
-    auto-derived from the robot's solver at plan time.
+    cuRobo always runs in a spawned side process with its own CUDA context, so it
+    can capture CUDA graphs (~0.02s/plan) without conflicting with DexSim's
+    Vulkan/CUDA interop semaphores (graph capture in-process crashes DexSim at
+    ``DFGpuSemaphore.cpp:346``). Both the cuRobo robot YAML and the collision-world
+    YAML are auto-generated internally (from the robot's URDF and from
+    :attr:`world.rigid_objects` respectively); no external YAML is used. The
+    per-control-part profile is auto-derived from the robot's solver at plan time.
     """
 
     planner_type: str = "curobo"
@@ -263,9 +265,6 @@ class CuroboPlannerCfg(BasePlannerCfg):
     different fixed frame conventions.
     """
 
-    warmup: bool = True
-    """Whether to warm each cached planner once at construction time."""
-
     collision_activation_distance: float = 0.01
     """cuRobo collision activation distance (optimizer setting)."""
 
@@ -275,15 +274,15 @@ class CuroboPlannerCfg(BasePlannerCfg):
     max_planning_time: float | None = None
     """Post-plan validation budget (seconds). ``None`` skips the timing check."""
 
-    use_cuda_graph: bool = False
-    """Whether cuRobo may use CUDA graphs internally.
-
-    Disabled by default because CUDA graph capture can conflict with DexSim's
-    GPU physics stream. Enable only after validating the local stream setup.
-    """
-
     interpolation_dt: float = 0.025
     """Interpolation step (seconds) used by cuRobo and as a dt fallback."""
+
+    warmup_iterations: int = 5
+    """cuRobo warmup iterations run once per cached worker planner.
+
+    The worker captures CUDA graphs during warmup so the first real plan is fast.
+    Lower to speed up worker startup at the cost of a colder first plan.
+    """
 
 
 @configclass
@@ -311,40 +310,6 @@ class CuroboPlanOptions(PlanOptions):
 # =============================================================================
 # Pure conversion / validation helpers (no cuRobo import required)
 # =============================================================================
-
-
-def _reorder_by_names(
-    values: torch.Tensor,
-    from_names: list[str],
-    to_names: list[str],
-) -> torch.Tensor:
-    """Reorder the trailing joint dimension of ``values`` by name.
-
-    Args:
-        values: Tensor whose last dimension is ordered by ``from_names``.
-        from_names: Joint names describing the current trailing-axis order.
-        to_names: Desired joint-name order; must be a permutation of
-            ``from_names``.
-
-    Returns:
-        Tensor with the trailing axis reordered to ``to_names``.
-
-    Raises:
-        ValueError: If the two name sets are not equal as sets.
-    """
-    if (
-        len(from_names) != len(set(from_names))
-        or len(to_names) != len(set(to_names))
-        or sorted(from_names) != sorted(to_names)
-    ):
-        raise ValueError(
-            f"Cannot reorder joints: source names {from_names} and target names "
-            f"{to_names} are not the same set."
-        )
-    if from_names == to_names:
-        return values
-    perm = [from_names.index(name) for name in to_names]
-    return values[..., perm]
 
 
 def _matrix_to_position_quaternion(
@@ -455,10 +420,14 @@ def _require_curobo() -> "Any":
 class CuroboPlanner(BasePlanner):
     r"""cuRobo V2 collision-aware motion-planning backend.
 
-    The planner lazily imports cuRobo V2 at construction time, builds and caches
-    a V2 ``MotionPlanner`` (single-environment) or ``BatchMotionPlanner``
-    (multi-environment) per ``(control_part, batch_size, multi_env)`` key, and
-    converts standard batched :class:`PlanState` inputs into V2 planning calls.
+    The planner lazily imports cuRobo V2 at construction time (as a fail-fast
+    check) and runs all cuRobo work in a spawned side process with its own CUDA
+    context, where cuRobo can capture CUDA graphs without conflicting with
+    DexSim's GPU stream. One worker process per control part is cached; the
+    worker itself caches a ``MotionPlanner`` (single-environment) or
+    ``BatchMotionPlanner`` (multi-environment) per ``(batch_size, multi_env)``
+    key. Cartesian goals are converted to the cuRobo base frame in the parent
+    (which holds the live robot) and the solve is RPC'd to the worker.
 
     Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged - the
     backend performs its own collision-aware IK and trajectory optimization, so
@@ -488,9 +457,11 @@ class CuroboPlanner(BasePlanner):
                 f"'{cfg.robot_uid}' is on {self.device}. Move the simulation "
                 "to a CUDA device before constructing the curobo planner."
             )
-        self._bindings = _require_curobo()
-        # Cached V2 backends keyed by (control_part, batch_size, multi_env).
-        self._backend_cache: dict[tuple, "_CuroboBackend"] = {}
+        # Fail fast with an actionable error if cuRobo V2 is not installed; the
+        # worker process imports it lazily, but surface the error at construction.
+        _require_curobo()
+        # Cached subprocess workers keyed by control_part.
+        self._isolated_workers: dict[str, "_IsolatedWorker"] = {}
         world_cfg = cfg.world
         if world_cfg.obstacle_representation not in ("cuboid", "mesh", "sphere"):
             logger.log_error(
@@ -552,7 +523,7 @@ class CuroboPlanner(BasePlanner):
             )
         control_part = self._resolve_control_part(options)
         start = self._resolve_start_qpos(options.start_qpos, control_part)
-        backend = self._get_backend(control_part, start.shape[0])
+        backend = self._get_isolated_backend(control_part, start.shape[0])
         self.update_dynamic_obstacles(options.dynamic_obstacle_poses, backend)
         return self._plan_segments(target_states, start, backend, options)
 
@@ -590,84 +561,6 @@ class CuroboPlanner(BasePlanner):
     # ------------------------------------------------------------------
     # Backend construction / caching
     # ------------------------------------------------------------------
-
-    def _materialize_multi_env_scene_model(
-        self, world_config_path: str | None, batch_size: int
-    ) -> list[dict]:
-        """Return exactly one cuRobo V2 scene mapping for every batch row.
-
-        cuRobo V2 infers the collision-world count from the length of a scene
-        model list; ``multi_env=True`` and ``max_batch_size`` alone do not
-        allocate per-environment collision data. A single mapping YAML is
-        therefore cloned for every row. A top-level YAML list supports
-        explicitly different static worlds, but it must contain either one
-        mapping (cloned) or exactly ``batch_size`` mappings.
-
-        Args:
-            world_config_path: cuRobo scene identifier/path, or ``None`` for
-                an initially empty collision world.
-            batch_size: Number of simultaneous planning environments.
-
-        Returns:
-            A list of independent V2 scene mappings with length ``batch_size``.
-
-        Raises:
-            ValueError: If the YAML cannot be loaded or has an incompatible
-                top-level structure/count.
-        """
-        if batch_size < 1:
-            logger.log_error(
-                f"multi-env cuRobo batch_size must be positive, got {batch_size}.",
-                ValueError,
-            )
-
-        if world_config_path is None:
-            # Even an initially empty collision world needs one scene mapping
-            # per row. Otherwise V2's SceneCollisionCfg defaults to num_envs=1
-            # despite multi_env=True and later dynamic updates fail for row > 0.
-            return [{} for _ in range(batch_size)]
-
-        scene_path = Path(world_config_path)
-        if not scene_path.is_absolute():
-            content_mod = importlib.import_module("curobo.content")
-            scene_path = Path(content_mod.get_scene_configs_path()) / scene_path
-        try:
-            with scene_path.open(encoding="utf-8") as scene_file:
-                scene_model = yaml.safe_load(scene_file)
-        except (OSError, yaml.YAMLError) as exc:
-            logger.log_error(
-                f"Unable to load cuRobo V2 scene configuration "
-                f"'{world_config_path}': {exc}",
-                ValueError,
-            )
-            raise AssertionError("unreachable") from exc
-
-        if isinstance(scene_model, dict):
-            return [deepcopy(scene_model) for _ in range(batch_size)]
-        if isinstance(scene_model, list):
-            if not scene_model or not all(
-                isinstance(scene, dict) for scene in scene_model
-            ):
-                logger.log_error(
-                    "A multi-env cuRobo scene YAML list must contain one or more "
-                    "mapping worlds.",
-                    ValueError,
-                )
-            if len(scene_model) == 1:
-                return [deepcopy(scene_model[0]) for _ in range(batch_size)]
-            if len(scene_model) == batch_size:
-                return [deepcopy(scene) for scene in scene_model]
-            logger.log_error(
-                "A multi-env cuRobo scene YAML list must have one world to clone "
-                f"or exactly batch_size={batch_size} worlds; got {len(scene_model)}.",
-                ValueError,
-            )
-        logger.log_error(
-            "A cuRobo V2 scene YAML must contain a mapping world or a list of "
-            f"mapping worlds, got {type(scene_model).__name__}.",
-            ValueError,
-        )
-        raise AssertionError("unreachable")
 
     def _materialize_profile(self, control_part: str) -> _CuroboProfile:
         """Auto-derive the cuRobo profile for ``control_part`` from the robot.
@@ -868,74 +761,6 @@ class CuroboPlanner(BasePlanner):
             hasher.update(pose.detach().to("cpu").to(torch.float32).numpy().tobytes())
         return hasher.hexdigest()
 
-    def _get_backend(
-        self,
-        control_part: str,
-        batch_size: int,
-    ) -> "_CuroboBackend":
-        """Return a cached V2 backend for ``(control_part, batch_size, multi_env)``."""
-        multi_env = self.cfg.world.multi_env
-        key = (control_part, int(batch_size), bool(multi_env))
-        if key in self._backend_cache:
-            return self._backend_cache[key]
-
-        profile = self._materialize_profile(control_part)
-        sim_joint_names = self._resolve_sim_joint_names(control_part)
-        world_cfg = self.cfg.world
-        collision_cache = (
-            dict(world_cfg.collision_cache) if world_cfg.collision_cache else None
-        )
-        curobo_device = self.device
-        if curobo_device.index is None:
-            # Warp's V2 collision cache indexes CUDA devices by integer and
-            # cannot consume the indexless torch.device("cuda") used by
-            # DexSim's default CUDA configuration.
-            curobo_device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        world_config_path = (
-            self._auto_generate_world_yaml(world_cfg)
-            if world_cfg.rigid_objects
-            else None
-        )
-        scene_model = world_config_path
-        if multi_env:
-            scene_model = self._materialize_multi_env_scene_model(
-                world_config_path, int(batch_size)
-            )
-        planner_cfg = self._bindings.MotionPlannerCfg.create(
-            robot=profile.robot_config_path,
-            scene_model=scene_model,
-            collision_cache=collision_cache,
-            device_cfg=self._bindings.DeviceCfg(device=curobo_device),
-            max_batch_size=int(batch_size),
-            multi_env=bool(multi_env),
-            optimizer_collision_activation_distance=self.cfg.collision_activation_distance,
-            use_cuda_graph=bool(self.cfg.use_cuda_graph),
-            interpolation_dt=float(self.cfg.interpolation_dt),
-        )
-        if batch_size == 1:
-            planner = self._bindings.MotionPlanner(planner_cfg)
-        else:
-            planner = self._bindings.BatchMotionPlanner(planner_cfg)
-
-        self._validate_profile_joint_names(
-            profile, sim_joint_names, list(planner.joint_names)
-        )
-        self._validate_base_link_name(profile, planner)
-        tool_frame = self._resolve_tool_frame(profile, planner)
-
-        backend = _CuroboBackend(
-            planner=planner,
-            control_part=control_part,
-            sim_joint_names=sim_joint_names,
-            tool_frame=tool_frame,
-            profile=profile,
-            batch_size=int(batch_size),
-        )
-        if self.cfg.warmup:
-            planner.warmup(enable_graph=bool(self.cfg.use_cuda_graph))
-        self._backend_cache[key] = backend
-        return backend
-
     def _resolve_sim_joint_names(self, control_part: str) -> list[str]:
         """Return simulator control-part joints in the robot's canonical order."""
         control_parts = getattr(self.robot, "control_parts", None)
@@ -946,85 +771,6 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
         return list(control_parts[control_part])
-
-    def _validate_profile_joint_names(
-        self,
-        profile: _CuroboProfile,
-        sim_joint_names: list[str],
-        curobo_joint_names: list[str],
-    ) -> None:
-        """Validate the auto-derived joint mapping before a CUDA planning call."""
-        sim_to_curobo = profile.sim_to_curobo_joint_names
-        if set(sim_to_curobo) != set(sim_joint_names):
-            logger.log_error(
-                "sim_to_curobo_joint_names keys must exactly match the robot "
-                f"control-part joints {sim_joint_names}; got {list(sim_to_curobo)}.",
-                ValueError,
-            )
-        mapped_names = [sim_to_curobo[name] for name in sim_joint_names]
-        if len(mapped_names) != len(set(mapped_names)):
-            logger.log_error(
-                "sim_to_curobo_joint_names maps multiple simulator joints to "
-                f"the same cuRobo joint: {mapped_names}.",
-                ValueError,
-            )
-        missing = [name for name in mapped_names if name not in curobo_joint_names]
-        if missing:
-            logger.log_error(
-                "cuRobo profile is missing mapped active joints "
-                f"{missing}; planner joints are {curobo_joint_names}.",
-                ValueError,
-            )
-        unmapped = [
-            name for name in curobo_joint_names if name not in set(mapped_names)
-        ]
-        if unmapped:
-            logger.log_error(
-                "cuRobo planner exposes joints outside the requested control "
-                f"part: {unmapped}. Lock non-controlled joints in the V2 robot "
-                "profile or select a control part that includes them.",
-                ValueError,
-            )
-
-    def _resolve_tool_frame(self, profile: _CuroboProfile, planner: "Any") -> str:
-        """Resolve and validate the single V2 tool frame used for pose goals."""
-        tool_frames = list(getattr(planner, "tool_frames", []))
-        tool_frame = profile.tool_frame_name
-        if tool_frame is None:
-            if len(tool_frames) != 1:
-                logger.log_error(
-                    "tool_frame_name is required when the cuRobo profile exposes "
-                    f"multiple tool frames: {tool_frames}.",
-                    ValueError,
-                )
-            return tool_frames[0]
-        if tool_frames and tool_frame not in tool_frames:
-            logger.log_error(
-                f"tool_frame_name '{tool_frame}' is not available in the cuRobo "
-                f"profile tool frames {tool_frames}.",
-                ValueError,
-            )
-        return tool_frame
-
-    def _validate_base_link_name(self, profile: _CuroboProfile, planner: "Any") -> None:
-        """Ensure an explicitly configured base link matches the V2 model."""
-        expected = profile.base_link_name
-        if expected is None:
-            return
-        kinematics = getattr(planner, "kinematics", None)
-        actual = getattr(kinematics, "base_link", None)
-        if actual is None:
-            logger.log_error(
-                "cuRobo planner did not expose a kinematics.base_link, so "
-                f"base_link_name={expected!r} cannot be validated.",
-                ValueError,
-            )
-        if actual != expected:
-            logger.log_error(
-                f"Auto-derived base_link_name={expected!r} does not "
-                f"match the loaded cuRobo V2 base link {actual!r}.",
-                ValueError,
-            )
 
     # ------------------------------------------------------------------
     # Segment planning
@@ -1037,7 +783,15 @@ class CuroboPlanner(BasePlanner):
         backend: "_CuroboBackend",
         options: CuroboPlanOptions,
     ) -> PlanResult:
-        """Plan each waypoint segment sequentially and assemble a PlanResult."""
+        """Plan each waypoint segment sequentially and assemble a PlanResult.
+
+        Each segment's goal is converted to the cuRobo base frame in-process
+        (pure-tensor, using the live robot pose) and the cuRobo solve itself is
+        RPC'd to the subprocess worker, which returns a V2-result-like object
+        (or ``None``). Everything after the solve - segment extraction, the
+        planning-time budget check, junction-sample de-duplication, and
+        rectangular assembly - then runs unchanged.
+        """
         B = start.shape[0]
         D = start.shape[1]
         max_attempts = (
@@ -1052,16 +806,21 @@ class CuroboPlanner(BasePlanner):
 
         for seg_idx, target in enumerate(target_states):
             self._validate_segment_batch(target, B, seg_idx)
-            current_state = self._to_curobo_joint_state(current, backend)
             if target.move_type == MoveType.EEF_MOVE:
                 if target.xpos is None:
                     logger.log_error(
                         f"Segment {seg_idx} EEF_MOVE target missing xpos.",
                         ValueError,
                     )
-                goal = self._to_curobo_pose_goal(target.xpos, backend)
-                v2_result = backend.planner.plan_pose(
-                    goal, current_state, max_attempts=max_attempts
+                goal_matrix = self._to_curobo_base_tool_matrix(target.xpos, backend)
+                position, quaternion = _matrix_to_position_quaternion(goal_matrix)
+                start_time = time.time()
+                v2_result = self._worker_plan(
+                    "eef", current, position, quaternion, None, backend, max_attempts
+                )
+                logger.log_info(
+                    f"cuRobo plan_pose segment {seg_idx} cost time: "
+                    f"{time.time() - start_time:.4f}s"
                 )
             elif target.move_type == MoveType.JOINT_MOVE:
                 if target.qpos is None:
@@ -1069,9 +828,13 @@ class CuroboPlanner(BasePlanner):
                         f"Segment {seg_idx} JOINT_MOVE target missing qpos.",
                         ValueError,
                     )
-                goal_state = self._to_curobo_joint_goal(target.qpos, backend)
-                v2_result = backend.planner.plan_cspace(
-                    goal_state, current_state, max_attempts=max_attempts
+                start_time = time.time()
+                v2_result = self._worker_plan(
+                    "joint", current, None, None, target.qpos, backend, max_attempts
+                )
+                logger.log_info(
+                    f"cuRobo plan_cspace segment {seg_idx} cost time: "
+                    f"{time.time() - start_time:.4f}s"
                 )
             else:
                 logger.log_error(
@@ -1305,69 +1068,6 @@ class CuroboPlanner(BasePlanner):
     # cuRobo state / goal construction
     # ------------------------------------------------------------------
 
-    def _to_curobo_joint_state(
-        self, current: torch.Tensor, backend: "_CuroboBackend"
-    ) -> "Any":
-        """Build a full cuRobo ``JointState`` from a sim-order control-part qpos.
-
-        Every active joint is filled from ``current`` in the simulator control
-        part order. Backend construction already rejects profiles whose active
-        V2 joints extend beyond that control part, which keeps collision
-        checking and the returned trajectory semantically aligned.
-        """
-        profile = backend.profile
-        curobo_names = list(backend.planner.joint_names)
-        sim_to_curobo = profile.sim_to_curobo_joint_names
-        curobo_to_sim_idx = {
-            cu_name: idx
-            for idx, sim_name in enumerate(backend.sim_joint_names)
-            for cu_name in [sim_to_curobo[sim_name]]
-        }
-        if current.dim() != 2 or current.shape[1] != len(backend.sim_joint_names):
-            logger.log_error(
-                "cuRobo start/goal qpos must have shape "
-                f"(B, {len(backend.sim_joint_names)}), got {tuple(current.shape)}.",
-                ValueError,
-            )
-        B = current.shape[0]
-        state = torch.zeros(
-            B, len(curobo_names), device=self.device, dtype=torch.float32
-        )
-        for i, cu_name in enumerate(curobo_names):
-            if cu_name in curobo_to_sim_idx:
-                state[:, i] = current[:, curobo_to_sim_idx[cu_name]]
-            else:  # Defensive: _validate_profile_joint_names rejects this case.
-                logger.log_error(
-                    f"cuRobo active joint '{cu_name}' is not mapped to the "
-                    "selected EmbodiChain control part.",
-                    ValueError,
-                )
-        return self._bindings.JointState.from_position(state, joint_names=curobo_names)
-
-    def _to_curobo_pose_goal(
-        self, xpos: torch.Tensor, backend: "_CuroboBackend"
-    ) -> "Any":
-        """Build a cuRobo ``GoalToolPose`` from a batched world-frame pose."""
-        xpos = torch.as_tensor(xpos, device=self.device, dtype=torch.float32)
-        xpos = self._sim_world_to_curobo_base_pose(xpos, backend)
-        xpos = self._tcp_to_tool_pose(xpos, backend.profile)
-        position, quaternion = _matrix_to_position_quaternion(xpos)
-        pose = self._bindings.Pose(position=position, quaternion=quaternion)
-        return self._bindings.GoalToolPose.from_poses(
-            {backend.tool_frame: pose},
-            ordered_tool_frames=[backend.tool_frame],
-            num_goalset=1,
-        )
-
-    def _to_curobo_joint_goal(
-        self, qpos: torch.Tensor, backend: "_CuroboBackend"
-    ) -> "Any":
-        """Build a cuRobo c-space goal state from a sim-order target qpos."""
-        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
-        if qpos.dim() == 1:
-            qpos = qpos.unsqueeze(0)
-        return self._to_curobo_joint_state(qpos, backend)
-
     def _tcp_to_tool_pose(
         self, tcp_pose: torch.Tensor, profile: _CuroboProfile
     ) -> torch.Tensor:
@@ -1474,88 +1174,266 @@ class CuroboPlanner(BasePlanner):
         poses: dict[str, torch.Tensor] | None,
         backend: "_CuroboBackend | None" = None,
     ) -> None:
-        """Update named dynamic obstacle poses on the cuRobo collision world.
+        """Update named dynamic obstacle poses on the cuRobo worker collision worlds.
 
         Args:
             poses: Mapping of obstacle name -> ``(B, 4, 4)`` world pose. ``None``
                 is a no-op.
-            backend: Specific backend to update. If ``None``, updates all cached
-                backends. In ``multi_env`` mode, cached backends must share one
-                batch size; otherwise pass the intended backend explicitly.
+            backend: Specific control part's worker to update. If ``None``,
+                updates all cached workers.
         """
         if poses is None:
             return
         _validate_dynamic_obstacles(poses, list(self.cfg.world.dynamic_obstacle_names))
-        backends = (
-            [backend] if backend is not None else list(self._backend_cache.values())
-        )
-        if backend is None and self.cfg.world.multi_env:
-            batch_sizes = {cached_backend.batch_size for cached_backend in backends}
-            if len(batch_sizes) > 1:
-                logger.log_error(
-                    "Cannot update all cached multi-env cuRobo backends with "
-                    "different cached batch sizes. Pass the intended backend "
-                    "explicitly.",
-                    ValueError,
-                )
+        from .curobo_process_worker import UpdateObstacleMsg
+
+        if backend is not None:
+            targets = [self._isolated_workers[backend.control_part]]
+        else:
+            targets = list(self._isolated_workers.values())
         for name, pose_tensor in poses.items():
             pose_tensor = torch.as_tensor(
                 pose_tensor, device=self.device, dtype=torch.float32
             )
-            for be in backends:
-                curobo_pose = self._sim_world_to_curobo_base_pose(pose_tensor, be)
-                self._update_backend_obstacle(name, curobo_pose, be)
+            for iw in targets:
+                curobo_pose = self._sim_world_to_curobo_base_pose(
+                    pose_tensor, iw.shadow_backend
+                )
+                position, quaternion = _matrix_to_position_quaternion(curobo_pose)
+                self._worker_request(
+                    iw,
+                    UpdateObstacleMsg(
+                        name=name,
+                        position=position.detach().to("cpu"),
+                        quaternion=quaternion.detach().to("cpu"),
+                    ),
+                )
 
-    def _update_backend_obstacle(
-        self, name: str, pose_tensor: torch.Tensor, backend: "_CuroboBackend"
-    ) -> None:
-        """Apply one named obstacle pose tensor under the backend's world policy."""
-        if self.cfg.world.multi_env:
-            if pose_tensor.shape[0] != backend.batch_size:
-                logger.log_error(
-                    f"dynamic obstacle '{name}' has batch {pose_tensor.shape[0]}, "
-                    f"but this multi-env cuRobo backend expects {backend.batch_size}.",
-                    ValueError,
-                )
-            positions, quaternions = _matrix_to_position_quaternion(pose_tensor)
-            for env_idx in range(backend.batch_size):
-                pose = self._bindings.Pose(
-                    position=positions[env_idx], quaternion=quaternions[env_idx]
-                )
-                backend.planner.scene_collision_checker.update_obstacle_pose(
-                    name, pose, env_idx=env_idx
-                )
-            return
+    # ------------------------------------------------------------------
+    # Subprocess-isolated worker backend
+    # ------------------------------------------------------------------
 
-        # A shared world has one collision environment, so a batched input is
-        # only meaningful if every environment supplied the same world pose.
-        if pose_tensor.shape[0] > 1 and not torch.allclose(
-            pose_tensor, pose_tensor[:1].expand_as(pose_tensor)
-        ):
-            logger.log_error(
-                f"dynamic obstacle '{name}' has different poses across a "
-                "shared cuRobo world. Enable world.multi_env for per-env worlds.",
-                ValueError,
+    def _to_curobo_base_tool_matrix(
+        self, xpos: torch.Tensor, backend: "_CuroboBackend"
+    ) -> torch.Tensor:
+        """Convert a batched sim-world TCP pose to a cuRobo-base tool-frame matrix.
+
+        Pure-tensor composition of :meth:`_sim_world_to_curobo_base_pose` and
+        :meth:`_tcp_to_tool_pose`, so it runs in the parent (which holds the live
+        robot) without constructing any cuRobo type. The worker splits this matrix
+        into position/quaternion and builds the ``GoalToolPose``.
+        """
+        xpos = torch.as_tensor(xpos, device=self.device, dtype=torch.float32)
+        xpos = self._sim_world_to_curobo_base_pose(xpos, backend)
+        xpos = self._tcp_to_tool_pose(xpos, backend.profile)
+        return xpos
+
+    def _get_isolated_backend(
+        self, control_part: str, batch_size: int
+    ) -> "_CuroboBackend":
+        """Return a shadow backend for ``control_part``, spawning its worker once.
+
+        The shadow carries the profile / sim joint names needed by the shared
+        post-processing (``_extract_segment``, ``_map_curobo_to_sim``,
+        ``_sim_world_to_curobo_base_pose``); the actual cuRobo planner lives in
+        the worker process. ``batch_size`` is refreshed on every call so the
+        worker builds/caches the right planner.
+        """
+        iw = self._isolated_workers.get(control_part)
+        if iw is None:
+            profile = self._materialize_profile(control_part)
+            sim_joint_names = self._resolve_sim_joint_names(control_part)
+            world_cfg = self.cfg.world
+            world_config_path = (
+                self._auto_generate_world_yaml(world_cfg)
+                if world_cfg.rigid_objects
+                else None
             )
-        position, quaternion = _matrix_to_position_quaternion(pose_tensor[:1])
-        pose = self._bindings.Pose(position=position[0], quaternion=quaternion[0])
-        backend.planner.scene_collision_checker.update_obstacle_pose(
-            name, pose, env_idx=0
+            iw = self._spawn_isolated_worker(
+                control_part, profile, sim_joint_names, world_config_path
+            )
+            self._isolated_workers[control_part] = iw
+        iw.shadow_backend.batch_size = int(batch_size)
+        return iw.shadow_backend
+
+    def _spawn_isolated_worker(
+        self,
+        control_part: str,
+        profile: _CuroboProfile,
+        sim_joint_names: list[str],
+        world_config_path: str | None,
+    ) -> "_IsolatedWorker":
+        """Spawn (spawn start method) a cuRobo worker and wait for its init ACK."""
+        import multiprocessing as mp
+
+        from .curobo_process_worker import InitMsg, worker_main
+
+        ctx = mp.get_context("spawn")
+        req_queue = ctx.Queue()
+        resp_queue = ctx.Queue()
+        device_index = (
+            self.device.index
+            if self.device.index is not None
+            else torch.cuda.current_device()
+        )
+        collision_cache = (
+            dict(self.cfg.world.collision_cache)
+            if self.cfg.world.collision_cache
+            else None
+        )
+        init_msg = InitMsg(
+            robot_config_path=profile.robot_config_path,
+            world_config_path=world_config_path,
+            tool_frame=profile.tool_frame_name,  # type: ignore[arg-type]
+            sim_joint_names=list(sim_joint_names),
+            sim_to_curobo=dict(profile.sim_to_curobo_joint_names),
+            device_index=int(device_index),
+            interpolation_dt=float(self.cfg.interpolation_dt),
+            collision_activation_distance=float(self.cfg.collision_activation_distance),
+            collision_cache=collision_cache,
+            multi_env=bool(self.cfg.world.multi_env),
+            warmup_iterations=int(self.cfg.warmup_iterations),
+        )
+        process = ctx.Process(
+            target=worker_main,
+            args=(init_msg, req_queue, resp_queue),
+            daemon=True,
+        )
+        process.start()
+        iw = _IsolatedWorker(
+            control_part=control_part,
+            process=process,
+            req_queue=req_queue,
+            resp_queue=resp_queue,
+            shadow_backend=_CuroboBackend(
+                control_part=control_part,
+                sim_joint_names=list(sim_joint_names),
+                profile=profile,
+                batch_size=1,
+            ),
+        )
+        status, payload = self._worker_request(iw, None)
+        if status != "ok":
+            self._shutdown_worker(iw)
+            details = (
+                payload[2]
+                if isinstance(payload, tuple) and len(payload) > 2
+                else payload
+            )
+            logger.log_error(
+                "cuRobo isolated worker failed to initialize: " f"{details}",
+                RuntimeError,
+            )
+        logger.log_info(
+            f"cuRobo isolated worker ready for control part '{control_part}'."
+        )
+        return iw
+
+    def _worker_request(self, iw: "_IsolatedWorker", msg: "Any") -> tuple[str, "Any"]:
+        """Send one request to worker ``iw`` and await its ``(status, payload)`` reply.
+
+        A ``None`` message is the init handshake (the worker ACKs once it has built
+        and warmed its first planner is deferred to first plan; here it ACKs after
+        executor construction). The loop re-checks liveness on each timeout so a
+        worker crash surfaces as a clear error instead of an infinite hang.
+        """
+        proc = iw.process
+        if proc is None or not proc.is_alive():
+            logger.log_error(
+                "cuRobo isolated worker process is not running.", RuntimeError
+            )
+        if msg is not None:
+            iw.req_queue.put(msg)
+        while True:
+            try:
+                return iw.resp_queue.get(timeout=30.0)
+            except queue.Empty:
+                if proc is None or not proc.is_alive():
+                    logger.log_error(
+                        "cuRobo isolated worker process died mid-request.",
+                        RuntimeError,
+                    )
+                # Worker still alive but slow (e.g. first-plan warmup): keep waiting.
+
+    def _worker_plan(
+        self,
+        move_type: str,
+        current: torch.Tensor,
+        position: torch.Tensor | None,
+        quaternion: torch.Tensor | None,
+        goal_qpos: torch.Tensor | None,
+        backend: "_CuroboBackend",
+        max_attempts: int,
+    ) -> "Any":
+        """RPC one plan to the worker and wrap the reply as a V2-result-like object."""
+        from .curobo_process_worker import PlanMsg
+
+        iw = self._isolated_workers[backend.control_part]
+        msg = PlanMsg(
+            batch_size=int(backend.batch_size),
+            move_type=move_type,
+            start_qpos=current.detach().to("cpu", dtype=torch.float32),
+            max_attempts=int(max_attempts),
+            goal_position=None if position is None else position.detach().to("cpu"),
+            goal_quaternion=(
+                None if quaternion is None else quaternion.detach().to("cpu")
+            ),
+            goal_qpos=None if goal_qpos is None else goal_qpos.detach().to("cpu"),
+        )
+        status: str
+        payload: Any
+        status, payload = self._worker_request(iw, msg)
+        if status != "ok":
+            details = (
+                payload[2]
+                if isinstance(payload, tuple) and len(payload) > 2
+                else payload
+            )
+            logger.log_error(
+                f"cuRobo isolated worker plan failed: {details}", RuntimeError
+            )
+        if payload is None:
+            return None
+        return SimpleNamespace(
+            success=payload.success,
+            interpolated_trajectory=SimpleNamespace(
+                position=payload.position,
+                joint_names=payload.joint_names,
+                dt=payload.dt,
+            ),
+            interpolated_last_tstep=payload.last_tstep,
+            total_time=payload.total_time,
         )
 
+    def _shutdown_worker(self, iw: "_IsolatedWorker") -> None:
+        """Best-effort close + forcible reap of one isolated worker process.
+
+        Mirrors ``ToppraPlanner._shutdown_pool``: we do not rely on a clean join
+        (a worker holding a CUDA context may deadlock in the driver at exit), so
+        after signalling close we terminate and, if needed, kill.
+        """
+        proc = iw.process
+        if proc is None:
+            return
+        try:
+            from .curobo_process_worker import CloseMsg
+
+            iw.req_queue.put_nowait(CloseMsg())
+        except Exception:
+            pass
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5.0)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=1.0)
+        iw.process = None
+
     def close(self) -> None:
-        """Destroy every cached cuRobo planner and clear the cache."""
-        for backend in list(self._backend_cache.values()):
-            planner = backend.planner
-            close_fn = getattr(planner, "close", None) or getattr(
-                planner, "destroy", None
-            )
-            if close_fn is not None:
-                try:
-                    close_fn()
-                except Exception:
-                    pass
-        self._backend_cache.clear()
+        """Shut down every cached cuRobo worker process."""
+        for iw in list(self._isolated_workers.values()):
+            self._shutdown_worker(iw)
+        self._isolated_workers.clear()
 
     def __del__(self) -> None:  # pragma: no cover - best-effort GC cleanup
         try:
@@ -1566,11 +1444,31 @@ class CuroboPlanner(BasePlanner):
 
 @dataclass
 class _CuroboBackend:
-    """Internal bundle of a cached V2 planner and its EmbodiChain-side metadata."""
+    """Parent-side metadata for one control part's subprocess worker.
 
-    planner: "Any"
+    Carries the profile / sim joint names the shared post-processing
+    (``_extract_segment``, ``_map_curobo_to_sim``,
+    ``_sim_world_to_curobo_base_pose``) needs; the real cuRobo planner lives in
+    the worker process. ``batch_size`` is refreshed per plan.
+    """
+
     control_part: str
     sim_joint_names: list[str]
-    tool_frame: str
     profile: _CuroboProfile
     batch_size: int
+
+
+@dataclass
+class _IsolatedWorker:
+    """One subprocess-isolated cuRobo worker and its parent-side handle.
+
+    ``shadow_backend`` carries the profile / sim joint names the shared
+    post-processing needs, while the real cuRobo planner lives in ``process``.
+    ``batch_size`` on the shadow is refreshed per plan.
+    """
+
+    control_part: str
+    process: "Any"
+    req_queue: "Any"
+    resp_queue: "Any"
+    shadow_backend: _CuroboBackend
