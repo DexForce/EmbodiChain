@@ -36,7 +36,7 @@ topics:
     source_of_truth:
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/embodied_env.py
-      - embodichain/lab/gym/envs/tasks/
+      - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
     related_topics:
       - manager-functor

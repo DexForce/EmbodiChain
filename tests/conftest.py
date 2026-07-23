@@ -21,6 +21,27 @@ import pytest
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _discover_task_packages():
+    """Discover all installed task packages once per test session.
+
+    Task environments now live in the separate ``embodichain_tasks`` package
+    (and any third-party package declaring an ``embodichain.tasks`` entry
+    point). They are no longer auto-registered by importing
+    ``embodichain.lab.gym.envs``, so tests that build task envs via
+    ``make(env_id)`` / ``build_env`` / ``train_from_config`` need discovery to
+    run first. This mirrors what the ``run_env`` and ``train-rl`` CLIs do at
+    startup.
+    """
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+
+    discover_task_packages()
+    execute_init_hooks()
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--renderer",

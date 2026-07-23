@@ -44,6 +44,33 @@ DEFAULT_MANAGER_MODULES = [
     "embodichain.lab.gym.envs.managers.rewards",
 ]
 
+# Extra manager modules registered by third-party packages via init hooks
+_EXTRA_MANAGER_MODULES: list[str] = []
+
+
+def register_manager_modules(modules: list[str]) -> None:
+    """Register additional manager modules for functor resolution.
+
+    These modules are searched when resolving functor function names from
+    config strings, in addition to the built-in ``DEFAULT_MANAGER_MODULES``.
+    Call this from an ``embodichain.init`` entry point hook.
+
+    Args:
+        modules: List of fully-qualified module path strings.
+    """
+    for m in modules:
+        if m not in _EXTRA_MANAGER_MODULES:
+            _EXTRA_MANAGER_MODULES.append(m)
+
+
+def get_manager_modules() -> list[str]:
+    """Get all registered manager modules (built-in + extensions).
+
+    Returns:
+        Combined list of default and extra manager module paths.
+    """
+    return DEFAULT_MANAGER_MODULES + _EXTRA_MANAGER_MODULES
+
 
 def get_dtype_bounds(dtype: np.dtype):
     """Gets the min and max values of a given numpy type"""
@@ -485,8 +512,8 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
-    # Initialize manager_modules with defaults
-    default_manager_modules = DEFAULT_MANAGER_MODULES.copy()
+    # Initialize manager_modules with defaults + registered extensions
+    default_manager_modules = get_manager_modules().copy()
 
     # Extend with user-provided modules, skipping duplicates
     if manager_modules is not None:
@@ -882,7 +909,7 @@ def build_env_cfg_from_args(
         gym_config_modifier(gym_config)
 
     cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config, manager_modules=DEFAULT_MANAGER_MODULES
+        gym_config, manager_modules=get_manager_modules()
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving

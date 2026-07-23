@@ -1,6 +1,6 @@
 trainer:
   exp_name: cart_pole_ppo
-  gym_config: configs/agents/rl/basic/cart_pole/gym_config.yaml
+  gym_config: embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.yaml
   seed: 42
   device: cuda:0
   headless: true

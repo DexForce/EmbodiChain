@@ -20,7 +20,7 @@ Usage examples::
 
     python -m embodichain preview-asset --asset_path /path/to/asset.usda --preview
     python -m embodichain run-env --env_name my_env
-    python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
+    python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
     python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
 """
 

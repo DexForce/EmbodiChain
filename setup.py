@@ -108,7 +108,6 @@ def main():
 
     data_files = []
     data_files += get_data_files_of_a_directory("embodichain", ignore_py=False)
-    data_files += get_data_files_of_a_directory("configs", target_dir="configs")
 
     cmdclass = {"clean": CleanCommand}
     if BuildExtension is not None:
@@ -122,7 +121,6 @@ def main():
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
         packages=find_packages(exclude=["docs"]),
         data_files=data_files,
-        entry_points={},
         cmdclass=cmdclass,
         include_package_data=True,
     )

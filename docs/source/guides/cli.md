@@ -1,6 +1,8 @@
 # CLI Reference
 
-EmbodiChain provides a unified CLI via ``python -m embodichain <subcommand>``.
+EmbodiChain provides a unified CLI, available both as the ``embodichain``
+console command and via ``python -m embodichain <subcommand>``. The two are
+equivalent; this guide uses the ``python -m embodichain`` form.
 
 ---
 
@@ -110,6 +112,13 @@ When ``--preview`` is enabled, an interactive REPL is available:
 
 Launch a Gymnasium environment for data generation or interactive preview.
 
+Task environments are **auto-discovered**: any installed package that declares
+an ``embodichain.tasks`` entry point (e.g. the official ``embodichain_tasks``
+package) is imported at startup, registering its environments via
+``@register_env``. Make sure your task package is pip-installed
+(``pip install -e .``) so its tasks are visible to the CLI. The task to launch
+is selected by the ``"id"`` field of the gym config.
+
 ```bash
 # Run an environment with a gym config file
 python -m embodichain run-env --gym_config path/to/config.yaml
@@ -143,6 +152,7 @@ python -m embodichain run-env --gym_config config.yaml --headless
 | ``--preview`` | ``False`` | Enter interactive preview mode |
 | ``--filter_visual_rand`` | ``False`` | Filter out visual randomization |
 | ``--filter_dataset_saving`` | ``False`` | Filter out dataset saving |
+| ``--max_episodes`` | *(from config)* | Override the maximum number of rollout episodes |
 
 ### Preview Mode
 
@@ -159,21 +169,21 @@ Launch reinforcement learning training from a JSON or YAML config file.
 
 ```bash
 # Train with a config file (JSON or YAML)
-python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 
 # JSON configs remain supported
-python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
+python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config configs/agents/rl/push_cube/train_config.yaml \
+    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml \
     --distributed
 ```
 
 The direct module entry point remains available:
 
 ```bash
-python -m embodichain.learning.rl.train --config configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 ```
 
 ### Arguments

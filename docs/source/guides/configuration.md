@@ -132,8 +132,8 @@ Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Gym environment | `configs/gym/cobotmagic.json` | `configs/gym/cobotmagic.yaml` |
-| RL training | `configs/agents/rl/basic/cart_pole/train_config.json` | `configs/agents/rl/basic/cart_pole/train_config.yaml` |
+| Gym environment | `embodichain_tasks/configs/gym/cobotmagic.json` | `embodichain_tasks/configs/gym/cobotmagic.yaml` |
+| RL training | `embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.json` | `embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
 
@@ -269,7 +269,7 @@ trainer:
   device: cuda:0
   iterations: 500
   buffer_size: 1024
-  gym_config: configs/agents/rl/basic/cart_pole/gym_config.yaml
+  gym_config: embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.yaml
 policy:
   name: actor_critic
   actor:
@@ -313,7 +313,7 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 ## Tips
 
-1. **Start from an existing config.** Copy a config file from `configs/gym/` or `configs/agents/rl/` and modify it for your task.
+1. **Start from an existing config.** Copy a config file from `embodichain_tasks/configs/gym/` or `embodichain_tasks/configs/agents/rl/` and modify it for your task.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
