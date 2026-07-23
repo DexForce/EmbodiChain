@@ -151,6 +151,45 @@ pip install embodichain \
 
 This pulls in `dexsim_engine` (Python package `dexsim`) and the rest of the core dependencies declared in `pyproject.toml`.
 
+## Optional: cuRobo V2 motion planning
+
+Install a cuRobo extra to use EmbodiChain's CUDA-accelerated, collision-aware
+motion planner. cuRobo is intentionally not part of the core dependency set:
+select exactly one extra that matches the CUDA version reported by
+`nvidia-smi`.
+
+The normal EmbodiChain environment already provides PyTorch, so prefer one of
+the non-`torch` extras:
+
+| CUDA | Published package | Source checkout |
+|------|-------------------|-----------------|
+| 12.x | `uv pip install "embodichain[curobo-cu12]" ${PIP_EXTRA_ARGS}` | `uv pip install -e ".[curobo-cu12]" ${PIP_EXTRA_ARGS}` |
+| 13.x | `uv pip install "embodichain[curobo-cu13]" ${PIP_EXTRA_ARGS}` | `uv pip install -e ".[curobo-cu13]" ${PIP_EXTRA_ARGS}` |
+
+For a fresh environment that also needs cuRobo to select and install PyTorch,
+use `curobo-cu12-torch` or `curobo-cu13-torch` instead. The same extras work
+with `pip`; replace `uv pip install` with `pip install`.
+
+**Recommended for the current CUDA 12.x EmbodiChain stack:**
+
+```bash
+uv pip install -e ".[curobo-cu12]" \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+  --trusted-host pyp.open3dv.site
+
+python -c "import curobo; print(curobo.__version__)"
+pytest --pyargs curobo.tests
+```
+
+The dependency is installed from NVIDIA's source repository and pinned to the
+cuRobo V2 `v0.8.0` release. cuRobo has stricter requirements than the core
+EmbodiChain installation: Linux, Python 3.10--3.13, a supported NVIDIA GPU with
+at least 4 GB VRAM, and a driver that supports CUDA 12 or newer. See
+[NVIDIA's official installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
+for the current compatibility requirements, and see
+[cuRobo V2 Planner](../overview/sim/planners/curobo_planner.md) for EmbodiChain
+configuration and usage.
+
 ## Optional: generative simulation (`gensim`)
 
 Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh processing, and `pyrender`. The `bpy` wheel is hosted on Blender's index and must be included in the install command.
@@ -219,6 +258,7 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 | Docker Vulkan / EGL warnings from `docker_run.sh` | Install host NVIDIA drivers and Vulkan user-space packages; paths must be files under `/etc` or `/usr/share`, not directories. |
 | Viewer does not open | Export `DISPLAY`, allow X11 access (`xhost +local:` on the host), and ensure `~/.Xauthority` is mounted (the run script does this by default). |
 | PyTorch / CUDA errors at runtime | Reinstall a PyTorch build that matches your driver/CUDA from [pytorch.org](https://pytorch.org/get-started/locally/). |
+| `No module named 'curobo'` | Install exactly one CUDA-matched cuRobo extra, such as `uv pip install -e ".[curobo-cu12]"`, from the EmbodiChain repository root. |
 | `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.10 or 3.11. |
 
 ## Next steps
