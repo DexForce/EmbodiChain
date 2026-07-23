@@ -23,6 +23,7 @@ from embodichain.lab.sim.sensors.camera import (
     _resize_camera_output,
     plan_camera_groups,
 )
+from embodichain.lab.gym.envs.base_env import BaseEnv
 
 
 class _FakeEnv:
@@ -78,3 +79,13 @@ def test_resize_camera_output_preserves_shape_and_dtype() -> None:
     assert resized_mask.shape == (1, 4, 4)
     assert resized_mask.dtype == torch.int32
     assert set(resized_mask.unique().tolist()) == {1, 2, 3, 4}
+
+
+def test_camera_group_ids_are_deduplicated() -> None:
+    env = object.__new__(BaseEnv)
+
+    env.add_camera_group_id(7)
+    env.add_camera_group_id(7)
+    env.add_camera_group_id(11)
+
+    assert env._camera_group_ids == [7, 11]

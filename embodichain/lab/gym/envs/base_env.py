@@ -280,7 +280,7 @@ class BaseEnv(gym.Env):
         self._camera_group_ids: List[int] = []
         for sensor in self.sensors.values():
             if isinstance(sensor, Camera):
-                self._camera_group_ids.append(sensor.group_id)
+                self.add_camera_group_id(sensor.group_id)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Load the robot agent, setup the controller and action space.
