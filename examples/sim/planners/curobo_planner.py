@@ -338,7 +338,7 @@ def main() -> None:
 
         print(f"cuRobo atomic-action success: {bool(success.item())}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"[warp-up] atomic-action planning duration: {planning_duration:.3f} s")
+        print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
 
         if not bool(success.item()):
             raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
