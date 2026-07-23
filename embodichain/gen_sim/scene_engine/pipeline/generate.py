@@ -26,9 +26,9 @@ from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
     ImageSegmentationClient,
 )
 
-# from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
-#     GeometryGenerationClient,
-# )
+from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
+    GeometryGenerationClient,
+)
 
 from embodichain.gen_sim.scene_engine.pipeline.scene_understanding import (
     understand_scene,
@@ -38,9 +38,9 @@ from embodichain.gen_sim.scene_engine.pipeline.scene_segmentation import (
 )
 from embodichain.gen_sim.scene_engine.utils.logger import log_stage_end, log_stage_start
 
-# from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
-#     generate_geometries_and_coarse_layout,
-# )
+from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
+    generate_geometries_and_coarse_layout,
+)
 
 
 def generate_scene_from_image(
@@ -49,6 +49,7 @@ def generate_scene_from_image(
     *,
     llm_config_path: str | Path | None = None,
     image_segmentation_config_path: str | Path | None = None,
+    geometry_generation_config_path: str | Path | None = None,
 ) -> Scene:
     """Generate the initial core scene state from an input image."""
     resolved_output_root = Path(output_root).expanduser().resolve()
@@ -86,18 +87,22 @@ def generate_scene_from_image(
     log_stage_end("Scene Segmentation")
 
     # 3. Objects + Coarse Layout Generation
-    # geometry_generation_client = GeometryGenerationClient.from_config(
-    #     geometry_generation_config_path
-    # )
-    # geometry_generation_client.check_health()
+    log_stage_start("Objects + Coarse Layout Generation")
+    # Load the config and fail if the Geometry Generation Server is unavailable.
+    geometry_generation_client = GeometryGenerationClient.from_config(
+        geometry_generation_config_path
+    )
+    geometry_generation_client.check_health()
 
-    # scene = generate_geometries_and_coarse_layout(
-    #     output_root=resolved_output_root,
-    #     scene=scene,
-    #     vlm_client=vlm_client,
-    #     geometry_generation_client=geometry_generation_client,
-    # )
-    # # geometry_generation_client.close() # Kill the session.
+    scene = generate_geometries_and_coarse_layout(
+        image_path=image_path,
+        output_root=resolved_output_root,
+        scene=scene,
+        vlm_client=vlm_client,
+        geometry_generation_client=geometry_generation_client,
+    )
+    geometry_generation_client.close()  # Kill the session.
+    log_stage_end("Objects + Coarse Layout Generation")
 
     # 4. Geometry + Layout Refinement
     # 5. Scene Export

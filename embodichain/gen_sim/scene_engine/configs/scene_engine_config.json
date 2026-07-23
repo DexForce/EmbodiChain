@@ -10,9 +10,16 @@
   },
   "image_segmentation": {
     "base_url": "",
-    "timeout_s": 1200,
+    "timeout_s": 30,
+    "max_attempts": 3,
     "health_path": "/health",
     "segment_single_object_path": "/predict"
+  },
+  "geometry_generation": {
+      "base_url": "",
+      "timeout_s": 600,
+      "max_attempts": 3,
+      "health_path": "/health",
+      "generate_multiple_objects_path": "/generate_multiple_objects"
   }
 }
-

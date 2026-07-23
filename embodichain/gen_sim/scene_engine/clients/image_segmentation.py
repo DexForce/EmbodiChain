@@ -35,12 +35,14 @@ class ImageSegmentationClient:
         *,
         base_url: str,
         timeout_s: int,
+        max_attempts: int,
         health_path: str,
         segment_single_object_path: str,
         session: requests.Session | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
+        self._max_attempts = max_attempts
         self._health_path = health_path
         self._segment_single_object_path = segment_single_object_path
         self._session = session or requests.Session()
@@ -54,11 +56,23 @@ class ImageSegmentationClient:
         return cls(**config)
 
     def check_health(self) -> None:
-        response = self._session.get(
-            self._url(self._health_path),
-            timeout=self._timeout_s,
-        )
-        response.raise_for_status()
+        last_error: requests.RequestException | None = None
+        for _ in range(self._max_attempts):
+            try:
+                response = self._session.get(
+                    self._url(self._health_path),
+                    timeout=self._timeout_s,
+                )
+                response.raise_for_status()
+                return
+            except requests.RequestException as exc:
+                last_error = exc
+
+        assert last_error is not None
+        raise RuntimeError(
+            "Image Segmentation Server health check failed after "
+            f"{self._max_attempts} attempts."
+        ) from last_error
 
     def close(self) -> None:
         self._session.close()
@@ -81,31 +95,42 @@ class ImageSegmentationClient:
         if not prompt:
             raise ValueError("Image segmentation prompt must not be empty.")
 
-        with resolved_image_path.open("rb") as image_file:
-            response = self._session.post(
-                self._url(self._segment_single_object_path),
-                data={"prompt": prompt},
-                files={"image": (resolved_image_path.name, image_file)},
-                timeout=self._timeout_s,
-            )
-        response.raise_for_status()
+        last_error: Exception | None = None
+        for _ in range(self._max_attempts):
+            try:
+                with resolved_image_path.open("rb") as image_file:
+                    response = self._session.post(
+                        self._url(self._segment_single_object_path),
+                        data={"prompt": prompt},
+                        files={"image": (resolved_image_path.name, image_file)},
+                        timeout=self._timeout_s,
+                    )
+                response.raise_for_status()
 
-        try:
-            response_data = response.json()
-        except ValueError as exc:
-            raise ValueError(
-                "Image Segmentation Server response is not valid JSON."
-            ) from exc
-        if not isinstance(response_data, dict):
-            raise ValueError(
-                "Image Segmentation Server response must be a JSON object."
-            )
-        if response_data.get("ok") is False:
-            raise RuntimeError(
-                "Image Segmentation Server request failed: "
-                f"{response_data.get('error', 'unknown error')}"
-            )
-        return _extract_rle_masks(response_data)
+                try:
+                    response_data = response.json()
+                except ValueError as exc:
+                    raise RuntimeError(
+                        "Image Segmentation Server response is not valid JSON."
+                    ) from exc
+                if not isinstance(response_data, dict):
+                    raise RuntimeError(
+                        "Image Segmentation Server response must be a JSON object."
+                    )
+                if response_data.get("ok") is False:
+                    raise RuntimeError(
+                        "Image Segmentation Server request failed: "
+                        f"{response_data.get('error', 'unknown error')}"
+                    )
+                return _extract_rle_masks(response_data)
+            except (requests.RequestException, RuntimeError) as exc:
+                last_error = exc
+
+        assert last_error is not None
+        raise RuntimeError(
+            "Image Segmentation Server request failed after "
+            f"{self._max_attempts} attempts."
+        ) from last_error
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}/{path.lstrip('/')}"
@@ -129,6 +154,7 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     required_keys = (
         "base_url",
         "timeout_s",
+        "max_attempts",
         "health_path",
         "segment_single_object_path",
     )
@@ -147,6 +173,17 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
             "Image Segmentation Server config timeout_s must be at least 1."
         )
 
+    try:
+        max_attempts = int(config["max_attempts"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Image Segmentation Server config max_attempts must be an integer."
+        ) from exc
+    if max_attempts < 1:
+        raise ValueError(
+            "Image Segmentation Server config max_attempts must be at least 1."
+        )
+
     string_keys = ("base_url", "health_path", "segment_single_object_path")
     for key in string_keys:
         if not isinstance(config[key], str) or not config[key].strip():
@@ -157,6 +194,7 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     return {
         "base_url": config["base_url"].strip(),
         "timeout_s": timeout_s,
+        "max_attempts": max_attempts,
         "health_path": config["health_path"].strip(),
         "segment_single_object_path": config["segment_single_object_path"].strip(),
     }

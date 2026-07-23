@@ -27,7 +27,6 @@ from urllib.request import Request, urlopen
 from embodichain.gen_sim.scene_engine.llms.load_config import LLMConfig, load_llm_config
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-_RETRYABLE_HTTP_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 
 
 class OpenAICompatibleVLM:
@@ -102,15 +101,13 @@ class OpenAICompatibleVLM:
                 return _extract_response_text(response_payload)
             except HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")
-                if exc.code not in _RETRYABLE_HTTP_STATUS_CODES:
-                    raise RuntimeError(
-                        f"VLM request failed with HTTP {exc.code}: {details}"
-                    ) from exc
                 last_error = RuntimeError(
                     f"VLM request failed with HTTP {exc.code}: {details}"
                 )
             except URLError as exc:
                 last_error = RuntimeError(f"VLM request failed: {exc.reason}")
+            except (TimeoutError, OSError) as exc:
+                last_error = RuntimeError(f"VLM request failed: {exc}")
             except (json.JSONDecodeError, ValueError):
                 last_error = RuntimeError("VLM API returned a malformed response.")
 

@@ -42,7 +42,7 @@ def cli_scene_engine(image: str | Path, output_root: str | Path) -> None:
         image_path=resolved_image_path,
         output_root=resolved_output_root,
     )
-    print("Successfully completed scene understanding.")
+    print("Successfully completed!")
 
 
 def main() -> None:
