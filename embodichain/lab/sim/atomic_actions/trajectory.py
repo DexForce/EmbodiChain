@@ -519,7 +519,9 @@ class TrajectoryBuilder:
 
             return NeuralPlanOptions()
         if planner_type == "curobo":
-            from embodichain.lab.sim.planners.curobo_planner import CuroboPlanOptions
+            from embodichain.lab.sim.planners.curobo.curobo_planner import (
+                CuroboPlanOptions,
+            )
 
             return CuroboPlanOptions(max_attempts=getattr(cfg, "max_attempts", None))
         logger.log_error(

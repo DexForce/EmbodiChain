@@ -20,7 +20,7 @@ each link's collision mesh (vertices/faces) from the simulator, fits collision
 spheres to every link mesh with cuRobo's sphere-fitting library, and writes a
 complete cuRobo V2 robot configuration YAML. The cuRobo planner adapter calls
 this automatically (with on-disk caching) on the first plan; see
-:class:`~embodichain.lab.sim.planners.curobo_planner.CuroboAutoGenCfg`.
+:class:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboAutoGenCfg`.
 
 :func:`generate_curobo_world_yaml` builds the cuRobo collision-world YAML from
 live :class:`~embodichain.lab.sim.objects.RigidObject` meshes.
@@ -516,7 +516,7 @@ def generate_curobo_world_yaml(
         the simulator world origin, rebase the object poses first, or register the
         obstacle name in ``CuroboWorldCfg.dynamic_obstacle_names`` and update its
         pose at plan time via
-        :meth:`~embodichain.lab.sim.planners.curobo_planner.CuroboPlanner.update_dynamic_obstacles`.
+        :meth:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboPlanner.update_dynamic_obstacles`.
 
     Args:
         rigid_objects: ``RigidObject`` instances to bake into the collision world.

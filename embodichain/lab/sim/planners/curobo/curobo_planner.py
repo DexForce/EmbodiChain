@@ -42,13 +42,13 @@ import torch
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import quat_from_matrix
 
-from .base_planner import (
+from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
     PlanOptions,
     validate_plan_options,
 )
-from .utils import MoveType, PlanResult, PlanState
+from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
     from typing import Any

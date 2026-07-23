@@ -31,7 +31,7 @@ import pytest
 import torch
 import yaml
 
-from embodichain.lab.sim.planners.curobo_planner import CuroboWorldCfg
+from embodichain.lab.sim.planners.curobo.curobo_planner import CuroboWorldCfg
 from embodichain.lab.sim.planners.curobo_yaml import (
     _mesh_to_obstacle_entry,
     generate_curobo_world_yaml,

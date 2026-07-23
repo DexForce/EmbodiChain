@@ -41,7 +41,7 @@ from embodichain.lab.sim.planners import (  # noqa: E402
     MotionGenCfg,
     MotionGenerator,
 )
-from embodichain.lab.sim.planners.curobo_planner import (  # noqa: E402
+from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
