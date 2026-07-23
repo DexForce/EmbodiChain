@@ -29,7 +29,9 @@ import torch
 
 def _create_minimal_distributed_config():
     """Create a minimal train config for distributed testing."""
-    config_path = Path("embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config_grpo.json")
+    config_path = Path(
+        "embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config_grpo.json"
+    )
     if not config_path.exists():
         pytest.skip(f"Config not found: {config_path}")
 
@@ -89,7 +91,10 @@ def test_distributed_training_via_torchrun():
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            # Distributed sim startup (per-rank Warp/CUDA + DexSim + NCCL
+            # init) dominates wall time on multi-GPU hosts and can exceed 120s
+            # even though the training itself is short.
+            timeout=300,
             cwd=Path(__file__).resolve().parents[2],
             env=child_env,
         )

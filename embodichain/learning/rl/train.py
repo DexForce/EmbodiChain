@@ -31,7 +31,11 @@ from embodichain.learning.rl.algo import build_algo, get_registered_algo_names
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
-from embodichain.lab.gym.utils.registration import build_env
+from embodichain.lab.gym.utils.registration import (
+    build_env,
+    discover_task_packages,
+    execute_init_hooks,
+)
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
 from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
@@ -414,8 +418,19 @@ def cli() -> None:
     """Command-line interface for RL training.
 
     Parses CLI arguments and launches training from a config file.
+
+    Task packages are discovered (and init hooks executed) before training so
+    that task environments registered in separate packages (e.g.
+    ``embodichain_tasks``) are available to ``build_env``. This mirrors the
+    ``run_env`` CLI.
     """
     args = parse_args()
+
+    # Discover all installed task packages and run init hooks (register custom
+    # manager modules / asset resolvers) before building any environment.
+    discover_task_packages()
+    execute_init_hooks()
+
     train_from_config(args.config, distributed=args.distributed)
 
 
