@@ -25,20 +25,28 @@ Run from the repository root::
 
     python examples/sim/planners/curobo_planner.py --headless
 
-Requirements: an NVIDIA CUDA device and cuRobo V2 installed with CUDA/PyTorch
-extras compatible with the active environment.  Installation instructions:
+Requirements: an NVIDIA CUDA device and the CUDA-matched EmbodiChain cuRobo V2
+extra installed in the active environment.  Installation instructions:
 https://nvlabs.github.io/curobo/latest/getting-started/installation.html
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
 import torch
 
-from embodichain import data as _data
+# Prefer the in-repo source over any installed (possibly stale) embodichain
+# package, so this example exercises the current code. The demo relies on the
+# cuRobo adapter's URDF-based robot-YAML auto-generation, which lives in the
+# source tree and may not be present in an older installed copy.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -47,11 +55,11 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffectorCfg,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
-from embodichain.lab.sim.objects import RigidObjectCfg, Robot
+from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.planners.curobo_planner import (
+from embodichain.lab.sim.planners.curobo.curobo_planner import (
+    CuroboPlanner,
     CuroboPlannerCfg,
-    CuroboRobotProfileCfg,
     CuroboWorldCfg,
 )
 from embodichain.lab.sim.robots import FrankaPandaCfg
@@ -62,10 +70,11 @@ __all__ = ["main"]
 
 ROBOT_UID = "curobo_franka"
 CONTROL_PART = "arm"
-DEMO_BLOCK_DIMS = [0.18, 0.40, 0.36]
-DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
+DEMO_BLOCK_DIMS = [0.18, 0.3, 0.36]
+DEMO_BLOCK_POS = (0.40, 0.0, 0.18)
 DEFAULT_RECORD_FPS = 20
 DEFAULT_RECORD_MAX_MEMORY = 2048
+DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_RECORD_LOOK_AT = (
     (1.8, -1.8, 1.35),
     (0.35, 0.10, 0.40),
@@ -99,16 +108,12 @@ def parse_args() -> argparse.Namespace:
         help="Simulation updates to hold before and after trajectory playback.",
     )
     parser.add_argument(
-        "--no-warmup",
-        action="store_true",
-        help="Skip cuRobo planner warmup (useful for iteration/debugging).",
-    )
-    parser.add_argument(
-        "--cuda-graph",
-        action="store_true",
+        "--max-attempts",
+        type=int,
+        default=DEFAULT_MAX_ATTEMPTS,
         help=(
-            "Enable cuRobo CUDA graphs. Disabled by default because graph capture "
-            "can conflict with DexSim's GPU physics stream."
+            "cuRobo planning attempts per request. Lower values are faster; "
+            "increase this if a harder scene fails to find a path."
         ),
     )
     parser.add_argument(
@@ -142,38 +147,15 @@ def _check_runtime() -> None:
         import curobo  # noqa: F401
     except ImportError as exc:
         raise ImportError(
-            "cuRobo V2 is not installed. Install NVIDIA's CUDA-matched extras, "
-            "for example `pip install .[cu12]` or `pip install .[cu13]` "
+            "cuRobo V2 is not installed. From the EmbodiChain repository root, "
+            "install the extra matching the CUDA environment: "
+            '`uv pip install ".[curobo-cu12]"` for CUDA 12.x or '
+            '`uv pip install ".[curobo-cu13]"` for CUDA 13.x '
             f"(see {CUROBO_INSTALL_URL})."
         ) from exc
 
 
-def _demo_world_path() -> str:
-    """Return the static collision scene shared by the simulator and cuRobo."""
-    return str(
-        Path(_data.__file__).parent / "assets" / "curobo" / "collision_franka_demo.yml"
-    )
-
-
-def _franka_profile() -> CuroboRobotProfileCfg:
-    """Build the explicit Franka joint and TCP-frame mapping for cuRobo."""
-    return CuroboRobotProfileCfg(
-        robot_config_path="franka.yml",
-        sim_to_curobo_joint_names={
-            f"fr3_joint{i}": f"panda_joint{i}" for i in range(1, 8)
-        },
-        base_link_name="panda_link0",
-        tool_frame_name="panda_hand",
-        tool_frame_to_tcp=[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.1034],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-    )
-
-
-def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
+def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -183,21 +165,34 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot]:
             arena_space=2.0,
         )
     )
+
     robot = sim.add_robot(
-        cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
+        cfg=FrankaPandaCfg.from_dict(
+            {
+                "uid": ROBOT_UID,
+                "robot_type": "panda",
+                "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
+            }
+        )
     )
-    # Keep this geometry synchronized with collision_franka_demo.yml.
-    sim.add_rigid_object(
+
+    if robot is None:
+        raise RuntimeError(f"Failed to add robot '{ROBOT_UID}' to the cuRobo demo.")
+    # This object is also exported into the cuRobo collision world below via
+    # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
+    # automatically (no hand-authored collision YAML to keep in sync).
+    demo_block = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
             attrs=RigidBodyAttributesCfg(),
             body_type="kinematic",
             init_pos=DEMO_BLOCK_POS,
-            init_rot=[0.0, 0.0, 0.0],
+            init_rot=(0.0, 0.0, 0.0),
         )
     )
-    return sim, robot
+
+    return sim, robot, demo_block
 
 
 def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) -> bool:
@@ -219,14 +214,6 @@ def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) 
         "`SimulationManager.start_window_record()`."
     )
     return True
-
-
-def _target_beyond_block(robot: Robot) -> torch.Tensor:
-    """Return a reachable TCP target whose route must pass around the cuboid."""
-    qpos = robot.get_qpos(name=CONTROL_PART)
-    target = robot.compute_fk(qpos=qpos, name=CONTROL_PART, to_matrix=True)[0].clone()
-    target[:3, 3] = torch.tensor([0.55, 0.30, 0.45], device=robot.device)
-    return target
 
 
 def _replay_full_dof_trajectory(
@@ -275,7 +262,9 @@ def _final_tcp_error(robot: Robot, target: torch.Tensor) -> float:
         name=CONTROL_PART,
         to_matrix=True,
     )
-    return float(torch.linalg.vector_norm(final_pose[0, :3, 3] - target[:3, 3]))
+    # Accept either a single (4, 4) pose or a batched (B, 4, 4) target.
+    target_pos = target[0, :3, 3] if target.dim() == 3 else target[:3, 3]
+    return float(torch.linalg.vector_norm(final_pose[0, :3, 3] - target_pos))
 
 
 def main() -> None:
@@ -285,13 +274,18 @@ def main() -> None:
         raise ValueError("--step-repeat must be at least 1.")
     if args.hold_steps < 0:
         raise ValueError("--hold-steps must be non-negative.")
+    if args.max_attempts < 1:
+        raise ValueError("--max-attempts must be at least 1.")
     if args.record_fps < 1:
         raise ValueError("--record-fps must be at least 1.")
     _check_runtime()
+    # Spawn the cuRobo worker now so its ~5s Python+torch startup overlaps with
+    # the simulation build below instead of blocking the first plan.
+    CuroboPlanner.prewarm(ROBOT_UID)
 
     sim: SimulationManager | None = None
     try:
-        sim, robot = _build_scene(args.headless)
+        sim, robot, demo_block = _build_scene(args.headless)
         if not args.headless:
             sim.open_window()
         _start_headless_recording(sim, args)
@@ -302,10 +296,8 @@ def main() -> None:
             MotionGenCfg(
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=ROBOT_UID,
-                    robot_profiles={CONTROL_PART: _franka_profile()},
-                    world=CuroboWorldCfg(world_config_path=_demo_world_path()),
-                    warmup=not args.no_warmup,
-                    use_cuda_graph=args.cuda_graph,
+                    world=CuroboWorldCfg(rigid_objects=[demo_block]),
+                    max_attempts=args.max_attempts,
                 )
             )
         )
@@ -323,16 +315,32 @@ def main() -> None:
             name="move_end_effector",
         )
 
-        target = _target_beyond_block(robot)
+        initial_qpos = robot.get_qpos(name=CONTROL_PART)
+        initial_xpos = robot.compute_fk(
+            qpos=initial_qpos,
+            name=CONTROL_PART,
+            to_matrix=True,
+        )
+        target_xpos = torch.tensor(
+            [
+                [
+                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
+                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
         plan_start = time.perf_counter()
         success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target))]
+            [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
         )
         planning_duration = time.perf_counter() - plan_start
 
         print(f"cuRobo atomic-action success: {bool(success.item())}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"atomic-action planning duration: {planning_duration:.3f} s")
+        print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
 
         if not bool(success.item()):
             raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
@@ -345,7 +353,23 @@ def main() -> None:
         )
         if args.hold_steps:
             sim.update(step=args.hold_steps)
-        print(f"final TCP position error: {_final_tcp_error(robot, target):.4f} m")
+        print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
+
+        plan_start = time.perf_counter()
+        success, trajectory, _ = engine.run(
+            [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
+        )
+        planning_duration = time.perf_counter() - plan_start
+        print(f"cuRobo atomic-action success: {bool(success.item())}")
+        print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
+        print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
+        _replay_full_dof_trajectory(
+            sim,
+            robot,
+            trajectory,
+            step_repeat=args.step_repeat,
+        )
+
     finally:
         if sim is not None:
             if sim.is_window_recording():
