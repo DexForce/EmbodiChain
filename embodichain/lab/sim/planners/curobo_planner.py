@@ -277,11 +277,13 @@ class CuroboPlannerCfg(BasePlannerCfg):
     interpolation_dt: float = 0.025
     """Interpolation step (seconds) used by cuRobo and as a dt fallback."""
 
-    warmup_iterations: int = 5
+    warmup_iterations: int = 1
     """cuRobo warmup iterations run once per cached worker planner.
 
     The worker captures CUDA graphs during warmup so the first real plan is fast.
-    Lower to speed up worker startup at the cost of a colder first plan.
+    One iteration suffices to capture the trajectory-optimization graph; extra
+    iterations only re-replay it. Raise this only if a warm plan is unexpectedly
+    slow (incomplete graph capture on a complex robot).
     """
 
 
@@ -448,6 +450,47 @@ class CuroboPlanner(BasePlanner):
     preserve_plan_samples = True
     supports_joint_move = True
 
+    # Prewarmed workers spawned before the robot exists (see prewarm()), keyed by
+    # robot_uid. A CuroboPlanner picks up its prewarmed worker at construction.
+    _prewarmed: dict[str, "_IsolatedWorker"] = {}
+
+    @classmethod
+    def prewarm(cls, robot_uid: str, *, device_index: int | None = None) -> None:
+        """Spawn the cuRobo worker process early, before the robot exists.
+
+        cuRobo's worker startup is dominated by Python + torch import (~5s) that
+        is independent of the robot or scene. Calling ``prewarm`` before building
+        the simulation overlaps that startup with the sim build, shaving it off
+        the first plan's critical path. The worker imports cuRobo and idles; the
+        profile + world are sent when the planner first plans.
+
+        Args:
+            robot_uid: UID of the robot this worker will serve. Must match the
+                ``robot_uid`` of the later :class:`CuroboPlannerCfg`.
+            device_index: CUDA device index. ``None`` uses the current device.
+        """
+        import multiprocessing as mp
+
+        from .curobo_process_worker import InitMsg, worker_main
+
+        if robot_uid in cls._prewarmed:
+            return  # Already prewarming/prewarmed for this robot.
+        ctx = mp.get_context("spawn")
+        req_queue = ctx.Queue()
+        resp_queue = ctx.Queue()
+        idx = int(
+            device_index if device_index is not None else torch.cuda.current_device()
+        )
+        process = ctx.Process(
+            target=worker_main,
+            args=(InitMsg(device_index=idx), req_queue, resp_queue),
+            daemon=True,
+        )
+        process.start()
+        cls._prewarmed[robot_uid] = _IsolatedWorker(
+            process=process, req_queue=req_queue, resp_queue=resp_queue
+        )
+
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
         self.cfg: CuroboPlannerCfg = cfg
@@ -462,6 +505,11 @@ class CuroboPlanner(BasePlanner):
         _require_curobo()
         # Cached subprocess workers keyed by control_part.
         self._isolated_workers: dict[str, "_IsolatedWorker"] = {}
+        # A worker prewarmed via CuroboPlanner.prewarm() before this planner
+        # existed (its spawn overlapped with the sim build); claimed on first use.
+        self._prewarmed_worker: "_IsolatedWorker | None" = type(self)._prewarmed.pop(
+            cfg.robot_uid, None
+        )
         world_cfg = cfg.world
         if world_cfg.obstacle_representation not in ("cuboid", "mesh", "sphere"):
             logger.log_error(
@@ -1196,6 +1244,8 @@ class CuroboPlanner(BasePlanner):
                 pose_tensor, device=self.device, dtype=torch.float32
             )
             for iw in targets:
+                if iw.shadow_backend is None:
+                    continue  # Not yet configured for a control part.
                 curobo_pose = self._sim_world_to_curobo_base_pose(
                     pose_tensor, iw.shadow_backend
                 )
@@ -1249,21 +1299,75 @@ class CuroboPlanner(BasePlanner):
                 if world_cfg.rigid_objects
                 else None
             )
-            iw = self._spawn_isolated_worker(
+            iw = self._obtain_worker(
                 control_part, profile, sim_joint_names, world_config_path
             )
             self._isolated_workers[control_part] = iw
+        assert iw.shadow_backend is not None  # set by _obtain_worker
         iw.shadow_backend.batch_size = int(batch_size)
         return iw.shadow_backend
 
-    def _spawn_isolated_worker(
+    def _obtain_worker(
         self,
         control_part: str,
         profile: _CuroboProfile,
         sim_joint_names: list[str],
         world_config_path: str | None,
     ) -> "_IsolatedWorker":
-        """Spawn (spawn start method) a cuRobo worker and wait for its init ACK."""
+        """Take a prewarmed worker or spawn a light one, then configure it.
+
+        A prewarmed worker (spawned by :meth:`prewarm` before the robot existed)
+        has already imported cuRobo; otherwise a light worker is spawned here.
+        Either way the profile + world are sent via :class:`ConfigureMsg`, and the
+        shadow backend (for parent-side frame conversion) is attached.
+        """
+        from .curobo_process_worker import ConfigureMsg
+
+        if self._prewarmed_worker is not None:
+            iw = self._prewarmed_worker
+            self._prewarmed_worker = None
+        else:
+            iw = self._spawn_light_worker()
+        iw.control_part = control_part
+        iw.shadow_backend = _CuroboBackend(
+            control_part=control_part,
+            sim_joint_names=list(sim_joint_names),
+            profile=profile,
+            batch_size=1,
+        )
+        self._worker_request(
+            iw,
+            ConfigureMsg(
+                robot_config_path=profile.robot_config_path,
+                world_config_path=world_config_path,
+                tool_frame=profile.tool_frame_name,  # type: ignore[arg-type]
+                sim_joint_names=list(sim_joint_names),
+                sim_to_curobo=dict(profile.sim_to_curobo_joint_names),
+                interpolation_dt=float(self.cfg.interpolation_dt),
+                collision_activation_distance=float(
+                    self.cfg.collision_activation_distance
+                ),
+                collision_cache=(
+                    dict(self.cfg.world.collision_cache)
+                    if self.cfg.world.collision_cache
+                    else None
+                ),
+                multi_env=bool(self.cfg.world.multi_env),
+                warmup_iterations=int(self.cfg.warmup_iterations),
+            ),
+        )
+        logger.log_info(
+            f"cuRobo isolated worker configured for control part '{control_part}'."
+        )
+        return iw
+
+    def _spawn_light_worker(self) -> "_IsolatedWorker":
+        """Spawn a worker with a light init (device only); configure it later.
+
+        The worker imports cuRobo and ACKs; the profile + world arrive via
+        :class:`ConfigureMsg`. The init ACK is consumed lazily by the first
+        :meth:`_worker_request` (readiness sync), so this returns immediately.
+        """
         import multiprocessing as mp
 
         from .curobo_process_worker import InitMsg, worker_main
@@ -1276,74 +1380,50 @@ class CuroboPlanner(BasePlanner):
             if self.device.index is not None
             else torch.cuda.current_device()
         )
-        collision_cache = (
-            dict(self.cfg.world.collision_cache)
-            if self.cfg.world.collision_cache
-            else None
-        )
-        init_msg = InitMsg(
-            robot_config_path=profile.robot_config_path,
-            world_config_path=world_config_path,
-            tool_frame=profile.tool_frame_name,  # type: ignore[arg-type]
-            sim_joint_names=list(sim_joint_names),
-            sim_to_curobo=dict(profile.sim_to_curobo_joint_names),
-            device_index=int(device_index),
-            interpolation_dt=float(self.cfg.interpolation_dt),
-            collision_activation_distance=float(self.cfg.collision_activation_distance),
-            collision_cache=collision_cache,
-            multi_env=bool(self.cfg.world.multi_env),
-            warmup_iterations=int(self.cfg.warmup_iterations),
-        )
         process = ctx.Process(
             target=worker_main,
-            args=(init_msg, req_queue, resp_queue),
+            args=(InitMsg(device_index=int(device_index)), req_queue, resp_queue),
             daemon=True,
         )
         process.start()
-        iw = _IsolatedWorker(
-            control_part=control_part,
-            process=process,
-            req_queue=req_queue,
-            resp_queue=resp_queue,
-            shadow_backend=_CuroboBackend(
-                control_part=control_part,
-                sim_joint_names=list(sim_joint_names),
-                profile=profile,
-                batch_size=1,
-            ),
+        return _IsolatedWorker(
+            process=process, req_queue=req_queue, resp_queue=resp_queue
         )
-        status, payload = self._worker_request(iw, None)
-        if status != "ok":
-            self._shutdown_worker(iw)
-            details = (
-                payload[2]
-                if isinstance(payload, tuple) and len(payload) > 2
-                else payload
-            )
-            logger.log_error(
-                "cuRobo isolated worker failed to initialize: " f"{details}",
-                RuntimeError,
-            )
-        logger.log_info(
-            f"cuRobo isolated worker ready for control part '{control_part}'."
-        )
-        return iw
 
     def _worker_request(self, iw: "_IsolatedWorker", msg: "Any") -> tuple[str, "Any"]:
-        """Send one request to worker ``iw`` and await its ``(status, payload)`` reply.
+        """Send one request and await its reply, consuming the init ACK first if pending.
 
-        A ``None`` message is the init handshake (the worker ACKs once it has built
-        and warmed its first planner is deferred to first plan; here it ACKs after
-        executor construction). The loop re-checks liveness on each timeout so a
-        worker crash surfaces as a clear error instead of an infinite hang.
+        The light-init ACK (cuRobo imported) is consumed before the first real
+        request, so a prewarmed worker's spawn overlaps with the caller's other
+        work without blocking there. The loop re-checks liveness on each timeout
+        so a worker crash surfaces as a clear error instead of an infinite hang.
         """
         proc = iw.process
         if proc is None or not proc.is_alive():
             logger.log_error(
                 "cuRobo isolated worker process is not running.", RuntimeError
             )
-        if msg is not None:
-            iw.req_queue.put(msg)
+        if not iw.ready:
+            status, payload = self._recv_worker(iw, proc)
+            iw.ready = True
+            if status != "ok":
+                self._shutdown_worker(iw)
+                details = (
+                    payload[2]
+                    if isinstance(payload, tuple) and len(payload) > 2
+                    else payload
+                )
+                logger.log_error(
+                    "cuRobo isolated worker failed to initialize: " f"{details}",
+                    RuntimeError,
+                )
+        if msg is None:
+            return ("ok", None)
+        iw.req_queue.put(msg)
+        return self._recv_worker(iw, proc)
+
+    def _recv_worker(self, iw: "_IsolatedWorker", proc: "Any") -> tuple[str, "Any"]:
+        """Block for the worker's next ``(status, payload)`` reply, re-checking liveness."""
         while True:
             try:
                 return iw.resp_queue.get(timeout=30.0)
@@ -1434,6 +1514,9 @@ class CuroboPlanner(BasePlanner):
         for iw in list(self._isolated_workers.values()):
             self._shutdown_worker(iw)
         self._isolated_workers.clear()
+        if self._prewarmed_worker is not None:
+            self._shutdown_worker(self._prewarmed_worker)
+            self._prewarmed_worker = None
 
     def __del__(self) -> None:  # pragma: no cover - best-effort GC cleanup
         try:
@@ -1464,11 +1547,15 @@ class _IsolatedWorker:
 
     ``shadow_backend`` carries the profile / sim joint names the shared
     post-processing needs, while the real cuRobo planner lives in ``process``.
-    ``batch_size`` on the shadow is refreshed per plan.
+    ``batch_size`` on the shadow is refreshed per plan. ``ready`` is False from
+    spawn until the light-init ACK (cuRobo imported) is consumed; ``control_part``
+    and ``shadow_backend`` are empty for a prewarmed worker and filled in when it
+    is obtained for a specific control part.
     """
 
-    control_part: str
     process: "Any"
     req_queue: "Any"
     resp_queue: "Any"
-    shadow_backend: _CuroboBackend
+    control_part: str = ""
+    shadow_backend: "_CuroboBackend | None" = None
+    ready: bool = False

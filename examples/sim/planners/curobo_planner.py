@@ -58,6 +58,7 @@ from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo_planner import (
+    CuroboPlanner,
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
@@ -69,8 +70,8 @@ __all__ = ["main"]
 
 ROBOT_UID = "curobo_franka"
 CONTROL_PART = "arm"
-DEMO_BLOCK_DIMS = [0.18, 0.40, 0.36]
-DEMO_BLOCK_POS = (0.45, 0.0, 0.18)
+DEMO_BLOCK_DIMS = [0.18, 0.3, 0.36]
+DEMO_BLOCK_POS = (0.40, 0.0, 0.18)
 DEFAULT_RECORD_FPS = 20
 DEFAULT_RECORD_MAX_MEMORY = 2048
 DEFAULT_MAX_ATTEMPTS = 2
@@ -162,9 +163,17 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]
             arena_space=2.0,
         )
     )
+
     robot = sim.add_robot(
-        cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
+        cfg=FrankaPandaCfg.from_dict(
+            {
+                "uid": ROBOT_UID,
+                "robot_type": "panda",
+                "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
+            }
+        )
     )
+
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{ROBOT_UID}' to the cuRobo demo.")
     # This object is also exported into the cuRobo collision world below via
@@ -259,7 +268,9 @@ def _final_tcp_error(robot: Robot, target: torch.Tensor) -> float:
         name=CONTROL_PART,
         to_matrix=True,
     )
-    return float(torch.linalg.vector_norm(final_pose[0, :3, 3] - target[:3, 3]))
+    # Accept either a single (4, 4) pose or a batched (B, 4, 4) target.
+    target_pos = target[0, :3, 3] if target.dim() == 3 else target[:3, 3]
+    return float(torch.linalg.vector_norm(final_pose[0, :3, 3] - target_pos))
 
 
 def main() -> None:
@@ -274,6 +285,9 @@ def main() -> None:
     if args.record_fps < 1:
         raise ValueError("--record-fps must be at least 1.")
     _check_runtime()
+    # Spawn the cuRobo worker now so its ~5s Python+torch startup overlaps with
+    # the simulation build below instead of blocking the first plan.
+    CuroboPlanner.prewarm(ROBOT_UID)
 
     sim: SimulationManager | None = None
     try:
@@ -307,10 +321,21 @@ def main() -> None:
             name="move_end_effector",
         )
 
-        target = _target_beyond_block(robot)
+        # target = _target_beyond_block(robot)
+        target_xpos = torch.tensor(
+            [
+                [
+                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
+                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
         plan_start = time.perf_counter()
         success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target))]
+            [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
         )
         planning_duration = time.perf_counter() - plan_start
 
@@ -329,7 +354,7 @@ def main() -> None:
         )
         if args.hold_steps:
             sim.update(step=args.hold_steps)
-        print(f"final TCP position error: {_final_tcp_error(robot, target):.4f} m")
+        print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
     finally:
         if sim is not None:
             if sim.is_window_recording():

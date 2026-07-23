@@ -54,6 +54,7 @@ import yaml
 
 __all__ = [
     "InitMsg",
+    "ConfigureMsg",
     "PlanMsg",
     "UpdateObstacleMsg",
     "CloseMsg",
@@ -106,14 +107,30 @@ def _worker_init() -> None:
 
 @dataclass
 class InitMsg:
-    """One-time worker initialization, sent before the first plan request."""
+    """Light worker initialization (sent at spawn, before anything else is known).
+
+    Only carries the CUDA device index - just enough to import cuRobo and pick a
+    device. Everything else (cuRobo config params + robot profile + world) arrives
+    via :class:`ConfigureMsg`, so the spawn + cuRobo import can overlap with the
+    simulator build (see :meth:`CuroboPlanner.prewarm`).
+    """
+
+    device_index: int
+
+
+@dataclass
+class ConfigureMsg:
+    """Send the cuRobo config + robot profile + collision world to a spawned worker.
+
+    The worker stores these and builds/warms its planner lazily on the first
+    plan. Sent once per control part (the profile is control-part-specific).
+    """
 
     robot_config_path: str
     world_config_path: str | None
     tool_frame: str
     sim_joint_names: list[str]
     sim_to_curobo: dict[str, str]
-    device_index: int
     interpolation_dt: float
     collision_activation_distance: float
     collision_cache: dict | None
@@ -268,35 +285,47 @@ class _CuroboWorkerExecutor:
     _bindings: SimpleNamespace = field(init=False)
     _device: torch.device = field(init=False)
     _planners: dict = field(init=False, default_factory=dict)
+    _configure_msg: ConfigureMsg | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self._bindings = _load_bindings()
         self._device = torch.device("cuda", int(self.init_msg.device_index))
 
+    def configure(self, msg: ConfigureMsg) -> None:
+        """Store the robot profile + world (sent after the light init)."""
+        self._configure_msg = msg
+
+    @property
+    def _cfg(self) -> ConfigureMsg:
+        """The configured profile + world (must be set before any plan/build)."""
+        if self._configure_msg is None:
+            raise RuntimeError("cuRobo worker received a plan before ConfigureMsg.")
+        return self._configure_msg
+
     # -- planner construction / caching ------------------------------------
 
     def _get_planner(self, batch_size: int):  # noqa: ANN202
         """Return a warmed planner for ``batch_size``, building it on first use."""
-        key = (int(batch_size), bool(self.init_msg.multi_env))
+        cfg = self._cfg
+        key = (int(batch_size), bool(cfg.multi_env))
         if key in self._planners:
             return self._planners[key]
 
-        msg = self.init_msg
         scene_model = (
-            _materialize_multi_env_scene_model(msg.world_config_path, int(batch_size))
-            if msg.multi_env
-            else msg.world_config_path
+            _materialize_multi_env_scene_model(cfg.world_config_path, int(batch_size))
+            if cfg.multi_env
+            else cfg.world_config_path
         )
         planner_cfg = self._bindings.MotionPlannerCfg.create(
-            robot=msg.robot_config_path,
+            robot=cfg.robot_config_path,
             scene_model=scene_model,
-            collision_cache=msg.collision_cache,
+            collision_cache=cfg.collision_cache,
             device_cfg=self._bindings.DeviceCfg(device=self._device),
             max_batch_size=int(batch_size),
-            multi_env=bool(msg.multi_env),
-            optimizer_collision_activation_distance=msg.collision_activation_distance,
+            multi_env=bool(cfg.multi_env),
+            optimizer_collision_activation_distance=cfg.collision_activation_distance,
             use_cuda_graph=True,
-            interpolation_dt=float(msg.interpolation_dt),
+            interpolation_dt=float(cfg.interpolation_dt),
         )
         planner = (
             self._bindings.MotionPlanner(planner_cfg)
@@ -305,7 +334,7 @@ class _CuroboWorkerExecutor:
         )
         self._validate_planner(planner)
         planner.warmup(
-            enable_graph=True, num_warmup_iterations=int(msg.warmup_iterations)
+            enable_graph=True, num_warmup_iterations=int(cfg.warmup_iterations)
         )
         self._planners[key] = planner
         return planner
@@ -313,8 +342,8 @@ class _CuroboWorkerExecutor:
     def _validate_planner(self, planner) -> None:  # noqa: ANN001
         """Reject profiles whose joint/tool-frame mapping disagrees with the planner."""
         curobo_names = list(planner.joint_names)
-        sim_to_curobo = self.init_msg.sim_to_curobo
-        mapped = [sim_to_curobo[name] for name in self.init_msg.sim_joint_names]
+        sim_to_curobo = self._cfg.sim_to_curobo
+        mapped = [sim_to_curobo[name] for name in self._cfg.sim_joint_names]
         if len(mapped) != len(set(mapped)):
             raise ValueError(
                 f"sim_to_curobo maps multiple sim joints to the same cuRobo joint: {mapped}."
@@ -332,9 +361,9 @@ class _CuroboWorkerExecutor:
                 f"{unmapped}."
             )
         tool_frames = list(getattr(planner, "tool_frames", []))
-        if tool_frames and self.init_msg.tool_frame not in tool_frames:
+        if tool_frames and self._cfg.tool_frame not in tool_frames:
             raise ValueError(
-                f"tool_frame {self.init_msg.tool_frame!r} is not available in the "
+                f"tool_frame {self._cfg.tool_frame!r} is not available in the "
                 f"cuRobo planner tool frames {tool_frames}."
             )
 
@@ -343,18 +372,16 @@ class _CuroboWorkerExecutor:
     def _build_joint_state(self, sim_qpos: torch.Tensor, planner):  # noqa: ANN001
         """Reorder sim-order qpos to cuRobo order and wrap as a JointState."""
         curobo_names = list(planner.joint_names)
-        sim_to_curobo = self.init_msg.sim_to_curobo
+        sim_to_curobo = self._cfg.sim_to_curobo
         curobo_to_sim_idx = {
             cu_name: idx
-            for idx, sim_name in enumerate(self.init_msg.sim_joint_names)
+            for idx, sim_name in enumerate(self._cfg.sim_joint_names)
             for cu_name in [sim_to_curobo[sim_name]]
         }
-        if sim_qpos.dim() != 2 or sim_qpos.shape[1] != len(
-            self.init_msg.sim_joint_names
-        ):
+        if sim_qpos.dim() != 2 or sim_qpos.shape[1] != len(self._cfg.sim_joint_names):
             raise ValueError(
                 "cuRobo start/goal qpos must have shape "
-                f"(B, {len(self.init_msg.sim_joint_names)}), got {tuple(sim_qpos.shape)}."
+                f"(B, {len(self._cfg.sim_joint_names)}), got {tuple(sim_qpos.shape)}."
             )
         state = torch.zeros(
             sim_qpos.shape[0],
@@ -372,8 +399,8 @@ class _CuroboWorkerExecutor:
         """Build a single-tool-frame GoalToolPose from batched position/quaternion."""
         pose = self._bindings.Pose(position=position, quaternion=quaternion)
         return self._bindings.GoalToolPose.from_poses(
-            {self.init_msg.tool_frame: pose},
-            ordered_tool_frames=[self.init_msg.tool_frame],
+            {self._cfg.tool_frame: pose},
+            ordered_tool_frames=[self._cfg.tool_frame],
             num_goalset=1,
         )
 
@@ -426,7 +453,7 @@ class _CuroboWorkerExecutor:
         quaternions = msg.quaternion.to(self._device, dtype=torch.float32)
         batch_size = positions.shape[0]
         for planner in self._planners.values():
-            if self.init_msg.multi_env:
+            if self._cfg.multi_env:
                 planner_batch = _planner_batch_size(planner)
                 if batch_size != planner_batch:
                     raise ValueError(
@@ -521,7 +548,10 @@ def worker_main(
         if request is None or isinstance(request, CloseMsg):
             break
         try:
-            if isinstance(request, PlanMsg):
+            if isinstance(request, ConfigureMsg):
+                executor.configure(request)
+                response = ("ok", None)
+            elif isinstance(request, PlanMsg):
                 response = ("ok", executor.handle_plan(request))
             elif isinstance(request, UpdateObstacleMsg):
                 executor.handle_update_obstacle(request)
