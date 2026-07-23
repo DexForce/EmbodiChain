@@ -391,6 +391,12 @@ def _require_curobo() -> "Any":
         ImportError: If cuRobo V2 is not installed, with an actionable message
             naming NVIDIA's CUDA-matched extras.
     """
+    # cuRobo 0.8 references ``wp.torch.*``, which warp >= 1.13 removed (warp >=
+    # 1.13 is required for RTX 50-series / sm_120). Restore the namespace before
+    # importing cuRobo so the parent's fail-fast import stays representative.
+    from .curobo_process_worker import _ensure_warp_torch_compat
+
+    _ensure_warp_torch_compat()
     try:
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")

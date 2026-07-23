@@ -198,8 +198,37 @@ class PlanResultMsg:
 # =============================================================================
 
 
+def _ensure_warp_torch_compat() -> None:
+    """Restore the ``warp.torch`` interop namespace for cuRobo 0.8 on warp >= 1.13.
+
+    cuRobo 0.8 references ``wp.torch.device_from_torch`` (see
+    ``curobo/_src/geom/data/data_mesh.py`` and ``.../perception/mapper/mesh_extractor.py``).
+    Warp 1.13 removed the public ``warp.torch`` module - its contents moved to
+    ``warp._src.torch`` and only ``device_from_torch`` was hoisted to top-level
+    ``warp``. RTX 50-series (sm_120) requires warp >= 1.13 for Blackwell support,
+    so downgrading warp is not an option; instead alias the relocated module back
+    into place before cuRobo is imported. No-op on older warp versions that still
+    expose ``warp.torch`` natively.
+    """
+    import sys
+
+    import warp as wp
+
+    if hasattr(wp, "torch"):
+        return
+    try:
+        import warp._src.torch as _torch_mod
+    except ImportError:
+        # Warp build without the torch interop module - leave the namespace
+        # unset so cuRobo raises its own AttributeError with the real cause.
+        return
+    wp.torch = _torch_mod  # type: ignore[attr-defined]  # restored interop namespace
+    sys.modules["warp.torch"] = _torch_mod
+
+
 def _load_bindings() -> SimpleNamespace:
     """Import the cuRobo V2 facade types used by the worker."""
+    _ensure_warp_torch_compat()
     planner_mod = importlib.import_module("curobo.motion_planner")
     batch_mod = importlib.import_module("curobo.batch_motion_planner")
     types_mod = importlib.import_module("curobo.types")
@@ -325,8 +354,13 @@ class _CuroboWorkerExecutor:
             multi_env=bool(cfg.multi_env),
             optimizer_collision_activation_distance=cfg.collision_activation_distance,
             use_cuda_graph=True,
-            interpolation_dt=float(cfg.interpolation_dt),
         )
+        # cuRobo 0.8 exposes ``interpolation_dt`` on the trajopt solver config -
+        # read lazily when the interpolated-trajectory buffer is first built -
+        # not as a parameter of ``MotionPlannerCfg.create()``. Set it on the cfg
+        # before the planner is constructed (and warmed up / graph-captured) so
+        # the solver, which holds this config by reference, picks up the value.
+        planner_cfg.trajopt_solver_config.interpolation_dt = float(cfg.interpolation_dt)
         planner = (
             self._bindings.MotionPlanner(planner_cfg)
             if batch_size == 1

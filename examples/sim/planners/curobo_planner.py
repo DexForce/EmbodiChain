@@ -284,99 +284,96 @@ def main() -> None:
     CuroboPlanner.prewarm(ROBOT_UID)
 
     sim: SimulationManager | None = None
-    try:
-        sim, robot, demo_block = _build_scene(args.headless)
-        if not args.headless:
-            sim.open_window()
-        _start_headless_recording(sim, args)
-        if args.hold_steps:
-            sim.update(step=args.hold_steps)
+    # try:
+    sim, robot, demo_block = _build_scene(args.headless)
+    if not args.headless:
+        sim.open_window()
+    _start_headless_recording(sim, args)
+    if args.hold_steps:
+        sim.update(step=args.hold_steps)
 
-        motion_generator = MotionGenerator(
-            MotionGenCfg(
-                planner_cfg=CuroboPlannerCfg(
-                    robot_uid=ROBOT_UID,
-                    world=CuroboWorldCfg(rigid_objects=[demo_block]),
-                    max_attempts=args.max_attempts,
-                )
+    motion_generator = MotionGenerator(
+        MotionGenCfg(
+            planner_cfg=CuroboPlannerCfg(
+                robot_uid=ROBOT_UID,
+                world=CuroboWorldCfg(rigid_objects=[demo_block]),
+                max_attempts=args.max_attempts,
             )
         )
-        engine = AtomicActionEngine(motion_generator)
-        engine.register(
-            MoveEndEffector(
-                motion_generator,
-                MoveEndEffectorCfg(
-                    motion_source="motion_gen",
-                    planner_type="curobo",
-                    control_part=CONTROL_PART,
-                    sample_interval=80,
-                ),
+    )
+    engine = AtomicActionEngine(motion_generator)
+    engine.register(
+        MoveEndEffector(
+            motion_generator,
+            MoveEndEffectorCfg(
+                motion_source="motion_gen",
+                planner_type="curobo",
+                control_part=CONTROL_PART,
+                sample_interval=80,
             ),
-            name="move_end_effector",
-        )
+        ),
+        name="move_end_effector",
+    )
 
-        initial_qpos = robot.get_qpos(name=CONTROL_PART)
-        initial_xpos = robot.compute_fk(
-            qpos=initial_qpos,
-            name=CONTROL_PART,
-            to_matrix=True,
-        )
-        target_xpos = torch.tensor(
+    initial_qpos = robot.get_qpos(name=CONTROL_PART)
+    initial_xpos = robot.compute_fk(
+        qpos=initial_qpos,
+        name=CONTROL_PART,
+        to_matrix=True,
+    )
+    target_xpos = torch.tensor(
+        [
             [
-                [
-                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
-                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
-                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
-                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
-                ]
-            ],
-            device=robot.device,
-        )
-        plan_start = time.perf_counter()
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
-        )
-        planning_duration = time.perf_counter() - plan_start
+                [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
+                [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
+                [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+            ]
+        ],
+        device=robot.device,
+    )
+    plan_start = time.perf_counter()
+    success, trajectory, _ = engine.run(
+        [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
+    )
+    planning_duration = time.perf_counter() - plan_start
 
-        print(f"cuRobo atomic-action success: {bool(success.item())}")
-        print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
+    print(f"cuRobo atomic-action success: {bool(success.item())}")
+    print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
+    print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
 
-        if not bool(success.item()):
-            raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
+    if not bool(success.item()):
+        raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
 
-        _replay_full_dof_trajectory(
-            sim,
-            robot,
-            trajectory,
-            step_repeat=args.step_repeat,
-        )
-        if args.hold_steps:
-            sim.update(step=args.hold_steps)
-        print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
+    _replay_full_dof_trajectory(
+        sim,
+        robot,
+        trajectory,
+        step_repeat=args.step_repeat,
+    )
+    if args.hold_steps:
+        sim.update(step=args.hold_steps)
+    print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
 
-        plan_start = time.perf_counter()
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
-        )
-        planning_duration = time.perf_counter() - plan_start
-        print(f"cuRobo atomic-action success: {bool(success.item())}")
-        print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-        print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
-        _replay_full_dof_trajectory(
-            sim,
-            robot,
-            trajectory,
-            step_repeat=args.step_repeat,
-        )
-
-    finally:
-        if sim is not None:
-            if sim.is_window_recording():
-                sim.stop_window_record()
-                sim.wait_window_record_saves()
-            sim.destroy()
-            SimulationManager.flush_cleanup_queue()
+    plan_start = time.perf_counter()
+    success, trajectory, _ = engine.run(
+        [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
+    )
+    planning_duration = time.perf_counter() - plan_start
+    print(f"cuRobo atomic-action success: {bool(success.item())}")
+    print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
+    print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
+    _replay_full_dof_trajectory(
+        sim,
+        robot,
+        trajectory,
+        step_repeat=args.step_repeat,
+    )
+    if sim.is_window_recording():
+        sim.stop_window_record()
+        sim.wait_window_record_saves()
+    sim.destroy()
+    SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":
