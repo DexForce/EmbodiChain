@@ -96,9 +96,7 @@ def _build_env_cfg(
     gpu_id: int,
 ):
     gym_config_data = load_config(gym_config_path)
-    gym_env_cfg = config_to_cfg(
-        gym_config_data, manager_modules=get_manager_modules()
-    )
+    gym_env_cfg = config_to_cfg(gym_config_data, manager_modules=get_manager_modules())
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
     if gym_env_cfg.sim_cfg is None:
