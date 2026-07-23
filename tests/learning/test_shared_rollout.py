@@ -25,8 +25,8 @@ from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.utils import flatten_dict_observation
-from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
+from embodichain.lab.gym.utils.registration import build_env
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
 from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
 from embodichain.utils.utility import load_json
 
@@ -181,7 +181,7 @@ def test_shared_rollout_collects_policy_and_env_fields():
 
 def test_embodied_env_writes_next_fields_into_external_rollout():
     gym_config = load_json("configs/agents/rl/basic/cart_pole/gym_config.json")
-    env_cfg = config_to_cfg(gym_config, manager_modules=DEFAULT_MANAGER_MODULES)
+    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
     env_cfg = deepcopy(env_cfg)
     env_cfg.num_envs = 2
     env_cfg.sim_cfg = SimulationManagerCfg(

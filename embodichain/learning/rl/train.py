@@ -31,8 +31,8 @@ from embodichain.learning.rl.algo import build_algo, get_registered_algo_names
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
-from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
+from embodichain.lab.gym.utils.registration import build_env
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
 from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
@@ -190,9 +190,7 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         logger.log_info(f"Current working directory: {Path.cwd()}")
 
     gym_config_data = load_config(str(gym_config_path))
-    gym_env_cfg = config_to_cfg(
-        gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
-    )
+    gym_env_cfg = config_to_cfg(gym_config_data, manager_modules=get_manager_modules())
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
 

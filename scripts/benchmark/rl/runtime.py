@@ -32,8 +32,8 @@ from embodichain.learning.rl.models import build_mlp_from_cfg, build_policy
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
-from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import DEFAULT_MANAGER_MODULES, config_to_cfg
+from embodichain.lab.gym.utils.registration import build_env
+from embodichain.lab.gym.utils.gym_utils import get_manager_modules, config_to_cfg
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import load_config
@@ -97,7 +97,7 @@ def _build_env_cfg(
 ):
     gym_config_data = load_config(gym_config_path)
     gym_env_cfg = config_to_cfg(
-        gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
+        gym_config_data, manager_modules=get_manager_modules()
     )
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)

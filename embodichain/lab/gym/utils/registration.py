@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import json
 import logging
+import os
 import sys
 import torch
 
@@ -34,7 +36,7 @@ from gymnasium.envs.registration import WrapperSpec
 from dexsim.utility import log_warning
 
 if TYPE_CHECKING:
-    from embodichain.lab.gym.envs import BaseEnv
+    from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnvCfg
 
 _logger = logging.getLogger(__name__)
 
@@ -144,6 +146,27 @@ def make(env_id, **kwargs):
     return env
 
 
+def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):
+    """Create an environment from a registered env id.
+
+    A thin convenience wrapper around :func:`make` that deep-copies the base
+    config so callers can safely mutate the resulting environment's cfg
+    without affecting shared defaults. This helper used to live in the task
+    package (``embodichain_tasks.rl``); it now lives with the registry so
+    that core code paths such as RL training do not need to depend on a task
+    package. ``embodichain_tasks.rl`` re-exports it for backward
+    compatibility.
+
+    Args:
+        env_id: Registered environment id (see :func:`register_env`).
+        base_env_cfg: Base environment configuration to instantiate with.
+
+    Returns:
+        The instantiated environment.
+    """
+    return make(env_id, cfg=deepcopy(base_env_cfg))
+
+
 def make_vec(env_id, **kwargs):
     env = gym.make(env_id, **kwargs)
     return env
@@ -207,6 +230,65 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
     return cls
 
 
+def _import_task_package(ep: importlib.metadata.EntryPoint):
+    """Import a task package and ensure its auto-registration runs.
+
+    In editable ("development") installs, a task package that lives in a
+    subdirectory of another editable project can be shadowed by a same-named
+    namespace package. For example, when both ``embodichain`` and
+    ``embodichain_tasks`` are installed editable from the same checkout, the
+    ``embodichain`` editable finder exposes the repository root on the import
+    path; the ``embodichain_tasks/`` project container (which has no
+    ``__init__.py`` at its root) is then picked up as a namespace package
+    that shadows the real ``embodichain_tasks/embodichain_tasks/`` package.
+
+    A namespace package never executes ``__init__.py``, so the package's
+    ``import_packages()`` call -- which triggers every ``@register_env`` --
+    is skipped and no environments are registered.
+
+    When such shadowing is detected (the imported module has no ``__file__``),
+    this helper locates the real ``__init__.py`` beneath one of the namespace's
+    search locations (``<location>/<top_level>/__init__.py``) and loads it
+    directly so registration runs. This is a no-op for regular, non-shadowed
+    installs.
+
+    Args:
+        ep: The ``embodichain.tasks`` entry point to import.
+
+    Returns:
+        The imported module (the real package when possible, otherwise the
+        namespace module).
+    """
+    module_name = ep.value
+    top_level = module_name.partition(".")[0]
+    mod = importlib.import_module(module_name)
+    if getattr(mod, "__file__", None) is not None:
+        return mod
+
+    # Only top-level packages can be reliably force-loaded here; dotted entry
+    # point values fall back to the plain import above.
+    if module_name != top_level:
+        return mod
+
+    # Namespace shadowing: search each namespace location for the real
+    # package's __init__.py and load it in place of the namespace module.
+    for location in list(getattr(mod, "__path__", [])):
+        init_path = os.path.join(location, top_level, "__init__.py")
+        if not os.path.isfile(init_path):
+            continue
+        pkg_dir = os.path.dirname(init_path)
+        spec = importlib.util.spec_from_file_location(
+            top_level, init_path, submodule_search_locations=[pkg_dir]
+        )
+        if spec is None or spec.loader is None:
+            continue
+        real_mod = importlib.util.module_from_spec(spec)
+        sys.modules[top_level] = real_mod
+        spec.loader.exec_module(real_mod)
+        return real_mod
+    return mod
+
+
 def discover_task_packages() -> list[str]:
     """Import all registered task packages via ``embodichain.tasks`` entry_points.
 
@@ -227,7 +309,7 @@ def discover_task_packages() -> list[str]:
 
     for ep in eps:
         try:
-            importlib.import_module(ep.value)
+            _import_task_package(ep)
             imported.append(ep.name)
         except Exception:
             _logger.warning(
