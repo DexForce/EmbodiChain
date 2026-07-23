@@ -41,9 +41,9 @@ embodichain.lab.gym.envs.managers
       observations.compute_exteroception
       events.replace_assets_from_group
       record.record_camera_data
-      randomization.rendering.randomize_light
-      randomization.rendering.randomize_camera_intrinsics
-      randomization.rendering.randomize_visual_material
+      randomization.visual.randomize_light
+      randomization.visual.randomize_camera_intrinsics
+      randomization.visual.randomize_visual_material
       randomization.spatial.get_random_pose
       randomization.spatial.randomize_rigid_object_pose
       randomization.spatial.randomize_robot_eef_pose

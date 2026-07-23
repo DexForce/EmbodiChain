@@ -69,24 +69,10 @@ class ExampleEventCfg:
         },
     )
 
-    randomize_light: EventCfg = EventCfg(
-        func=rand.randomize_light,
-        mode="interval",
-        interval_step=5,
-        params={
-            "entity_cfg": SceneEntityCfg(
-                uid="point",
-            ),
-            "position_range": [[-0.5, -0.5, 2], [0.5, 0.5, 2]],
-            "color_range": [[0.6, 0.6, 0.6], [1, 1, 1]],
-            "intensity_range": [10.0, 30.0],
-        },
-    )
-
     randomize_table_mat: EventCfg = EventCfg(
         func=rand.randomize_visual_material,
         mode="interval",
-        interval_step=10,
+        interval_step=25,
         params={
             "entity_cfg": SceneEntityCfg(
                 uid="table",
@@ -138,18 +124,6 @@ class ExampleCfg(EmbodiedEnvCfg):
             ),
         )
     ]
-
-    light: EmbodiedEnvCfg.EnvLightCfg = EmbodiedEnvCfg.EnvLightCfg(
-        direct=[
-            LightCfg(
-                uid="point",
-                light_type="point",
-                color=(1.0, 1.0, 1.0),
-                intensity=20.0,
-                init_pos=(0, 0, 2),
-            )
-        ]
-    )
 
     background: List[RigidObjectCfg] = [
         RigidObjectCfg(
@@ -221,14 +195,14 @@ if __name__ == "__main__":
             render_cfg=RenderCfg(renderer=args.renderer),
             headless=args.headless,
             sim_device=args.device,
-            num_envs=args.num_envs,
-        )
+        ),
+        num_envs=args.num_envs,
     )
 
     # Create the Gym environment
     env = gym.make("ModularEnv-v1", cfg=env_cfg)
 
-    while True:
+    for i in range(5):
         obs, info = env.reset()
 
         for i in range(100):
