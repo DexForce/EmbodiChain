@@ -31,7 +31,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.planners import CuroboPlannerCfg, PlanState
-from embodichain.lab.sim.planners import curobo_yaml as _curobo_yaml_mod
+from embodichain.lab.sim.planners.curobo import curobo_yaml as _curobo_yaml_mod
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboAutoGenCfg,
     CuroboPlanOptions,

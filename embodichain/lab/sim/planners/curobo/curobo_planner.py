@@ -69,6 +69,12 @@ _CUROBO_INSTALL_URL = (
     "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
 )
 
+# Bumped whenever the auto-generated robot-YAML schema/logic changes so that
+# cached YAMLs from an older generator are regenerated instead of reused. v2:
+# exclude URDF mimic joints from cspace/lock_joints (cuRobo folds them into
+# their active joint and raises KeyError when locking one).
+_CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v2"
+
 
 @dataclass
 class _CuroboProfile:
@@ -197,9 +203,10 @@ class CuroboAutoGenCfg:
     """Directory for cached robot YAMLs.
 
     ``None`` (default) uses ``$XDG_CACHE_HOME/embodichain_curobo`` or
-    ``~/.cache/embodichain_curobo``. The cache key hashes the URDF path, URDF
-    content, control part, tool frame, and fit parameters, so editing the URDF
-    or changing the fit settings regenerates automatically.
+    ``~/.cache/embodichain_curobo``. The cache key hashes the generator version,
+    URDF path, URDF content, control part, tool frame, and fit parameters, so
+    editing the URDF, changing the fit settings, or a generator update
+    regenerates automatically.
     """
 
     fit_type: str = "voxel"
@@ -727,6 +734,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
+        hasher.update(_CUROBO_ROBOT_YAML_GENERATOR_VERSION.encode("utf-8"))
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:

@@ -41,6 +41,44 @@ if TYPE_CHECKING:
 __all__ = ["generate_curobo_robot_yaml", "generate_curobo_world_yaml"]
 
 
+def _parse_mimic_joint_names(urdf_path: str) -> set[str]:
+    """Return the names of URDF joints that mimic another joint.
+
+    cuRobo's URDF parser folds each ``<mimic>`` joint into its active joint: the
+    mimic joint's body takes the active joint's name, so the mimic joint has no
+    independent entry in the kinematics tree. cuRobo therefore rejects mimic
+    joints in ``cspace`` and ``lock_joints`` - locking one raises ``KeyError``
+    because cuRobo finds no body for it. They must be excluded from both, so
+    cuRobo drives them from their active joint instead.
+
+    cuRobo's ``UrdfRobotParser`` exposes no public accessor for mimic joints (a
+    prior ``get_mimic_joint_map`` call did not exist on this cuRobo version and
+    silently left the set empty), so they are read directly from the URDF XML -
+    the same ``<mimic>`` tags cuRobo itself parses.
+
+    Args:
+        urdf_path: Path to the robot URDF file.
+
+    Returns:
+        The set of joint names declared with a ``<mimic>`` child element. Empty
+        if the URDF cannot be parsed (a warning is logged).
+    """
+    import xml.etree.ElementTree as ET
+
+    mimic_joints: set[str] = set()
+    try:
+        root = ET.parse(urdf_path).getroot()
+    except Exception as exc:  # noqa: BLE001
+        logger.log_warning(f"Could not parse mimic joints from URDF ({exc}).")
+        return mimic_joints
+    for joint in root.findall("joint"):
+        if joint.find("mimic") is not None:
+            name = joint.get("name")
+            if name is not None:
+                mimic_joints.add(name)
+    return mimic_joints
+
+
 def generate_curobo_robot_yaml(
     robot: Robot,
     control_part: str,
@@ -133,14 +171,17 @@ def generate_curobo_robot_yaml(
     #    ``robot.root_link_name`` is avoided because it touches an uninitialized
     #    ``entities`` attribute on some Robot instances; cuRobo's parser resolves
     #    the root link directly from the URDF.
+    #    Mimic joints are detected from the URDF XML (not cuRobo's parser, which
+    #    exposes no mimic accessor) so they can be excluded from cspace/lock_joints
+    #    in step 4/5 - cuRobo folds them into their active joint and raises
+    #    KeyError if they are locked.
+    mimic_joints: set[str] = _parse_mimic_joint_names(urdf_path)
     base_link: str | None = None
     urdf_parent_map: dict[str, str | None] = {}
-    mimic_joints: set[str] = set()
     try:
         parser = UrdfRobotParser(urdf_path, load_meshes=False, build_scene_graph=True)
         parser.build_link_parent()
         base_link = parser.root_link
-        mimic_joints = set(parser.get_mimic_joint_map().keys())
         # Build the full parent map for every URDF link so self_collision_ignore
         # can walk multiple hops (the parent of a non-collision link still
         # connects two collision links, e.g. fr3_link8 between fr3_link7 and
