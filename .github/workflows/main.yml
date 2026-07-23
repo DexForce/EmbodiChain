@@ -158,7 +158,7 @@ jobs:
       - uses: ./.github/actions/activate-conda
       - name: Install test package
         run: |
-          pip install -e ".[gensim]" \
+          pip install -e ".[gensim, curobo-cu12]" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
