@@ -16,7 +16,7 @@
 """Persistent cuRobo V2 worker process for the subprocess-isolated planner backend.
 
 This module runs entirely inside a child process spawned (``spawn`` start method)
-by :class:`~embodichain.lab.sim.planners.curobo_planner.CuroboPlanner`. The child
+by :class:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboPlanner`. The child
 owns a private CUDA context, fully decoupled from DexSim's Vulkan/CUDA interop
 semaphores, so cuRobo may capture and replay CUDA graphs - the path that crashes
 DexSim's ``DFGpuSemaphore`` stream synchronization when run in-process.

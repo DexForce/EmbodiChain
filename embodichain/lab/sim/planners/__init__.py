@@ -19,5 +19,5 @@ from .base_planner import *
 from .toppra_planner import *
 from .neural_planner import *
 from .curobo.curobo_yaml import *
-from .curobo_planner import *
+from .curobo.curobo_planner import *
 from .motion_generator import *

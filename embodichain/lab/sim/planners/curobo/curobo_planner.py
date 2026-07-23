@@ -42,13 +42,13 @@ import torch
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import quat_from_matrix
 
-from .base_planner import (
+from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
     PlanOptions,
     validate_plan_options,
 )
-from .utils import MoveType, PlanResult, PlanState
+from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
     from typing import Any
@@ -471,7 +471,7 @@ class CuroboPlanner(BasePlanner):
         """
         import multiprocessing as mp
 
-        from .curobo.curobo_process_worker import InitMsg, worker_main
+        from .curobo_process_worker import InitMsg, worker_main
 
         if robot_uid in cls._prewarmed:
             return  # Already prewarming/prewarmed for this robot.
@@ -673,7 +673,7 @@ class CuroboPlanner(BasePlanner):
         self, control_part: str, tool_frame: str | None
     ) -> str:
         """Return a cached cuRobo robot YAML path, generating it from the URDF if needed."""
-        from .curobo.curobo_yaml import generate_curobo_robot_yaml
+        from .curobo_yaml import generate_curobo_robot_yaml
 
         robot = self.robot
         assert (
@@ -745,7 +745,7 @@ class CuroboPlanner(BasePlanner):
         on the first plan and reused thereafter. Sphere-fit parameters come from
         :class:`CuroboAutoGenCfg` so robot and world fitting are configured together.
         """
-        from .curobo.curobo_yaml import generate_curobo_world_yaml
+        from .curobo_yaml import generate_curobo_world_yaml
 
         rigid_objects = world_cfg.rigid_objects
         if not rigid_objects:
@@ -1233,7 +1233,7 @@ class CuroboPlanner(BasePlanner):
         if poses is None:
             return
         _validate_dynamic_obstacles(poses, list(self.cfg.world.dynamic_obstacle_names))
-        from .curobo.curobo_process_worker import UpdateObstacleMsg
+        from .curobo_process_worker import UpdateObstacleMsg
 
         if backend is not None:
             targets = [self._isolated_workers[backend.control_part]]
@@ -1321,7 +1321,7 @@ class CuroboPlanner(BasePlanner):
         Either way the profile + world are sent via :class:`ConfigureMsg`, and the
         shadow backend (for parent-side frame conversion) is attached.
         """
-        from .curobo.curobo_process_worker import ConfigureMsg
+        from .curobo_process_worker import ConfigureMsg
 
         if self._prewarmed_worker is not None:
             iw = self._prewarmed_worker
@@ -1370,7 +1370,7 @@ class CuroboPlanner(BasePlanner):
         """
         import multiprocessing as mp
 
-        from .curobo.curobo_process_worker import InitMsg, worker_main
+        from .curobo_process_worker import InitMsg, worker_main
 
         ctx = mp.get_context("spawn")
         req_queue = ctx.Queue()
@@ -1446,7 +1446,7 @@ class CuroboPlanner(BasePlanner):
         max_attempts: int,
     ) -> "Any":
         """RPC one plan to the worker and wrap the reply as a V2-result-like object."""
-        from .curobo.curobo_process_worker import PlanMsg
+        from .curobo_process_worker import PlanMsg
 
         iw = self._isolated_workers[backend.control_part]
         msg = PlanMsg(
@@ -1496,7 +1496,7 @@ class CuroboPlanner(BasePlanner):
         if proc is None:
             return
         try:
-            from .curobo.curobo_process_worker import CloseMsg
+            from .curobo_process_worker import CloseMsg
 
             iw.req_queue.put_nowait(CloseMsg())
         except Exception:
