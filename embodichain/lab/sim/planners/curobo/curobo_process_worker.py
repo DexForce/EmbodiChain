@@ -314,6 +314,7 @@ class _CuroboWorkerExecutor:
     _bindings: SimpleNamespace = field(init=False)
     _device: torch.device = field(init=False)
     _planners: dict = field(init=False, default_factory=dict)
+    _reorder_index: dict = field(init=False, default_factory=dict)
     _configure_msg: ConfigureMsg | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
@@ -371,6 +372,7 @@ class _CuroboWorkerExecutor:
             enable_graph=True, num_warmup_iterations=int(cfg.warmup_iterations)
         )
         self._planners[key] = planner
+        self._reorder_index[key] = self._sim_reorder_index(planner)
         return planner
 
     def _validate_planner(self, planner) -> None:  # noqa: ANN001
@@ -403,29 +405,47 @@ class _CuroboWorkerExecutor:
 
     # -- state / goal construction (runs entirely in the worker) --
 
-    def _build_joint_state(self, sim_qpos: torch.Tensor, planner):  # noqa: ANN001
-        """Reorder sim-order qpos to cuRobo order and wrap as a JointState."""
+    def _sim_reorder_index(self, planner) -> torch.Tensor:  # noqa: ANN001
+        """Build the fixed cuRobo-joint -> sim-column gather index for ``planner``.
+
+        Inverse of the simulator->cuRobo joint-name mapping. Validated as a
+        bijection by :meth:`_validate_planner`, so it is built once per planner
+        (cached in :attr:`_reorder_index`) and reused on every plan instead of
+        rebuilding a per-joint dict + Python column loop each call.
+        """
         curobo_names = list(planner.joint_names)
         sim_to_curobo = self._cfg.sim_to_curobo
         curobo_to_sim_idx = {
-            cu_name: idx
+            sim_to_curobo[sim_name]: idx
             for idx, sim_name in enumerate(self._cfg.sim_joint_names)
-            for cu_name in [sim_to_curobo[sim_name]]
         }
+        return torch.tensor(
+            [curobo_to_sim_idx[cu_name] for cu_name in curobo_names],
+            dtype=torch.long,
+            device=self._device,
+        )
+
+    def _build_joint_state(
+        self,
+        sim_qpos: torch.Tensor,
+        curobo_names: list[str],
+        sim_idx: torch.Tensor,
+    ):  # noqa: ANN202
+        """Reorder sim-order qpos to cuRobo order and wrap as a JointState.
+
+        ``sim_idx`` is the precomputed gather index from
+        :meth:`_sim_reorder_index`, so this is a single vectorized gather instead
+        of a per-joint Python loop on every plan.
+        """
         if sim_qpos.dim() != 2 or sim_qpos.shape[1] != len(self._cfg.sim_joint_names):
             raise ValueError(
                 "cuRobo start/goal qpos must have shape "
                 f"(B, {len(self._cfg.sim_joint_names)}), got {tuple(sim_qpos.shape)}."
             )
-        state = torch.zeros(
-            sim_qpos.shape[0],
-            len(curobo_names),
-            device=self._device,
-            dtype=torch.float32,
+        state = sim_qpos.to(self._device, dtype=torch.float32)[:, sim_idx]
+        return self._bindings.JointState.from_position(
+            state, joint_names=list(curobo_names)
         )
-        for i, cu_name in enumerate(curobo_names):
-            state[:, i] = sim_qpos[:, curobo_to_sim_idx[cu_name]]
-        return self._bindings.JointState.from_position(state, joint_names=curobo_names)
 
     def _build_pose_goal(
         self, position: torch.Tensor, quaternion: torch.Tensor
@@ -443,8 +463,11 @@ class _CuroboWorkerExecutor:
     def handle_plan(self, msg: PlanMsg) -> PlanResultMsg | None:
         """Run one cuRobo plan and return its result on CPU (or ``None``)."""
         planner = self._get_planner(msg.batch_size)
+        key = (int(msg.batch_size), bool(self._cfg.multi_env))
+        sim_idx = self._reorder_index[key]
+        curobo_names = list(planner.joint_names)
         start = msg.start_qpos.to(self._device, dtype=torch.float32)
-        current_state = self._build_joint_state(start, planner)
+        current_state = self._build_joint_state(start, curobo_names, sim_idx)
 
         if msg.move_type == "eef":
             if msg.goal_position is None or msg.goal_quaternion is None:
@@ -459,7 +482,9 @@ class _CuroboWorkerExecutor:
             if msg.goal_qpos is None:
                 raise ValueError("JOINT plan requires goal_qpos.")
             goal_state = self._build_joint_state(
-                msg.goal_qpos.to(self._device, dtype=torch.float32), planner
+                msg.goal_qpos.to(self._device, dtype=torch.float32),
+                curobo_names,
+                sim_idx,
             )
             result = planner.plan_cspace(
                 goal_state, current_state, max_attempts=int(msg.max_attempts)

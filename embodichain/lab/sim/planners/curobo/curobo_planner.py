@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import quat_from_matrix
+from embodichain.utils.math import pose_inv, quat_from_matrix
 
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
@@ -616,8 +616,25 @@ class CuroboPlanner(BasePlanner):
         control_part = self._resolve_control_part(options)
         start = self._resolve_start_qpos(options.start_qpos, control_part)
         backend = self._get_isolated_backend(control_part, start.shape[0])
-        self.update_dynamic_obstacles(options.dynamic_obstacle_poses, backend)
-        return self._plan_segments(target_states, start, backend, options)
+        # Compute the live sim base pose + its inverse once per plan and reuse it
+        # across every EEF segment and every dynamic-obstacle update (the robot
+        # does not move during planning), instead of re-querying get_link_pose +
+        # re-inverting per segment / per (obstacle, worker). Skipped for pure
+        # joint-move plans with no dynamic obstacles, which never need it.
+        needs_base_pose = bool(options.dynamic_obstacle_poses) or any(
+            t.move_type == MoveType.EEF_MOVE for t in target_states
+        )
+        sim_base_pose_inv = (
+            pose_inv(self._get_sim_base_pose(backend, start.shape[0]))
+            if needs_base_pose
+            else None
+        )
+        self.update_dynamic_obstacles(
+            options.dynamic_obstacle_poses, backend, sim_base_pose_inv
+        )
+        return self._plan_segments(
+            target_states, start, backend, options, sim_base_pose_inv
+        )
 
     # ------------------------------------------------------------------
     # Profile / start resolution
@@ -916,6 +933,7 @@ class CuroboPlanner(BasePlanner):
         start: torch.Tensor,
         backend: "_CuroboBackend",
         options: CuroboPlanOptions,
+        sim_base_pose_inv: torch.Tensor | None = None,
     ) -> PlanResult:
         """Plan each waypoint segment sequentially and assemble a PlanResult.
 
@@ -946,7 +964,9 @@ class CuroboPlanner(BasePlanner):
                         f"Segment {seg_idx} EEF_MOVE target missing xpos.",
                         ValueError,
                     )
-                goal_matrix = self._to_curobo_base_tool_matrix(target.xpos, backend)
+                goal_matrix = self._to_curobo_base_tool_matrix(
+                    target.xpos, backend, sim_base_pose_inv
+                )
                 position, quaternion = _matrix_to_position_quaternion(goal_matrix)
 
                 start_time = time.time()
@@ -1062,19 +1082,27 @@ class CuroboPlanner(BasePlanner):
         if last_tstep.dim() == 2:
             last_tstep = last_tstep.squeeze(-1)
 
-        B, T, _ = position.shape
+        B, T, D = position.shape
+        # last_tstep arrives on CPU (worker _to_cpu); compute the per-env lengths
+        # on CPU so neither the max() nor the clamp forces a GPU sync.
         max_len = max(int((last_tstep + 1).max().item()), 1)
-        full = torch.zeros(
-            B, max_len, position.shape[-1], device=self.device, dtype=torch.float32
-        )
-        for b in range(B):
-            length = min(int(last_tstep[b].item()) + 1, T, max_len)
-            full[b, :length] = position[b, :length].float().to(self.device)
-            if length < max_len:
-                full[b, length:] = position[b, length - 1].float().to(self.device)
+        cap = min(max_len, T)
+        lengths = (last_tstep + 1).clamp(min=1, max=cap).long().to(self.device)
+        # One bulk H2D for the whole segment (was B per-row copies) plus a single
+        # gather that both trims to each env's length and pads by repeating the
+        # last valid sample: src[b, t] = t if t < length[b] else length[b] - 1.
+        # cap <= T guarantees src < T, so the gather never indexes out of bounds.
+        position = position.float().to(self.device)
+        arange = torch.arange(max_len, device=self.device)
+        src = torch.where(
+            arange[None, :] < lengths[:, None],
+            arange[None, :],
+            lengths[:, None] - 1,
+        ).long()
+        full = position.gather(1, src.unsqueeze(-1).expand(-1, -1, D))
 
         seg_positions = self._map_curobo_to_sim(full, traj.joint_names, backend)
-        seg_dt = self._extract_dt(traj, last_tstep, max_len, B)
+        seg_dt = self._extract_dt(traj, lengths, max_len, B)
         return success, seg_positions, seg_dt
 
     def _map_curobo_to_sim(
@@ -1083,25 +1111,41 @@ class CuroboPlanner(BasePlanner):
         curobo_joint_names: list[str],
         backend: "_CuroboBackend",
     ) -> torch.Tensor:
-        """Map a full cuRobo trajectory to simulator control-part joint order."""
-        sim_to_curobo = backend.profile.sim_to_curobo_joint_names
-        cols: list[int] = []
-        for sim_name in backend.sim_joint_names:
-            cu_name = sim_to_curobo[sim_name]
-            if cu_name not in curobo_joint_names:
-                logger.log_error(
-                    f"cuRobo trajectory is missing active joint '{cu_name}' "
-                    f"(mapped from sim joint '{sim_name}'); trajectory joints: "
-                    f"{list(curobo_joint_names)}.",
-                    ValueError,
-                )
-            cols.append(curobo_joint_names.index(cu_name))
-        return full_positions[..., cols].to(dtype=torch.float32)
+        """Map a full cuRobo trajectory to simulator control-part joint order.
+
+        The cuRobo joint order is fixed for a planner's life, so the column
+        gather index is built once (cached on ``backend``) and reused instead of
+        recomputing O(D^2) ``.index()`` lookups on every segment.
+        """
+        sig = tuple(curobo_joint_names)
+        if (
+            backend.curobo_joint_names_sig != sig
+            or backend.curobo_to_sim_col_idx is None
+        ):
+            sim_to_curobo = backend.profile.sim_to_curobo_joint_names
+            cols: list[int] = []
+            for sim_name in backend.sim_joint_names:
+                cu_name = sim_to_curobo[sim_name]
+                if cu_name not in curobo_joint_names:
+                    logger.log_error(
+                        f"cuRobo trajectory is missing active joint '{cu_name}' "
+                        f"(mapped from sim joint '{sim_name}'); trajectory joints: "
+                        f"{list(curobo_joint_names)}.",
+                        ValueError,
+                    )
+                cols.append(curobo_joint_names.index(cu_name))
+            backend.curobo_to_sim_col_idx = torch.as_tensor(
+                cols, dtype=torch.long, device=self.device
+            )
+            backend.curobo_joint_names_sig = sig
+        return full_positions[..., backend.curobo_to_sim_col_idx].to(
+            dtype=torch.float32
+        )
 
     def _extract_dt(
         self,
         traj: "Any",
-        last_tstep: torch.Tensor,
+        lengths: torch.Tensor,
         max_len: int,
         B: int,
     ) -> torch.Tensor:
@@ -1109,7 +1153,10 @@ class CuroboPlanner(BasePlanner):
 
         cuRobo V2 uses a scalar ``dt`` per batch/seed for interpolated
         trajectories. EmbodiChain represents deltas at each trajectory point,
-        with a zero first point and one interval per following point.
+        with a zero first point and one interval per following point. ``lengths``
+        is the per-env valid-length tensor (computed once in
+        :meth:`_extract_segment` and reused here) so this is a vectorized mask
+        instead of a per-env Python loop with ``.item()`` syncs.
         """
         raw_dt = getattr(traj, "dt", None)
         dt: torch.Tensor | None = None
@@ -1135,12 +1182,12 @@ class CuroboPlanner(BasePlanner):
 
         out = torch.zeros(B, max_len, device=self.device, dtype=torch.float32)
         if dt.shape[-1] == 1:
+            # Scalar dt per env: out[b, t] = interval[b] for 1 <= t < length[b],
+            # else 0 - one vectorized mask multiply (was a per-env Python loop).
             interval = dt[:, 0].to(self.device, dtype=torch.float32)
-            for b in range(B):
-                length = min(int(last_tstep[b].item()) + 1, max_len)
-                if length > 1:
-                    out[b, 1:length] = interval[b]
-            return out
+            arange = torch.arange(max_len, device=self.device)
+            mask = (arange[None, :] >= 1) & (arange[None, :] < lengths[:, None])
+            return interval[:, None] * mask
 
         # Preserve an explicitly per-point delta sequence supplied by a V2
         # result or a compatible future API. It already includes the first
@@ -1170,9 +1217,13 @@ class CuroboPlanner(BasePlanner):
         D: int,
     ) -> PlanResult:
         """Concatenate per-env segment samples into a rectangular PlanResult."""
+        # One D2H sync for the whole batch (was B per-env `if alive[b]:` syncs,
+        # each forcing the GPU pipeline to drain). The rest of the loop reads
+        # Python bools and GPU tensors whose .shape / .cat do not sync.
+        alive_list = alive.tolist()
         env_lengths: list[int] = []
         for b in range(B):
-            if alive[b]:
+            if alive_list[b]:
                 env_lengths.append(sum(s.shape[0] for s in per_env_samples[b]))
             else:
                 env_lengths.append(1)
@@ -1181,7 +1232,7 @@ class CuroboPlanner(BasePlanner):
         positions = torch.zeros(B, max_len, D, device=self.device, dtype=torch.float32)
         dt = torch.zeros(B, max_len, device=self.device, dtype=torch.float32)
         for b in range(B):
-            if alive[b]:
+            if alive_list[b]:
                 cat = torch.cat(per_env_samples[b], dim=0)
                 cat_dt = torch.cat(per_env_dt[b], dim=0)
                 length = cat.shape[0]
@@ -1204,7 +1255,7 @@ class CuroboPlanner(BasePlanner):
     # ------------------------------------------------------------------
 
     def _tcp_to_tool_pose(
-        self, tcp_pose: torch.Tensor, profile: _CuroboProfile
+        self, tcp_pose: torch.Tensor, backend: "_CuroboBackend"
     ) -> torch.Tensor:
         """Convert a simulator TCP goal into the configured cuRobo tool frame."""
         if tcp_pose.dim() != 3 or tcp_pose.shape[-2:] != (4, 4):
@@ -1212,8 +1263,23 @@ class CuroboPlanner(BasePlanner):
                 f"Expected (B, 4, 4) TCP pose matrices, got {tuple(tcp_pose.shape)}.",
                 ValueError,
             )
-        if profile.tool_frame_to_tcp is None:
+        tool_to_frame = self._tool_to_frame_matrix(backend)
+        if tool_to_frame is None:
             return tcp_pose
+        return tcp_pose @ tool_to_frame
+
+    def _tool_to_frame_matrix(self, backend: "_CuroboBackend") -> torch.Tensor | None:
+        """Cached inverse of the profile's fixed tool_frame->TCP transform.
+
+        ``None`` means the tool frame is already the TCP (the common auto-derived
+        case). Built once per backend and reused across plans instead of calling
+        ``torch.linalg.inv`` on every EEF segment.
+        """
+        if backend.tool_to_frame_matrix is not None:
+            return backend.tool_to_frame_matrix
+        profile = backend.profile
+        if profile.tool_frame_to_tcp is None:
+            return None
         frame_to_tcp = torch.as_tensor(
             profile.tool_frame_to_tcp,
             dtype=torch.float32,
@@ -1225,11 +1291,14 @@ class CuroboPlanner(BasePlanner):
                 f"got {tuple(frame_to_tcp.shape)}.",
                 ValueError,
             )
-        tool_to_frame = torch.linalg.inv(frame_to_tcp)
-        return tcp_pose @ tool_to_frame
+        backend.tool_to_frame_matrix = pose_inv(frame_to_tcp)
+        return backend.tool_to_frame_matrix
 
     def _sim_world_to_curobo_base_pose(
-        self, world_pose: torch.Tensor, backend: "_CuroboBackend"
+        self,
+        world_pose: torch.Tensor,
+        backend: "_CuroboBackend",
+        sim_base_pose_inv: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Express simulator-world poses in the loaded cuRobo base frame.
 
@@ -1238,6 +1307,13 @@ class CuroboPlanner(BasePlanner):
         link. The live simulator base pose accounts for arena offsets and
         mobile bases; ``sim_base_to_curobo_base`` accounts for any fixed frame
         convention difference between the two robot descriptions.
+
+        ``sim_base_pose_inv`` is the precomputed inverse of the live sim base
+        pose; the :meth:`plan` hot path passes it so K segments and N dynamic
+        obstacles reuse one inverse (the robot does not move during planning).
+        The public path leaves it ``None`` and computes it here via
+        :func:`pose_inv` (closed-form, cheaper and more stable than
+        ``torch.linalg.inv``).
         """
         if world_pose.dim() != 3 or world_pose.shape[-2:] != (4, 4):
             logger.log_error(
@@ -1246,27 +1322,40 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
         batch_size = world_pose.shape[0]
-        sim_base_pose = self._get_sim_base_pose(backend, batch_size)
-        profile_transform = backend.profile.sim_base_to_curobo_base
-        if profile_transform is None:
-            sim_base_to_curobo = torch.eye(
-                4, dtype=torch.float32, device=self.device
-            ).expand(batch_size, -1, -1)
-        else:
-            sim_base_to_curobo = torch.as_tensor(
-                profile_transform, dtype=torch.float32, device=self.device
-            )
-            if sim_base_to_curobo.shape != (4, 4):
-                logger.log_error(
-                    "sim_base_to_curobo_base must be a homogeneous (4, 4) "
-                    f"transform, got {tuple(sim_base_to_curobo.shape)}.",
-                    ValueError,
-                )
-            sim_base_to_curobo = sim_base_to_curobo.expand(batch_size, -1, -1)
+        if sim_base_pose_inv is None:
+            sim_base_pose = self._get_sim_base_pose(backend, batch_size)
+            sim_base_pose_inv = pose_inv(sim_base_pose)
+        sim_base_to_curobo = self._sim_base_to_curobo_matrix(backend).expand(
+            batch_size, -1, -1
+        )
         return torch.bmm(
             sim_base_to_curobo,
-            torch.bmm(torch.linalg.inv(sim_base_pose), world_pose),
+            torch.bmm(sim_base_pose_inv, world_pose),
         )
+
+    def _sim_base_to_curobo_matrix(self, backend: "_CuroboBackend") -> torch.Tensor:
+        """Cached fixed sim-base -> cuRobo-base transform (eye when ``None``).
+
+        Built once per backend and reused across plans instead of
+        ``torch.as_tensor``-ing the profile list on every call.
+        """
+        if backend.sim_base_to_curobo_base_matrix is not None:
+            return backend.sim_base_to_curobo_base_matrix
+        profile_transform = backend.profile.sim_base_to_curobo_base
+        if profile_transform is None:
+            matrix = torch.eye(4, dtype=torch.float32, device=self.device)
+        else:
+            matrix = torch.as_tensor(
+                profile_transform, dtype=torch.float32, device=self.device
+            )
+            if matrix.shape != (4, 4):
+                logger.log_error(
+                    "sim_base_to_curobo_base must be a homogeneous (4, 4) "
+                    f"transform, got {tuple(matrix.shape)}.",
+                    ValueError,
+                )
+        backend.sim_base_to_curobo_base_matrix = matrix
+        return matrix
 
     def _get_sim_base_pose(
         self, backend: "_CuroboBackend", batch_size: int
@@ -1308,6 +1397,7 @@ class CuroboPlanner(BasePlanner):
         self,
         poses: dict[str, torch.Tensor] | None,
         backend: "_CuroboBackend | None" = None,
+        sim_base_pose_inv: torch.Tensor | None = None,
     ) -> None:
         """Update named dynamic obstacle poses on the cuRobo worker collision worlds.
 
@@ -1316,6 +1406,11 @@ class CuroboPlanner(BasePlanner):
                 is a no-op.
             backend: Specific control part's worker to update. If ``None``,
                 updates all cached workers.
+            sim_base_pose_inv: Precomputed inverse of the live sim base pose for
+                ``backend``'s batch size, reused across all obstacles on that
+                worker (computed once in :meth:`plan`). Only consulted when
+                ``backend`` is not ``None`` and its batch matches the pose batch;
+                otherwise each worker computes its own inverse.
         """
         if poses is None:
             return
@@ -1326,15 +1421,33 @@ class CuroboPlanner(BasePlanner):
             targets = [self._isolated_workers[backend.control_part]]
         else:
             targets = list(self._isolated_workers.values())
+        # Cache the base-pose inverse per worker (keyed by id(shadow_backend)) so
+        # N obstacles on W workers do W inversions instead of N*W (the base pose
+        # is identical for every obstacle on a given worker).
+        inv_cache: dict[int, torch.Tensor] = {}
         for name, pose_tensor in poses.items():
             pose_tensor = torch.as_tensor(
                 pose_tensor, device=self.device, dtype=torch.float32
             )
+            b = pose_tensor.shape[0]
             for iw in targets:
-                if iw.shadow_backend is None:
+                shadow = iw.shadow_backend
+                if shadow is None:
                     continue  # Not yet configured for a control part.
+                key = id(shadow)
+                inv = inv_cache.get(key)
+                if inv is None or inv.shape[0] != b:
+                    if (
+                        backend is not None
+                        and sim_base_pose_inv is not None
+                        and sim_base_pose_inv.shape[0] == b
+                    ):
+                        inv = sim_base_pose_inv
+                    else:
+                        inv = pose_inv(self._get_sim_base_pose(shadow, b))
+                    inv_cache[key] = inv
                 curobo_pose = self._sim_world_to_curobo_base_pose(
-                    pose_tensor, iw.shadow_backend
+                    pose_tensor, shadow, inv
                 )
                 position, quaternion = _matrix_to_position_quaternion(curobo_pose)
                 self._worker_request(
@@ -1351,7 +1464,10 @@ class CuroboPlanner(BasePlanner):
     # ------------------------------------------------------------------
 
     def _to_curobo_base_tool_matrix(
-        self, xpos: torch.Tensor, backend: "_CuroboBackend"
+        self,
+        xpos: torch.Tensor,
+        backend: "_CuroboBackend",
+        sim_base_pose_inv: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Convert a batched sim-world TCP pose to a cuRobo-base tool-frame matrix.
 
@@ -1359,10 +1475,12 @@ class CuroboPlanner(BasePlanner):
         :meth:`_tcp_to_tool_pose`, so it runs in the parent (which holds the live
         robot) without constructing any cuRobo type. The worker splits this matrix
         into position/quaternion and builds the ``GoalToolPose``.
+        ``sim_base_pose_inv`` is the per-plan cached base-pose inverse (see
+        :meth:`plan`).
         """
         xpos = torch.as_tensor(xpos, device=self.device, dtype=torch.float32)
-        xpos = self._sim_world_to_curobo_base_pose(xpos, backend)
-        xpos = self._tcp_to_tool_pose(xpos, backend.profile)
+        xpos = self._sim_world_to_curobo_base_pose(xpos, backend, sim_base_pose_inv)
+        xpos = self._tcp_to_tool_pose(xpos, backend)
         return xpos
 
     def _get_isolated_backend(
@@ -1626,6 +1744,14 @@ class _CuroboBackend:
     sim_joint_names: list[str]
     profile: _CuroboProfile
     batch_size: int
+    # Lazily-built device-tensor caches for the shared post-processing. The
+    # cuRobo joint order and the profile's fixed transforms are stable for a
+    # worker's life, so these are built once on first use and reused across
+    # plans instead of recomputing per segment / per plan.
+    curobo_to_sim_col_idx: torch.Tensor | None = None
+    curobo_joint_names_sig: tuple[str, ...] | None = None
+    tool_to_frame_matrix: torch.Tensor | None = None
+    sim_base_to_curobo_base_matrix: torch.Tensor | None = None
 
 
 @dataclass
