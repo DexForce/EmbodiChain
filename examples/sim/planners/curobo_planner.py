@@ -433,12 +433,6 @@ def _replay_full_dof_trajectory(
         robot.set_qpos(
             qpos=waypoint,
             joint_ids=all_joint_ids,
-            target=False,
-        )
-        robot.set_qpos(
-            qpos=waypoint,
-            joint_ids=all_joint_ids,
-            target=True,
         )
         sim.update(step=step_repeat)
 
@@ -500,7 +494,11 @@ def main() -> None:
                 motion_source="motion_gen",
                 planner_type="curobo",
                 control_part=control_part,
-                sample_interval=80,
+                # sample_interval sets the returned trajectory's waypoint count.
+                # cuRobo's own collision-checked samples are arc-length resampled
+                # to this count; set CuroboPlannerCfg.preserve_plan_samples=True
+                # above to keep cuRobo's raw samples (count from interpolation_dt).
+                sample_interval=30,
             ),
         ),
         name="move_end_effector",
@@ -551,6 +549,7 @@ def main() -> None:
         trajectory,
         step_repeat=args.step_repeat,
     )
+    input("Press Enter to exit the cuRobo demo...")
     if sim.is_window_recording():
         sim.stop_window_record()
         sim.wait_window_record_saves()

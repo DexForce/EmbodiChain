@@ -57,6 +57,7 @@ CONTROL_PART = "arm"
 DEMO_BLOCK_DIMS = [0.18, 0.40, 0.36]
 DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
 POS_TOL = 0.02
+SAMPLE_INTERVAL = 80
 
 
 def _make_franka_curobo_engine():
@@ -81,8 +82,6 @@ def _make_franka_curobo_engine():
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=ROBOT_UID,
                 world=CuroboWorldCfg(rigid_objects=[block]),
-                warmup=False,
-                use_cuda_graph=False,
             )
         )
     )
@@ -94,7 +93,7 @@ def _make_franka_curobo_engine():
                 motion_source="motion_gen",
                 planner_type="curobo",
                 control_part=CONTROL_PART,
-                sample_interval=80,
+                sample_interval=SAMPLE_INTERVAL,
             ),
         ),
         name="move_end_effector",
@@ -146,6 +145,9 @@ def test_atomic_move_end_effector_uses_curobo_v2():
         assert success.shape == (1,)
         assert bool(success.item())
         assert trajectory.shape[2] == robot.dof
+        # Default preserve_plan_samples=False resamples cuRobo's raw samples to
+        # the action's sample_interval waypoint count.
+        assert trajectory.shape[1] == SAMPLE_INTERVAL
         _play_trajectory(sim, robot, trajectory)
         assert _position_error(robot, target) < POS_TOL
     finally:

@@ -284,6 +284,24 @@ class CuroboPlannerCfg(BasePlannerCfg):
     interpolation_dt: float = 0.025
     """Interpolation step (seconds) used by cuRobo and as a dt fallback."""
 
+    preserve_plan_samples: bool = False
+    """Whether callers must retain cuRobo's raw collision-checked samples exactly.
+
+    When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
+    resamples the returned trajectory to the atomic action's ``sample_interval``
+    waypoint count - matching the documented contract of
+    :class:`~embodichain.lab.sim.atomic_actions.primitives.move_end_effector.MoveEndEffectorCfg.sample_interval`
+    and the other planners. The resample is arc-length piecewise-linear along
+    cuRobo's joint-space path, so the collision-free path is preserved; only the
+    sample density changes (cuRobo's own count is derived from
+    :attr:`interpolation_dt` and the trajectory duration, e.g. ~82 for a 2 s
+    plan at 0.025 s).
+
+    When ``True``, the builder returns cuRobo's own samples unchanged. Use this
+    when you need cuRobo's exact time-parameterized, collision-checked samples
+    rather than a fixed waypoint count.
+    """
+
     warmup_iterations: int = 1
     """cuRobo warmup iterations run once per cached worker planner.
 
@@ -446,9 +464,12 @@ class CuroboPlanner(BasePlanner):
 
     Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged - the
     backend performs its own collision-aware IK and trajectory optimization, so
-    EmbodiChain pre-interpolation is disabled (``preinterpolate_targets=False``)
-    and returned collision-checked samples are preserved
-    (``preserve_plan_samples=True``).
+    EmbodiChain pre-interpolation is disabled (``preinterpolate_targets=False``).
+    By default the returned collision-checked samples are arc-length resampled to
+    the action's ``sample_interval`` waypoint count
+    (``preserve_plan_samples=False``); set
+    :attr:`CuroboPlannerCfg.preserve_plan_samples=True` to keep cuRobo's own
+    samples unchanged.
 
     Args:
         cfg: Configuration for the cuRobo planner.
@@ -460,8 +481,18 @@ class CuroboPlanner(BasePlanner):
     """
 
     preinterpolate_targets = False
-    preserve_plan_samples = True
     supports_joint_move = True
+
+    @property
+    def preserve_plan_samples(self) -> bool:
+        """Whether callers must retain this planner's raw samples exactly.
+
+        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by
+        :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
+        to decide whether to resample the returned trajectory to the action's
+        ``sample_interval``.
+        """
+        return self.cfg.preserve_plan_samples
 
     # Prewarmed workers spawned before the robot exists (see prewarm()), keyed by
     # robot_uid. A CuroboPlanner picks up its prewarmed worker at construction.
