@@ -480,10 +480,7 @@ class SimulationManager:
             )
             sim_config.render_cfg.renderer = resolved_renderer
 
-        world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
-        world_config.raytrace_config.render_iterations_per_frame = (
-            sim_config.render_cfg.spp
-        )
+        sim_config.render_cfg.apply_to_dexsim_config(world_config)
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
