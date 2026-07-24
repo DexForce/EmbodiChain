@@ -51,6 +51,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
+    build_trajectory_states_buffer,
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.utils import configclass, logger
@@ -206,6 +207,14 @@ class EmbodiedEnvCfg(EnvCfg):
     If filter_dataset_saving is False and a dataset manager is configured, the rollout buffer will be initialized by default
     """
 
+    record_trajectory: bool = False
+    """Whether to record per-object kinematic states (root pose + qpos) into the
+    rollout buffer's ``states`` field each step. Forces ``init_rollout_buffer=True``."""
+
+    trajectory_uids: list[str] | None = None
+    """Optional allow-list of non-robot object uids to record. If None, all rigid
+    objects and articulations are recorded. The robot is always recorded."""
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -275,6 +284,9 @@ class EmbodiedEnv(BaseEnv):
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
             self.cfg.init_rollout_buffer = True
 
+        if self.cfg.record_trajectory:
+            self.cfg.init_rollout_buffer = True
+
         # Rollout buffer for episode data collection.
         # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
         # The default key in the buffer are:
@@ -297,6 +309,15 @@ class EmbodiedEnv(BaseEnv):
             )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
             self._rollout_buffer_mode = "expert"
+
+        if self.cfg.record_trajectory:
+            self.rollout_buffer["states"] = build_trajectory_states_buffer(
+                env=self,
+                max_steps=self.max_episode_steps,
+                num_envs=self.num_envs,
+                device=self.device,
+                uids=self.cfg.trajectory_uids,
+            )
 
         self.current_rollout_step = 0
 
@@ -630,6 +651,30 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )
+        self._write_trajectory_states()
+
+    def _write_trajectory_states(self) -> None:
+        """Write per-object kinematic states into the rollout buffer's ``states`` field."""
+        if "states" not in self.rollout_buffer.keys():
+            return
+        if self.current_rollout_step >= self._max_rollout_steps:
+            return
+        states_slot = self.rollout_buffer["states"][:, self.current_rollout_step]
+        states_slot["robot"]["root_pose"].copy_(self.robot.get_local_pose())
+        states_slot["robot"]["qpos"].copy_(self.robot.get_qpos())
+        if "articulations" in states_slot.keys():
+            for uid, art in self.sim._articulations.items():
+                if uid in states_slot["articulations"].keys():
+                    states_slot["articulations"][uid]["root_pose"].copy_(
+                        art.get_local_pose()
+                    )
+                    states_slot["articulations"][uid]["qpos"].copy_(art.get_qpos())
+        if "rigid_objects" in states_slot.keys():
+            for uid, obj in self.sim._rigid_objects.items():
+                if uid in states_slot["rigid_objects"].keys():
+                    states_slot["rigid_objects"][uid]["pose"].copy_(
+                        obj.get_local_pose()
+                    )
 
     def _write_rl_rollout_step(
         self,
