@@ -121,3 +121,39 @@ def test_save_trajectory_round_trip(tmp_path):
         env.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_no_auto_reset_when_replay_flag_set():
+    env = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        action = env.robot.get_qpos()  # hold position
+        # Force a "done" every step so the auto-reset path would normally fire.
+        success = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+        fail = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        env.compute_task_state = lambda **kwargs: (success, fail, {})
+        env.cfg.ignore_terminations = False
+        env.max_episode_steps = 10_000  # avoid time-limit truncation
+
+        reset_calls = [0]
+        orig_reset = env.reset
+
+        def counting_reset(*a, **k):
+            reset_calls[0] += 1
+            return orig_reset(*a, **k)
+
+        env.reset = counting_reset
+
+        # With the guard on, stepping must NOT auto-reset even though dones=True.
+        env._replay_no_auto_reset = True
+        env.step(action)
+        assert reset_calls[0] == 0
+
+        # With the guard off, the same step triggers an auto-reset.
+        env._replay_no_auto_reset = False
+        env.step(action)
+        assert reset_calls[0] == 1
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
