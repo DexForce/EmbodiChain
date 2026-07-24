@@ -1112,6 +1112,41 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
+    def save_trajectory(self, path: str) -> None:
+        """Save the recorded episode trajectory to a ``.pt`` file.
+
+        Bundles the sliced ``states`` and ``actions`` from the rollout buffer
+        with a ``meta`` dict describing object uids, dims, and env/step counts.
+        The file can be replayed with :class:`ReplayWrapper`.
+
+        Args:
+            path: Destination ``.pt`` file path.
+
+        Raises:
+            RuntimeError: If trajectory recording was never enabled.
+        """
+        if self.rollout_buffer is None or "states" not in self.rollout_buffer.keys():
+            raise RuntimeError(
+                "Trajectory recording is not enabled (set cfg.record_trajectory=True)."
+            )
+        n = int(self.current_rollout_step)
+        states = self.rollout_buffer["states"][:, :n].clone()
+        actions = self.rollout_buffer["actions"][:, :n].clone()
+        meta = {
+            "num_steps": n,
+            "num_envs": int(self.num_envs),
+            "dt": float(self.sim_cfg.physics_dt),
+            "active_joint_ids": list(self.active_joint_ids),
+            "robot_uid": self.robot.uid,
+            "robot_dof": int(self.robot.dof),
+            "articulation_uids": list(self.sim._articulations.keys()),
+            "articulation_dofs": {
+                uid: int(art.dof) for uid, art in self.sim._articulations.items()
+            },
+            "rigid_object_uids": list(self.sim._rigid_objects.keys()),
+        }
+        torch.save({"states": states, "actions": actions, "meta": meta}, path)
+
     def close(self) -> None:
         """Close the environment and release resources."""
         # Finalize dataset if present

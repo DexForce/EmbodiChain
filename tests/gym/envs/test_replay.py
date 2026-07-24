@@ -97,3 +97,27 @@ def test_record_trajectory_populates_states():
         env.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_save_trajectory_round_trip(tmp_path):
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        n = 4
+        _drive(env, num_steps=n)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+        assert path.exists()
+
+        from embodichain.lab.gym.utils.gym_utils import load_trajectory
+
+        data = load_trajectory(str(path))
+        assert data["meta"]["num_steps"] == n
+        assert data["meta"]["num_envs"] == 2
+        assert tuple(data["states"]["robot"]["qpos"].shape) == (2, n, 6)
+        assert tuple(data["actions"].shape)[0] == 2
+        assert "cube" in data["states"]["rigid_objects"].keys()
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
