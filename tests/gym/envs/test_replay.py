@@ -25,6 +25,7 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RigidObjectCfg, RobotCfg
@@ -155,5 +156,51 @@ def test_no_auto_reset_when_replay_flag_set():
         assert reset_calls[0] == 1
     finally:
         env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_kinematic_replay_reproduces_recorded_states(tmp_path):
+    # --- Record ---
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        n = 5
+        _drive(env, num_steps=n)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    recorded = torch.load(path, weights_only=False)
+    rec_states = recorded["states"]
+
+    # --- Replay (kinematic) ---
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="kinematic")
+    try:
+        env2.reset()
+        for i in range(n):
+            obs, reward, term, trunc, info = env2.step(None)
+            inner = env2.env  # the wrapped ReplayTestEnv
+            assert torch.allclose(
+                inner.robot.get_qpos(), rec_states["robot"]["qpos"][:, i], atol=1e-4
+            )
+            assert torch.allclose(
+                inner.robot.get_local_pose(),
+                rec_states["robot"]["root_pose"][:, i],
+                atol=1e-4,
+            )
+            assert torch.allclose(
+                inner.sim.get_rigid_object("cube").get_local_pose(),
+                rec_states["rigid_objects"]["cube"]["pose"][:, i],
+                atol=1e-4,
+            )
+            assert torch.all(reward == 0)
+        assert bool(trunc.all())  # truncated after consuming all steps
+    finally:
+        env2.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()

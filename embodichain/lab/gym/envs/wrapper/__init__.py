@@ -15,3 +15,4 @@
 # ----------------------------------------------------------------------------
 
 from .no_fail import NoFailWrapper
+from .replay import ReplayWrapper
