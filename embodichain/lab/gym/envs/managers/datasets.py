@@ -31,7 +31,6 @@ from tensordict import TensorDict
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.data.enum import LeRobotKey
-from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
@@ -502,18 +501,18 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
+                    for frame_name in value:
+                        if (
+                            frame_name not in CAMERA_IMAGE_FRAMES
+                            and frame_name not in CAMERA_AUXILIARY_FRAMES
+                        ):
+                            continue
 
-                    color_data = obs["sensor"][sensor_name]["color"]
-                    color_img = color_data[:, :, :3].cpu()
-                    frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = color_img
-
-                    if is_stereo:
-                        color_right_data = obs["sensor"][sensor_name]["color_right"]
-                        color_right_img = color_right_data[:, :, :3].cpu()
-                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = (
-                            color_right_img
-                        )
+                        feature_key = self._camera_feature_key(sensor_name, frame_name)
+                        frame_data = obs["sensor"][sensor_name][frame_name]
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            frame_data = frame_data[:, :, :3]
+                        frame[feature_key] = frame_data.cpu()
                 elif isinstance(sensor, ContactSensor):
                     for frame_name in value.keys():
                         frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][
