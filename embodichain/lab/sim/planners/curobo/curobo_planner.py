@@ -145,7 +145,7 @@ class CuroboWorldCfg:
     initially empty collision world.
     """
 
-    obstacle_representation: str = "cuboid"
+    obstacle_representation: str = "sphere"
     """Collision representation used when generating the YAML from :attr:`rigid_objects`.
 
     ``"cuboid"`` (default) emits a local-frame AABB per object, placed as an OBB
