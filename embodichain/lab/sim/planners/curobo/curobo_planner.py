@@ -662,15 +662,26 @@ class CuroboPlanner(BasePlanner):
             if tcp_xpos is not None:
                 tool_frame_to_tcp = tcp_xpos.tolist()
 
-        base_link = (
+        # cuRobo's base is the auto-generated YAML's ``base_link`` (the URDF root
+        # link), NOT the solver's control-part root.  For robots whose control
+        # part spans the whole arm (franka, ur) the two coincide, but for a
+        # control part that is a sub-chain of a larger robot - e.g. w1
+        # ``right_arm`` whose root ``right_arm_base`` hangs off a locked torso -
+        # they differ.  Cartesian goals and dynamic obstacle poses are converted
+        # into this base frame (see :meth:`_sim_world_to_curobo_base_pose`), so it
+        # must match the frame cuRobo actually plans in; otherwise cuRobo receives
+        # a goal expressed in the control-part base and interprets it in the URDF
+        # root, planning to a wrong pose.
+        solver_base_link = (
             getattr(solver, "root_link_name", None) if solver is not None else None
         )
-        sim_base_link = base_link
 
         sim_joints = self._resolve_sim_joint_names(control_part)
         sim_to_curobo = {j: j for j in sim_joints}
 
         robot_config_path = self._auto_generate_robot_yaml(control_part, tool_frame)
+        base_link = self._read_curobo_base_link(robot_config_path) or solver_base_link
+        sim_base_link = base_link
 
         return _CuroboProfile(
             robot_config_path=robot_config_path,
@@ -681,6 +692,31 @@ class CuroboPlanner(BasePlanner):
             sim_base_link_name=sim_base_link,
             sim_base_to_curobo_base=self.cfg.sim_base_to_curobo_base,
         )
+
+    @staticmethod
+    def _read_curobo_base_link(robot_yaml_path: str) -> str | None:
+        """Return cuRobo's ``base_link`` from an auto-generated robot YAML.
+
+        The YAML's ``robot_cfg.kinematics.base_link`` is the URDF root link cuRobo
+        roots its kinematics at - the frame Cartesian goals must be expressed in.
+        Reading it back (rather than assuming it equals the solver's control-part
+        root) keeps the parent's frame conversion in sync with cuRobo's actual
+        model for robots whose control part is a sub-chain of a larger URDF.
+
+        Args:
+            robot_yaml_path: Path to the cached cuRobo robot YAML.
+
+        Returns:
+            The base link name, or ``None`` if the YAML cannot be read.
+        """
+        try:
+            import yaml
+
+            with open(robot_yaml_path, "r") as fh:
+                data = yaml.safe_load(fh)
+            return data["robot_cfg"]["kinematics"]["base_link"]
+        except Exception:  # noqa: BLE001 - fall back to the solver root upstream
+            return None
 
     def _auto_generate_robot_yaml(
         self, control_part: str, tool_frame: str | None
@@ -876,6 +912,7 @@ class CuroboPlanner(BasePlanner):
                     )
                 goal_matrix = self._to_curobo_base_tool_matrix(target.xpos, backend)
                 position, quaternion = _matrix_to_position_quaternion(goal_matrix)
+
                 start_time = time.time()
                 v2_result = self._worker_plan(
                     "eef", current, position, quaternion, None, backend, max_attempts

@@ -65,15 +65,12 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
 )
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
 from embodichain.lab.sim.shapes import CubeCfg
 
 __all__ = ["main"]
 
 
-CONTROL_PART = "arm"
-DEMO_BLOCK_DIMS = [0.18, 0.3, 0.36]
-DEMO_BLOCK_POS = (0.40, 0.0, 0.18)
 DEFAULT_RECORD_FPS = 20
 DEFAULT_RECORD_MAX_MEMORY = 2048
 DEFAULT_MAX_ATTEMPTS = 2
@@ -165,7 +162,7 @@ def _check_runtime() -> None:
 
 def _build_scene(
     headless: bool, robot_type: str = "franka"
-) -> tuple[SimulationManager, Robot, RigidObject]:
+) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -176,6 +173,7 @@ def _build_scene(
         )
     )
     if robot_type == "franka":
+        control_part = "arm"
         robot = sim.add_robot(
             cfg=FrankaPandaCfg.from_dict(
                 {
@@ -200,6 +198,7 @@ def _build_scene(
             device=robot.device,
         )
     elif robot_type == "ur":
+        control_part = "arm"
         hand_urdf_path = get_data_path(
             "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
         )
@@ -270,6 +269,101 @@ def _build_scene(
             ],
             device=robot.device,
         )
+    elif robot_type == "w1":
+        control_part = "right_arm"
+        cfg = DexforceW1Cfg.from_dict(
+            {
+                "uid": "dexforce_w1",
+            }
+        )
+        cfg.solver_cfg["left_arm"].tcp = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.012],
+                [0.0, 1.0, 0.0, 0.04],
+                [0.0, 0.0, 1.0, 0.11],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        cfg.solver_cfg["right_arm"].tcp = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.012],
+                [0.0, 1.0, 0.0, -0.04],
+                [0.0, 0.0, 1.0, 0.11],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+
+        cfg.init_qpos = [
+            1.0000e00,
+            -2.0000e00,
+            1.0000e00,
+            0.0000e00,
+            -2.6921e-05,
+            -2.6514e-03,
+            -1.5708e00,
+            1.4575e00,
+            -7.8540e-01,
+            1.2834e-01,
+            1.5708e00,
+            -2.2310e00,
+            -7.8540e-01,
+            1.4461e00,
+            -1.5708e00,
+            1.6716e00,
+            7.8540e-01,
+            7.6745e-01,
+            0.0000e00,
+            3.8108e-01,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            1.5000e00,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            1.5000e00,
+            6.9974e-02,
+            7.3950e-02,
+            6.6574e-02,
+            6.0923e-02,
+            0.0000e00,
+            6.7342e-02,
+            7.0862e-02,
+            6.3684e-02,
+            5.7822e-02,
+            0.0000e00,
+        ]
+        robot = sim.add_robot(cfg=cfg)
+
+        demo_block_size = [0.2, 0.2, 0.2]
+        demo_block_position = (0.36, -0.15, 0.88)
+        target_xpos = torch.tensor(
+            [
+                [
+                    [2.2020e-03, 3.4217e-01, 9.3964e-01, 4.6395e-01],
+                    [1.5398e-04, -9.3964e-01, 3.4217e-01, -1.7e-01],
+                    [1.0000e00, -6.0877e-04, -2.1218e-03, 6.80e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
+
+        # robot compute ik success in example
+        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
+        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
+
+        # sim.open_window()
+        # # sim.update(50)
+        # current_qpos = robot.get_qpos(name=control_part)
+        # current_xpos = robot.compute_fk(name=control_part, qpos=current_qpos, to_matrix=True)
+        # print(f"Current {control_part} TCP pose:\n{current_xpos}")
+        # import ipdb; ipdb.set_trace()
+
+    else:
+        raise ValueError(f"Unknown robot type '{robot_type}' for cuRobo demo.")
 
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot.uid}' to the cuRobo demo.")
@@ -287,7 +381,7 @@ def _build_scene(
         )
     )
 
-    return sim, robot, demo_block, target_xpos
+    return sim, robot, demo_block, target_xpos, control_part
 
 
 def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) -> bool:
@@ -349,12 +443,12 @@ def _replay_full_dof_trajectory(
         sim.update(step=step_repeat)
 
 
-def _final_tcp_error(robot: Robot, target: torch.Tensor) -> float:
+def _final_tcp_error(robot: Robot, target: torch.Tensor, control_part: str) -> float:
     """Return the Cartesian position error of the simulator's final TCP pose."""
-    final_qpos = robot.get_qpos(name=CONTROL_PART)
+    final_qpos = robot.get_qpos(name=control_part)
     final_pose = robot.compute_fk(
         qpos=final_qpos,
-        name=CONTROL_PART,
+        name=control_part,
         to_matrix=True,
     )
     # Accept either a single (4, 4) pose or a batched (B, 4, 4) target.
@@ -379,7 +473,9 @@ def main() -> None:
 
     sim: SimulationManager | None = None
     # try:
-    sim, robot, demo_block, target_xpos = _build_scene(args.headless, args.robot)
+    sim, robot, demo_block, target_xpos, control_part = _build_scene(
+        args.headless, args.robot
+    )
     CuroboPlanner.prewarm(robot.uid)
     if not args.headless:
         sim.open_window()
@@ -403,17 +499,17 @@ def main() -> None:
             MoveEndEffectorCfg(
                 motion_source="motion_gen",
                 planner_type="curobo",
-                control_part=CONTROL_PART,
+                control_part=control_part,
                 sample_interval=80,
             ),
         ),
         name="move_end_effector",
     )
 
-    initial_qpos = robot.get_qpos(name=CONTROL_PART)
+    initial_qpos = robot.get_qpos(name=control_part)
     initial_xpos = robot.compute_fk(
         qpos=initial_qpos,
-        name=CONTROL_PART,
+        name=control_part,
         to_matrix=True,
     )
     plan_start = time.perf_counter()
@@ -437,7 +533,9 @@ def main() -> None:
     )
     if args.hold_steps:
         sim.update(step=args.hold_steps)
-    print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
+    print(
+        f"final TCP position error: {_final_tcp_error(robot, target_xpos, control_part):.4f} m"
+    )
 
     plan_start = time.perf_counter()
     success, trajectory, _ = engine.run(
