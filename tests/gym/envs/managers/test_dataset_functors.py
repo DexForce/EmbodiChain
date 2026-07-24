@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -278,6 +279,116 @@ class TestLeRobotRecorderFeatures:
 
         # Check camera feature exists (use LeRobot standard key format)
         assert f"{LeRobotKey.OBS_IMAGES.value}.camera" in features
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_build_features_with_depth_and_mask(self, mock_lerobot_dataset):
+        """Test that depth and mask keep their numeric shape and dtype."""
+        env = MockEnvForDataset(num_joints=6)
+        env.single_observation_space["sensor"]["camera"].update(
+            {
+                "depth": Mock(dtype=np.dtype("float32"), shape=(480, 640)),
+                "depth_right": Mock(dtype=np.dtype("float32"), shape=(480, 640)),
+                "mask": Mock(dtype=np.dtype("int32"), shape=(480, 640)),
+                "mask_right": Mock(dtype=np.dtype("int32"), shape=(480, 640)),
+            }
+        )
+
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": "/tmp/test_dataset",
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+                "use_videos": False,
+            }
+        )
+
+        original_isinstance = isinstance
+
+        def mock_isinstance(obj, class_or_tuple):
+            if isinstance(obj, MockSensor):
+                if class_or_tuple is Camera or (
+                    isinstance(class_or_tuple, tuple) and Camera in class_or_tuple
+                ):
+                    return True
+            return original_isinstance(obj, class_or_tuple)
+
+        with patch(
+            "embodichain.lab.gym.envs.managers.datasets.isinstance",
+            side_effect=mock_isinstance,
+        ):
+            recorder = LeRobotRecorder(cfg, env)
+            features = recorder._build_features()
+
+        assert features["observation.depth.camera"] == {
+            "dtype": "float32",
+            "shape": (480, 640),
+            "names": ["height", "width"],
+        }
+        assert features["observation.mask.camera"] == {
+            "dtype": "int32",
+            "shape": (480, 640),
+            "names": ["height", "width"],
+        }
+        assert features["observation.depth.camera_right"] == {
+            "dtype": "float32",
+            "shape": (480, 640),
+            "names": ["height", "width"],
+        }
+        assert features["observation.mask.camera_right"] == {
+            "dtype": "int32",
+            "shape": (480, 640),
+            "names": ["height", "width"],
+        }
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_build_features_ignores_unsupported_camera_frame(
+        self, mock_lerobot_dataset
+    ):
+        """Test that unsupported camera data does not create an invalid feature."""
+        env = MockEnvForDataset(num_joints=6)
+        env.single_observation_space["sensor"]["camera"]["normal"] = Mock(
+            dtype=np.dtype("float32"), shape=(480, 640, 3)
+        )
+
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": "/tmp/test_dataset",
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+                "use_videos": False,
+            }
+        )
+
+        original_isinstance = isinstance
+
+        def mock_isinstance(obj, class_or_tuple):
+            if isinstance(obj, MockSensor):
+                if class_or_tuple is Camera or (
+                    isinstance(class_or_tuple, tuple) and Camera in class_or_tuple
+                ):
+                    return True
+            return original_isinstance(obj, class_or_tuple)
+
+        with patch(
+            "embodichain.lab.gym.envs.managers.datasets.isinstance",
+            side_effect=mock_isinstance,
+        ):
+            recorder = LeRobotRecorder(cfg, env)
+            features = recorder._build_features()
+
+        assert "observation.normal.camera" not in features
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
