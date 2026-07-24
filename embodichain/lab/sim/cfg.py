@@ -15,9 +15,12 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+
 import enum
 import json
 import os
+
+import dexsim
 import numpy as np
 import torch
 
@@ -25,7 +28,9 @@ from typing import Sequence, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
+    DenoiserType,
     Renderer,
+    ToneMappingType,
     PhysicalAttr,
     ActorType,
     AxisArrowType,
@@ -71,7 +76,23 @@ class RenderCfg:
     spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
-    def to_dexsim_flags(self):
+    tone_mapping_enabled: bool = False
+    """Whether to map HDR RGB output with the modified Reinhard curve."""
+
+    tone_mapping_exposure: float = 1.0
+    """Fixed linear exposure multiplier applied before tone mapping."""
+
+    def __post_init__(self) -> None:
+        """Validate rendering parameters."""
+        if self.spp < 1:
+            logger.log_error("RenderCfg.spp must be at least 1.", ValueError)
+        if self.tone_mapping_exposure < 0.0:
+            logger.log_error(
+                "RenderCfg.tone_mapping_exposure must be non-negative.", ValueError
+            )
+
+    def to_dexsim_flags(self) -> Renderer:
+        """Convert the renderer name to DexSim's renderer enum."""
         if self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
@@ -90,6 +111,24 @@ class RenderCfg:
             logger.log_error(
                 f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
             )
+
+    def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
+        """Apply rendering settings to a DexSim world configuration.
+
+        Args:
+            world_config: DexSim world configuration to update in place.
+        """
+        world_config.renderer = self.to_dexsim_flags()
+        world_config.raytrace_config.render_iterations_per_frame = self.spp
+        world_config.raytrace_config.open_denoise = True
+        world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
+        world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
+        world_config.postprocess_config.tone_mapping_type = (
+            ToneMappingType.MODIFIED_REINHARD
+        )
+        world_config.postprocess_config.tone_mapping_exposure = (
+            self.tone_mapping_exposure
+        )
 
 
 @configclass
