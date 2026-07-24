@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import trimesh
 import numpy as np
 import torch
@@ -185,17 +187,23 @@ class ConvexCollisionChecker:
         batch_points: torch.Tensor,
         collision_threshold: float = 0.0,
         is_visual: bool = False,
-    ) -> torch.Tensor:
-        """Query collision status for a batch of point clouds. The collision status is determined by checking if the signed distance from any point in the cloud to the convex hulls is less than or equal to the specified collision threshold.
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Query collision status for a batch of point clouds.
+
+        A point collides when its signed distance to any convex hull is less
+        than or equal to ``collision_threshold``.
+
         Args:
-            batch_points: [B, n_point, 3] batch of point clouds to query for collision status.
-            collision_threshold: Collision threshold in meters. A point is considered colliding if its signed distance to the hull interior is <= this threshold. This allows for a margin of error in collision checking, where a small positive threshold can be used to consider points near the surface as colliding, and a small negative threshold can be used to allow for slight penetration without considering it a collision.
-            is_visual: Whether to visualize the collision checking results for debugging purposes. If set to True, the code will generate visualizations of the query points colored by their collision status (e.g., red for colliding points and green for non-colliding points) along with the original mesh. This can help in understanding and verifying the collision checking process, especially during development and testing.
+            batch_points: Point clouds with shape ``(B, n_point, 3)``.
+            collision_threshold: Collision threshold in meters. Positive values
+                also classify points near the surface as colliding; negative
+                values allow slight penetration.
+            is_visual: Whether to visualize collision results for debugging.
+
         Returns:
-            is_point_collide: [B, n_point] boolean tensor indicating whether a point cloud is collided.
-            point_signed_distance: [B, n_point] of float. Signed distance from the point cloud to the object surface.
-                Negative means the point cloud is penetrating into the object,
-                positive means the point cloud is outside the object.
+            A tuple containing the ``(B, n_point)`` collision mask and signed
+            distances. Negative distances are inside the object; positive
+            distances are outside it.
         """
         n_batch = batch_points.shape[0]
         (
