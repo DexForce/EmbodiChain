@@ -204,3 +204,86 @@ def test_kinematic_replay_reproduces_recorded_states(tmp_path):
         env2.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_dynamic_replay_tracks_recorded_states(tmp_path):
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        n = 5
+        _drive(env, num_steps=n)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    rec = torch.load(path, weights_only=False)
+    rec_states = rec["states"]
+
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="dynamic")
+    try:
+        env2.reset()
+        for i in range(n):
+            obs, reward, term, trunc, info = env2.step(None)
+            inner = env2.env
+            # Robot qpos is driven by the recorded action target -> tracks closely.
+            assert torch.allclose(
+                inner.robot.get_qpos(), rec_states["robot"]["qpos"][:, i], atol=0.05
+            )
+        # Dynamic replay keeps the auto-reset guard engaged.
+        assert inner._replay_no_auto_reset is True
+    finally:
+        env2.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_single_env_trajectory_broadcasts_to_many(tmp_path):
+    env = ReplayTestEnv(record_trajectory=True, num_envs=1, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=3)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="kinematic")
+    try:
+        env2.reset()
+        obs, _, _, trunc, _ = env2.step(None)
+        assert obs["robot"]["qpos"].shape[0] == 2  # broadcast to 2 envs
+    finally:
+        env2.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_close_restores_physics(tmp_path):
+    env = ReplayTestEnv(record_trajectory=True, num_envs=1, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=2)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="kinematic")
+    inner = env2.env
+    env2.reset()
+    # During kinematic replay physics is off.
+    # After close, the guard flag is cleared.
+    env2.close()
+    assert inner._replay_no_auto_reset is False
+    SimulationManager.flush_cleanup_queue()
+    gc.collect()
