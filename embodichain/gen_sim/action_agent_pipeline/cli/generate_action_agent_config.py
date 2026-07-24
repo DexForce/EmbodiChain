@@ -30,7 +30,7 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
 )
-from embodichain.gen_sim.action_agent_pipeline.cli.project_resolution import (
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     is_prompt2scene_gym_export,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (

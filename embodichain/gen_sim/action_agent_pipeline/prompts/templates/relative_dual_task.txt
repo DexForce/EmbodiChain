@@ -1,0 +1,34 @@
+Task:
+$task_name: $task_prompt_summary
+
+This config was generated from a simple task description by the config-stage
+LLM. The task graph is precomputed from this deterministic specification.
+
+Original simple task description:
+$task_description
+
+Config-stage LLM interpretation:
+$action_sketch
+
+Object and arm mapping:
+- $first_slot manipulates `$first_moved_runtime_uid`. Source object:
+  `$first_moved_source_uid`.
+- $second_slot manipulates `$second_moved_runtime_uid`. Source object:
+  `$second_moved_source_uid`.
+- $first_reference_line Goal relation for `$first_moved_runtime_uid`:
+  `$first_relation` ($first_relation_phrase).
+- $second_reference_line Goal relation for `$second_moved_runtime_uid`:
+  `$second_relation` ($second_relation_phrase).
+
+$coordinate_convention
+
+The deterministic nominal graph contains exactly $edge_count nominal edges.
+It uses only the atomic action class JSON specs below and adds no recovery,
+monitor, search, alignment, or extra lift edges. $release_rule
+
+$numbered_edges
+
+Final state: `$first_moved_runtime_uid` is $first_relation_phrase
+`$first_reference_runtime_uid`, and `$second_moved_runtime_uid` is
+$second_relation_phrase `$second_reference_runtime_uid`.
+$final_planning_rule

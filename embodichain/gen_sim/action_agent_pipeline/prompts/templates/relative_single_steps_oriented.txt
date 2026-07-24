@@ -1,0 +1,15 @@
+2. Move the held object directly to the $release_step_label object pose while applying the requested orientation:
+   - $active_slot: $release_move_spec
+   - $inactive_slot: null
+
+3. Release the held object in-place without moving the object pose:
+   - $active_slot: $place_spec
+   - $inactive_slot: null
+
+4. Retreat the now-empty end-effector upward:
+   - $active_slot: $retreat_spec
+   - $inactive_slot: null
+
+5. Return the active arm to its initial pose:
+   - $active_slot: $initial_spec
+   - $inactive_slot: null

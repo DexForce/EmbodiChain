@@ -1,0 +1,18 @@
+The scene comes from the exported $project_name mesh environment.
+
+This configuration directory is for a $robot_display_name multi-object line
+arrangement task generated from a simple natural-language task description.
+
+$robot_context
+
+Interactive task objects and target slots:
+$object_lines
+$registry
+
+Config-stage LLM notes:
+$notes
+
+The graph preserves each object's initial orientation while lifting to the high
+staging pose. Steps with `orientation_goal:"preserve"` move directly down
+without a separate alignment move. Only non-preserve goals align at the high
+pose. After release, the empty hand retreats upward before the arm returns.

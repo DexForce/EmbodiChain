@@ -181,6 +181,8 @@ def _validate_nominal_path(
     task_spec: Mapping[str, Any],
     edge_specs: list[Mapping[str, Any]],
 ) -> None:
+    # Runtime execution has no branch selector. Enforcing one outgoing edge per
+    # node here turns that limitation into a validated graph invariant.
     outgoing_edges: dict[str, Mapping[str, Any]] = {}
     for edge in edge_specs:
         source = edge["source"]
@@ -214,6 +216,8 @@ def _validate_nominal_path(
 
     all_edge_ids = {edge["id"] for edge in edge_specs}
     unused_edge_ids = all_edge_ids - visited_edges
+    # Reject disconnected or alternate paths even if start can reach goal. This
+    # keeps every serialized action auditable and guarantees it will execute.
     if unused_edge_ids:
         unused = ", ".join(sorted(unused_edge_ids))
         raise ValueError(

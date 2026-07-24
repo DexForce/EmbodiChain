@@ -1,0 +1,10 @@
+### Atomic Action Class JSON Specs for $robot_display_name Relative Placement
+
+The deterministic graph uses only the native atomic action class JSON specs
+below. The active arm is `$active_arm`; `$inactive_arm` stays null.
+
+- Pick up `$moved_runtime_uid`:
+  $pick_spec
+$release_actions
+- Return to initial qpos:
+  $return_spec

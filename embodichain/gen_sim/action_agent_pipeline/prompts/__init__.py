@@ -16,6 +16,6 @@
 
 from __future__ import annotations
 
-from .task_prompt import TaskPrompt
+from .template_loader import render_prompt_template
 
-__all__ = ["TaskPrompt"]
+__all__ = ["render_prompt_template"]

@@ -497,6 +497,9 @@ def _arrangement_collision_aware_line_slots(
         for obj in hard_obstacle_objects
     ]
 
+    # Search perpendicular rows without changing the requested line axis. Hard
+    # obstacles and table bounds are feasibility constraints; overlap with
+    # movable objects is only a cost because scheduling can clear those slots.
     best_candidate: tuple[float, float, list[list[float]], list[float]] | None = None
     for perpendicular_offset in _row_search_offsets(
         _ROW_SEARCH_RADIUS,
@@ -1224,6 +1227,8 @@ def _arrangement_initial_occupancy_schedule(
     initial_bounds = {
         uid: footprint.xy_bounds for uid, footprint in footprint_by_uid.items()
     }
+    # An edge other -> uid means uid's destination is occupied by other's
+    # initial footprint. Therefore other must move before uid can enter its slot.
     dependencies = {step.runtime_uid: set() for step in steps}
     blockers = {}
     for step in steps:
@@ -1251,6 +1256,8 @@ def _arrangement_initial_occupancy_schedule(
     execution_steps = []
     previous_arm = None
     while remaining:
+        # A missing ready node is a physical occupancy cycle, not merely an
+        # undesirable ordering, so the caller must try another slot assignment.
         ready = [uid for uid in remaining if not (dependencies[uid] & remaining)]
         if not ready:
             return None

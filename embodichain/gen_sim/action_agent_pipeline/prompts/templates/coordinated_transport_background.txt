@@ -1,0 +1,16 @@
+The scene comes from the exported $project_name mesh environment.
+
+This task stays on the existing object_manipulation coordinated_pickment path.
+Payload objects are placed sequentially with single-arm actions, then both arms
+use one CoordinatedPickment action to lift and transport the shared object. A
+place terminal uses synchronized descent, parallel gripper opening, vertical
+retreat, and return; a hold terminal ends with both grippers closed.
+
+Shared object: $moved_runtime_uid
+Payloads: $payloads
+Direction: $coordinated_direction
+Terminal behavior: $coordinated_terminal_behavior
+$registry
+
+Config-stage LLM notes:
+$notes

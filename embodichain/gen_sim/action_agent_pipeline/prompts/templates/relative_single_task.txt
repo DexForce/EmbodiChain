@@ -1,0 +1,35 @@
+Task:
+$task_name: $task_prompt_summary
+
+This config was generated from a simple task description by the config-stage
+LLM. The task graph is precomputed from this deterministic specification.
+
+Original simple task description:
+$task_description
+
+Config-stage LLM interpretation:
+$action_sketch
+
+Object and arm mapping:
+- Move `$moved_runtime_uid`. Source object: `$moved_source_uid`.
+- $reference_line
+- Goal relation: `$relation` ($relation_phrase).
+- Active arm: `$active_arm`.
+- Keep every `$inactive_slot` as null.
+
+$coordinate_convention
+
+The deterministic nominal graph contains exactly $edge_count nominal edges.
+It uses only the atomic action class JSON specs shown below and adds no
+recovery, monitor, search, alignment, or extra lift edges. $release_rule
+The inactive arm remains null in every edge.
+
+1. Pick up the moved object:
+   - $active_slot: $pick_spec
+   - $inactive_slot: null
+
+$high_instruction
+
+Final state: `$moved_runtime_uid` is $relation_phrase
+`$reference_runtime_uid`.
+$final_planning_rule

@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from copy import deepcopy
 from typing import Any
 
 import torch
@@ -45,7 +44,6 @@ from embodichain.utils import logger
 
 __all__ = ["AgenticGenSimEnv", "AtomicActionsAgentEnv"]
 
-_TASK_PROMPT_KEYS = frozenset({"task_prompt", "basic_background", "atom_actions"})
 _AGENT_RESERVED_KEYS = frozenset({"task_name", "config_dir"})
 _REQUIRED_AGENT_KWARGS = frozenset({"agent_config", "task_name"})
 _OPTIONAL_AGENT_KWARGS = frozenset({"agent_config_path"})
@@ -148,31 +146,19 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
         from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import (
             CompileAgent,
-        )
-        from embodichain.gen_sim.action_agent_pipeline.agents.llm import (
-            task_llm,
-        )
-        from embodichain.gen_sim.action_agent_pipeline.agents.task_agent import (
-            TaskAgent,
+            resolve_precomputed_task_graph_path,
         )
 
-        task_agent_config = self._agent_config_with_prompt_keys(
-            sections["Agent"],
-            _TASK_PROMPT_KEYS,
-        )
-        compile_agent_config = self._agent_config_with_prompt_keys(
-            sections["Agent"],
-            frozenset(),
-        )
-        self.task_agent = TaskAgent(
-            task_llm,
-            **task_agent_config,
-            **sections["TaskAgent"],
-            task_name=task_name,
-            config_dir=agent_config_path,
+        configured_graph = sections["TaskAgent"].get("precomputed_task_graph")
+        if configured_graph is not None and not isinstance(configured_graph, str):
+            raise ValueError("TaskAgent.precomputed_task_graph must be a path string.")
+        # Resolve the graph once during environment construction. Runtime graph
+        # execution is deterministic and never falls back to an online LLM.
+        self.precomputed_task_graph_path = resolve_precomputed_task_graph_path(
+            configured_path=configured_graph,
+            agent_config_path=agent_config_path,
         )
         self.compile_agent = CompileAgent(
-            **compile_agent_config,
             **sections["CompileAgent"],
             task_name=task_name,
             config_dir=agent_config_path,
@@ -206,16 +192,6 @@ class AgenticGenSimEnv(EmbodiedEnv):
                 f"{section_name} config contains reserved keys: "
                 f"{', '.join(sorted(reserved_keys))}."
             )
-
-    def _agent_config_with_prompt_keys(
-        self, agent_config: Mapping[str, Any], allowed_keys: frozenset[str]
-    ) -> dict[str, Any]:
-        filtered = deepcopy(agent_config)
-        prompt_kwargs = filtered.get("prompt_kwargs", {}) or {}
-        filtered["prompt_kwargs"] = {
-            key: value for key, value in prompt_kwargs.items() if key in allowed_keys
-        }
-        return filtered
 
     def get_states(self) -> None:
         # store robot states in each env.reset; keep the leading env dimension
@@ -496,39 +472,33 @@ class AgenticGenSimEnv(EmbodiedEnv):
     # -------------------- get compiled graph for action list --------------------
     def generate_graph_for_actions(self, regenerate=False, **kwargs):
         logger.log_info(
-            "Generate graph for creating action list for "
+            "Load graph for creating action list for "
             f"{self.compile_agent.task_name}.",
             color="green",
         )
 
-        logger.log_info("Start task graph generation.", color="green")
+        logger.log_info(
+            f"Using precomputed task graph: {self.precomputed_task_graph_path}",
+            color="green",
+        )
         with timing_scope(
-            "action_agent.task_graph.total",
+            "action_agent.task_graph.precomputed_read",
             metadata={"regenerate": bool(regenerate)},
         ):
-            with timing_scope("action_agent.task_graph.observe"):
-                observations = self.get_obs_for_agent()
-            with timing_scope("action_agent.task_graph.compose_input"):
-                task_agent_input = self.task_agent.get_composed_observations(
-                    env=self,
-                    regenerate=regenerate,
-                    observations=observations,
-                    **kwargs,
-                )
-            task_graph = self.task_agent.generate(**task_agent_input)
+            task_graph = self.precomputed_task_graph_path.read_text(encoding="utf-8")
 
         logger.log_info("Start graph compilation.", color="blue")
-        compile_agent_input = self.compile_agent.get_composed_observations(
+        compile_agent_input = dict(
             env=self,
             regenerate=regenerate,
             task_graph=task_graph,
             **kwargs,
         )
-        graph_file_path, kwargs, graph_content = self.compile_agent.generate(
+        graph_file_path, compile_kwargs, graph_content = self.compile_agent.generate(
             **compile_agent_input
         )
 
-        return graph_file_path, kwargs, graph_content
+        return graph_file_path, compile_kwargs, graph_content
 
     # -------------------- get action list --------------------
     def create_demo_action_list(self, regenerate=False, *args, **kwargs):

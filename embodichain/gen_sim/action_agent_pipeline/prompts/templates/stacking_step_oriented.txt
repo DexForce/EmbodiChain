@@ -1,0 +1,27 @@
+$start_edge. Pick up `$runtime_uid` for stack layer $layer_index:
+   - $active_slot: $pickup_spec
+   - $inactive_slot: null
+
+$edge_high. Move `$runtime_uid` to the high staging pose without changing orientation:
+   - $active_slot: $high_preserve_spec
+   - $inactive_slot: null
+
+$edge_align. Align `$runtime_uid` at the high staging pose if the spec requires it:
+   - $active_slot: $high_oriented_spec
+   - $inactive_slot: null
+
+$edge_down. Move `$runtime_uid` down to the final stack object pose:
+   - $active_slot: $release_move_spec
+   - $inactive_slot: null
+
+$edge_release. Release `$runtime_uid` in-place without moving the object pose:
+   - $active_slot: $release_spec
+   - $inactive_slot: null
+
+$edge_retreat. Retreat `$active_arm` upward after release:
+   - $active_slot: $retreat_spec
+   - $inactive_slot: null
+
+$edge_return. Return `$active_arm` to its initial pose:
+   - $active_slot: $return_spec
+   - $inactive_slot: null

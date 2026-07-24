@@ -103,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--regenerate",
         action="store_true",
-        help="Whether to regenerate code if already existed.",
+        help="Rebuild the compiled graph artifact instead of reusing its cache.",
         default=False,
     )
     return parser

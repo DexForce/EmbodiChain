@@ -40,6 +40,7 @@ __all__ = [
     "_collect_scene_objects",
     "_infer_basket_task_roles",
     "_infer_project_name",
+    "is_prompt2scene_gym_export",
     "_pick_container",
     "_pick_left_right_targets",
     "_pick_table",
@@ -52,6 +53,20 @@ _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
 _GYM_CONFIG_FILENAMES = frozenset({"gym_config.json", "gym_config_merged.json"})
 _GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 _ROBOT_VIEW_SIDE_AXIS_INDEX = 1
+
+
+def is_prompt2scene_gym_export(path: Path) -> bool:
+    """Return whether a path belongs to a prompt2scene gym export.
+
+    Detection intentionally lives below the CLI orchestration layer so direct
+    config generation does not import scene-generation stages, pipeline
+    history, or optional service clients.
+    """
+    candidates = [path.parent] if path.is_file() else [path, path / "gym_export"]
+    return any(
+        (candidate / "scene_state" / "result.json").is_file()
+        for candidate in candidates
+    )
 
 
 def _resolve_gym_config_path(input_path: Path) -> Path:

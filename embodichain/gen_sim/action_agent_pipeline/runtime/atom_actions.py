@@ -1067,6 +1067,8 @@ def build_parallel_action_stream(
         _action_failed_env_mask(right_arm_action),
     )
     if bool(node_failed_env_mask.any()):
+        # Replace only failed batches with their current qpos. Successful
+        # environments keep executing the same synchronized graph edge.
         failed_indices = node_failed_env_mask.detach().cpu().numpy()
         actions[failed_indices] = current_qpos[failed_indices, None, :]
 

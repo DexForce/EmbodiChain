@@ -1,0 +1,18 @@
+The scene comes from the exported $project_name mesh environment.
+
+This configuration directory is for a $robot_display_name stacking task
+generated from a simple natural-language task description.
+
+$robot_context
+
+Stack mode: `$stack_mode` with `$anchor` anchor at xy `$anchor_xy`.
+
+Interactive task objects and stack layers:
+$object_lines
+$registry
+
+Config-stage LLM notes:
+$notes
+
+The graph manipulates one object at a time, releases it in place, retreats
+upward with an empty gripper, and returns the active arm before the next layer.

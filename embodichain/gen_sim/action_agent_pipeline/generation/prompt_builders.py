@@ -45,6 +45,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
     RobotProfile,
     resolve_robot_profile,
 )
+from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
+    render_prompt_template,
+)
 from embodichain.gen_sim.action_agent_pipeline.semantics import (
     relative_relation_phrase as _canonical_relative_relation_phrase,
 )
@@ -95,18 +98,9 @@ _STACKING_MAX_APPROACH_RETRACT_Z = float(_STACKING_DEFAULTS["max_approach_retrac
 _SURFACE_RELEASE_Z_POLICY = "object_on_surface"
 _SURFACE_RELEASE_CLEARANCE = DEFAULT_SURFACE_RELEASE_CLEARANCE
 _USE_PLACEMENT_ALIGN_TO = object()
-_RELATIVE_COORDINATE_CONVENTION = """Coordinate convention for relative placement:
-- `left_of` means positive world y relative to the reference object.
-- `right_of` means negative world y relative to the reference object.
-- `front_of` means positive world x relative to the reference object.
-- `behind` means negative world x relative to the reference object.
-- `front_left_of` combines positive world x and positive world y.
-- `back_left_of` combines negative world x and positive world y.
-- `front_right_of` combines positive world x and negative world y.
-- `back_right_of` combines negative world x and negative world y.
-- `inside` uses generated container slot offsets; multiple objects sharing a
-  container are distributed along the container XY long axis.
-- `on` uses the reference object's xy center."""
+_RELATIVE_COORDINATE_CONVENTION = render_prompt_template(
+    "relative_coordinate_convention.txt"
+)
 
 
 class _BasketRolesLike(Protocol):
@@ -296,47 +290,26 @@ def make_arrangement_task_prompt(
         for step in sorted(spec.steps, key=lambda item: item.slot_index)
     )
     world_axis = _arrangement_world_axis(spec)
-    return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This config was generated from a simple task description by the config-stage
-LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
-
-Original simple task description:
-{spec.task_description}
-
-Arrangement plan:
-- Layout axis: `{spec.axis}`, resolved to world `{world_axis}`. Semantic slots
-  unfold `{spec.spatial_direction}` while execution follows occupancy dependencies.
-- Anchor: `{spec.anchor}` in the exported {project_name} environment.
-- Collision-aware line origin xy: `{list(spec.line_origin_xy)}`.
-- Slot spacing: `{float(spec.spacing):.6g}` with clearance `{float(spec.layout_clearance):.6g}`.
-- Ordering rule: `{spec.order_by}` with direction `{spec.order_direction}`.
-- Category order: `{list(spec.category_order)}`.
-- Final order: {final_order}.
-
-Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
-Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges beyond the listed steps. The
-absolute target object poses are collision-aware slots computed by the
-config-stage generator; do not rewrite them. First move each held object to the
-high staging pose with orientation preserved. If a step has
-`orientation_goal:"preserve"`, move directly down to the final release object
-pose without adding a separate high-orientation/alignment edge. Only steps with
-an explicit non-preserve orientation goal may align at the same high pose before
-moving down. The final release move includes an explicit surface `z_policy`;
-keep it exactly so the runtime resolver chooses a safe release height from the
-support surface and held-object geometry. Use the exact relative-zero
-release-only `Place` spec shown below, retreat the empty hand upward, then
-return that arm. The arm not listed for a step must remain null.
-
-{step_blocks}
-
-Final state: all listed objects must rest near their assigned absolute XY slots.
-Only steps that explicitly request axis alignment should rotate the held object.
-Use the exact absolute target_object_pose JSON specs shown above; do not rewrite
-slot placement as object-referenced poses.
-"""
+    return render_prompt_template(
+        "arrangement_task.txt",
+        task_name=task_name,
+        task_prompt_summary=spec.task_prompt_summary,
+        task_description=spec.task_description,
+        axis=spec.axis,
+        world_axis=world_axis,
+        spatial_direction=spec.spatial_direction,
+        anchor=spec.anchor,
+        project_name=project_name,
+        line_origin_xy=list(spec.line_origin_xy),
+        spacing=f"{float(spec.spacing):.6g}",
+        layout_clearance=f"{float(spec.layout_clearance):.6g}",
+        order_by=spec.order_by,
+        order_direction=spec.order_direction,
+        category_order=list(spec.category_order),
+        final_order=final_order,
+        edge_count=edge_count,
+        step_blocks=step_blocks,
+    )
 
 
 def make_arrangement_task_graph(
@@ -511,27 +484,15 @@ def make_arrangement_basic_background(
         _arrangement_object_background_line(step) for step in spec.steps
     )
     registry = _format_runtime_object_registry(object_registry)
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a {profile.display_name} multi-object line arrangement
-task generated from a simple natural-language task description.
-
-{_robot_context(profile)}
-
-Interactive task objects and target slots:
-{object_lines}
-{registry}
-
-Config-stage LLM notes:
-{notes}
-
-The execution-stage LLM should preserve each object's initial orientation while
-lifting to the high staging pose. For steps with `orientation_goal:"preserve"`,
-move directly down to the final object pose without a separate alignment move.
-Only steps with a non-preserve orientation goal should align at the high pose.
-After release, retreat the empty hand upward and then return the arm to its
-initial pose.
-"""
+    return render_prompt_template(
+        "arrangement_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        object_lines=object_lines,
+        registry=registry,
+        notes=notes,
+    )
 
 
 def _arrangement_object_background_line(step: _ArrangementStepLike) -> str:
@@ -555,16 +516,11 @@ def make_arrangement_atom_actions_prompt(
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
     blocks = "\n\n".join(_arrangement_atom_action_block(step) for step in spec.steps)
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Line Arrangement
-
-Use only the native atomic action class JSON specs shown below. Each object is
-moved to an absolute collision-aware slot pose computed by the config-stage
-generator. For steps with `orientation_goal:"preserve"`, move directly from the
-high pose to the final object pose without a high alignment move. Keep the
-non-active arm null for each listed object.
-
-{blocks}
-"""
+    return render_prompt_template(
+        "arrangement_actions.txt",
+        robot_display_name=profile.display_name,
+        blocks=blocks,
+    )
 
 
 def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
@@ -587,19 +543,17 @@ def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
         surface_clearance=_SURFACE_RELEASE_CLEARANCE,
     )
     if step.orientation_goal == "preserve":
-        return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
-- Pick up:
-  {_format_pick_up_spec(active_arm, step.runtime_uid)}
-- High staging without orientation change:
-  {high_preserve_spec}
-- Final release object pose without orientation change:
-  {release_move_spec}
-- Release-only Place:
-  {_format_release_only_place_spec(active_arm)}
-- Empty-hand retreat:
-  {_format_empty_hand_retreat_spec(active_arm)}
-- Return:
-  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
+        return render_prompt_template(
+            "arrangement_action_block_preserve.txt",
+            runtime_uid=step.runtime_uid,
+            slot_index=step.slot_index,
+            pickup_spec=_format_pick_up_spec(active_arm, step.runtime_uid),
+            high_preserve_spec=high_preserve_spec,
+            release_move_spec=release_move_spec,
+            release_spec=_format_release_only_place_spec(active_arm),
+            retreat_spec=_format_empty_hand_retreat_spec(active_arm),
+            return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+        )
     high_align_spec = _format_pose_absolute_spec(
         active_arm,
         step.high_position,
@@ -607,21 +561,18 @@ def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
         orientation_goal=step.orientation_goal,
         orientation_axis=step.orientation_axis,
     )
-    return f"""Object `{step.runtime_uid}` to slot {step.slot_index}:
-- Pick up:
-  {_format_pick_up_spec(active_arm, step.runtime_uid)}
-- High staging without orientation change:
-  {high_preserve_spec}
-- High staging axis alignment:
-  {high_align_spec}
-- Final release object pose:
-  {release_move_spec}
-- Release-only Place:
-  {_format_release_only_place_spec(active_arm)}
-- Empty-hand retreat:
-  {_format_empty_hand_retreat_spec(active_arm)}
-- Return:
-  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
+    return render_prompt_template(
+        "arrangement_action_block_align.txt",
+        runtime_uid=step.runtime_uid,
+        slot_index=step.slot_index,
+        pickup_spec=_format_pick_up_spec(active_arm, step.runtime_uid),
+        high_preserve_spec=high_preserve_spec,
+        high_align_spec=high_align_spec,
+        release_move_spec=release_move_spec,
+        release_spec=_format_release_only_place_spec(active_arm),
+        retreat_spec=_format_empty_hand_retreat_spec(active_arm),
+        return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+    )
 
 
 def make_stacking_task_prompt(
@@ -661,37 +612,20 @@ def make_stacking_task_prompt(
         else "Use the exact absolute target_object_pose JSON specs shown above; "
         "do not rewrite them."
     )
-    return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This config was generated from a stacking task description by the config-stage
-LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
-
-Original simple task description:
-{spec.task_description}
-
-Stacking plan:
-- Stack mode: `{spec.stack_mode}`.
-- Anchor: {anchor_description} in the exported {project_name} environment.
-- Ordering rule: `{spec.order_by}`.
-- Bottom-to-top order: {stack_order}.
-
-Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
-Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges. Execute one object at a time;
-do not pick up two objects simultaneously. Move each held object to the high
-staging object pose. If a step has `orientation_goal:"preserve"`, do not add a
-separate high-orientation/alignment edge. Only steps with an explicit
-non-preserve orientation goal may align at the same high pose before moving down
-to the final object pose. Release with the exact relative-zero `Place` spec,
-retreat the empty hand upward, then return that arm to its initial pose.
-
-{step_blocks}
-
-Final state: the objects must be stacked at the configured anchor.
-For `on_top`, each upper layer rests on the previous layer. For `nested`, each
-upper bowl is nested into the previous bowl. {final_target_rule}
-"""
+    return render_prompt_template(
+        "stacking_task.txt",
+        task_name=task_name,
+        task_prompt_summary=spec.task_prompt_summary,
+        task_description=spec.task_description,
+        stack_mode=spec.stack_mode,
+        anchor_description=anchor_description,
+        project_name=project_name,
+        order_by=spec.order_by,
+        stack_order=stack_order,
+        edge_count=edge_count,
+        step_blocks=step_blocks,
+        final_target_rule=final_target_rule,
+    )
 
 
 def make_stacking_task_graph(
@@ -884,44 +818,47 @@ def _stacking_step_prompt_block(
         orientation_axis=step.orientation_axis,
     )
     if step.orientation_goal == "preserve":
-        return f"""{start_edge}. Pick up `{step.runtime_uid}` for stack layer {step.layer_index}:
-   - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
-   - {inactive_slot}: null
-
-{start_edge + 1}. Place `{step.runtime_uid}` directly at the final stack pose without changing orientation:
-   - {active_slot}: {_format_stacking_place_spec(active_arm, step, object_anchored=object_anchored, stack_mode=stack_mode)}
-   - {inactive_slot}: null
-
-{start_edge + 2}. Return `{active_arm}` to its initial pose:
-   - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
-   - {inactive_slot}: null"""
-    return f"""{start_edge}. Pick up `{step.runtime_uid}` for stack layer {step.layer_index}:
-   - {active_slot}: {_format_pick_up_spec(active_arm, step.runtime_uid)}
-   - {inactive_slot}: null
-
-{start_edge + 1}. Move `{step.runtime_uid}` to the high staging pose without changing orientation:
-   - {active_slot}: {high_preserve_spec}
-   - {inactive_slot}: null
-
-{start_edge + 2}. Align `{step.runtime_uid}` at the high staging pose if the spec requires it:
-   - {active_slot}: {high_oriented_spec}
-   - {inactive_slot}: null
-
-{start_edge + 3}. Move `{step.runtime_uid}` down to the final stack object pose:
-   - {active_slot}: {release_move_spec}
-   - {inactive_slot}: null
-
-{start_edge + 4}. Release `{step.runtime_uid}` in-place without moving the object pose:
-   - {active_slot}: {_format_release_only_place_spec(active_arm)}
-   - {inactive_slot}: null
-
-{start_edge + 5}. Retreat `{active_arm}` upward after release:
-   - {active_slot}: {_format_empty_hand_retreat_spec(active_arm)}
-   - {inactive_slot}: null
-
-{start_edge + 6}. Return `{active_arm}` to its initial pose:
-   - {active_slot}: {_format_initial_qpos_spec(active_arm, sample_interval=30)}
-   - {inactive_slot}: null"""
+        return render_prompt_template(
+            "stacking_step_preserve.txt",
+            start_edge=start_edge,
+            edge_place=start_edge + 1,
+            edge_return=start_edge + 2,
+            runtime_uid=step.runtime_uid,
+            layer_index=step.layer_index,
+            active_arm=active_arm,
+            active_slot=active_slot,
+            inactive_slot=inactive_slot,
+            pickup_spec=_format_pick_up_spec(active_arm, step.runtime_uid),
+            place_spec=_format_stacking_place_spec(
+                active_arm,
+                step,
+                object_anchored=object_anchored,
+                stack_mode=stack_mode,
+            ),
+            return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+        )
+    return render_prompt_template(
+        "stacking_step_oriented.txt",
+        start_edge=start_edge,
+        edge_high=start_edge + 1,
+        edge_align=start_edge + 2,
+        edge_down=start_edge + 3,
+        edge_release=start_edge + 4,
+        edge_retreat=start_edge + 5,
+        edge_return=start_edge + 6,
+        runtime_uid=step.runtime_uid,
+        layer_index=step.layer_index,
+        active_arm=active_arm,
+        active_slot=active_slot,
+        inactive_slot=inactive_slot,
+        pickup_spec=_format_pick_up_spec(active_arm, step.runtime_uid),
+        high_preserve_spec=high_preserve_spec,
+        high_oriented_spec=high_oriented_spec,
+        release_move_spec=release_move_spec,
+        release_spec=_format_release_only_place_spec(active_arm),
+        retreat_spec=_format_empty_hand_retreat_spec(active_arm),
+        return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+    )
 
 
 def make_stacking_basic_background(
@@ -939,26 +876,18 @@ def make_stacking_basic_background(
         _stacking_object_background_line(step) for step in spec.steps
     )
     registry = _format_runtime_object_registry(object_registry)
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a {profile.display_name} stacking task
-generated from a simple natural-language task description.
-
-{_robot_context(profile)}
-
-Stack mode: `{spec.stack_mode}` with `{spec.anchor}` anchor at xy `{list(spec.anchor_xy)}`.
-
-Interactive task objects and stack layers:
-{object_lines}
-{registry}
-
-Config-stage LLM notes:
-{notes}
-
-The execution-stage LLM should manipulate one object at a time, release it in
-place, retreat upward with an empty gripper, and then return the active arm to
-its initial pose before starting the next stack layer.
-"""
+    return render_prompt_template(
+        "stacking_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        stack_mode=spec.stack_mode,
+        anchor=spec.anchor,
+        anchor_xy=list(spec.anchor_xy),
+        object_lines=object_lines,
+        registry=registry,
+        notes=notes,
+    )
 
 
 def _stacking_object_background_line(step: _StackingStepLike) -> str:
@@ -991,14 +920,11 @@ def make_stacking_atom_actions_prompt(
         )
         for step in spec.steps
     )
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Stacking
-
-Use only the native atomic action class JSON specs shown below. Each object is
-moved to the configured stack target computed by the config-stage generator.
-Keep the non-active arm null for each listed object.
-
-{blocks}
-"""
+    return render_prompt_template(
+        "stacking_actions.txt",
+        robot_display_name=profile.display_name,
+        blocks=blocks,
+    )
 
 
 def _stacking_atom_action_block(
@@ -1016,28 +942,43 @@ def _stacking_atom_action_block(
         orientation_axis=step.orientation_axis,
     )
     if step.orientation_goal == "preserve":
-        return f"""Object `{step.runtime_uid}` to stack layer {step.layer_index}:
-- Pick up:
-  {_format_pick_up_spec(active_arm, step.runtime_uid)}
-- Direct final Place without orientation change:
-  {_format_stacking_place_spec(active_arm, step, object_anchored=object_anchored, stack_mode=stack_mode)}
-- Return:
-  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
-    return f"""Object `{step.runtime_uid}` to stack layer {step.layer_index}:
-- Pick up:
-  {_format_pick_up_spec(active_arm, step.runtime_uid)}
-- High staging without orientation change:
-  {_format_pose_absolute_spec(active_arm, step.high_position, sample_interval=45, orientation_goal="preserve", orientation_axis="none")}
-- High staging orientation:
-  {high_oriented_spec}
-- Final stack object pose:
-  {_format_pose_absolute_spec(active_arm, step.target_position, sample_interval=45, orientation_goal=step.orientation_goal, orientation_axis=step.orientation_axis)}
-- Release-only Place:
-  {_format_release_only_place_spec(active_arm)}
-- Empty-hand retreat:
-  {_format_empty_hand_retreat_spec(active_arm)}
-- Return:
-  {_format_initial_qpos_spec(active_arm, sample_interval=30)}"""
+        return render_prompt_template(
+            "stacking_action_block_preserve.txt",
+            runtime_uid=step.runtime_uid,
+            layer_index=step.layer_index,
+            pickup_spec=_format_pick_up_spec(active_arm, step.runtime_uid),
+            place_spec=_format_stacking_place_spec(
+                active_arm,
+                step,
+                object_anchored=object_anchored,
+                stack_mode=stack_mode,
+            ),
+            return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+        )
+    return render_prompt_template(
+        "stacking_action_block_oriented.txt",
+        runtime_uid=step.runtime_uid,
+        layer_index=step.layer_index,
+        pickup_spec=_format_pick_up_spec(active_arm, step.runtime_uid),
+        high_preserve_spec=_format_pose_absolute_spec(
+            active_arm,
+            step.high_position,
+            sample_interval=45,
+            orientation_goal="preserve",
+            orientation_axis="none",
+        ),
+        high_oriented_spec=high_oriented_spec,
+        final_pose_spec=_format_pose_absolute_spec(
+            active_arm,
+            step.target_position,
+            sample_interval=45,
+            orientation_goal=step.orientation_goal,
+            orientation_axis=step.orientation_axis,
+        ),
+        release_spec=_format_release_only_place_spec(active_arm),
+        retreat_spec=_format_empty_hand_retreat_spec(active_arm),
+        return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+    )
 
 
 def make_relative_task_graph(
@@ -1112,22 +1053,16 @@ def make_relative_task_prompt(
         place_spec = _format_release_only_place_spec(active_arm)
         retreat_spec = _format_empty_hand_retreat_spec(active_arm)
         edge_count = 5
-        release_instruction = f"""2. Move the held object directly to the {release_step_label} object pose while applying the requested orientation:
-   - {active_slot}: {release_move_spec}
-   - {inactive_slot}: null
-
-3. Release the held object in-place without moving the object pose:
-   - {active_slot}: {place_spec}
-   - {inactive_slot}: null
-
-4. Retreat the now-empty end-effector upward:
-   - {active_slot}: {retreat_spec}
-   - {inactive_slot}: null
-
-5. Return the active arm to its initial pose:
-   - {active_slot}: {initial_spec}
-   - {inactive_slot}: null"""
-        high_instruction = release_instruction
+        high_instruction = render_prompt_template(
+            "relative_single_steps_oriented.txt",
+            release_step_label=release_step_label,
+            active_slot=active_slot,
+            inactive_slot=inactive_slot,
+            release_move_spec=release_move_spec,
+            place_spec=place_spec,
+            retreat_spec=retreat_spec,
+            initial_spec=initial_spec,
+        )
         release_rule = (
             "For this pose-sensitive placement, use exactly one `MoveHeldObject` "
             "to move directly to the final release object pose while applying the "
@@ -1137,54 +1072,41 @@ def make_relative_task_prompt(
     else:
         place_spec = _format_direct_relative_place_spec(active_arm, spec)
         edge_count = 3
-        high_instruction = f"""2. Move directly to the {release_step_label} object pose, release, and retract without rotating:
-   - {active_slot}: {place_spec}
-   - {inactive_slot}: null
-
-3. Return the active arm to its initial pose:
-   - {active_slot}: {initial_spec}
-   - {inactive_slot}: null"""
+        high_instruction = render_prompt_template(
+            "relative_single_steps_preserve.txt",
+            release_step_label=release_step_label,
+            active_slot=active_slot,
+            inactive_slot=inactive_slot,
+            place_spec=place_spec,
+            initial_spec=initial_spec,
+        )
         release_rule = (
             "This orientation-preserving placement must use the object-aware "
             "`Place(target_object_pose=...)` spec shown below directly after "
             "`PickUp`; do not add `MoveHeldObject` or a release-only Place edge."
         )
-    return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This config was generated from a simple task description by the config-stage
-LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
-
-Original simple task description:
-{spec.task_description}
-
-Config-stage LLM interpretation:
-{action_sketch}
-
-Object and arm mapping:
-- Move `{spec.moved_runtime_uid}`. Source object: `{spec.moved_source_uid}`.
-- {reference_line}
-- Goal relation: `{spec.relation}` ({_relative_relation_phrase(spec.relation)}).
-- Active arm: `{active_arm}`.
-- Keep every `{inactive_slot}` as null.
-
-{_RELATIVE_COORDINATE_CONVENTION}
-
-Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
-Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges. {release_rule} The inactive arm
-must remain null in every edge.
-
-1. Pick up the moved object:
-   - {active_slot}: {pick_spec}
-   - {inactive_slot}: null
-
-{high_instruction}
-
-Final state: `{spec.moved_runtime_uid}` must be
-{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}`.
-{final_planning_rule}
-"""
+    return render_prompt_template(
+        "relative_single_task.txt",
+        task_name=task_name,
+        task_prompt_summary=spec.task_prompt_summary,
+        task_description=spec.task_description,
+        action_sketch=action_sketch,
+        moved_runtime_uid=spec.moved_runtime_uid,
+        moved_source_uid=spec.moved_source_uid,
+        reference_line=reference_line,
+        relation=spec.relation,
+        relation_phrase=_relative_relation_phrase(spec.relation),
+        reference_runtime_uid=spec.reference_runtime_uid,
+        active_arm=active_arm,
+        active_slot=active_slot,
+        inactive_slot=inactive_slot,
+        coordinate_convention=_RELATIVE_COORDINATE_CONVENTION,
+        edge_count=edge_count,
+        release_rule=release_rule,
+        pick_spec=pick_spec,
+        high_instruction=high_instruction,
+        final_planning_rule=final_planning_rule,
+    )
 
 
 def _single_relative_graph_steps(
@@ -1288,23 +1210,15 @@ def _make_coordinated_pickment_task_prompt(
     resolve_robot_profile(robot_profile)
     if spec.coordinated_terminal_behavior is not None:
         graph = make_relative_task_graph(task_name, spec)
-        return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This is an object_manipulation task using the existing coordinated_pickment
-recognition path. Generate exactly the deterministic graph below; do not add,
-remove, merge, or reorder edges and do not replace existing atomic action
-classes.
-
-Original simple task description:
-{spec.task_description}
-
-Configured direction: {spec.coordinated_direction}
-Configured terminal behavior: {spec.coordinated_terminal_behavior}
-
-Deterministic graph JSON:
-{json.dumps(graph, ensure_ascii=False, indent=2)}
-"""
+        return render_prompt_template(
+            "coordinated_transport_task.txt",
+            task_name=task_name,
+            task_prompt_summary=spec.task_prompt_summary,
+            task_description=spec.task_description,
+            coordinated_direction=spec.coordinated_direction,
+            coordinated_terminal_behavior=spec.coordinated_terminal_behavior,
+            graph_json=json.dumps(graph, ensure_ascii=False, indent=2),
+        )
     action_sketch = _format_action_sketch(spec.action_sketch)
     action_spec = _format_coordinated_pickment_spec(spec)
     left_release_spec = _format_gripper_spec(
@@ -1322,53 +1236,25 @@ Deterministic graph JSON:
     left_initial_spec = _format_initial_qpos_spec("left_arm", sample_interval=30)
     right_initial_spec = _format_initial_qpos_spec("right_arm", sample_interval=30)
     final_planning_rule = _relative_final_planning_rule(project_name, spec)
-    return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This config was generated from a simple task description by the config-stage
-LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
-
-Original simple task description:
-{spec.task_description}
-
-Config-stage LLM interpretation:
-{action_sketch}
-
-Coordinated shared-object mapping:
-- Use both arms together to pick and move `{spec.moved_runtime_uid}`.
-- Source object: `{spec.moved_source_uid}`.
-- Target relation: `{spec.relation}` ({_relative_relation_phrase(spec.relation)})
-  relative to `{spec.reference_runtime_uid}`.
-
-{_RELATIVE_COORDINATE_CONVENTION}
-
-Generate one deterministic nominal graph with exactly 3 nominal edges. First
-use the `CoordinatedPickment` JSON spec shown below to move the shared object.
-It controls both arms in one atomic action, so put it in `left_arm_action` and
-keep `right_arm_action` null. Then release the object by opening both grippers
-simultaneously with the `MoveJoints(control="hand")` specs shown below. Finally
-return both empty arms to their initial arm joint poses with the
-`MoveJoints(control="arm")` specs shown below. Do not add separate `PickUp`,
-`MoveHeldObject`, `Place`, or extra gripper/return actions.
-
-1. Coordinated pick and move `{spec.moved_runtime_uid}`:
-   - left_arm_action: {action_spec}
-   - right_arm_action: null
-
-2. Release `{spec.moved_runtime_uid}` from both grippers:
-   - left_arm_action: {left_release_spec}
-   - right_arm_action: {right_release_spec}
-
-3. Return both empty arms to their initial poses:
-   - left_arm_action: {left_initial_spec}
-   - right_arm_action: {right_initial_spec}
-
-Final state: `{spec.moved_runtime_uid}` must be
-{_relative_relation_phrase(spec.relation)} `{spec.reference_runtime_uid}` and
-must not remain held by either gripper. Both arms must be back at their initial
-arm joint poses with grippers open.
-{final_planning_rule}
-"""
+    return render_prompt_template(
+        "coordinated_pickment_task.txt",
+        task_name=task_name,
+        task_prompt_summary=spec.task_prompt_summary,
+        task_description=spec.task_description,
+        action_sketch=action_sketch,
+        moved_runtime_uid=spec.moved_runtime_uid,
+        moved_source_uid=spec.moved_source_uid,
+        relation=spec.relation,
+        relation_phrase=_relative_relation_phrase(spec.relation),
+        reference_runtime_uid=spec.reference_runtime_uid,
+        coordinate_convention=_RELATIVE_COORDINATE_CONVENTION,
+        action_spec=action_spec,
+        left_release_spec=left_release_spec,
+        right_release_spec=right_release_spec,
+        left_initial_spec=left_initial_spec,
+        right_initial_spec=right_initial_spec,
+        final_planning_rule=final_planning_rule,
+    )
 
 
 def _coordinated_pickment_graph_steps(
@@ -1534,42 +1420,32 @@ def _make_dual_relative_task_prompt(
     edge_count = len(edge_blocks)
     numbered_edges = _format_numbered_edge_blocks(edge_blocks)
     release_rule = _dual_relative_release_rule(spec)
-    return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This config was generated from a simple task description by the config-stage
-LLM. The execution-stage LLM must now generate the graph JSON from this prompt.
-
-Original simple task description:
-{spec.task_description}
-
-Config-stage LLM interpretation:
-{action_sketch}
-
-Object and arm mapping:
-- {first_slot} must manipulate `{first.moved_runtime_uid}`. Source object:
-  `{first.moved_source_uid}`.
-- {second_slot} must manipulate `{second.moved_runtime_uid}`. Source object:
-  `{second.moved_source_uid}`.
-- {first_reference_line} Goal relation for `{first.moved_runtime_uid}`:
-  `{first.relation}` ({_relative_relation_phrase(first.relation)}).
-- {second_reference_line} Goal relation for `{second.moved_runtime_uid}`:
-  `{second.relation}` ({_relative_relation_phrase(second.relation)}).
-
-{_RELATIVE_COORDINATE_CONVENTION}
-
-Generate one deterministic nominal graph with exactly {edge_count} nominal edges.
-Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, alignment, or extra lift edges. {release_rule}
-
-{numbered_edges}
-
-Final state: `{first.moved_runtime_uid}` must be
-{_relative_relation_phrase(first.relation)} `{first.reference_runtime_uid}`, and
-`{second.moved_runtime_uid}` must be {_relative_relation_phrase(second.relation)}
-`{second.reference_runtime_uid}`.
-{final_planning_rule}
-"""
+    return render_prompt_template(
+        "relative_dual_task.txt",
+        task_name=task_name,
+        task_prompt_summary=spec.task_prompt_summary,
+        task_description=spec.task_description,
+        action_sketch=action_sketch,
+        first_slot=first_slot,
+        first_moved_runtime_uid=first.moved_runtime_uid,
+        first_moved_source_uid=first.moved_source_uid,
+        second_slot=second_slot,
+        second_moved_runtime_uid=second.moved_runtime_uid,
+        second_moved_source_uid=second.moved_source_uid,
+        first_reference_line=first_reference_line,
+        first_relation=first.relation,
+        first_relation_phrase=_relative_relation_phrase(first.relation),
+        first_reference_runtime_uid=first.reference_runtime_uid,
+        second_reference_line=second_reference_line,
+        second_relation=second.relation,
+        second_relation_phrase=_relative_relation_phrase(second.relation),
+        second_reference_runtime_uid=second.reference_runtime_uid,
+        coordinate_convention=_RELATIVE_COORDINATE_CONVENTION,
+        edge_count=edge_count,
+        release_rule=release_rule,
+        numbered_edges=numbered_edges,
+        final_planning_rule=final_planning_rule,
+    )
 
 
 def _dual_relative_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
@@ -1771,31 +1647,16 @@ def _make_hold_hover_task_prompt(
         f"`{placement.moved_runtime_uid}` with {placement.active_side}_arm"
         for placement in spec.placements
     )
-    return f"""Task:
-{task_name}: {spec.task_prompt_summary}
-
-This config was generated from an object-manipulation task description by the
-config-stage LLM. The execution-stage LLM must now generate the graph JSON from
-this prompt.
-
-Original simple task description:
-{spec.task_description}
-
-Object and arm mapping:
-- Hold-hover manipulation(s): {objects}.
-- Do not release any held object.
-- Do not return a holding arm to its initial qpos.
-
-Generate one deterministic nominal graph with exactly 3 nominal edges.
-Use only the atomic action class JSON specs shown below. Do not add recovery,
-monitor, search, release, placement, or return-to-initial edges. The final state
-must keep every selected object hovering in a closed gripper.
-
-{numbered_edges}
-
-Final state: every selected object must remain lifted and held by its assigned
-{profile.display_name} arm in the exported {project_name} environment config.
-"""
+    return render_prompt_template(
+        "hold_hover_task.txt",
+        task_name=task_name,
+        task_prompt_summary=spec.task_prompt_summary,
+        task_description=spec.task_description,
+        objects=objects,
+        numbered_edges=numbered_edges,
+        robot_display_name=profile.display_name,
+        project_name=project_name,
+    )
 
 
 def _hold_hover_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
@@ -1960,14 +1821,21 @@ def _relative_release_action_patterns(
     placement: _RelativePlacementLike,
 ) -> str:
     if not _is_pose_sensitive_placement(placement):
-        return f"""- Direct orientation-preserving Place:
-  {_format_direct_relative_place_spec(robot_name, placement)}"""
-    return f"""- Direct final release object pose with requested orientation:
-  {_format_relative_pose_spec(robot_name, placement, pose_kind="release", sample_interval=45)}
-- Release-only Place:
-  {_format_release_only_place_spec(robot_name)}
-- Empty-hand retreat:
-  {_format_empty_hand_retreat_spec(robot_name)}"""
+        return render_prompt_template(
+            "relative_release_actions_preserve.txt",
+            place_spec=_format_direct_relative_place_spec(robot_name, placement),
+        )
+    return render_prompt_template(
+        "relative_release_actions_oriented.txt",
+        release_pose_spec=_format_relative_pose_spec(
+            robot_name,
+            placement,
+            pose_kind="release",
+            sample_interval=45,
+        ),
+        release_spec=_format_release_only_place_spec(robot_name),
+        retreat_spec=_format_empty_hand_retreat_spec(robot_name),
+    )
 
 
 def make_relative_basic_background(
@@ -2007,34 +1875,28 @@ def make_relative_basic_background(
     )
     registry = _format_runtime_object_registry(object_registry)
     placement_rule = (
-        "The execution-stage LLM should generate graph JSON that grasps the moved "
-        "object, uses object-aware Place directly at the final pose without "
-        "MoveHeldObject, and returns the arm to its initial pose."
+        "The deterministic graph grasps the moved object, uses object-aware Place "
+        "directly at the final pose without MoveHeldObject, and returns the arm "
+        "to its initial pose."
         if not _is_pose_sensitive_placement(spec)
-        else "The execution-stage LLM should use exactly one MoveHeldObject to move "
-        "directly to the final release pose while applying the requested orientation, "
-        "then release in place and return the arm to its initial pose."
+        else "The deterministic graph uses exactly one MoveHeldObject to move "
+        "directly to the final release pose while applying the requested "
+        "orientation, then releases in place and returns the arm."
     )
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a {profile.display_name} relative-placement
-task generated from a simple natural-language task description.
-
-{_robot_context(profile)}
-
-The active arm for this task is `{active_arm}`. The inactive arm
-`{inactive_arm}` must stay null in the nominal graph.
-
-Interactive task objects:
-- {spec.moved_runtime_uid}: moved object from source `{spec.moved_source_uid}`.
-- {_relative_reference_line(spec)}
-{registry}
-
-Config-stage LLM notes:
-{notes}
-
-{placement_rule}
-"""
+    return render_prompt_template(
+        "relative_single_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        active_arm=active_arm,
+        inactive_arm=inactive_arm,
+        moved_runtime_uid=spec.moved_runtime_uid,
+        moved_source_uid=spec.moved_source_uid,
+        reference_line=_relative_reference_line(spec),
+        registry=registry,
+        notes=notes,
+        placement_rule=placement_rule,
+    )
 
 
 def _make_coordinated_pickment_basic_background(
@@ -2055,49 +1917,26 @@ def _make_coordinated_pickment_basic_background(
             for placement in spec.placements
             if placement.intent == "place_relative"
         ]
-        return f"""The scene comes from the exported {project_name} mesh environment.
-
-This task stays on the existing object_manipulation coordinated_pickment path.
-Payload objects are placed sequentially with existing single-arm actions, then
-both arms use one CoordinatedPickment action to lift and transport the shared
-object. A place terminal uses synchronized relative MoveEndEffector descent,
-parallel gripper opening, vertical retreat, and return; a hold terminal ends
-with both grippers closed.
-
-Shared object: {spec.moved_runtime_uid}
-Payloads: {payloads or "none"}
-Direction: {spec.coordinated_direction}
-Terminal behavior: {spec.coordinated_terminal_behavior}
-{registry}
-
-Config-stage LLM notes:
-{notes}
-"""
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a {profile.display_name} coordinated
-shared-object task generated from a simple natural-language task description.
-
-{_robot_context(profile)}
-
-Both arms must act through one `CoordinatedPickment` action. The graph should
-place that action in `left_arm_action` and keep `right_arm_action` null.
-
-Interactive task object:
-- {spec.moved_runtime_uid}: shared moved object from source `{spec.moved_source_uid}`.
-{registry}
-
-Config-stage LLM notes:
-{notes}
-
-The execution-stage LLM should generate a three-edge graph. First use
-`CoordinatedPickment` to grasp the shared object with both grippers, lift it,
-and move the object to the configured target pose. Then open both grippers in
-parallel with `MoveJoints(control="hand", state="open")` to release it. Finally
-return both empty arms to their initial arm joint poses in parallel. It must not
-decompose this task into separate single-arm `PickUp`, `MoveHeldObject`, or
-`Place` actions.
-"""
+        return render_prompt_template(
+            "coordinated_transport_background.txt",
+            project_name=project_name,
+            moved_runtime_uid=spec.moved_runtime_uid,
+            payloads=payloads or "none",
+            coordinated_direction=spec.coordinated_direction,
+            coordinated_terminal_behavior=spec.coordinated_terminal_behavior,
+            registry=registry,
+            notes=notes,
+        )
+    return render_prompt_template(
+        "coordinated_pickment_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        moved_runtime_uid=spec.moved_runtime_uid,
+        moved_source_uid=spec.moved_source_uid,
+        registry=registry,
+        notes=notes,
+    )
 
 
 def _make_dual_relative_basic_background(
@@ -2127,16 +1966,13 @@ def _make_dual_relative_basic_background(
     registry = _format_runtime_object_registry(object_registry)
     serial_sequence = _uses_serial_dual_sequence(spec)
     execution_rule = (
-        "The execution-stage LLM should generate graph JSON that completes the "
-        "first moved object's pick-up, placement, retreat, and return before "
-        "picking up the second moved object. The inactive arm must remain null "
-        "throughout each object's sequence."
+        "The deterministic graph completes the first moved object's pick-up, "
+        "placement, retreat, and return before picking up the second moved "
+        "object. The inactive arm remains null throughout each sequence."
         if serial_sequence
-        else "The execution-stage LLM should generate graph JSON that grasps both "
-        "moved objects, stages and releases the first moved object, then stages "
-        "and releases the second moved object while the first arm returns to its "
-        "initial pose. Each arm must release its moved object before returning to "
-        "its initial pose."
+        else "The deterministic graph grasps both moved objects, stages and "
+        "releases the first, then stages and releases the second while the first "
+        "arm returns. Each arm releases its object before returning."
     )
     placement_rule = (
         "Dependent objects are placed serially in dependency order."
@@ -2145,24 +1981,17 @@ def _make_dual_relative_basic_background(
         "after pickup, without MoveHeldObject. Each pose-sensitive placement uses "
         "exactly one direct final-pose MoveHeldObject, then release-only Place."
     )
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a {profile.display_name} dual-arm
-relative-placement task generated from a simple natural-language task
-description.
-
-{_robot_context(profile)}
-
-Both arms participate in the nominal graph:
-{placement_lines}
-{registry}
-
-Config-stage LLM notes:
-{notes}
-
-{execution_rule}
-{placement_rule}
-"""
+    return render_prompt_template(
+        "relative_dual_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        placement_lines=placement_lines,
+        registry=registry,
+        notes=notes,
+        execution_rule=execution_rule,
+        placement_rule=placement_rule,
+    )
 
 
 def _make_hold_hover_basic_background(
@@ -2182,25 +2011,15 @@ def _make_hold_hover_basic_background(
         for placement in spec.placements
     )
     registry = _format_runtime_object_registry(object_registry)
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a {profile.display_name} object-manipulation
-hold-hover task generated from a simple natural-language task description.
-
-{_robot_context(profile)}
-
-Hold-hover task objects:
-{object_lines}
-{registry}
-
-Config-stage LLM notes:
-{notes}
-
-The execution-stage LLM should pick up the selected object(s), move them to the
-configured hover pose if needed, and keep the gripper(s) closed. It must not use
-`Place` or return a holding arm to its initial qpos because the final state is
-the object still hovering in the gripper.
-"""
+    return render_prompt_template(
+        "hold_hover_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        object_lines=object_lines,
+        registry=registry,
+        notes=notes,
+    )
 
 
 def make_relative_atom_actions_prompt(
@@ -2228,19 +2047,16 @@ def make_relative_atom_actions_prompt(
         pickup_upright_direction=spec.pickup_upright_direction,
         pickup_rotate_upright=spec.pickup_rotate_upright,
     )
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Relative Placement
-
-Use only the native atomic action class JSON specs shown below. The active arm
-is `{active_arm}`. Keep `{inactive_arm}` null in
-the nominal graph.
-
-Use exactly these action patterns:
-- Pick up `{spec.moved_runtime_uid}`:
-  {pick_spec}
-{release_actions}
-- Return to initial qpos:
-  {_format_initial_qpos_spec(active_arm, sample_interval=30)}
-"""
+    return render_prompt_template(
+        "relative_single_actions.txt",
+        robot_display_name=profile.display_name,
+        active_arm=active_arm,
+        inactive_arm=inactive_arm,
+        moved_runtime_uid=spec.moved_runtime_uid,
+        pick_spec=pick_spec,
+        release_actions=release_actions,
+        return_spec=_format_initial_qpos_spec(active_arm, sample_interval=30),
+    )
 
 
 def _make_dual_relative_atom_actions_prompt(
@@ -2268,24 +2084,20 @@ def _make_dual_relative_atom_actions_prompt(
         pickup_upright_direction=second.pickup_upright_direction,
         pickup_rotate_upright=second.pickup_rotate_upright,
     )
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Dual-Arm Relative Placement
-
-Use only the native atomic action class JSON specs shown below.
-- `{first_arm}` manipulates `{first.moved_runtime_uid}`.
-- `{second_arm}` manipulates `{second.moved_runtime_uid}`.
-
-Use these action patterns:
-- First arm pick-up:
-  {first_pick_spec}
-- Second arm pick-up:
-  {second_pick_spec}
-{first_release_actions}
-{second_release_actions}
-- Keep a holding arm closed:
-  {_format_gripper_spec("<holding_arm>", "close", sample_interval=10)}
-- Return to initial qpos:
-  {_format_initial_qpos_spec("<released_arm>", sample_interval=30)}
-"""
+    return render_prompt_template(
+        "relative_dual_actions.txt",
+        robot_display_name=profile.display_name,
+        first_arm=first_arm,
+        first_runtime_uid=first.moved_runtime_uid,
+        second_arm=second_arm,
+        second_runtime_uid=second.moved_runtime_uid,
+        first_pick_spec=first_pick_spec,
+        second_pick_spec=second_pick_spec,
+        first_release_actions=first_release_actions,
+        second_release_actions=second_release_actions,
+        holding_spec=_format_gripper_spec("<holding_arm>", "close", sample_interval=10),
+        return_spec=_format_initial_qpos_spec("<released_arm>", sample_interval=30),
+    )
 
 
 def _make_hold_hover_atom_actions_prompt(
@@ -2297,25 +2109,27 @@ def _make_hold_hover_atom_actions_prompt(
     blocks = "\n\n".join(
         _hold_hover_atom_action_block(placement) for placement in spec.placements
     )
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Object Manipulation
-
-Use only the native atomic action class JSON specs shown below. The final state
-must keep the listed object(s) held in closed grippers. Do not use `Place` and
-do not return a holding arm to its initial qpos.
-
-{blocks}
-"""
+    return render_prompt_template(
+        "hold_hover_actions.txt",
+        robot_display_name=profile.display_name,
+        blocks=blocks,
+    )
 
 
 def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
     active_arm = f"{placement.active_side}_arm"
-    return f"""Object `{placement.moved_runtime_uid}` hold-hover:
-- Pick up:
-  {_format_pick_up_spec(active_arm, placement.moved_runtime_uid)}
-- Hover move:
-  {_format_hover_move_spec(active_arm, placement)}
-- Keep gripper closed:
-  {_format_gripper_spec(active_arm, "close", sample_interval=10, post_hold_steps=20)}"""
+    return render_prompt_template(
+        "hold_hover_action_block.txt",
+        moved_runtime_uid=placement.moved_runtime_uid,
+        pickup_spec=_format_pick_up_spec(active_arm, placement.moved_runtime_uid),
+        hover_spec=_format_hover_move_spec(active_arm, placement),
+        close_spec=_format_gripper_spec(
+            active_arm,
+            "close",
+            sample_interval=10,
+            post_hold_steps=20,
+        ),
+    )
 
 
 def _make_coordinated_pickment_atom_actions_prompt(
@@ -2333,13 +2147,11 @@ def _make_coordinated_pickment_atom_actions_prompt(
                 f"   left_arm_action: {json.dumps(step.left_arm_action, ensure_ascii=False, separators=(',', ':')) if step.left_arm_action is not None else 'null'}\n"
                 f"   right_arm_action: {json.dumps(step.right_arm_action, ensure_ascii=False, separators=(',', ':')) if step.right_arm_action is not None else 'null'}"
             )
-        return f"""### Atomic Action Class JSON Specs for {profile.display_name} Coordinated Transport
-
-Use exactly the following existing atomic-action sequence. No new atomic action
-class is required or allowed.
-
-{chr(10).join(lines)}
-"""
+        return render_prompt_template(
+            "coordinated_transport_actions.txt",
+            robot_display_name=profile.display_name,
+            action_lines="\n".join(lines),
+        )
     left_release_spec = _format_gripper_spec(
         "left_arm",
         "open",
@@ -2354,25 +2166,16 @@ class is required or allowed.
     )
     left_initial_spec = _format_initial_qpos_spec("left_arm", sample_interval=30)
     right_initial_spec = _format_initial_qpos_spec("right_arm", sample_interval=30)
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Coordinated Pickment
-
-Use only these native atomic action class JSON specs. `CoordinatedPickment`
-controls both arms, so the nominal graph must put that spec in
-`left_arm_action` and set `right_arm_action` to null. The following release
-edge must then open both hands in parallel, followed by a return-to-initial edge
-for both empty arms.
-
-- Coordinated pick and move `{spec.moved_runtime_uid}`:
-  {_format_coordinated_pickment_spec(spec)}
-
-- Release `{spec.moved_runtime_uid}` from both grippers:
-  left_arm_action: {left_release_spec}
-  right_arm_action: {right_release_spec}
-
-- Return both empty arms to initial poses:
-  left_arm_action: {left_initial_spec}
-  right_arm_action: {right_initial_spec}
-"""
+    return render_prompt_template(
+        "coordinated_pickment_actions.txt",
+        robot_display_name=profile.display_name,
+        moved_runtime_uid=spec.moved_runtime_uid,
+        coordinated_spec=_format_coordinated_pickment_spec(spec),
+        left_release_spec=left_release_spec,
+        right_release_spec=right_release_spec,
+        left_initial_spec=left_initial_spec,
+        right_initial_spec=right_initial_spec,
+    )
 
 
 def make_basket_task_prompt(
@@ -2434,80 +2237,28 @@ def make_basket_task_prompt(
         "right_arm",
         sample_interval=30,
     )
-    return f"""Task:
-{task_name}: use the current {profile.display_name} configuration to place
-{target_pair_text} into the {roles.container_runtime_uid}.
-
-The task starts with both arms acting simultaneously:
-the left arm grasps the left {left_target_text} while the right arm grasps the
-right {right_target_text} in the same nominal graph edge. After both
-{target_plural} are grasped, the left arm places its {left_target_text} into the
-{roles.container_runtime_uid} and retreats upward. While the left arm returns
-to its initial pose, the right arm must simultaneously begin placing its
-already-grasped {right_target_text} by moving it to the high staging pose above
-the {roles.container_runtime_uid}. The right arm then completes its placement
-and returns to its initial pose.
-
-Object and arm mapping:
-- left_arm must only manipulate `{roles.left_target_runtime_uid}`.
-- right_arm must only manipulate `{roles.right_target_runtime_uid}`.
-- Both target objects must be released into `{roles.container_runtime_uid}`.
-
-Generate one deterministic nominal graph with the following semantic sequence.
-Do not add extra alignment, search, recovery, or monitor steps. Use `Place`
-for each release-place step so lowering, gripper opening, and upward retreat
-remain one atomic action. The left arm must finish its `Place` retreat
-before the right arm enters the shared container workspace, but the left
-return-to-initial action and the right high-staging action must execute
-simultaneously in one graph edge. Generate exactly 6
-nominal edges, one edge for each numbered step below. Do not split the
-simultaneous grasp or the simultaneous left-return/right-staging action into
-separate edges. Do not split a `Place` into separate lower-to-release,
-open-gripper, or upward-retreat edges.
-
-A target object is not considered placed when it is only above the
-{roles.container_runtime_uid}. For each arm, the placement order must be: move
-to a high staging pose above the container, then execute one `Place` at
-the release pose inside the container, then return the arm to its initial pose.
-Never use `target_qpos` source `initial` for an arm that has not already
-released its held target object.
-
-1. Pick up both target objects simultaneously:
-   - left_arm_action: {left_pick_spec}
-   - right_arm_action: {right_pick_spec}
-
-2. Move the held left target object directly above the left half of the
-   {roles.container_runtime_uid} while the right arm keeps holding its target:
-   - left_arm_action: {left_high_spec}
-   - right_arm_action: {right_close_spec}
-
-3. Place the held left target object at the left release pose inside the
-   {roles.container_runtime_uid}:
-   - left_arm_action: {left_place_spec}
-   - right_arm_action: {right_close_spec}
-
-4. After the left gripper has retreated upward, return the left arm to its
-   initial pose while simultaneously moving the held right target object
-   directly above the right half of the {roles.container_runtime_uid}. This
-   parallel handoff must remain one graph edge:
-   - left_arm_action: {left_initial_spec}
-   - right_arm_action: {right_high_spec}
-
-5. Place the held right target object at the right release pose inside the
-   {roles.container_runtime_uid}:
-   - left_arm_action: null
-   - right_arm_action: {right_place_spec}
-
-6. Return the right arm to its initial pose after releasing the target object:
-   - left_arm_action: null
-   - right_arm_action: {right_initial_spec}
-
-The final state is both `{roles.left_target_runtime_uid}` and
-`{roles.right_target_runtime_uid}` resting inside `{roles.container_runtime_uid}`,
-with both arms moved away from the container workspace. Always plan to the
-current `{roles.container_runtime_uid}` object pose from the exported
-{project_name} environment config.
-"""
+    return render_prompt_template(
+        "basket_task.txt",
+        task_name=task_name,
+        robot_display_name=profile.display_name,
+        target_pair_text=target_pair_text,
+        container_runtime_uid=roles.container_runtime_uid,
+        left_target_text=left_target_text,
+        right_target_text=right_target_text,
+        target_plural=target_plural,
+        left_target_runtime_uid=roles.left_target_runtime_uid,
+        right_target_runtime_uid=roles.right_target_runtime_uid,
+        left_pick_spec=left_pick_spec,
+        right_pick_spec=right_pick_spec,
+        left_high_spec=left_high_spec,
+        right_high_spec=right_high_spec,
+        left_place_spec=left_place_spec,
+        right_place_spec=right_place_spec,
+        right_close_spec=right_close_spec,
+        left_initial_spec=left_initial_spec,
+        right_initial_spec=right_initial_spec,
+        project_name=project_name,
+    )
 
 
 def make_basket_task_graph(
@@ -2621,55 +2372,22 @@ def make_basket_basic_background(
     right_target_text = _right_target_text(roles)
     target_plural = _target_plural_text(roles)
     registry = _format_runtime_object_registry(object_registry)
-    return f"""The scene comes from the exported {project_name} mesh environment.
-
-This configuration directory is for a basket-placement task template. The
-current robot is {profile.display_name}.
-
-{_robot_context(profile)}
-
-Both robot bases are on the same long side of the table and face inward toward
-the central {roles.container_runtime_uid}. The bases are intentionally kept
-outside the table edge to avoid initial robot-table contact.
-
-The interactive objects are:
-- {roles.left_target_runtime_uid}: the {left_target_text} mesh initially on the
-  positive-y side (source object {roles.left_target_source_uid}).
-- {roles.right_target_runtime_uid}: the {right_target_text} mesh initially on the
-  negative-y side (source object {roles.right_target_source_uid}).
-- {roles.container_runtime_uid}: the target container near the center of the
-  table (source object {roles.container_source_uid}).
-{registry}
-
-The nominal task starts with simultaneous dual-arm grasping. The left arm must
-grasp {roles.left_target_runtime_uid} while the right arm grasps
-{roles.right_target_runtime_uid} in the same graph edge. After both
-{target_plural} are held, the left arm places
-{roles.left_target_runtime_uid} into {roles.container_runtime_uid} with one
-`Place`. The next graph edge is a parallel handoff: the left arm returns
-to its initial pose while the right arm simultaneously moves its
-already-grasped {roles.right_target_runtime_uid} to the high staging pose above
-{roles.container_runtime_uid}. The right arm then places
-{roles.right_target_runtime_uid} with one `Place` and returns to its
-initial pose. To change the insertion order later, edit the task prompt sequence
-and keep the same atomic action API.
-
-The {roles.container_runtime_uid} area is a shared workspace. An arm should
-complete its `Place` retreat before the other arm moves to the container,
-otherwise the two arms may collide near the container. The right arm should keep
-holding {roles.right_target_runtime_uid} while the left arm performs its
-placement. Once that `Place` is complete, the right arm may move toward
-the container while the left arm simultaneously returns to its initial pose; it
-must not wait for the left return-to-initial motion to finish.
-
-A target object at a high pose above `{roles.container_runtime_uid}` is only
-staged, not placed. Each arm must execute a `Place` at the container
-release pose before any return-to-initial motion.
-
-Always plan to the current `{roles.container_runtime_uid}` object pose from the
-environment config. Do not hard-code container coordinates in generated graph
-actions.
-"""
+    return render_prompt_template(
+        "basket_background.txt",
+        project_name=project_name,
+        robot_display_name=profile.display_name,
+        robot_context=_robot_context(profile),
+        container_runtime_uid=roles.container_runtime_uid,
+        left_target_runtime_uid=roles.left_target_runtime_uid,
+        left_target_text=left_target_text,
+        left_target_source_uid=roles.left_target_source_uid,
+        right_target_runtime_uid=roles.right_target_runtime_uid,
+        right_target_text=right_target_text,
+        right_target_source_uid=roles.right_target_source_uid,
+        container_source_uid=roles.container_source_uid,
+        object_registry=registry,
+        target_plural=target_plural,
+    )
 
 
 def make_basket_atom_actions_prompt(
@@ -2704,45 +2422,33 @@ def make_basket_atom_actions_prompt(
         sample_interval=80,
         lift_height=_PLACE_LIFT_HEIGHT,
     )
-    return f"""### Atomic Action Class JSON Specs for {profile.display_name} Basket Placement
-
-Use only the native atomic action class JSON specs shown below. Use
-`robot_name="left_arm"` only for
-`{roles.left_target_runtime_uid}` and `robot_name="right_arm"` only for
-`{roles.right_target_runtime_uid}`.
-
-The nominal task starts with simultaneous dual-arm pick-up, followed by a
-left-first placement with an overlapped handoff to the right arm:
-- The first nominal edge must use `atomic_action_class:"PickUp"` for both arms.
-- While the left arm places its target, keep the right hand closed with a
-  `target_qpos` whose source is `gripper_state` and state is `close`.
-- After the left arm releases `{roles.left_target_runtime_uid}`, first move it
-  upward to clear the container as part of the same `Place`.
-- The next nominal edge must pair the left arm's initial `target_qpos` move with
-  the right arm's object-referenced `target_object_pose` high-staging move. Do not split this
-  parallel handoff into separate edges.
-- After the parallel handoff edge, the remaining right-side placement steps put
-  the actual action in `right_arm_action` and set `left_arm_action` to null.
-- Never use initial `target_qpos` for an arm that is still holding a target object.
-
-Use these action patterns:
-- Left pick-up:
-  {_format_pick_up_spec("left_arm", roles.left_target_runtime_uid)}
-- Right pick-up:
-  {_format_pick_up_spec("right_arm", roles.right_target_runtime_uid)}
-- Left high staging:
-  {left_high_spec}
-- Left place action:
-  {left_place_spec}
-- Right high staging:
-  {right_high_spec}
-- Right place action:
-  {right_place_spec}
-- Keep a holding arm closed:
-  {_format_gripper_spec("<holding_arm>", "close", sample_interval=10)}
-- Return to initial qpos:
-  {_format_initial_qpos_spec("<released_arm>", sample_interval=30)}
-"""
+    return render_prompt_template(
+        "basket_actions.txt",
+        robot_display_name=profile.display_name,
+        left_target_runtime_uid=roles.left_target_runtime_uid,
+        right_target_runtime_uid=roles.right_target_runtime_uid,
+        left_pick_spec=_format_pick_up_spec(
+            "left_arm",
+            roles.left_target_runtime_uid,
+        ),
+        right_pick_spec=_format_pick_up_spec(
+            "right_arm",
+            roles.right_target_runtime_uid,
+        ),
+        left_high_spec=left_high_spec,
+        left_place_spec=left_place_spec,
+        right_high_spec=right_high_spec,
+        right_place_spec=right_place_spec,
+        holding_close_spec=_format_gripper_spec(
+            "<holding_arm>",
+            "close",
+            sample_interval=10,
+        ),
+        initial_qpos_spec=_format_initial_qpos_spec(
+            "<released_arm>",
+            sample_interval=30,
+        ),
+    )
 
 
 def _format_pick_up_spec(

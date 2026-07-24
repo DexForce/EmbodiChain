@@ -1,0 +1,27 @@
+Task:
+$task_name: $task_prompt_summary
+
+This config was generated from a stacking task description by the config-stage
+LLM. The task graph is precomputed from this deterministic specification.
+
+Original simple task description:
+$task_description
+
+Stacking plan:
+- Stack mode: `$stack_mode`.
+- Anchor: $anchor_description in the exported $project_name environment.
+- Ordering rule: `$order_by`.
+- Bottom-to-top order: $stack_order.
+
+The deterministic nominal graph contains exactly $edge_count nominal edges.
+It manipulates one object at a time and does not add recovery, monitor, search,
+alignment, or extra lift edges. Each held object moves to the configured high
+staging pose. Preserve-orientation steps omit a separate alignment edge; only
+explicit non-preserve goals align before moving down. The graph releases with
+the relative-zero `Place`, retreats the empty hand, and returns the active arm.
+
+$step_blocks
+
+Final state: the objects are stacked at the configured anchor. For `on_top`,
+each upper layer rests on the previous layer. For `nested`, each upper bowl is
+nested into the previous bowl. $final_target_rule

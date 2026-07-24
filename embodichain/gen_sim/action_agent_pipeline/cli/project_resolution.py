@@ -44,6 +44,9 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_records import (
 from embodichain.gen_sim.action_agent_pipeline.cli.prompt2scene_stage import (
     run_prompt2scene_stage,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    is_prompt2scene_gym_export,
+)
 
 __all__ = [
     "PROMPT2SCENE_PROJECT_MODES",
@@ -170,21 +173,6 @@ def resolve_gym_project(args: argparse.Namespace) -> ProjectResolution:
             job_timeout_s=args.job_timeout_s,
         ),
         mode="image2tabletop",
-    )
-
-
-def is_prompt2scene_gym_export(path: Path) -> bool:
-    """Return true if *path* points at a prompt2scene exported gym project."""
-
-    candidates: list[Path] = []
-    if path.is_file():
-        candidates.append(path.parent)
-    else:
-        candidates.extend([path, path / "gym_export"])
-
-    return any(
-        (candidate / "scene_state" / "result.json").is_file()
-        for candidate in candidates
     )
 
 

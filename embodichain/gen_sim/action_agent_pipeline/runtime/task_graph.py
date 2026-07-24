@@ -134,6 +134,8 @@ class AgentTaskGraph:
             )
             actions = result["actions"]
             world_states = result["world_states"]
+            # Failure is monotonic across graph edges: an environment that
+            # failed once receives hold commands for every remaining edge.
             failed_env_mask = result["failed_env_mask"]
             executed_actions.extend(actions)
             current = edge.target

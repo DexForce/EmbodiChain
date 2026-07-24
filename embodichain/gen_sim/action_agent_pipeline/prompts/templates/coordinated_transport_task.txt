@@ -1,0 +1,15 @@
+Task:
+$task_name: $task_prompt_summary
+
+This object_manipulation task uses the existing coordinated_pickment
+recognition path. The deterministic graph below must not have edges added,
+removed, merged, or reordered, and its atomic action classes stay unchanged.
+
+Original simple task description:
+$task_description
+
+Configured direction: $coordinated_direction
+Configured terminal behavior: $coordinated_terminal_behavior
+
+Deterministic graph JSON:
+$graph_json

@@ -1,0 +1,19 @@
+The scene comes from the exported $project_name mesh environment.
+
+This configuration directory is for a $robot_display_name relative-placement
+task generated from a simple natural-language task description.
+
+$robot_context
+
+The active arm is `$active_arm`. The inactive arm `$inactive_arm` stays null
+in the nominal graph.
+
+Interactive task objects:
+- $moved_runtime_uid: moved object from source `$moved_source_uid`.
+- $reference_line
+$registry
+
+Config-stage LLM notes:
+$notes
+
+$placement_rule

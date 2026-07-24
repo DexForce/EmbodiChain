@@ -1,0 +1,16 @@
+### Atomic Action Class JSON Specs for $robot_display_name Coordinated Pickment
+
+`CoordinatedPickment` controls both arms, so its spec stays in
+`left_arm_action` while `right_arm_action` is null. The next edge opens both
+hands in parallel, followed by a return-to-initial edge for both empty arms.
+
+- Coordinated pick and move `$moved_runtime_uid`:
+  $coordinated_spec
+
+- Release `$moved_runtime_uid` from both grippers:
+  left_arm_action: $left_release_spec
+  right_arm_action: $right_release_spec
+
+- Return both empty arms to initial poses:
+  left_arm_action: $left_initial_spec
+  right_arm_action: $right_initial_spec

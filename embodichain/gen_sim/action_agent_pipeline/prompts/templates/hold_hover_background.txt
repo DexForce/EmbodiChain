@@ -1,0 +1,17 @@
+The scene comes from the exported $project_name mesh environment.
+
+This configuration directory is for a $robot_display_name object-manipulation
+hold-hover task generated from a simple natural-language task description.
+
+$robot_context
+
+Hold-hover task objects:
+$object_lines
+$registry
+
+Config-stage LLM notes:
+$notes
+
+The deterministic graph picks up the selected object(s), moves them to the
+configured hover pose, and keeps the gripper(s) closed. It never uses `Place`
+or returns a holding arm to its initial qpos.

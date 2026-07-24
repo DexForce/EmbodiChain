@@ -1,0 +1,20 @@
+The scene comes from the exported $project_name mesh environment.
+
+This configuration directory is for a $robot_display_name coordinated
+shared-object task generated from a simple natural-language task description.
+
+$robot_context
+
+Both arms act through one `CoordinatedPickment` action in `left_arm_action`;
+`right_arm_action` remains null for that edge.
+
+Interactive task object:
+- $moved_runtime_uid: shared moved object from source `$moved_source_uid`.
+$registry
+
+Config-stage LLM notes:
+$notes
+
+The deterministic three-edge graph coordinates the grasp and move, opens both
+grippers in parallel, then returns both empty arms. It does not decompose the
+task into separate `PickUp`, `MoveHeldObject`, or `Place` actions.

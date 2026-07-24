@@ -1,0 +1,7 @@
+Object `$moved_runtime_uid` hold-hover:
+- Pick up:
+  $pickup_spec
+- Hover move:
+  $hover_spec
+- Keep gripper closed:
+  $close_spec

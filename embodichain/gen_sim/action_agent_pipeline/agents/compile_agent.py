@@ -23,8 +23,8 @@ from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
     COMPILED_GRAPH_FILENAME,
+    TASK_GRAPH_FILENAME,
 )
-from embodichain.gen_sim.action_agent_pipeline.agents.agent_base import AgentBase
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
     extract_json_object,
     normalize_json_content,
@@ -32,21 +32,25 @@ from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
 from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.logger import log_info
 
-__all__ = ["CompileAgent"]
+__all__ = ["CompileAgent", "resolve_precomputed_task_graph_path"]
 
 COMPILED_GRAPH_SCHEMA_VERSION = "nominal_graph_v1"
 
 
-class CompileAgent(AgentBase):
+class CompileAgent:
     """Compile and execute nominal atomic-action graph specs."""
 
-    query_prefix = "# "
-    query_suffix = "."
-    prompt_kwargs: dict[str, dict[str, Any]]
-
-    def __init__(self, **kwargs) -> None:
-        kwargs.setdefault("prompt_kwargs", {})
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        *,
+        task_name: str,
+        config_dir: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.task_name = task_name
+        self.config_dir = config_dir
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def generate(self, **kwargs: Any):
         log_dir = kwargs.get(
@@ -56,6 +60,9 @@ class CompileAgent(AgentBase):
         task_graph = extract_json_object(kwargs["task_graph"])
         task_graph_hash = _stable_json_hash(task_graph)
 
+        # The cache is valid only for the exact source graph and compiler
+        # schema. ``regenerate`` bypasses this artifact cache; it never mutates
+        # the generation-stage task_graph.json supplied by the caller.
         if not kwargs.get("regenerate", False) and file_path.exists():
             existing_bundle = extract_json_object(file_path.read_text(encoding="utf-8"))
             metadata = existing_bundle.get("metadata", {})
@@ -90,11 +97,64 @@ class CompileAgent(AgentBase):
             compile_agent_graph_from_file,
         )
 
-        runtime_kwargs = _runtime_kwargs(kwargs, getattr(self, "prompt_kwargs", {}))
+        runtime_kwargs = _runtime_kwargs(kwargs)
         graph = compile_agent_graph_from_file(graph_file_path)
         result = graph.run(**runtime_kwargs)
         log_info("Compiled agent graph executed successfully.")
         return result
+
+
+def resolve_precomputed_task_graph_path(
+    *,
+    configured_path: str | None,
+    agent_config_path: str | None,
+) -> Path:
+    """Resolve the immutable task graph consumed by the runtime.
+
+    An explicit ``precomputed_task_graph`` remains authoritative. Legacy
+    configs without that field fall back to ``task_graph.json`` beside the
+    agent config, which preserves compatibility without reviving online graph
+    generation.
+
+    Args:
+        configured_path: Path from ``TaskAgent.precomputed_task_graph``.
+        agent_config_path: Path to the loaded ``agent_config.json``.
+
+    Returns:
+        The resolved task graph path.
+
+    Raises:
+        FileNotFoundError: If no configured or adjacent task graph exists.
+    """
+    candidates: list[Path] = []
+    config_file = (
+        Path(agent_config_path).expanduser().resolve() if agent_config_path else None
+    )
+
+    if configured_path:
+        graph_path = Path(configured_path).expanduser()
+        if not graph_path.is_absolute():
+            graph_path = (
+                config_file.parent / graph_path
+                if config_file is not None
+                else graph_path.resolve()
+            )
+        candidates.append(graph_path.resolve())
+    elif config_file is not None:
+        candidates.append(config_file.parent / TASK_GRAPH_FILENAME)
+    else:
+        candidates.append(Path(TASK_GRAPH_FILENAME).resolve())
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    searched = "\n".join(f"  - {candidate}" for candidate in candidates)
+    raise FileNotFoundError(
+        "Precomputed task graph not found. Searched:\n"
+        f"{searched}\n"
+        "Generate the action-agent config before running the agent."
+    )
 
 
 def _stable_json_hash(content: dict[str, Any]) -> str:
@@ -106,14 +166,6 @@ def _stable_json_hash(content: dict[str, Any]) -> str:
 
 def _runtime_kwargs(
     kwargs: dict[str, Any],
-    prompt_kwargs: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    prompt_only_keys = set(prompt_kwargs)
-    prompt_only_keys.update(
-        {
-            "task_graph",
-            "observations",
-            "regenerate",
-        }
-    )
+    prompt_only_keys = {"task_graph", "observations", "regenerate"}
     return {key: value for key, value in kwargs.items() if key not in prompt_only_keys}

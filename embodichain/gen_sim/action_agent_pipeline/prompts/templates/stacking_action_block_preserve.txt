@@ -1,0 +1,7 @@
+Object `$runtime_uid` to stack layer $layer_index:
+- Pick up:
+  $pickup_spec
+- Direct final Place without orientation change:
+  $place_spec
+- Return:
+  $return_spec

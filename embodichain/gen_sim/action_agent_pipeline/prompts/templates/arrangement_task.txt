@@ -1,0 +1,35 @@
+Task:
+$task_name: $task_prompt_summary
+
+This config was generated from a simple task description by the config-stage
+LLM. The task graph is precomputed from this deterministic specification.
+
+Original simple task description:
+$task_description
+
+Arrangement plan:
+- Layout axis: `$axis`, resolved to world `$world_axis`. Semantic slots unfold
+  `$spatial_direction` while execution follows occupancy dependencies.
+- Anchor: `$anchor` in the exported $project_name environment.
+- Collision-aware line origin xy: `$line_origin_xy`.
+- Slot spacing: `$spacing` with clearance `$layout_clearance`.
+- Ordering rule: `$order_by` with direction `$order_direction`.
+- Category order: `$category_order`.
+- Final order: $final_order.
+
+The deterministic nominal graph contains exactly $edge_count nominal edges.
+It uses only the atomic action class JSON specs shown below and contains no
+recovery, monitor, search, alignment, or extra lift edges beyond the listed
+steps. Absolute target object poses are collision-aware slots computed by the
+config-stage generator. Each held object first moves to its high staging pose
+with orientation preserved. A step with `orientation_goal:"preserve"` moves
+directly down without a separate high-orientation edge. Only explicit
+non-preserve goals align at the same high pose. The final release move keeps
+its surface `z_policy`, then uses a relative-zero `Place`, retreats the empty
+hand upward, and returns that arm. The unlisted arm remains null.
+
+$step_blocks
+
+Final state: all listed objects rest near their assigned absolute XY slots.
+Only steps that explicitly request axis alignment rotate the held object.
+The graph keeps the absolute target_object_pose specs shown above.

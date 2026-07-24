@@ -283,6 +283,9 @@ def _mesh_config_transform_matrix(
                 else translation
             ),
         )
+    # Vertices are column vectors in mesh-local coordinates. Applying scale on
+    # the right preserves the exported convention: scale first, then rotate and
+    # translate into the simulation frame.
     return _matrix_multiply(root_matrix, _scale_matrix4(scale))
 
 
@@ -377,6 +380,8 @@ def _maybe_convert_gltf_vertices_to_sim_frame(
 ) -> list[tuple[float, float, float]] | None:
     if not enabled or vertices is None:
         return vertices
+    # DexSim maps glTF's right-handed Y-up basis to Z-up as (x, y, z) ->
+    # (x, -z, y). Bounds must use the same basis change as runtime mesh loading.
     return [(x, -z, y) for x, y, z in vertices]
 
 
