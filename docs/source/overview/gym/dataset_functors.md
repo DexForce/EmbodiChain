@@ -44,7 +44,7 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 - Records observation-action pairs during episodes
 - Converts data to LeRobot format automatically
 - Saves episodes when they complete
-- Supports vision sensors (camera images)
+- Supports RGB, depth, and segmentation-mask camera observations
 - Supports robot state (qpos, qvel, qf)
 - Supports custom observation features
 - Auto-incrementing dataset naming
@@ -81,6 +81,14 @@ The LeRobotRecorder saves the following data for each frame:
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
 - ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
+- ``observation.depth.{sensor_name}``: Native numeric depth arrays
+- ``observation.depth.{sensor_name}_right``: Right-camera depth arrays
+- ``observation.mask.{sensor_name}``: Native numeric segmentation-mask arrays
+- ``observation.mask.{sensor_name}_right``: Right-camera segmentation-mask arrays
+
+Depth and mask features keep the dtype and shape declared by the sensor
+observation space. They are stored as numeric LeRobot array features rather than
+images, so enabling ``use_videos`` affects only the RGB image features.
 
 ### Dataset Recording vs Video Recording
 
