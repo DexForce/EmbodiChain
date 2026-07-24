@@ -284,6 +284,10 @@ class ToppraPlanOptions(PlanOptions):
 
 
 class ToppraPlanner(BasePlanner):
+    """Time-optimal joint-space planner backed by TOPPRA."""
+
+    supports_joint_move = True
+
     def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 
@@ -304,6 +308,10 @@ class ToppraPlanner(BasePlanner):
         # moment the parent process dies — including the os._exit(0) path taken
         # by SimulationManager.destroy(), which skips every Python finalizer.
         # __del__ below only handles in-process GC of an abandoned planner.
+
+    def default_plan_options(self) -> ToppraPlanOptions:
+        """Return backend-default planning options."""
+        return ToppraPlanOptions()
 
     @staticmethod
     def _resolve_mp_context(mp_context: str | None, device: torch.device) -> str:

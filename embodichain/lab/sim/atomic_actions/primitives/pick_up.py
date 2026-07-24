@@ -212,22 +212,29 @@ class PickUp(AtomicAction):
             self.hand_open_qpos, self.hand_close_qpos, n_waypoints=n_close
         )
 
+        # Allocate from the actually-returned phase lengths so collision-aware
+        # planners (which preserve their own sample count) are not forced into
+        # the requested n_approach / n_lift counts.
+        n_approach_actual = approach_arm.shape[1]
+        n_lift_actual = lift_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_approach + n_close + n_lift, self.robot_dof),
+            (self.n_envs, n_approach_actual + n_close + n_lift_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :n_approach, self.arm_joint_ids] = approach_arm
-        full[:, :n_approach, self.hand_joint_ids] = self.hand_open_qpos
-        full[:, n_approach : n_approach + n_close, self.arm_joint_ids] = (
+        full[:, :n_approach_actual, self.arm_joint_ids] = approach_arm
+        full[:, :n_approach_actual, self.hand_joint_ids] = self.hand_open_qpos
+        full[:, n_approach_actual : n_approach_actual + n_close, self.arm_joint_ids] = (
             grasp_arm_qpos.unsqueeze(1)
         )
-        full[:, n_approach : n_approach + n_close, self.hand_joint_ids] = (
-            hand_close_path
+        full[
+            :, n_approach_actual : n_approach_actual + n_close, self.hand_joint_ids
+        ] = hand_close_path
+        full[:, n_approach_actual + n_close :, self.arm_joint_ids] = lift_arm
+        full[:, n_approach_actual + n_close :, self.hand_joint_ids] = (
+            self.hand_close_qpos
         )
-        full[:, n_approach + n_close :, self.arm_joint_ids] = lift_arm
-        full[:, n_approach + n_close :, self.hand_joint_ids] = self.hand_close_qpos
 
         obj_poses = sem.entity.get_local_pose(to_matrix=True)
         object_to_eef = torch.bmm(pose_inv(obj_poses), grasp_xpos)
@@ -296,6 +303,13 @@ class PickUp(AtomicAction):
             torch.arange(n_envs, device=self.device), best_idx
         ]
         return is_success, best_grasp_xpos
+
+    def _is_motion_gen_curobo(self) -> bool:
+        """Whether this action is configured to plan through the cuRobo backend."""
+        return (
+            getattr(self.cfg, "motion_source", None) == "motion_gen"
+            and getattr(self.cfg, "planner_type", None) == "curobo"
+        )
 
     def _select_feasible_grasp_variants(
         self,

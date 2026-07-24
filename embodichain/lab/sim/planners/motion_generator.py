@@ -30,6 +30,9 @@ from embodichain.lab.sim.planners import (
     NeuralPlanner,
     NeuralPlannerCfg,
     NeuralPlanOptions,
+    CuroboPlanner,
+    CuroboPlannerCfg,
+    CuroboPlanOptions,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 from embodichain.utils import logger, configclass
@@ -101,6 +104,7 @@ class MotionGenerator:
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
+        "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
 
     def __init__(self, cfg: MotionGenCfg) -> None:
@@ -156,10 +160,10 @@ class MotionGenerator:
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        if options.is_interpolate and isinstance(self.planner, NeuralPlanner):
+        if options.is_interpolate and not self.planner.preinterpolate_targets:
             logger.log_warning(
-                "is_interpolate=True is not supported with NeuralPlanner; "
-                "disabling interpolation."
+                f"{type(self.planner).__name__} does not support MotionGenerator "
+                "pre-interpolation; disabling it."
             )
             options.is_interpolate = False
 
@@ -227,20 +231,12 @@ class MotionGenerator:
             target_plan_states = target_states
 
         if options.plan_opts is None:
-            if hasattr(self.planner, "default_plan_options"):
-                options.plan_opts = self.planner.default_plan_options()
-            else:
-                options.plan_opts = PlanOptions()
-
-        # Propagate MotionGenOptions fields into NeuralPlanOptions so that callers
-        # can set control_part/start_qpos at the MotionGenerator level.
-        if isinstance(self.planner, NeuralPlanner) and isinstance(
-            options.plan_opts, NeuralPlanOptions
-        ):
-            if options.plan_opts.control_part is None:
-                options.plan_opts.control_part = options.control_part
-            if options.plan_opts.start_qpos is None:
-                options.plan_opts.start_qpos = options.start_qpos
+            options.plan_opts = self.planner.default_plan_options()
+        options.plan_opts = self.planner.with_motion_context(
+            options.plan_opts,
+            start_qpos=options.start_qpos,
+            control_part=options.control_part,
+        )
 
         return self.planner.plan(
             target_states=target_plan_states, options=options.plan_opts

@@ -25,6 +25,7 @@ from unittest.mock import Mock, patch
 from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
 )
+from embodichain.lab.sim.planners.utils import MoveType, PlanResult
 from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
     AtomicAction,
@@ -120,6 +121,26 @@ def _make_mock_motion_generator():
     mg = Mock()
     mg.robot = _make_mock_robot()
     mg.device = torch.device("cpu")
+    return mg
+
+
+def _make_curobo_mock_motion_generator(result_positions, success=None):
+    """Mock MotionGenerator whose planner is a cuRobo backend.
+
+    ``result_positions`` is ``(B, N, ARM_DOF)``. The planner preserves samples
+    and disables pre-interpolation, matching the real cuRobo capabilities.
+    """
+    mg = _make_mock_motion_generator()
+    planner = Mock()
+    planner.cfg.planner_type = "curobo"
+    planner.preinterpolate_targets = False
+    planner.preserve_plan_samples = True
+    planner.supports_joint_move = True
+    mg.planner = planner
+    B = result_positions.shape[0]
+    if success is None:
+        success = torch.ones(B, dtype=torch.bool)
+    mg.generate.return_value = PlanResult(success=success, positions=result_positions)
     return mg
 
 
@@ -1249,3 +1270,111 @@ class TestCoordinatedPlacementAction:
         )
         assert result.next_state.held_object.object_to_eef.shape == (NUM_ENVS, 4, 4)
         assert result.next_state.held_object.grasp_xpos.shape == (NUM_ENVS, 4, 4)
+
+
+# ---------------------------------------------------------------------------
+# MoveJoints + cuRobo motion_gen routing
+# ---------------------------------------------------------------------------
+
+
+class TestMoveJointsCurobo:
+    def setup_method(self):
+        # shared per-test mg is created in each test (result shapes differ).
+        pass
+
+    def _action(self, mg, **cfg_kw):
+        return MoveJoints(
+            mg,
+            MoveJointsCfg(motion_source="motion_gen", planner_type="curobo", **cfg_kw),
+        )
+
+    def test_one_waypoint_routes_joint_move_to_motion_gen(self):
+        mg = _make_curobo_mock_motion_generator(
+            result_positions=torch.zeros(NUM_ENVS, 5, ARM_DOF)
+        )
+        action = self._action(mg, sample_interval=10)
+        result = action.execute(
+            JointPositionTarget(qpos=torch.full((ARM_DOF,), 0.5)),
+            WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+        )
+        assert result.success.tolist() == [True, True]
+        # Returned CuRobo length (5), not sample_interval (10).
+        assert result.trajectory.shape == (NUM_ENVS, 5, TOTAL_DOF)
+        # Full-DoF preservation: hand joints stay at the inherited state (zeros).
+        assert torch.allclose(
+            result.trajectory[:, :, ARM_DOF:], torch.zeros(NUM_ENVS, 5, HAND_DOF)
+        )
+        plan_states = mg.generate.call_args.args[0]
+        assert all(s.move_type is MoveType.JOINT_MOVE for s in plan_states)
+        assert mg.generate.call_args.kwargs["options"].is_interpolate is False
+
+    def test_multi_waypoint_routes_ordered_joint_states(self):
+        mg = _make_curobo_mock_motion_generator(
+            result_positions=torch.zeros(NUM_ENVS, 5, ARM_DOF)
+        )
+        action = self._action(mg, sample_interval=10)
+        waypoint_qpos = (
+            torch.stack(
+                [torch.full((ARM_DOF,), 0.3), torch.full((ARM_DOF,), 0.7)], dim=0
+            )
+            .unsqueeze(0)
+            .repeat(NUM_ENVS, 1, 1)
+        )
+        result = action.execute(
+            JointPositionTarget(qpos=waypoint_qpos),
+            WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+        )
+        assert result.success.tolist() == [True, True]
+        assert result.trajectory.shape == (NUM_ENVS, 5, TOTAL_DOF)
+        plan_states = mg.generate.call_args.args[0]
+        assert len(plan_states) == 2
+        assert all(s.move_type is MoveType.JOINT_MOVE for s in plan_states)
+        # Ordered: first waypoint, then second.
+        assert torch.allclose(plan_states[0].qpos, torch.full((NUM_ENVS, ARM_DOF), 0.3))
+        assert torch.allclose(plan_states[1].qpos, torch.full((NUM_ENVS, ARM_DOF), 0.7))
+
+    def test_failure_holds_start_qpos(self):
+        positions = torch.zeros(NUM_ENVS, 5, ARM_DOF)
+        positions[1] = 1.0  # env 1 "would move" but is marked failed
+        mg = _make_curobo_mock_motion_generator(
+            result_positions=positions, success=torch.tensor([True, False])
+        )
+        action = self._action(mg, sample_interval=10)
+        last_qpos = torch.zeros(NUM_ENVS, TOTAL_DOF)
+        last_qpos[1, :ARM_DOF] = 0.7  # env 1 start
+        result = action.execute(
+            JointPositionTarget(qpos=torch.full((ARM_DOF,), 0.5)),
+            WorldState(last_qpos=last_qpos),
+        )
+        assert result.success.tolist() == [True, False]
+        # Failed env held at its start arm qpos across all samples.
+        assert torch.allclose(
+            result.trajectory[1, :, :ARM_DOF], torch.full((5, ARM_DOF), 0.7)
+        )
+
+
+class TestCoordinatedRejectsCurobo:
+    def test_coordinated_pickment_rejects_curobo(self):
+        mg = _make_dual_arm_mock_motion_generator()
+        cfg = CoordinatedPickmentCfg(
+            left_hand_open_qpos=_hand_open(),
+            left_hand_close_qpos=_hand_close(),
+            right_hand_open_qpos=_hand_open(),
+            right_hand_close_qpos=_hand_close(),
+            motion_source="motion_gen",
+            planner_type="curobo",
+        )
+        with pytest.raises(ValueError, match="not supported"):
+            CoordinatedPickment(mg, cfg)
+
+    def test_coordinated_placement_rejects_curobo(self):
+        mg = _make_dual_arm_mock_motion_generator()
+        cfg = CoordinatedPlacementCfg(
+            placing_hand_open_qpos=_hand_open(),
+            placing_hand_close_qpos=_hand_close(),
+            support_hand_close_qpos=_hand_close(),
+            motion_source="motion_gen",
+            planner_type="curobo",
+        )
+        with pytest.raises(ValueError, match="not supported"):
+            CoordinatedPlacement(mg, cfg)

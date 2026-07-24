@@ -56,6 +56,22 @@ gensim = [
   "bpy",
   "pyrender==0.1.45"
 ]
+# cuRobo V2 is distributed from its source repository and provides separate
+# dependency sets for CUDA 12 and CUDA 13. Keep it optional so CPU-only and
+# non-NVIDIA EmbodiChain installations do not pull in CUDA packages. Select
+# exactly one of these extras for the target environment.
+curobo-cu12 = [
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+]
+curobo-cu12-torch = [
+  "nvidia-curobo[cu12-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+]
+curobo-cu13 = [
+  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+]
+curobo-cu13-torch = [
+  "nvidia-curobo[cu13-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+]
 
 [project.scripts]
 # Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).

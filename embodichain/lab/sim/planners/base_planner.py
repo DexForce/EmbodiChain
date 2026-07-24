@@ -155,6 +155,59 @@ class BasePlanner(ABC):
 
         self.device = self.robot.device
 
+    preinterpolate_targets: bool = True
+    """Whether ``MotionGenerator`` may pre-interpolate targets for this backend.
+
+    Backends that perform their own collision-aware IK/trajectory optimization
+    (e.g. cuRobo) set this to ``False`` so the original Cartesian targets
+    reach ``plan`` unchanged rather than being converted through EmbodiChain IK.
+    """
+
+    preserve_plan_samples: bool = False
+    """Whether callers must retain this planner's returned sample points exactly.
+
+    When ``True``, ``TrajectoryBuilder`` returns the planner's trajectory
+    without resampling, preserving collision-checked samples. When ``False``
+    (the default), the builder may normalize the trajectory to a requested
+    waypoint count.
+    """
+
+    supports_joint_move: bool = False
+    """Whether the backend accepts :attr:`MoveType.JOINT_MOVE` targets.
+
+    Atomic actions use this capability to decide whether their joint-only
+    phases may be delegated through ``MotionGenerator``. Cartesian-only
+    planners retain the deterministic local joint interpolation for those
+    phases.
+    """
+
+    def default_plan_options(self) -> PlanOptions:
+        """Return backend-default planning options."""
+        return PlanOptions()
+
+    def with_motion_context(
+        self,
+        options: PlanOptions,
+        *,
+        start_qpos: torch.Tensor | None,
+        control_part: str | None,
+    ) -> PlanOptions:
+        """Attach MotionGenerator runtime context to backend options.
+
+        The base planner has no context fields and therefore returns ``options``
+        unchanged. Backends with contextual options override this method.
+
+        Args:
+            options: The backend's planning options, already constructed (either
+                by the caller or via :meth:`default_plan_options`).
+            start_qpos: Optional starting joint configuration ``(B, DOF)``.
+            control_part: Optional control-part name.
+
+        Returns:
+            The (possibly mutated) planning options carrying the context.
+        """
+        return options
+
     @validate_plan_options
     @abstractmethod
     def plan(
