@@ -54,6 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
+from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
@@ -62,13 +63,14 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.lab.sim.shapes import CubeCfg
 
 __all__ = ["main"]
 
 
-ROBOT_UID = "curobo_franka"
 CONTROL_PART = "arm"
 DEMO_BLOCK_DIMS = [0.18, 0.3, 0.36]
 DEMO_BLOCK_POS = (0.40, 0.0, 0.18)
@@ -133,6 +135,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable automatic offscreen recording in headless mode.",
     )
+    parser.add_argument(
+        "--robot",
+        type=str,
+        default="franka",
+        help="Robot type for the cuRobo demo (franka, ur, w1).",
+    )
     return parser.parse_args()
 
 
@@ -155,7 +163,9 @@ def _check_runtime() -> None:
         ) from exc
 
 
-def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]:
+def _build_scene(
+    headless: bool, robot_type: str = "franka"
+) -> tuple[SimulationManager, Robot, RigidObject]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -165,34 +175,119 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]
             arena_space=2.0,
         )
     )
-
-    robot = sim.add_robot(
-        cfg=FrankaPandaCfg.from_dict(
-            {
-                "uid": ROBOT_UID,
-                "robot_type": "panda",
-                "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
-            }
+    if robot_type == "franka":
+        robot = sim.add_robot(
+            cfg=FrankaPandaCfg.from_dict(
+                {
+                    "uid": "franka",
+                    "robot_type": "panda",
+                    "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
+                }
+            )
         )
-    )
+        demo_block_size = [0.18, 0.3, 0.36]
+        demo_block_position = (0.40, 0.0, 0.18)
+
+        target_xpos = torch.tensor(
+            [
+                [
+                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
+                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
+    elif robot_type == "ur":
+        hand_urdf_path = get_data_path(
+            "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
+        )
+        hand_attach_xpos = np.eye(4)
+        hand_attach_xpos[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
+        robot = sim.add_robot(
+            cfg=URRobotCfg.from_dict(
+                {
+                    "robot_type": "ur10",
+                    "uid": "ur10_with_brainco",
+                    "urdf_cfg": {
+                        "components": [
+                            {
+                                "component_type": "hand",
+                                "urdf_path": hand_urdf_path,
+                                "transform": hand_attach_xpos,
+                            },
+                        ]
+                    },
+                    "control_parts": {
+                        "hand": [
+                            "LEFT_HAND_THUMB1",
+                            "LEFT_HAND_THUMB2",
+                            "LEFT_HAND_INDEX",
+                            "LEFT_HAND_MIDDLE",
+                            "LEFT_HAND_RING",
+                            "LEFT_HAND_PINKY",
+                        ],
+                    },
+                    "drive_pros": {
+                        "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
+                        "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
+                        "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},
+                        "drive_type": "force",
+                    },
+                    "solver_cfg": {"arm": {"tcp": np.eye(4)}},
+                    "init_qpos": [
+                        0.0,
+                        -np.pi / 2,
+                        -np.pi / 2,
+                        2.5,
+                        -np.pi / 2,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.5,
+                        -0.00016,
+                        -0.00010,
+                        -0.00013,
+                        -0.00009,
+                        0.0,
+                    ],
+                }
+            )
+        )
+        demo_block_size = [0.18, 0.3, 0.36]
+        demo_block_position = (0.60, 0.0, 0.18)
+        target_xpos = torch.tensor(
+            [
+                [
+                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 8.5e-01],
+                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 4.0e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
 
     if robot is None:
-        raise RuntimeError(f"Failed to add robot '{ROBOT_UID}' to the cuRobo demo.")
+        raise RuntimeError(f"Failed to add robot '{robot.uid}' to the cuRobo demo.")
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
     # automatically (no hand-authored collision YAML to keep in sync).
     demo_block = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="demo_block",
-            shape=CubeCfg(size=DEMO_BLOCK_DIMS),
+            shape=CubeCfg(size=demo_block_size),
             attrs=RigidBodyAttributesCfg(),
             body_type="kinematic",
-            init_pos=DEMO_BLOCK_POS,
+            init_pos=demo_block_position,
             init_rot=(0.0, 0.0, 0.0),
         )
     )
 
-    return sim, robot, demo_block
+    return sim, robot, demo_block, target_xpos
 
 
 def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) -> bool:
@@ -281,11 +376,11 @@ def main() -> None:
     _check_runtime()
     # Spawn the cuRobo worker now so its ~5s Python+torch startup overlaps with
     # the simulation build below instead of blocking the first plan.
-    CuroboPlanner.prewarm(ROBOT_UID)
 
     sim: SimulationManager | None = None
     # try:
-    sim, robot, demo_block = _build_scene(args.headless)
+    sim, robot, demo_block, target_xpos = _build_scene(args.headless, args.robot)
+    CuroboPlanner.prewarm(robot.uid)
     if not args.headless:
         sim.open_window()
     _start_headless_recording(sim, args)
@@ -295,7 +390,7 @@ def main() -> None:
     motion_generator = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
-                robot_uid=ROBOT_UID,
+                robot_uid=robot.uid,
                 world=CuroboWorldCfg(rigid_objects=[demo_block]),
                 max_attempts=args.max_attempts,
             )
@@ -320,17 +415,6 @@ def main() -> None:
         qpos=initial_qpos,
         name=CONTROL_PART,
         to_matrix=True,
-    )
-    target_xpos = torch.tensor(
-        [
-            [
-                [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
-                [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
-                [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
-                [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
-            ]
-        ],
-        device=robot.device,
     )
     plan_start = time.perf_counter()
     success, trajectory, _ = engine.run(
