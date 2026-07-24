@@ -54,6 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
+from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
@@ -62,16 +63,14 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
 from embodichain.lab.sim.shapes import CubeCfg
 
 __all__ = ["main"]
 
 
-ROBOT_UID = "curobo_franka"
-CONTROL_PART = "arm"
-DEMO_BLOCK_DIMS = [0.18, 0.3, 0.36]
-DEMO_BLOCK_POS = (0.40, 0.0, 0.18)
 DEFAULT_RECORD_FPS = 20
 DEFAULT_RECORD_MAX_MEMORY = 2048
 DEFAULT_MAX_ATTEMPTS = 2
@@ -133,6 +132,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable automatic offscreen recording in headless mode.",
     )
+    parser.add_argument(
+        "--robot",
+        type=str,
+        default="franka",
+        help="Robot type for the cuRobo demo (franka, ur, w1).",
+    )
     return parser.parse_args()
 
 
@@ -155,7 +160,9 @@ def _check_runtime() -> None:
         ) from exc
 
 
-def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]:
+def _build_scene(
+    headless: bool, robot_type: str = "franka"
+) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -165,34 +172,216 @@ def _build_scene(headless: bool) -> tuple[SimulationManager, Robot, RigidObject]
             arena_space=2.0,
         )
     )
+    if robot_type == "franka":
+        control_part = "arm"
+        robot = sim.add_robot(
+            cfg=FrankaPandaCfg.from_dict(
+                {
+                    "uid": "franka",
+                    "robot_type": "panda",
+                    "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
+                }
+            )
+        )
+        demo_block_size = [0.18, 0.3, 0.36]
+        demo_block_position = (0.40, 0.0, 0.18)
 
-    robot = sim.add_robot(
-        cfg=FrankaPandaCfg.from_dict(
+        target_xpos = torch.tensor(
+            [
+                [
+                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
+                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
+    elif robot_type == "ur":
+        control_part = "arm"
+        hand_urdf_path = get_data_path(
+            "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
+        )
+        hand_attach_xpos = np.eye(4)
+        hand_attach_xpos[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
+        robot = sim.add_robot(
+            cfg=URRobotCfg.from_dict(
+                {
+                    "robot_type": "ur10",
+                    "uid": "ur10_with_brainco",
+                    "urdf_cfg": {
+                        "components": [
+                            {
+                                "component_type": "hand",
+                                "urdf_path": hand_urdf_path,
+                                "transform": hand_attach_xpos,
+                            },
+                        ]
+                    },
+                    "control_parts": {
+                        "hand": [
+                            "LEFT_HAND_THUMB1",
+                            "LEFT_HAND_THUMB2",
+                            "LEFT_HAND_INDEX",
+                            "LEFT_HAND_MIDDLE",
+                            "LEFT_HAND_RING",
+                            "LEFT_HAND_PINKY",
+                        ],
+                    },
+                    "drive_pros": {
+                        "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
+                        "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
+                        "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},
+                        "drive_type": "force",
+                    },
+                    "solver_cfg": {"arm": {"tcp": np.eye(4)}},
+                    "init_qpos": [
+                        0.0,
+                        -np.pi / 2,
+                        -np.pi / 2,
+                        2.5,
+                        -np.pi / 2,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.5,
+                        -0.00016,
+                        -0.00010,
+                        -0.00013,
+                        -0.00009,
+                        0.0,
+                    ],
+                }
+            )
+        )
+        demo_block_size = [0.18, 0.3, 0.36]
+        demo_block_position = (0.60, 0.0, 0.18)
+        target_xpos = torch.tensor(
+            [
+                [
+                    [9.9896e-01, 4.3707e-02, -1.2806e-02, 8.5e-01],
+                    [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
+                    [-1.2628e-02, -4.3484e-03, -9.9991e-01, 3.0e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
+    elif robot_type == "w1":
+        control_part = "right_arm"
+        cfg = DexforceW1Cfg.from_dict(
             {
-                "uid": ROBOT_UID,
-                "robot_type": "panda",
-                "init_qpos": [0.0, -0.5, 0.0, -2.3, 0.0, 1.8, 0.741, 0.04, 0.04],
+                "uid": "dexforce_w1",
             }
         )
-    )
+        cfg.solver_cfg["left_arm"].tcp = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.012],
+                [0.0, 1.0, 0.0, 0.04],
+                [0.0, 0.0, 1.0, 0.11],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        cfg.solver_cfg["right_arm"].tcp = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.012],
+                [0.0, 1.0, 0.0, -0.04],
+                [0.0, 0.0, 1.0, 0.11],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+
+        cfg.init_qpos = [
+            1.0000e00,
+            -2.0000e00,
+            1.0000e00,
+            0.0000e00,
+            -2.6921e-05,
+            -2.6514e-03,
+            -1.5708e00,
+            1.4575e00,
+            -7.8540e-01,
+            1.2834e-01,
+            1.5708e00,
+            -2.2310e00,
+            -7.8540e-01,
+            1.4461e00,
+            -1.5708e00,
+            1.6716e00,
+            7.8540e-01,
+            7.6745e-01,
+            0.0000e00,
+            3.8108e-01,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            1.5000e00,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            0.0000e00,
+            1.5000e00,
+            6.9974e-02,
+            7.3950e-02,
+            6.6574e-02,
+            6.0923e-02,
+            0.0000e00,
+            6.7342e-02,
+            7.0862e-02,
+            6.3684e-02,
+            5.7822e-02,
+            0.0000e00,
+        ]
+        robot = sim.add_robot(cfg=cfg)
+
+        demo_block_size = [0.2, 0.2, 0.2]
+        demo_block_position = (0.36, -0.15, 0.88)
+        target_xpos = torch.tensor(
+            [
+                [
+                    [2.2020e-03, 3.4217e-01, 9.3964e-01, 4.6395e-01],
+                    [1.5398e-04, -9.3964e-01, 3.4217e-01, -1.7e-01],
+                    [1.0000e00, -6.0877e-04, -2.1218e-03, 6.80e-01],
+                    [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
+                ]
+            ],
+            device=robot.device,
+        )
+
+        # robot compute ik success in example
+        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
+        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
+
+        # sim.open_window()
+        # # sim.update(50)
+        # current_qpos = robot.get_qpos(name=control_part)
+        # current_xpos = robot.compute_fk(name=control_part, qpos=current_qpos, to_matrix=True)
+        # print(f"Current {control_part} TCP pose:\n{current_xpos}")
+        # import ipdb; ipdb.set_trace()
+
+    else:
+        raise ValueError(f"Unknown robot type '{robot_type}' for cuRobo demo.")
 
     if robot is None:
-        raise RuntimeError(f"Failed to add robot '{ROBOT_UID}' to the cuRobo demo.")
+        raise RuntimeError(f"Failed to add robot '{robot.uid}' to the cuRobo demo.")
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
     # automatically (no hand-authored collision YAML to keep in sync).
     demo_block = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="demo_block",
-            shape=CubeCfg(size=DEMO_BLOCK_DIMS),
+            shape=CubeCfg(size=demo_block_size),
             attrs=RigidBodyAttributesCfg(),
             body_type="kinematic",
-            init_pos=DEMO_BLOCK_POS,
+            init_pos=demo_block_position,
             init_rot=(0.0, 0.0, 0.0),
         )
     )
 
-    return sim, robot, demo_block
+    return sim, robot, demo_block, target_xpos, control_part
 
 
 def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) -> bool:
@@ -244,22 +433,16 @@ def _replay_full_dof_trajectory(
         robot.set_qpos(
             qpos=waypoint,
             joint_ids=all_joint_ids,
-            target=False,
-        )
-        robot.set_qpos(
-            qpos=waypoint,
-            joint_ids=all_joint_ids,
-            target=True,
         )
         sim.update(step=step_repeat)
 
 
-def _final_tcp_error(robot: Robot, target: torch.Tensor) -> float:
+def _final_tcp_error(robot: Robot, target: torch.Tensor, control_part: str) -> float:
     """Return the Cartesian position error of the simulator's final TCP pose."""
-    final_qpos = robot.get_qpos(name=CONTROL_PART)
+    final_qpos = robot.get_qpos(name=control_part)
     final_pose = robot.compute_fk(
         qpos=final_qpos,
-        name=CONTROL_PART,
+        name=control_part,
         to_matrix=True,
     )
     # Accept either a single (4, 4) pose or a batched (B, 4, 4) target.
@@ -281,11 +464,13 @@ def main() -> None:
     _check_runtime()
     # Spawn the cuRobo worker now so its ~5s Python+torch startup overlaps with
     # the simulation build below instead of blocking the first plan.
-    CuroboPlanner.prewarm(ROBOT_UID)
 
     sim: SimulationManager | None = None
     # try:
-    sim, robot, demo_block = _build_scene(args.headless)
+    sim, robot, demo_block, target_xpos, control_part = _build_scene(
+        args.headless, args.robot
+    )
+    CuroboPlanner.prewarm(robot.uid)
     if not args.headless:
         sim.open_window()
     _start_headless_recording(sim, args)
@@ -295,7 +480,7 @@ def main() -> None:
     motion_generator = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
-                robot_uid=ROBOT_UID,
+                robot_uid=robot.uid,
                 world=CuroboWorldCfg(rigid_objects=[demo_block]),
                 max_attempts=args.max_attempts,
             )
@@ -308,29 +493,22 @@ def main() -> None:
             MoveEndEffectorCfg(
                 motion_source="motion_gen",
                 planner_type="curobo",
-                control_part=CONTROL_PART,
-                sample_interval=80,
+                control_part=control_part,
+                # sample_interval sets the returned trajectory's waypoint count.
+                # cuRobo's own collision-checked samples are arc-length resampled
+                # to this count; set CuroboPlannerCfg.preserve_plan_samples=True
+                # above to keep cuRobo's raw samples (count from interpolation_dt).
+                sample_interval=30,
             ),
         ),
         name="move_end_effector",
     )
 
-    initial_qpos = robot.get_qpos(name=CONTROL_PART)
+    initial_qpos = robot.get_qpos(name=control_part)
     initial_xpos = robot.compute_fk(
         qpos=initial_qpos,
-        name=CONTROL_PART,
+        name=control_part,
         to_matrix=True,
-    )
-    target_xpos = torch.tensor(
-        [
-            [
-                [9.9896e-01, 4.3707e-02, -1.2806e-02, 6.5e-01],
-                [4.3759e-02, -9.9903e-01, 3.7920e-03, 8.5299e-04],
-                [-1.2628e-02, -4.3484e-03, -9.9991e-01, 2.0e-01],
-                [0.0000e00, 0.0000e00, 0.0000e00, 1.0000e00],
-            ]
-        ],
-        device=robot.device,
     )
     plan_start = time.perf_counter()
     success, trajectory, _ = engine.run(
@@ -353,7 +531,9 @@ def main() -> None:
     )
     if args.hold_steps:
         sim.update(step=args.hold_steps)
-    print(f"final TCP position error: {_final_tcp_error(robot, target_xpos):.4f} m")
+    print(
+        f"final TCP position error: {_final_tcp_error(robot, target_xpos, control_part):.4f} m"
+    )
 
     plan_start = time.perf_counter()
     success, trajectory, _ = engine.run(
@@ -369,6 +549,7 @@ def main() -> None:
         trajectory,
         step_repeat=args.step_repeat,
     )
+    input("Press Enter to exit the cuRobo demo...")
     if sim.is_window_recording():
         sim.stop_window_record()
         sim.wait_window_record_saves()

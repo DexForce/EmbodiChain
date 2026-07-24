@@ -124,17 +124,22 @@ def _make_mock_motion_generator():
     return mg
 
 
-def _make_curobo_mock_motion_generator(result_positions, success=None):
+def _make_curobo_mock_motion_generator(
+    result_positions, success=None, preserve_plan_samples=True
+):
     """Mock MotionGenerator whose planner is a cuRobo backend.
 
     ``result_positions`` is ``(B, N, ARM_DOF)``. The planner preserves samples
     and disables pre-interpolation, matching the real cuRobo capabilities.
+    ``preserve_plan_samples`` defaults to ``True`` to exercise the opt-in raw
+    path; pass ``False`` to exercise the default resample-to-sample_interval
+    path.
     """
     mg = _make_mock_motion_generator()
     planner = Mock()
     planner.cfg.planner_type = "curobo"
     planner.preinterpolate_targets = False
-    planner.preserve_plan_samples = True
+    planner.preserve_plan_samples = preserve_plan_samples
     planner.supports_joint_move = True
     mg.planner = planner
     B = result_positions.shape[0]
@@ -1298,7 +1303,8 @@ class TestMoveJointsCurobo:
             WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
         )
         assert result.success.tolist() == [True, True]
-        # Returned CuRobo length (5), not sample_interval (10).
+        # With preserve_plan_samples=True (opt-in), cuRobo's raw length (5) is
+        # returned unchanged rather than resampled to sample_interval (10).
         assert result.trajectory.shape == (NUM_ENVS, 5, TOTAL_DOF)
         # Full-DoF preservation: hand joints stay at the inherited state (zeros).
         assert torch.allclose(
@@ -1307,6 +1313,27 @@ class TestMoveJointsCurobo:
         plan_states = mg.generate.call_args.args[0]
         assert all(s.move_type is MoveType.JOINT_MOVE for s in plan_states)
         assert mg.generate.call_args.kwargs["options"].is_interpolate is False
+
+    def test_default_resamples_to_sample_interval(self):
+        mg = _make_curobo_mock_motion_generator(
+            result_positions=torch.zeros(NUM_ENVS, 5, ARM_DOF),
+            preserve_plan_samples=False,
+        )
+        action = self._action(mg, sample_interval=10)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
+        ) as interp:
+            result = action.execute(
+                JointPositionTarget(qpos=torch.full((ARM_DOF,), 0.5)),
+                WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF)),
+            )
+        assert result.success.tolist() == [True, True]
+        # Default preserve_plan_samples=False resamples cuRobo's raw length (5)
+        # up to the action's sample_interval (10).
+        assert interp.call_count == 1
+        assert interp.call_args.kwargs["interp_num"] == 10
+        assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
 
     def test_multi_waypoint_routes_ordered_joint_states(self):
         mg = _make_curobo_mock_motion_generator(

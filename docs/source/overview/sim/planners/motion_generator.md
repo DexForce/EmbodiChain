@@ -181,7 +181,7 @@ print(f"Estimated sample count: {sample_count}")
 * The planner type can be specified as a string or `PlannerType` enum.
 * If the robot provides its own joint limits, those will be used; otherwise, default or user-specified limits are applied.
 * For Cartesian interpolation, inverse kinematics (IK) is used to compute joint configurations for each interpolated pose.
-* Backends declare whether pre-interpolation is safe and whether their returned samples must be preserved. cuRobo V2 disables EmbodiChain Cartesian pre-interpolation and preserves its collision-checked samples.
+* Backends declare whether pre-interpolation is safe and whether their returned samples must be preserved. cuRobo V2 disables EmbodiChain Cartesian pre-interpolation and (by default) is resampled to the action's `sample_interval`; set `CuroboPlannerCfg.preserve_plan_samples=True` to keep its raw collision-checked samples.
 * CuroboPlanner is optional and requires CUDA plus a matching cuRobo V2 installation; see [the cuRobo planner page](curobo_planner.md) and [NVIDIA's installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html).
 * Run the collision-aware Panda demo with `python examples/sim/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1`.
 * The sample count estimation is useful for predicting computational load and memory requirements.
