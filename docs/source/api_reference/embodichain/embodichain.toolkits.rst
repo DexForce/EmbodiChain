@@ -1,12 +1,16 @@
 embodichain.toolkits
 ====================
 
+The :mod:`embodichain.toolkits` package contains asset-preparation and
+manipulation utilities that can be used independently of the simulation loop.
+
 .. automodule:: embodichain.toolkits
 
    .. rubric:: Submodules
 
    .. autosummary::
 
+      acd
       graspkit
       urdf_assembly
 
@@ -85,7 +89,7 @@ ConvexCollisionChecker
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ConvexCollisionChecker
-   :members: query, query_batch
+   :members: query, query_batch_points
    :show-inheritance:
 
 ConvexCollisionCheckerCfg
@@ -96,8 +100,20 @@ ConvexCollisionCheckerCfg
    :show-inheritance:
 
 
-URDF Assembly Tool
--------------------
+URDF Convex Decomposition
+-------------------------
+
+The :mod:`embodichain.toolkits.acd.urdf_modifider` module converts concave URDF
+collision meshes into CoACD-generated convex hulls. The high-level function can
+also scale the model and recompute inertial properties.
+
+.. currentmodule:: embodichain.toolkits.acd.urdf_modifider
+
+.. autofunction:: generate_urdf_collision_convexes
+
+
+URDF Assembly
+-------------
 
 .. automodule:: embodichain.toolkits.urdf_assembly
    :members:
