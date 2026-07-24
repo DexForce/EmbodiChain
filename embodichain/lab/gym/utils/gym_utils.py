@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 import numpy as np
 import torch
 import dexsim
@@ -1156,3 +1157,113 @@ def init_rollout_buffer_from_config(
             assign_data_to_dict(rollout_buffer["obs"], obs_name, obs_tensor)
 
     return rollout_buffer
+
+
+def build_trajectory_states_buffer(
+    env,
+    max_steps: int,
+    num_envs: int,
+    device: Union[str, torch.device],
+    uids: List[str] | None = None,
+) -> TensorDict:
+    """Preallocate a nested ``states`` TensorDict for trajectory recording.
+
+    Records per-object kinematic state over time: the robot (always) plus all
+    non-robot articulations and rigid objects, unless ``uids`` restricts the
+    non-robot set. Layout is ``[num_envs, max_steps, ...]``.
+
+    Args:
+        env: An environment exposing ``robot`` and ``sim._articulations`` /
+            ``sim._rigid_objects`` registries.
+        max_steps: Number of per-env timesteps to preallocate.
+        num_envs: Number of parallel environments.
+        device: Torch device for the buffers.
+        uids: Optional allow-list of non-robot object uids to record.
+
+    Returns:
+        A nested ``TensorDict`` with batch size ``[num_envs, max_steps]``.
+    """
+
+    def _zeros(*shape: int) -> torch.Tensor:
+        return torch.zeros(*shape, dtype=torch.float32, device=device)
+
+    states: dict = {}
+    states["robot"] = TensorDict(
+        {
+            "root_pose": _zeros(num_envs, max_steps, 7),
+            "qpos": _zeros(num_envs, max_steps, env.robot.dof),
+        },
+        batch_size=[num_envs, max_steps],
+        device=device,
+    )
+
+    art_items = {
+        uid: art
+        for uid, art in env.sim._articulations.items()
+        if uids is None or uid in uids
+    }
+    if art_items:
+        states["articulations"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {
+                        "root_pose": _zeros(num_envs, max_steps, 7),
+                        "qpos": _zeros(num_envs, max_steps, art.dof),
+                    },
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, art in art_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    rigid_items = {
+        uid: obj
+        for uid, obj in env.sim._rigid_objects.items()
+        if uids is None or uid in uids
+    }
+    if rigid_items:
+        states["rigid_objects"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {"pose": _zeros(num_envs, max_steps, 7)},
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, obj in rigid_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    return TensorDict(states, batch_size=[num_envs, max_steps], device=device)
+
+
+def load_trajectory(trajectory: Union[str, "os.PathLike[str]", dict]) -> dict:
+    """Load a recorded trajectory from a path or pass through an in-memory dict.
+
+    Args:
+        trajectory: A ``.pt`` path produced by :meth:`EmbodiedEnv.save_trajectory`
+            or an already-loaded dict.
+
+    Returns:
+        A dict with keys ``states`` (TensorDict), ``actions`` (Tensor) and
+        ``meta`` (dict).
+
+    Raises:
+        ValueError: If required top-level or ``meta`` keys are missing.
+    """
+    if isinstance(trajectory, dict):
+        data = trajectory
+    else:
+        data = torch.load(trajectory, weights_only=False)
+    for key in ("states", "actions", "meta"):
+        if key not in data:
+            raise ValueError(f"Trajectory is missing required key: {key!r}")
+    meta = data["meta"]
+    for key in ("num_steps", "num_envs"):
+        if key not in meta:
+            raise ValueError(f"Trajectory meta is missing key: {key!r}")
+    return data

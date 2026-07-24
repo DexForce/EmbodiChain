@@ -508,3 +508,85 @@ class TestConfigToCfgFromFile:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+from types import SimpleNamespace
+
+import torch
+from tensordict import TensorDict
+
+from embodichain.lab.gym.utils.gym_utils import (
+    build_trajectory_states_buffer,
+    load_trajectory,
+)
+
+
+class _StubRobot:
+    def __init__(self, dof: int):
+        self.dof = dof
+        self.uid = "robot"
+
+
+class _StubArticulation:
+    def __init__(self, dof: int, uid: str):
+        self.dof = dof
+        self.uid = uid
+
+
+class _StubRigidObject:
+    def __init__(self, uid: str):
+        self.uid = uid
+
+
+def _stub_env(robot_dof=6, articulations=None, rigid_objects=None):
+    return SimpleNamespace(
+        robot=_StubRobot(robot_dof),
+        sim=SimpleNamespace(
+            _articulations={
+                uid: _StubArticulation(d, uid)
+                for uid, d in (articulations or {}).items()
+            },
+            _rigid_objects={
+                uid: _StubRigidObject(uid) for uid in (rigid_objects or [])
+            },
+        ),
+    )
+
+
+def test_build_trajectory_states_buffer_shapes():
+    env = _stub_env(robot_dof=6, articulations={"drawer": 2}, rigid_objects=["cube"])
+    buf = build_trajectory_states_buffer(env, max_steps=10, num_envs=3, device="cpu")
+    assert tuple(buf.batch_size) == (3, 10)
+    assert tuple(buf["robot"]["root_pose"].shape) == (3, 10, 7)
+    assert tuple(buf["robot"]["qpos"].shape) == (3, 10, 6)
+    assert tuple(buf["articulations"]["drawer"]["qpos"].shape) == (3, 10, 2)
+    assert tuple(buf["rigid_objects"]["cube"]["pose"].shape) == (3, 10, 7)
+
+
+def test_build_trajectory_states_buffer_uids_filter():
+    env = _stub_env(
+        robot_dof=6,
+        articulations={"drawer": 2, "door": 1},
+        rigid_objects=["cube", "ball"],
+    )
+    buf = build_trajectory_states_buffer(
+        env, max_steps=5, num_envs=1, device="cpu", uids=["cube"]
+    )
+    assert "articulations" not in buf.keys()  # drawer/door filtered out
+    assert "rigid_objects" in buf.keys()
+    assert "cube" in buf["rigid_objects"].keys()
+    assert "ball" not in buf["rigid_objects"].keys()
+
+
+def test_load_trajectory_validates_and_returns_dict(tmp_path):
+    data = {
+        "states": TensorDict({"a": torch.zeros(1, 4)}, batch_size=[1, 4]),
+        "actions": torch.zeros(1, 4, 3),
+        "meta": {"num_steps": 4, "num_envs": 1},
+    }
+    p = tmp_path / "traj.pt"
+    torch.save(data, p)
+    loaded = load_trajectory(str(p))
+    assert loaded["meta"]["num_steps"] == 4
+
+    with pytest.raises(ValueError):
+        load_trajectory({"states": torch.zeros(1)})
