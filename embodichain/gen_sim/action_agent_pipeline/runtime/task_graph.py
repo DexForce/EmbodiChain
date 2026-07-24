@@ -25,6 +25,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_actions import (
     execute_parallel_atomic_actions,
     init_parallel_world_states,
 )
+from embodichain.utils.logger import log_info
 
 __all__ = [
     "AgentGraphEdge",
@@ -120,6 +121,12 @@ class AgentTaskGraph:
                 raise RuntimeError("Agent task graph exceeded max_transitions.")
 
             edge = self.edges[self._next_edge(current)]
+            log_info(
+                f"Executing task graph edge {transitions}/{len(self.edges)}: "
+                f"{edge.id} ({edge.source} -> {edge.target}); "
+                f"left={self._action_log_label(edge.left_arm_action)}, "
+                f"right={self._action_log_label(edge.right_arm_action)}."
+            )
             result = execute_parallel_atomic_actions(
                 left_arm_action=edge.left_arm_action,
                 right_arm_action=edge.right_arm_action,
@@ -137,6 +144,13 @@ class AgentTaskGraph:
             # Failure is monotonic across graph edges: an environment that
             # failed once receives hold commands for every remaining edge.
             failed_env_mask = result["failed_env_mask"]
+            failed_count = (
+                int(failed_env_mask.sum().item()) if failed_env_mask is not None else 0
+            )
+            log_info(
+                f"Completed task graph edge {edge.id}: "
+                f"action_steps={len(actions)}, failed_envs={failed_count}."
+            )
             executed_actions.extend(actions)
             current = edge.target
 
@@ -204,6 +218,16 @@ class AgentTaskGraph:
             return None
         value = to_dict()
         return value if isinstance(value, Mapping) else None
+
+    @classmethod
+    def _action_log_label(cls, action: Any) -> str:
+        """Return a compact action label without serializing the full spec."""
+        action_mapping = cls._action_mapping(action)
+        if action_mapping is None:
+            return "null"
+        action_class = str(action_mapping.get("atomic_action_class", "unknown"))
+        robot_name = str(action_mapping.get("robot_name", "unknown"))
+        return f"{action_class}({robot_name})"
 
     def _next_edge(self, node_id: str) -> str:
         outgoing_edges = self.outgoing[node_id]

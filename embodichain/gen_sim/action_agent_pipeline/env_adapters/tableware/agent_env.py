@@ -486,6 +486,15 @@ class AgenticGenSimEnv(EmbodiedEnv):
             metadata={"regenerate": bool(regenerate)},
         ):
             task_graph = self.precomputed_task_graph_path.read_text(encoding="utf-8")
+        if not getattr(self, "_task_graph_logged", False):
+            # The graph is immutable for this environment instance, so print
+            # the full source once without flooding logs on later episodes.
+            logger.log_info(
+                "Task graph input (precomputed):\n"
+                f"```json\n{task_graph.rstrip()}\n```",
+                color="green",
+            )
+            self._task_graph_logged = True
 
         logger.log_info("Start graph compilation.", color="blue")
         compile_agent_input = dict(
