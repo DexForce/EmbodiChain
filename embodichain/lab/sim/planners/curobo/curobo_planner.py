@@ -760,11 +760,15 @@ class CuroboPlanner(BasePlanner):
             robot is not None
         ), "cuRobo planner has no robot; cannot auto-generate its YAML."
         auto = self.cfg.auto_gen
-        solvers = getattr(robot, "_solvers", None) or {}
-        solver = solvers.get(control_part) if solvers else None
-        urdf_path = (
-            getattr(solver, "urdf_path", None) if solver is not None else None
-        ) or robot.cfg.fpath
+        # cuRobo's robot YAML is generated from the *assembled* URDF
+        # (robot.cfg.fpath), which includes every mounted component (arm +
+        # gripper). A solver's ``urdf_path`` may be a sub-chain URDF (e.g. the
+        # UR arm's bare UR10 URDF hardcoded in URSolverCfg) that omits the
+        # gripper; keying the cache on it would reuse a stale, gripper-less YAML
+        # even after the gripper is attached, and would not invalidate when the
+        # gripper changes. Use robot.cfg.fpath for both the cache key and
+        # generation so they stay consistent and the gripper links are included.
+        urdf_path = robot.cfg.fpath
         cache_dir = auto.cache_dir or os.path.join(
             os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
             "embodichain_curobo",
@@ -784,6 +788,7 @@ class CuroboPlanner(BasePlanner):
             control_part,
             cache_path,
             tool_frame=tool_frame,
+            urdf_path=urdf_path,
             fit_type=auto.fit_type,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
