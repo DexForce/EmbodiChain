@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -26,8 +27,10 @@ from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
+    build_trajectory_states_buffer,
     config_to_cfg,
     DEFAULT_MANAGER_MODULES,
+    load_trajectory,
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
 )
@@ -506,20 +509,6 @@ class TestConfigToCfgFromFile:
         assert cfg.max_episode_steps == 321
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
-from types import SimpleNamespace
-
-import torch
-from tensordict import TensorDict
-
-from embodichain.lab.gym.utils.gym_utils import (
-    build_trajectory_states_buffer,
-    load_trajectory,
-)
-
-
 class _StubRobot:
     def __init__(self, dof: int):
         self.dof = dof
@@ -590,3 +579,7 @@ def test_load_trajectory_validates_and_returns_dict(tmp_path):
 
     with pytest.raises(ValueError):
         load_trajectory({"states": torch.zeros(1)})
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

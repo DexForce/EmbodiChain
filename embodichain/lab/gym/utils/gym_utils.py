@@ -1163,8 +1163,8 @@ def build_trajectory_states_buffer(
     env,
     max_steps: int,
     num_envs: int,
-    device: Union[str, torch.device],
-    uids: List[str] | None = None,
+    device: str | torch.device,
+    uids: list[str] | None = None,
 ) -> TensorDict:
     """Preallocate a nested ``states`` TensorDict for trajectory recording.
 
@@ -1241,7 +1241,7 @@ def build_trajectory_states_buffer(
     return TensorDict(states, batch_size=[num_envs, max_steps], device=device)
 
 
-def load_trajectory(trajectory: Union[str, "os.PathLike[str]", dict]) -> dict:
+def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
     """Load a recorded trajectory from a path or pass through an in-memory dict.
 
     Args:

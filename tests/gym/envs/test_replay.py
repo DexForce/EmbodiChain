@@ -17,10 +17,9 @@
 from __future__ import annotations
 
 import gc
+from unittest.mock import patch
 
-import gymnasium as gym
 import numpy as np
-import pytest
 import torch
 
 from embodichain.data import get_data_path
@@ -280,10 +279,18 @@ def test_close_restores_physics(tmp_path):
     env2 = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
     env2 = ReplayWrapper(env2, str(path), mode="kinematic")
     inner = env2.env
-    env2.reset()
-    # During kinematic replay physics is off.
-    # After close, the guard flag is cleared.
-    env2.close()
-    assert inner._replay_no_auto_reset is False
-    SimulationManager.flush_cleanup_queue()
-    gc.collect()
+    closed = False
+    try:
+        with patch.object(
+            inner.sim, "enable_physics", wraps=inner.sim.enable_physics
+        ) as spy:
+            env2.reset()
+            env2.close()
+            closed = True
+        spy.assert_any_call(True)
+        assert inner._replay_no_auto_reset is False
+    finally:
+        if not closed:
+            env2.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()

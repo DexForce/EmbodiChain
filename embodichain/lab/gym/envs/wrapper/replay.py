@@ -16,12 +16,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
 import torch
 
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
+from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.types import EnvObs
 
 __all__ = ["ReplayWrapper"]
 
@@ -57,6 +61,32 @@ class ReplayWrapper(gym.Wrapper):
         self._trajectory = load_trajectory(trajectory)
         self._num_steps = int(self._trajectory["meta"]["num_steps"])
         self._idx = 0
+
+        # Sanity-check that the trajectory matches the replay env's robot.
+        meta = self._trajectory["meta"]
+        traj_robot_dof = int(meta.get("robot_dof", self.env.robot.dof))
+        traj_active_joint_ids = list(meta.get("active_joint_ids", []))
+        env_robot_dof = int(self.env.robot.dof)
+        env_active_joint_ids = list(self.env.active_joint_ids)
+        if (
+            traj_robot_dof != env_robot_dof
+            or traj_active_joint_ids != env_active_joint_ids
+        ):
+            raise ValueError(
+                f"Trajectory was recorded with robot_dof={traj_robot_dof} / "
+                f"active_joint_ids={traj_active_joint_ids} but replay env has "
+                f"robot_dof={env_robot_dof} / active_joint_ids={env_active_joint_ids}."
+            )
+
+        # Clamp replay length to the wrapped env's horizon.
+        max_steps = int(self.env.max_episode_steps)
+        if self._num_steps > max_steps:
+            logger.log_warning(
+                f"Trajectory has {self._num_steps} steps but env max_episode_steps is "
+                f"{max_steps}; truncating replay to {max_steps} steps."
+            )
+            self._num_steps = max_steps
+
         self._expand_to_env_count()
 
     def _expand_to_env_count(self) -> None:
@@ -90,16 +120,38 @@ class ReplayWrapper(gym.Wrapper):
             target=False,
         )
         if "articulations" in states.keys():
-            for uid, art in env.sim._articulations.items():
-                if uid in states["articulations"].keys():
-                    art.set_local_pose(states["articulations"][uid]["root_pose"])
-                    art.set_qpos(states["articulations"][uid]["qpos"], target=False)
+            traj_art_uids = set(states["articulations"].keys())
+            scene_art_uids = set(env.sim._articulations.keys())
+            for uid in traj_art_uids - scene_art_uids:
+                logger.log_warning(
+                    f"Trajectory articulation '{uid}' is not present in the scene; skipping."
+                )
+            for uid in traj_art_uids & scene_art_uids:
+                art = env.sim._articulations[uid]
+                art.set_local_pose(states["articulations"][uid]["root_pose"])
+                art.set_qpos(states["articulations"][uid]["qpos"], target=False)
+            for uid in scene_art_uids - traj_art_uids:
+                logger.log_warning(
+                    f"Scene articulation '{uid}' is not in the trajectory; leaving initial state."
+                )
         if "rigid_objects" in states.keys():
-            for uid, obj in env.sim._rigid_objects.items():
-                if uid in states["rigid_objects"].keys():
-                    obj.set_local_pose(states["rigid_objects"][uid]["pose"])
+            traj_rigid_uids = set(states["rigid_objects"].keys())
+            scene_rigid_uids = set(env.sim._rigid_objects.keys())
+            for uid in traj_rigid_uids - scene_rigid_uids:
+                logger.log_warning(
+                    f"Trajectory rigid object '{uid}' is not present in the scene; skipping."
+                )
+            for uid in traj_rigid_uids & scene_rigid_uids:
+                obj = env.sim._rigid_objects[uid]
+                obj.set_local_pose(states["rigid_objects"][uid]["pose"])
+            for uid in scene_rigid_uids - traj_rigid_uids:
+                logger.log_warning(
+                    f"Scene rigid object '{uid}' is not in the trajectory; leaving initial state."
+                )
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(
+        self, *, seed: int | None = None, options: dict | None = None
+    ) -> tuple[EnvObs, dict]:
         obs, info = self.env.reset(seed=seed, options=options)
         # Disable physics during restore so set_local_pose's internal update
         # does not integrate dynamics.
@@ -111,7 +163,9 @@ class ReplayWrapper(gym.Wrapper):
         self._idx = 0
         return self.env.get_obs(), info
 
-    def step(self, action):
+    def step(
+        self, action: Any
+    ) -> tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         env = self.env
         if self._idx >= self._num_steps:
             obs = env.get_obs()
