@@ -1,234 +1,154 @@
-# URDF Assembly Tool
+# URDF Assembly
 
-The URDF Assembly Tool is a modular system for building and assembling Unified Robot Description Format (URDF) files for robotic systems. It enables users to combine individual robot components (chassis, arms, legs, sensors, etc.) into a complete robot description.
+The URDF assembly toolkit builds one robot description from multiple component
+URDFs. It is intended for modular robots whose chassis, arms, end effectors, or
+sensors are maintained as separate assets.
 
-## Overview
+During assembly, the toolkit loads each component, copies its links, joints, and
+meshes into a unified layout, creates fixed joints between compatible
+components, attaches sensors, normalizes names, and writes the merged URDF. A
+content signature avoids rebuilding an unchanged assembly.
 
-The tool provides a programmatic way to:
+## Capabilities
 
-- **Add robot components**: Import URDF files for different robot parts (chassis, legs, torso, head, arms, hands)
-- **Attach sensors**: Add sensors (camera, lidar, IMU, GPS, force/torque) to specific components
-- **Merge URDFs**: Combine multiple component URDFs into a single unified robot description
-- **Apply transformations**: Position and orient components using 4x4 transformation matrices
-- **Validate assemblies**: Ensure URDF integrity and format compliance
-- **Cache assemblies**: Use signature checking to skip redundant processing
+- **Component assembly** — combines common robot parts such as a chassis,
+  torso, arms, and hands.
+- **Automatic connections** — creates fixed joints from built-in parent-child
+  rules and applies optional 4×4 transforms.
+- **Sensor attachment** — inserts sensor URDFs or XML elements at a selected
+  component link.
+- **Name management** — adds per-component prefixes and applies a consistent
+  casing policy to links and joints.
+- **Asset collection** — copies referenced meshes and related material assets
+  into the output layout.
+- **Incremental rebuilds** — hashes component files and assembly settings so an
+  up-to-date output can be reused.
+
+## Internal Modules
+
+The public entry point is `URDFAssemblyManager`. Its work is divided among the
+following submodules:
+
+| Module | Responsibility |
+|---|---|
+| `urdf_assembly_manager.py` | Coordinates registration, connection generation, merging, and output. |
+| `component.py` | Loads component URDFs, applies prefixes, and manages component registries. |
+| `connection.py` | Creates fixed joints according to connection rules and component transforms. |
+| `sensor.py` | Registers sensor attachments and merges their links and joints. |
+| `mesh.py` | Resolves and copies mesh, material, and texture assets. |
+| `name_normalizer.py` | Applies link and joint casing policies. |
+| `file_writer.py` | Formats and writes the assembled URDF. |
+| `signature.py` | Calculates and checks assembly signatures. |
+| `logging_utils.py` | Provides assembly-specific logging. |
+
+Most applications should use `URDFAssemblyManager` or
+`embodichain.lab.sim.cfg.URDFCfg` instead of calling these internal helpers
+directly.
 
 ## Quick Start
 
 ```python
-from pathlib import Path
 import numpy as np
+
 from embodichain.toolkits.urdf_assembly import URDFAssemblyManager
 
-# Initialize the assembly manager
 manager = URDFAssemblyManager()
 
-# Add robot components
 manager.add_component(
-    component_type="chassis",
-    urdf_path="path/to/chassis.urdf",
+    component_type="arm",
+    urdf_path="assets/arm.urdf",
+)
+manager.add_component(
+    component_type="hand",
+    urdf_path="assets/hand.urdf",
+    transform=np.eye(4),
 )
 
-manager.add_component(
-    component_type="torso",
-    urdf_path="path/to/torso.urdf",
-    transform=np.eye(4)  # 4x4 transformation matrix
-)
+manager.merge_urdfs(output_path="build/arm_with_hand.urdf")
+```
+
+`add_component()` returns `False` and logs an error if registration fails.
+Check its return value in asset-processing pipelines before calling
+`merge_urdfs()`.
+
+## Component Assembly
+
+### Supported Component Types
+
+The manager recognizes these component roles:
+
+| Component | Purpose |
+|---|---|
+| `chassis` | Mobile base or central platform. |
+| `legs` | Legged locomotion system. |
+| `torso` | Main body between the base and upper-body components. |
+| `head` | Head or upper sensor structure. |
+| `left_arm`, `right_arm` | Side-specific manipulators. |
+| `left_hand`, `right_hand` | Side-specific end effectors. |
+| `arm` | Single manipulator without a side designation. |
+| `hand` | Single end effector without a side designation. |
+
+For a chassis, the optional `wheel_type` parameter accepts `omni`,
+`differential`, or `tracked`. Referenced meshes can use STL, OBJ, PLY, DAE, or
+GLB formats.
+
+### Connection Rules
+
+The manager connects registered components using built-in parent-child rules:
+
+- `chassis` → `legs` → `torso`
+- `chassis` → `torso`
+- `torso` → `head`
+- `torso` or `chassis` → side-specific arms
+- `left_arm` → `left_hand`
+- `right_arm` → `right_hand`
+- `arm` → `hand`
+
+Components without a matching parent are attached to the assembly base link.
+The `transform` passed to `add_component()` controls the fixed joint that
+attaches that component. It must be a 4×4 homogeneous transformation matrix.
+
+```python
+hand_transform = np.eye(4)
+hand_transform[2, 3] = 0.05
 
 manager.add_component(
-    component_type="left_arm",
-    urdf_path="path/to/arm.urdf"
+    component_type="hand",
+    urdf_path="assets/hand.urdf",
+    transform=hand_transform,
 )
+```
 
-# Attach sensors
+## Sensor Attachment
+
+`attach_sensor()` accepts either a path to a sensor URDF or an
+`xml.etree.ElementTree.Element`. The attachment identifies both the component
+and the link within that component.
+
+```python
 manager.attach_sensor(
     sensor_name="front_camera",
-    sensor_source="path/to/camera.urdf",
+    sensor_source="assets/camera.urdf",
     parent_component="chassis",
     parent_link="base_link",
-    transform=np.eye(4)
+    transform=np.eye(4),
 )
-
-# Merge all components into a single URDF
-manager.merge_urdfs(output_path="assembly_robot.urdf")
 ```
 
-## Supported Components
+The predefined sensor categories are `camera`, `lidar`, `imu`, `gps`, and
+`force`. Use a unique `sensor_name` for each attachment.
 
-The tool supports the following robot component types:
+## Naming Configuration
 
-| Component | Description |
-|:----------|:------------|
-| `chassis` | Base platform of the robot |
-| `legs` | Leg system for legged robots |
-| `torso` | Main body/torso section |
-| `head` | Head/upper section |
-| `left_arm` | Left arm manipulator |
-| `right_arm` | Right arm manipulator |
-| `left_hand` | Left end-effector/gripper |
-| `right_hand` | Right end-effector/gripper |
-| `arm` | Single arm (bimanual robots) |
-| `hand` | Single end-effector/gripper |
+### Component Prefixes
 
-### Wheel Types
+Prefixes prevent duplicate link and joint names when two components originate
+from the same URDF. The default side-specific prefixes are `left_` and
+`right_`; the other component types have no prefix.
 
-For chassis components, the following wheel types are supported:
-
-- `omni`: Omnidirectional wheels
-- `differential`: Differential drive
-- `tracked`: Tracked locomotion
-
-## Supported Sensors
-
-The following sensor types can be attached to robot components:
-
-| Sensor | Description |
-|:-------|:------------|
-| `camera` | RGB/depth cameras |
-| `lidar` | 2D/3D LIDAR sensors |
-| `imu` | Inertial measurement units |
-| `gps` | GPS receivers |
-| `force` | Force/torque sensors |
-
-## Connection Rules
-
-The tool automatically generates connection rules based on available components. The default rules include:
-
-- Chassis → Legs → Torso (for legged robots)
-- Chassis → Torso (for wheeled robots)
-- Torso → Head
-- Torso → Arms → Hands
-- Chassis → Arms (when no torso exists)
-
-## Mesh Formats
-
-Supported mesh file formats for visual and collision geometries:
-
-- STL
-- OBJ
-- PLY
-- DAE
-- GLB
-
-## API Reference
-
-### URDFAssemblyManager
-
-*Located in:* `embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py`
-
-The main class for managing URDF assembly operations.
-
-#### Methods
-
-##### add_component()
-
-Add a URDF component to the component registry.
+Set `component_prefix` with a list of `(component_type, prefix)` tuples:
 
 ```python
-manager.add_component(
-    component_type: str,
-    urdf_path: Union[str, Path],
-    transform: np.ndarray = None,
-    **params
-) -> bool
-```
-
-**Parameters:**
-
-- `component_type` (str): Type of component (e.g., 'chassis', 'head')
-- `urdf_path` (str or Path): Path to the component's URDF file
-- `transform` (np.ndarray, optional): 4x4 transformation matrix for positioning
-- `**params`: Additional component-specific parameters (e.g., `wheel_type` for chassis)
-
-**Returns:** `bool` - True if component added successfully
-
-##### attach_sensor()
-
-Attach a sensor to a specific component and link.
-
-```python
-manager.attach_sensor(
-    sensor_name: str,
-    sensor_source: Union[str, ET.Element],
-    parent_component: str,
-    parent_link: str,
-    transform: np.ndarray = None,
-    **kwargs
-) -> bool
-```
-
-**Parameters:**
-
-- `sensor_name` (str): Unique name for the sensor
-- `sensor_source` (str or ET.Element): Path to sensor URDF or XML element
-- `parent_component` (str): Component to attach sensor to
-- `parent_link` (str): Link within the parent component
-- `transform` (np.ndarray, optional): Sensor transformation matrix
-
-**Returns:** `bool` - True if sensor attached successfully
-
-##### merge_urdfs()
-
-Merge all registered components into a single URDF file.
-
-```python
-manager.merge_urdfs(
-    output_path: str = "./assembly_robot.urdf",
-    use_signature_check: bool = True
-) -> ET.Element
-```
-
-**Parameters:**
-
-- `output_path` (str): Path where the merged URDF will be saved
-- `use_signature_check` (bool): Whether to check signatures to avoid redundant processing
-
-**Returns:** `ET.Element` - Root element of the merged URDF
-
-##### get_component()
-
-Retrieve a registered component by type.
-
-```python
-manager.get_component(component_type: str) -> URDFComponent | None
-```
-
-##### get_attached_sensors()
-
-Get all attached sensors.
-
-```python
-manager.get_attached_sensors() -> dict
-```
-
-##### Component name prefixes (`component_prefix`)
-
-`URDFAssemblyManager` uses `component_prefix` to configure name prefixes for
-each supported component type. This attribute is a list of 2-tuples:
-
-- Form: `[(component_name, prefix), ...]`
-- The default value is:
-
-    ```python
-    [
-        ("chassis", None),
-        ("legs", None),
-        ("torso", None),
-        ("head", None),
-        ("left_arm", "left_"),
-        ("right_arm", "right_"),
-        ("left_hand", "left_"),
-        ("right_hand", "right_"),
-        ("arm", None),
-        ("hand", None),
-    ]
-    ```
-
-You can configure it in a *patch-style* manner via the property:
-
-```python
-# Only override prefixes for existing components; do not introduce
-# new component names.
 manager.component_prefix = [
     ("left_arm", "L_"),
     ("right_arm", "R_"),
@@ -237,280 +157,133 @@ manager.component_prefix = [
 ]
 ```
 
-Semantics:
+This property uses patch semantics: omitted component types keep their current
+prefix. It does not accept new component types, and an unknown type raises
+`ValueError`.
 
-- Only components that already exist in the default configuration (e.g. `chassis/torso/left_arm/...`) may be overridden; new component names are not allowed.
-- Components not listed in `new_prefixes` keep their original prefix.
-- If `new_prefixes` contains an unknown component name, a `ValueError` is raised indicating that new component types cannot be introduced.
+### Link and Joint Casing
 
-##### Name casing policy (`name_case`)
-
-`URDFAssemblyManager` supports a global name casing policy that controls how
-link and joint names are normalized during assembly. This is configured on
-the manager instance after construction:
+The `name_case` policy controls how names are normalized:
 
 ```python
-manager = URDFAssemblyManager()
 manager.name_case = {
-        "joint": "upper",  # or "lower" / "none"
-        "link": "lower",  # or "upper" / "none"
+    "joint": "upper",
+    "link": "lower",
 }
+```
 
-Semantics:
+Both `joint` and `link` keys are required. Supported modes are `upper`, `lower`,
+and `original`; `none` is retained as a legacy alias for `original`.
+`URDFAssemblyManager` defaults to uppercase joints and lowercase links.
 
-- Valid keys: `"joint"`, `"link"`.
-- Valid values: `"upper"`, `"lower"`, `"none"`.
-- Default behavior matches the legacy implementation:
-  - joints are normalized to **UPPERCASE**,
-  - links are normalized to **lowercase**.
-- This policy is propagated to the internal component and connection managers,
-    and is also included in the assembly signature. Changing `name_case` will
-    therefore force a rebuild of the assembled URDF.
+```{note}
+`URDFCfg` defaults to preserving the source casing for both links and joints.
+Set `name_case` explicitly when direct-manager and simulation-config workflows
+must produce identical names.
+```
 
-## Using with URDFCfg for Robot Creation
+Prefix and casing changes are included in the assembly signature, so they
+trigger a rebuild even when the component files are unchanged.
 
-The URDF Assembly Tool can be used directly with `URDFCfg` to create robots with multiple components in the simulation. This is the recommended approach when building robots from assembled URDF files.
+## Public API
 
-### URDFCfg Overview
+### `add_component()`
 
-The `URDFCfg` class provides a convenient way to define multi-component robots:
+Registers a component URDF:
 
 ```python
+manager.add_component(
+    component_type: str,
+    urdf_path: str | Path,
+    transform: np.ndarray | None = None,
+    **params,
+) -> bool
+```
+
+### `attach_sensor()`
+
+Registers a sensor attachment:
+
+```python
+manager.attach_sensor(
+    sensor_name: str,
+    sensor_source: str | Element,
+    parent_component: str,
+    parent_link: str,
+    transform: np.ndarray | None = None,
+    **kwargs,
+) -> bool
+```
+
+### `merge_urdfs()`
+
+Builds and writes the unified description:
+
+```python
+manager.merge_urdfs(
+    output_path: str = "./assembly_robot.urdf",
+    use_signature_check: bool = True,
+) -> Element
+```
+
+When signature checking is enabled, the manager reuses an existing output if
+the component contents, transforms, parameters, prefix configuration, casing
+policy, and output name have not changed.
+
+### Registry Access
+
+Use `get_component(component_type)` to retrieve one registered component and
+`get_attached_sensors()` to retrieve all sensor attachments.
+
+## Using `URDFCfg` in Simulation
+
+`URDFCfg` is the convenient integration point for robots created through
+`SimulationManager`. It invokes the assembly toolkit automatically when more
+than one component is configured.
+
+```python
+import numpy as np
+from scipy.spatial.transform import Rotation
+
 from embodichain.lab.sim.cfg import RobotCfg, URDFCfg
 
+hand_transform = np.eye(4)
+hand_transform[:3, :3] = Rotation.from_euler(
+    "x", 90, degrees=True
+).as_matrix()
+
 cfg = RobotCfg(
-    uid="my_robot",
+    uid="arm_with_hand",
     urdf_cfg=URDFCfg(
         components=[
             {
                 "component_type": "arm",
-                "urdf_path": "path/to/arm.urdf",
+                "urdf_path": "assets/arm.urdf",
             },
             {
                 "component_type": "hand",
-                "urdf_path": "path/to/hand.urdf",
-                "transform": hand_transform,  # 4x4 transformation matrix
+                "urdf_path": "assets/hand.urdf",
+                "transform": hand_transform,
             },
-        ]
+        ],
+        component_prefix=[("hand", "tool_")],
+        name_case={"joint": "original", "link": "original"},
     ),
-    control_parts={...},
-    drive_pros={...},
 )
 ```
 
-When using `URDFCfg` to build multi-component robots, you can pass custom
-component prefixes to the internal `URDFAssemblyManager` via
-`URDFCfg.component_prefix`. Its semantics are identical to
-`URDFAssemblyManager.component_prefix`:
+Each component dictionary requires `component_type` and `urdf_path`; `transform`
+and component-specific parameters are optional. `URDFCfg` also supports:
 
-- Each element is a `(component_name, prefix)` tuple.
-- Only prefixes for components that exist in the default configuration may be overridden; no new component names can be added.
-- Components not explicitly listed keep their original prefix.
+| Setting | Purpose |
+|---|---|
+| `sensors` | Sensor attachment configurations. |
+| `base_link_name` | Name of the assembly root link. |
+| `component_prefix` | Per-component prefix overrides. |
+| `name_case` | Link and joint casing policy. |
+| `use_signature_check` | Enables incremental assembly reuse. |
+| `fpath` | Explicit output URDF path. |
+| `fname`, `fpath_prefix` | Generated output name and parent directory. |
 
-Example:
-
-```python
-urdf_cfg = URDFCfg(
-    components=[...],
-)
-urdf_cfg.component_prefix = [
-    ("left_arm", "L_"),
-    ("right_arm", "R_"),
-]
-```
-
-### Complete Example
-
-Here's a complete example from `scripts/tutorials/sim/create_robot.py`:
-
-```python
-import numpy as np
-import torch
-from scipy.spatial.transform import Rotation as R
-
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    RobotCfg,
-    URDFCfg,
-)
-from embodichain.data import get_data_path
-
-
-def create_robot(sim):
-    """Create and configure a robot with arm and hand components."""
-
-    # Get URDF paths for robot components
-    arm_urdf_path = get_data_path("Rokae/SR5/SR5.urdf")
-    hand_urdf_path = get_data_path(
-        "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
-    )
-
-    # Define control parts - joint names can be regex patterns
-    CONTROL_PARTS = {
-        "arm": ["JOINT[1-6]"],      # Matches JOINT1, JOINT2, ..., JOINT6
-        "hand": ["LEFT_.*"],         # Matches all joints starting with LEFT_
-    }
-
-    # Define transformation for hand attachment
-    hand_transform = np.eye(4)
-    hand_transform[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
-
-    # Create robot configuration
-    cfg = RobotCfg(
-        uid="sr5_with_hand",
-        urdf_cfg=URDFCfg(
-            components=[
-                {
-                    "component_type": "arm",
-                    "urdf_path": arm_urdf_path,
-                },
-                {
-                    "component_type": "hand",
-                    "urdf_path": hand_urdf_path,
-                    "transform": hand_transform,
-                },
-            ]
-        ),
-        control_parts=CONTROL_PARTS,
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[1-6]": 1e4, "LEFT_.*": 1e3},
-            damping={"JOINT[1-6]": 1e3, "LEFT_.*": 1e2},
-        ),
-    )
-
-    # Add robot to simulation
-    robot: Robot = sim.add_robot(cfg=cfg)
-
-    return robot
-
-
-# Initialize simulation and create robot
-sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=4))
-robot = create_robot(sim)
-print(f"Robot created with {robot.dof} joints")
-```
-
-```python
-import numpy as np
-import torch
-from scipy.spatial.transform import Rotation as R
-
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    RobotCfg,
-    URDFCfg,
-)
-from embodichain.data import get_data_path
-
-
-def create_robot(sim):
-    """Create and configure a robot with arm and hand components."""
-
-    # Get URDF paths for robot components
-    arm_urdf_path = get_data_path("Rokae/SR5/SR5.urdf")
-    hand_urdf_path = get_data_path(
-        "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
-    )
-
-    # Define transformation for hand attachment
-    hand_transform = np.eye(4)
-    hand_transform[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
-
-    left_arm_base_xpos = np.eye(4)
-    left_arm_base_xpos[1, 3] = 0.3
-
-    right_arm_base_xpos = np.eye(4)
-    right_arm_base_xpos[1, 3] = -0.3
-
-    # Create robot configuration
-    cfg = RobotCfg(
-        uid="dual_sr5",
-        urdf_cfg=URDFCfg(
-            components=[
-                {
-                    "component_type": "left_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": left_arm_base_xpos,
-                },
-                {
-                    "component_type": "right_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": right_arm_base_xpos,
-                },
-                {
-                    "component_type": "left_hand",
-                    "urdf_path": hand_urdf_path,
-                    "transform": hand_transform,
-                },
-                {
-                    "component_type": "right_hand",
-                    "urdf_path": hand_urdf_path,
-                    "transform": hand_transform,
-                },
-            ],
-            component_prefix=[("left_arm", "L_"), ("right_arm", "R_"), ("left_hand", "left_"), ("right_hand", "right_")],
-            name_case={
-                "joint": "lower",
-                "link": "lower",
-            }
-        ),
-    )
-
-    # Add robot to simulation
-    robot: Robot = sim.add_robot(cfg=cfg)
-
-    return robot
-
-
-# Initialize simulation and create robot
-sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=4))
-robot = create_robot(sim)
-print(f"Robot created with {robot.dof} joints")
-```
-
-### Component Configuration
-
-Each component in the `components` list supports the following keys:
-
-| Key | Type | Description |
-|:-----|:-----|:------------|
-| `component_type` | str | Type of component (arm, hand, chassis, etc.) |
-| `urdf_path` | str | Path to the component's URDF file |
-| `transform` | np.ndarray | Optional 4x4 transformation matrix for positioning |
-
-### Control Parts
-
-Control parts define which joints belong to different subsystems of the robot. Joint names can be specified as:
-
-- **Exact match**: `"JOINT1"` matches only `JOINT1`
-- **Regex patterns**: `"JOINT[1-6]"` matches `JOINT1` through `JOINT6`
-- **Wildcards**: `"LEFT_.*"` matches all joints starting with `LEFT_`
-
-### Drive Properties
-
-Drive properties control the joint behavior:
-
-- `stiffness`: Position control gain (P gain) for each joint/group
-- `damping`: Velocity control gain (D gain) for each joint/group
-
-Both support regex pattern matching for convenient configuration.
-
-## File Structure
-
-```
-embodichain/toolkits/urdf_assembly/
-├── __init__.py                  # Package exports
-├── urdf_assembly_manager.py     # Main assembly manager
-├── component.py                  # Component classes and registry
-├── sensor.py                     # Sensor attachment and registry
-├── connection.py                 # Connection/joint management
-├── mesh.py                       # Mesh file handling
-├── file_writer.py                # URDF file output
-├── signature.py                  # Assembly signature checking
-├── logging_utils.py              # Logging configuration
-└── utils.py                      # Utility functions
-```
+For a runnable robot example, see
+`scripts/tutorials/sim/create_robot.py` in the repository.

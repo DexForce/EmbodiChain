@@ -1,74 +1,112 @@
-# URDF Convex Decomposition Tool
+# URDF Convex Decomposition
 
-The URDF Convex Decomposition Tool is a utility within EmbodiChain designed to automatically process URDF models for simulation. It handles the decomposition of complex visual meshes into convex collision geometries and provides capabilities for model scaling and inertia recomputation.
+The URDF convex decomposition toolkit prepares mesh-based robot models for
+physics simulation. It processes each URDF link, decomposes its collision mesh
+into convex hulls with CoACD, writes the generated meshes beside the source
+asset, and updates a copy of the URDF to reference them.
 
-## Key Features
+If a link has no collision geometry, the toolkit uses its visual mesh and
+creates a collision element with the same origin. Primitive geometries and
+links without usable meshes are left unchanged.
 
-- **Automated Convex Decomposition**: Uses the CoACD algorithm to decompose concave meshes into multiple convex hulls, essential for stable physics simulation.
-- **URDF Modification**: Automatically generates a new URDF file linking to the newly created convex collision meshes.
-- **Inertia Handling**: Supports recomputing inertial properties (mass, center of mass, inertia tensor) based on the geometry.
-- **Model Scaling**: Allows for scaling the entire robot model (geometry, joints, origins) by specified factors.
+## Capabilities
 
-## Method 1: Python API Usage
+- **Convex collision generation** — decomposes concave meshes into a
+  configurable number of convex hulls for more stable collision detection.
+- **URDF rewriting** — stores generated meshes under `Collision/` and updates
+  the output URDF without replacing the source URDF.
+- **Inertia recomputation** — optionally calculates mass, center of mass, and
+  inertia from the generated collision mesh at unit density.
+- **Model scaling** — optionally scales mesh geometry, link and joint origins,
+  mass, and prismatic-joint limits.
 
-The tool provides a high-level function `generate_urdf_collision_convexes` for programmatic access. This is recommended for integrating the decomposition process into larger pipelines or scripts.
+```{note}
+Mesh paths are resolved relative to the input URDF directory. Keep the
+generated `Collision/` and `Scale/` directories together with the output URDF
+when moving the processed asset.
+```
 
-**Parameters:**
+## Python API
 
-- `urdf_path`: Path to the input URDF file.
-- `output_urdf_name`: Filename for the output URDF.
-- `max_convex_hull_num`: Maximum number of convex hulls to generate per mesh (default: 16).
-- `recompute_inertia`: Whether to recalculate inertial properties (default: False).
-- `scale`: Optional numpy array `[x, y, z]` to scale the model.
+Use `generate_urdf_collision_convexes` when integrating asset preprocessing
+into a Python pipeline.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `urdf_path` | `str` | required | Path to the source URDF. |
+| `output_urdf_name` | `str` | required | Name of the output URDF, written in the source URDF directory. |
+| `max_convex_hull_num` | `int` | `16` | Maximum hull count passed to CoACD for each mesh. |
+| `recompute_inertia` | `bool` | `False` | Recompute inertial properties from collision geometry. |
+| `scale` | sequence of 3 floats or `None` | `None` | Per-axis scale factors `[x, y, z]`. |
 
 ```python
-from embodichain.toolkits.acd.urdf_modifider import generate_urdf_collision_convexes
 import numpy as np
 
-# Example: Decompose and Scale
+from embodichain.toolkits.acd.urdf_modifider import (
+    generate_urdf_collision_convexes,
+)
+
 generate_urdf_collision_convexes(
     urdf_path="./assets/robot.urdf",
     output_urdf_name="robot_processed.urdf",
     max_convex_hull_num=16,
     recompute_inertia=True,
-    scale=np.array([1.0, 1.0, 1.0])
+    scale=np.array([1.0, 1.0, 1.0]),
 )
-print("Convex decomposition and inertia update completed.")
 ```
 
-## Method 2: Command Line Interface (CLI)
+## Command-Line Interface
 
-The tool can also be run directly from the terminal, which is useful for quick batch processing or standalone usage.
-
-**Command Structure:**
+Run the module directly for one-off or batch asset preparation:
 
 ```bash
 python -m embodichain.toolkits.acd.urdf_modifider [OPTIONS]
 ```
 
-### Argument Descriptions
+### Options
 
 | Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `--urdf_path` | str | Required | Path to the source URDF file. |
-| `--output_urdf_name` | str | `articulation_acd.urdf` | Name of the generated URDF file. |
-| `--max_convex_hull_num` | int | 8 | Maximum number of convex hulls for decomposition. |
-| `--recompute_inertia` | flag | False | If present, recomputes inertia based on mesh geometry. |
-| `--scale` | float | None | Scale factors (x y z). Example: `--scale 1.5 1.5 1.5`. |
+|---|---|---|---|
+| `--urdf_path` | `str` | required | Path to the source URDF. |
+| `--output_urdf_name` | `str` | `articulation_acd.urdf` | Name of the generated URDF. |
+| `--max_convex_hull_num` | `int` | `8` | Maximum hull count for each mesh. |
+| `--recompute_inertia` | flag | disabled | Recompute inertia from generated collision geometry. |
+| `--scale` | 3 floats | `None` | Per-axis scale factors, for example `--scale 1.5 1.5 1.5`. |
 
-**Example Usage:**
+The Python API and CLI intentionally have different default hull limits: `16`
+for the function and `8` for the CLI.
+
+### Examples
 
 ```bash
-# Basic decomposition
+# Generate convex collision meshes.
 python -m embodichain.toolkits.acd.urdf_modifider \
     --urdf_path ./assets/my_robot.urdf \
     --output_urdf_name my_robot_convex.urdf \
     --max_convex_hull_num 16
 
-# Decomposition with scaling and inertia recomputation
+# Scale the model and recompute inertia.
 python -m embodichain.toolkits.acd.urdf_modifider \
     --urdf_path ./assets/my_robot.urdf \
     --output_urdf_name my_robot_scaled.urdf \
     --recompute_inertia \
     --scale 0.5 0.5 0.5
 ```
+
+## Output Layout
+
+For an input at `assets/robot.urdf`, the toolkit writes generated files relative
+to `assets/`:
+
+```text
+assets/
+├── robot.urdf
+├── robot_processed.urdf
+├── Collision/
+│   └── *_auto_convex.obj
+└── Scale/                  # Created only when --scale is used.
+```
+
+Review the generated URDF before simulation, especially when using non-uniform
+scaling or inertia recomputation. The inertia calculation assumes unit mesh
+density, and non-watertight geometry may produce inaccurate values.

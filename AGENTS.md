@@ -73,7 +73,7 @@ EmbodiChain/
 │       ├── logger.py             # Project logger
 │       ├── math/                 # Tensor math helpers
 │       └── warp/kinematics/      # GPU kinematics via Warp
-├── configs/                      # Agent configs and task prompts (text/YAML)
+├── embodichain_tasks/            # Official task environments (separate package; ships its own configs/)
 ├── docs/                         # Sphinx documentation source + build
 │   └── source/                   # .md doc pages (overview, quick_start, features, resources)
 ├── tests/                        # Test suite

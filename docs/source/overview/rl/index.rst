@@ -62,7 +62,7 @@ Example
 
 .. code-block:: bash
 
-    python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+    python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 
 For more details, please refer to the source code and API documentation of each submodule.
 

@@ -57,6 +57,14 @@ gensim = [
   "pyrender==0.1.45"
 ]
 
+[project.scripts]
+# Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).
+# ``embodichain run-env`` discovers all installed task packages (via the
+# ``embodichain.tasks`` entry points) and runs their init hooks (via
+# ``embodichain.init``) before building and launching the environment.
+# Other sub-commands: preview-asset, annotate-grasp, train-rl.
+embodichain = "embodichain.__main__:main"
+
 [tool.uv.sources]
 bpy = { index = "blender" }
 
