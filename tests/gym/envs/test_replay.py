@@ -29,6 +29,8 @@ from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RigidObjectCfg, RobotCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.gym.envs.managers.actions import DeltaQposTerm
+from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
 
 
 @register_env("ReplayTest-v1", max_episode_steps=100, override=True)
@@ -405,3 +407,103 @@ def test_auto_save_on_close(tmp_path):
 
     files = list(save_dir.glob("*.pt"))
     assert len(files) == 2  # one per in-flight env
+
+
+def test_async_envs_do_not_corrupt_recording(tmp_path):
+    """env0 terminates early; env1 keeps recording without being overwritten."""
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=3)
+        # env0 "finishes" its episode at step 3 -> its counter resets to 0.
+        env._initialize_episode(torch.tensor([0]))
+        # env1 continues for 2 more steps; env0 records a new episode from 0.
+        _drive(env, num_steps=2)
+        # env1 should have 5 recorded steps; env0 should have 2 (not overwrite env1).
+        assert env._traj_steps.tolist() == [2, 5]
+        # env1 step 4 (the 5th) was recorded and is intact.
+        env1_qpos_step4 = env._traj_buffer["states"]["robot"]["qpos"][1, 4]
+        assert not torch.all(env1_qpos_step4 == 0)
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+@register_env("ReplayDeltaTask-v1", max_episode_steps=100, override=True)
+class ReplayDeltaEnv(EmbodiedEnv):
+    """UR10 + dynamic cube with a delta-qpos ActionManager for replay tests."""
+
+    def __init__(
+        self,
+        record_trajectory: bool = True,
+        num_envs: int = 1,
+        device: str = "cpu",
+        **kwargs,
+    ):
+        cfg = EmbodiedEnvCfg()
+        cfg.num_envs = num_envs
+        cfg.max_episode_steps = 100
+        cfg.sim_cfg = SimulationManagerCfg(headless=True, sim_device=device)
+        cfg.robot = RobotCfg(
+            uid="UR10",
+            fpath=get_data_path("UniversalRobots/UR10/UR10.urdf"),
+            init_pos=(0.0, 0.0, 1.0),
+            drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+        )
+        cfg.rigid_object = [
+            RigidObjectCfg(
+                uid="cube",
+                shape=CubeCfg(size=[0.03, 0.03, 0.03]),
+                init_pos=(0.0, 0.0, 0.5),
+                body_type="dynamic",
+            )
+        ]
+        cfg.actions = {
+            "arm": ActionTermCfg(func=DeltaQposTerm, mode="pre", params={"scale": 1.0})
+        }
+        cfg.record_trajectory = record_trajectory
+        super().__init__(cfg, **kwargs)
+
+
+def test_dynamic_replay_with_action_manager(tmp_path):
+    """Dynamic replay feeds pre-process (delta) action; ActionManager re-applies it."""
+    env = ReplayDeltaEnv(record_trajectory=True, num_envs=1, device="cpu")
+    try:
+        env.reset()
+        init_qpos = env.robot.get_qpos()
+        deltas = []
+        for i in range(4):
+            d = torch.zeros_like(init_qpos)
+            d[:, 0] = 0.05 * (i + 1)
+            deltas.append(d)
+            env.step(d)
+        path = tmp_path / "delta.pt"
+        env.save_trajectory(str(path))
+        # Recorded action must be the raw delta (pre-process), not the resolved qpos.
+        rec = torch.load(path, weights_only=False)
+        assert torch.allclose(rec["actions"][0, 0], deltas[0][0], atol=1e-6)
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    rec_states = rec["states"]
+
+    env2 = ReplayDeltaEnv(record_trajectory=False, num_envs=1, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="dynamic")
+    try:
+        env2.reset()
+        for _ in range(4):
+            obs, reward, term, trunc, info = env2.step(None)
+        # Dynamic replay re-applies the recorded raw deltas through the same
+        # ActionManager, so the final state should closely track the recording.
+        assert torch.allclose(
+            env2.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, -1], atol=0.05
+        )
+        # Auto-reset guard stays engaged during dynamic replay.
+        assert env2.env._replay_no_auto_reset is True
+    finally:
+        env2.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
