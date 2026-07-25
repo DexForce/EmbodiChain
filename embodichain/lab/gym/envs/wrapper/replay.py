@@ -199,6 +199,31 @@ class ReplayWrapper(gym.Wrapper):
         trunc = trunc | (self._replay_steps >= self._lengths)
         return obs, reward, term, trunc, info
 
+    def go_to_step(self, step: int) -> EnvObs:
+        """Scrub to a specific recorded step (kinematic).
+
+        Disables physics, writes the recorded object states at ``step``, commits
+        the scene, and returns the rendered observation. Used by interactive
+        control mode (forward/back/jump are all O(1) since kinematic replay sets
+        states directly). ``step`` is clamped to ``[0, min(lengths)-1]``.
+
+        Args:
+            step: Target step index.
+
+        Returns:
+            The observation at the target step.
+        """
+        env = self.env
+        max_step = int(self._lengths.min().item()) - 1
+        step = max(0, min(int(step), max_step))
+        env.sim.enable_physics(False)
+        self._set_all_states(self._trajectory["states"][:, step])
+        env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
+        self._replay_steps = torch.full(
+            (env.num_envs,), step, dtype=torch.long, device=env.device
+        )
+        return env.get_obs()
+
     def close(self) -> None:
         try:
             self.env.sim.enable_physics(True)

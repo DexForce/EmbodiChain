@@ -510,3 +510,78 @@ def test_dynamic_replay_with_action_manager(tmp_path):
         env2.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_go_to_step_scrubs_to_recorded_state(tmp_path):
+    """go_to_step jumps to an arbitrary step and sets the recorded state (O(1) kinematic scrub)."""
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=5)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    rec = torch.load(path, weights_only=False)
+    rec_states = rec["states"]
+
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    rw = ReplayWrapper(env2.unwrapped, str(path), mode="kinematic")
+    try:
+        rw.reset()
+        # jump to step 3
+        rw.go_to_step(3)
+        assert torch.allclose(
+            rw.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, 3], atol=1e-4
+        )
+        # out-of-range clamps to last step
+        rw.go_to_step(999)
+        max_step = int(rw._lengths.min().item()) - 1
+        assert torch.allclose(
+            rw.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, max_step], atol=1e-4
+        )
+        # jump back to step 0
+        rw.go_to_step(0)
+        assert torch.allclose(
+            rw.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, 0], atol=1e-4
+        )
+    finally:
+        rw.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_run_env_replay_function(tmp_path):
+    """run_env.replay() drives the full trajectory without error (kinematic + dynamic)."""
+    from embodichain.lab.scripts.run_env import replay
+
+    # record
+    env = ReplayTestEnv(record_trajectory=True, num_envs=1, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=4)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    # kinematic replay (replay() closes the env)
+    env_k = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
+    try:
+        replay(env_k, str(path), mode="kinematic")
+    finally:
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    # dynamic replay on a fresh env
+    env_d = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
+    try:
+        replay(env_d, str(path), mode="dynamic")
+    finally:
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
