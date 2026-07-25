@@ -16,6 +16,7 @@
 
 from math import log
 from functools import wraps
+from datetime import datetime
 import os
 import torch
 import numpy as np
@@ -323,8 +324,6 @@ class EmbodiedEnv(BaseEnv):
         self._traj_steps: torch.Tensor | None = None
         self._traj_raw_action: EnvAction | None = None
         self._traj_save_count = 0
-        from datetime import datetime
-
         self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         if self.cfg.record_trajectory:
             self._traj_buffer = build_trajectory_buffer(
@@ -1196,20 +1195,29 @@ class EmbodiedEnv(BaseEnv):
         return path
 
     def _save_trajectory_for_env(self, env_id: int) -> str | None:
-        """Auto-save one env's trajectory to ``cfg.trajectory_save_dir`` (or default)."""
+        """Auto-save one env's trajectory (best-effort; never crashes the episode)."""
         if self._traj_buffer is None or not self.cfg.trajectory_auto_save:
             return None
         if int(self._traj_steps[env_id].item()) == 0:
             return None
-        base = self.cfg.trajectory_save_dir
-        if base is None:
-            base = os.path.join(
-                EMBODICHAIN_DEFAULT_DATA_ROOT, "trajectories", self._traj_run_id
+        try:
+            base = self.cfg.trajectory_save_dir
+            if base is None:
+                base = os.path.join(
+                    EMBODICHAIN_DEFAULT_DATA_ROOT, "trajectories", self._traj_run_id
+                )
+            os.makedirs(base, exist_ok=True)
+            path = os.path.join(
+                base, f"traj_env{env_id}_{self._traj_save_count:06d}.pt"
             )
-        os.makedirs(base, exist_ok=True)
-        path = os.path.join(base, f"traj_env{env_id}_{self._traj_save_count:06d}.pt")
-        self._traj_save_count += 1
-        return self.save_trajectory(path, env_ids=[env_id])
+            self._traj_save_count += 1
+            return self.save_trajectory(path, env_ids=[env_id])
+        except OSError as e:
+            logger.log_warning(
+                f"Auto-save failed for env {env_id} ({e}); skipping. "
+                "Use save_trajectory(path) explicitly to surface IO errors."
+            )
+            return None
 
     def close(self) -> None:
         """Close the environment and release resources."""

@@ -63,6 +63,7 @@ class ReplayTestEnv(EmbodiedEnv):
             )
         ]
         cfg.record_trajectory = record_trajectory
+        cfg.trajectory_auto_save = False
         cfg.init_rollout_buffer = True
         super().__init__(cfg, **kwargs)
 
@@ -397,6 +398,7 @@ def test_auto_save_on_close(tmp_path):
     save_dir = tmp_path / "trajs"
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     env.cfg.trajectory_save_dir = str(save_dir)
+    env.cfg.trajectory_auto_save = True
     try:
         env.reset()
         _drive(env, num_steps=3)
@@ -409,7 +411,7 @@ def test_auto_save_on_close(tmp_path):
     assert len(files) == 2  # one per in-flight env
 
 
-def test_async_envs_do_not_corrupt_recording(tmp_path):
+def test_async_envs_do_not_corrupt_recording():
     """env0 terminates early; env1 keeps recording without being overwritten."""
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     try:
@@ -463,6 +465,7 @@ class ReplayDeltaEnv(EmbodiedEnv):
             "arm": ActionTermCfg(func=DeltaQposTerm, mode="pre", params={"scale": 1.0})
         }
         cfg.record_trajectory = record_trajectory
+        cfg.trajectory_auto_save = False
         super().__init__(cfg, **kwargs)
 
 

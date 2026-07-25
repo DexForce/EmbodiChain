@@ -22,6 +22,7 @@ import torch
 import dexsim
 import argparse
 import gymnasium
+import gymnasium as gym
 
 from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
@@ -1165,7 +1166,7 @@ def build_trajectory_buffer(
     num_envs: int,
     device: str | torch.device,
     uids: list[str] | None = None,
-    action_space=None,
+    action_space: "gym.Space" | None = None,
 ) -> TensorDict:
     """Preallocate a nested trajectory buffer for per-env recording.
 
