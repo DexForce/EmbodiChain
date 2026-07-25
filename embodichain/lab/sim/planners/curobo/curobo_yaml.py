@@ -85,6 +85,7 @@ def generate_curobo_robot_yaml(
     output_path: str,
     *,
     tool_frame: str | None = None,
+    urdf_path: str | None = None,
     fit_type: str = "morphit",
     num_spheres: int | None = None,
     sphere_density: float = 1.0,
@@ -115,6 +116,13 @@ def generate_curobo_robot_yaml(
         output_path: Destination YAML file path.
         tool_frame: cuRobo tool frame (a URDF link name) to plan to. If ``None``,
             defaults to the last link of the control part.
+        urdf_path: URDF to generate the cuRobo model from. If ``None`` (default),
+            uses ``robot.cfg.fpath`` -- the *assembled* URDF that includes every
+            mounted component (arm + gripper). Pass this explicitly when the
+            caller already resolved the URDF (the planner does, so the on-disk
+            cache key and the generation use the same file). Must be the full
+            assembled URDF, not a solver's sub-chain URDF, or gripper links are
+            silently dropped from the collision model.
         fit_type: cuRobo sphere-fit strategy - ``"morphit"`` (default, best),
             ``"voxel"`` (faster), or ``"surface"`` (crude, fixed radius).
         num_spheres: Per-link sphere count. If ``None``, cuRobo auto-estimates
@@ -159,7 +167,7 @@ def generate_curobo_robot_yaml(
     fit_type_enum = fit_type_map[fit_type]
     device_cfg = DeviceCfg(device=device)
 
-    urdf_path = robot.cfg.fpath
+    urdf_path = urdf_path or robot.cfg.fpath
     link_vert_dict: dict = {}
     link_face_dict: dict = {}
     for link_name in robot.get_link_names() or []:
