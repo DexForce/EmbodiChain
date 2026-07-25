@@ -43,7 +43,7 @@ The cuRobo robot model and the per-control-part profile are both auto-generated
 internally - no external cuRobo robot YAML (e.g. `franka.yml`) and no
 `robot_profiles` config are needed. On the first plan, the adapter fits collision
 spheres to each link of the robot's URDF and writes a cuRobo V2 robot YAML (see
-[Auto-generated robot YAML](#auto-generated-robot-yaml)). The tool frame, TCP
+[Auto-generated robot YAML](curobo-auto-generated-robot-yaml). The tool frame, TCP
 offset, and base link are read from the control part's IK solver, and the
 simulator->cuRobo joint mapping is identity (the generated YAML reuses the
 URDF's own joint names). The control part is selected at plan time through
@@ -74,6 +74,15 @@ planner_cfg = CuroboPlannerCfg(
 motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 ~~~
 
+The physics and planner devices are independent.
+`SimulationManagerCfg(sim_device="cpu")` keeps robot state, targets, and
+returned trajectories on CPU,
+while cuRobo still performs all model generation and planning on CUDA. By
+default a CPU simulation uses PyTorch's current CUDA device; set
+`CuroboPlannerCfg.cuda_device="cuda:1"` (or an integer GPU index) to select a
+different planning GPU. A CPU value is rejected because cuRobo itself has no
+CPU backend.
+
 The robot configuration must be a cuRobo V2 robot profile with collision
 spheres and self-collision data; the adapter generates this from the robot's
 URDF automatically. A plain URDF alone is not sufficient for collision planning
@@ -91,23 +100,50 @@ is not itself the TCP. By convention, the adapter uses
 `T_curobo,X = T_curobo,sim_base @ inv(T_world,sim_base) @ T_world,X`. It obtains
 the simulator base from the control part's IK solver root.
 
-`CuroboPlannerCfg.use_cuda_graph` defaults to `False` for the same DexSim GPU
-stream-safety reason. Enable it explicitly only after validating the local
-simulation stack.
+`CuroboPlannerCfg.use_cuda_graph` defaults to `True`. The planner runs in the
+simulator process and reuses its CUDA context; it does not launch a persistent
+`spawn` worker or copy planning tensors through multiprocessing queues. Set
+`use_cuda_graph=False` when lower one-time initialization cost and lower
+graph-resident memory are more important than hot planning latency.
+
+In graph mode, planner initialization uses the same per-device
+`CaptureCoordinator` as DexSim's Newton backend and synchronizes the device
+before and after cuRobo warmup. EmbodiChain also forces cuRobo's PyTorch graphs
+to use `cuda_graph_capture_error_mode="thread_local"` (the default).
+Unlike PyTorch's strict `"global"` mode, this allows DexSim's Vulkan render
+thread to continue making CUDA calls without invalidating capture on the
+planner thread.
+
+If coordinator acquisition times out before recording begins,
+`cuda_graph_fallback=True` waits for the active capture to finish and builds a
+non-graph backend. An exception after graph recording starts is deliberately
+not downgraded: CUDA may have invalidated the process context, so the planner
+raises an error and requires a simulator-process restart. The `"global"` and
+`"relaxed"` modes remain available for diagnosis, but `"thread_local"` is the
+supported renderer-compatible setting.
+
+cuRobo cannot reset a captured trajectory-optimizer graph when switching
+between Cartesian pose goals and joint-space goals. EmbodiChain therefore
+caches those two goal types separately and initializes each lazily. Applications
+that use only one move type retain one planner backend; using both incurs a
+second one-time warmup and its graph-resident memory, but still no subprocess or
+second CUDA context.
 
 The collision world is always auto-generated from live `RigidObject` meshes via
 `CuroboWorldCfg.rigid_objects`: the adapter reads each object's mesh
 (`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and writes a
 cached cuRobo scene YAML on the first plan, using
-`CuroboWorldCfg.obstacle_representation` (`"cuboid"` by default - a local-frame
-AABB placed as an OBB via the object pose; also `"mesh"` for the exact triangle
-mesh, or `"sphere"` to fit spheres with cuRobo's `fit_spheres_to_mesh`).
+`CuroboWorldCfg.obstacle_representation` (`"sphere"` by default for fast
+collision queries; use `"cuboid"` for a local-frame AABB placed as an OBB via
+the object pose, or `"mesh"` for the exact triangle mesh).
 Generated poses are authored in the cuRobo base/world frame, so this is exact
 when the robot base sits at the simulator world origin. For obstacles that move
 or live in an offset base frame, also declare their names in
 `CuroboWorldCfg.dynamic_obstacle_names` and update poses at plan time through
 `CuroboPlanOptions.dynamic_obstacle_poses` (provision
-`CuroboWorldCfg.collision_cache` before planning). With the default shared world
+`CuroboWorldCfg.collision_cache` before planning). Dynamic updates require the
+`"cuboid"` or `"mesh"` representation because sphere fitting expands one object
+into multiple independently named obstacles. With the default shared world
 (`multi_env=False`), all batch rows must provide the same obstacle pose; set
 `multi_env=True` when each environment needs its own collision-world instance
 (for example, different dynamic obstacle poses). In that mode the generated world
@@ -116,6 +152,7 @@ left `None`) is likewise materialized once per row so its per-environment cache
 is allocated. Dynamic pose updates still require the named geometry to already
 exist in every scene; the adapter does not insert new geometry at runtime.
 
+(curobo-auto-generated-robot-yaml)=
 ## Auto-generated robot YAML
 
 On the first plan, the adapter auto-derives the cuRobo robot profile from the
@@ -153,8 +190,11 @@ trajectory duration).
 ~~~python
 import torch
 
-from embodichain.lab.sim.planners import MotionGenOptions, PlanState
-from embodichain.lab.sim.planners.curobo_planner import CuroboPlanOptions
+from embodichain.lab.sim.planners import (
+    CuroboPlanOptions,
+    MotionGenOptions,
+    PlanState,
+)
 
 goal_pose = torch.eye(4, device=robot.device).unsqueeze(0)
 goal_pose[:, :3, 3] = torch.tensor(
@@ -196,7 +236,10 @@ This first release intentionally has the following limits:
   values. The adapter does not yet validate cross-model locked-joint name/value
   equivalence automatically.
 - The legacy Gym ActionBank path is unsupported.
-- CPU execution and cuRobo V1 compatibility are unsupported.
+- CPU execution of cuRobo itself and cuRobo V1 compatibility are unsupported.
+  CPU physics is supported because tensors are transferred to CUDA only for
+  planning and the resulting trajectory is copied back to the simulation
+  device.
 
 ## Demo
 
@@ -205,14 +248,17 @@ the Panda obstacle-avoidance demo from the repository root:
 
 ~~~bash
 python examples/sim/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1
+
+# CPU physics with CUDA planning
+python examples/sim/planners/curobo_planner.py --headless --sim-device cpu
 ~~~
 
 The demo exports the DexSim `demo_block` into the cuRobo collision world via
 `CuroboWorldCfg.rigid_objects` (the robot and world YAMLs are both
 auto-generated), prints the result status and trajectory shape, then replays the
-returned full-DoF trajectory. It disables cuRobo CUDA graph capture by default because graph
-capture can conflict with DexSim GPU physics; pass `--cuda-graph` only after
-validating that the local simulator stream setup supports it. Headless runs
+returned full-DoF trajectory. CUDA graph capture is enabled by default with the
+renderer-compatible `"thread_local"` mode; pass `--no-cuda-graph` to disable it.
+Headless runs
 automatically record this fixed offscreen camera view to an MP4. Set an explicit
 destination with `--record-save-path outputs/videos/curobo_demo.mp4`, adjust
 the rate with `--record-fps`, or pass `--disable-record` to skip recording. See

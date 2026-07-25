@@ -5,7 +5,7 @@
 ## Features
 
 * **Unified planning interface**: Supports interpolation-oriented planners and collision-aware cuRobo V2 planning through one `generate()` API.
-* **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CUDA-only CuroboPlanner backend.
+* **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CuroboPlanner backend, which plans on CUDA with either CPU or CUDA physics simulation.
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
 * **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
 * **Convenient sampling**: Supports various sampling strategies via `TrajectorySampleMethod`.

@@ -188,7 +188,8 @@ at least 4 GB VRAM, and a driver that supports CUDA 12 or newer. See
 [NVIDIA's official installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 for the current compatibility requirements, and see
 [cuRobo V2 Planner](../overview/sim/planners/curobo_planner.md) for EmbodiChain
-configuration and usage.
+configuration and usage. cuRobo planning always runs on CUDA, but the
+SimulationManager physics device may be either CPU or CUDA.
 
 ## Optional: generative simulation (`gensim`)
 

@@ -31,13 +31,18 @@ from __future__ import annotations
 import hashlib
 import importlib
 import os
-import queue
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
+import yaml
 
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import pose_inv, quat_from_matrix
@@ -74,6 +79,11 @@ _CUROBO_INSTALL_URL = (
 # exclude URDF mimic joints from cspace/lock_joints (cuRobo folds them into
 # their active joint and raises KeyError when locking one).
 _CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v2"
+
+# cuRobo 0.8 does not expose PyTorch's CUDA stream-capture error mode. The
+# temporary adapter below therefore replaces ``torch.cuda.graph`` only while
+# cuRobo can lazily record graphs. Serialize that small process-wide patch.
+_TORCH_CUDA_GRAPH_PATCH_LOCK = threading.Lock()
 
 
 @dataclass
@@ -148,11 +158,11 @@ class CuroboWorldCfg:
     obstacle_representation: str = "sphere"
     """Collision representation used when generating the YAML from :attr:`rigid_objects`.
 
-    ``"cuboid"`` (default) emits a local-frame AABB per object, placed as an OBB
-    via the object pose - exact for box-shaped obstacles and needs no CUDA.
-    ``"mesh"`` emits the full triangle mesh (exact, no CUDA). ``"sphere"`` fits
-    spheres with cuRobo's ``fit_spheres_to_mesh`` (faster collision checking, but
-    approximate and requires CUDA + cuRobo + trimesh).
+    ``"sphere"`` (default) fits spheres with cuRobo's
+    ``fit_spheres_to_mesh`` (fast collision queries, approximate, and requires
+    CUDA + cuRobo + trimesh). ``"cuboid"`` emits a local-frame AABB per object,
+    placed as an OBB via the object pose. ``"mesh"`` emits the full triangle
+    mesh (exact, no CUDA).
     """
 
     collision_cache: dict[str, int | dict[str, int | float | list[float]]] = {
@@ -244,11 +254,11 @@ class CuroboAutoGenCfg:
 class CuroboPlannerCfg(BasePlannerCfg):
     """Configuration for the cuRobo V2 planner backend.
 
-    cuRobo always runs in a spawned side process with its own CUDA context, so it
-    can capture CUDA graphs (~0.02s/plan) without conflicting with DexSim's
-    Vulkan/CUDA interop semaphores (graph capture in-process crashes DexSim at
-    ``DFGpuSemaphore.cpp:346``). Both the cuRobo robot YAML and the collision-world
-    YAML are auto-generated internally (from the robot's URDF and from
+    cuRobo runs in the simulator process so it reuses the existing CUDA context
+    instead of keeping a spawned Python process and a second CUDA context alive.
+    CUDA graphs are enabled by default with renderer-compatible thread-local
+    capture. Both the cuRobo robot YAML and the collision-world YAML are
+    auto-generated internally (from the robot's URDF and from
     :attr:`world.rigid_objects` respectively); no external YAML is used. The
     per-control-part profile is auto-derived from the robot's solver at plan time.
     """
@@ -281,6 +291,54 @@ class CuroboPlannerCfg(BasePlannerCfg):
     max_planning_time: float | None = None
     """Post-plan validation budget (seconds). ``None`` skips the timing check."""
 
+    cuda_device: str | int | torch.device | None = None
+    """CUDA device used exclusively by cuRobo.
+
+    ``None`` uses the simulator GPU when physics runs on CUDA, otherwise the
+    current PyTorch CUDA device. An integer selects ``cuda:<index>``. CPU
+    physics is supported, but cuRobo itself always runs on CUDA.
+    """
+
+    use_cuda_graph: bool = True
+    """Whether cuRobo may capture CUDA graphs in the simulator process.
+
+    ``True`` enables the renderer-compatible fast path by default. Capture is
+    serialized with DexSim Newton captures on the same CUDA device and fenced
+    with device synchronizations. cuRobo's PyTorch graph captures use
+    :attr:`cuda_graph_capture_error_mode`, whose ``"thread_local"`` default
+    permits the DexSim render thread to continue submitting CUDA work. Set this
+    to ``False`` to reduce one-time initialization and graph-resident memory.
+    """
+
+    cuda_graph_fallback: bool = True
+    """Use non-graph mode if the capture coordinator times out before capture.
+
+    An error after capture starts is never downgraded in-process because CUDA
+    may leave the context in an invalid state. Such errors are raised and the
+    simulator process must be restarted.
+    """
+
+    cuda_graph_capture_error_mode: str = "thread_local"
+    """PyTorch CUDA stream-capture error mode used by cuRobo.
+
+    ``"thread_local"`` isolates capture from CUDA calls made by DexSim's render
+    thread and is the recommended mode for the in-process planner. ``"global"``
+    retains PyTorch's strict default and is expected to conflict with an active
+    renderer. ``"relaxed"`` disables additional capture-safety checks and
+    should only be used for diagnosis.
+    """
+
+    capture_acquire_timeout: float | None = 2.0
+    """Seconds to wait for the per-device capture coordinator.
+
+    ``None`` waits indefinitely. After a finite timeout, graph mode falls back
+    to non-graph mode, then waits for the active capture to finish before
+    launching planner initialization kernels.
+    """
+
+    capture_wait_log_interval: float | None = 10.0
+    """Seconds between coordinator wait logs; ``None`` disables them."""
+
     interpolation_dt: float = 0.025
     """Interpolation step (seconds) used by cuRobo and as a dt fallback."""
 
@@ -303,12 +361,11 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     warmup_iterations: int = 1
-    """cuRobo warmup iterations run once per cached worker planner.
+    """cuRobo warmup iterations run once per cached in-process planner.
 
-    The worker captures CUDA graphs during warmup so the first real plan is fast.
-    One iteration suffices to capture the trajectory-optimization graph; extra
-    iterations only re-replay it. Raise this only if a warm plan is unexpectedly
-    slow (incomplete graph capture on a complex robot).
+    Set to ``0`` to skip warmup when CUDA graphs are disabled. Graph mode always
+    runs at least one coordinated warmup because otherwise the first real plan
+    would perform an uncoordinated lazy capture.
     """
 
 
@@ -405,6 +462,115 @@ def _validate_dynamic_obstacles(
 # =============================================================================
 
 
+def _ensure_warp_torch_compat() -> None:
+    """Restore ``warp.torch`` for cuRobo 0.8 when using Warp 1.13 or newer."""
+    import sys
+
+    import warp as wp
+
+    if hasattr(wp, "torch"):
+        return
+    try:
+        import warp._src.torch as torch_interop
+    except ImportError:
+        return
+    wp.torch = torch_interop  # type: ignore[attr-defined]
+    sys.modules["warp.torch"] = torch_interop
+
+
+class _LocalCaptureCoordinator:
+    """Fallback per-device capture lock when DexSim's coordinator is unavailable."""
+
+    _instance: "_LocalCaptureCoordinator | None" = None
+    _instance_lock = threading.Lock()
+
+    def __init__(self) -> None:
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    @classmethod
+    def get(cls) -> "_LocalCaptureCoordinator":
+        """Return the process-wide fallback coordinator."""
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return cls._instance
+
+    def acquire_for_capture(
+        self,
+        device: str,
+        owner: object,  # noqa: ARG002 - API-compatible with DexSim coordinator
+        timeout: float | None = None,
+        wait_log_interval: float | None = None,  # noqa: ARG002
+    ) -> bool:
+        """Acquire the lock for ``device`` within ``timeout``."""
+        with self._locks_guard:
+            lock = self._locks.setdefault(str(device), threading.Lock())
+        if timeout is None:
+            lock.acquire()
+            return True
+        return lock.acquire(timeout=max(0.0, float(timeout)))
+
+    def release_for_capture(
+        self,
+        device: str,
+        owner: object,  # noqa: ARG002 - API-compatible with DexSim coordinator
+    ) -> None:
+        """Release the lock for ``device`` when held."""
+        with self._locks_guard:
+            lock = self._locks.get(str(device))
+        if lock is not None and lock.locked():
+            lock.release()
+
+
+class _CaptureOwner:
+    """Weak-referenceable identity for one backend capture attempt."""
+
+
+@contextmanager
+def _torch_cuda_graph_capture_mode(mode: str) -> Iterator[None]:
+    """Temporarily force a capture mode for cuRobo's PyTorch graph contexts.
+
+    cuRobo 0.8 creates every graph through ``torch.cuda.graph`` but does not
+    forward its ``capture_error_mode`` argument. The patch is deliberately
+    scoped to planner warmup/planning and restored even when capture raises.
+    """
+    valid_modes = ("global", "thread_local", "relaxed")
+    if mode not in valid_modes:
+        raise ValueError(
+            "CuroboPlannerCfg.cuda_graph_capture_error_mode must be one of "
+            f"{valid_modes}, got {mode!r}."
+        )
+
+    with _TORCH_CUDA_GRAPH_PATCH_LOCK:
+        original_graph = torch.cuda.graph
+
+        def graph_with_capture_mode(*args: "Any", **kwargs: "Any") -> "Any":
+            kwargs["capture_error_mode"] = mode
+            return original_graph(*args, **kwargs)
+
+        torch.cuda.graph = graph_with_capture_mode  # type: ignore[assignment]
+        try:
+            yield
+        finally:
+            torch.cuda.graph = original_graph  # type: ignore[assignment]
+
+
+def _get_capture_coordinator() -> "Any":
+    """Return DexSim Newton's shared capture coordinator when available."""
+    try:
+        coordinator_mod = importlib.import_module(
+            "dexsim.engine.newton_physics.capture_coordinator"
+        )
+    except (ImportError, AttributeError):
+        logger.log_warning(
+            "DexSim CaptureCoordinator is unavailable; cuRobo CUDA graph "
+            "capture will use a local per-device lock."
+        )
+        return _LocalCaptureCoordinator.get()
+    return coordinator_mod.CaptureCoordinator.get()
+
+
 def _require_curobo() -> "Any":
     """Lazily import and bundle the cuRobo V2 public facade types.
 
@@ -416,11 +582,7 @@ def _require_curobo() -> "Any":
         ImportError: If cuRobo V2 is not installed, with an actionable message
             naming NVIDIA's CUDA-matched extras.
     """
-    # cuRobo 0.8 references ``wp.torch.*``, which warp >= 1.13 removed (warp >=
-    # 1.13 is required for RTX 50-series / sm_120). Restore the namespace before
-    # importing cuRobo so the parent's fail-fast import stays representative.
-    from .curobo_process_worker import _ensure_warp_torch_compat
-
+    # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
     _ensure_warp_torch_compat()
     try:
         planner_mod = importlib.import_module("curobo.motion_planner")
@@ -445,6 +607,44 @@ def _require_curobo() -> "Any":
     )
 
 
+def _resolve_curobo_device(
+    configured_device: str | int | torch.device | None,
+    simulation_device: torch.device,
+) -> torch.device:
+    """Resolve cuRobo's concrete CUDA device independently of physics."""
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "cuRobo V2 requires CUDA even when SimulationManager uses CPU "
+            "physics, but torch.cuda.is_available() is False."
+        )
+
+    if configured_device is None:
+        if simulation_device.type == "cuda" and simulation_device.index is not None:
+            device = simulation_device
+        else:
+            device = torch.device("cuda", torch.cuda.current_device())
+    elif isinstance(configured_device, int):
+        device = torch.device("cuda", configured_device)
+    else:
+        device = torch.device(configured_device)
+        if device.type != "cuda":
+            raise ValueError(
+                "CuroboPlannerCfg.cuda_device must select a CUDA device, "
+                f"got {configured_device!r}."
+            )
+        if device.index is None:
+            device = torch.device("cuda", torch.cuda.current_device())
+
+    assert device.index is not None
+    device_count = torch.cuda.device_count()
+    if device.index < 0 or device.index >= device_count:
+        raise RuntimeError(
+            f"cuRobo CUDA device index {device.index} is unavailable; "
+            f"torch reports {device_count} CUDA device(s)."
+        )
+    return device
+
+
 # =============================================================================
 # CuroboPlanner
 # =============================================================================
@@ -453,14 +653,19 @@ def _require_curobo() -> "Any":
 class CuroboPlanner(BasePlanner):
     r"""cuRobo V2 collision-aware motion-planning backend.
 
-    The planner lazily imports cuRobo V2 at construction time (as a fail-fast
-    check) and runs all cuRobo work in a spawned side process with its own CUDA
-    context, where cuRobo can capture CUDA graphs without conflicting with
-    DexSim's GPU stream. One worker process per control part is cached; the
-    worker itself caches a ``MotionPlanner`` (single-environment) or
-    ``BatchMotionPlanner`` (multi-environment) per ``(batch_size, multi_env)``
-    key. Cartesian goals are converted to the cuRobo base frame in the parent
-    (which holds the live robot) and the solve is RPC'd to the worker.
+    The planner lazily imports cuRobo V2 at construction time and builds a
+    ``MotionPlanner`` (single environment) or ``BatchMotionPlanner`` (batched
+    environments) in the simulator process. Backends are cached per control
+    part, batch size, collision-world mode, and goal type, so there is no helper
+    process, IPC tensor copy, or second CUDA context.
+
+    CUDA graphs are enabled by default. Initialization uses DexSim Newton's
+    per-device capture coordinator, synchronizes the CUDA device before and
+    after warmup, and records PyTorch graphs in
+    ``"thread_local"`` capture mode so the DexSim renderer can continue issuing
+    CUDA calls from its own thread. A coordinator timeout may safely downgrade
+    before capture begins; a failure during capture is raised because the CUDA
+    context may already be invalid.
 
     Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged - the
     backend performs its own collision-aware IK and trajectory optimization, so
@@ -476,7 +681,7 @@ class CuroboPlanner(BasePlanner):
 
     Raises:
         ImportError: If cuRobo V2 is not installed.
-        RuntimeError: If the robot is not on a CUDA device.
+        RuntimeError: If CUDA is unavailable for cuRobo.
         ValueError: If ``robot_uid`` is missing or the robot is not found.
     """
 
@@ -494,71 +699,62 @@ class CuroboPlanner(BasePlanner):
         """
         return self.cfg.preserve_plan_samples
 
-    # Prewarmed workers spawned before the robot exists (see prewarm()), keyed by
-    # robot_uid. A CuroboPlanner picks up its prewarmed worker at construction.
-    _prewarmed: dict[str, "_IsolatedWorker"] = {}
-
-    @classmethod
-    def prewarm(cls, robot_uid: str, *, device_index: int | None = None) -> None:
-        """Spawn the cuRobo worker process early, before the robot exists.
-
-        cuRobo's worker startup is dominated by Python + torch import (~5s) that
-        is independent of the robot or scene. Calling ``prewarm`` before building
-        the simulation overlaps that startup with the sim build, shaving it off
-        the first plan's critical path. The worker imports cuRobo and idles; the
-        profile + world are sent when the planner first plans.
-
-        Args:
-            robot_uid: UID of the robot this worker will serve. Must match the
-                ``robot_uid`` of the later :class:`CuroboPlannerCfg`.
-            device_index: CUDA device index. ``None`` uses the current device.
-        """
-        import multiprocessing as mp
-
-        from .curobo_process_worker import InitMsg, worker_main
-
-        if robot_uid in cls._prewarmed:
-            return  # Already prewarming/prewarmed for this robot.
-        ctx = mp.get_context("spawn")
-        req_queue = ctx.Queue()
-        resp_queue = ctx.Queue()
-        idx = int(
-            device_index if device_index is not None else torch.cuda.current_device()
-        )
-        process = ctx.Process(
-            target=worker_main,
-            args=(InitMsg(device_index=idx), req_queue, resp_queue),
-            daemon=True,
-        )
-        process.start()
-        cls._prewarmed[robot_uid] = _IsolatedWorker(
-            process=process, req_queue=req_queue, resp_queue=resp_queue
-        )
-
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
         self.cfg: CuroboPlannerCfg = cfg
-        if self.device.type != "cuda":
-            raise RuntimeError(
-                "cuRobo V2 requires a CUDA device, but robot "
-                f"'{cfg.robot_uid}' is on {self.device}. Move the simulation "
-                "to a CUDA device before constructing the curobo planner."
-            )
-        # Fail fast with an actionable error if cuRobo V2 is not installed; the
-        # worker process imports it lazily, but surface the error at construction.
-        _require_curobo()
-        # Cached subprocess workers keyed by control_part.
-        self._isolated_workers: dict[str, "_IsolatedWorker"] = {}
-        # A worker prewarmed via CuroboPlanner.prewarm() before this planner
-        # existed (its spawn overlapped with the sim build); claimed on first use.
-        self._prewarmed_worker: "_IsolatedWorker | None" = type(self)._prewarmed.pop(
-            cfg.robot_uid, None
+        self.device = torch.device(self.robot.device)
+        self._curobo_device = _resolve_curobo_device(
+            cfg.cuda_device,
+            self.device,
+        )
+        # cuRobo and Warp contain a few current-device-sensitive initialization
+        # paths, so select the dedicated planning GPU before importing them.
+        torch.cuda.set_device(self._curobo_device)
+        self._bindings = _require_curobo()
+        self._backend_cache: dict[tuple[str, int, bool, MoveType], "_CuroboBackend"] = (
+            {}
         )
         world_cfg = cfg.world
         if world_cfg.obstacle_representation not in ("cuboid", "mesh", "sphere"):
             logger.log_error(
                 "CuroboWorldCfg.obstacle_representation must be 'cuboid', 'mesh', "
                 f"or 'sphere', got {world_cfg.obstacle_representation!r}.",
+                ValueError,
+            )
+        if (
+            world_cfg.dynamic_obstacle_names
+            and world_cfg.obstacle_representation == "sphere"
+        ):
+            logger.log_error(
+                "Dynamic obstacle updates require the 'cuboid' or 'mesh' world "
+                "representation. Sphere fitting expands one RigidObject into "
+                "multiple independent obstacles that cannot be updated by the "
+                "original object name.",
+                ValueError,
+            )
+        if cfg.warmup_iterations < 0:
+            logger.log_error(
+                "CuroboPlannerCfg.warmup_iterations must be non-negative.",
+                ValueError,
+            )
+        if (
+            cfg.capture_acquire_timeout is not None
+            and cfg.capture_acquire_timeout < 0.0
+        ):
+            logger.log_error(
+                "CuroboPlannerCfg.capture_acquire_timeout must be non-negative "
+                "or None.",
+                ValueError,
+            )
+        if cfg.cuda_graph_capture_error_mode not in (
+            "global",
+            "thread_local",
+            "relaxed",
+        ):
+            logger.log_error(
+                "CuroboPlannerCfg.cuda_graph_capture_error_mode must be "
+                "'global', 'thread_local', or 'relaxed'; got "
+                f"{cfg.cuda_graph_capture_error_mode!r}.",
                 ValueError,
             )
 
@@ -615,25 +811,43 @@ class CuroboPlanner(BasePlanner):
             )
         control_part = self._resolve_control_part(options)
         start = self._resolve_start_qpos(options.start_qpos, control_part)
-        backend = self._get_isolated_backend(control_part, start.shape[0])
+        move_types = {target.move_type for target in target_states}
+        unsupported = move_types.difference((MoveType.EEF_MOVE, MoveType.JOINT_MOVE))
+        if unsupported:
+            logger.log_error(
+                f"cuRobo does not support move types {sorted(str(x) for x in unsupported)}.",
+                ValueError,
+            )
+        backends = {
+            move_type: self._get_backend(
+                control_part,
+                start.shape[0],
+                move_type,
+            )
+            for move_type in move_types
+        }
+        transform_backend = backends.get(
+            MoveType.EEF_MOVE, next(iter(backends.values()))
+        )
         # Compute the live sim base pose + its inverse once per plan and reuse it
         # across every EEF segment and every dynamic-obstacle update (the robot
         # does not move during planning), instead of re-querying get_link_pose +
-        # re-inverting per segment / per (obstacle, worker). Skipped for pure
+        # re-inverting per segment / obstacle. Skipped for pure
         # joint-move plans with no dynamic obstacles, which never need it.
         needs_base_pose = bool(options.dynamic_obstacle_poses) or any(
             t.move_type == MoveType.EEF_MOVE for t in target_states
         )
         sim_base_pose_inv = (
-            pose_inv(self._get_sim_base_pose(backend, start.shape[0]))
+            pose_inv(self._get_sim_base_pose(transform_backend, start.shape[0]))
             if needs_base_pose
             else None
         )
-        self.update_dynamic_obstacles(
-            options.dynamic_obstacle_poses, backend, sim_base_pose_inv
-        )
+        for backend in backends.values():
+            self.update_dynamic_obstacles(
+                options.dynamic_obstacle_poses, backend, sim_base_pose_inv
+            )
         return self._plan_segments(
-            target_states, start, backend, options, sim_base_pose_inv
+            target_states, start, backends, options, sim_base_pose_inv
         )
 
     # ------------------------------------------------------------------
@@ -661,7 +875,7 @@ class CuroboPlanner(BasePlanner):
         if start_qpos is None:
             start_qpos = self.robot.get_qpos(name=control_part)
         start_qpos = torch.as_tensor(
-            start_qpos, dtype=torch.float32, device=self.device
+            start_qpos, dtype=torch.float32, device=self._curobo_device
         )
         if start_qpos.dim() == 1:
             start_qpos = start_qpos.unsqueeze(0)
@@ -670,6 +884,388 @@ class CuroboPlanner(BasePlanner):
     # ------------------------------------------------------------------
     # Backend construction / caching
     # ------------------------------------------------------------------
+
+    def _materialize_multi_env_scene_model(
+        self, world_config_path: str | None, batch_size: int
+    ) -> list[dict]:
+        """Return one independent cuRobo scene mapping for every batch row."""
+        if batch_size < 1:
+            logger.log_error(
+                f"multi-env cuRobo batch_size must be positive, got {batch_size}.",
+                ValueError,
+            )
+        if world_config_path is None:
+            return [{} for _ in range(batch_size)]
+
+        scene_path = Path(world_config_path)
+        if not scene_path.is_absolute():
+            content_mod = importlib.import_module("curobo.content")
+            scene_path = Path(content_mod.get_scene_configs_path()) / scene_path
+        try:
+            with scene_path.open(encoding="utf-8") as scene_file:
+                scene_model = yaml.safe_load(scene_file)
+        except (OSError, yaml.YAMLError) as exc:
+            logger.log_error(
+                f"Unable to load cuRobo V2 scene configuration "
+                f"'{world_config_path}': {exc}",
+                ValueError,
+            )
+            raise AssertionError("unreachable") from exc
+
+        if isinstance(scene_model, dict):
+            return [deepcopy(scene_model) for _ in range(batch_size)]
+        if isinstance(scene_model, list):
+            if not scene_model or not all(
+                isinstance(scene, dict) for scene in scene_model
+            ):
+                logger.log_error(
+                    "A multi-env cuRobo scene YAML list must contain one or more "
+                    "mapping worlds.",
+                    ValueError,
+                )
+            if len(scene_model) == 1:
+                return [deepcopy(scene_model[0]) for _ in range(batch_size)]
+            if len(scene_model) == batch_size:
+                return [deepcopy(scene) for scene in scene_model]
+            logger.log_error(
+                "A multi-env cuRobo scene YAML list must have one world to clone "
+                f"or exactly batch_size={batch_size} worlds; got {len(scene_model)}.",
+                ValueError,
+            )
+        logger.log_error(
+            "A cuRobo V2 scene YAML must contain a mapping world or a list of "
+            f"mapping worlds, got {type(scene_model).__name__}.",
+            ValueError,
+        )
+        raise AssertionError("unreachable")
+
+    def _get_backend(
+        self,
+        control_part: str,
+        batch_size: int,
+        planning_mode: MoveType = MoveType.EEF_MOVE,
+    ) -> "_CuroboBackend":
+        """Return a cached in-process backend for one goal-buffer shape."""
+        multi_env = bool(self.cfg.world.multi_env)
+        key = (control_part, int(batch_size), multi_env, planning_mode)
+        if key in self._backend_cache:
+            return self._backend_cache[key]
+
+        profile = self._materialize_profile(control_part)
+        sim_joint_names = self._resolve_sim_joint_names(control_part)
+        world_cfg = self.cfg.world
+        collision_cache = (
+            dict(world_cfg.collision_cache) if world_cfg.collision_cache else None
+        )
+        world_config_path = (
+            self._auto_generate_world_yaml(world_cfg)
+            if world_cfg.rigid_objects
+            else None
+        )
+        scene_model: str | list[dict] | None = world_config_path
+        if multi_env:
+            scene_model = self._materialize_multi_env_scene_model(
+                world_config_path, int(batch_size)
+            )
+
+        use_cuda_graph = bool(self.cfg.use_cuda_graph)
+        coordinator = None
+        capture_owner = _CaptureOwner()
+        capture_acquired = False
+        if use_cuda_graph:
+            coordinator = _get_capture_coordinator()
+            capture_acquired = coordinator.acquire_for_capture(
+                str(self._curobo_device),
+                capture_owner,
+                timeout=self.cfg.capture_acquire_timeout,
+                wait_log_interval=self.cfg.capture_wait_log_interval,
+            )
+            if not capture_acquired:
+                if not self.cfg.cuda_graph_fallback:
+                    raise RuntimeError(
+                        "Timed out waiting for coordinated cuRobo CUDA graph "
+                        f"capture on {self._curobo_device}."
+                    )
+                logger.log_warning(
+                    "Timed out waiting for coordinated cuRobo CUDA graph capture "
+                    f"on {self._curobo_device}; waiting for the active capture "
+                    "to finish, then using non-graph mode."
+                )
+                use_cuda_graph = False
+                # Non-graph initialization still launches CUDA kernels. Wait
+                # for the active capture to finish so those launches cannot
+                # invalidate a peer's stream capture.
+                capture_acquired = coordinator.acquire_for_capture(
+                    str(self._curobo_device),
+                    capture_owner,
+                    timeout=None,
+                    wait_log_interval=self.cfg.capture_wait_log_interval,
+                )
+                if not capture_acquired:
+                    raise RuntimeError(
+                        "Unable to coordinate safe non-graph cuRobo "
+                        f"initialization on {self._curobo_device}."
+                    )
+
+        backend: _CuroboBackend
+        try:
+            backend = self._build_backend(
+                control_part=control_part,
+                batch_size=int(batch_size),
+                profile=profile,
+                sim_joint_names=sim_joint_names,
+                scene_model=scene_model,
+                collision_cache=collision_cache,
+                use_cuda_graph=use_cuda_graph,
+                planning_mode=planning_mode,
+            )
+            try:
+                self._warmup_backend(backend)
+            except Exception as exc:
+                self._close_planner(backend.planner)
+                if not use_cuda_graph:
+                    raise
+                raise RuntimeError(
+                    "cuRobo CUDA graph warmup failed after capture may have "
+                    "started. The CUDA context may now be invalid, so an "
+                    "in-process non-graph fallback is unsafe; restart the "
+                    "simulator process. Original error: "
+                    f"{exc}"
+                ) from exc
+        finally:
+            if capture_acquired and coordinator is not None:
+                try:
+                    coordinator.release_for_capture(
+                        str(self._curobo_device), capture_owner
+                    )
+                except Exception as exc:
+                    logger.log_warning(
+                        f"cuRobo capture coordinator release failed: {exc}"
+                    )
+
+        self._backend_cache[key] = backend
+        logger.log_info(
+            f"cuRobo in-process backend ready for '{control_part}' "
+            f"(batch={batch_size}, mode={planning_mode.name}, "
+            f"cuda_graph={backend.use_cuda_graph})."
+        )
+        return backend
+
+    def _build_backend(
+        self,
+        *,
+        control_part: str,
+        batch_size: int,
+        profile: _CuroboProfile,
+        sim_joint_names: list[str],
+        scene_model: str | list[dict] | None,
+        collision_cache: dict[str, int | dict[str, int | float | list[float]]] | None,
+        use_cuda_graph: bool,
+        planning_mode: MoveType,
+    ) -> "_CuroboBackend":
+        """Construct and validate one cuRobo planner on the selected CUDA device."""
+        with torch.cuda.device(self._curobo_device):
+            planner_cfg = self._bindings.MotionPlannerCfg.create(
+                robot=profile.robot_config_path,
+                scene_model=scene_model,
+                collision_cache=collision_cache,
+                device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
+                max_batch_size=batch_size,
+                multi_env=bool(self.cfg.world.multi_env),
+                optimizer_collision_activation_distance=(
+                    self.cfg.collision_activation_distance
+                ),
+                use_cuda_graph=use_cuda_graph,
+            )
+            # cuRobo 0.8 reads interpolation_dt from the trajectory optimizer
+            # config rather than accepting it in MotionPlannerCfg.create().
+            planner_cfg.trajopt_solver_config.interpolation_dt = float(
+                self.cfg.interpolation_dt
+            )
+            planner = (
+                self._bindings.MotionPlanner(planner_cfg)
+                if batch_size == 1
+                else self._bindings.BatchMotionPlanner(planner_cfg)
+            )
+
+        try:
+            self._validate_profile_joint_names(
+                profile, sim_joint_names, list(planner.joint_names)
+            )
+            self._validate_base_link_name(profile, planner)
+            tool_frame = self._resolve_tool_frame(profile, planner)
+        except Exception:
+            self._close_planner(planner)
+            raise
+        return _CuroboBackend(
+            planner=planner,
+            control_part=control_part,
+            sim_joint_names=sim_joint_names,
+            tool_frame=tool_frame,
+            profile=profile,
+            batch_size=batch_size,
+            use_cuda_graph=use_cuda_graph,
+            planning_mode=planning_mode,
+        )
+
+    def _warmup_backend(self, backend: "_CuroboBackend") -> None:
+        """Warm one goal type without forcing cuRobo to reset captured graphs.
+
+        cuRobo uses structurally different trajectory-optimizer goal buffers for
+        pose and c-space solves. Its CUDA backend cannot reset captured graphs,
+        so each cached backend is warmed only for its declared planning mode.
+        """
+        iterations = int(self.cfg.warmup_iterations)
+        if not backend.use_cuda_graph and iterations == 0:
+            return
+        if backend.use_cuda_graph:
+            iterations = max(iterations, 1)
+        self._synchronize_device()
+        capture_mode = (
+            _torch_cuda_graph_capture_mode(self.cfg.cuda_graph_capture_error_mode)
+            if backend.use_cuda_graph
+            else nullcontext()
+        )
+        with capture_mode, torch.cuda.device(self._curobo_device):
+            planner = backend.planner
+            default_position = planner.default_joint_state.position
+            if default_position.dim() == 1:
+                default_position = default_position.unsqueeze(0)
+            if default_position.shape[0] == 1 and backend.batch_size > 1:
+                default_position = default_position.expand(
+                    backend.batch_size, -1
+                ).clone()
+            current_state = self._bindings.JointState.from_position(
+                default_position,
+                joint_names=list(planner.joint_names),
+            )
+            original_exit_early = planner.ik_solver.config.exit_early
+            planner.ik_solver.config.exit_early = False
+            try:
+                for _ in range(iterations):
+                    goal_state = current_state.clone()
+                    goal_state.position[..., 0] += 0.2
+                    if backend.planning_mode == MoveType.EEF_MOVE:
+                        goal = planner.compute_kinematics(
+                            goal_state
+                        ).tool_poses.as_goal()
+                        planner.plan_pose(
+                            goal,
+                            current_state,
+                            max_attempts=1,
+                            enable_graph_attempt=1,
+                        )
+                    elif backend.planning_mode == MoveType.JOINT_MOVE:
+                        planner.plan_cspace(
+                            goal_state,
+                            current_state,
+                            max_attempts=1,
+                            enable_graph_attempt=1,
+                        )
+                    else:  # pragma: no cover - validated before backend creation
+                        raise ValueError(
+                            f"Unsupported cuRobo warmup mode {backend.planning_mode}."
+                        )
+                    planner.reset_seed()
+
+                graph_planner = getattr(planner, "graph_planner", None)
+                if backend.use_cuda_graph and graph_planner is not None:
+                    graph_planner.warmup(num_warmup_iterations=iterations)
+            finally:
+                planner.ik_solver.config.exit_early = original_exit_early
+        self._synchronize_device()
+
+    def _synchronize_device(self) -> None:
+        """Synchronize only the CUDA device used by this planner."""
+        torch.cuda.synchronize(self._curobo_device)
+
+    @staticmethod
+    def _close_planner(planner: "Any") -> None:
+        """Best-effort release of a cuRobo planner's graph resources."""
+        close_fn = getattr(planner, "close", None) or getattr(planner, "destroy", None)
+        if close_fn is not None:
+            try:
+                close_fn()
+            except Exception:
+                pass
+
+    def _validate_profile_joint_names(
+        self,
+        profile: _CuroboProfile,
+        sim_joint_names: list[str],
+        curobo_joint_names: list[str],
+    ) -> None:
+        """Validate the auto-derived joint mapping before a CUDA planning call."""
+        sim_to_curobo = profile.sim_to_curobo_joint_names
+        if set(sim_to_curobo) != set(sim_joint_names):
+            logger.log_error(
+                "sim_to_curobo_joint_names keys must exactly match the robot "
+                f"control-part joints {sim_joint_names}; got {list(sim_to_curobo)}.",
+                ValueError,
+            )
+        mapped_names = [sim_to_curobo[name] for name in sim_joint_names]
+        if len(mapped_names) != len(set(mapped_names)):
+            logger.log_error(
+                "sim_to_curobo_joint_names maps multiple simulator joints to "
+                f"the same cuRobo joint: {mapped_names}.",
+                ValueError,
+            )
+        missing = [name for name in mapped_names if name not in curobo_joint_names]
+        if missing:
+            logger.log_error(
+                "cuRobo profile is missing mapped active joints "
+                f"{missing}; planner joints are {curobo_joint_names}.",
+                ValueError,
+            )
+        mapped_set = set(mapped_names)
+        unmapped = [name for name in curobo_joint_names if name not in mapped_set]
+        if unmapped:
+            logger.log_error(
+                "cuRobo planner exposes joints outside the requested control "
+                f"part: {unmapped}. Lock non-controlled joints in the V2 robot "
+                "profile or select a control part that includes them.",
+                ValueError,
+            )
+
+    def _resolve_tool_frame(self, profile: _CuroboProfile, planner: "Any") -> str:
+        """Resolve and validate the V2 tool frame used for pose goals."""
+        tool_frames = list(getattr(planner, "tool_frames", []))
+        tool_frame = profile.tool_frame_name
+        if tool_frame is None:
+            if len(tool_frames) != 1:
+                logger.log_error(
+                    "tool_frame_name is required when the cuRobo profile exposes "
+                    f"multiple tool frames: {tool_frames}.",
+                    ValueError,
+                )
+            return tool_frames[0]
+        if tool_frames and tool_frame not in tool_frames:
+            logger.log_error(
+                f"tool_frame_name '{tool_frame}' is not available in the cuRobo "
+                f"profile tool frames {tool_frames}.",
+                ValueError,
+            )
+        return tool_frame
+
+    @staticmethod
+    def _validate_base_link_name(profile: _CuroboProfile, planner: "Any") -> None:
+        """Ensure the auto-derived base link matches the loaded V2 model."""
+        expected = profile.base_link_name
+        if expected is None:
+            return
+        actual = getattr(getattr(planner, "kinematics", None), "base_link", None)
+        if actual is None:
+            logger.log_error(
+                "cuRobo planner did not expose kinematics.base_link, so "
+                f"base_link_name={expected!r} cannot be validated.",
+                ValueError,
+            )
+        if actual != expected:
+            logger.log_error(
+                f"Auto-derived base_link_name={expected!r} does not match the "
+                f"loaded cuRobo V2 base link {actual!r}.",
+                ValueError,
+            )
 
     def _materialize_profile(self, control_part: str) -> _CuroboProfile:
         """Auto-derive the cuRobo profile for ``control_part`` from the robot.
@@ -807,6 +1403,7 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            device=str(self._curobo_device),
         )
 
     def _robot_yaml_cache_key(
@@ -876,6 +1473,7 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            device=str(self._curobo_device),
         )
 
     def _world_yaml_cache_key(self, world_cfg: CuroboWorldCfg) -> str:
@@ -926,18 +1524,17 @@ class CuroboPlanner(BasePlanner):
         self,
         target_states: list[PlanState],
         start: torch.Tensor,
-        backend: "_CuroboBackend",
+        backends: dict[MoveType, "_CuroboBackend"],
         options: CuroboPlanOptions,
         sim_base_pose_inv: torch.Tensor | None = None,
     ) -> PlanResult:
         """Plan each waypoint segment sequentially and assemble a PlanResult.
 
-        Each segment's goal is converted to the cuRobo base frame in-process
-        (pure-tensor, using the live robot pose) and the cuRobo solve itself is
-        RPC'd to the subprocess worker, which returns a V2-result-like object
-        (or ``None``). Everything after the solve - segment extraction, the
-        planning-time budget check, junction-sample de-duplication, and
-        rectangular assembly - then runs unchanged.
+        Each segment's goal is converted to the cuRobo base frame and solved by
+        the cached in-process V2 planner. Segment extraction, planning-time
+        budget checks, junction de-duplication, and rectangular assembly all
+        stay on cuRobo's CUDA device. The assembled result is copied to the
+        simulation device once at the API boundary.
         """
         B = start.shape[0]
         D = start.shape[1]
@@ -948,26 +1545,34 @@ class CuroboPlanner(BasePlanner):
         )
         per_env_samples: list[list[torch.Tensor]] = [[] for _ in range(B)]
         per_env_dt: list[list[torch.Tensor]] = [[] for _ in range(B)]
-        alive = torch.ones(B, dtype=torch.bool, device=self.device)
+        alive = torch.ones(B, dtype=torch.bool, device=self._curobo_device)
         current = start.clone()
 
         for seg_idx, target in enumerate(target_states):
             self._validate_segment_batch(target, B, seg_idx)
+            backend = backends[target.move_type]
+            current_state = self._to_curobo_joint_state(current, backend)
             if target.move_type == MoveType.EEF_MOVE:
                 if target.xpos is None:
                     logger.log_error(
                         f"Segment {seg_idx} EEF_MOVE target missing xpos.",
                         ValueError,
                     )
-                goal_matrix = self._to_curobo_base_tool_matrix(
+                goal = self._to_curobo_pose_goal(
                     target.xpos, backend, sim_base_pose_inv
                 )
-                position, quaternion = _matrix_to_position_quaternion(goal_matrix)
-
                 start_time = time.time()
-                v2_result = self._worker_plan(
-                    "eef", current, position, quaternion, None, backend, max_attempts
+                capture_mode = (
+                    _torch_cuda_graph_capture_mode(
+                        self.cfg.cuda_graph_capture_error_mode
+                    )
+                    if backend.use_cuda_graph
+                    else nullcontext()
                 )
+                with capture_mode, torch.cuda.device(self._curobo_device):
+                    v2_result = backend.planner.plan_pose(
+                        goal, current_state, max_attempts=max_attempts
+                    )
                 logger.log_info(
                     f"cuRobo plan_pose segment {seg_idx} cost time: "
                     f"{time.time() - start_time:.4f}s"
@@ -978,10 +1583,19 @@ class CuroboPlanner(BasePlanner):
                         f"Segment {seg_idx} JOINT_MOVE target missing qpos.",
                         ValueError,
                     )
+                goal_state = self._to_curobo_joint_goal(target.qpos, backend)
                 start_time = time.time()
-                v2_result = self._worker_plan(
-                    "joint", current, None, None, target.qpos, backend, max_attempts
+                capture_mode = (
+                    _torch_cuda_graph_capture_mode(
+                        self.cfg.cuda_graph_capture_error_mode
+                    )
+                    if backend.use_cuda_graph
+                    else nullcontext()
                 )
+                with capture_mode, torch.cuda.device(self._curobo_device):
+                    v2_result = backend.planner.plan_cspace(
+                        goal_state, current_state, max_attempts=max_attempts
+                    )
                 logger.log_info(
                     f"cuRobo plan_cspace segment {seg_idx} cost time: "
                     f"{time.time() - start_time:.4f}s"
@@ -996,14 +1610,18 @@ class CuroboPlanner(BasePlanner):
                 # V2 returns None when no seed reaches a valid solution. Keep
                 # the standard EmbodiChain failure contract instead of
                 # dereferencing a result that does not exist.
-                seg_success = torch.zeros(B, dtype=torch.bool, device=self.device)
+                seg_success = torch.zeros(
+                    B, dtype=torch.bool, device=self._curobo_device
+                )
                 seg_positions = current.unsqueeze(1)
-                seg_dt = torch.zeros(B, 1, dtype=torch.float32, device=self.device)
+                seg_dt = torch.zeros(
+                    B, 1, dtype=torch.float32, device=self._curobo_device
+                )
             else:
                 seg_success, seg_positions, seg_dt = self._extract_segment(
                     v2_result, backend
                 )
-            seg_success = seg_success.to(self.device) & alive
+            seg_success = seg_success.to(self._curobo_device) & alive
             if v2_result is not None and self.cfg.max_planning_time is not None:
                 total_time = self._extract_total_time(v2_result, B)
                 over = total_time > float(self.cfg.max_planning_time)
@@ -1066,7 +1684,7 @@ class CuroboPlanner(BasePlanner):
         success = torch.as_tensor(v2_result.success)
         if success.dim() == 2:
             success = success.squeeze(-1)
-        success = success.to(torch.bool).to(self.device)
+        success = success.to(torch.bool).to(self._curobo_device)
 
         traj = v2_result.interpolated_trajectory
         position = torch.as_tensor(traj.position)
@@ -1078,17 +1696,16 @@ class CuroboPlanner(BasePlanner):
             last_tstep = last_tstep.squeeze(-1)
 
         B, T, D = position.shape
-        # last_tstep arrives on CPU (worker _to_cpu); compute the per-env lengths
-        # on CPU so neither the max() nor the clamp forces a GPU sync.
+        # Compute the per-env valid length once. This scalar extraction is the
+        # only synchronization needed before rectangular trajectory assembly.
         max_len = max(int((last_tstep + 1).max().item()), 1)
         cap = min(max_len, T)
-        lengths = (last_tstep + 1).clamp(min=1, max=cap).long().to(self.device)
-        # One bulk H2D for the whole segment (was B per-row copies) plus a single
-        # gather that both trims to each env's length and pads by repeating the
-        # last valid sample: src[b, t] = t if t < length[b] else length[b] - 1.
+        lengths = (last_tstep + 1).clamp(min=1, max=cap).long().to(self._curobo_device)
+        # A single gather both trims to each env's length and pads by repeating
+        # the last valid sample: src[b, t] = t if t < length[b] else length[b] - 1.
         # cap <= T guarantees src < T, so the gather never indexes out of bounds.
-        position = position.float().to(self.device)
-        arange = torch.arange(max_len, device=self.device)
+        position = position.float().to(self._curobo_device)
+        arange = torch.arange(max_len, device=self._curobo_device)
         src = torch.where(
             arange[None, :] < lengths[:, None],
             arange[None, :],
@@ -1130,7 +1747,7 @@ class CuroboPlanner(BasePlanner):
                     )
                 cols.append(curobo_joint_names.index(cu_name))
             backend.curobo_to_sim_col_idx = torch.as_tensor(
-                cols, dtype=torch.long, device=self.device
+                cols, dtype=torch.long, device=self._curobo_device
             )
             backend.curobo_joint_names_sig = sig
         return full_positions[..., backend.curobo_to_sim_col_idx].to(
@@ -1164,7 +1781,7 @@ class CuroboPlanner(BasePlanner):
             dt = torch.full(
                 (B, 1),
                 float(self.cfg.interpolation_dt),
-                device=self.device,
+                device=self._curobo_device,
                 dtype=torch.float32,
             )
         if dt.shape[0] == 1 and B > 1:
@@ -1175,12 +1792,12 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
 
-        out = torch.zeros(B, max_len, device=self.device, dtype=torch.float32)
+        out = torch.zeros(B, max_len, device=self._curobo_device, dtype=torch.float32)
         if dt.shape[-1] == 1:
             # Scalar dt per env: out[b, t] = interval[b] for 1 <= t < length[b],
             # else 0 - one vectorized mask multiply (was a per-env Python loop).
-            interval = dt[:, 0].to(self.device, dtype=torch.float32)
-            arange = torch.arange(max_len, device=self.device)
+            interval = dt[:, 0].to(self._curobo_device, dtype=torch.float32)
+            arange = torch.arange(max_len, device=self._curobo_device)
             mask = (arange[None, :] >= 1) & (arange[None, :] < lengths[:, None])
             return interval[:, None] * mask
 
@@ -1188,7 +1805,7 @@ class CuroboPlanner(BasePlanner):
         # result or a compatible future API. It already includes the first
         # point's zero delta in EmbodiChain's convention.
         length = min(dt.shape[-1], max_len)
-        out[:, :length] = dt[:, :length].to(self.device, dtype=torch.float32)
+        out[:, :length] = dt[:, :length].to(self._curobo_device, dtype=torch.float32)
         return out
 
     def _extract_total_time(self, v2_result: "Any", B: int) -> torch.Tensor:
@@ -1196,11 +1813,11 @@ class CuroboPlanner(BasePlanner):
         tt = v2_result.total_time
         if isinstance(tt, torch.Tensor):
             if tt.dim() == 0:
-                return tt.unsqueeze(0).expand(B).to(self.device)
+                return tt.unsqueeze(0).expand(B).to(self._curobo_device)
             if tt.dim() == 2:
                 tt = tt.squeeze(-1)
-            return tt[:B].to(self.device)
-        return torch.full((B,), float(tt), device=self.device)
+            return tt[:B].to(self._curobo_device)
+        return torch.full((B,), float(tt), device=self._curobo_device)
 
     def _assemble_result(
         self,
@@ -1224,8 +1841,10 @@ class CuroboPlanner(BasePlanner):
                 env_lengths.append(1)
         max_len = max(env_lengths) if env_lengths else 1
 
-        positions = torch.zeros(B, max_len, D, device=self.device, dtype=torch.float32)
-        dt = torch.zeros(B, max_len, device=self.device, dtype=torch.float32)
+        positions = torch.zeros(
+            B, max_len, D, device=self._curobo_device, dtype=torch.float32
+        )
+        dt = torch.zeros(B, max_len, device=self._curobo_device, dtype=torch.float32)
         for b in range(B):
             if alive_list[b]:
                 cat = torch.cat(per_env_samples[b], dim=0)
@@ -1239,15 +1858,68 @@ class CuroboPlanner(BasePlanner):
                 positions[b, 1:] = start[b]
         duration = dt.sum(dim=1)
         return PlanResult(
-            success=alive,
-            positions=positions,
-            dt=dt,
-            duration=duration,
+            success=alive.to(self.device),
+            positions=positions.to(self.device),
+            dt=dt.to(self.device),
+            duration=duration.to(self.device),
         )
 
     # ------------------------------------------------------------------
     # cuRobo state / goal construction
     # ------------------------------------------------------------------
+
+    def _to_curobo_joint_state(
+        self, current: torch.Tensor, backend: "_CuroboBackend"
+    ) -> "Any":
+        """Build a cuRobo ``JointState`` from simulator-order joint positions."""
+        if current.dim() != 2 or current.shape[1] != len(backend.sim_joint_names):
+            logger.log_error(
+                "cuRobo start/goal qpos must have shape "
+                f"(B, {len(backend.sim_joint_names)}), got {tuple(current.shape)}.",
+                ValueError,
+            )
+        curobo_names = list(backend.planner.joint_names)
+        if backend.sim_to_curobo_col_idx is None:
+            curobo_to_sim = {
+                backend.profile.sim_to_curobo_joint_names[sim_name]: idx
+                for idx, sim_name in enumerate(backend.sim_joint_names)
+            }
+            backend.sim_to_curobo_col_idx = torch.as_tensor(
+                [curobo_to_sim[name] for name in curobo_names],
+                dtype=torch.long,
+                device=self._curobo_device,
+            )
+        position = current.to(self._curobo_device, dtype=torch.float32).index_select(
+            -1, backend.sim_to_curobo_col_idx
+        )
+        return self._bindings.JointState.from_position(
+            position, joint_names=curobo_names
+        )
+
+    def _to_curobo_pose_goal(
+        self,
+        xpos: torch.Tensor,
+        backend: "_CuroboBackend",
+        sim_base_pose_inv: torch.Tensor | None = None,
+    ) -> "Any":
+        """Build a cuRobo pose goal from a simulator-world TCP pose."""
+        goal_matrix = self._to_curobo_base_tool_matrix(xpos, backend, sim_base_pose_inv)
+        position, quaternion = _matrix_to_position_quaternion(goal_matrix)
+        pose = self._bindings.Pose(position=position, quaternion=quaternion)
+        return self._bindings.GoalToolPose.from_poses(
+            {backend.tool_frame: pose},
+            ordered_tool_frames=[backend.tool_frame],
+            num_goalset=1,
+        )
+
+    def _to_curobo_joint_goal(
+        self, qpos: torch.Tensor, backend: "_CuroboBackend"
+    ) -> "Any":
+        """Build a cuRobo c-space goal from simulator-order joint positions."""
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self._curobo_device)
+        if qpos.dim() == 1:
+            qpos = qpos.unsqueeze(0)
+        return self._to_curobo_joint_state(qpos, backend)
 
     def _tcp_to_tool_pose(
         self, tcp_pose: torch.Tensor, backend: "_CuroboBackend"
@@ -1278,7 +1950,7 @@ class CuroboPlanner(BasePlanner):
         frame_to_tcp = torch.as_tensor(
             profile.tool_frame_to_tcp,
             dtype=torch.float32,
-            device=self.device,
+            device=self._curobo_device,
         )
         if frame_to_tcp.shape != (4, 4):
             logger.log_error(
@@ -1338,10 +2010,12 @@ class CuroboPlanner(BasePlanner):
             return backend.sim_base_to_curobo_base_matrix
         profile_transform = backend.profile.sim_base_to_curobo_base
         if profile_transform is None:
-            matrix = torch.eye(4, dtype=torch.float32, device=self.device)
+            matrix = torch.eye(4, dtype=torch.float32, device=self._curobo_device)
         else:
             matrix = torch.as_tensor(
-                profile_transform, dtype=torch.float32, device=self.device
+                profile_transform,
+                dtype=torch.float32,
+                device=self._curobo_device,
             )
             if matrix.shape != (4, 4):
                 logger.log_error(
@@ -1373,7 +2047,9 @@ class CuroboPlanner(BasePlanner):
             env_ids=list(range(batch_size)),
             to_matrix=True,
         )
-        base_pose = torch.as_tensor(base_pose, dtype=torch.float32, device=self.device)
+        base_pose = torch.as_tensor(
+            base_pose, dtype=torch.float32, device=self._curobo_device
+        )
         if base_pose.dim() == 2:
             base_pose = base_pose.unsqueeze(0)
         if base_pose.shape != (batch_size, 4, 4):
@@ -1394,42 +2070,40 @@ class CuroboPlanner(BasePlanner):
         backend: "_CuroboBackend | None" = None,
         sim_base_pose_inv: torch.Tensor | None = None,
     ) -> None:
-        """Update named dynamic obstacle poses on the cuRobo worker collision worlds.
+        """Update named dynamic obstacle poses on cached cuRobo collision worlds.
 
         Args:
             poses: Mapping of obstacle name -> ``(B, 4, 4)`` world pose. ``None``
                 is a no-op.
-            backend: Specific control part's worker to update. If ``None``,
-                updates all cached workers.
+            backend: Specific cached backend to update. If ``None``, updates all
+                cached backends.
             sim_base_pose_inv: Precomputed inverse of the live sim base pose for
-                ``backend``'s batch size, reused across all obstacles on that
-                worker (computed once in :meth:`plan`). Only consulted when
-                ``backend`` is not ``None`` and its batch matches the pose batch;
-                otherwise each worker computes its own inverse.
+                ``backend``'s batch size, reused across all obstacles. Only
+                consulted when its batch matches the obstacle pose batch.
         """
         if poses is None:
             return
         _validate_dynamic_obstacles(poses, list(self.cfg.world.dynamic_obstacle_names))
-        from .curobo_process_worker import UpdateObstacleMsg
+        backends = (
+            [backend] if backend is not None else list(self._backend_cache.values())
+        )
+        if backend is None and self.cfg.world.multi_env:
+            batch_sizes = {cached.batch_size for cached in backends}
+            if len(batch_sizes) > 1:
+                logger.log_error(
+                    "Cannot update all cached multi-env cuRobo backends with "
+                    "different batch sizes. Pass the intended backend explicitly.",
+                    ValueError,
+                )
 
-        if backend is not None:
-            targets = [self._isolated_workers[backend.control_part]]
-        else:
-            targets = list(self._isolated_workers.values())
-        # Cache the base-pose inverse per worker (keyed by id(shadow_backend)) so
-        # N obstacles on W workers do W inversions instead of N*W (the base pose
-        # is identical for every obstacle on a given worker).
         inv_cache: dict[int, torch.Tensor] = {}
         for name, pose_tensor in poses.items():
             pose_tensor = torch.as_tensor(
-                pose_tensor, device=self.device, dtype=torch.float32
+                pose_tensor, device=self._curobo_device, dtype=torch.float32
             )
             b = pose_tensor.shape[0]
-            for iw in targets:
-                shadow = iw.shadow_backend
-                if shadow is None:
-                    continue  # Not yet configured for a control part.
-                key = id(shadow)
+            for cached_backend in backends:
+                key = id(cached_backend)
                 inv = inv_cache.get(key)
                 if inv is None or inv.shape[0] != b:
                     if (
@@ -1439,23 +2113,50 @@ class CuroboPlanner(BasePlanner):
                     ):
                         inv = sim_base_pose_inv
                     else:
-                        inv = pose_inv(self._get_sim_base_pose(shadow, b))
+                        inv = pose_inv(self._get_sim_base_pose(cached_backend, b))
                     inv_cache[key] = inv
                 curobo_pose = self._sim_world_to_curobo_base_pose(
-                    pose_tensor, shadow, inv
+                    pose_tensor, cached_backend, inv
                 )
-                position, quaternion = _matrix_to_position_quaternion(curobo_pose)
-                self._worker_request(
-                    iw,
-                    UpdateObstacleMsg(
-                        name=name,
-                        position=position.detach().to("cpu"),
-                        quaternion=quaternion.detach().to("cpu"),
-                    ),
+                self._update_backend_obstacle(name, curobo_pose, cached_backend)
+
+    def _update_backend_obstacle(
+        self, name: str, pose_tensor: torch.Tensor, backend: "_CuroboBackend"
+    ) -> None:
+        """Apply one obstacle pose tensor under the backend's world policy."""
+        if self.cfg.world.multi_env:
+            if pose_tensor.shape[0] != backend.batch_size:
+                logger.log_error(
+                    f"dynamic obstacle '{name}' has batch {pose_tensor.shape[0]}, "
+                    f"but this multi-env backend expects {backend.batch_size}.",
+                    ValueError,
                 )
+            positions, quaternions = _matrix_to_position_quaternion(pose_tensor)
+            for env_idx in range(backend.batch_size):
+                pose = self._bindings.Pose(
+                    position=positions[env_idx], quaternion=quaternions[env_idx]
+                )
+                backend.planner.scene_collision_checker.update_obstacle_pose(
+                    name, pose, env_idx=env_idx
+                )
+            return
+
+        if pose_tensor.shape[0] > 1 and not torch.allclose(
+            pose_tensor, pose_tensor[:1].expand_as(pose_tensor)
+        ):
+            logger.log_error(
+                f"dynamic obstacle '{name}' has different poses across a shared "
+                "cuRobo world. Enable world.multi_env for per-env worlds.",
+                ValueError,
+            )
+        position, quaternion = _matrix_to_position_quaternion(pose_tensor[:1])
+        pose = self._bindings.Pose(position=position[0], quaternion=quaternion[0])
+        backend.planner.scene_collision_checker.update_obstacle_pose(
+            name, pose, env_idx=0
+        )
 
     # ------------------------------------------------------------------
-    # Subprocess-isolated worker backend
+    # In-process goal conversion and lifecycle
     # ------------------------------------------------------------------
 
     def _to_curobo_base_tool_matrix(
@@ -1467,256 +2168,20 @@ class CuroboPlanner(BasePlanner):
         """Convert a batched sim-world TCP pose to a cuRobo-base tool-frame matrix.
 
         Pure-tensor composition of :meth:`_sim_world_to_curobo_base_pose` and
-        :meth:`_tcp_to_tool_pose`, so it runs in the parent (which holds the live
-        robot) without constructing any cuRobo type. The worker splits this matrix
-        into position/quaternion and builds the ``GoalToolPose``.
+        :meth:`_tcp_to_tool_pose`.
         ``sim_base_pose_inv`` is the per-plan cached base-pose inverse (see
         :meth:`plan`).
         """
-        xpos = torch.as_tensor(xpos, device=self.device, dtype=torch.float32)
+        xpos = torch.as_tensor(xpos, device=self._curobo_device, dtype=torch.float32)
         xpos = self._sim_world_to_curobo_base_pose(xpos, backend, sim_base_pose_inv)
         xpos = self._tcp_to_tool_pose(xpos, backend)
         return xpos
 
-    def _get_isolated_backend(
-        self, control_part: str, batch_size: int
-    ) -> "_CuroboBackend":
-        """Return a shadow backend for ``control_part``, spawning its worker once.
-
-        The shadow carries the profile / sim joint names needed by the shared
-        post-processing (``_extract_segment``, ``_map_curobo_to_sim``,
-        ``_sim_world_to_curobo_base_pose``); the actual cuRobo planner lives in
-        the worker process. ``batch_size`` is refreshed on every call so the
-        worker builds/caches the right planner.
-        """
-        iw = self._isolated_workers.get(control_part)
-        if iw is None:
-            profile = self._materialize_profile(control_part)
-            sim_joint_names = self._resolve_sim_joint_names(control_part)
-            world_cfg = self.cfg.world
-            world_config_path = (
-                self._auto_generate_world_yaml(world_cfg)
-                if world_cfg.rigid_objects
-                else None
-            )
-            iw = self._obtain_worker(
-                control_part, profile, sim_joint_names, world_config_path
-            )
-            self._isolated_workers[control_part] = iw
-        assert iw.shadow_backend is not None  # set by _obtain_worker
-        iw.shadow_backend.batch_size = int(batch_size)
-        return iw.shadow_backend
-
-    def _obtain_worker(
-        self,
-        control_part: str,
-        profile: _CuroboProfile,
-        sim_joint_names: list[str],
-        world_config_path: str | None,
-    ) -> "_IsolatedWorker":
-        """Take a prewarmed worker or spawn a light one, then configure it.
-
-        A prewarmed worker (spawned by :meth:`prewarm` before the robot existed)
-        has already imported cuRobo; otherwise a light worker is spawned here.
-        Either way the profile + world are sent via :class:`ConfigureMsg`, and the
-        shadow backend (for parent-side frame conversion) is attached.
-        """
-        from .curobo_process_worker import ConfigureMsg
-
-        if self._prewarmed_worker is not None:
-            iw = self._prewarmed_worker
-            self._prewarmed_worker = None
-        else:
-            iw = self._spawn_light_worker()
-        iw.control_part = control_part
-        iw.shadow_backend = _CuroboBackend(
-            control_part=control_part,
-            sim_joint_names=list(sim_joint_names),
-            profile=profile,
-            batch_size=1,
-        )
-        self._worker_request(
-            iw,
-            ConfigureMsg(
-                robot_config_path=profile.robot_config_path,
-                world_config_path=world_config_path,
-                tool_frame=profile.tool_frame_name,  # type: ignore[arg-type]
-                sim_joint_names=list(sim_joint_names),
-                sim_to_curobo=dict(profile.sim_to_curobo_joint_names),
-                interpolation_dt=float(self.cfg.interpolation_dt),
-                collision_activation_distance=float(
-                    self.cfg.collision_activation_distance
-                ),
-                collision_cache=(
-                    dict(self.cfg.world.collision_cache)
-                    if self.cfg.world.collision_cache
-                    else None
-                ),
-                multi_env=bool(self.cfg.world.multi_env),
-                warmup_iterations=int(self.cfg.warmup_iterations),
-            ),
-        )
-        logger.log_info(
-            f"cuRobo isolated worker configured for control part '{control_part}'."
-        )
-        return iw
-
-    def _spawn_light_worker(self) -> "_IsolatedWorker":
-        """Spawn a worker with a light init (device only); configure it later.
-
-        The worker imports cuRobo and ACKs; the profile + world arrive via
-        :class:`ConfigureMsg`. The init ACK is consumed lazily by the first
-        :meth:`_worker_request` (readiness sync), so this returns immediately.
-        """
-        import multiprocessing as mp
-
-        from .curobo_process_worker import InitMsg, worker_main
-
-        ctx = mp.get_context("spawn")
-        req_queue = ctx.Queue()
-        resp_queue = ctx.Queue()
-        device_index = (
-            self.device.index
-            if self.device.index is not None
-            else torch.cuda.current_device()
-        )
-        process = ctx.Process(
-            target=worker_main,
-            args=(InitMsg(device_index=int(device_index)), req_queue, resp_queue),
-            daemon=True,
-        )
-        process.start()
-        return _IsolatedWorker(
-            process=process, req_queue=req_queue, resp_queue=resp_queue
-        )
-
-    def _worker_request(self, iw: "_IsolatedWorker", msg: "Any") -> tuple[str, "Any"]:
-        """Send one request and await its reply, consuming the init ACK first if pending.
-
-        The light-init ACK (cuRobo imported) is consumed before the first real
-        request, so a prewarmed worker's spawn overlaps with the caller's other
-        work without blocking there. The loop re-checks liveness on each timeout
-        so a worker crash surfaces as a clear error instead of an infinite hang.
-        """
-        proc = iw.process
-        if proc is None or not proc.is_alive():
-            logger.log_error(
-                "cuRobo isolated worker process is not running.", RuntimeError
-            )
-        if not iw.ready:
-            status, payload = self._recv_worker(iw, proc)
-            iw.ready = True
-            if status != "ok":
-                self._shutdown_worker(iw)
-                details = (
-                    payload[2]
-                    if isinstance(payload, tuple) and len(payload) > 2
-                    else payload
-                )
-                logger.log_error(
-                    "cuRobo isolated worker failed to initialize: " f"{details}",
-                    RuntimeError,
-                )
-        if msg is None:
-            return ("ok", None)
-        iw.req_queue.put(msg)
-        return self._recv_worker(iw, proc)
-
-    def _recv_worker(self, iw: "_IsolatedWorker", proc: "Any") -> tuple[str, "Any"]:
-        """Block for the worker's next ``(status, payload)`` reply, re-checking liveness."""
-        while True:
-            try:
-                return iw.resp_queue.get(timeout=30.0)
-            except queue.Empty:
-                if proc is None or not proc.is_alive():
-                    logger.log_error(
-                        "cuRobo isolated worker process died mid-request.",
-                        RuntimeError,
-                    )
-                # Worker still alive but slow (e.g. first-plan warmup): keep waiting.
-
-    def _worker_plan(
-        self,
-        move_type: str,
-        current: torch.Tensor,
-        position: torch.Tensor | None,
-        quaternion: torch.Tensor | None,
-        goal_qpos: torch.Tensor | None,
-        backend: "_CuroboBackend",
-        max_attempts: int,
-    ) -> "Any":
-        """RPC one plan to the worker and wrap the reply as a V2-result-like object."""
-        from .curobo_process_worker import PlanMsg
-
-        iw = self._isolated_workers[backend.control_part]
-        msg = PlanMsg(
-            batch_size=int(backend.batch_size),
-            move_type=move_type,
-            start_qpos=current.detach().to("cpu", dtype=torch.float32),
-            max_attempts=int(max_attempts),
-            goal_position=None if position is None else position.detach().to("cpu"),
-            goal_quaternion=(
-                None if quaternion is None else quaternion.detach().to("cpu")
-            ),
-            goal_qpos=None if goal_qpos is None else goal_qpos.detach().to("cpu"),
-        )
-        status: str
-        payload: Any
-        status, payload = self._worker_request(iw, msg)
-        if status != "ok":
-            details = (
-                payload[2]
-                if isinstance(payload, tuple) and len(payload) > 2
-                else payload
-            )
-            logger.log_error(
-                f"cuRobo isolated worker plan failed: {details}", RuntimeError
-            )
-        if payload is None:
-            return None
-        return SimpleNamespace(
-            success=payload.success,
-            interpolated_trajectory=SimpleNamespace(
-                position=payload.position,
-                joint_names=payload.joint_names,
-                dt=payload.dt,
-            ),
-            interpolated_last_tstep=payload.last_tstep,
-            total_time=payload.total_time,
-        )
-
-    def _shutdown_worker(self, iw: "_IsolatedWorker") -> None:
-        """Best-effort close + forcible reap of one isolated worker process.
-
-        Mirrors ``ToppraPlanner._shutdown_pool``: we do not rely on a clean join
-        (a worker holding a CUDA context may deadlock in the driver at exit), so
-        after signalling close we terminate and, if needed, kill.
-        """
-        proc = iw.process
-        if proc is None:
-            return
-        try:
-            from .curobo_process_worker import CloseMsg
-
-            iw.req_queue.put_nowait(CloseMsg())
-        except Exception:
-            pass
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=5.0)
-            if proc.is_alive():
-                proc.kill()
-                proc.join(timeout=1.0)
-        iw.process = None
-
     def close(self) -> None:
-        """Shut down every cached cuRobo worker process."""
-        for iw in list(self._isolated_workers.values()):
-            self._shutdown_worker(iw)
-        self._isolated_workers.clear()
-        if self._prewarmed_worker is not None:
-            self._shutdown_worker(self._prewarmed_worker)
-            self._prewarmed_worker = None
+        """Destroy every cached in-process cuRobo planner."""
+        for backend in list(self._backend_cache.values()):
+            self._close_planner(backend.planner)
+        self._backend_cache.clear()
 
     def __del__(self) -> None:  # pragma: no cover - best-effort GC cleanup
         try:
@@ -1727,43 +2192,22 @@ class CuroboPlanner(BasePlanner):
 
 @dataclass
 class _CuroboBackend:
-    """Parent-side metadata for one control part's subprocess worker.
+    """Cached in-process V2 planner and its EmbodiChain-side metadata."""
 
-    Carries the profile / sim joint names the shared post-processing
-    (``_extract_segment``, ``_map_curobo_to_sim``,
-    ``_sim_world_to_curobo_base_pose``) needs; the real cuRobo planner lives in
-    the worker process. ``batch_size`` is refreshed per plan.
-    """
-
+    planner: "Any"
     control_part: str
     sim_joint_names: list[str]
+    tool_frame: str
     profile: _CuroboProfile
     batch_size: int
+    use_cuda_graph: bool
+    planning_mode: MoveType
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
-    # worker's life, so these are built once on first use and reused across
+    # planner's life, so these are built once on first use and reused across
     # plans instead of recomputing per segment / per plan.
+    sim_to_curobo_col_idx: torch.Tensor | None = None
     curobo_to_sim_col_idx: torch.Tensor | None = None
     curobo_joint_names_sig: tuple[str, ...] | None = None
     tool_to_frame_matrix: torch.Tensor | None = None
     sim_base_to_curobo_base_matrix: torch.Tensor | None = None
-
-
-@dataclass
-class _IsolatedWorker:
-    """One subprocess-isolated cuRobo worker and its parent-side handle.
-
-    ``shadow_backend`` carries the profile / sim joint names the shared
-    post-processing needs, while the real cuRobo planner lives in ``process``.
-    ``batch_size`` on the shadow is refreshed per plan. ``ready`` is False from
-    spawn until the light-init ACK (cuRobo imported) is consumed; ``control_part``
-    and ``shadow_backend`` are empty for a prewarmed worker and filled in when it
-    is obtained for a specific control part.
-    """
-
-    process: "Any"
-    req_queue: "Any"
-    resp_queue: "Any"
-    control_part: str = ""
-    shadow_backend: "_CuroboBackend | None" = None
-    ready: bool = False

@@ -22,7 +22,7 @@ The `embodichain` project provides a unified interface for robot trajectory plan
 - **MotionGenerator**: A unified trajectory planning interface that supports joint/Cartesian interpolation, automatic constraint handling, flexible planner selection, and backend-specific collision-aware planning.
 - **ToppraPlanner**: A time-optimal trajectory planner based on the TOPPRA library, supporting joint trajectory generation under velocity and acceleration constraints.
 - **NeuralPlanner** (experimental): A learning-based EEF waypoint planner for Franka Panda.
-- **CuroboPlanner** (optional): A CUDA-only cuRobo V2 backend for collision-aware single-arm Cartesian and joint-space planning.
+- **CuroboPlanner** (optional): A cuRobo V2 backend that plans on CUDA and supports either CPU or CUDA physics simulation for collision-aware single-arm Cartesian and joint-space planning.
 - **TrajectorySampleMethod**: An enumeration for trajectory sampling strategies, supporting sampling by time, quantity, or distance.
 
 These tools can be used to generate smooth and dynamically feasible robot trajectories. Install a CUDA-matched EmbodiChain cuRobo extra when collision-aware planning against an explicit cuRobo world is required.

@@ -59,7 +59,6 @@ from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
-    CuroboPlanner,
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
@@ -138,6 +137,25 @@ def parse_args() -> argparse.Namespace:
         default="franka",
         help="Robot type for the cuRobo demo (franka, ur, w1).",
     )
+    parser.add_argument(
+        "--sim-device",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help=(
+            "Physics device (default: cuda). cuRobo always plans on CUDA even "
+            "when CPU physics is selected."
+        ),
+    )
+    parser.add_argument(
+        "--cuda-graph",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Enable in-process cuRobo CUDA graphs with renderer-compatible "
+            "thread-local stream capture (default: enabled; use "
+            "--no-cuda-graph to disable)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -161,13 +179,15 @@ def _check_runtime() -> None:
 
 
 def _build_scene(
-    headless: bool, robot_type: str = "franka"
+    headless: bool,
+    robot_type: str = "franka",
+    sim_device: str = "cuda",
 ) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
     """Create the one-environment Franka scene with its shared cuboid."""
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=headless,
-            sim_device="cuda",
+            sim_device=sim_device,
             num_envs=1,
             arena_space=2.0,
         )
@@ -462,15 +482,11 @@ def main() -> None:
     if args.record_fps < 1:
         raise ValueError("--record-fps must be at least 1.")
     _check_runtime()
-    # Spawn the cuRobo worker now so its ~5s Python+torch startup overlaps with
-    # the simulation build below instead of blocking the first plan.
-
     sim: SimulationManager | None = None
     # try:
     sim, robot, demo_block, target_xpos, control_part = _build_scene(
-        args.headless, args.robot
+        args.headless, args.robot, args.sim_device
     )
-    CuroboPlanner.prewarm(robot.uid)
     if not args.headless:
         sim.open_window()
     _start_headless_recording(sim, args)
@@ -483,6 +499,7 @@ def main() -> None:
                 robot_uid=robot.uid,
                 world=CuroboWorldCfg(rigid_objects=[demo_block]),
                 max_attempts=args.max_attempts,
+                use_cuda_graph=args.cuda_graph,
             )
         )
     )
@@ -549,7 +566,8 @@ def main() -> None:
         trajectory,
         step_repeat=args.step_repeat,
     )
-    input("Press Enter to exit the cuRobo demo...")
+    if not args.headless:
+        input("Press Enter to exit the cuRobo demo...")
     if sim.is_window_recording():
         sim.stop_window_record()
         sim.wait_window_record_saves()

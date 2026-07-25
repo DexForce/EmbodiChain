@@ -42,7 +42,6 @@ from embodichain.lab.sim.planners import (  # noqa: E402
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
-    MoveType,
     PlanState,
 )
 from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
@@ -90,9 +89,10 @@ def test_curobo_v2_plans_around_a_static_cuboid():
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
-            world=CuroboWorldCfg(rigid_objects=[block]),
-            # Skipping warmup keeps it practical on fresh CI GPU workers; the
-            # subprocess worker always captures CUDA graphs (no toggle).
+            world=CuroboWorldCfg(
+                rigid_objects=[block], obstacle_representation="cuboid"
+            ),
+            # Skipping optional non-graph warmup keeps fresh CI runs practical.
             warmup_iterations=0,
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
@@ -191,7 +191,9 @@ def test_curobo_v2_plans_a_joint_space_move():
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
-            world=CuroboWorldCfg(rigid_objects=[block]),
+            world=CuroboWorldCfg(
+                rigid_objects=[block], obstacle_representation="cuboid"
+            ),
             warmup_iterations=0,
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
@@ -222,14 +224,7 @@ def test_curobo_v2_plans_a_joint_space_move():
 
 @pytest.mark.slow
 def test_curobo_v2_multi_env_worlds_are_independent():
-    """Multi-env planning + per-env dynamic-obstacle updates through the worker.
-
-    The cuRobo planner lives in a subprocess worker, so the parent can no longer
-    inspect ``backend.planner.scene_collision_checker`` directly. Per-env
-    independence is exercised through the public path instead: two envs plan to
-    distinct joint targets, then each env's obstacle pose is updated separately
-    and a second plan still succeeds.
-    """
+    """Apply the first dynamic update to both in-process collision worlds."""
     sim, robot, block = _make_sim_robot(num_envs=2)
     planner = None
     try:
@@ -237,20 +232,25 @@ def test_curobo_v2_multi_env_worlds_are_independent():
             robot_uid=ROBOT_UID,
             world=CuroboWorldCfg(
                 rigid_objects=[block],
+                obstacle_representation="cuboid",
                 dynamic_obstacle_names=["demo_block"],
                 multi_env=True,
             ),
             warmup_iterations=0,
         )
         planner = CuroboPlanner(cfg)
-        backend = planner._get_isolated_backend(CONTROL_PART, batch_size=2)
 
         start_qpos = robot.get_qpos(name=CONTROL_PART)
         target_qpos = start_qpos.clone()
         target_qpos[:, 0] += torch.tensor([0.08, -0.08], device=robot.device)
+        dynamic_poses = block.get_local_pose(to_matrix=True).clone()
         result = planner.plan(
             [PlanState.from_qpos(target_qpos)],
-            CuroboPlanOptions(start_qpos=start_qpos, control_part=CONTROL_PART),
+            CuroboPlanOptions(
+                start_qpos=start_qpos,
+                control_part=CONTROL_PART,
+                dynamic_obstacle_poses={"demo_block": dynamic_poses},
+            ),
         )
         assert result.success.tolist() == [True, True]
         assert result.positions is not None
@@ -259,14 +259,13 @@ def test_curobo_v2_multi_env_worlds_are_independent():
         assert torch.allclose(result.positions[0, -1], target_qpos[0], atol=1e-3)
         assert torch.allclose(result.positions[1, -1], target_qpos[1], atol=1e-3)
 
-        # Start from each live simulator base, apply a different per-env offset,
-        # and push the per-env obstacle poses to the worker. The update itself is
-        # the check that per-env obstacle writes reach the worker; replanning is
+        # Apply a different per-env offset. The update itself checks that both
+        # collision worlds are independently addressable; replanning is
         # not asserted because the offset moves the block into the arm's path.
-        dynamic_poses = planner._get_sim_base_pose(backend, batch_size=2).clone()
         dynamic_poses[:, 0, 3] += torch.tensor(
             [0.10, -0.15], device=dynamic_poses.device
         )
+        backend = next(iter(planner._backend_cache.values()))
         planner.update_dynamic_obstacles({"demo_block": dynamic_poses}, backend)
     finally:
         if planner is not None:

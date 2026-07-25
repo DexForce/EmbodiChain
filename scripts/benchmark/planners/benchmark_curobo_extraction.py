@@ -209,7 +209,7 @@ def make_backend(sim_joint_names: list[str], batch_size: int) -> _CuroboBackend:
 def make_v2_result(
     B: int, T: int, D: int, device_cpu: torch.device, joint_names: list[str]
 ) -> SimpleNamespace:
-    """Synthetic V2 result. position/last_tstep/dt stay on CPU (as the worker sends)."""
+    """Build a synthetic V2 result with CPU-side trajectory metadata."""
     position = torch.randn(B, 1, T, D, dtype=torch.float32)  # CPU
     last_tstep = torch.randint(T // 2, T, (B,))  # CPU, varying lengths
     dt = torch.full((B, 1), 0.02, dtype=torch.float32)  # CPU
