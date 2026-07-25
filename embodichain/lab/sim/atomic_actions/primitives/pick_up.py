@@ -304,13 +304,6 @@ class PickUp(AtomicAction):
         ]
         return is_success, best_grasp_xpos
 
-    def _is_motion_gen_curobo(self) -> bool:
-        """Whether this action is configured to plan through the cuRobo backend."""
-        return (
-            getattr(self.cfg, "motion_source", None) == "motion_gen"
-            and getattr(self.cfg, "planner_type", None) == "curobo"
-        )
-
     def _select_feasible_grasp_variants(
         self,
         semantics: ObjectSemantics,

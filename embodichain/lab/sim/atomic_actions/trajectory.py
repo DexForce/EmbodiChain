@@ -429,7 +429,7 @@ class TrajectoryBuilder:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Validate a MotionGenerator PlanResult and apply sample/hold policy."""
         success = (
-            result.success
+            result.success.to(self.device)
             if isinstance(result.success, torch.Tensor)
             else torch.tensor(result.success, device=self.device)
         )

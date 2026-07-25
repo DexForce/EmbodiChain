@@ -63,7 +63,6 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboWorldCfg,
 )
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
 from embodichain.lab.sim.shapes import CubeCfg
 
@@ -223,7 +222,16 @@ def _build_scene(
             "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf"
         )
         hand_attach_xpos = np.eye(4)
-        hand_attach_xpos[:3, :3] = R.from_rotvec([90, 0, 0], degrees=True).as_matrix()
+        try:
+            from scipy.spatial.transform import Rotation as _Rotation
+        except ImportError as exc:  # pragma: no cover - exercised only without SciPy
+            raise ImportError(
+                "The '--robot ur' demo path requires SciPy. Install it with "
+                "`pip install scipy`."
+            ) from exc
+        hand_attach_xpos[:3, :3] = _Rotation.from_rotvec(
+            [90, 0, 0], degrees=True
+        ).as_matrix()
         robot = sim.add_robot(
             cfg=URRobotCfg.from_dict(
                 {
@@ -386,7 +394,7 @@ def _build_scene(
         raise ValueError(f"Unknown robot type '{robot_type}' for cuRobo demo.")
 
     if robot is None:
-        raise RuntimeError(f"Failed to add robot '{robot.uid}' to the cuRobo demo.")
+        raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
     # automatically (no hand-authored collision YAML to keep in sync).
@@ -483,96 +491,100 @@ def main() -> None:
         raise ValueError("--record-fps must be at least 1.")
     _check_runtime()
     sim: SimulationManager | None = None
-    # try:
-    sim, robot, demo_block, target_xpos, control_part = _build_scene(
-        args.headless, args.robot, args.sim_device
-    )
-    if not args.headless:
-        sim.open_window()
-    _start_headless_recording(sim, args)
-    if args.hold_steps:
-        sim.update(step=args.hold_steps)
+    try:
+        sim, robot, demo_block, target_xpos, control_part = _build_scene(
+            args.headless, args.robot, args.sim_device
+        )
+        if not args.headless:
+            sim.open_window()
+        _start_headless_recording(sim, args)
+        if args.hold_steps:
+            sim.update(step=args.hold_steps)
 
-    motion_generator = MotionGenerator(
-        MotionGenCfg(
-            planner_cfg=CuroboPlannerCfg(
-                robot_uid=robot.uid,
-                world=CuroboWorldCfg(rigid_objects=[demo_block]),
-                max_attempts=args.max_attempts,
-                use_cuda_graph=args.cuda_graph,
+        motion_generator = MotionGenerator(
+            MotionGenCfg(
+                planner_cfg=CuroboPlannerCfg(
+                    robot_uid=robot.uid,
+                    world=CuroboWorldCfg(rigid_objects=[demo_block]),
+                    max_attempts=args.max_attempts,
+                    use_cuda_graph=args.cuda_graph,
+                )
             )
         )
-    )
-    engine = AtomicActionEngine(motion_generator)
-    engine.register(
-        MoveEndEffector(
-            motion_generator,
-            MoveEndEffectorCfg(
-                motion_source="motion_gen",
-                planner_type="curobo",
-                control_part=control_part,
-                # sample_interval sets the returned trajectory's waypoint count.
-                # cuRobo's own collision-checked samples are arc-length resampled
-                # to this count; set CuroboPlannerCfg.preserve_plan_samples=True
-                # above to keep cuRobo's raw samples (count from interpolation_dt).
-                sample_interval=30,
+        engine = AtomicActionEngine(motion_generator)
+        engine.register(
+            MoveEndEffector(
+                motion_generator,
+                MoveEndEffectorCfg(
+                    motion_source="motion_gen",
+                    planner_type="curobo",
+                    control_part=control_part,
+                    # sample_interval sets the returned trajectory's waypoint count.
+                    # cuRobo's own collision-checked samples are arc-length resampled
+                    # to this count; set CuroboPlannerCfg.preserve_plan_samples=True
+                    # above to keep cuRobo's raw samples (count from interpolation_dt).
+                    sample_interval=30,
+                ),
             ),
-        ),
-        name="move_end_effector",
-    )
+            name="move_end_effector",
+        )
 
-    initial_qpos = robot.get_qpos(name=control_part)
-    initial_xpos = robot.compute_fk(
-        qpos=initial_qpos,
-        name=control_part,
-        to_matrix=True,
-    )
-    plan_start = time.perf_counter()
-    success, trajectory, _ = engine.run(
-        [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
-    )
-    planning_duration = time.perf_counter() - plan_start
+        initial_qpos = robot.get_qpos(name=control_part)
+        initial_xpos = robot.compute_fk(
+            qpos=initial_qpos,
+            name=control_part,
+            to_matrix=True,
+        )
+        plan_start = time.perf_counter()
+        success, trajectory, _ = engine.run(
+            [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
+        )
+        planning_duration = time.perf_counter() - plan_start
 
-    print(f"cuRobo atomic-action success: {bool(success.item())}")
-    print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-    print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
+        print(f"cuRobo atomic-action success: {bool(success.item())}")
+        print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
+        print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
 
-    if not bool(success.item()):
-        raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
+        if not bool(success.item()):
+            raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
 
-    _replay_full_dof_trajectory(
-        sim,
-        robot,
-        trajectory,
-        step_repeat=args.step_repeat,
-    )
-    if args.hold_steps:
-        sim.update(step=args.hold_steps)
-    print(
-        f"final TCP position error: {_final_tcp_error(robot, target_xpos, control_part):.4f} m"
-    )
+        _replay_full_dof_trajectory(
+            sim,
+            robot,
+            trajectory,
+            step_repeat=args.step_repeat,
+        )
+        if args.hold_steps:
+            sim.update(step=args.hold_steps)
+        print(
+            f"final TCP position error: {_final_tcp_error(robot, target_xpos, control_part):.4f} m"
+        )
 
-    plan_start = time.perf_counter()
-    success, trajectory, _ = engine.run(
-        [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
-    )
-    planning_duration = time.perf_counter() - plan_start
-    print(f"cuRobo atomic-action success: {bool(success.item())}")
-    print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
-    print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
-    _replay_full_dof_trajectory(
-        sim,
-        robot,
-        trajectory,
-        step_repeat=args.step_repeat,
-    )
-    if not args.headless:
-        input("Press Enter to exit the cuRobo demo...")
-    if sim.is_window_recording():
-        sim.stop_window_record()
-        sim.wait_window_record_saves()
-    sim.destroy()
-    SimulationManager.flush_cleanup_queue()
+        plan_start = time.perf_counter()
+        success, trajectory, _ = engine.run(
+            [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
+        )
+        planning_duration = time.perf_counter() - plan_start
+        print(f"cuRobo atomic-action success: {bool(success.item())}")
+        print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
+        print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
+        _replay_full_dof_trajectory(
+            sim,
+            robot,
+            trajectory,
+            step_repeat=args.step_repeat,
+        )
+        if not args.headless:
+            input("Press Enter to exit the cuRobo demo...")
+    finally:
+        # Guarantee GPU sim resources and the recorder subprocess are released
+        # even when planning/replay raises mid-demo.
+        if sim is not None:
+            if sim.is_window_recording():
+                sim.stop_window_record()
+                sim.wait_window_record_saves()
+            sim.destroy()
+            SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":

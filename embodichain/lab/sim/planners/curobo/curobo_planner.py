@@ -591,9 +591,10 @@ def _require_curobo() -> "Any":
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
-            "Install it using NVIDIA's CUDA-matched extras, e.g. "
-            "`pip install .[cu12]` or `pip install .[cu13]` "
-            "(also `.[cu12-torch]` / `.[cu13-torch]`). "
+            "From the EmbodiChain repository root, install the CUDA-matched "
+            "extra, e.g. `pip install -e '.[curobo-cu12]'` for CUDA 12.x or "
+            "`pip install -e '.[curobo-cu13]'` for CUDA 13.x "
+            "(also `.[curobo-cu12-torch]` / `.[curobo-cu13-torch]`). "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
     return SimpleNamespace(
