@@ -208,8 +208,9 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     record_trajectory: bool = False
-    """Whether to record per-object kinematic states (root pose + qpos) into the
-    rollout buffer's ``states`` field each step. Forces ``init_rollout_buffer=True``."""
+    """Whether to record per-object kinematic states (root pose + qpos) and the
+    pre-process action into a dedicated ``_traj_buffer`` each step. Uses a per-env
+    step counter so async parallel envs are supported."""
 
     trajectory_uids: list[str] | None = None
     """Optional allow-list of non-robot object uids to record. If None, all rigid
@@ -319,7 +320,7 @@ class EmbodiedEnv(BaseEnv):
         # rollout_buffer so async parallel envs and ActionManager are supported.
         self._traj_buffer: TensorDict | None = None
         self._traj_steps: torch.Tensor | None = None
-        self._traj_raw_action = None
+        self._traj_raw_action: EnvAction | None = None
         self._traj_save_count = 0
         from datetime import datetime
 
@@ -689,8 +690,8 @@ class EmbodiedEnv(BaseEnv):
         idx = env_idx[mask]
         st = step[mask]
         states = self._traj_buffer["states"]
-        # Use assignment because advanced-indexing views on these nested
-        # TensorDict leaves are copies, so ``copy_`` would silently drop writes.
+        # Advanced indexing here returns a copy, so ``copy_`` would silently drop
+        # writes; use assignment (`[idx, st] = ...`) which scatters in-place.
         states["robot"]["root_pose"][idx, st] = self.robot.get_local_pose()[idx]
         states["robot"]["qpos"][idx, st] = self.robot.get_qpos()[idx]
         if "articulations" in states.keys():
