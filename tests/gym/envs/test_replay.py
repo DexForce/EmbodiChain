@@ -352,11 +352,14 @@ def test_replay_respects_per_env_lengths(tmp_path):
     try:
         env2.reset()
         trunc = torch.zeros(2, dtype=torch.bool)
-        for _ in range(5):
+        for step_i in range(5):
             _, _, _, t, _ = env2.step(None)
             trunc = trunc | t
+            if step_i == 2:  # after 3 steps (0, 1, 2)
+                assert bool(t[0]) and not bool(
+                    t[1]
+                ), f"after step 3: env0 should be truncated, env1 not; got {t.tolist()}"
         assert bool(trunc[0]) and bool(trunc[1])  # both eventually done
-        # env0 finishes at step 3, env1 at step 5
     finally:
         env2.close()
         SimulationManager.flush_cleanup_queue()
