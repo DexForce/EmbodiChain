@@ -59,11 +59,9 @@ class ReplayWrapper(gym.Wrapper):
             )
         self._mode = mode
         self._trajectory = load_trajectory(trajectory)
-        self._num_steps = int(self._trajectory["meta"]["num_steps"])
-        self._idx = 0
+        meta = self._trajectory["meta"]
 
         # Sanity-check that the trajectory matches the replay env's robot.
-        meta = self._trajectory["meta"]
         traj_robot_dof = int(meta.get("robot_dof", self.env.robot.dof))
         traj_active_joint_ids = list(meta.get("active_joint_ids", []))
         env_robot_dof = int(self.env.robot.dof)
@@ -78,20 +76,28 @@ class ReplayWrapper(gym.Wrapper):
                 f"robot_dof={env_robot_dof} / active_joint_ids={env_active_joint_ids}."
             )
 
+        self._expand_to_env_count()
+
+        # Per-env lengths: fall back to uniform num_steps for legacy files.
+        num_envs = int(self._trajectory["meta"]["num_envs"])
+        lengths = meta.get("lengths", [int(meta["num_steps"])] * num_envs)
+        self._lengths = torch.tensor(lengths, dtype=torch.long, device=self.env.device)
+
         # Clamp replay length to the wrapped env's horizon.
         max_steps = int(self.env.max_episode_steps)
-        if self._num_steps > max_steps:
+        if bool((self._lengths > max_steps).any()):
             logger.log_warning(
-                f"Trajectory has {self._num_steps} steps but env max_episode_steps is "
-                f"{max_steps}; truncating replay to {max_steps} steps."
+                f"Trajectory lengths exceed env max_episode_steps={max_steps}; clamping."
             )
-            self._num_steps = max_steps
-
-        self._expand_to_env_count()
+            self._lengths = self._lengths.clamp(max=max_steps)
+        self._replay_steps = torch.zeros(
+            self.env.num_envs, dtype=torch.long, device=self.env.device
+        )
 
     def _expand_to_env_count(self) -> None:
         """Broadcast a single-env trajectory to the wrapped env's env count."""
-        traj_envs = int(self._trajectory["meta"]["num_envs"])
+        meta = self._trajectory["meta"]
+        traj_envs = int(meta["num_envs"])
         env_envs = int(self.env.num_envs)
         if traj_envs == env_envs:
             return
@@ -100,13 +106,12 @@ class ReplayWrapper(gym.Wrapper):
                 f"Trajectory has {traj_envs} envs but wrapped env has {env_envs}; "
                 "only single-env trajectories can be broadcast."
             )
-        states = self._trajectory["states"]
-        self._trajectory["states"] = states.expand(env_envs, *states.shape[1:]).clone()
-        actions = self._trajectory["actions"]
-        self._trajectory["actions"] = actions.expand(
-            env_envs, *actions.shape[1:]
-        ).clone()
-        self._trajectory["meta"]["num_envs"] = env_envs
+        for key in ("states", "actions"):
+            t = self._trajectory[key]
+            self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
+        meta["num_envs"] = env_envs
+        if "lengths" in meta:
+            meta["lengths"] = meta["lengths"] * env_envs
 
     def _set_all_states(self, states: Any) -> None:
         """Write one timestep's object states directly (kinematic write)."""
@@ -160,42 +165,38 @@ class ReplayWrapper(gym.Wrapper):
         if self._mode == "dynamic":
             self.env.sim.enable_physics(True)
             self.env._replay_no_auto_reset = True
-        self._idx = 0
+        self._replay_steps = torch.zeros(
+            self.env.num_envs, dtype=torch.long, device=self.env.device
+        )
         return self.env.get_obs(), info
 
     def step(
         self, action: Any
     ) -> tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         env = self.env
-        if self._idx >= self._num_steps:
-            obs = env.get_obs()
-            return (
-                obs,
-                torch.zeros(env.num_envs, device=env.device),
-                torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
-                torch.ones(env.num_envs, dtype=torch.bool, device=env.device),
-                {},
-            )
+        n = env.num_envs
+        idx = torch.arange(n, device=env.device)
+        st = self._replay_steps.clamp(max=self._lengths - 1)  # finished envs hold last
 
         if self._mode == "kinematic":
-            self._set_all_states(self._trajectory["states"][:, self._idx])
+            self._set_all_states(self._trajectory["states"][idx, st])
             env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
             obs = env.get_obs()
-            self._idx += 1
-            trunc = self._idx >= self._num_steps
+            self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
+            trunc = self._replay_steps >= self._lengths
             return (
                 obs,
-                torch.zeros(env.num_envs, device=env.device),
-                torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
-                torch.full((env.num_envs,), trunc, dtype=torch.bool, device=env.device),
+                torch.zeros(n, device=env.device),
+                torch.zeros(n, dtype=torch.bool, device=env.device),
+                trunc,
                 {},
             )
 
-        # dynamic
-        action_t = self._trajectory["actions"][:, self._idx]
+        # dynamic: feed the recorded (pre-process) action; env.step re-preprocesses.
+        action_t = self._trajectory["actions"][idx, st]
         obs, reward, term, trunc, info = env.step(action_t)
-        self._idx += 1
-        trunc = trunc | (self._idx >= self._num_steps)
+        self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
+        trunc = trunc | (self._replay_steps >= self._lengths)
         return obs, reward, term, trunc, info
 
     def close(self) -> None:

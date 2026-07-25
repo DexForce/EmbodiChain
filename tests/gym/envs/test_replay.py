@@ -294,3 +294,70 @@ def test_close_restores_physics(tmp_path):
             env2.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_replay_reads_legacy_file_without_lengths(tmp_path):
+    """PR #425 files (no meta["lengths"]) replay as uniform-length (backward compat)."""
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=4)
+        path = tmp_path / "legacy.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    # Strip "lengths" to simulate a PR #425 file.
+    data = torch.load(path, weights_only=False)
+    data["meta"].pop("lengths", None)
+    torch.save(data, path)
+
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="kinematic")
+    try:
+        env2.reset()
+        trunc_all = torch.zeros(2, dtype=torch.bool)
+        for _ in range(4):
+            _, _, _, trunc, _ = env2.step(None)
+            trunc_all = trunc_all | trunc
+        assert bool(trunc_all.all())  # all envs done after num_steps
+    finally:
+        env2.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_replay_respects_per_env_lengths(tmp_path):
+    """Replay truncates each env at its own recorded length."""
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    try:
+        env.reset()
+        _drive(env, num_steps=5)
+        path = tmp_path / "traj.pt"
+        env.save_trajectory(str(path))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    # Override lengths: env0 -> 3 steps, env1 -> 5 steps.
+    data = torch.load(path, weights_only=False)
+    data["meta"]["lengths"] = [3, 5]
+    torch.save(data, path)
+
+    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
+    env2 = ReplayWrapper(env2, str(path), mode="kinematic")
+    try:
+        env2.reset()
+        trunc = torch.zeros(2, dtype=torch.bool)
+        for _ in range(5):
+            _, _, _, t, _ = env2.step(None)
+            trunc = trunc | t
+        assert bool(trunc[0]) and bool(trunc[1])  # both eventually done
+        # env0 finishes at step 3, env1 at step 5
+    finally:
+        env2.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
