@@ -51,7 +51,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
-    build_trajectory_states_buffer,
+    build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.utils import configclass, logger
@@ -215,6 +215,14 @@ class EmbodiedEnvCfg(EnvCfg):
     """Optional allow-list of non-robot object uids to record. If None, all rigid
     objects and articulations are recorded. The robot is always recorded."""
 
+    trajectory_save_dir: str | None = None
+    """Directory for auto-saved trajectories. Defaults to
+    ``<EMBODICHAIN_DEFAULT_DATA_ROOT>/trajectories/{run_id}/``."""
+
+    trajectory_auto_save: bool = True
+    """If True (and record_trajectory is True), auto-save each env's trajectory to
+    ``trajectory_save_dir`` at episode end and on close()."""
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -284,9 +292,6 @@ class EmbodiedEnv(BaseEnv):
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
             self.cfg.init_rollout_buffer = True
 
-        if self.cfg.record_trajectory:
-            self.cfg.init_rollout_buffer = True
-
         # Rollout buffer for episode data collection.
         # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
         # The default key in the buffer are:
@@ -310,13 +315,26 @@ class EmbodiedEnv(BaseEnv):
             self._max_rollout_steps = self.rollout_buffer.shape[1]
             self._rollout_buffer_mode = "expert"
 
+        # Dedicated per-env trajectory buffer (states + actions). Decoupled from
+        # rollout_buffer so async parallel envs and ActionManager are supported.
+        self._traj_buffer: TensorDict | None = None
+        self._traj_steps: torch.Tensor | None = None
+        self._traj_raw_action = None
+        self._traj_save_count = 0
+        from datetime import datetime
+
+        self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         if self.cfg.record_trajectory:
-            self.rollout_buffer["states"] = build_trajectory_states_buffer(
+            self._traj_buffer = build_trajectory_buffer(
                 env=self,
                 max_steps=self.max_episode_steps,
                 num_envs=self.num_envs,
                 device=self.device,
                 uids=self.cfg.trajectory_uids,
+                action_space=self.action_space,
+            )
+            self._traj_steps = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
             )
 
         self.current_rollout_step = 0
@@ -493,6 +511,8 @@ class EmbodiedEnv(BaseEnv):
                 )
             self.current_rollout_step += 1
 
+        self._write_trajectory_step()
+
         # Update success status for all environments where episode is done
         if "success" in info:
             # info["success"] should be a tensor or array of shape (num_envs,)
@@ -583,6 +603,9 @@ class EmbodiedEnv(BaseEnv):
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
 
+        if self._traj_steps is not None:
+            self._traj_steps[env_ids_to_process] = 0
+
         self.episode_success_status[env_ids_to_process] = False
 
         # apply events such as randomization for environments that need a reset
@@ -651,30 +674,41 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )
-        self._write_trajectory_states()
 
-    def _write_trajectory_states(self) -> None:
-        """Write per-object kinematic states into the rollout buffer's ``states`` field."""
-        if "states" not in self.rollout_buffer.keys():
+    def _write_trajectory_step(self) -> None:
+        """Write one step of per-env ``states`` + pre-process ``action`` into ``_traj_buffer``."""
+        if self._traj_buffer is None:
             return
-        if self.current_rollout_step >= self._max_rollout_steps:
+        max_steps = self._traj_buffer.shape[1]
+        env_idx = torch.arange(self.num_envs, device=self.device)
+        step = self._traj_steps
+        mask = step < max_steps
+        if not bool(mask.any()):
+            self._traj_steps = (self._traj_steps + 1).clamp(max=max_steps)
             return
-        states_slot = self.rollout_buffer["states"][:, self.current_rollout_step]
-        states_slot["robot"]["root_pose"].copy_(self.robot.get_local_pose())
-        states_slot["robot"]["qpos"].copy_(self.robot.get_qpos())
-        if "articulations" in states_slot.keys():
+        idx = env_idx[mask]
+        st = step[mask]
+        states = self._traj_buffer["states"]
+        # Use assignment because advanced-indexing views on these nested
+        # TensorDict leaves are copies, so ``copy_`` would silently drop writes.
+        states["robot"]["root_pose"][idx, st] = self.robot.get_local_pose()[idx]
+        states["robot"]["qpos"][idx, st] = self.robot.get_qpos()[idx]
+        if "articulations" in states.keys():
             for uid, art in self.sim._articulations.items():
-                if uid in states_slot["articulations"].keys():
-                    states_slot["articulations"][uid]["root_pose"].copy_(
-                        art.get_local_pose()
-                    )
-                    states_slot["articulations"][uid]["qpos"].copy_(art.get_qpos())
-        if "rigid_objects" in states_slot.keys():
+                if uid in states["articulations"].keys():
+                    states["articulations"][uid]["root_pose"][
+                        idx, st
+                    ] = art.get_local_pose()[idx]
+                    states["articulations"][uid]["qpos"][idx, st] = art.get_qpos()[idx]
+        if "rigid_objects" in states.keys():
             for uid, obj in self.sim._rigid_objects.items():
-                if uid in states_slot["rigid_objects"].keys():
-                    states_slot["rigid_objects"][uid]["pose"].copy_(
-                        obj.get_local_pose()
-                    )
+                if uid in states["rigid_objects"].keys():
+                    states["rigid_objects"][uid]["pose"][
+                        idx, st
+                    ] = obj.get_local_pose()[idx]
+        if self._traj_raw_action is not None:
+            self._traj_buffer["actions"][idx, st] = self._traj_raw_action[idx]
+        self._traj_steps = (self._traj_steps + 1).clamp(max=max_steps)
 
     def _write_rl_rollout_step(
         self,
@@ -906,7 +940,9 @@ class EmbodiedEnv(BaseEnv):
         return eval_dict
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
-        """Delegate to ActionManager when configured."""
+        """Delegate to ActionManager when configured; stash raw action for trajectory."""
+        if self._traj_buffer is not None:
+            self._traj_raw_action = action
         if self.action_manager is not None:
             return self.action_manager.process_action(action, mode="pre")
         return super()._preprocess_action(action)
@@ -1112,29 +1148,33 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
-    def save_trajectory(self, path: str) -> None:
-        """Save the recorded episode trajectory to a ``.pt`` file.
-
-        Bundles the sliced ``states`` and ``actions`` from the rollout buffer
-        with a ``meta`` dict describing object uids, dims, and env/step counts.
-        The file can be replayed with :class:`ReplayWrapper`.
+    def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
+        """Save recorded trajectory (states + actions) to a ``.pt`` file.
 
         Args:
             path: Destination ``.pt`` file path.
+            env_ids: Env indices to save (default: all). Each saved env's actual
+                recorded length is stored in ``meta["lengths"]``.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
         """
-        if self.rollout_buffer is None or "states" not in self.rollout_buffer.keys():
+        if self._traj_buffer is None:
             raise RuntimeError(
                 "Trajectory recording is not enabled (set cfg.record_trajectory=True)."
             )
-        n = int(self.current_rollout_step)
-        states = self.rollout_buffer["states"][:, :n].clone()
-        actions = self.rollout_buffer["actions"][:, :n].clone()
+        if env_ids is None:
+            env_ids = list(range(self.num_envs))
+        env_ids_t = torch.as_tensor(list(env_ids), dtype=torch.long, device=self.device)
+        lengths = self._traj_steps[env_ids_t]
+        max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
+        sub = self._traj_buffer[env_ids_t]
+        states = sub["states"][:, :max_len].clone()
+        actions = sub["actions"][:, :max_len].clone()
         meta = {
-            "num_steps": n,
-            "num_envs": int(self.num_envs),
+            "lengths": lengths.tolist(),
+            "num_steps": max_len,
+            "num_envs": int(len(env_ids)),
             "dt": float(self.sim_cfg.physics_dt),
             "active_joint_ids": list(self.active_joint_ids),
             "robot_uid": self.robot.uid,
@@ -1144,8 +1184,10 @@ class EmbodiedEnv(BaseEnv):
                 uid: int(art.dof) for uid, art in self.sim._articulations.items()
             },
             "rigid_object_uids": list(self.sim._rigid_objects.keys()),
+            "env_ids": [int(e) for e in env_ids],
         }
         torch.save({"states": states, "actions": actions, "meta": meta}, path)
+        return path
 
     def close(self) -> None:
         """Close the environment and release resources."""

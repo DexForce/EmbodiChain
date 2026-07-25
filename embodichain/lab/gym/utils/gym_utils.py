@@ -1159,18 +1159,20 @@ def init_rollout_buffer_from_config(
     return rollout_buffer
 
 
-def build_trajectory_states_buffer(
+def build_trajectory_buffer(
     env,
     max_steps: int,
     num_envs: int,
     device: str | torch.device,
     uids: list[str] | None = None,
+    action_space=None,
 ) -> TensorDict:
-    """Preallocate a nested ``states`` TensorDict for trajectory recording.
+    """Preallocate a nested trajectory buffer for per-env recording.
 
-    Records per-object kinematic state over time: the robot (always) plus all
-    non-robot articulations and rigid objects, unless ``uids`` restricts the
-    non-robot set. Layout is ``[num_envs, max_steps, ...]``.
+    Records per-object kinematic state over time (the robot always, plus all
+    non-robot articulations and rigid objects unless ``uids`` restricts the
+    non-robot set) and, when ``action_space`` is provided, pre-process actions.
+    Layout is ``[num_envs, max_steps, ...]``.
 
     Args:
         env: An environment exposing ``robot`` and ``sim._articulations`` /
@@ -1179,9 +1181,13 @@ def build_trajectory_states_buffer(
         num_envs: Number of parallel environments.
         device: Torch device for the buffers.
         uids: Optional allow-list of non-robot object uids to record.
+        action_space: Optional batched action space. If supplied, an ``actions``
+            field is allocated with shape ``[num_envs, max_steps, *action_shape]``
+            where ``action_shape`` is ``action_space.shape[1:]``.
 
     Returns:
-        A nested ``TensorDict`` with batch size ``[num_envs, max_steps]``.
+        A nested ``TensorDict`` with ``states`` and optionally ``actions`` fields
+        and batch size ``[num_envs, max_steps]``.
     """
 
     def _zeros(*shape: int) -> torch.Tensor:
@@ -1238,7 +1244,16 @@ def build_trajectory_states_buffer(
             device=device,
         )
 
-    return TensorDict(states, batch_size=[num_envs, max_steps], device=device)
+    td: dict = {
+        "states": TensorDict(states, batch_size=[num_envs, max_steps], device=device)
+    }
+    if action_space is not None and hasattr(action_space, "shape"):
+        # action_space is the batched space (shape[0] == num_envs).
+        action_shape = tuple(action_space.shape[1:])
+        td["actions"] = torch.zeros(
+            (num_envs, max_steps, *action_shape), dtype=torch.float32, device=device
+        )
+    return TensorDict(td, batch_size=[num_envs, max_steps], device=device)
 
 
 def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:

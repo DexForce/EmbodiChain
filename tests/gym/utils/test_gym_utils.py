@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 from types import SimpleNamespace
 
+import gymnasium.spaces
+import numpy as np
 import pytest
 import torch
 
@@ -27,7 +29,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
-    build_trajectory_states_buffer,
+    build_trajectory_buffer,
     config_to_cfg,
     DEFAULT_MANAGER_MODULES,
     load_trajectory,
@@ -541,29 +543,44 @@ def _stub_env(robot_dof=6, articulations=None, rigid_objects=None):
     )
 
 
-def test_build_trajectory_states_buffer_shapes():
+def test_build_trajectory_buffer_shapes():
     env = _stub_env(robot_dof=6, articulations={"drawer": 2}, rigid_objects=["cube"])
-    buf = build_trajectory_states_buffer(env, max_steps=10, num_envs=3, device="cpu")
-    assert tuple(buf.batch_size) == (3, 10)
-    assert tuple(buf["robot"]["root_pose"].shape) == (3, 10, 7)
-    assert tuple(buf["robot"]["qpos"].shape) == (3, 10, 6)
-    assert tuple(buf["articulations"]["drawer"]["qpos"].shape) == (3, 10, 2)
-    assert tuple(buf["rigid_objects"]["cube"]["pose"].shape) == (3, 10, 7)
+    num_envs = 3
+    action_space = gymnasium.spaces.Box(
+        low=-1, high=1, shape=(num_envs, 6), dtype=np.float32
+    )
+    buf = build_trajectory_buffer(
+        env, max_steps=10, num_envs=num_envs, device="cpu", action_space=action_space
+    )
+    assert tuple(buf.batch_size) == (num_envs, 10)
+    assert tuple(buf["states"]["robot"]["root_pose"].shape) == (num_envs, 10, 7)
+    assert tuple(buf["states"]["robot"]["qpos"].shape) == (num_envs, 10, 6)
+    assert tuple(buf["states"]["articulations"]["drawer"]["qpos"].shape) == (
+        num_envs,
+        10,
+        2,
+    )
+    assert tuple(buf["states"]["rigid_objects"]["cube"]["pose"].shape) == (
+        num_envs,
+        10,
+        7,
+    )
+    assert tuple(buf["actions"].shape) == (num_envs, 10, 6)
 
 
-def test_build_trajectory_states_buffer_uids_filter():
+def test_build_trajectory_buffer_uids_filter():
     env = _stub_env(
         robot_dof=6,
         articulations={"drawer": 2, "door": 1},
         rigid_objects=["cube", "ball"],
     )
-    buf = build_trajectory_states_buffer(
+    buf = build_trajectory_buffer(
         env, max_steps=5, num_envs=1, device="cpu", uids=["cube"]
     )
-    assert "articulations" not in buf.keys()  # drawer/door filtered out
-    assert "rigid_objects" in buf.keys()
-    assert "cube" in buf["rigid_objects"].keys()
-    assert "ball" not in buf["rigid_objects"].keys()
+    assert "articulations" not in buf["states"].keys()  # drawer/door filtered out
+    assert "rigid_objects" in buf["states"].keys()
+    assert "cube" in buf["states"]["rigid_objects"].keys()
+    assert "ball" not in buf["states"]["rigid_objects"].keys()
 
 
 def test_load_trajectory_validates_and_returns_dict(tmp_path):

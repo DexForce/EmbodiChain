@@ -84,13 +84,14 @@ def test_record_trajectory_populates_states():
     try:
         env.reset()
         _drive(env, num_steps=5)
-        assert "states" in env.rollout_buffer.keys()
-        assert env.current_rollout_step == 5
-        states = env.rollout_buffer["states"]
+        assert env._traj_buffer is not None
+        assert "states" in env._traj_buffer.keys()
+        assert env._traj_steps.tolist() == [5, 5]
+        states = env._traj_buffer["states"]
         assert tuple(states["robot"]["qpos"].shape) == (2, 100, 6)
         assert tuple(states["rigid_objects"]["cube"]["pose"].shape) == (2, 100, 7)
         # The last recorded step must reflect the actual robot qpos after driving.
-        recorded = states["robot"]["qpos"][:, env.current_rollout_step - 1]
+        recorded = states["robot"]["qpos"][:, env._traj_steps[0].item() - 1]
         actual = env.robot.get_qpos()
         assert torch.allclose(recorded, actual, atol=1e-5)
     finally:
@@ -112,10 +113,11 @@ def test_save_trajectory_round_trip(tmp_path):
         from embodichain.lab.gym.utils.gym_utils import load_trajectory
 
         data = load_trajectory(str(path))
+        assert data["meta"]["lengths"] == [n, n]
         assert data["meta"]["num_steps"] == n
         assert data["meta"]["num_envs"] == 2
         assert tuple(data["states"]["robot"]["qpos"].shape) == (2, n, 6)
-        assert tuple(data["actions"].shape)[0] == 2
+        assert data["actions"].shape == (2, n, 6)
         assert "cube" in data["states"]["rigid_objects"].keys()
     finally:
         env.close()
