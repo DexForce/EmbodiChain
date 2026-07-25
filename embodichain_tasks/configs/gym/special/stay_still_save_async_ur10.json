@@ -9,7 +9,6 @@
                 "mode": "save",
                 "save_failed_episodes": true,
                 "params": {
-                    "save_path": "/tmp/embodichain_async_demo",
                     "robot_meta": {
                         "robot_type": "UR10",
                         "control_freq": 25
@@ -22,7 +21,7 @@
                         "task_description": "stay still",
                         "data_type": "sim"
                     },
-                    "use_videos": false,
+                    "use_videos": true,
                     "image_writer_threads": 4,
                     "image_writer_processes": 0
                 }
