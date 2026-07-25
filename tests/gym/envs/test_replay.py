@@ -366,3 +366,42 @@ def test_replay_respects_per_env_lengths(tmp_path):
         env2.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_auto_save_at_episode_end(tmp_path):
+    save_dir = tmp_path / "trajs"
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    env.cfg.trajectory_save_dir = str(save_dir)
+    env.cfg.trajectory_auto_save = True
+    try:
+        env.reset()
+        _drive(env, num_steps=4)
+        # Trigger an episode-end reset for env 0 only.
+        env._initialize_episode(torch.tensor([0]))
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    files = list(save_dir.glob("*.pt"))
+    env0_files = [f for f in files if f.name.startswith("traj_env0_")]
+    assert len(env0_files) == 1, f"expected 1 auto-saved file for env 0, got {files}"
+    data = torch.load(env0_files[0], weights_only=False)
+    assert data["meta"]["env_ids"] == [0]
+    assert data["meta"]["lengths"] == [4]
+
+
+def test_auto_save_on_close(tmp_path):
+    save_dir = tmp_path / "trajs"
+    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
+    env.cfg.trajectory_save_dir = str(save_dir)
+    try:
+        env.reset()
+        _drive(env, num_steps=3)
+        env.close()
+    finally:
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+    files = list(save_dir.glob("*.pt"))
+    assert len(files) == 2  # one per in-flight env

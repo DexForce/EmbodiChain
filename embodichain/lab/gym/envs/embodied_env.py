@@ -56,6 +56,7 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
@@ -603,6 +604,10 @@ class EmbodiedEnv(BaseEnv):
         # Clear episode buffers and reset success status for environments being reset
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
+
+        if self._traj_buffer is not None and self.cfg.trajectory_auto_save:
+            for env_id in env_ids_to_process.tolist():
+                self._save_trajectory_for_env(env_id)
 
         if self._traj_steps is not None:
             self._traj_steps[env_ids_to_process] = 0
@@ -1190,8 +1195,27 @@ class EmbodiedEnv(BaseEnv):
         torch.save({"states": states, "actions": actions, "meta": meta}, path)
         return path
 
+    def _save_trajectory_for_env(self, env_id: int) -> str | None:
+        """Auto-save one env's trajectory to ``cfg.trajectory_save_dir`` (or default)."""
+        if self._traj_buffer is None or not self.cfg.trajectory_auto_save:
+            return None
+        if int(self._traj_steps[env_id].item()) == 0:
+            return None
+        base = self.cfg.trajectory_save_dir
+        if base is None:
+            base = os.path.join(
+                EMBODICHAIN_DEFAULT_DATA_ROOT, "trajectories", self._traj_run_id
+            )
+        os.makedirs(base, exist_ok=True)
+        path = os.path.join(base, f"traj_env{env_id}_{self._traj_save_count:06d}.pt")
+        self._traj_save_count += 1
+        return self.save_trajectory(path, env_ids=[env_id])
+
     def close(self) -> None:
         """Close the environment and release resources."""
+        if self._traj_buffer is not None and self.cfg.trajectory_auto_save:
+            for env_id in range(self.num_envs):
+                self._save_trajectory_for_env(env_id)
         # Finalize dataset if present
         if self.dataset_manager:
             self.dataset_manager.finalize()
