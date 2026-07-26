@@ -334,7 +334,7 @@ def cli():
         if getattr(args, "preview", False):
             log_error("--replay and --preview are mutually exclusive.")
             return
-            
+
     # Step 1: Discover all task packages via entry_points
     discover_task_packages()
 
