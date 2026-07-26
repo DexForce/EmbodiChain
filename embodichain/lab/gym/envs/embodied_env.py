@@ -604,12 +604,19 @@ class EmbodiedEnv(BaseEnv):
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
 
-        if self._traj_buffer is not None and self.cfg.trajectory_auto_save:
+        # Auto-save + reset the per-env trajectory buffer for environments being
+        # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
+        # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
+        _traj_buffer = getattr(self, "_traj_buffer", None)
+        if _traj_buffer is not None and getattr(
+            self.cfg, "trajectory_auto_save", False
+        ):
             for env_id in env_ids_to_process.tolist():
                 self._save_trajectory_for_env(env_id)
 
-        if self._traj_steps is not None:
-            self._traj_steps[env_ids_to_process] = 0
+        _traj_steps = getattr(self, "_traj_steps", None)
+        if _traj_steps is not None:
+            _traj_steps[env_ids_to_process] = 0
 
         self.episode_success_status[env_ids_to_process] = False
 
