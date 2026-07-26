@@ -182,10 +182,31 @@ class CuroboWorldCfg:
     multi_env: bool = False
     """Whether cuRobo allocates one collision-world instance per environment.
 
-    ``False`` shares one world and therefore requires equal rebased dynamic
-    obstacle poses across batch rows. ``True`` materializes one V2 scene model
-    per batch row, supporting independently updated obstacle poses for each
-    environment. The generated world YAML is cloned for every row.
+    This setting concerns collision-world batching only; robot states and goals
+    remain env-batched in either mode. The relevant comparison is between
+    obstacle poses *after* each simulator-world pose has been rebased into that
+    environment's robot-base frame:
+
+    - ``False`` (default) shares one collision world across the batch. Use it
+      when every environment has the same robot-relative obstacle layout. The
+      raw simulator-world poses may still differ because replicated arenas have
+      different world offsets; sharing remains valid when rebasing removes those
+      offsets and produces equal poses.
+    - ``True`` allocates one collision world per batch row. Use it when obstacle
+      poses differ relative to their respective robot bases, such as with
+      per-environment object-pose randomization.
+
+    In multi-env mode the scene generated from ``rigid_objects`` (using env 0)
+    is cloned for every row; enabling this option alone does not read a distinct
+    initial pose from every simulator environment. Per-env pose differences must
+    therefore be declared in :attr:`dynamic_obstacle_names` and supplied as
+    batched ``(B, 4, 4)`` poses through
+    :attr:`CuroboPlanOptions.dynamic_obstacle_poses`. Dynamic updates require
+    ``obstacle_representation="cuboid"`` or ``"mesh"``.
+
+    Prefer the shared default when the rebased layouts are identical because
+    independent worlds replicate scene data and collision caches across the
+    batch.
     """
 
     def __post_init__(self) -> None:
@@ -668,9 +689,9 @@ class CuroboPlanner(BasePlanner):
     before capture begins; a failure during capture is raised because the CUDA
     context may already be invalid.
 
-    Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged - the
-    backend performs its own collision-aware IK and trajectory optimization, so
-    EmbodiChain pre-interpolation is disabled (``preinterpolate_targets=False``).
+    Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged because
+    the backend accepts them directly and performs its own collision-aware IK
+    and trajectory optimization.
     By default the returned collision-checked samples are arc-length resampled to
     the action's ``sample_interval`` waypoint count
     (``preserve_plan_samples=False``); set
@@ -686,8 +707,7 @@ class CuroboPlanner(BasePlanner):
         ValueError: If ``robot_uid`` is missing or the robot is not found.
     """
 
-    preinterpolate_targets = False
-    supports_joint_move = True
+    supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
 
     @property
     def preserve_plan_samples(self) -> bool:
@@ -889,7 +909,12 @@ class CuroboPlanner(BasePlanner):
     def _materialize_multi_env_scene_model(
         self, world_config_path: str | None, batch_size: int
     ) -> list[dict]:
-        """Return one independent cuRobo scene mapping for every batch row."""
+        """Return one independent cuRobo scene mapping for every batch row.
+
+        The auto-generated YAML contains env 0's static scene. Cloning it makes
+        the collision worlds independently addressable but does not discover
+        per-env simulator poses; dynamic-obstacle updates apply those later.
+        """
         if batch_size < 1:
             logger.log_error(
                 f"multi-env cuRobo batch_size must be positive, got {batch_size}.",

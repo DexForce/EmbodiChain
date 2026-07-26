@@ -16,14 +16,19 @@
 
 """cuRobo V2 collision-aware planning through the atomic-action interface.
 
-The demo creates a single Franka Panda and a static cuboid that is represented
-both in DexSim and in the cuRobo collision world.  It then executes a
-``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays the
-returned full-robot-DoF trajectory, and reports the final TCP error.
+The demo creates one or more copies of the selected robot and a kinematic
+cuboid represented in both DexSim and cuRobo. With multiple environments, each
+obstacle receives a small reproducible XY/yaw perturbation and cuRobo allocates
+an independent collision world for each environment. The demo then executes a
+batched ``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays
+the returned full-robot-DoF trajectories, and reports the final TCP error for
+every environment.
 
 Run from the repository root::
 
     python examples/sim/planners/curobo_planner.py --headless
+    python examples/sim/planners/curobo_planner.py --headless --num_envs 4
+    python examples/sim/planners/curobo_planner.py --headless --device cuda:1
 
 Requirements: an NVIDIA CUDA device and the CUDA-matched EmbodiChain cuRobo V2
 extra installed in the active environment.  Installation instructions:
@@ -48,6 +53,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     EndEffectorPoseTarget,
@@ -55,10 +61,11 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffectorCfg,
 )
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import RenderCfg, RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
+    CuroboPlanOptions,
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
@@ -72,6 +79,9 @@ __all__ = ["main"]
 DEFAULT_RECORD_FPS = 20
 DEFAULT_RECORD_MAX_MEMORY = 2048
 DEFAULT_MAX_ATTEMPTS = 2
+DEFAULT_OBSTACLE_XY_PERTURBATION = 0.02
+DEFAULT_OBSTACLE_YAW_PERTURBATION_DEG = 5.0
+DEFAULT_RANDOM_SEED = 0
 DEFAULT_RECORD_LOOK_AT = (
     (1.8, -1.8, 1.35),
     (0.35, 0.10, 0.40),
@@ -87,11 +97,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run cuRobo V2 through EmbodiChain AtomicActionEngine."
     )
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        help="Run without opening the simulation viewer.",
-    )
+    add_env_launcher_args_to_parser(parser)
+    parser.set_defaults(arena_space=2.0)
+    # Backward-compatible aliases used by older versions of this example.
     parser.add_argument(
         "--step-repeat",
         type=int,
@@ -137,13 +145,28 @@ def parse_args() -> argparse.Namespace:
         help="Robot type for the cuRobo demo (franka, ur, w1).",
     )
     parser.add_argument(
-        "--sim-device",
-        choices=("cpu", "cuda"),
-        default="cpu",
+        "--obstacle-xy-perturbation",
+        type=float,
+        default=DEFAULT_OBSTACLE_XY_PERTURBATION,
         help=(
-            "Physics device (default: cuda). cuRobo always plans on CUDA even "
-            "when CPU physics is selected."
+            "Maximum per-axis XY obstacle position perturbation in meters when "
+            "num_envs > 1."
         ),
+    )
+    parser.add_argument(
+        "--obstacle-yaw-perturbation-deg",
+        type=float,
+        default=DEFAULT_OBSTACLE_YAW_PERTURBATION_DEG,
+        help=(
+            "Maximum absolute obstacle yaw perturbation in degrees when "
+            "num_envs > 1."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_RANDOM_SEED,
+        help="Random seed used for per-environment obstacle perturbations.",
     )
     parser.add_argument(
         "--cuda-graph",
@@ -158,7 +181,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _check_runtime() -> None:
+def _resolve_device(device: str, gpu_id: int) -> str:
+    """Resolve launcher device syntax to an explicit simulation device."""
+    try:
+        resolved = torch.device(device)
+    except (RuntimeError, ValueError) as exc:
+        raise ValueError(f"Invalid --device value {device!r}.") from exc
+    if resolved.type != "cuda":
+        return str(resolved)
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"CUDA device {device!r} was requested, but CUDA is not available."
+        )
+    index = gpu_id if resolved.index is None else resolved.index
+    if index < 0 or index >= torch.cuda.device_count():
+        raise RuntimeError(
+            f"CUDA device index {index} is unavailable; torch reports "
+            f"{torch.cuda.device_count()} device(s)."
+        )
+    return f"cuda:{index}"
+
+
+def _check_runtime(curobo_gpu_id: int) -> None:
     """Raise clear errors before allocating the CUDA simulation scene."""
     if not torch.cuda.is_available():
         raise RuntimeError(
@@ -175,20 +219,31 @@ def _check_runtime() -> None:
             '`uv pip install ".[curobo-cu13]"` for CUDA 13.x '
             f"(see {CUROBO_INSTALL_URL})."
         ) from exc
+    if curobo_gpu_id < 0 or curobo_gpu_id >= torch.cuda.device_count():
+        raise RuntimeError(
+            f"cuRobo CUDA device index {curobo_gpu_id} is unavailable; torch "
+            f"reports {torch.cuda.device_count()} device(s)."
+        )
 
 
 def _build_scene(
     headless: bool,
     robot_type: str = "franka",
-    sim_device: str = "cuda",
+    device: str = "cuda:0",
+    num_envs: int = 1,
+    renderer: str = "auto",
+    arena_space: float = 2.0,
+    gpu_id: int = 0,
 ) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
-    """Create the one-environment Franka scene with its shared cuboid."""
+    """Create the batched robot scene with an identical cuboid in each arena."""
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=headless,
-            sim_device=sim_device,
-            num_envs=1,
-            arena_space=2.0,
+            sim_device=device,
+            num_envs=num_envs,
+            arena_space=arena_space,
+            gpu_id=gpu_id,
+            render_cfg=RenderCfg(renderer=renderer),
         )
     )
     if robot_type == "franka":
@@ -379,10 +434,6 @@ def _build_scene(
             device=robot.device,
         )
 
-        # robot compute ik success in example
-        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
-        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
-
         # sim.open_window()
         # # sim.update(50)
         # current_qpos = robot.get_qpos(name=control_part)
@@ -395,6 +446,13 @@ def _build_scene(
 
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
+    target_xpos = _resolve_batched_target(target_xpos, robot.num_instances)
+    if robot_type == "w1":
+        # Keep the W1-specific IK diagnostic batched so it remains useful when
+        # checking solver and cuRobo reachability across multiple environments.
+        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
+        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
+
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
     # automatically (no hand-authored collision YAML to keep in sync).
@@ -410,6 +468,111 @@ def _build_scene(
     )
 
     return sim, robot, demo_block, target_xpos, control_part
+
+
+def _resolve_batched_target(target: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Return a homogeneous target pose for every simulation environment."""
+    if num_envs < 1:
+        raise ValueError(f"num_envs must be positive, got {num_envs}.")
+    if target.shape == (4, 4):
+        target = target.unsqueeze(0)
+    if target.shape == (1, 4, 4):
+        return target.repeat(num_envs, 1, 1)
+    if target.shape == (num_envs, 4, 4):
+        return target
+    raise ValueError(
+        "Target pose must have shape (4, 4), (1, 4, 4), or "
+        f"({num_envs}, 4, 4); got {tuple(target.shape)}."
+    )
+
+
+def _sample_perturbed_obstacle_poses(
+    nominal_poses: torch.Tensor,
+    *,
+    xy_perturbation: float,
+    yaw_perturbation_deg: float,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    """Apply bounded XY translation and local-yaw noise to batched poses."""
+    if nominal_poses.dim() != 3 or nominal_poses.shape[-2:] != (4, 4):
+        raise ValueError(
+            "nominal_poses must have shape (B, 4, 4), got "
+            f"{tuple(nominal_poses.shape)}."
+        )
+    if xy_perturbation < 0.0:
+        raise ValueError("xy_perturbation must be non-negative.")
+    if yaw_perturbation_deg < 0.0:
+        raise ValueError("yaw_perturbation_deg must be non-negative.")
+
+    num_envs = nominal_poses.shape[0]
+    if num_envs == 1:
+        return nominal_poses.clone()
+
+    # Sample on CPU so one generator works regardless of the simulation device.
+    unit_noise = (
+        2.0
+        * torch.rand(
+            num_envs,
+            3,
+            generator=generator,
+            dtype=torch.float32,
+        )
+        - 1.0
+    ).to(nominal_poses.device)
+    perturbed = nominal_poses.clone()
+    perturbed[:, :2, 3] += unit_noise[:, :2] * xy_perturbation
+
+    yaw = torch.deg2rad(unit_noise[:, 2] * yaw_perturbation_deg)
+    cos_yaw = torch.cos(yaw)
+    sin_yaw = torch.sin(yaw)
+    yaw_rotation = torch.zeros(
+        num_envs,
+        3,
+        3,
+        dtype=nominal_poses.dtype,
+        device=nominal_poses.device,
+    )
+    yaw_rotation[:, 0, 0] = cos_yaw
+    yaw_rotation[:, 0, 1] = -sin_yaw
+    yaw_rotation[:, 1, 0] = sin_yaw
+    yaw_rotation[:, 1, 1] = cos_yaw
+    yaw_rotation[:, 2, 2] = 1.0
+    perturbed[:, :3, :3] = torch.bmm(
+        nominal_poses[:, :3, :3],
+        yaw_rotation,
+    )
+    return perturbed
+
+
+def _perturb_obstacles(
+    obstacles: list[RigidObject],
+    *,
+    num_envs: int,
+    xy_perturbation: float,
+    yaw_perturbation_deg: float,
+    seed: int,
+) -> dict[str, torch.Tensor]:
+    """Perturb every obstacle and return its per-environment current poses."""
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    obstacle_poses: dict[str, torch.Tensor] = {}
+    for obstacle in obstacles:
+        nominal_poses = obstacle.get_local_pose(to_matrix=True)
+        if nominal_poses.shape[0] != num_envs:
+            raise ValueError(
+                f"Obstacle '{obstacle.uid}' has {nominal_poses.shape[0]} poses, "
+                f"expected {num_envs}."
+            )
+        perturbed_poses = _sample_perturbed_obstacle_poses(
+            nominal_poses,
+            xy_perturbation=xy_perturbation,
+            yaw_perturbation_deg=yaw_perturbation_deg,
+            generator=generator,
+        )
+        if num_envs > 1:
+            obstacle.set_local_pose(perturbed_poses)
+        obstacle_poses[obstacle.uid] = perturbed_poses
+    return obstacle_poses
 
 
 def _start_headless_recording(sim: SimulationManager, args: argparse.Namespace) -> bool:
@@ -441,10 +604,11 @@ def _replay_full_dof_trajectory(
     step_repeat: int,
 ) -> None:
     """Replay the engine's ``(B, N, robot.dof)`` trajectory in DexSim."""
-    if trajectory.dim() != 3 or trajectory.shape[0] != 1:
+    expected_batch = robot.num_instances
+    if trajectory.dim() != 3 or trajectory.shape[0] != expected_batch:
         raise ValueError(
-            "This single-environment demo expected a (1, N, robot.dof) "
-            f"trajectory, got {tuple(trajectory.shape)}."
+            "Expected an environment-batched trajectory with shape "
+            f"({expected_batch}, N, robot.dof), got {tuple(trajectory.shape)}."
         )
     if trajectory.shape[-1] != robot.dof:
         raise ValueError(
@@ -461,25 +625,35 @@ def _replay_full_dof_trajectory(
         robot.set_qpos(
             qpos=waypoint,
             joint_ids=all_joint_ids,
+            target=False,
+        )
+        robot.set_qpos(
+            qpos=waypoint,
+            joint_ids=all_joint_ids,
+            target=True,
         )
         sim.update(step=step_repeat)
 
 
-def _final_tcp_error(robot: Robot, target: torch.Tensor, control_part: str) -> float:
-    """Return the Cartesian position error of the simulator's final TCP pose."""
+def _final_tcp_errors(
+    robot: Robot, target: torch.Tensor, control_part: str
+) -> torch.Tensor:
+    """Return the Cartesian position error for every simulator environment."""
     final_qpos = robot.get_qpos(name=control_part)
     final_pose = robot.compute_fk(
         qpos=final_qpos,
         name=control_part,
         to_matrix=True,
     )
-    # Accept either a single (4, 4) pose or a batched (B, 4, 4) target.
-    target_pos = target[0, :3, 3] if target.dim() == 3 else target[:3, 3]
-    return float(torch.linalg.vector_norm(final_pose[0, :3, 3] - target_pos))
+    target = _resolve_batched_target(target, robot.num_instances).to(final_pose)
+    return torch.linalg.vector_norm(
+        final_pose[:, :3, 3] - target[:, :3, 3],
+        dim=-1,
+    )
 
 
 def main() -> None:
-    """Plan and replay one collision-aware atomic end-effector action."""
+    """Plan and replay one batched collision-aware end-effector action."""
     args = parse_args()
     if args.step_repeat < 1:
         raise ValueError("--step-repeat must be at least 1.")
@@ -489,25 +663,73 @@ def main() -> None:
         raise ValueError("--max-attempts must be at least 1.")
     if args.record_fps < 1:
         raise ValueError("--record-fps must be at least 1.")
-    _check_runtime()
+    if args.num_envs < 1:
+        raise ValueError("--num_envs must be at least 1.")
+    if args.obstacle_xy_perturbation < 0.0:
+        raise ValueError("--obstacle-xy-perturbation must be non-negative.")
+    if args.obstacle_yaw_perturbation_deg < 0.0:
+        raise ValueError("--obstacle-yaw-perturbation-deg must be non-negative.")
+    sim_device = _resolve_device(args.device, args.gpu_id)
+    resolved_device = torch.device(sim_device)
+    effective_gpu_id = (
+        resolved_device.index if resolved_device.type == "cuda" else int(args.gpu_id)
+    )
+    assert effective_gpu_id is not None
+    _check_runtime(effective_gpu_id)
     sim: SimulationManager | None = None
     try:
         sim, robot, demo_block, target_xpos, control_part = _build_scene(
-            args.headless, args.robot, args.sim_device
+            args.headless,
+            args.robot,
+            sim_device,
+            args.num_envs,
+            args.renderer,
+            args.arena_space,
+            effective_gpu_id,
         )
+        if sim.is_use_gpu_physics:
+            sim.init_gpu_physics()
         if not args.headless:
             sim.open_window()
         _start_headless_recording(sim, args)
         if args.hold_steps:
             sim.update(step=args.hold_steps)
 
+        obstacles = [demo_block]
+        obstacle_poses = _perturb_obstacles(
+            obstacles,
+            num_envs=args.num_envs,
+            xy_perturbation=args.obstacle_xy_perturbation,
+            yaw_perturbation_deg=args.obstacle_yaw_perturbation_deg,
+            seed=args.seed,
+        )
+        use_independent_worlds = args.num_envs > 1
+        if use_independent_worlds:
+            for name, poses in obstacle_poses.items():
+                yaw_deg = torch.rad2deg(torch.atan2(poses[:, 1, 0], poses[:, 0, 0]))
+                print(
+                    f"{name} perturbed pose by environment: "
+                    f"XY={poses[:, :2, 3].tolist()}, "
+                    f"yaw_deg={yaw_deg.tolist()}"
+                )
+
         motion_generator = MotionGenerator(
             MotionGenCfg(
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=robot.uid,
-                    world=CuroboWorldCfg(rigid_objects=[demo_block]),
+                    world=CuroboWorldCfg(
+                        rigid_objects=obstacles,
+                        obstacle_representation="cuboid",
+                        dynamic_obstacle_names=(
+                            [obstacle.uid for obstacle in obstacles]
+                            if use_independent_worlds
+                            else []
+                        ),
+                        multi_env=use_independent_worlds,
+                    ),
                     max_attempts=args.max_attempts,
                     use_cuda_graph=args.cuda_graph,
+                    cuda_device=f"cuda:{effective_gpu_id}",
                 )
             )
         )
@@ -519,6 +741,12 @@ def main() -> None:
                     motion_source="motion_gen",
                     planner_type="curobo",
                     control_part=control_part,
+                    plan_opts=CuroboPlanOptions(
+                        dynamic_obstacle_poses=(
+                            obstacle_poses if use_independent_worlds else None
+                        ),
+                        max_attempts=args.max_attempts,
+                    ),
                     # sample_interval sets the returned trajectory's waypoint count.
                     # cuRobo's own collision-checked samples are arc-length resampled
                     # to this count; set CuroboPlannerCfg.preserve_plan_samples=True
@@ -541,12 +769,16 @@ def main() -> None:
         )
         planning_duration = time.perf_counter() - plan_start
 
-        print(f"cuRobo atomic-action success: {bool(success.item())}")
+        print(f"cuRobo atomic-action success by environment: {success.tolist()}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
         print(f"[warm-up] atomic-action planning duration: {planning_duration:.3f} s")
 
-        if not bool(success.item()):
-            raise RuntimeError("cuRobo failed to find a collision-free trajectory.")
+        if not bool(success.all().item()):
+            failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
+            raise RuntimeError(
+                "cuRobo failed to find a collision-free trajectory for "
+                f"environment(s) {failed_env_ids}."
+            )
 
         _replay_full_dof_trajectory(
             sim,
@@ -556,18 +788,24 @@ def main() -> None:
         )
         if args.hold_steps:
             sim.update(step=args.hold_steps)
-        print(
-            f"final TCP position error: {_final_tcp_error(robot, target_xpos, control_part):.4f} m"
-        )
+        final_errors = _final_tcp_errors(robot, target_xpos, control_part)
+        print(f"final TCP position error by environment: {final_errors.tolist()} m")
+        print(f"maximum final TCP position error: {final_errors.max().item():.4f} m")
 
         plan_start = time.perf_counter()
         success, trajectory, _ = engine.run(
             [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
         )
         planning_duration = time.perf_counter() - plan_start
-        print(f"cuRobo atomic-action success: {bool(success.item())}")
+        print(f"cuRobo return-action success by environment: {success.tolist()}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")
         print(f"[Runtime]atomic-action planning duration: {planning_duration:.3f} s")
+        if not bool(success.all().item()):
+            failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
+            raise RuntimeError(
+                "cuRobo failed to plan the return trajectory for "
+                f"environment(s) {failed_env_ids}."
+            )
         _replay_full_dof_trajectory(
             sim,
             robot,

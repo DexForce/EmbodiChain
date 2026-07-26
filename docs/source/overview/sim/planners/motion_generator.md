@@ -10,6 +10,23 @@
 * **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
 * **Convenient sampling**: Supports various sampling strategies via `TrajectorySampleMethod`.
 
+## Backend target capabilities
+
+Every `BasePlanner` subclass declares the target types it accepts directly
+through `supported_move_types` and exposes them through
+`supports_move_type(move_type)`. `MotionGenerator` uses this contract to:
+
+* forward native EEF or joint targets unchanged;
+* convert EEF targets into joint waypoints only for joint-only backends such as
+  TOPPRA when `MotionGenOptions.is_interpolate=True`;
+* reject unsupported target types before entering the backend.
+
+The built-in declarations are:
+
+* TOPPRA: `JOINT_MOVE`;
+* NeuralPlanner: `EEF_MOVE`;
+* cuRobo: `EEF_MOVE` and `JOINT_MOVE`.
+
 ## Usage
 
 ### Initialization

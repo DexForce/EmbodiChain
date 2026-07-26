@@ -32,6 +32,7 @@ Moves the end-effector to a target pose in free space.
 |---|---|---|
 | `control_part` | `"arm"` | Robot control part to move |
 | `sample_interval` | `50` | Number of waypoints in the trajectory |
+| `plan_opts` | `None` | Optional planner-specific options; copied before each motion-generator call |
 
 **Target:** `EndEffectorPoseTarget(xpos=...)` where `xpos` is a `torch.Tensor` of shape `(4, 4)`, `(n_envs, 4, 4)` or `(n_envs, n_waypoint, 4, 4)` — a homogeneous EEF pose.
 

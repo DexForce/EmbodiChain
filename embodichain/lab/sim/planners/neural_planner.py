@@ -245,8 +245,7 @@ class NeuralPlanner(BasePlanner):
         KeyError: If the checkpoint is missing required keys.
     """
 
-    preinterpolate_targets = False
-    """Neural rollouts consume raw EEF waypoints; pre-interpolation is disabled."""
+    supported_move_types = frozenset({MoveType.EEF_MOVE})
 
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)

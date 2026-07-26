@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 import functools
@@ -23,7 +25,7 @@ from dataclasses import MISSING
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
-from .utils import PlanState, PlanResult
+from .utils import MoveType, PlanState, PlanResult
 
 __all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
 
@@ -155,12 +157,12 @@ class BasePlanner(ABC):
 
         self.device = self.robot.device
 
-    preinterpolate_targets: bool = True
-    """Whether ``MotionGenerator`` may pre-interpolate targets for this backend.
+    supported_move_types: frozenset[MoveType] = frozenset()
+    """Movement target types accepted directly by this planner.
 
-    Backends that perform their own collision-aware IK/trajectory optimization
-    (e.g. cuRobo) set this to ``False`` so the original Cartesian targets
-    reach ``plan`` unchanged rather than being converted through EmbodiChain IK.
+    :class:`MotionGenerator` uses this declaration to validate targets and
+    determine whether Cartesian targets must first be converted into joint
+    waypoints for a joint-only backend.
     """
 
     preserve_plan_samples: bool = False
@@ -172,14 +174,17 @@ class BasePlanner(ABC):
     waypoint count.
     """
 
-    supports_joint_move: bool = False
-    """Whether the backend accepts :attr:`MoveType.JOINT_MOVE` targets.
+    def supports_move_type(self, move_type: MoveType) -> bool:
+        """Return whether the planner accepts a movement target type directly.
 
-    Atomic actions use this capability to decide whether their joint-only
-    phases may be delegated through ``MotionGenerator``. Cartesian-only
-    planners retain the deterministic local joint interpolation for those
-    phases.
-    """
+        Args:
+            move_type: Movement target type to query.
+
+        Returns:
+            ``True`` when :meth:`plan` accepts the target type without
+            :class:`MotionGenerator` preprocessing.
+        """
+        return move_type in self.supported_move_types
 
     def default_plan_options(self) -> PlanOptions:
         """Return backend-default planning options."""

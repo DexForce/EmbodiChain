@@ -143,14 +143,64 @@ or live in an offset base frame, also declare their names in
 `CuroboPlanOptions.dynamic_obstacle_poses` (provision
 `CuroboWorldCfg.collision_cache` before planning). Dynamic updates require the
 `"cuboid"` or `"mesh"` representation because sphere fitting expands one object
-into multiple independently named obstacles. With the default shared world
-(`multi_env=False`), all batch rows must provide the same obstacle pose; set
-`multi_env=True` when each environment needs its own collision-world instance
-(for example, different dynamic obstacle poses). In that mode the generated world
-YAML is cloned into one V2 scene per batch row. An empty world (`rigid_objects`
-left `None`) is likewise materialized once per row so its per-environment cache
-is allocated. Dynamic pose updates still require the named geometry to already
-exist in every scene; the adapter does not insert new geometry at runtime.
+into multiple independently named obstacles.
+
+### Shared and per-environment collision worlds
+
+`CuroboWorldCfg.multi_env` controls collision-world batching only. Robot start
+states and planning goals remain batched regardless of this setting.
+
+Choose the setting based on obstacle poses after EmbodiChain rebases them from
+the simulator world frame into each environment's robot-base frame:
+
+| Environment layout | Recommended setting |
+|---|---|
+| Replicated arenas have different simulator-world offsets, but each obstacle has the same pose relative to its local robot base | `multi_env=False` (default) |
+| Obstacles have different poses relative to their respective robot bases, for example due to per-environment pose randomization | `multi_env=True` |
+
+With `multi_env=False`, all batch rows share one collision world. Raw
+simulator-world poses may differ—for example, because env 1 is translated from
+env 0—but the shared world remains correct when rebasing removes the arena
+offset and the resulting robot-relative poses are equal. If the rebased poses
+differ, the adapter rejects the update and instructs the caller to enable
+`multi_env`.
+
+With `multi_env=True`, cuRobo allocates one collision world per batch row and
+EmbodiChain sends row `i` of each dynamic obstacle pose to world `i`. The
+auto-generated YAML still reads the static scene from env 0 and clones that
+scene for every row; setting `multi_env=True` does not by itself discover each
+environment's distinct initial object poses. Any object whose robot-relative
+pose differs by environment must also:
+
+1. Use `obstacle_representation="cuboid"` or `"mesh"`.
+2. Be listed in `CuroboWorldCfg.dynamic_obstacle_names`.
+3. Have its current `(B, 4, 4)` simulator-world poses passed through
+   `CuroboPlanOptions.dynamic_obstacle_poses` when planning.
+
+For example:
+
+```python
+world_cfg = CuroboWorldCfg(
+    rigid_objects=[block],
+    obstacle_representation="cuboid",
+    dynamic_obstacle_names=["block"],
+    multi_env=True,
+)
+
+plan_options = CuroboPlanOptions(
+    control_part="arm",
+    dynamic_obstacle_poses={
+        "block": block.get_local_pose(to_matrix=True),  # (B, 4, 4)
+    },
+)
+```
+
+An empty world (`rigid_objects=None`) is likewise materialized once per row in
+multi-env mode so its per-environment cache is allocated. Dynamic pose updates
+still require the named geometry to already exist in every scene; the adapter
+does not insert new geometry at runtime. Independent worlds replicate scene
+data and collision caches across the batch, so retain the shared default when
+the rebased layouts are identical.
 
 (curobo-auto-generated-robot-yaml)=
 ## Auto-generated robot YAML

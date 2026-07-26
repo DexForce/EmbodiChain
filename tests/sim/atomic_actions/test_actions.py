@@ -130,7 +130,8 @@ def _make_curobo_mock_motion_generator(
     """Mock MotionGenerator whose planner is a cuRobo backend.
 
     ``result_positions`` is ``(B, N, ARM_DOF)``. The planner preserves samples
-    and disables pre-interpolation, matching the real cuRobo capabilities.
+    and accepts both EEF and joint targets directly, matching the real cuRobo
+    capabilities.
     ``preserve_plan_samples`` defaults to ``True`` to exercise the opt-in raw
     path; pass ``False`` to exercise the default resample-to-sample_interval
     path.
@@ -138,9 +139,11 @@ def _make_curobo_mock_motion_generator(
     mg = _make_mock_motion_generator()
     planner = Mock()
     planner.cfg.planner_type = "curobo"
-    planner.preinterpolate_targets = False
+    planner.supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    planner.supports_move_type.side_effect = (
+        lambda move_type: move_type in planner.supported_move_types
+    )
     planner.preserve_plan_samples = preserve_plan_samples
-    planner.supports_joint_move = True
     mg.planner = planner
     B = result_positions.shape[0]
     if success is None:
@@ -1312,7 +1315,9 @@ class TestMoveJointsCurobo:
         )
         plan_states = mg.generate.call_args.args[0]
         assert all(s.move_type is MoveType.JOINT_MOVE for s in plan_states)
-        assert mg.generate.call_args.kwargs["options"].is_interpolate is False
+        # The builder requests target preparation; MotionGenerator skips it
+        # because cuRobo declares native JOINT_MOVE support.
+        assert mg.generate.call_args.kwargs["options"].is_interpolate is True
 
     def test_default_resamples_to_sample_interval(self):
         mg = _make_curobo_mock_motion_generator(

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -404,7 +405,7 @@ class TrajectoryBuilder:
                 start_qpos=start_qpos,
                 control_part=control_part,
                 plan_opts=plan_opts,
-                is_interpolate=self.motion_generator.planner.preinterpolate_targets,
+                is_interpolate=True,
             ),
         )
         return self._process_motion_gen_result(result, start_qpos, n_waypoints, arm_dof)
@@ -502,6 +503,12 @@ class TrajectoryBuilder:
 
     def _build_plan_opts(self, cfg: "ActionCfg | None", n_waypoints: int):
         """Build planner options from action configuration (three-way factory)."""
+        configured_plan_opts = getattr(cfg, "plan_opts", None)
+        if configured_plan_opts is not None:
+            # Planner.with_motion_context may populate runtime fields such as
+            # start_qpos and control_part, so never mutate the action config's
+            # reusable options object.
+            return deepcopy(configured_plan_opts)
         planner_type = getattr(cfg, "planner_type", None)
         if planner_type == "toppra":
             constraints: dict = {}
@@ -542,10 +549,11 @@ class TrajectoryBuilder:
         """Plan a joint-space trajectory through one or more target waypoints.
 
         For ``motion_source='motion_gen'``, this delegates only when the
-        selected backend advertises ``supports_joint_move``. Cartesian-only
-        backends (such as the neural planner) retain the deterministic local
-        interpolation for joint-only phases. ``motion_source='ik_interp'``
-        always uses that local interpolation.
+        selected backend includes :attr:`MoveType.JOINT_MOVE` in its supported
+        target types. Cartesian-only backends (such as the neural planner)
+        retain the deterministic local joint interpolation for joint-only
+        phases. ``motion_source='ik_interp'`` always uses that local
+        interpolation.
 
         Returns:
             ``(success:(B,), trajectory:(B, N, arm_dof))``.
@@ -560,7 +568,7 @@ class TrajectoryBuilder:
                     ValueError,
                 )
             self._validate_planner_type(cfg)
-            if self.motion_generator.planner.supports_joint_move:
+            if self.motion_generator.planner.supports_move_type(MoveType.JOINT_MOVE):
                 if target_qpos.dim() == 2:
                     target_qpos = target_qpos.unsqueeze(1)  # (B, 1, D)
                 plan_states = [
@@ -574,7 +582,7 @@ class TrajectoryBuilder:
                         start_qpos=start_qpos,
                         control_part=control_part,
                         plan_opts=plan_opts,
-                        is_interpolate=self.motion_generator.planner.preinterpolate_targets,
+                        is_interpolate=True,
                     ),
                 )
                 return self._process_motion_gen_result(

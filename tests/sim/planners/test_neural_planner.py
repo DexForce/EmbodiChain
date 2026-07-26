@@ -311,9 +311,7 @@ def test_motion_generator_neural_propagates_motion_gen_options(tmp_path, monkeyp
     assert torch.allclose(result.positions[0, 0], custom_qpos)
 
 
-def test_motion_generator_neural_auto_disables_interpolation(
-    tmp_path, monkeypatch, caplog
-):
+def test_motion_generator_neural_preserves_native_eef_targets(tmp_path, monkeypatch):
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
@@ -330,22 +328,20 @@ def test_motion_generator_neural_auto_disables_interpolation(
         )
     )
 
-    import logging
-
-    with caplog.at_level(logging.WARNING):
-        result = motion_generator.generate(
-            target_states=[
-                PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
-            ],
-            options=MotionGenOptions(
-                is_interpolate=True,
-                control_part="main_arm",
-                start_qpos=torch.zeros(NUM_ARM_JOINTS),
-            ),
-        )
+    options = MotionGenOptions(
+        is_interpolate=True,
+        control_part="main_arm",
+        start_qpos=torch.zeros(NUM_ARM_JOINTS),
+    )
+    result = motion_generator.generate(
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
+        options=options,
+    )
 
     assert result.success.all().item()
-    assert "does not support MotionGenerator pre-interpolation" in caplog.text
+    assert options.is_interpolate is True
 
 
 def test_safe_torch_load_roundtrip(tmp_path):

@@ -42,10 +42,16 @@ def _mock_mg(num_envs=2, arm_dof=6, planner_type="toppra"):
     mg.device = torch.device("cpu")
     planner = Mock()
     planner.cfg.planner_type = planner_type
-    # TOPPRA allows MotionGenerator pre-interpolation; neural/curobo do not.
-    planner.preinterpolate_targets = planner_type == "toppra"
+    supported_move_types = {
+        "toppra": frozenset({MoveType.JOINT_MOVE}),
+        "neural": frozenset({MoveType.EEF_MOVE}),
+        "curobo": frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE}),
+    }
+    planner.supported_move_types = supported_move_types[planner_type]
+    planner.supports_move_type.side_effect = (
+        lambda move_type: move_type in planner.supported_move_types
+    )
     planner.preserve_plan_samples = planner_type == "curobo"
-    planner.supports_joint_move = planner_type in {"toppra", "curobo"}
     mg.planner = planner
     return mg
 
@@ -147,8 +153,9 @@ class TestCuroboBuilderDispatch:
         assert success.tolist() == [True, True]
         # preserve_plan_samples -> returned length is the planner's (7), not 20.
         assert trajectory.shape == (2, 7, 6)
-        # No pre-interpolation; original EEF target reaches the generator.
-        assert mg.generate.call_args.kwargs["options"].is_interpolate is False
+        # MotionGenerator decides from planner capabilities that no
+        # pre-interpolation is needed; the builder only requests preparation.
+        assert mg.generate.call_args.kwargs["options"].is_interpolate is True
         assert mg.generate.call_args.args[0][0].move_type is MoveType.EEF_MOVE
 
     def test_mismatched_planner_type_raises(self):

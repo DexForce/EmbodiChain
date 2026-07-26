@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 
 import torch
@@ -21,7 +23,7 @@ import numpy as np
 from concurrent.futures.process import BrokenProcessPool
 
 from embodichain.utils import logger, configclass
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.planners.utils import MoveType, TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import (
     validate_plan_options,
     BasePlanner,
@@ -286,7 +288,7 @@ class ToppraPlanOptions(PlanOptions):
 class ToppraPlanner(BasePlanner):
     """Time-optimal joint-space planner backed by TOPPRA."""
 
-    supports_joint_move = True
+    supported_move_types = frozenset({MoveType.JOINT_MOVE})
 
     def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
