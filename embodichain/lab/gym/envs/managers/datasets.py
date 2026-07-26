@@ -95,6 +95,15 @@ class LeRobotRecorder(Functor):
         # Experimental parameters for extra episode info saving.
         self.use_videos = params.get("use_videos", False)
 
+        # Async image writing (lerobot official AsyncImageWriter).
+        # When > 0, per-frame PNG writes are offloaded to a thread/process pool
+        # so add_frame() no longer blocks on PIL.Image.save(). This is the
+        # single biggest lever for saving throughput with camera sensors.
+        # Threads share the process (cheap, GIL-released by PIL C path);
+        # processes add isolation at a higher spawn cost.
+        self.image_writer_threads = int(params.get("image_writer_threads", 0))
+        self.image_writer_processes = int(params.get("image_writer_processes", 0))
+
         # LeRobot dataset instance
         self.dataset: Optional[LeRobotDataset] = None
         self.dataset_full_path: Optional[Path] = None
@@ -122,6 +131,7 @@ class LeRobotRecorder(Functor):
         instruction: Optional[str] = None,
         extra: Optional[Dict] = None,
         use_videos: bool = False,
+        **kwargs,
     ) -> None:
         """Main entry point for the recorder functor.
 
@@ -131,6 +141,15 @@ class LeRobotRecorder(Functor):
         Args:
             env: The environment instance.
             env_ids: Environment IDs to save. If None, attempts to save all environments.
+            save_path: Unused at call time (honored at construction).
+            robot_meta: Unused at call time (honored at construction).
+            instruction: Unused at call time (honored at construction).
+            extra: Unused at call time (honored at construction).
+            use_videos: Unused at call time (honored at construction).
+            **kwargs: Construction-only params (e.g. ``image_writer_threads``,
+                ``image_writer_processes``, ``save_path``) passed through by
+                ``DatasetManager.apply`` via ``**functor_cfg.params``. They are
+                read in :meth:`__init__` and ignored here.
         """
         # If env_ids is None, check all environments for completed episodes
         if env_ids is None:
@@ -146,55 +165,85 @@ class LeRobotRecorder(Functor):
         self,
         env_ids: torch.Tensor,
     ) -> None:
-        """Save completed episodes for specified environments."""
-        task = self.instruction.get("lang", "unknown_task")
+        """Save completed episodes for specified environments.
 
-        # Process each environment
+        This reads each env's slice from the rollout buffer and delegates to
+        :meth:`_save_single_episode`. The slice read happens in the caller
+        thread so that subclasses (e.g. :class:`AsyncLeRobotRecorder`) can
+        clone the slice and defer the actual conversion/disk-write to a
+        background worker without racing the buffer reuse on reset.
+        """
+        step = self._env.current_rollout_step
         for env_id in env_ids.cpu().tolist():
-            # Get buffer for this environment (already contains single-env data)
-            obs_list = self._env.rollout_buffer["obs"][
-                env_id, : self._env.current_rollout_step
-            ]
-            action_list = self._env.rollout_buffer["actions"][
-                env_id, : self._env.current_rollout_step
-            ]
+            obs_list = self._env.rollout_buffer["obs"][env_id, :step]
+            action_list = self._env.rollout_buffer["actions"][env_id, :step]
+            self._save_single_episode(env_id, obs_list, action_list)
 
-            if len(obs_list) == 0:
-                logger.log_warning(f"No episode data to save for env {env_id}")
-                continue
+    def _save_single_episode(
+        self,
+        env_id: int,
+        obs_list: Any,
+        action_list: Any,
+    ) -> bool:
+        """Convert and persist one episode already sliced from the buffer.
 
-            # Align obs and action
-            if len(obs_list) > len(action_list):
-                obs_list = obs_list[:-1]
+        This operates purely on the provided ``obs_list`` / ``action_list``
+        (which may be live buffer views or detached clones) and never touches
+        ``self._env.rollout_buffer`` or ``self._env.current_rollout_step``,
+        so it is safe to call from a background thread on cloned data.
 
-            # Update metadata
-            extra_info = self.extra.copy() if self.extra else {}
-            fps = self.dataset.meta.info.get("fps", 30)
-            current_episode_time = len(obs_list) / fps if fps > 0 else 0
+        Args:
+            env_id: Environment id (used for logging only).
+            obs_list: Per-frame observations for the episode.
+            action_list: Per-frame actions for the episode.
 
-            episode_extra_info = extra_info.copy()
-            self.total_time += current_episode_time
-            episode_extra_info["total_time"] = self.total_time
+        Returns:
+            True if the episode was saved successfully, False otherwise.
+        """
+        task = (
+            self.instruction.get("lang", "unknown_task")
+            if self.instruction
+            else "unknown_task"
+        )
 
-            try:
-                for obs, action in tqdm.tqdm(
-                    zip(obs_list, action_list),
-                    total=len(obs_list),
-                    desc=f"Converting env {env_id} episode to LeRobot format",
-                ):
-                    frame = self._convert_frame_to_lerobot(obs, action, task)
-                    self.dataset.add_frame(frame)
+        if len(obs_list) == 0:
+            logger.log_warning(f"No episode data to save for env {env_id}")
+            return False
 
-                self.dataset.save_episode()
+        # Align obs and action (obs may be one longer than action)
+        if len(obs_list) > len(action_list):
+            obs_list = obs_list[:-1]
 
-                logger.log_info(
-                    f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
-                    f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
-                )
+        # Update metadata
+        extra_info = self.extra.copy() if self.extra else {}
+        fps = self.dataset.meta.info.get("fps", 30)
+        current_episode_time = len(obs_list) / fps if fps > 0 else 0
 
-                self.curr_episode += 1
-            except Exception as e:
-                logger.log_error(f"Failed to save episode {env_id}: {e}")
+        episode_extra_info = extra_info.copy()
+        self.total_time += current_episode_time
+        episode_extra_info["total_time"] = self.total_time
+
+        try:
+            for obs, action in tqdm.tqdm(
+                zip(obs_list, action_list),
+                total=len(obs_list),
+                desc=f"Converting env {env_id} episode to LeRobot format",
+            ):
+                frame = self._convert_frame_to_lerobot(obs, action, task)
+                self.dataset.add_frame(frame)
+
+            self.dataset.save_episode()
+
+            logger.log_info(
+                f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
+                f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
+            )
+
+            self.curr_episode += 1
+            return True
+        except Exception as e:
+            logger.log_error(f"Failed to save episode {env_id}: {e}")
+            return False
 
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
@@ -205,6 +254,10 @@ class LeRobotRecorder(Functor):
 
         try:
             if self.dataset is not None:
+                # Flush + stop the async image writer (if enabled) so every
+                # queued PNG write lands on disk before metadata is finalized.
+                if self.dataset.image_writer is not None:
+                    self.dataset.stop_image_writer()
                 self.dataset.finalize()
                 logger.log_info(
                     f"[LeRobotRecorder] Dataset finalized successfully\n"
@@ -263,6 +316,8 @@ class LeRobotRecorder(Functor):
             features=features,
             use_videos=self.use_videos,
             metadata_buffer_size=1,
+            image_writer_processes=self.image_writer_processes,
+            image_writer_threads=self.image_writer_threads,
         )
         logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 
