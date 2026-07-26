@@ -1293,7 +1293,7 @@ class TestMoveJointsCurobo:
     def _action(self, mg, **cfg_kw):
         return MoveJoints(
             mg,
-            MoveJointsCfg(motion_source="motion_gen", planner_type="curobo", **cfg_kw),
+            MoveJointsCfg(motion_source="motion_gen", **cfg_kw),
         )
 
     def test_one_waypoint_routes_joint_move_to_motion_gen(self):
@@ -1388,25 +1388,25 @@ class TestMoveJointsCurobo:
 class TestCoordinatedRejectsCurobo:
     def test_coordinated_pickment_rejects_curobo(self):
         mg = _make_dual_arm_mock_motion_generator()
+        mg.planner.cfg.planner_type = "curobo"
         cfg = CoordinatedPickmentCfg(
             left_hand_open_qpos=_hand_open(),
             left_hand_close_qpos=_hand_close(),
             right_hand_open_qpos=_hand_open(),
             right_hand_close_qpos=_hand_close(),
             motion_source="motion_gen",
-            planner_type="curobo",
         )
         with pytest.raises(ValueError, match="not supported"):
             CoordinatedPickment(mg, cfg)
 
     def test_coordinated_placement_rejects_curobo(self):
         mg = _make_dual_arm_mock_motion_generator()
+        mg.planner.cfg.planner_type = "curobo"
         cfg = CoordinatedPlacementCfg(
             placing_hand_open_qpos=_hand_open(),
             placing_hand_close_qpos=_hand_close(),
             support_hand_close_qpos=_hand_close(),
             motion_source="motion_gen",
-            planner_type="curobo",
         )
         with pytest.raises(ValueError, match="not supported"):
             CoordinatedPlacement(mg, cfg)

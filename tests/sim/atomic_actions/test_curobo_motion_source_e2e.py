@@ -18,7 +18,7 @@
 
 Skipped when cuRobo or CUDA is unavailable. When both are present, it builds a
 single-arm Franka + static cuboid scene, executes ``MoveEndEffector`` with
-``planner_type='curobo'`` through the engine, and asserts a full-DoF
+a cuRobo-backed ``MotionGenerator`` through the engine, and asserts a full-DoF
 collision-aware trajectory that reaches the target after playback.
 """
 
@@ -91,7 +91,6 @@ def _make_franka_curobo_engine():
             mg,
             MoveEndEffectorCfg(
                 motion_source="motion_gen",
-                planner_type="curobo",
                 control_part=CONTROL_PART,
                 sample_interval=SAMPLE_INTERVAL,
             ),

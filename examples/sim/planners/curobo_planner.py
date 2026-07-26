@@ -739,7 +739,6 @@ def main() -> None:
                 motion_generator,
                 MoveEndEffectorCfg(
                     motion_source="motion_gen",
-                    planner_type="curobo",
                     control_part=control_part,
                     plan_opts=CuroboPlanOptions(
                         dynamic_obstacle_poses=(

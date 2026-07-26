@@ -83,9 +83,7 @@ class TestPlanArmTrajMotionGen:
             positions=torch.zeros(3, 12, 6),
         )
         builder = TrajectoryBuilder(mg)
-        cfg = ActionCfg(
-            motion_source="motion_gen", planner_type="toppra", control_part="arm"
-        )
+        cfg = ActionCfg(motion_source="motion_gen", control_part="arm")
         start_qpos = torch.zeros(3, 6)
         # per-env list[list[PlanState]] with single-env PlanStates (action contract)
         target_states_list = [
@@ -107,6 +105,10 @@ class TestPlanArmTrajMotionGen:
         assert ok.all().item()
         assert traj.shape == (3, 12, 6)
         mg.generate.assert_called_once()
+        assert (
+            type(mg.generate.call_args.kwargs["options"].plan_opts).__name__
+            == "ToppraPlanOptions"
+        )
 
     def test_ik_interp_path_unchanged(self):
         mg = _mock_mg(num_envs=2, arm_dof=6)
@@ -146,7 +148,6 @@ class TestCuroboBuilderDispatch:
             arm_dof=6,
             cfg=ActionCfg(
                 motion_source="motion_gen",
-                planner_type="curobo",
                 control_part="arm",
             ),
         )
@@ -156,37 +157,15 @@ class TestCuroboBuilderDispatch:
         # MotionGenerator decides from planner capabilities that no
         # pre-interpolation is needed; the builder only requests preparation.
         assert mg.generate.call_args.kwargs["options"].is_interpolate is True
+        assert (
+            type(mg.generate.call_args.kwargs["options"].plan_opts).__name__
+            == "CuroboPlanOptions"
+        )
         assert mg.generate.call_args.args[0][0].move_type is MoveType.EEF_MOVE
-
-    def test_mismatched_planner_type_raises(self):
-        # MotionGenerator owns toppra, action requests curobo.
-        mg = _mock_mg(num_envs=2, arm_dof=6, planner_type="toppra")
-        builder = TrajectoryBuilder(mg)
-        with pytest.raises(ValueError, match="planner_type"):
-            builder.plan_arm_traj(
-                _pose_targets_for_two_envs(),
-                torch.zeros(2, 6),
-                n_waypoints=10,
-                control_part="arm",
-                arm_dof=6,
-                cfg=ActionCfg(
-                    motion_source="motion_gen",
-                    planner_type="curobo",
-                    control_part="arm",
-                ),
-            )
 
     def test_invalid_motion_source_raises(self):
         with pytest.raises(ValueError, match="motion_source"):
             ActionCfg(motion_source="bogus")
-
-    def test_motion_gen_without_planner_type_raises(self):
-        with pytest.raises(ValueError, match="planner_type is required"):
-            ActionCfg(motion_source="motion_gen")
-
-    def test_ik_interp_with_planner_type_raises(self):
-        with pytest.raises(ValueError, match="planner_type is only valid"):
-            ActionCfg(motion_source="ik_interp", planner_type="toppra")
 
     def test_nan_positions_rejected(self):
         positions = torch.zeros(2, 5, 6)
@@ -202,7 +181,6 @@ class TestCuroboBuilderDispatch:
                 arm_dof=6,
                 cfg=ActionCfg(
                     motion_source="motion_gen",
-                    planner_type="curobo",
                     control_part="arm",
                 ),
             )
@@ -222,7 +200,6 @@ class TestCuroboBuilderDispatch:
                 arm_dof=6,
                 cfg=ActionCfg(
                     motion_source="motion_gen",
-                    planner_type="curobo",
                     control_part="arm",
                 ),
             )
@@ -245,7 +222,6 @@ class TestCuroboBuilderDispatch:
             arm_dof=6,
             cfg=ActionCfg(
                 motion_source="motion_gen",
-                planner_type="curobo",
                 control_part="arm",
             ),
         )
@@ -269,7 +245,6 @@ class TestCuroboBuilderDispatch:
             arm_dof=6,
             cfg=ActionCfg(
                 motion_source="motion_gen",
-                planner_type="curobo",
                 control_part="arm",
             ),
         )
@@ -287,9 +262,7 @@ class TestJointMotionCapabilities:
             positions=torch.zeros(2, 8, 6),
         )
         builder = TrajectoryBuilder(mg)
-        cfg = ActionCfg(
-            motion_source="motion_gen", planner_type="toppra", control_part="arm"
-        )
+        cfg = ActionCfg(motion_source="motion_gen", control_part="arm")
 
         success, trajectory = builder.plan_joint_motion(
             torch.zeros(2, 6),
@@ -310,9 +283,7 @@ class TestJointMotionCapabilities:
         builder = TrajectoryBuilder(mg)
         start = torch.zeros(2, 6)
         target = torch.ones(2, 6)
-        cfg = ActionCfg(
-            motion_source="motion_gen", planner_type="neural", control_part="arm"
-        )
+        cfg = ActionCfg(motion_source="motion_gen", control_part="arm")
 
         with patch(
             "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",

@@ -395,7 +395,6 @@ class TrajectoryBuilder:
                 "motion_source='motion_gen' requires a MotionGenerator on the engine",
                 ValueError,
             )
-        self._validate_planner_type(cfg)
         n_envs = start_qpos.shape[0]
         plan_states = self._to_batched_plan_states(target_states_list, n_envs)
         plan_opts = self._build_plan_opts(cfg, n_waypoints)
@@ -409,17 +408,6 @@ class TrajectoryBuilder:
             ),
         )
         return self._process_motion_gen_result(result, start_qpos, n_waypoints, arm_dof)
-
-    def _validate_planner_type(self, cfg: "ActionCfg | None") -> None:
-        """Reject actions whose requested planner differs from the engine's."""
-        actual_type = self.motion_generator.planner.cfg.planner_type
-        requested_type = getattr(cfg, "planner_type", None)
-        if requested_type != actual_type:
-            logger.log_error(
-                f"Action requested planner_type={requested_type!r}, but "
-                f"MotionGenerator owns {actual_type!r}.",
-                ValueError,
-            )
 
     def _process_motion_gen_result(
         self,
@@ -509,7 +497,7 @@ class TrajectoryBuilder:
             # start_qpos and control_part, so never mutate the action config's
             # reusable options object.
             return deepcopy(configured_plan_opts)
-        planner_type = getattr(cfg, "planner_type", None)
+        planner_type = self.motion_generator.planner.cfg.planner_type
         if planner_type == "toppra":
             constraints: dict = {}
             vl = getattr(cfg, "velocity_limit", None)
@@ -567,7 +555,6 @@ class TrajectoryBuilder:
                     "motion_source='motion_gen' requires a MotionGenerator on the engine",
                     ValueError,
                 )
-            self._validate_planner_type(cfg)
             if self.motion_generator.planner.supports_move_type(MoveType.JOINT_MOVE):
                 if target_qpos.dim() == 2:
                     target_qpos = target_qpos.unsqueeze(1)  # (B, 1, D)

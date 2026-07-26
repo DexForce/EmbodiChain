@@ -650,7 +650,6 @@ def _make_curobo_engine(
             motion_generator,
             MoveEndEffectorCfg(
                 motion_source="motion_gen",
-                planner_type="curobo",
                 control_part=_SIM_CONTROL_PART,
                 sample_interval=80,
             ),
