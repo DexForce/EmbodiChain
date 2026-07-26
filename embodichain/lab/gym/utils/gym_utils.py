@@ -937,6 +937,14 @@ def build_env_cfg_from_args(
     if args.preview:
         # In preview mode, we typically don't want to save data
         cfg.filter_dataset_saving = True
+    if (
+        getattr(args, "replay", False)
+        and getattr(args, "replay_mode", None) == "control"
+    ):
+        # Interactive replay only reads recorded states. Disable dataset
+        # functors before environment construction so recorders do not create
+        # empty output datasets.
+        cfg.filter_dataset_saving = True
 
     action_config = {}
     if args.action_config is not None:

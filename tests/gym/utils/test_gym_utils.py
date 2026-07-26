@@ -510,6 +510,66 @@ class TestConfigToCfgFromFile:
         assert merged_config["max_episode_steps"] == 321
         assert cfg.max_episode_steps == 321
 
+    @pytest.mark.parametrize(
+        ("replay_mode", "expected"),
+        [("control", True), ("dynamic", False)],
+    )
+    def test_control_replay_disables_dataset_saving(
+        self, tmp_path, replay_mode, expected
+    ):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "max_episode_steps": 100,
+            "env": {
+                "events": {},
+                "observations": {},
+                "rewards": {},
+                "dataset": {
+                    "lerobot": {
+                        "func": "LeRobotRecorder",
+                        "mode": "save",
+                        "params": {},
+                    }
+                },
+            },
+            "robot": {
+                "uid": "TestRobot",
+                "urdf_cfg": {
+                    "components": [
+                        {
+                            "component_type": "arm",
+                            "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+                        }
+                    ]
+                },
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "init_qpos": [0.0] * 6,
+            },
+        }
+        config_path = tmp_path / "gym_config.json"
+        save_config(config_path, config)
+        args = argparse.Namespace(
+            gym_config=str(config_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer="rasterization",
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            replay=True,
+            replay_mode=replay_mode,
+            action_config=None,
+        )
+
+        cfg, _, _ = build_env_cfg_from_args(args)
+
+        assert cfg.filter_dataset_saving is expected
+
 
 class _StubRobot:
     def __init__(self, dof: int):

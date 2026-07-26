@@ -18,6 +18,8 @@ import gymnasium
 import numpy as np
 import argparse
 import os
+import select
+import sys
 import time
 import torch
 import tqdm
@@ -165,51 +167,185 @@ def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
         log_info(f"Replay complete ({num_steps} steps).", color="green")
 
 
-def replay_control(replay_env: ReplayWrapper) -> None:
-    """Interactive kinematic scrubber: terminal input controls progress."""
+class _ReplayControlInput:
+    """Read replay-control commands immediately when stdin is a terminal."""
+
+    def __init__(self):
+        self._fd = None
+        self._term_attrs = None
+        self.single_key = False
+
+    def __enter__(self):
+        if not sys.stdin.isatty():
+            return self
+        self._fd = sys.stdin.fileno()
+        if os.name == "nt":
+            self.single_key = True
+            return self
+
+        import termios
+        import tty
+
+        self._term_attrs = termios.tcgetattr(self._fd)
+        tty.setcbreak(self._fd)
+        self.single_key = True
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self._term_attrs is not None and self._fd is not None:
+            import termios
+
+            termios.tcsetattr(self._fd, termios.TCSADRAIN, self._term_attrs)
+
+    def read_key(self, timeout: float | None = None) -> str | None:
+        """Read one key, or return ``None`` when the timeout expires."""
+        if os.name == "nt" and self.single_key:
+            import msvcrt
+
+            if timeout is None:
+                return msvcrt.getwch().lower()
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if msvcrt.kbhit():
+                    return msvcrt.getwch().lower()
+                time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+            return None
+
+        if timeout is not None:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+            if not ready:
+                return None
+
+        if self.single_key:
+            value = sys.stdin.read(1)
+        else:
+            value = sys.stdin.readline()
+        if value == "":
+            raise EOFError
+        return value.lower() if self.single_key else value.strip().lower()
+
+
+def _read_replay_control_command(
+    control_input: _ReplayControlInput, initial: str | None = None
+) -> str:
+    """Read a command, collecting multi-digit jump targets until Enter."""
+    command = control_input.read_key() if initial is None else initial
+    if command is None:
+        return ""
+    if not control_input.single_key or not command.isdigit():
+        return command
+
+    digits = command
+    print(digits, end="", flush=True)
+    while True:
+        key = control_input.read_key()
+        if key in ("\r", "\n"):
+            print()
+            return digits
+        if key in ("\b", "\x7f"):
+            if digits:
+                digits = digits[:-1]
+                print("\b \b", end="", flush=True)
+            continue
+        if key.isdigit():
+            digits += key
+            print(key, end="", flush=True)
+
+
+def _run_replay_control_loop(
+    replay_env: ReplayWrapper, control_input: _ReplayControlInput
+) -> None:
+    """Run the interactive replay loop using the provided input source."""
     num_steps = int(replay_env._lengths.min().item())
     max_step = num_steps - 1
-    if replay_env.env.sim_cfg.headless:
-        log_warning(
-            "control mode with --headless: no window to view the scrub. "
-            "Re-run without --headless to see the replay."
-        )
-    replay_env.reset()
     step = 0
     replay_env.go_to_step(step)
     dt = (
         float(replay_env.env.sim_cfg.physics_dt)
         * replay_env.env.cfg.sim_steps_per_control
     )
+    pending_command = None
+    auto_playing = False
+
     print(f"Trajectory has {num_steps} steps (0..{max_step}).")
     while True:
+        if auto_playing:
+            if step >= max_step:
+                auto_playing = False
+                print(f"\nAuto replay finished at step {step}.")
+                continue
+
+            step += 1
+            replay_env.go_to_step(step)
+            print(
+                f"\r[auto step {step}/{max_step}]  press any key to pause",
+                end="",
+                flush=True,
+            )
+            try:
+                key = control_input.read_key(timeout=dt)
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if key is None:
+                continue
+
+            auto_playing = False
+            print(f"\nPaused at step {step}.")
+            # Pause keys are consumed. Other keys also pause and then execute
+            # their normal command, so p/n/q/r remain responsive during auto.
+            if key not in ("a", " ", "\r", "\n"):
+                pending_command = key
+            continue
+
         print(
-            f"[step {step}/{max_step}]  n=next  p=prev  <N>=jump  a=auto  r=reset  q=quit"
+            f"[step {step}/{max_step}]  n=next  p=prev  <N>=jump  "
+            "a=auto  r=reset  q=quit"
         )
+        if control_input.single_key:
+            print("> ", end="", flush=True)
         try:
-            cmd = input("> ").strip().lower()
+            command = _read_replay_control_command(
+                control_input, initial=pending_command
+            )
         except (EOFError, KeyboardInterrupt):
             break
-        if cmd in ("q", "quit"):
+        finally:
+            pending_command = None
+        if control_input.single_key and not command.isdigit():
+            print()
+
+        if command in ("q", "quit"):
             break
-        elif cmd in ("n", ""):
+        if command in ("n", ""):
             step = min(step + 1, max_step)
-        elif cmd in ("p", "b"):
+        elif command in ("p", "b"):
             step = max(step - 1, 0)
-        elif cmd == "r":
+        elif command == "r":
             step = 0
-        elif cmd == "a":
-            for s in range(step + 1, num_steps):
-                step = s
-                replay_env.go_to_step(step)
-                time.sleep(dt)
+        elif command == "a":
+            auto_playing = True
             continue
-        elif cmd.isdigit():
-            step = max(0, min(int(cmd), max_step))
+        elif command.isdigit():
+            step = max(0, min(int(command), max_step))
+        elif command == " ":
+            continue
         else:
-            print(f"Unknown command: {cmd!r}")
+            print(f"Unknown command: {command!r}")
             continue
         replay_env.go_to_step(step)
+
+
+def replay_control(replay_env: ReplayWrapper) -> None:
+    """Run an interactive, single-key kinematic trajectory scrubber."""
+    if replay_env.env.sim_cfg.headless:
+        log_warning(
+            "control mode with --headless: no window to view the scrub. "
+            "Re-run without --headless to see the replay."
+        )
+    replay_env.reset()
+    with _ReplayControlInput() as control_input:
+        _run_replay_control_loop(replay_env, control_input)
 
 
 def main(args, env, gym_config):
@@ -360,6 +496,9 @@ def cli():
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+
+    if args.replay and args.replay_mode == "control":
+        log_info("Dataset saving disabled for control replay mode.", color="green")
 
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 

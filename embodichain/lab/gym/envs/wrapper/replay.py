@@ -31,19 +31,21 @@ __all__ = ["ReplayWrapper"]
 
 
 class ReplayWrapper(gym.Wrapper):
-    """Replay a recorded environment trajectory in pure-kinematic or dynamic mode.
+    """Replay a recorded environment trajectory.
 
     In ``kinematic`` mode physics is disabled and every recorded object's
     pose/qpos is written directly each step, producing observations only (no
     reward / success / action). In ``dynamic`` mode the recorded robot actions
     are fed back through :meth:`env.step` so physics re-simulates the scene;
-    the full ``obs/reward/terminated/truncated/info`` tuple is returned.
+    the full ``obs/reward/terminated/truncated/info`` tuple is returned. The
+    ``control`` mode uses the same kinematic behavior while exposing
+    :meth:`go_to_step` for interactive scrubbing.
 
     Args:
         env: The environment to wrap (constructed without ``record_trajectory``).
         trajectory: A ``.pt`` path or loaded dict from
             :meth:`EmbodiedEnv.save_trajectory`.
-        mode: ``"kinematic"`` or ``"dynamic"``.
+        mode: ``"kinematic"``, ``"dynamic"``, or ``"control"``.
     """
 
     def __init__(
@@ -53,9 +55,10 @@ class ReplayWrapper(gym.Wrapper):
         mode: str = "dynamic",
     ):
         super().__init__(env)
-        if mode not in ("kinematic", "dynamic"):
+        if mode not in ("kinematic", "dynamic", "control"):
             raise ValueError(
-                f"Invalid replay mode {mode!r}; use 'kinematic' or 'dynamic'."
+                f"Invalid replay mode {mode!r}; use 'kinematic', 'dynamic', or "
+                "'control'."
             )
         self._mode = mode
         self._trajectory = load_trajectory(trajectory)
@@ -178,7 +181,7 @@ class ReplayWrapper(gym.Wrapper):
         idx = torch.arange(n, device=env.device)
         st = self._replay_steps.clamp(max=self._lengths - 1)  # finished envs hold last
 
-        if self._mode == "kinematic":
+        if self._mode in ("kinematic", "control"):
             self._set_all_states(self._trajectory["states"][idx, st])
             env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
             obs = env.get_obs()

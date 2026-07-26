@@ -194,14 +194,15 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
 - **``dynamic``** - feed the recorded robot actions back through ``env.step`` so physics re-simulates the scene. Produces the full ``obs/reward/terminated/truncated/info``. Faithful even with an ``ActionManager`` (the raw action is re-preprocessed).
 - **``control``** - interactive kinematic scrubber. Terminal commands:
 
-  - **``n``** (or Enter) - next step
-  - **``p``** - previous step
+  - **``n``** - next step immediately (no Enter required)
+  - **``p``** - previous step immediately (no Enter required)
   - **``<N>``** - jump to step N
-  - **``a``** - auto-play to the end
+  - **``a``** - start auto-play; press any key to pause
   - **``r``** - reset to step 0
   - **``q``** - quit
 
   ``control`` mode needs a render window (re-run without ``--headless``).
+  Dataset saving is disabled automatically in this mode.
 
 ``--replay`` and ``--preview`` are mutually exclusive.
 

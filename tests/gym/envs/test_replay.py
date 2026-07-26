@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import gc
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -512,8 +513,8 @@ def test_dynamic_replay_with_action_manager(tmp_path):
         gc.collect()
 
 
-def test_go_to_step_scrubs_to_recorded_state(tmp_path):
-    """go_to_step jumps to an arbitrary step and sets the recorded state (O(1) kinematic scrub)."""
+def test_control_mode_scrubs_to_recorded_state(tmp_path):
+    """Control mode jumps to arbitrary steps and sets the recorded state."""
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     try:
         env.reset()
@@ -529,7 +530,7 @@ def test_go_to_step_scrubs_to_recorded_state(tmp_path):
     rec_states = rec["states"]
 
     env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
-    rw = ReplayWrapper(env2.unwrapped, str(path), mode="kinematic")
+    rw = ReplayWrapper(env2.unwrapped, str(path), mode="control")
     try:
         rw.reset()
         # jump to step 3
@@ -552,6 +553,44 @@ def test_go_to_step_scrubs_to_recorded_state(tmp_path):
         rw.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_control_loop_uses_single_keys_and_auto_can_be_interrupted():
+    """Single-key commands act immediately and interrupt auto playback."""
+    from embodichain.lab.scripts.run_env import _run_replay_control_loop
+
+    class FakeControlInput:
+        single_key = True
+
+        def __init__(self):
+            self.keys = iter(["n", "p", "a", None, "p", "q"])
+            self.timeouts = []
+
+        def read_key(self, timeout=None):
+            if timeout is not None:
+                self.timeouts.append(timeout)
+            return next(self.keys)
+
+    class FakeReplayEnv:
+        def __init__(self):
+            self._lengths = torch.tensor([5])
+            self.env = SimpleNamespace(
+                sim_cfg=SimpleNamespace(physics_dt=0.01),
+                cfg=SimpleNamespace(sim_steps_per_control=4),
+            )
+            self.visited_steps = []
+
+        def go_to_step(self, step):
+            self.visited_steps.append(step)
+
+    replay_env = FakeReplayEnv()
+    control_input = FakeControlInput()
+    _run_replay_control_loop(replay_env, control_input)
+
+    # n and p execute as individual key reads. During auto, p interrupts at
+    # step 2 and is then applied immediately, moving back to step 1.
+    assert replay_env.visited_steps == [0, 1, 0, 1, 2, 1]
+    assert control_input.timeouts == [0.04, 0.04]
 
 
 def test_run_env_replay_function(tmp_path):
