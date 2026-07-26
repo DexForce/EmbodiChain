@@ -502,7 +502,27 @@ def cli():
 
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 
-    main(args, env, gym_config)
+    # Ensure the sim is torn down via env.close() (-> SimulationManager.destroy())
+    # before the interpreter shuts down. Without this, C++ resources (dexsim/warp/
+    # CUDA) are finalized during Python shutdown in an unpredictable order, which
+    # segfaults on exit (exit code 139). ``destroy()`` queues a deferred cleanup
+    # task and, by default (EMBODICHAIN_SIM_EXIT_PROCESS=1), calls ``os._exit(0)``
+    # to skip the unsafe teardown entirely. When that env var is disabled (e.g.
+    # dev/test), ``flush_cleanup_queue`` drains the queue and runs the deferred
+    # destruction + GC + scene-barrier so we still exit cleanly.
+    try:
+        main(args, env, gym_config)
+    finally:
+        try:
+            env.close()
+        except Exception as e:
+            log_warning(f"Failed to close environment: {e}")
+        try:
+            from embodichain.lab.sim.sim_manager import SimulationManager
+
+            SimulationManager.flush_cleanup_queue()
+        except Exception as e:
+            log_warning(f"Failed to flush simulation cleanup queue: {e}")
 
 
 if __name__ == "__main__":
