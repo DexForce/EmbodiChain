@@ -15,6 +15,7 @@
 | `embodichain/lab/gym/envs/tasks/__init__.py` | All concrete task imports (forces registration on import) |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
 | `embodichain/lab/gym/envs/wrapper/no_fail.py` | `NoFailWrapper` — forces `is_task_success() → True` |
+| `embodichain/lab/gym/envs/wrapper/replay.py` | `ReplayWrapper` — record-and-replay trajectories (kinematic/dynamic/control) |
 
 ---
 
@@ -248,6 +249,36 @@ class MyTaskEnv(EmbodiedEnv):
 |---|---|---|
 | `NoFailWrapper` | `envs/wrapper/no_fail.py` | Forces `is_task_success() → True` |
 | `TimeLimitWrapper` | `utils/registration.py` | Batched truncation via `elapsed_steps >= max_episode_steps` |
+| `ReplayWrapper` | `envs/wrapper/replay.py` | Replays a recorded trajectory: `kinematic` (physics off, set states), `dynamic` (feed recorded actions, physics on), `control` (interactive scrubber via `go_to_step`) |
+
+---
+
+## Recording & Replay
+
+`EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
+
+- **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
+  `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
+  rigid objects; `actions` = the **pre-process** action) is written each step via
+  `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
+  `self._traj_steps` counter means **async parallel envs** (different reset times)
+  don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
+  are recorded.
+- **Persistence**: `env.save_trajectory(path, env_ids=None)` writes a `.pt` with
+  `states`, `actions`, and `meta` (incl. per-env `lengths`). With
+  `cfg.trajectory_auto_save = True` (default), trajectories auto-save to
+  `<EMBODICHAIN_DEFAULT_DATA_ROOT>/trajectories/<run_id>/` at episode end and on
+  `close()` (best-effort: IO errors warn + skip, never crash the episode).
+- **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
+  `kinematic` disables physics and writes recorded states (obs only, exact
+  reproduction); `dynamic` feeds recorded actions through `env.step` so the
+  `ActionManager` re-applies the transform (faithful even with delta/eef_pose
+  actions); `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay
+  env must use the same robot/objects/`actions` config as the recording env.
+- **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
+  shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
+  `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
+- **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---
 

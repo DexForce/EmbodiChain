@@ -32,3 +32,10 @@ Environment Classes
 .. autoclass:: EmbodiedEnvCfg
     :members:
     :exclude-members: __init__, class_type
+
+Wrappers
+--------
+
+.. autoclass:: ReplayWrapper
+    :members:
+    :show-inheritance:
