@@ -57,10 +57,10 @@ generate_urdf_collision_convexes(
 
 ## Command-Line Interface
 
-Run the module directly for one-off or batch asset preparation:
+Use the unified CLI for one-off or batch asset preparation:
 
 ```bash
-python -m embodichain.toolkits.acd.urdf_modifider [OPTIONS]
+embodichain decompose-urdf [OPTIONS]
 ```
 
 ### Options
@@ -80,13 +80,13 @@ for the function and `8` for the CLI.
 
 ```bash
 # Generate convex collision meshes.
-python -m embodichain.toolkits.acd.urdf_modifider \
+embodichain decompose-urdf \
     --urdf_path ./assets/my_robot.urdf \
     --output_urdf_name my_robot_convex.urdf \
     --max_convex_hull_num 16
 
 # Scale the model and recompute inertia.
-python -m embodichain.toolkits.acd.urdf_modifider \
+embodichain decompose-urdf \
     --urdf_path ./assets/my_robot.urdf \
     --output_urdf_name my_robot_scaled.urdf \
     --recompute_inertia \

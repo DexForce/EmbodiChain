@@ -762,7 +762,11 @@ def assign_data_to_dict(data_dict: TensorDict, name: str, value: Any) -> None:
     current_data[last_key] = value
 
 
-def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
+def add_env_launcher_args_to_parser(
+    parser: argparse.ArgumentParser,
+    *,
+    require_gym_config: bool = False,
+) -> None:
     """Add common environment launcher arguments to an existing argparse parser.
 
     This function adds the following arguments to the provided parser:
@@ -781,7 +785,10 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         1. In preview mode, the environment will be launched and keep running in a loop for user interaction.
 
     Args:
-        parser (argparse.ArgumentParser): The parser to which arguments will be added.
+        parser: The parser to which arguments will be added.
+        require_gym_config: Whether ``--gym_config`` is required. Environment
+            runners should enable this; standalone simulation scripts can
+            leave it disabled.
     """
     parser.add_argument(
         "--num_envs",
@@ -825,7 +832,7 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
-        required=False,
+        required=require_gym_config,
     )
     parser.add_argument(
         "--action_config",
@@ -1004,6 +1011,31 @@ def init_rollout_buffer_from_gym_space(
         device=device,
     )
     return rollout_buffer
+
+
+__all__ = [
+    "DEFAULT_MANAGER_MODULES",
+    "add_env_launcher_args_to_parser",
+    "assign_data_to_dict",
+    "batch",
+    "build_env_cfg_from_args",
+    "cat_tensor_with_ids",
+    "clip_and_scale_action",
+    "config_to_cfg",
+    "convert_observation_to_space",
+    "dict_array_to_torch_inplace",
+    "fetch_data_from_dict",
+    "flatten_state_dict",
+    "get_dtype_bounds",
+    "get_manager_modules",
+    "init_rollout_buffer_from_config",
+    "init_rollout_buffer_from_gym_space",
+    "map_qpos_to_eef_pose",
+    "merge_args_with_gym_config",
+    "register_manager_modules",
+    "to_cpu_tensor",
+    "to_tensor",
+]
 
 
 def init_rollout_buffer_from_config(
