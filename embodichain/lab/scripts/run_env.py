@@ -246,6 +246,24 @@ def main(args, env, gym_config):
     # Final reset.
     _, _ = env.reset()
 
+    if getattr(args, "record_trajectory", False):
+        save_dir = args.trajectory_save_dir
+        if save_dir is None:
+            import os
+
+            from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+
+            save_dir = os.path.join(
+                EMBODICHAIN_DEFAULT_DATA_ROOT,
+                "trajectories",
+                env.unwrapped._traj_run_id,
+            )
+        log_info(
+            f"Trajectories recorded to: {save_dir} "
+            "(replay with --replay --replay_trajectory <path>)",
+            color="green",
+        )
+
 
 def preview(env: gymnasium.Env) -> None:
     """

@@ -859,6 +859,21 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         default=None,
         type=int,
     )
+    parser.add_argument(
+        "--record_trajectory",
+        help="Whether to record per-object kinematic trajectories (for replay). "
+        "Episodes auto-save to --trajectory_save_dir (or "
+        "~/.cache/embodichain_data/trajectories/<run_id>/ by default).",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--trajectory_save_dir",
+        help="Directory for auto-saved trajectories (default: "
+        "~/.cache/embodichain_data/trajectories/<run_id>/).",
+        default=None,
+        type=str,
+    )
 
 
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
@@ -915,6 +930,9 @@ def build_env_cfg_from_args(
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+    cfg.record_trajectory = getattr(args, "record_trajectory", False)
+    if getattr(args, "trajectory_save_dir", None):
+        cfg.trajectory_save_dir = args.trajectory_save_dir
 
     if args.preview:
         # In preview mode, we typically don't want to save data
