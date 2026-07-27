@@ -74,9 +74,11 @@ Helpers:
 | `velocity_limit` | `float \| None` | `None` | Used on the `motion_gen` path |
 | `acceleration_limit` | `float \| None` | `None` | Used on the `motion_gen` path |
 | `motion_source` | `str` | `"ik_interp"` | `"ik_interp"` (batched IK + interpolation) or `"motion_gen"` (batched `MotionGenerator`) |
-| `planner_type` | `str \| None` | `None` | `"toppra"` or `"neural"; required when `motion_source="motion_gen"` |
 
 The base config is flat: every action cfg extends `ActionCfg` directly, even if it also carries hand open/close fields (see `PickUpCfg` / `PlaceCfg`).
+The engine's `MotionGenerator` owns exactly one planner, so action configs do not
+declare a planner type. On the `motion_gen` path, `TrajectoryBuilder` derives
+planner-specific options from that owned planner.
 
 ## TrajectoryBuilder
 
@@ -137,9 +139,8 @@ success, traj, final_state = engine.run(steps=[("move_end_effector", target)])
 
 ## Common Failure Modes
 
-- **Forgetting `cfg=self.cfg` in `plan_arm_traj`** — without it, `motion_source` defaults to `"ik_interp"` and `planner_type` is ignored.
+- **Forgetting `cfg=self.cfg` in `plan_arm_traj`** — without it, `motion_source` defaults to `"ik_interp"` and per-action planning options are ignored.
 - **Treating `success` as scalar** — `ActionResult.success` is `(B,)` for all built-ins; use `success_all` or `success.all()` for a single bool.
 - **Using `bool(action_result)` in new code** — still works but emits a `DeprecationWarning`; prefer `.success_all`.
 - **Returning arm-only trajectory** — actions must embed into `(B, n_wp, robot.dof)` before returning.
 - **`motion_source="motion_gen"` without a MotionGenerator** — the engine passes its own `motion_generator` to each action's `TrajectoryBuilder`; if it is `None`, the action raises `ValueError` at execute time.
-- **Wrong planner_type** — `planner_type` must be registered in `MotionGenerator._support_planner_dict` (currently `"toppra"` or `"neural"`).

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 import functools
@@ -23,7 +25,7 @@ from dataclasses import MISSING
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
-from .utils import PlanState, PlanResult
+from .utils import MoveType, PlanState, PlanResult
 
 __all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
 
@@ -154,6 +156,62 @@ class BasePlanner(ABC):
             logger.log_error(f"Robot {cfg.robot_uid} not found", ValueError)
 
         self.device = self.robot.device
+
+    supported_move_types: frozenset[MoveType] = frozenset()
+    """Movement target types accepted directly by this planner.
+
+    :class:`MotionGenerator` uses this declaration to validate targets and
+    determine whether Cartesian targets must first be converted into joint
+    waypoints for a joint-only backend.
+    """
+
+    preserve_plan_samples: bool = False
+    """Whether callers must retain this planner's returned sample points exactly.
+
+    When ``True``, ``TrajectoryBuilder`` returns the planner's trajectory
+    without resampling, preserving collision-checked samples. When ``False``
+    (the default), the builder may normalize the trajectory to a requested
+    waypoint count.
+    """
+
+    def supports_move_type(self, move_type: MoveType) -> bool:
+        """Return whether the planner accepts a movement target type directly.
+
+        Args:
+            move_type: Movement target type to query.
+
+        Returns:
+            ``True`` when :meth:`plan` accepts the target type without
+            :class:`MotionGenerator` preprocessing.
+        """
+        return move_type in self.supported_move_types
+
+    def default_plan_options(self) -> PlanOptions:
+        """Return backend-default planning options."""
+        return PlanOptions()
+
+    def with_motion_context(
+        self,
+        options: PlanOptions,
+        *,
+        start_qpos: torch.Tensor | None,
+        control_part: str | None,
+    ) -> PlanOptions:
+        """Attach MotionGenerator runtime context to backend options.
+
+        The base planner has no context fields and therefore returns ``options``
+        unchanged. Backends with contextual options override this method.
+
+        Args:
+            options: The backend's planning options, already constructed (either
+                by the caller or via :meth:`default_plan_options`).
+            start_qpos: Optional starting joint configuration ``(B, DOF)``.
+            control_part: Optional control-part name.
+
+        Returns:
+            The (possibly mutated) planning options carrying the context.
+        """
+        return options
 
     @validate_plan_options
     @abstractmethod

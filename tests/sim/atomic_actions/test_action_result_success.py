@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for ActionResult.success tensor and ActionCfg.motion_source/planner_type."""
+"""Tests for ActionResult.success tensor and ActionCfg.motion_source."""
 
 from __future__ import annotations
 
@@ -47,4 +47,3 @@ class TestActionCfgMotionSource:
     def test_defaults(self):
         cfg = ActionCfg()
         assert cfg.motion_source == "ik_interp"
-        assert cfg.planner_type is None

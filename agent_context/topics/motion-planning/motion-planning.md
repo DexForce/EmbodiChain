@@ -8,6 +8,7 @@
 | Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
+| cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
 | Motion generator | `embodichain/lab/sim/planners/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Planner utilities & data types | `embodichain/lab/sim/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
@@ -27,7 +28,8 @@ The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult`
 ```
 BasePlanner (ABC)
   ├─ ToppraPlanner        Time-optimal path parameterization (fork-pool fan-out)
-  └─ NeuralPlanner (experimental)   APG waypoint rollout (native batching)
+  ├─ NeuralPlanner (experimental)   APG waypoint rollout (native batching)
+  └─ CuroboPlanner        CUDA collision-aware planning (native batching)
 
 MotionGenerator           Wraps any BasePlanner; adds interpolation and multi-part support
 ```
@@ -89,6 +91,27 @@ Learning-based EEF waypoint planner. Franka Panda only.
 - Input: `EEF_MOVE` `PlanState` list with batched `xpos:(B, 4, 4)`
 - Key cfg: `checkpoint_path` (from download), `control_part`
 - Natively batched: transformer forward, reach checks, and convergence holds all operate on `(B, ...)`.
+
+### CuroboPlanner collision worlds
+
+`CuroboWorldCfg.multi_env` controls collision-world batching, not whether robot
+states or goals are batched:
+
+- `multi_env=False` (default) shares one world. Use it when obstacle poses are
+  equal after each simulator-world pose is rebased into its environment's robot
+  base. Replicated arenas may have different world-frame offsets and still
+  safely share a world when their robot-relative layouts are identical.
+- `multi_env=True` allocates one world per batch row. Use it when obstacles have
+  different poses relative to their local robot bases, such as per-env pose
+  randomization.
+
+The multi-env scene is cloned from the YAML generated using env 0; enabling the
+flag does not load distinct initial simulator poses for other rows. Per-env
+differences require `"cuboid"` or `"mesh"` representation, registration in
+`dynamic_obstacle_names`, and current `(B, 4, 4)` world poses in
+`CuroboPlanOptions.dynamic_obstacle_poses`. Independent worlds replicate scene
+data and collision caches, so retain the shared default for identical rebased
+layouts.
 
 ### MotionGenerator
 
@@ -208,3 +231,4 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
 - **Interpolation with unsupported MoveType** — pre-interpolation in `MotionGenOptions` only works for `EEF_MOVE` and `JOINT_MOVE`. Using it with `TOOL`, `SYNC`, or `PAUSE` is ignored or produces unexpected results.
 - **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
 - **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
+- **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.

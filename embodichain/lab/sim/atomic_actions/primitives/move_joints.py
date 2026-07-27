@@ -92,12 +92,17 @@ class MoveJoints(AtomicAction):
             arm_dof=self.joint_dof,
             control_part=self.cfg.control_part,
         )
-        joint_traj = self.builder.plan_joint_traj(
-            start_qpos, target_qpos, self.cfg.sample_interval
+        success, joint_traj = self.builder.plan_joint_motion(
+            start_qpos,
+            target_qpos,
+            self.cfg.sample_interval,
+            control_part=self.cfg.control_part,
+            arm_dof=self.joint_dof,
+            cfg=self.cfg,
         )
         full = self._embed(joint_traj, state.last_qpos)
         return ActionResult(
-            success=torch.ones(self.n_envs, dtype=torch.bool, device=self.device),
+            success=success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),

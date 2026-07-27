@@ -115,23 +115,34 @@ class Press(AtomicAction):
         )
 
         press_arm_qpos = down_arm[:, -1, :]
-        back_arm = self.builder.plan_joint_traj(press_arm_qpos, start_arm_qpos, n_back)
-        success = down_success
+        back_success, back_arm = self.builder.plan_joint_motion(
+            press_arm_qpos,
+            start_arm_qpos,
+            n_back,
+            control_part=self.cfg.control_part,
+            arm_dof=self.arm_dof,
+            cfg=self.cfg,
+        )
+        success = down_success & back_success
 
+        # Allocate from the actually-returned phase lengths so collision-aware
+        # planners (which preserve their own sample count) are accommodated.
+        n_down_actual = down_arm.shape[1]
+        n_back_actual = back_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_close + n_down + n_back, self.robot_dof),
+            (self.n_envs, n_close + n_down_actual + n_back_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
         full[:, :n_close, self.arm_joint_ids] = start_arm_qpos.unsqueeze(1)
         full[:, :n_close, self.hand_joint_ids] = hand_close_path
-        full[:, n_close : n_close + n_down, self.arm_joint_ids] = down_arm
-        full[:, n_close : n_close + n_down, self.hand_joint_ids] = (
+        full[:, n_close : n_close + n_down_actual, self.arm_joint_ids] = down_arm
+        full[:, n_close : n_close + n_down_actual, self.hand_joint_ids] = (
             self.hand_close_qpos.unsqueeze(1)
         )
-        full[:, n_close + n_down :, self.arm_joint_ids] = back_arm
-        full[:, n_close + n_down :, self.hand_joint_ids] = (
+        full[:, n_close + n_down_actual :, self.arm_joint_ids] = back_arm
+        full[:, n_close + n_down_actual :, self.hand_joint_ids] = (
             self.hand_close_qpos.unsqueeze(1)
         )
 
