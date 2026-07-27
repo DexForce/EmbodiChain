@@ -23,8 +23,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 
 __all__ = [
@@ -42,7 +42,7 @@ __all__ = [
     "_format_release_only_place_spec",
 ]
 
-_ACTION_DEFAULTS = generation_defaults_section("action")
+_ACTION_DEFAULTS = defaults_section("action")
 _PICKUP_LIFT_HEIGHT = float(_ACTION_DEFAULTS["pickup_lift_height"])
 _PLACE_LIFT_HEIGHT = float(_ACTION_DEFAULTS["place_lift_height"])
 _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT = int(

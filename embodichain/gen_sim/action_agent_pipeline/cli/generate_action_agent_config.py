@@ -19,12 +19,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    DEFAULT_GENERATED_CONFIG_TASK_NAME,
     DEFAULT_MAX_EPISODES,
     DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
-    DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
@@ -68,7 +68,7 @@ def cli() -> None:
     parser.add_argument(
         "--task_name",
         type=str,
-        default=DEFAULT_TASK_NAME,
+        default=DEFAULT_GENERATED_CONFIG_TASK_NAME,
         help="Task name passed to run_agent.",
     )
     parser.add_argument(

@@ -30,6 +30,7 @@ __all__ = [
     "DEFAULT_PROMPT2SCENE_LLM_CONFIG",
     "DEFAULT_PROMPT2SCENE_OUTPUT_ROOT",
     "DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES",
+    "DEFAULT_PIPELINE_TASK_NAME",
     "DEFAULT_TASK_NAME",
     "GYM_CONFIG_PREFERENCE",
     "IMAGE_SUFFIXES",
@@ -62,7 +63,13 @@ DEFAULT_CONFIG_OUTPUT_DIR = DEFAULT_ACTION_AGENT_WORKSPACE / "configs/demo3_text
 DEFAULT_PIPELINE_HISTORY = (
     DEFAULT_ACTION_AGENT_WORKSPACE / "configs/pipeline_history.json"
 )
-DEFAULT_TASK_NAME = os.getenv("ACTION_AGENT_DEFAULT_TASK_NAME", "ActionAgentTask")
+# The one-shot pipeline historically supported an environment override, while
+# direct config generation reads its default from config/defaults.yaml. Keep the
+# two policies explicit instead of silently forcing them to share one value.
+DEFAULT_PIPELINE_TASK_NAME = os.getenv(
+    "ACTION_AGENT_DEFAULT_TASK_NAME", "ActionAgentTask"
+)
+DEFAULT_TASK_NAME = DEFAULT_PIPELINE_TASK_NAME
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 GYM_CONFIG_PREFERENCE = ("gym_config_merged.json", "gym_config.json")
 PIPELINE_HISTORY_SCHEMA_VERSION = 1

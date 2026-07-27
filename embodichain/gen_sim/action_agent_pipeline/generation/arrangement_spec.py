@@ -22,8 +22,8 @@ from itertools import permutations, product
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -71,7 +71,7 @@ __all__ = [
     "_with_arrangement_generated_pose_targets",
 ]
 
-_DEFAULTS = generation_defaults_section("arrangement")
+_DEFAULTS = defaults_section("arrangement")
 _DEFAULT_RELEASE_Z = float(_DEFAULTS["release_z"])
 _SLOT_MARGIN = float(_DEFAULTS["slot_margin"])
 _MIN_SLOT_SPACING = float(_DEFAULTS["min_slot_spacing"])

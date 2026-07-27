@@ -24,12 +24,12 @@ import math
 import warnings
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import ACTION_AGENT_ENV_ID
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    DEFAULT_GENERATED_CONFIG_TASK_NAME,
     DEFAULT_MAX_EPISODES,
     DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
-    DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,
@@ -167,7 +167,7 @@ def generate_action_agent_config_from_project(
     gym_project: str | Path,
     output_dir: str | Path,
     *,
-    task_name: str = DEFAULT_TASK_NAME,
+    task_name: str = DEFAULT_GENERATED_CONFIG_TASK_NAME,
     task_description: str | None = None,
     llm_model: str | None = None,
     robot_profile: str | RobotProfile | None = DEFAULT_ROBOT_PROFILE_ID,

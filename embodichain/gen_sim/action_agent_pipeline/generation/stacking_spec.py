@@ -23,8 +23,8 @@ from typing import Any
 
 import math
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -71,7 +71,7 @@ _SUPPORTED_STACK_MODES = {"on_top", "nested"}
 _SUPPORTED_ORDER_BY = {"explicit", "size"}
 _STACKING_ANCHOR = "table_center"
 _OBJECT_STACKING_ANCHOR = "object"
-_DEFAULTS = generation_defaults_section("stacking")
+_DEFAULTS = defaults_section("stacking")
 _STAGING_Z_DELTA = float(_DEFAULTS["staging_z_delta"])
 _STACK_CLEARANCE = float(_DEFAULTS["clearance"])
 _NESTED_RELEASE_Z_OFFSET = float(_DEFAULTS["nested_release_z_offset"])

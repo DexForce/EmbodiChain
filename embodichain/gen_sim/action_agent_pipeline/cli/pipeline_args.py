@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )
@@ -30,7 +30,7 @@ from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_PROMPT2SCENE_LLM_CONFIG,
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
-    DEFAULT_TASK_NAME,
+    DEFAULT_PIPELINE_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
@@ -205,8 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--task_name",
         "--task-name",
         dest="task_name",
-        default=DEFAULT_TASK_NAME,
-        help=f"Task name passed to run_agent. Defaults to {DEFAULT_TASK_NAME}",
+        default=DEFAULT_PIPELINE_TASK_NAME,
+        help=(
+            "Task name passed to run_agent. Defaults to "
+            f"{DEFAULT_PIPELINE_TASK_NAME}"
+        ),
     )
     parser.add_argument(
         "--task_description",

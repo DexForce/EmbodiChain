@@ -24,8 +24,8 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
     DEFAULT_VIEWER_CAMERA_UID,
     SuccessTerm,
 )
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     ArrangementLineSpec,
@@ -50,7 +50,7 @@ __all__ = [
     "_validate_success_uids",
 ]
 
-_SUCCESS_DEFAULTS = generation_defaults_section("success")
+_SUCCESS_DEFAULTS = defaults_section("success")
 _CONTAINER_XY_RADIUS = float(_SUCCESS_DEFAULTS["container_xy_radius"])
 _CONTAINER_MIN_Z_OFFSET = float(_SUCCESS_DEFAULTS["container_min_z_offset"])
 _CONTAINER_MAX_Z_OFFSET = float(_SUCCESS_DEFAULTS["container_max_z_offset"])

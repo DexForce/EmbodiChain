@@ -25,8 +25,8 @@ import numpy as np
 import torch
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
     get_arm_states,
@@ -84,7 +84,7 @@ ATOMIC_ACTION_REGISTRY = {
     "MoveHeldObject": (MoveHeldObject, MoveHeldObjectCfg),
     "Place": (Place, PlaceCfg),
 }
-_ACTION_DEFAULTS = generation_defaults_section("action")
+_ACTION_DEFAULTS = defaults_section("action")
 _DEFAULT_PICKUP_LIFT_HEIGHT = float(
     _ACTION_DEFAULTS["runtime_default_pickup_lift_height"]
 )

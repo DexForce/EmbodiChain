@@ -34,6 +34,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atomic_action_spec import
 from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
     _ensure_batched_pose_tensor,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.success_evaluator import (
+    evaluate_configured_success,
+)
 from embodichain.lab.sim.atomic_actions import ObjectSemantics, WorldState
 from embodichain.utils.math import pose_inv
 
@@ -141,10 +144,6 @@ def _coordinated_transport_failure_mask(
         if isinstance(action, ExecutedAtomicAction)
     }
     if coordinated_active:
-        from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
-            evaluate_configured_success,
-        )
-
         held = evaluate_configured_success(
             env,
             {

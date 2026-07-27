@@ -20,9 +20,9 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    DEFAULT_TASK_NAME,
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    DEFAULT_GENERATED_CONFIG_TASK_NAME,
+    defaults_section,
 )
 import copy
 import math
@@ -59,8 +59,8 @@ __all__ = [
     "_target_body_scale_vector",
 ]
 
-_PHYSICS_DEFAULTS = generation_defaults_section("physics")
-_VISUAL_MATERIAL_DEFAULTS = generation_defaults_section("visual_material")
+_PHYSICS_DEFAULTS = defaults_section("physics")
+_VISUAL_MATERIAL_DEFAULTS = defaults_section("visual_material")
 _BACKGROUND_DEFAULTS = _PHYSICS_DEFAULTS["background"]
 _RIGID_OBJECT_DEFAULTS = _PHYSICS_DEFAULTS["rigid_object"]
 _CONVEX_HULL_DEFAULTS = _PHYSICS_DEFAULTS["convex_hulls"]
@@ -105,7 +105,7 @@ def _make_arrangement_events_config(
     registered_runtime_uids: list[str],
     *,
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = DEFAULT_TASK_NAME,
+    task_name: str = DEFAULT_GENERATED_CONFIG_TASK_NAME,
     load_template_material: bool = False,
 ) -> dict[str, Any]:
     return {
@@ -212,7 +212,7 @@ def _table_visual_material_event_config() -> dict[str, Any]:
 def _record_camera_event_configs(
     sensor_config_factory: Callable[[], list[dict[str, Any]]],
     *,
-    task_name: str = DEFAULT_TASK_NAME,
+    task_name: str = DEFAULT_GENERATED_CONFIG_TASK_NAME,
 ) -> dict[str, Any]:
     camera = sensor_config_factory()[0]
     audience_camera = copy.deepcopy(camera)

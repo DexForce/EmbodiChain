@@ -20,8 +20,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 import json
 import math
@@ -52,7 +52,7 @@ __all__ = [
 
 _GLTF_TO_SIM_FRAME_KEY = "_gltf_to_sim_frame"
 
-_GEOMETRY_DEFAULTS = generation_defaults_section("geometry")
+_GEOMETRY_DEFAULTS = defaults_section("geometry")
 _DUAL_UR5_DEFAULTS = _GEOMETRY_DEFAULTS["dual_ur5"]
 _DUAL_UR10_DEFAULTS = _GEOMETRY_DEFAULTS["dual_ur10"]
 _DUAL_FRANKA_DEFAULTS = _GEOMETRY_DEFAULTS["dual_franka"]

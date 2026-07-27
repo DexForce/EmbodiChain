@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (

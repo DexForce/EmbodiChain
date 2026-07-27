@@ -14,18 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility facade for the runtime-owned success evaluator.
-
-The historical adapter path remains importable for recorded tooling and
-external tests. New production code must depend on the runtime module so lower
-layers never import a concrete environment adapter.
-"""
+"""Canonical package-wide configuration for the action-agent pipeline."""
 
 from __future__ import annotations
 
-from embodichain.gen_sim.action_agent_pipeline.runtime.success_evaluator import (
-    _FALLBACKS,
-    evaluate_configured_success,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    ACTION_AGENT_DEFAULTS,
+    DEFAULT_GENERATED_CONFIG_TASK_NAME,
+    DEFAULT_MAX_EPISODES,
+    DEFAULT_MAX_EPISODE_STEPS,
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+    DEFAULT_TARGET_BODY_SCALE,
+    defaults_section,
 )
 
-__all__ = ["evaluate_configured_success"]
+__all__ = [
+    "ACTION_AGENT_DEFAULTS",
+    "DEFAULT_GENERATED_CONFIG_TASK_NAME",
+    "DEFAULT_MAX_EPISODES",
+    "DEFAULT_MAX_EPISODE_STEPS",
+    "DEFAULT_SURFACE_RELEASE_CLEARANCE",
+    "DEFAULT_TARGET_BODY_SCALE",
+    "defaults_section",
+]

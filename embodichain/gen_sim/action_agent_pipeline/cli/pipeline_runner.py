@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
 )

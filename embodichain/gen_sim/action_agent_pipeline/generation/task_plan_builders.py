@@ -31,7 +31,7 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
     LEFT_ARM_ACTION_KEY,
     RIGHT_ARM_ACTION_KEY,
 )
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders import (

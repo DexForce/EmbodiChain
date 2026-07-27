@@ -27,10 +27,10 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
     ROBOTIQ_ARG2F_140_CLOSE_QPOS as _ROBOTIQ_ARG2F_140_CLOSE_QPOS,
     ROBOTIQ_ARG2F_140_OPEN_QPOS as _ROBOTIQ_ARG2F_140_OPEN_QPOS,
 )
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_MAX_EPISODE_STEPS,
 )
-from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (
+from embodichain.gen_sim.action_agent_pipeline.runtime.success_evaluator import (
     evaluate_configured_success,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.pytorch_solver_compat import (

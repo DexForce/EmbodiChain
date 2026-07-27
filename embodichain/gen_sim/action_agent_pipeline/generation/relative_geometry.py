@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -70,7 +70,7 @@ __all__ = [
     "_with_self_relative_absolute_targets",
 ]
 
-_DEFAULTS = generation_defaults_section("relative_placement")
+_DEFAULTS = defaults_section("relative_placement")
 _SIDE_RELATION_DISTANCE = float(_DEFAULTS["side_relation_distance"])
 _SIDE_RELEASE_Z_OFFSET = float(_DEFAULTS["side_release_z_offset"])
 _CONTAINER_SLOT_MIN_OFFSET = float(_DEFAULTS["container_slot_min_offset"])

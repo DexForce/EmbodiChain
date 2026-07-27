@@ -14,57 +14,36 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Compatibility facade for the package-owned default configuration.
+
+New pipeline modules should import from ``config.defaults``. This facade keeps
+the historical import path stable for external callers and recorded tooling.
+"""
+
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
-from embodichain.utils.utility import load_config
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    ACTION_AGENT_CONFIG_DEFAULTS,
+    ACTION_AGENT_DEFAULTS,
+    DEFAULT_GENERATED_CONFIG_TASK_NAME,
+    DEFAULT_MAX_EPISODES,
+    DEFAULT_MAX_EPISODE_STEPS,
+    DEFAULT_SURFACE_RELEASE_CLEARANCE,
+    DEFAULT_TARGET_BODY_SCALE,
+    DEFAULT_TASK_NAME,
+    defaults_section,
+    generation_defaults_section,
+)
 
 __all__ = [
     "ACTION_AGENT_CONFIG_DEFAULTS",
+    "ACTION_AGENT_DEFAULTS",
+    "DEFAULT_GENERATED_CONFIG_TASK_NAME",
     "DEFAULT_MAX_EPISODES",
     "DEFAULT_MAX_EPISODE_STEPS",
     "DEFAULT_SURFACE_RELEASE_CLEARANCE",
     "DEFAULT_TARGET_BODY_SCALE",
     "DEFAULT_TASK_NAME",
+    "defaults_section",
     "generation_defaults_section",
 ]
-
-_DEFAULTS_PATH = (
-    Path(__file__).resolve().parent / "generation" / "action_agent_config_defaults.yaml"
-)
-ACTION_AGENT_CONFIG_DEFAULTS: dict[str, Any] = load_config(_DEFAULTS_PATH)
-
-
-def generation_defaults_section(name: str) -> dict[str, Any]:
-    """Return one required section from the generation defaults.
-
-    Args:
-        name: Top-level YAML section name.
-
-    Returns:
-        The requested configuration section.
-
-    Raises:
-        ValueError: If the section is missing or is not a mapping.
-    """
-    section = ACTION_AGENT_CONFIG_DEFAULTS.get(name)
-    if not isinstance(section, dict):
-        raise ValueError(
-            f"Generation defaults section {name!r} must be a mapping in "
-            f"{_DEFAULTS_PATH}."
-        )
-    return section
-
-
-_TASK_DEFAULTS = generation_defaults_section("task")
-_GEOMETRY_DEFAULTS = generation_defaults_section("geometry")
-
-DEFAULT_TASK_NAME = str(_TASK_DEFAULTS["default_name"])
-DEFAULT_MAX_EPISODES = int(_TASK_DEFAULTS["max_episodes"])
-DEFAULT_MAX_EPISODE_STEPS = int(_TASK_DEFAULTS["max_episode_steps"])
-DEFAULT_TARGET_BODY_SCALE = float(_GEOMETRY_DEFAULTS["target_body_scale"])
-DEFAULT_SURFACE_RELEASE_CLEARANCE = float(
-    _GEOMETRY_DEFAULTS["surface_release_clearance"]
-)

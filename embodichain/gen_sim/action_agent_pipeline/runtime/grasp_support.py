@@ -31,8 +31,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (
     _cfg_supported_kwargs,
@@ -64,7 +64,7 @@ __all__ = [
     "_normalize_convex_decomposition_method",
 ]
 
-_GRASP_DEFAULTS = generation_defaults_section("grasp")
+_GRASP_DEFAULTS = defaults_section("grasp")
 _GRASP_ALIGNMENT_CONFIG_KEY = "action_agent_max_approach_alignment_angle"
 
 

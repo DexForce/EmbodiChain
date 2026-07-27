@@ -27,9 +27,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
-    generation_defaults_section,
+    defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders import (
     _add_surface_z_policy,
@@ -43,7 +43,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols impo
     StackingStepLike,
 )
 
-_ACTION_DEFAULTS = generation_defaults_section("action")
+_ACTION_DEFAULTS = defaults_section("action")
 _PLACE_LIFT_HEIGHT = float(_ACTION_DEFAULTS["place_lift_height"])
 _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT = int(
     _ACTION_DEFAULTS["direct_place_cartesian_waypoint_count"]
@@ -51,7 +51,7 @@ _DIRECT_PLACE_CARTESIAN_WAYPOINT_COUNT = int(
 _COORDINATED_MAX_GRASP_SEPARATION_ANGLE_TO_WORLD_Y_DEGREES = float(
     _ACTION_DEFAULTS["coordinated_max_grasp_separation_angle_to_world_y_degrees"]
 )
-_STACKING_DEFAULTS = generation_defaults_section("stacking")
+_STACKING_DEFAULTS = defaults_section("stacking")
 _STACKING_NESTED_RELEASE_Z_OFFSET = float(_STACKING_DEFAULTS["nested_release_z_offset"])
 _STACKING_SURFACE_CLEARANCE = float(_STACKING_DEFAULTS["clearance"])
 _STACKING_MAX_APPROACH_RETRACT_Z = float(_STACKING_DEFAULTS["max_approach_retract_z"])

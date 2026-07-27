@@ -27,8 +27,8 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.defaults import (
-    generation_defaults_section,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
     CoordinatedGraspPair,
@@ -78,7 +78,7 @@ __all__ = [
     "_assign_coordinated_local_grasp_pair_to_arms",
 ]
 
-_GRASP_DEFAULTS = generation_defaults_section("grasp")
+_GRASP_DEFAULTS = defaults_section("grasp")
 _COORDINATED_GRASP_STYLE_CONTAINER = "container_like"
 _COORDINATED_GRASP_STYLE_ROD = "rod_like"
 _COORDINATED_GRASP_STYLE_GENERIC = "generic"
