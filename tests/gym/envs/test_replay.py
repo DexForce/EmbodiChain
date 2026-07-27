@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import gc
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import torch
@@ -209,6 +209,30 @@ def test_kinematic_replay_reproduces_recorded_states(tmp_path):
         env2.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
+
+
+def test_kinematic_state_restore_writes_mimic_joint_qpos():
+    """The state restore shared by kinematic/control replay writes every joint."""
+    recorded_qpos = torch.tensor([[0.1, 0.02, 0.02]])
+    robot = SimpleNamespace(
+        set_local_pose=MagicMock(),
+        set_qpos=MagicMock(),
+        get_joint_ids=MagicMock(return_value=[0, 1]),
+    )
+    env = SimpleNamespace(
+        robot=robot,
+        sim=SimpleNamespace(_articulations={}, _rigid_objects={}),
+    )
+    states = {
+        "robot": {
+            "root_pose": torch.zeros((1, 7)),
+            "qpos": recorded_qpos,
+        }
+    }
+
+    ReplayWrapper._set_all_states(SimpleNamespace(env=env), states)
+
+    robot.set_qpos.assert_called_once_with(recorded_qpos, target=False)
 
 
 def test_dynamic_replay_tracks_recorded_states(tmp_path):

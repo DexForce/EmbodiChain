@@ -120,13 +120,11 @@ class ReplayWrapper(gym.Wrapper):
         """Write one timestep's object states directly (kinematic write)."""
         env = self.env
         robot = env.robot
-        non_mimic_ids = robot.get_joint_ids(remove_mimic=True)
         robot.set_local_pose(states["robot"]["root_pose"])
-        robot.set_qpos(
-            states["robot"]["qpos"][:, non_mimic_ids],
-            joint_ids=non_mimic_ids,
-            target=False,
-        )
+        # Trajectories record the robot's complete qpos, including mimic joints.
+        # Physics is disabled for kinematic/control replay, so writing only the
+        # active joints does not propagate their values to mimic children.
+        robot.set_qpos(states["robot"]["qpos"], target=False)
         if "articulations" in states.keys():
             traj_art_uids = set(states["articulations"].keys())
             scene_art_uids = set(env.sim._articulations.keys())
