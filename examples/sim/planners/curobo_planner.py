@@ -98,7 +98,10 @@ def parse_args() -> argparse.Namespace:
         description="Run cuRobo V2 through EmbodiChain AtomicActionEngine."
     )
     add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(arena_space=2.0)
+    # This standalone example does not merge a gym config after parsing, so
+    # override the launcher's ``None`` sentinel with a concrete single-world
+    # default.
+    parser.set_defaults(arena_space=2.0, num_envs=1)
     # Backward-compatible aliases used by older versions of this example.
     parser.add_argument(
         "--step-repeat",
@@ -238,7 +241,7 @@ def _build_scene(
     """Create the batched robot scene with an identical cuboid in each arena."""
     sim = SimulationManager(
         SimulationManagerCfg(
-            headless=headless,
+            headless=True,
             sim_device=device,
             num_envs=num_envs,
             arena_space=arena_space,
@@ -689,11 +692,6 @@ def main() -> None:
         )
         if sim.is_use_gpu_physics:
             sim.init_gpu_physics()
-        if not args.headless:
-            sim.open_window()
-        _start_headless_recording(sim, args)
-        if args.hold_steps:
-            sim.update(step=args.hold_steps)
 
         obstacles = [demo_block]
         obstacle_poses = _perturb_obstacles(
@@ -712,6 +710,14 @@ def main() -> None:
                     f"XY={poses[:, :2, 3].tolist()}, "
                     f"yaw_deg={yaw_deg.tolist()}"
                 )
+
+        # Delay viewer/recorder startup until the robot and every obstacle have
+        # been loaded and placed at their final initial poses.
+        if not args.headless:
+            sim.open_window()
+        _start_headless_recording(sim, args)
+        if args.hold_steps:
+            sim.update(step=args.hold_steps)
 
         motion_generator = MotionGenerator(
             MotionGenCfg(
