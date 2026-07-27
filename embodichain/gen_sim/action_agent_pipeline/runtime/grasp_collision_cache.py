@@ -82,8 +82,8 @@ def ensure_vhacd_grasp_collision_cache(
     """Prepare a V-HACD cache that Main's grasp checker loads directly.
 
     Main's cache key does not encode the decomposition backend. A sidecar records
-    the backend and cache checksum so an existing unlabelled CoACD cache is never
-    mistaken for a V-HACD result.
+    the backend and cache checksum so an existing unlabelled legacy cache is
+    never mistaken for a V-HACD result.
 
     Args:
         mesh_vertices: Object mesh vertices used by the grasp checker.

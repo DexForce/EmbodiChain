@@ -156,8 +156,8 @@ def iter_mesh_object_configs(
     """Return scene-object dicts whose ``shape.shape_type`` is ``"Mesh"``.
 
     Mesh-bearing objects are the ones that carry a GLB path and therefore need
-    geometry baking, CoACD caching, or mesh-based pose derivation. Non-mesh
-    objects (primitives) are filtered out.
+    geometry baking, convex-decomposition caching, or mesh-based pose
+    derivation. Non-mesh objects (primitives) are filtered out.
     """
     objects: list[dict[str, Any]] = []
     for obj in iter_scene_object_configs(gym_config):

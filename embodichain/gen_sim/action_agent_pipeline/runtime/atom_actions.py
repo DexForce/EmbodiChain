@@ -46,10 +46,6 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import 
     get_arm_states,
     resolve_arm_side,
 )
-from embodichain.gen_sim.action_agent_pipeline.runtime.coacd_cache_bridge import (
-    GraspCollisionCachePreparationError as CoacdCachePreparationError,
-    ensure_grasp_collision_cache_from_env_coacd,
-)
 from embodichain.gen_sim.action_agent_pipeline.runtime.grasp_collision_cache import (
     GraspCollisionCachePreparationError as VhacdCachePreparationError,
     ensure_vhacd_grasp_collision_cache,
@@ -4497,20 +4493,13 @@ def _build_object_semantics(
         )
     )
     max_decomposition_hulls = _max_decomposition_hulls(target_obj, runtime_kwargs)
-    convex_decomposition_method = _grasp_convex_decomposition_method(
-        target_obj, runtime_kwargs
-    )
-    source_mesh_path = _rigid_object_mesh_path(target_obj)
-    body_scale = _rigid_object_body_scale(target_obj)
+    convex_decomposition_method = _grasp_convex_decomposition_method(runtime_kwargs)
     _prepare_grasp_collision_cache(
         obj_name=obj_name,
         mesh_vertices=mesh_vertices,
         mesh_triangles=mesh_triangles,
-        source_mesh_path=source_mesh_path,
         max_decomposition_hulls=max_decomposition_hulls,
         convex_decomposition_method=convex_decomposition_method,
-        body_scale=body_scale,
-        runtime_kwargs=runtime_kwargs,
     )
 
     gripper_collision_cfg = GripperCollisionCfg(
@@ -4566,59 +4555,32 @@ def _prepare_grasp_collision_cache(
     obj_name: str,
     mesh_vertices: torch.Tensor,
     mesh_triangles: torch.Tensor,
-    source_mesh_path: str | None,
     max_decomposition_hulls: int,
     convex_decomposition_method: str,
-    body_scale: list[float] | None,
-    runtime_kwargs: Mapping[str, Any],
+    **_compat_kwargs: Any,
 ) -> None:
-    if convex_decomposition_method == "vhacd":
-        try:
-            result = ensure_vhacd_grasp_collision_cache(
-                mesh_vertices=mesh_vertices,
-                mesh_triangles=mesh_triangles,
-                max_decomposition_hulls=max_decomposition_hulls,
-            )
-        except VhacdCachePreparationError as exc:
-            raise VhacdCachePreparationError(
-                f"Failed to prepare V-HACD grasp collision cache for "
-                f"target={obj_name}: {exc}"
-            ) from exc
-        if result.get("status") != "hit":
-            log_info(
-                "Prepared Main-compatible V-HACD grasp collision cache: "
-                f"target={obj_name}, cache={result.get('grasp_cache_path')}.",
-                color="green",
-            )
-        return
-    if convex_decomposition_method != "coacd":
-        raise ValueError("convex_decomposition_method must be one of: 'vhacd', 'coacd'")
-    if not bool(runtime_kwargs.get("reuse_env_coacd_for_grasp", True)):
-        return
+    """Prepare the only supported grasp collision cache backend.
 
+    ``_compat_kwargs`` accepts historical private-call keywords without
+    restoring their retired backend behavior. New callers must pass only the
+    V-HACD inputs declared above.
+    """
+    if convex_decomposition_method != "vhacd":
+        raise ValueError("convex_decomposition_method must be 'vhacd'")
     try:
-        result = ensure_grasp_collision_cache_from_env_coacd(
+        result = ensure_vhacd_grasp_collision_cache(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
-            source_mesh_path=source_mesh_path,
             max_decomposition_hulls=max_decomposition_hulls,
-            body_scale=body_scale,
         )
-    except (
-        ImportError,
-        ModuleNotFoundError,
-        OSError,
-        CoacdCachePreparationError,
-    ) as exc:
-        log_warning(
-            "Failed to prepare grasp collision cache from environment CoACD cache; "
-            f"falling back to the default grasp collision path: {exc}"
-        )
-        return
-
-    if result.get("status") == "generated":
+    except VhacdCachePreparationError as exc:
+        raise VhacdCachePreparationError(
+            f"Failed to prepare V-HACD grasp collision cache for "
+            f"target={obj_name}: {exc}"
+        ) from exc
+    if result.get("status") != "hit":
         log_info(
-            "Prepared grasp collision cache from environment CoACD cache: "
+            "Prepared Main-compatible V-HACD grasp collision cache: "
             f"target={obj_name}, cache={result.get('grasp_cache_path')}.",
             color="green",
         )
@@ -5001,17 +4963,6 @@ def _affordance_cache_path(mesh_vertices, mesh_triangles):
     return os.path.join(GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{md5_hash}.npy")
 
 
-def _rigid_object_mesh_path(obj) -> str | None:
-    shape = getattr(getattr(obj, "cfg", None), "shape", None)
-    fpath = getattr(shape, "fpath", None)
-    return str(fpath) if fpath else None
-
-
-def _rigid_object_body_scale(obj) -> list[float] | None:
-    body_scale = obj.get_body_scale(env_ids=[0])[0]
-    return body_scale.detach().to("cpu", dtype=torch.float32).tolist()
-
-
 def _max_decomposition_hulls(target_obj, runtime_kwargs: Mapping[str, Any]) -> int:
     if "grasp_max_decomposition_hulls" in runtime_kwargs:
         return int(runtime_kwargs["grasp_max_decomposition_hulls"])
@@ -5031,22 +4982,8 @@ def _max_decomposition_hulls(target_obj, runtime_kwargs: Mapping[str, Any]) -> i
     return 8
 
 
-def _grasp_convex_decomposition_method(
-    target_obj, runtime_kwargs: Mapping[str, Any]
-) -> str:
-    if "grasp_convex_decomposition_method" in runtime_kwargs:
-        return _normalize_convex_decomposition_method(
-            runtime_kwargs["grasp_convex_decomposition_method"]
-        )
-
-    cfg = getattr(target_obj, "cfg", None)
-    method = getattr(cfg, "acd_method", MISSING)
-    if method is MISSING or method is None:
-        method = getattr(getattr(cfg, "shape", None), "acd_method", MISSING)
-    if method is MISSING or method is None:
-        method = getattr(cfg, "convex_decomposition_method", "vhacd")
-    if method is MISSING or method is None:
-        method = "vhacd"
+def _grasp_convex_decomposition_method(runtime_kwargs: Mapping[str, Any]) -> str:
+    method = runtime_kwargs.get("grasp_convex_decomposition_method", "vhacd")
     return _normalize_convex_decomposition_method(method)
 
 
@@ -5054,11 +4991,9 @@ def _normalize_convex_decomposition_method(method: Any) -> str:
     method = str(method).lower()
     if method == "visacd":
         return "vhacd"
-    if method in {"vhacd", "coacd"}:
+    if method == "vhacd":
         return method
-    raise ValueError(
-        "convex_decomposition_method must be one of: 'vhacd', 'visacd', 'coacd'"
-    )
+    raise ValueError("convex_decomposition_method must be one of: 'vhacd', 'visacd'")
 
 
 def _xyz(value, field_name: str) -> list[float]:
