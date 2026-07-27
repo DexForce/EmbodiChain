@@ -20,7 +20,7 @@ The benchmark sweeps object presets such as bottle and mug against multiple
 initial XY positions that cover all four workspace quadrants. It reports
 planning latency, memory usage, planning success, and whether the generated
 trajectory reaches the object's top center.
-Run: python -m scripts.benchmark.atomic_action.press_benchmark
+Run: embodichain benchmark atomic-action --action press
 """
 
 from __future__ import annotations

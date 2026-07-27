@@ -14,13 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import gymnasium
-import numpy as np
+from __future__ import annotations
+
 import argparse
 import os
 import select
 import sys
 import time
+
+from collections.abc import Sequence
+
+import gymnasium
+import numpy as np
 import torch
 import tqdm
 
@@ -382,6 +387,26 @@ def main(args, env, gym_config):
 
         # Final reset (saves the last completed episode).
         _, _ = env.reset()
+
+        # Log the trajectory save location BEFORE env.close() (in the finally
+        # below) tears down the sim and, by default, os._exit()s the process.
+        if getattr(args, "record_trajectory", False):
+            save_dir = args.trajectory_save_dir
+            if save_dir is None:
+                import os
+
+                from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+
+                save_dir = os.path.join(
+                    EMBODICHAIN_DEFAULT_DATA_ROOT,
+                    "trajectories",
+                    env.unwrapped._traj_run_id,
+                )
+            log_info(
+                f"Trajectories recorded to: {save_dir} "
+                "(replay with --replay --replay_trajectory <path>)",
+                color="green",
+            )
     finally:
         # Drain the dataset recorder and finalize the LeRobot dataset before
         # the process exits. This is REQUIRED for AsyncLeRobotRecorder: its
@@ -392,24 +417,6 @@ def main(args, env, gym_config):
         # the process without returning, so this MUST be the last thing main()
         # does.
         env.close()
-
-    if getattr(args, "record_trajectory", False):
-        save_dir = args.trajectory_save_dir
-        if save_dir is None:
-            import os
-
-            from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
-
-            save_dir = os.path.join(
-                EMBODICHAIN_DEFAULT_DATA_ROOT,
-                "trajectories",
-                env.unwrapped._traj_run_id,
-            )
-        log_info(
-            f"Trajectories recorded to: {save_dir} "
-            "(replay with --replay --replay_trajectory <path>)",
-            color="green",
-        )
 
 
 def preview(env: gymnasium.Env) -> None:
@@ -457,18 +464,25 @@ def preview(env: gymnasium.Env) -> None:
     exit(0)
 
 
-def cli():
+def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for environment runner.
 
     Parses CLI arguments, builds the environment config, and launches
     the data generation, preview, or replay workflow.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
     """
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        prog="embodichain run-env",
+        description="Run an environment for data generation or interactive preview.",
+    )
 
-    add_env_launcher_args_to_parser(parser)
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
 
     parser.add_argument(
         "--replay",
@@ -490,7 +504,7 @@ def cli():
         "control (interactive scrubber).",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if getattr(args, "replay", False):
         if not args.replay_trajectory:
@@ -538,3 +552,12 @@ def cli():
 
 if __name__ == "__main__":
     cli()
+
+
+__all__ = [
+    "cli",
+    "generate_and_execute_action_list",
+    "generate_function",
+    "main",
+    "preview",
+]
