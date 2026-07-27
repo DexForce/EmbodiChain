@@ -16,6 +16,7 @@
 
 from math import log
 from functools import wraps
+from datetime import datetime
 import os
 import torch
 import numpy as np
@@ -51,10 +52,12 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
+    build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
+from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 __all__ = ["EmbodiedEnvCfg", "EmbodiedEnv"]
 
@@ -206,6 +209,23 @@ class EmbodiedEnvCfg(EnvCfg):
     If filter_dataset_saving is False and a dataset manager is configured, the rollout buffer will be initialized by default
     """
 
+    record_trajectory: bool = False
+    """Whether to record per-object kinematic states (root pose + qpos) and the
+    pre-process action into a dedicated ``_traj_buffer`` each step. Uses a per-env
+    step counter so async parallel envs are supported."""
+
+    trajectory_uids: list[str] | None = None
+    """Optional allow-list of non-robot object uids to record. If None, all rigid
+    objects and articulations are recorded. The robot is always recorded."""
+
+    trajectory_save_dir: str | None = None
+    """Directory for auto-saved trajectories. Defaults to
+    ``<EMBODICHAIN_DEFAULT_DATA_ROOT>/trajectories/{run_id}/``."""
+
+    trajectory_auto_save: bool = True
+    """If True (and record_trajectory is True), auto-save each env's trajectory to
+    ``trajectory_save_dir`` at episode end and on close()."""
+
 
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
@@ -297,6 +317,26 @@ class EmbodiedEnv(BaseEnv):
             )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
             self._rollout_buffer_mode = "expert"
+
+        # Dedicated per-env trajectory buffer (states + actions). Decoupled from
+        # rollout_buffer so async parallel envs and ActionManager are supported.
+        self._traj_buffer: TensorDict | None = None
+        self._traj_steps: torch.Tensor | None = None
+        self._traj_raw_action: EnvAction | None = None
+        self._traj_save_count = 0
+        self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if self.cfg.record_trajectory:
+            self._traj_buffer = build_trajectory_buffer(
+                env=self,
+                max_steps=self.max_episode_steps,
+                num_envs=self.num_envs,
+                device=self.device,
+                uids=self.cfg.trajectory_uids,
+                action_space=self.action_space,
+            )
+            self._traj_steps = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
+            )
 
         self.current_rollout_step = 0
 
@@ -472,6 +512,8 @@ class EmbodiedEnv(BaseEnv):
                 )
             self.current_rollout_step += 1
 
+        self._write_trajectory_step()
+
         # Update success status for all environments where episode is done
         if "success" in info:
             # info["success"] should be a tensor or array of shape (num_envs,)
@@ -562,6 +604,20 @@ class EmbodiedEnv(BaseEnv):
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
             self.current_rollout_step = 0
 
+        # Auto-save + reset the per-env trajectory buffer for environments being
+        # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
+        # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
+        _traj_buffer = getattr(self, "_traj_buffer", None)
+        if _traj_buffer is not None and getattr(
+            self.cfg, "trajectory_auto_save", False
+        ):
+            for env_id in env_ids_to_process.tolist():
+                self._save_trajectory_for_env(env_id)
+
+        _traj_steps = getattr(self, "_traj_steps", None)
+        if _traj_steps is not None:
+            _traj_steps[env_ids_to_process] = 0
+
         self.episode_success_status[env_ids_to_process] = False
 
         # apply events such as randomization for environments that need a reset
@@ -630,6 +686,41 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )
+
+    def _write_trajectory_step(self) -> None:
+        """Write one step of per-env ``states`` + pre-process ``action`` into ``_traj_buffer``."""
+        if self._traj_buffer is None:
+            return
+        max_steps = self._traj_buffer.shape[1]
+        env_idx = torch.arange(self.num_envs, device=self.device)
+        step = self._traj_steps
+        mask = step < max_steps
+        if not bool(mask.any()):
+            self._traj_steps = (self._traj_steps + 1).clamp(max=max_steps)
+            return
+        idx = env_idx[mask]
+        st = step[mask]
+        states = self._traj_buffer["states"]
+        # Advanced indexing here returns a copy, so ``copy_`` would silently drop
+        # writes; use assignment (`[idx, st] = ...`) which scatters in-place.
+        states["robot"]["root_pose"][idx, st] = self.robot.get_local_pose()[idx]
+        states["robot"]["qpos"][idx, st] = self.robot.get_qpos()[idx]
+        if "articulations" in states.keys():
+            for uid, art in self.sim._articulations.items():
+                if uid in states["articulations"].keys():
+                    states["articulations"][uid]["root_pose"][
+                        idx, st
+                    ] = art.get_local_pose()[idx]
+                    states["articulations"][uid]["qpos"][idx, st] = art.get_qpos()[idx]
+        if "rigid_objects" in states.keys():
+            for uid, obj in self.sim._rigid_objects.items():
+                if uid in states["rigid_objects"].keys():
+                    states["rigid_objects"][uid]["pose"][
+                        idx, st
+                    ] = obj.get_local_pose()[idx]
+        if self._traj_raw_action is not None:
+            self._traj_buffer["actions"][idx, st] = self._traj_raw_action[idx]
+        self._traj_steps = (self._traj_steps + 1).clamp(max=max_steps)
 
     def _write_rl_rollout_step(
         self,
@@ -865,7 +956,9 @@ class EmbodiedEnv(BaseEnv):
         return eval_dict
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
-        """Delegate to ActionManager when configured."""
+        """Delegate to ActionManager when configured; stash raw action for trajectory."""
+        if self._traj_buffer is not None:
+            self._traj_raw_action = action
         if self.action_manager is not None:
             return self.action_manager.process_action(action, mode="pre")
         return super()._preprocess_action(action)
@@ -1071,8 +1164,77 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
+    def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
+        """Save recorded trajectory (states + actions) to a ``.pt`` file.
+
+        Args:
+            path: Destination ``.pt`` file path.
+            env_ids: Env indices to save (default: all). Each saved env's actual
+                recorded length is stored in ``meta["lengths"]``.
+
+        Raises:
+            RuntimeError: If trajectory recording was never enabled.
+        """
+        if self._traj_buffer is None:
+            raise RuntimeError(
+                "Trajectory recording is not enabled (set cfg.record_trajectory=True)."
+            )
+        if env_ids is None:
+            env_ids = list(range(self.num_envs))
+        env_ids_t = torch.as_tensor(list(env_ids), dtype=torch.long, device=self.device)
+        lengths = self._traj_steps[env_ids_t]
+        max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
+        sub = self._traj_buffer[env_ids_t]
+        states = sub["states"][:, :max_len].clone()
+        actions = sub["actions"][:, :max_len].clone()
+        meta = {
+            "lengths": lengths.tolist(),
+            "num_steps": max_len,
+            "num_envs": int(len(env_ids)),
+            "dt": float(self.sim_cfg.physics_dt),
+            "active_joint_ids": list(self.active_joint_ids),
+            "robot_uid": self.robot.uid,
+            "robot_dof": int(self.robot.dof),
+            "articulation_uids": list(self.sim._articulations.keys()),
+            "articulation_dofs": {
+                uid: int(art.dof) for uid, art in self.sim._articulations.items()
+            },
+            "rigid_object_uids": list(self.sim._rigid_objects.keys()),
+            "env_ids": [int(e) for e in env_ids],
+        }
+        torch.save({"states": states, "actions": actions, "meta": meta}, path)
+        return path
+
+    def _save_trajectory_for_env(self, env_id: int) -> str | None:
+        """Auto-save one env's trajectory (best-effort; never crashes the episode)."""
+        if self._traj_buffer is None or not self.cfg.trajectory_auto_save:
+            return None
+        if int(self._traj_steps[env_id].item()) == 0:
+            return None
+        try:
+            base = self.cfg.trajectory_save_dir
+            if base is None:
+                base = os.path.join(
+                    EMBODICHAIN_DEFAULT_DATA_ROOT, "trajectories", self._traj_run_id
+                )
+            os.makedirs(base, exist_ok=True)
+            path = os.path.join(
+                base, f"traj_env{env_id}_{self._traj_save_count:06d}.pt"
+            )
+            self._traj_save_count += 1
+            return self.save_trajectory(path, env_ids=[env_id])
+        except OSError as e:
+            logger.log_warning(
+                f"Auto-save failed for env {env_id} ({e}); skipping. "
+                "Use save_trajectory(path) explicitly to surface IO errors."
+            )
+            return None
+
     def close(self) -> None:
         """Close the environment and release resources."""
+        if self._traj_buffer is not None and self.cfg.trajectory_auto_save:
+            for env_id in range(self.num_envs):
+                self._save_trajectory_for_env(env_id)
         # Finalize dataset if present
         if self.dataset_manager:
             self.dataset_manager.finalize()

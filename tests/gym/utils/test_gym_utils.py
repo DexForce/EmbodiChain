@@ -18,7 +18,10 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
+import gymnasium.spaces
+import numpy as np
 import pytest
 import torch
 
@@ -26,8 +29,10 @@ from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
+    build_trajectory_buffer,
     config_to_cfg,
     DEFAULT_MANAGER_MODULES,
+    load_trajectory,
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
 )
@@ -504,6 +509,153 @@ class TestConfigToCfgFromFile:
 
         assert merged_config["max_episode_steps"] == 321
         assert cfg.max_episode_steps == 321
+
+    @pytest.mark.parametrize(
+        ("replay_mode", "expected"),
+        [("control", True), ("dynamic", False)],
+    )
+    def test_control_replay_disables_dataset_saving(
+        self, tmp_path, replay_mode, expected
+    ):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "max_episode_steps": 100,
+            "env": {
+                "events": {},
+                "observations": {},
+                "rewards": {},
+                "dataset": {
+                    "lerobot": {
+                        "func": "LeRobotRecorder",
+                        "mode": "save",
+                        "params": {},
+                    }
+                },
+            },
+            "robot": {
+                "uid": "TestRobot",
+                "urdf_cfg": {
+                    "components": [
+                        {
+                            "component_type": "arm",
+                            "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+                        }
+                    ]
+                },
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "init_qpos": [0.0] * 6,
+            },
+        }
+        config_path = tmp_path / "gym_config.json"
+        save_config(config_path, config)
+        args = argparse.Namespace(
+            gym_config=str(config_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer="rasterization",
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            replay=True,
+            replay_mode=replay_mode,
+            action_config=None,
+        )
+
+        cfg, _, _ = build_env_cfg_from_args(args)
+
+        assert cfg.filter_dataset_saving is expected
+
+
+class _StubRobot:
+    def __init__(self, dof: int):
+        self.dof = dof
+        self.uid = "robot"
+
+
+class _StubArticulation:
+    def __init__(self, dof: int, uid: str):
+        self.dof = dof
+        self.uid = uid
+
+
+class _StubRigidObject:
+    def __init__(self, uid: str):
+        self.uid = uid
+
+
+def _stub_env(robot_dof=6, articulations=None, rigid_objects=None):
+    return SimpleNamespace(
+        robot=_StubRobot(robot_dof),
+        sim=SimpleNamespace(
+            _articulations={
+                uid: _StubArticulation(d, uid)
+                for uid, d in (articulations or {}).items()
+            },
+            _rigid_objects={
+                uid: _StubRigidObject(uid) for uid in (rigid_objects or [])
+            },
+        ),
+    )
+
+
+def test_build_trajectory_buffer_shapes():
+    env = _stub_env(robot_dof=6, articulations={"drawer": 2}, rigid_objects=["cube"])
+    num_envs = 3
+    action_space = gymnasium.spaces.Box(
+        low=-1, high=1, shape=(num_envs, 6), dtype=np.float32
+    )
+    buf = build_trajectory_buffer(
+        env, max_steps=10, num_envs=num_envs, device="cpu", action_space=action_space
+    )
+    assert tuple(buf.batch_size) == (num_envs, 10)
+    assert tuple(buf["states"]["robot"]["root_pose"].shape) == (num_envs, 10, 7)
+    assert tuple(buf["states"]["robot"]["qpos"].shape) == (num_envs, 10, 6)
+    assert tuple(buf["states"]["articulations"]["drawer"]["qpos"].shape) == (
+        num_envs,
+        10,
+        2,
+    )
+    assert tuple(buf["states"]["rigid_objects"]["cube"]["pose"].shape) == (
+        num_envs,
+        10,
+        7,
+    )
+    assert tuple(buf["actions"].shape) == (num_envs, 10, 6)
+
+
+def test_build_trajectory_buffer_uids_filter():
+    env = _stub_env(
+        robot_dof=6,
+        articulations={"drawer": 2, "door": 1},
+        rigid_objects=["cube", "ball"],
+    )
+    buf = build_trajectory_buffer(
+        env, max_steps=5, num_envs=1, device="cpu", uids=["cube"]
+    )
+    assert "articulations" not in buf["states"].keys()  # drawer/door filtered out
+    assert "rigid_objects" in buf["states"].keys()
+    assert "cube" in buf["states"]["rigid_objects"].keys()
+    assert "ball" not in buf["states"]["rigid_objects"].keys()
+
+
+def test_load_trajectory_validates_and_returns_dict(tmp_path):
+    data = {
+        "states": TensorDict({"a": torch.zeros(1, 4)}, batch_size=[1, 4]),
+        "actions": torch.zeros(1, 4, 3),
+        "meta": {"num_steps": 4, "num_envs": 1},
+    }
+    p = tmp_path / "traj.pt"
+    torch.save(data, p)
+    loaded = load_trajectory(str(p))
+    assert loaded["meta"]["num_steps"] == 4
+
+    with pytest.raises(ValueError):
+        load_trajectory({"states": torch.zeros(1)})
 
 
 if __name__ == "__main__":
