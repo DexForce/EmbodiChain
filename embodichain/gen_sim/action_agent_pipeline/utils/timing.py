@@ -26,6 +26,13 @@ import re
 import time
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.utils.jsonl_records import (
+    add_grouped_record as _add_grouped_record_shared,
+    json_safe as _json_safe,
+    read_jsonl_records,
+    write_summary_json,
+)
+
 __all__ = [
     "TIMING_PATH_ENV",
     "TIMING_PROCESS_ENV",
@@ -144,7 +151,7 @@ def record_timing(
 def build_timing_summary(timing_path: str | Path) -> dict[str, Any]:
     """Build aggregate duration totals from a JSONL timing file."""
     path = Path(timing_path).expanduser().resolve()
-    records = _read_timing_records(path)
+    records = read_jsonl_records(path)
     summary: dict[str, Any] = {
         "timing_path": path.as_posix(),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -175,30 +182,8 @@ def write_timing_summary(
 ) -> dict[str, Any]:
     """Write a JSON timing summary and return it."""
     summary = build_timing_summary(timing_path)
-    path = Path(summary_path).expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=4, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_summary_json(summary, summary_path)
     return summary
-
-
-def _read_timing_records(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        return []
-    records: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            records.append(parsed)
-    return records
 
 
 def _empty_bucket() -> dict[str, float | int]:
@@ -218,9 +203,7 @@ def _add_grouped_record(
     key: Any,
     record: Mapping[str, Any],
 ) -> None:
-    group_key = str(key or "unknown")
-    bucket = groups.setdefault(group_key, _empty_bucket())
-    _add_record(bucket, record)
+    _add_grouped_record_shared(groups, key, record, _empty_bucket, _add_record)
 
 
 def _add_record(bucket: dict[str, float | int], record: Mapping[str, Any]) -> None:
@@ -245,15 +228,3 @@ def _add_record(bucket: dict[str, float | int], record: Mapping[str, Any]) -> No
 def _finalize_bucket(bucket: dict[str, float | int]) -> None:
     calls = int(bucket["calls"])
     bucket["avg_s"] = float(bucket["total_s"]) / calls if calls else 0.0
-
-
-def _json_safe(value: Any) -> Any:
-    try:
-        json.dumps(value, ensure_ascii=False)
-        return value
-    except TypeError:
-        if isinstance(value, Mapping):
-            return {str(key): _json_safe(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [_json_safe(item) for item in value]
-        return str(value)

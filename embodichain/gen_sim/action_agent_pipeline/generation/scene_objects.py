@@ -23,30 +23,22 @@ from typing import Any
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _BasketTaskRoles,
     _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
-    _base_name,
-    _container_runtime_uid,
-    _display_noun,
-    _is_container_like,
     _object_text,
-    _target_noun,
 )
 
 __all__ = [
     "_arm_side_for_position",
     "_collect_scene_objects",
-    "_infer_basket_task_roles",
     "_infer_project_name",
     "is_prompt2scene_gym_export",
-    "_pick_container",
-    "_pick_left_right_targets",
+    "iter_mesh_object_configs",
+    "iter_scene_object_configs",
     "_pick_table",
     "_position_side_axis_value",
     "_resolve_gym_config_path",
-    "_side_axis_value",
 ]
 
 _PROJECT_NAME_RE = re.compile(r"^[0-9]+_gym_project$")
@@ -137,6 +129,44 @@ def _infer_project_name(input_path: Path, scene_dir: Path) -> str:
     return scene_dir.name
 
 
+def iter_scene_object_configs(
+    gym_config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return every ``background``/``rigid_object`` dict in a gym config.
+
+    Each section may be a single dict or a list; both are normalized to a flat
+    list of dict configs. Non-dict entries are skipped. Returned dicts are the
+    live references in ``gym_config`` (no copy), matching the prior inline
+    behavior callers relied on for in-place mutation.
+    """
+    objects: list[dict[str, Any]] = []
+    for section in ("background", "rigid_object"):
+        value = gym_config.get(section, [])
+        if isinstance(value, Mapping):
+            value = [value]
+        if not isinstance(value, list):
+            continue
+        objects.extend(obj for obj in value if isinstance(obj, dict))
+    return objects
+
+
+def iter_mesh_object_configs(
+    gym_config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return scene-object dicts whose ``shape.shape_type`` is ``"Mesh"``.
+
+    Mesh-bearing objects are the ones that carry a GLB path and therefore need
+    geometry baking, CoACD caching, or mesh-based pose derivation. Non-mesh
+    objects (primitives) are filtered out.
+    """
+    objects: list[dict[str, Any]] = []
+    for obj in iter_scene_object_configs(gym_config):
+        shape = obj.get("shape", {})
+        if isinstance(shape, Mapping) and shape.get("shape_type") == "Mesh":
+            objects.append(obj)
+    return objects
+
+
 def _collect_scene_objects(scene_config: Mapping[str, Any]) -> list[_SceneObject]:
     scene_objects = []
     for source_role in ("background", "rigid_object"):
@@ -157,110 +187,12 @@ def _collect_scene_objects(scene_config: Mapping[str, Any]) -> list[_SceneObject
     return scene_objects
 
 
-def _infer_basket_task_roles(scene_objects: list[_SceneObject]) -> _BasketTaskRoles:
-    background_objects = [
-        obj for obj in scene_objects if obj.source_role == "background"
-    ]
-    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
-    if not background_objects:
-        raise ValueError("Basket generation requires a table/background object.")
-    if len(rigid_objects) < 3:
-        raise ValueError(
-            "Basket generation requires at least two target objects and one "
-            "basket-like container."
-        )
-
-    table = _pick_table(background_objects)
-    container = _pick_container(rigid_objects)
-    target_candidates = [
-        obj for obj in rigid_objects if obj.source_uid != container.source_uid
-    ]
-    if len(target_candidates) < 2:
-        raise ValueError("Expected at least two non-container target objects.")
-
-    left_target, right_target = _pick_left_right_targets(target_candidates)
-    target_noun = _target_noun(left_target, right_target)
-    container_noun = _display_noun(_base_name(container))
-    return _BasketTaskRoles(
-        table_source_uid=table.source_uid,
-        container_source_uid=container.source_uid,
-        left_target_source_uid=left_target.source_uid,
-        right_target_source_uid=right_target.source_uid,
-        container_runtime_uid=_container_runtime_uid(container),
-        left_target_runtime_uid=f"left_{target_noun}",
-        right_target_runtime_uid=f"right_{target_noun}",
-        target_noun=target_noun,
-        left_target_noun=target_noun,
-        right_target_noun=target_noun,
-        container_noun=container_noun,
-    )
-
-
 def _pick_table(background_objects: list[_SceneObject]) -> _SceneObject:
     for obj in background_objects:
         text = _object_text(obj)
         if "table" in text:
             return obj
     return background_objects[0]
-
-
-def _pick_container(rigid_objects: list[_SceneObject]) -> _SceneObject:
-    candidates = [obj for obj in rigid_objects if _is_container_like(obj)]
-    if not candidates:
-        names = ", ".join(obj.source_uid for obj in rigid_objects)
-        raise ValueError(f"No basket-like container object found among: {names}")
-
-    def score(obj: _SceneObject) -> tuple[int, float]:
-        text = _object_text(obj)
-        keyword_score = 0 if "basket" in text else 1
-        pos = _vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))
-        center_distance = abs(pos[0]) + abs(pos[1])
-        return keyword_score, center_distance
-
-    return sorted(candidates, key=score)[0]
-
-
-def _pick_left_right_targets(
-    target_candidates: list[_SceneObject],
-) -> tuple[_SceneObject, _SceneObject]:
-    if len(target_candidates) == 2:
-        picked = target_candidates
-    else:
-        grouped: dict[str, list[_SceneObject]] = {}
-        for obj in target_candidates:
-            grouped.setdefault(_base_name(obj), []).append(obj)
-        repeated_groups = [group for group in grouped.values() if len(group) >= 2]
-        if repeated_groups:
-            picked = sorted(
-                repeated_groups,
-                key=_target_group_sort_key,
-            )[0]
-            if len(picked) > 2:
-                picked = sorted(
-                    picked,
-                    key=lambda obj: abs(_side_axis_value(obj)),
-                    reverse=True,
-                )[:2]
-        else:
-            picked = sorted(
-                target_candidates,
-                key=lambda obj: abs(_side_axis_value(obj)),
-                reverse=True,
-            )[:2]
-    left, right = sorted(picked, key=_side_axis_value)
-    return left, right
-
-
-def _target_group_sort_key(group: list[_SceneObject]) -> tuple[float, int]:
-    side_values = [_side_axis_value(obj) for obj in group]
-    side_spread = max(side_values) - min(side_values)
-    return -side_spread, -len(group)
-
-
-def _side_axis_value(obj: _SceneObject) -> float:
-    return _position_side_axis_value(
-        _vector3(obj.config.get("init_pos", [0.0, 0.0, 0.0]))
-    )
 
 
 def _position_side_axis_value(position: list[float]) -> float:

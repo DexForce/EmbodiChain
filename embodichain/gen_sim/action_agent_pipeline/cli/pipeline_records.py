@@ -115,7 +115,6 @@ def write_pipeline_manifests(
     args: argparse.Namespace,
     resolution: Any,
     generated_paths: Any,
-    target_replacements: Sequence[object],
     repo_root: Path,
     schema_version: int,
     manifest_filename: str,
@@ -126,7 +125,6 @@ def write_pipeline_manifests(
         resolution=resolution,
         generated_paths=generated_paths,
         history_path=history_path,
-        target_replacements=target_replacements,
         repo_root=repo_root,
         schema_version=schema_version,
     )
@@ -152,7 +150,6 @@ def build_pipeline_record(
     resolution: Any,
     generated_paths: Any,
     history_path: Path,
-    target_replacements: Sequence[object],
     repo_root: Path,
     schema_version: int,
 ) -> dict[str, Any]:
@@ -212,12 +209,6 @@ def build_pipeline_record(
             "surface_release_clearance",
             DEFAULT_SURFACE_RELEASE_CLEARANCE,
         ),
-        "target_replacements": _target_replacement_records(
-            args,
-            target_replacements,
-        ),
-        "sync_replacement_names": args.sync_replacement_names,
-        "reuse_target_replacements": args.reuse_target_replacements,
         "acd_method": args.acd_method,
         "overwrite_config": args.overwrite_config,
         "regenerate": args.regenerate,
@@ -302,27 +293,7 @@ def _source_request_record(
         record["image_name"] = args.image_name
     if args.image:
         record["image"] = _record_path(Path(args.image).expanduser(), repo_root)
-    if args.use_image2scene:
-        record.update(
-            {
-                "server": args.server,
-                "background": args.background,
-                "image2scene_root": _record_path(
-                    Path(args.image2scene_root).expanduser(),
-                    repo_root,
-                ),
-                "image2scene_download_dir": str(args.image2scene_download_dir),
-                "image2scene_output_root": str(args.image2scene_output_root),
-                "image2scene_gen_config": str(args.image2scene_gen_config),
-                "image2scene_client_url": args.image2scene_client_url or args.server,
-                "image2scene_llm_config": str(args.image2scene_llm_config),
-            }
-        )
-        if args.image2scene_extract_dir is not None:
-            record["image2scene_extract_dir"] = str(args.image2scene_extract_dir)
-        if args.image2scene_merged_output is not None:
-            record["image2scene_merged_output"] = str(args.image2scene_merged_output)
-    elif resolution.mode == "prompt2scene":
+    if resolution.mode == "prompt2scene":
         record.update(
             {
                 "prompt2scene_output_root": _record_path(
@@ -357,17 +328,6 @@ def _source_request_record(
         record["prompt2scene_scene_z_rotation_degrees"] = (
             args.prompt2scene_scene_z_rotation_degrees
         )
-    elif resolution.mode == "image2tabletop":
-        record.update(
-            {
-                "server": args.server,
-                "gym_project_root": _record_path(
-                    Path(args.gym_project_root).expanduser(),
-                    repo_root,
-                ),
-                "overwrite_gym_project": args.overwrite_gym_project,
-            }
-        )
     elif resolution.mode == "existing_gym_project":
         record["gym_project"] = _record_path(
             Path(args.gym_project).expanduser(),
@@ -391,47 +351,6 @@ def _source_request_record(
             }
         )
     return record
-
-
-def _target_replacement_records(
-    args: argparse.Namespace,
-    target_replacements: Sequence[object],
-) -> list[dict[str, str]]:
-    requested_by_output_dir = _requested_replacement_sources_by_output_dir(args)
-    records = []
-    for replacement in target_replacements:
-        output_dir_name = str(getattr(replacement, "output_dir_name"))
-        source_uid = str(getattr(replacement, "source_uid"))
-        record = {
-            "source_uid": source_uid,
-            "prompt": str(getattr(replacement, "prompt")),
-            "output_dir_name": output_dir_name,
-        }
-        requested_source_uid = requested_by_output_dir.get(output_dir_name)
-        if requested_source_uid and requested_source_uid != source_uid:
-            record["requested_source_uid"] = requested_source_uid
-        records.append(record)
-    return records
-
-
-def _requested_replacement_sources_by_output_dir(
-    args: argparse.Namespace,
-) -> dict[str, str]:
-    generic_replacements = getattr(args, "target_replacement", []) or []
-    if generic_replacements:
-        return {
-            f"new{index}": replacement[0]
-            for index, replacement in enumerate(generic_replacements, start=1)
-            if replacement and len(replacement) == 2
-        }
-    return {
-        output_dir_name: replacement[0]
-        for output_dir_name, replacement in (
-            ("new1", getattr(args, "target_replacement1", None)),
-            ("new2", getattr(args, "target_replacement2", None)),
-        )
-        if replacement and len(replacement) == 2
-    }
 
 
 def _record_path(path: Path, repo_root: Path) -> str:

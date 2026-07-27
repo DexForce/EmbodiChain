@@ -25,7 +25,6 @@ from typing import Any
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
-import json
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
@@ -45,15 +44,22 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _base_name,
-    _normalize_runtime_uid,
     _string_list,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
     _pick_table,
 )
-from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
-    render_prompt_template,
+from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
+    request_json_spec,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation._spec_scene_helpers import (
+    color_hint_for_object as _color_hint_for_object,
+    make_scene_summary as _make_scene_summary_shared,
+    object_attributes as _object_attributes,
+    resolve_rigid_uid as _resolve_rigid_uid_shared,
+    resolved_mesh_config as _resolved_mesh_config,
+    rigid_runtime_uid_mapping as _arrangement_runtime_uid_mapping,
 )
 
 __all__ = [
@@ -168,41 +174,16 @@ def _call_arrangement_task_llm(
     scene_summary: list[dict[str, Any]],
     model: str | None,
 ) -> dict[str, Any]:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
-        extract_json_object,
-    )
-    from embodichain.gen_sim.action_agent_pipeline.utils.mllm import (
-        create_chat_openai,
-    )
-
     # Model-facing instructions live in a reviewable text asset. Slot geometry
     # and collision-aware scheduling intentionally remain deterministic code.
-    prompt = render_prompt_template(
-        "arrangement_spec.txt",
+    return request_json_spec(
+        template_name="arrangement_spec.txt",
+        usage_stage="config_generation.arrangement_task",
         project_name=project_name,
         task_description=task_description,
-        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
-    )
-    llm = create_chat_openai(
-        temperature=0.0,
+        scene_summary=scene_summary,
         model=model,
-        usage_stage="config_generation.arrangement_task",
     )
-    response = llm.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "You produce strict JSON specs for simulation config "
-                    "generation. Do not include markdown."
-                )
-            ),
-            HumanMessage(content=prompt),
-        ]
-    )
-    content = getattr(response, "content", response)
-    return extract_json_object(content)
 
 
 def _make_arrangement_scene_summary(
@@ -210,23 +191,11 @@ def _make_arrangement_scene_summary(
     *,
     scene_dir: Path,
 ) -> list[dict[str, Any]]:
-    return [
-        {
-            "source_uid": obj.source_uid,
-            "role": obj.source_role,
-            "object_type": _base_name(obj),
-            "description": str(obj.config.get("description", "")).strip(),
-            "mesh": obj.config.get("shape", {}).get("fpath"),
-            "init_pos": obj.config.get("init_pos"),
-            "body_scale": obj.config.get("body_scale"),
-            "color_hint": _color_hint_for_object(obj),
-            "size_score": _arrangement_object_size_score(
-                obj,
-                scene_dir=scene_dir,
-            ),
-        }
-        for obj in scene_objects
-    ]
+    return _make_scene_summary_shared(
+        scene_objects,
+        scene_dir=scene_dir,
+        size_score_fn=_arrangement_object_size_score,
+    )
 
 
 def _apply_arrangement_task_response(
@@ -1361,22 +1330,11 @@ def _resolve_rigid_uid(
     *,
     field_name: str,
 ) -> str:
-    if value in rigid_by_uid:
-        return value
-    normalized = _normalize_runtime_uid(value)
-    matches = [
-        source_uid
-        for source_uid, obj in rigid_by_uid.items()
-        if _normalize_runtime_uid(source_uid) == normalized
-        or _base_name(obj) == normalized
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    if not matches:
-        raise ValueError(f"LLM returned unknown arrangement {field_name}: {value!r}.")
-    raise ValueError(
-        f"LLM returned ambiguous arrangement {field_name}: {value!r}; "
-        f"candidates: {matches}."
+    return _resolve_rigid_uid_shared(
+        value,
+        rigid_by_uid,
+        field_name=field_name,
+        route_label="arrangement",
     )
 
 
@@ -1536,21 +1494,6 @@ def _normalize_anchor(value: Any) -> str:
     return text
 
 
-def _object_attributes(value: Any) -> dict[str, dict[str, str]]:
-    if not isinstance(value, Mapping):
-        return {}
-    attributes: dict[str, dict[str, str]] = {}
-    for source_uid, raw_attrs in value.items():
-        if not isinstance(raw_attrs, Mapping):
-            continue
-        attributes[str(source_uid)] = {
-            str(key): str(attr_value).strip().lower()
-            for key, attr_value in raw_attrs.items()
-            if str(attr_value).strip()
-        }
-    return attributes
-
-
 def _order_uids_by_size(
     source_uids: list[str],
     *,
@@ -1605,44 +1548,6 @@ def _object_color(
     attrs = object_attributes.get(source_uid, {})
     color = attrs.get("color")
     return color.strip().lower() if isinstance(color, str) and color.strip() else None
-
-
-def _color_hint_for_object(obj: _SceneObject) -> str | None:
-    text = (
-        f"{obj.source_uid} {obj.config.get('description', '')} "
-        f"{obj.config.get('shape', {}).get('fpath', '')}"
-    ).lower()
-    color_aliases = {
-        "red": ("red", "红"),
-        "green": ("green", "绿"),
-        "blue": ("blue", "蓝"),
-        "yellow": ("yellow", "黄"),
-        "orange": ("orange", "橙"),
-        "purple": ("purple", "紫"),
-        "black": ("black", "黑"),
-        "white": ("white", "白"),
-    }
-    for canonical, aliases in color_aliases.items():
-        if any(alias in text for alias in aliases):
-            return canonical
-    return None
-
-
-def _arrangement_runtime_uid_mapping(
-    rigid_objects: Sequence[_SceneObject],
-) -> dict[str, str]:
-    candidates = {obj.source_uid: _base_name(obj) for obj in rigid_objects}
-    counts: dict[str, int] = {}
-    for runtime_uid in candidates.values():
-        counts[runtime_uid] = counts.get(runtime_uid, 0) + 1
-    return {
-        source_uid: (
-            runtime_uid
-            if counts[runtime_uid] == 1
-            else _normalize_runtime_uid(source_uid)
-        )
-        for source_uid, runtime_uid in candidates.items()
-    }
 
 
 def _table_anchor_xy(
@@ -1717,19 +1622,3 @@ def _source_mesh_world_bounds(
     if z_bounds is None or xy_extents is None:
         return None
     return [0.0, 0.0, z_bounds[0]], [xy_extents[0], xy_extents[1], z_bounds[1]]
-
-
-def _resolved_mesh_config(
-    obj: _SceneObject,
-    *,
-    scene_dir: Path,
-) -> dict[str, Any]:
-    config = dict(obj.config)
-    shape = dict(config.get("shape", {}) or {})
-    fpath = shape.get("fpath")
-    if isinstance(fpath, str):
-        raw_path = Path(fpath)
-        if not raw_path.is_absolute():
-            shape["fpath"] = (scene_dir / raw_path).resolve().as_posix()
-        config["shape"] = shape
-    return config

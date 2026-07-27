@@ -25,14 +25,7 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
     DEFAULT_CONFIG_OUTPUT_DIR,
     DEFAULT_EXISTING_GYM_PROJECT,
-    DEFAULT_GYM_PROJECT_ROOT,
     DEFAULT_IMAGE,
-    DEFAULT_IMAGE2SCENE_CONFIG,
-    DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR,
-    DEFAULT_IMAGE2SCENE_IMAGE,
-    DEFAULT_IMAGE2SCENE_OUTPUT_ROOT,
-    DEFAULT_IMAGE2SCENE_ROOT,
-    DEFAULT_JOB_TIMEOUT_S,
     DEFAULT_PIPELINE_HISTORY,
     DEFAULT_PROMPT2SCENE_LLM_CONFIG,
     DEFAULT_PROMPT2SCENE_OUTPUT_ROOT,
@@ -51,8 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the one-shot action-agent pipeline argument parser."""
     parser = argparse.ArgumentParser(
         description=(
-            "Generate a tabletop gym project from one image, generate action-agent "
-            "configs from that project, then run the generated task."
+            "Generate or reuse a tabletop gym project, generate action-agent configs "
+            "from that project, then run the generated task."
         )
     )
     image_group = parser.add_mutually_exclusive_group()
@@ -60,8 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--image",
         default=None,
         help=(
-            f"Input image path. If omitted, defaults to {DEFAULT_IMAGE.as_posix()} "
-            f"or {DEFAULT_IMAGE2SCENE_IMAGE} with --use-image2scene."
+            f"Prompt2Scene input image path. If omitted, defaults to "
+            f"{DEFAULT_IMAGE.as_posix()}."
         ),
     )
     image_group.add_argument(
@@ -75,103 +68,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--server",
-        default=None,
-        help="Image2Tabletop API server. Defaults to IMAGE2TABLETOP_SERVER.",
-    )
-    parser.add_argument(
-        "--use-image2scene",
-        action="store_true",
-        default=False,
-        help=(
-            "Use gym_project/environment/image2tabletop/demo_api/client/"
-            "image2scene_pipeline.py as the first stage and continue from its "
-            "gym_config_merged.json output."
-        ),
-    )
-    parser.add_argument(
         "--use-prompt2scene",
         action="store_true",
         default=False,
         help=(
-            "Use embodichain.gen_sim.prompt2scene as the first stage and "
-            "continue from its exported gym_config.json output."
-        ),
-    )
-    parser.add_argument(
-        "--background",
-        default=None,
-        help=(
-            "Background description passed to image2scene_pipeline.py. Required "
-            "with --use-image2scene."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-root",
-        default=str(DEFAULT_IMAGE2SCENE_ROOT),
-        help=(
-            "Working directory for image2scene_pipeline.py. Defaults to "
-            f"{DEFAULT_IMAGE2SCENE_ROOT.as_posix()}"
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-download-dir",
-        default=DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR,
-        help=(
-            "Download directory passed to image2scene_pipeline.py. Relative "
-            "paths are interpreted under --image2scene-root. Defaults to "
-            f"{DEFAULT_IMAGE2SCENE_DOWNLOAD_DIR}."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-output-root",
-        default=DEFAULT_IMAGE2SCENE_OUTPUT_ROOT,
-        help=(
-            "Generated EC project directory passed to image2scene_pipeline.py. "
-            "Relative paths are interpreted under --image2scene-root. Defaults "
-            f"to {DEFAULT_IMAGE2SCENE_OUTPUT_ROOT}."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-gen-config",
-        default=DEFAULT_IMAGE2SCENE_CONFIG,
-        help=(
-            "Generation config passed to image2scene_pipeline.py. Relative "
-            "paths are interpreted under --image2scene-root. Defaults to "
-            f"{DEFAULT_IMAGE2SCENE_CONFIG}."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-client-url",
-        default=None,
-        help=(
-            "MesaTask/TextToScene service URL passed to image2scene Stage B. "
-            "If omitted, defaults to --server."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-llm-config",
-        default=DEFAULT_IMAGE2SCENE_CONFIG,
-        help=(
-            "LLM config passed to image2scene_pipeline.py. Relative paths are "
-            "interpreted under --image2scene-root. Defaults to "
-            f"{DEFAULT_IMAGE2SCENE_CONFIG}."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-extract-dir",
-        default=None,
-        help=(
-            "Optional extract directory passed to image2scene_pipeline.py. "
-            "Relative paths are interpreted under --image2scene-root."
-        ),
-    )
-    parser.add_argument(
-        "--image2scene-merged-output",
-        default=None,
-        help=(
-            "Optional merged output path passed to image2scene_pipeline.py. "
-            "Relative paths are interpreted under --image2scene-root."
+            "Explicitly select the default Prompt2Scene source mode. Retained "
+            "for compatibility with existing commands."
         ),
     )
     parser.add_argument(
@@ -239,20 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--gym-project-root",
-        default=str(DEFAULT_GYM_PROJECT_ROOT),
-        help=(
-            "Directory where Image2Tabletop generated gym projects are written. "
-            f"Defaults to {DEFAULT_GYM_PROJECT_ROOT.as_posix()}"
-        ),
-    )
-    parser.add_argument(
         "--use-existing-gym-project",
         action="store_true",
         default=False,
         help=(
-            "Skip Image2Tabletop API and start from --gym-project. Defaults to "
-            "false. For prompt2scene edits, use --use-prompt2scene with "
+            "Start from --gym-project instead of running Prompt2Scene. Defaults "
+            "to false. For Prompt2Scene edits, use --prompt2scene-prompt with "
             "--prompt2scene-output-root instead."
         ),
     )
@@ -320,8 +214,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="task_description",
         default="",
         help=(
-            'Task description passed to config generation. Defaults to "". '
-            "Ignored for default-template tasks such as Demo1_Text."
+            "Required natural-language task goal passed to action-agent config "
+            "generation."
         ),
     )
     parser.add_argument(
@@ -398,66 +292,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--target_replacement",
-        "--target-replacement",
-        dest="target_replacement",
-        action="append",
-        nargs="+",
-        metavar="SOURCE_OR_PROMPT",
-        default=[],
-        help=(
-            "Generate one replacement foreground interactive object. Repeat for "
-            "0-N replacements. Accepts either PROMPT for auto-selection from "
-            "numbered rigid_object targets, or SOURCE_UID PROMPT for explicit "
-            "selection."
-        ),
-    )
-    parser.add_argument(
-        "--target_replacement1",
-        "--target-replacement1",
-        nargs="+",
-        metavar="SOURCE_OR_PROMPT",
-        default=None,
-        help=(
-            "Generate <gym_project>/mesh_assets/new1 from PROMPT. Accepts either "
-            "PROMPT, which auto-selects the first duplicated foreground rigid "
-            "object, or SOURCE_UID PROMPT for explicit selection."
-        ),
-    )
-    parser.add_argument(
-        "--target_replacement2",
-        "--target-replacement2",
-        nargs="+",
-        metavar="SOURCE_OR_PROMPT",
-        default=None,
-        help=(
-            "Generate <gym_project>/mesh_assets/new2 from PROMPT. Accepts either "
-            "PROMPT, which auto-selects the second duplicated foreground rigid "
-            "object, or SOURCE_UID PROMPT for explicit selection."
-        ),
-    )
-    parser.add_argument(
-        "--sync_replacement_names",
-        "--sync-replacement-names",
-        action="store_true",
-        default=False,
-        help=(
-            "Also update replacement target runtime UIDs and generated prompts "
-            "from the replacement prompts."
-        ),
-    )
-    parser.add_argument(
-        "--reuse-target-replacements",
-        "--reuse_target_replacements",
-        dest="reuse_target_replacements",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Reuse existing prompt-generated replacement GLBs when the prompt "
-            "and expected output name match. Defaults to true."
-        ),
-    )
-    parser.add_argument(
         "--acd-method",
         "--acd_method",
         "--convex-decomposition-method",
@@ -466,32 +300,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("vhacd",),
         default="vhacd",
         help="ACD backend written as acd_method. Only vhacd is supported.",
-    )
-    parser.add_argument(
-        "--poll-interval",
-        type=float,
-        default=10.0,
-        help="Image2Tabletop job polling interval in seconds. Defaults to 10.0.",
-    )
-    parser.add_argument(
-        "--job-timeout-s",
-        "--job_timeout_s",
-        dest="job_timeout_s",
-        type=float,
-        default=DEFAULT_JOB_TIMEOUT_S,
-        help="Maximum seconds to wait for Image2Tabletop API jobs.",
-    )
-    parser.add_argument(
-        "--skip-health-check",
-        action="store_true",
-        default=False,
-        help="Skip GET /health before submitting the image.",
-    )
-    parser.add_argument(
-        "--overwrite-gym-project",
-        action="store_true",
-        default=False,
-        help="Replace an existing generated gym project with the same name.",
     )
     parser.add_argument(
         "--overwrite-config",

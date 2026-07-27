@@ -21,7 +21,6 @@ from typing import Any
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _BasketTaskRoles,
     _SceneObject,
 )
 
@@ -31,16 +30,11 @@ __all__ = [
     "_container_runtime_uid",
     "_display_noun",
     "_is_container_like",
-    "_left_target_text",
     "_normalize_runtime_uid",
     "_object_text",
     "_plural",
-    "_right_target_text",
     "_string_list",
-    "_target_pair_text",
-    "_target_plural_text",
     "_target_runtime_suffix",
-    "_target_task_description_text",
 ]
 
 _DIGIT_SUFFIX_RE = re.compile(r"_[0-9]+$")
@@ -68,14 +62,6 @@ _CONTAINER_KEYWORDS = (
 _DEFAULT_CONTAINER_RUNTIME_UID_ALIASES = {
     "basket": "wicker_basket",
 }
-
-
-def _target_noun(left_target: _SceneObject, right_target: _SceneObject) -> str:
-    left_base = _base_name(left_target)
-    right_base = _base_name(right_target)
-    if left_base == right_base:
-        return _target_runtime_suffix(left_base)
-    return "target_object"
 
 
 def _object_text(obj: _SceneObject) -> str:
@@ -127,38 +113,6 @@ def _plural(noun: str) -> str:
     if noun.endswith(("ch", "sh", "x")):
         return f"{noun}es"
     return f"{noun}s"
-
-
-def _left_target_text(roles: _BasketTaskRoles) -> str:
-    return _display_noun(roles.left_target_noun)
-
-
-def _right_target_text(roles: _BasketTaskRoles) -> str:
-    return _display_noun(roles.right_target_noun)
-
-
-def _target_pair_text(roles: _BasketTaskRoles) -> str:
-    left_text = _left_target_text(roles)
-    right_text = _right_target_text(roles)
-    if left_text == right_text:
-        return f"two {left_text} objects"
-    return f"the left {left_text} and right {right_text}"
-
-
-def _target_plural_text(roles: _BasketTaskRoles) -> str:
-    left_text = _left_target_text(roles)
-    right_text = _right_target_text(roles)
-    if left_text == right_text:
-        return _plural(left_text)
-    return "target objects"
-
-
-def _target_task_description_text(roles: _BasketTaskRoles) -> str:
-    left_text = _left_target_text(roles)
-    right_text = _right_target_text(roles)
-    if left_text == right_text:
-        return _plural(left_text)
-    return f"{left_text}-and-{right_text}"
 
 
 def _normalize_runtime_uid(value: str) -> str:

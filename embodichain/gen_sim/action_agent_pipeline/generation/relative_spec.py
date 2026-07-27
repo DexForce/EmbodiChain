@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
-import json
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
     MANIPULATION_INTENTS as _SUPPORTED_MANIPULATION_INTENTS,
@@ -46,8 +45,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _pick_table,
     _position_side_axis_value,
 )
-from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
-    render_prompt_template,
+from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
+    request_json_spec,
 )
 from embodichain.gen_sim.action_agent_pipeline.semantics import (
     BOTTLE_LIKE_KEYWORDS as _BOTTLE_LIKE_KEYWORDS,
@@ -275,41 +274,16 @@ def _call_relative_task_llm(
     scene_summary: list[dict[str, Any]],
     model: str | None,
 ) -> dict[str, Any]:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
-        extract_json_object,
-    )
-    from embodichain.gen_sim.action_agent_pipeline.utils.mllm import (
-        create_chat_openai,
-    )
-
     # The template owns model-facing prose; this module remains authoritative
     # for schema normalization and all deterministic geometry decisions.
-    prompt = render_prompt_template(
-        "relative_placement_spec.txt",
+    return request_json_spec(
+        template_name="relative_placement_spec.txt",
+        usage_stage="config_generation.relative_task",
         project_name=project_name,
         task_description=task_description,
-        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
-    )
-    llm = create_chat_openai(
-        temperature=0.0,
+        scene_summary=scene_summary,
         model=model,
-        usage_stage="config_generation.relative_task",
     )
-    response = llm.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "You produce strict JSON specs for simulation config "
-                    "generation. Do not include markdown."
-                )
-            ),
-            HumanMessage(content=prompt),
-        ]
-    )
-    content = getattr(response, "content", response)
-    return extract_json_object(content)
 
 
 def _call_object_manipulation_task_llm(
@@ -319,41 +293,16 @@ def _call_object_manipulation_task_llm(
     scene_summary: list[dict[str, Any]],
     model: str | None,
 ) -> dict[str, Any]:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
-        extract_json_object,
-    )
-    from embodichain.gen_sim.action_agent_pipeline.utils.mllm import (
-        create_chat_openai,
-    )
-
     # Keep the LLM boundary narrow: it selects semantic intent, while numeric
     # targets and runtime action contracts are computed and validated locally.
-    prompt = render_prompt_template(
-        "object_manipulation_spec.txt",
+    return request_json_spec(
+        template_name="object_manipulation_spec.txt",
+        usage_stage="config_generation.object_manipulation_task",
         project_name=project_name,
         task_description=task_description,
-        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
-    )
-    llm = create_chat_openai(
-        temperature=0.0,
+        scene_summary=scene_summary,
         model=model,
-        usage_stage="config_generation.object_manipulation_task",
     )
-    response = llm.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "You produce strict JSON specs for simulation config "
-                    "generation. Do not include markdown."
-                )
-            ),
-            HumanMessage(content=prompt),
-        ]
-    )
-    content = getattr(response, "content", response)
-    return extract_json_object(content)
 
 
 def _apply_relative_task_response(

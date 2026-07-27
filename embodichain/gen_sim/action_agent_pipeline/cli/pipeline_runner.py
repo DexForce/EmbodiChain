@@ -47,9 +47,6 @@ from embodichain.gen_sim.action_agent_pipeline.cli.project_resolution import (
     resolve_gym_project,
     resolve_task_description_for_generation,
 )
-from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
-    resolve_target_replacements,
-)
 
 __all__ = ["PIPELINE_RUNNER_REQUIRED_ARGS", "run_pipeline"]
 
@@ -61,10 +58,8 @@ PIPELINE_RUNNER_REQUIRED_ARGS = (
     "overwrite_config",
     "prompt2scene_scene_z_rotation_degrees",
     "regenerate",
-    "reuse_target_replacements",
     "skip_run_agent",
     "surface_release_clearance",
-    "sync_replacement_names",
     "target_body_scale",
     "target_body_scale_mode",
     "task_description",
@@ -76,9 +71,6 @@ def run_pipeline(args: argparse.Namespace) -> int:
     """Run image/project resolution, config generation, and optional task execution."""
     _ensure_repo_on_pythonpath()
     from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
-    from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
-        TargetReplacementSpec,
-    )
 
     timing_paths = configure_pipeline_timing(args)
     try:
@@ -86,15 +78,12 @@ def run_pipeline(args: argparse.Namespace) -> int:
             "pipeline.total",
             metadata={"task_name": args.task_name},
         ):
-            return _run_pipeline(args, TargetReplacementSpec)
+            return _run_pipeline(args)
     finally:
         write_pipeline_timing_summary(timing_paths)
 
 
-def _run_pipeline(
-    args: argparse.Namespace,
-    TargetReplacementSpec,
-) -> int:
+def _run_pipeline(args: argparse.Namespace) -> int:
     from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
     from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
         generate_action_agent_config_from_project,
@@ -103,18 +92,9 @@ def _run_pipeline(
     with timing_scope("pipeline.resolve_gym_project"):
         resolution = resolve_gym_project(args)
     usage_paths = configure_llm_usage_tracking(args)
-    with timing_scope(
-        "pipeline.resolve_target_replacements",
-        metadata={"source_mode": resolution.mode},
-    ):
-        target_replacements = resolve_target_replacements(
-            args,
-            TargetReplacementSpec,
-            resolution.path,
-        )
     with timing_scope("pipeline.resolve_task_description"):
         task_description = resolve_task_description_for_generation(args)
-    args.task_description = task_description or ""
+    args.task_description = task_description
     target_body_scale = args.target_body_scale
     target_body_scale_mode = getattr(args, "target_body_scale_mode", None)
     uses_prompt2scene_alignment = resolution.mode in PROMPT2SCENE_PROJECT_MODES
@@ -165,9 +145,6 @@ def _run_pipeline(
                 "surface_release_clearance",
                 DEFAULT_SURFACE_RELEASE_CLEARANCE,
             ),
-            target_replacements=target_replacements,
-            sync_replacement_names=args.sync_replacement_names,
-            reuse_target_replacements=args.reuse_target_replacements,
             acd_method=args.acd_method,
             overwrite=args.overwrite_config,
         )
@@ -176,7 +153,6 @@ def _run_pipeline(
             args=args,
             resolution=resolution,
             generated_paths=paths,
-            target_replacements=target_replacements,
             repo_root=REPO_ROOT,
             schema_version=PIPELINE_HISTORY_SCHEMA_VERSION,
             manifest_filename=PIPELINE_MANIFEST_FILENAME,

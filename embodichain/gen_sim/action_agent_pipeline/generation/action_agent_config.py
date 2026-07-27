@@ -39,37 +39,27 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
     GeneratedActionAgentConfigPaths,
-    TargetReplacementSpec,
-    _BasketTaskRoles,
     _RelativePlacementSpec,
-    _ResolvedTargetReplacement,
     _SceneObject,
     _StackingSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
-    _infer_basket_task_roles,
     _infer_project_name,
     _resolve_gym_config_path,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
-    _normalize_runtime_uid,
+    iter_mesh_object_configs,
+    iter_scene_object_configs,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
     GlbGeometryNormalizer,
     bake_body_scale_into_glbs,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_agent_config,
     make_arrangement_atom_actions_prompt,
     make_arrangement_basic_background,
     make_arrangement_task_graph,
     make_arrangement_task_prompt,
-    make_basket_atom_actions_prompt,
-    make_basket_basic_background,
-    make_basket_task_graph,
-    make_basket_task_prompt,
     make_relative_atom_actions_prompt,
     make_relative_basic_background,
     make_relative_task_graph,
@@ -105,16 +95,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_background_config,
     _make_arrangement_dataset_config,
     _make_arrangement_events_config,
-    _make_container_rigid_object_config,
-    _make_dataset_config,
-    _make_events_config,
-    _make_extra_rigid_object_config,
     _moved_rigid_object_max_convex_hull_num,
     _make_observations_config,
     _make_relative_dataset_config,
-    _make_relative_events_config,
     _make_relative_rigid_object_config,
-    _make_target_object_config,
     _relative_rigid_object_max_convex_hull_num,
     _source_body_scale,
     _target_body_scale_vector,
@@ -154,16 +138,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.object_manipulation_sp
     _build_object_manipulation_spec_with_llm,
     _call_object_manipulation_task_llm,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.replacement_generation import (
-    _apply_replacement_names,
-    _normalize_target_replacements,
-    _run_prompt2geometry_replacement,
-    _run_target_replacements,
-    _validate_target_replacement_sources,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.role_refinement import (
-    _refine_roles_with_llm,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
     _TASK_ROUTE_ARRANGEMENT_LINE,
     _TASK_ROUTE_OBJECT_MANIPULATION,
@@ -175,12 +149,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
     _make_arrangement_extensions_config,
-    _make_extensions_config,
     _make_relative_extensions_config,
     _make_stacking_extensions_config,
-    _object_in_container_success,
     _validate_arrangement_bundle,
-    _validate_bundle,
     _validate_relative_bundle,
     _validate_stacking_bundle,
 )
@@ -190,7 +161,6 @@ _SOURCE_SCENE_BODY_SCALE_MODES = {"preserve", "multiply", "absolute"}
 
 __all__ = [
     "GeneratedActionAgentConfigPaths",
-    "TargetReplacementSpec",
     "generate_action_agent_config_from_project",
 ]
 
@@ -201,7 +171,6 @@ def generate_action_agent_config_from_project(
     *,
     task_name: str = DEFAULT_TASK_NAME,
     task_description: str | None = None,
-    use_llm_roles: bool = False,
     llm_model: str | None = None,
     robot_profile: str | RobotProfile | None = DEFAULT_ROBOT_PROFILE_ID,
     target_body_scale: float | list[float] | tuple[float, float, float] = (
@@ -217,9 +186,6 @@ def generate_action_agent_config_from_project(
     load_template_material: bool = False,
     inside_container_slot_distance_scale: float = 1.0,
     surface_release_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE,
-    target_replacements: Sequence[TargetReplacementSpec] | None = None,
-    sync_replacement_names: bool = False,
-    reuse_target_replacements: bool = True,
     acd_method: str = "vhacd",
     arrangement_debug_visualization: bool = False,
     overwrite: bool = False,
@@ -228,27 +194,25 @@ def generate_action_agent_config_from_project(
 ) -> GeneratedActionAgentConfigPaths:
     """Generate action-agent configs from an exported gym project.
 
-    For the default basket template, this first-stage generator keeps the task
-    structure fixed: the left arm grasps the left target object, the right arm
-    grasps the right target object, and both objects are placed into one
-    basket-like container. The generated robot can be switched with
-    ``robot_profile``.
+    ``task_description`` is required: the task router classifies it into one of
+    the supported routes (stacking, arrangement line, object manipulation) and
+    the matching deterministic generator derives every pose, slot, and graph
+    edge from the scene geometry. The LLM boundary stays narrow -- it only
+    selects semantic intent, never numeric placement.
 
     Args:
         gym_project: Project root, formatted scene folder, ``gym_config.json``,
             or ``gym_config_merged.json``.
         output_dir: Destination config directory.
         task_name: Name passed to ``run_agent``.
-        task_description: Optional natural-language relative-placement task.
-            When provided, the generator asks the shared LLM for a constrained
-            config-level task spec and generates prompts from that spec.
-        use_llm_roles: If true, use an LLM only to refine object role mapping.
-        llm_model: Optional model override for role refinement.
+        task_description: Natural-language task goal. Required; an empty value
+            raises because there is no default task template to fall back to.
+        llm_model: Optional model override for task routing and spec derivation.
         robot_profile: Robot profile ID or profile instance used to generate the
             robot config, runtime arm-slot mapping, prompts, and dataset robot
             metadata. Defaults to ``dual_ur10``.
         target_body_scale: Uniform or xyz scale applied to generated target
-            objects. Basket-like containers keep their source ``body_scale``.
+            objects. Container-like objects keep their source ``body_scale``.
         preserve_source_target_body_scale: If true, moved target objects keep
             their source ``body_scale`` instead of using ``target_body_scale``.
             This is intended for metric-scaled prompt2scene exports.
@@ -281,14 +245,6 @@ def generate_action_agent_config_from_project(
             to the container center.
         surface_release_clearance: Final object-bottom clearance above support
             surfaces for ``object_on_surface`` release moves.
-        target_replacements: Optional prompt-generated GLB replacements for
-            selected default basket target objects. Each replacement writes to
-            ``<gym_project>/mesh_assets/<output_dir_name>`` and only affects the
-            generated config, not the original source mesh file.
-        sync_replacement_names: If true, update runtime target UIDs and prompts
-            from the replacement prompts. If false, only mesh paths are replaced.
-        reuse_target_replacements: If true, reuse an existing replacement GLB
-            at the expected output path when it matches the requested prompt.
         acd_method: Convex decomposition backend written to generated mesh
             objects. Only ``"vhacd"`` is supported.
         arrangement_debug_visualization: If true, write target-slot and
@@ -301,6 +257,13 @@ def generate_action_agent_config_from_project(
         Paths of generated config files.
     """
 
+    task_description = str(task_description or "").strip()
+    if not task_description:
+        raise ValueError(
+            "task_description is required. Provide the natural-language task "
+            "goal so the task router can select a supported route."
+        )
+
     output_dir_path = Path(output_dir).expanduser().resolve()
     _raise_if_generated_files_exist(output_dir_path, overwrite)
     robot_profile = resolve_robot_profile(robot_profile)
@@ -310,7 +273,6 @@ def generate_action_agent_config_from_project(
     scene_dir = gym_config_path.parent
     source_config = _read_json(gym_config_path)
     project_name = _infer_project_name(input_path, scene_dir)
-    replacement_specs = _normalize_target_replacements(target_replacements)
     source_scene_body_scale_mode = _validate_source_scene_body_scale_mode(
         source_scene_body_scale_mode
     )
@@ -320,106 +282,23 @@ def generate_action_agent_config_from_project(
     )
 
     scene_objects = _collect_scene_objects(source_config)
-    if task_description:
-        if replacement_specs:
-            raise ValueError(
-                "target_replacements are only supported by the default basket "
-                "template. Do not combine them with task_description."
-            )
-        task_route = _route_task_with_llm(
+    task_route = _route_task_with_llm(
+        scene_objects=scene_objects,
+        project_name=project_name,
+        task_description=task_description,
+        model=llm_model,
+        task_router_llm_caller=_call_task_router_llm,
+    )
+    if task_route.route == _TASK_ROUTE_STACKING:
+        spec = _build_stacking_spec_with_llm(
             scene_objects=scene_objects,
             project_name=project_name,
+            scene_dir=scene_dir,
             task_description=task_description,
             model=llm_model,
-            task_router_llm_caller=_call_task_router_llm,
+            task_llm_caller=_call_stacking_task_llm,
         )
-        if task_route.route == _TASK_ROUTE_STACKING:
-            spec = _build_stacking_spec_with_llm(
-                scene_objects=scene_objects,
-                project_name=project_name,
-                scene_dir=scene_dir,
-                task_description=task_description,
-                model=llm_model,
-                task_llm_caller=_call_stacking_task_llm,
-            )
-            bundle = _build_stacking_bundle(
-                scene_dir=scene_dir,
-                source_config=source_config,
-                spec=spec,
-                project_name=project_name,
-                task_name=task_name,
-                robot_profile=robot_profile,
-                target_body_scale=target_body_scale,
-                max_episodes=max_episodes,
-                max_episode_steps=max_episode_steps,
-                mesh_normalizer=mesh_normalizer,
-                source_scene_body_scale_mode=source_scene_body_scale_mode,
-                preserve_source_scene_geometry=preserve_source_scene_geometry,
-                source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
-                load_template_material=load_template_material,
-            )
-            _validate_stacking_bundle(bundle, spec)
-            return _finalize_and_write_bundle(
-                _with_task_route_summary(bundle, task_route),
-                output_dir=output_dir_path,
-                mesh_normalizer=mesh_normalizer,
-                load_source_meshes_directly=load_source_meshes_directly,
-                acd_method=acd_method,
-                overwrite=overwrite,
-            )
-        if task_route.route == _TASK_ROUTE_ARRANGEMENT_LINE:
-            spec = _build_arrangement_line_spec_with_llm(
-                scene_objects=scene_objects,
-                project_name=project_name,
-                scene_dir=scene_dir,
-                task_description=task_description,
-                model=llm_model,
-                task_llm_caller=_call_arrangement_task_llm,
-            )
-            bundle = _build_arrangement_line_bundle(
-                scene_dir=scene_dir,
-                source_config=source_config,
-                spec=spec,
-                project_name=project_name,
-                task_name=task_name,
-                robot_profile=robot_profile,
-                target_body_scale=target_body_scale,
-                max_episodes=max_episodes,
-                max_episode_steps=max_episode_steps,
-                mesh_normalizer=mesh_normalizer,
-                source_scene_body_scale_mode=source_scene_body_scale_mode,
-                preserve_source_scene_geometry=preserve_source_scene_geometry,
-                source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
-                arrangement_debug_visualization=arrangement_debug_visualization,
-                load_template_material=load_template_material,
-            )
-            _validate_arrangement_bundle(bundle, spec)
-            return _finalize_and_write_bundle(
-                _with_task_route_summary(bundle, task_route),
-                output_dir=output_dir_path,
-                mesh_normalizer=mesh_normalizer,
-                load_source_meshes_directly=load_source_meshes_directly,
-                acd_method=acd_method,
-                overwrite=overwrite,
-            )
-        if task_route.route == _TASK_ROUTE_UNSUPPORTED:
-            raise ValueError(
-                "Task router classified the task as unsupported: "
-                f"{task_route.reason}"
-            )
-        if task_route.route != _TASK_ROUTE_OBJECT_MANIPULATION:
-            raise ValueError(f"Unsupported task route: {task_route.route!r}.")
-        spec = _build_object_manipulation_spec_with_llm(
-            scene_objects=scene_objects,
-            project_name=project_name,
-            task_description=task_description,
-            model=llm_model,
-            release_offset_fn=_relative_release_offset,
-            staging_z_delta=_STAGING_Z_DELTA,
-            pose_sensitive_staging_z_delta=_POSE_SENSITIVE_STAGING_Z_DELTA,
-            task_llm_caller=_call_relative_task_llm,
-        )
-        bundle = _build_relative_placement_bundle(
+        bundle = _build_stacking_bundle(
             scene_dir=scene_dir,
             source_config=source_config,
             spec=spec,
@@ -427,19 +306,15 @@ def generate_action_agent_config_from_project(
             task_name=task_name,
             robot_profile=robot_profile,
             target_body_scale=target_body_scale,
-            preserve_source_target_body_scale=preserve_source_target_body_scale,
-            source_target_body_scale_multiplier=source_target_body_scale_multiplier,
-            source_scene_body_scale_mode=source_scene_body_scale_mode,
             max_episodes=max_episodes,
             max_episode_steps=max_episode_steps,
             mesh_normalizer=mesh_normalizer,
+            source_scene_body_scale_mode=source_scene_body_scale_mode,
             preserve_source_scene_geometry=preserve_source_scene_geometry,
             source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
-            inside_container_slot_distance_scale=inside_container_slot_distance_scale,
-            surface_release_clearance=surface_release_clearance,
             load_template_material=load_template_material,
         )
-        _validate_relative_bundle(bundle, spec)
+        _validate_stacking_bundle(bundle, spec)
         return _finalize_and_write_bundle(
             _with_task_route_summary(bundle, task_route),
             output_dir=output_dir_path,
@@ -448,49 +323,80 @@ def generate_action_agent_config_from_project(
             acd_method=acd_method,
             overwrite=overwrite,
         )
-
-    roles = _infer_basket_task_roles(scene_objects)
-    if use_llm_roles:
-        roles = _refine_roles_with_llm(
-            roles=roles,
+    if task_route.route == _TASK_ROUTE_ARRANGEMENT_LINE:
+        spec = _build_arrangement_line_spec_with_llm(
             scene_objects=scene_objects,
             project_name=project_name,
+            scene_dir=scene_dir,
+            task_description=task_description,
             model=llm_model,
+            task_llm_caller=_call_arrangement_task_llm,
         )
-
-    _validate_target_replacement_sources(roles, replacement_specs)
-    resolved_replacements = _run_target_replacements(
-        scene_dir=scene_dir,
-        replacement_specs=replacement_specs,
-        reuse_target_replacements=reuse_target_replacements,
-        prompt2geometry_runner=_run_prompt2geometry_replacement,
+        bundle = _build_arrangement_line_bundle(
+            scene_dir=scene_dir,
+            source_config=source_config,
+            spec=spec,
+            project_name=project_name,
+            task_name=task_name,
+            robot_profile=robot_profile,
+            target_body_scale=target_body_scale,
+            max_episodes=max_episodes,
+            max_episode_steps=max_episode_steps,
+            mesh_normalizer=mesh_normalizer,
+            source_scene_body_scale_mode=source_scene_body_scale_mode,
+            preserve_source_scene_geometry=preserve_source_scene_geometry,
+            source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+            arrangement_debug_visualization=arrangement_debug_visualization,
+            load_template_material=load_template_material,
+        )
+        _validate_arrangement_bundle(bundle, spec)
+        return _finalize_and_write_bundle(
+            _with_task_route_summary(bundle, task_route),
+            output_dir=output_dir_path,
+            mesh_normalizer=mesh_normalizer,
+            load_source_meshes_directly=load_source_meshes_directly,
+            acd_method=acd_method,
+            overwrite=overwrite,
+        )
+    if task_route.route == _TASK_ROUTE_UNSUPPORTED:
+        raise ValueError(
+            "Task router classified the task as unsupported: " f"{task_route.reason}"
+        )
+    if task_route.route != _TASK_ROUTE_OBJECT_MANIPULATION:
+        raise ValueError(f"Unsupported task route: {task_route.route!r}.")
+    spec = _build_object_manipulation_spec_with_llm(
+        scene_objects=scene_objects,
+        project_name=project_name,
+        task_description=task_description,
+        model=llm_model,
+        release_offset_fn=_relative_release_offset,
+        staging_z_delta=_STAGING_Z_DELTA,
+        pose_sensitive_staging_z_delta=_POSE_SENSITIVE_STAGING_Z_DELTA,
+        task_llm_caller=_call_relative_task_llm,
     )
-    if sync_replacement_names:
-        roles = _apply_replacement_names(
-            roles,
-            resolved_replacements,
-        )
-
-    bundle = _build_basket_bundle(
+    bundle = _build_relative_placement_bundle(
         scene_dir=scene_dir,
         source_config=source_config,
-        roles=roles,
+        spec=spec,
         project_name=project_name,
         task_name=task_name,
         robot_profile=robot_profile,
         target_body_scale=target_body_scale,
+        preserve_source_target_body_scale=preserve_source_target_body_scale,
+        source_target_body_scale_multiplier=source_target_body_scale_multiplier,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
-        target_replacements=resolved_replacements,
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
         mesh_normalizer=mesh_normalizer,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
+        inside_container_slot_distance_scale=inside_container_slot_distance_scale,
+        surface_release_clearance=surface_release_clearance,
         load_template_material=load_template_material,
     )
-    _validate_bundle(bundle, roles)
+    _validate_relative_bundle(bundle, spec)
     return _finalize_and_write_bundle(
-        bundle,
+        _with_task_route_summary(bundle, task_route),
         output_dir=output_dir_path,
         mesh_normalizer=mesh_normalizer,
         load_source_meshes_directly=load_source_meshes_directly,
@@ -541,165 +447,25 @@ def _robot_solver_end_link(
     return str(end_link_name)
 
 
-def _build_basket_bundle(
+def _apply_source_scene_transforms(
+    gym_config: dict[str, Any],
     *,
-    scene_dir: Path,
-    source_config: Mapping[str, Any],
-    roles: _BasketTaskRoles,
-    project_name: str,
-    task_name: str,
-    robot_profile: RobotProfile,
-    target_body_scale: float | list[float] | tuple[float, float, float],
-    source_scene_body_scale_mode: str | None,
-    target_replacements: Sequence[_ResolvedTargetReplacement],
-    max_episodes: int,
-    max_episode_steps: int,
-    mesh_normalizer: GlbGeometryNormalizer,
+    runtime_uids: Mapping[str, str],
+    by_uid: Mapping[str, _SceneObject],
+    table_top_z: float,
     preserve_source_scene_geometry: bool,
+    source_scene_body_scale_mode: str | None,
     source_scene_z_rotation_degrees: float,
-    load_template_material: bool,
-) -> dict[str, Any]:
-    scene_objects = _collect_scene_objects(source_config)
-    by_uid = {obj.source_uid: obj for obj in scene_objects}
-    replacement_by_source_uid = {
-        replacement.source_uid: replacement for replacement in target_replacements
-    }
-    object_scale = _target_body_scale_vector(target_body_scale)
-    container_obj = by_uid[roles.container_source_uid]
-    container_scale = _source_scene_body_scale_override(
-        container_obj,
-        target_body_scale=target_body_scale,
-        source_scene_body_scale_mode=source_scene_body_scale_mode,
-    ) or _source_body_scale(container_obj)
-    task_source_uids = {
-        roles.container_source_uid,
-        roles.left_target_source_uid,
-        roles.right_target_source_uid,
-    }
-    extra_rigid_objects = [
-        obj
-        for obj in scene_objects
-        if obj.source_role == "rigid_object" and obj.source_uid not in task_source_uids
-    ]
-    extra_background_objects = [
-        obj
-        for obj in scene_objects
-        if obj.source_role == "background" and obj.source_uid != roles.table_source_uid
-    ]
-    runtime_uids = {
-        roles.table_source_uid: "table",
-        roles.container_source_uid: roles.container_runtime_uid,
-        roles.left_target_source_uid: roles.left_target_runtime_uid,
-        roles.right_target_source_uid: roles.right_target_runtime_uid,
-        **{
-            obj.source_uid: _normalize_runtime_uid(obj.source_uid)
-            for obj in [*extra_background_objects, *extra_rigid_objects]
-        },
-    }
-    table_obj = by_uid[roles.table_source_uid]
-    table_config = _make_background_config(
-        scene_dir,
-        table_obj,
-        mesh_normalizer,
-    )
-    _maybe_apply_source_scene_body_scale(
-        table_config,
-        table_obj,
-        target_body_scale=target_body_scale,
-        source_scene_body_scale_mode=source_scene_body_scale_mode,
-    )
-    table_top_z = _mesh_config_world_zmax(table_config)
-    robot_config = robot_profile.make_robot_config(table_top_z)
-    sensor_config_factory = _make_sensor_config_factory_for_robot(robot_config)
+    robot_profile: RobotProfile,
+) -> None:
+    """Apply the shared source-scene transform pipeline in canonical order.
 
-    gym_config = {
-        "id": ACTION_AGENT_ENV_ID,
-        "max_episodes": int(max_episodes),
-        "max_episode_steps": int(max_episode_steps),
-        "env": {
-            "extensions": _make_extensions_config(roles, robot_profile=robot_profile),
-            "events": _make_events_config(
-                roles,
-                sensor_config_factory=sensor_config_factory,
-                task_name=task_name,
-                load_template_material=load_template_material,
-            ),
-            "observations": _make_observations_config(robot_config),
-            "dataset": _make_dataset_config(
-                project_name,
-                roles,
-                robot_profile=robot_profile,
-            ),
-        },
-        "robot": robot_config,
-        "sensor": sensor_config_factory(),
-        "light": _make_light_config(),
-        "background": [table_config],
-        "rigid_object": [
-            _make_container_rigid_object_config(
-                scene_dir,
-                by_uid[roles.container_source_uid],
-                roles.container_runtime_uid,
-                container_scale,
-                mesh_normalizer,
-            ),
-            _make_target_object_config(
-                scene_dir,
-                by_uid[roles.right_target_source_uid],
-                roles.right_target_runtime_uid,
-                _source_scene_body_scale_override(
-                    by_uid[roles.right_target_source_uid],
-                    target_body_scale=target_body_scale,
-                    source_scene_body_scale_mode=source_scene_body_scale_mode,
-                )
-                or object_scale,
-                mesh_normalizer,
-                replacement_by_source_uid.get(roles.right_target_source_uid),
-            ),
-            _make_target_object_config(
-                scene_dir,
-                by_uid[roles.left_target_source_uid],
-                roles.left_target_runtime_uid,
-                _source_scene_body_scale_override(
-                    by_uid[roles.left_target_source_uid],
-                    target_body_scale=target_body_scale,
-                    source_scene_body_scale_mode=source_scene_body_scale_mode,
-                )
-                or object_scale,
-                mesh_normalizer,
-                replacement_by_source_uid.get(roles.left_target_source_uid),
-            ),
-            *[
-                _make_extra_rigid_object_config(
-                    scene_dir,
-                    obj,
-                    _source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    )
-                    or _source_body_scale(obj),
-                    mesh_normalizer,
-                )
-                for obj in extra_rigid_objects
-            ],
-            *[
-                _make_extra_rigid_object_config(
-                    scene_dir,
-                    obj,
-                    _source_scene_body_scale_override(
-                        obj,
-                        target_body_scale=target_body_scale,
-                        source_scene_body_scale_mode=source_scene_body_scale_mode,
-                    )
-                    or _source_body_scale(obj),
-                    mesh_normalizer,
-                    runtime_uid=runtime_uids[obj.source_uid],
-                )
-                for obj in extra_background_objects
-            ],
-        ],
-    }
+    Arrangement and stacking bundles must apply these four steps in exactly
+    this order, otherwise prompt2scene metric exports drift: XY scale first
+    (anchors stay put), then vertical-contact preservation, then tabletop
+    z-snap, then world-Z rotation. Centralizing the call sequence prevents the
+    two routes from diverging on transform ordering.
+    """
     source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
         runtime_uids, by_uid=by_uid
     )
@@ -721,45 +487,6 @@ def _build_basket_bundle(
         preserve_source_scene_geometry=preserve_source_scene_geometry,
     )
     _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
-    return {
-        "gym_config": gym_config,
-        "agent_config": make_agent_config(),
-        "task_prompt": make_basket_task_prompt(
-            task_name,
-            project_name,
-            roles,
-            robot_profile=robot_profile,
-        ),
-        "task_graph": make_basket_task_graph(task_name, roles),
-        "basic_background": make_basket_basic_background(
-            project_name,
-            roles,
-            robot_profile=robot_profile,
-            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
-        ),
-        "atom_actions": make_basket_atom_actions_prompt(
-            roles,
-            robot_profile=robot_profile,
-        ),
-        "summary": {
-            "mode": "basket_template",
-            "robot_profile": robot_profile.summary(),
-            "left_target": roles.left_target_runtime_uid,
-            "right_target": roles.right_target_runtime_uid,
-            "container": roles.container_runtime_uid,
-            "target_replacements": [
-                {
-                    "source_uid": replacement.source_uid,
-                    "prompt": replacement.prompt,
-                    "output_dir_name": replacement.output_dir_name,
-                    "mesh_path": replacement.mesh_path.as_posix(),
-                    "runtime_noun": replacement.runtime_noun,
-                    "reused": replacement.reused,
-                }
-                for replacement in target_replacements
-            ],
-        },
-    }
 
 
 def _build_arrangement_line_bundle(
@@ -851,27 +578,16 @@ def _build_arrangement_line_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
-    source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
-        runtime_uids, by_uid=by_uid
-    )
-    _maybe_apply_source_scene_xy_scale(
+    _apply_source_scene_transforms(
         gym_config,
-        source_objects_by_runtime_uid,
-        source_scene_body_scale_mode=source_scene_body_scale_mode,
-    )
-    _maybe_preserve_source_scene_vertical_contacts(
-        gym_config,
-        source_objects_by_runtime_uid,
+        runtime_uids=runtime_uids,
+        by_uid=by_uid,
+        table_top_z=table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
+        source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
         robot_profile=robot_profile,
     )
-    _maybe_apply_tabletop_z_placement(
-        gym_config,
-        table_top_z,
-        preserve_source_scene_geometry=preserve_source_scene_geometry,
-    )
-    _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     spec = _with_arrangement_generated_pose_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_arrangement_extensions_config(
         spec,
@@ -1083,27 +799,16 @@ def _build_stacking_bundle(
             for obj in dynamic_rigid_objects
         ],
     }
-    source_objects_by_runtime_uid = _source_objects_by_runtime_uid(
-        runtime_uids, by_uid=by_uid
-    )
-    _maybe_apply_source_scene_xy_scale(
+    _apply_source_scene_transforms(
         gym_config,
-        source_objects_by_runtime_uid,
-        source_scene_body_scale_mode=source_scene_body_scale_mode,
-    )
-    _maybe_preserve_source_scene_vertical_contacts(
-        gym_config,
-        source_objects_by_runtime_uid,
+        runtime_uids=runtime_uids,
+        by_uid=by_uid,
+        table_top_z=table_top_z,
         preserve_source_scene_geometry=preserve_source_scene_geometry,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
+        source_scene_z_rotation_degrees=source_scene_z_rotation_degrees,
         robot_profile=robot_profile,
     )
-    _maybe_apply_tabletop_z_placement(
-        gym_config,
-        table_top_z,
-        preserve_source_scene_geometry=preserve_source_scene_geometry,
-    )
-    _apply_scene_z_rotation(gym_config, source_scene_z_rotation_degrees)
     spec = _with_stacking_generated_targets(spec, gym_config)
     gym_config["env"]["extensions"] = _make_stacking_extensions_config(
         spec,
@@ -1237,20 +942,7 @@ def _apply_acd_method(
 def _iter_generated_mesh_objects(
     gym_config: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    objects = []
-    for section in ("background", "rigid_object"):
-        value = gym_config.get(section, [])
-        if isinstance(value, Mapping):
-            value = [value]
-        if not isinstance(value, list):
-            continue
-        for obj in value:
-            if not isinstance(obj, dict):
-                continue
-            shape = obj.get("shape", {})
-            if isinstance(shape, Mapping) and shape.get("shape_type") == "Mesh":
-                objects.append(obj)
-    return objects
+    return iter_mesh_object_configs(gym_config)
 
 
 def _attach_body_scale_bake_summary(
@@ -1457,15 +1149,7 @@ def _apply_scene_z_rotation(
 
 
 def _iter_scene_pose_configs(gym_config: Mapping[str, Any]) -> list[dict[str, Any]]:
-    objects: list[dict[str, Any]] = []
-    for section in ("background", "rigid_object"):
-        value = gym_config.get(section, [])
-        if isinstance(value, Mapping):
-            value = [value]
-        if not isinstance(value, list):
-            continue
-        objects.extend(obj for obj in value if isinstance(obj, dict))
-    return objects
+    return iter_scene_object_configs(gym_config)
 
 
 def _rotate_pose_about_world_z(
@@ -1728,8 +1412,7 @@ def _build_relative_placement_bundle(
         "max_episode_steps": int(max_episode_steps),
         "env": {
             "extensions": {},
-            "events": _make_relative_events_config(
-                spec,
+            "events": _make_arrangement_events_config(
                 registered_runtime_uids,
                 sensor_config_factory=sensor_config_factory,
                 task_name=task_name,

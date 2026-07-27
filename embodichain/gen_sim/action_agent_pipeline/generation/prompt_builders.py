@@ -58,10 +58,6 @@ __all__ = [
     "make_arrangement_atom_actions_prompt",
     "make_arrangement_basic_background",
     "make_arrangement_task_prompt",
-    "make_basket_task_graph",
-    "make_basket_atom_actions_prompt",
-    "make_basket_basic_background",
-    "make_basket_task_prompt",
     "make_relative_task_graph",
     "make_relative_atom_actions_prompt",
     "make_relative_basic_background",
@@ -101,17 +97,6 @@ _USE_PLACEMENT_ALIGN_TO = object()
 _RELATIVE_COORDINATE_CONVENTION = render_prompt_template(
     "relative_coordinate_convention.txt"
 )
-
-
-class _BasketRolesLike(Protocol):
-    left_target_runtime_uid: str
-    right_target_runtime_uid: str
-    container_runtime_uid: str
-    left_target_source_uid: str
-    right_target_source_uid: str
-    container_source_uid: str
-    left_target_noun: str
-    right_target_noun: str
 
 
 class _RelativePlacementLike(Protocol):
@@ -226,6 +211,61 @@ def make_agent_config() -> dict[str, Any]:
             }
         },
     }
+
+
+def _arm_action_slots(active_side: str) -> tuple[str, str, str]:
+    """Return ``(active_arm, active_slot, inactive_slot)`` for one arm side.
+
+    Every single-arm edge sequence derives its arm/slot names from the active
+    side the same way; centralizing it keeps the inactive-slot complement
+    ("left"->"right", "right"->"left") consistent across arrangement, stacking,
+    and relative routes.
+    """
+    active_arm = f"{active_side}_arm"
+    active_slot = f"{active_side}_arm_action"
+    inactive_slot = f"{'right' if active_side == 'left' else 'left'}_arm_action"
+    return active_arm, active_slot, inactive_slot
+
+
+def _single_arm_post_release_blocks(
+    active_arm: str,
+    active_slot: str,
+    inactive_slot: str,
+    runtime_uid: str,
+) -> list[tuple[str, Mapping[str, str | None]]]:
+    """Return the in-place release, retreat, and home-return edge blocks.
+
+    After the object reaches its release pose, every single-arm sequence
+    performs the same three steps: open the gripper in place, retreat upward,
+    and return the arm to its initial qpos. These blocks are identical across
+    arrangement and stacking, so they live here to avoid divergence.
+    """
+    return [
+        (
+            f"Release `{runtime_uid}` in-place without moving the object pose",
+            {
+                active_slot: _format_release_only_place_spec(active_arm),
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Retreat `{active_arm}` upward after release",
+            {
+                active_slot: _format_empty_hand_retreat_spec(active_arm),
+                inactive_slot: None,
+            },
+        ),
+        (
+            f"Return `{active_arm}` to its initial pose",
+            {
+                active_slot: _format_initial_qpos_spec(
+                    active_arm,
+                    sample_interval=30,
+                ),
+                inactive_slot: None,
+            },
+        ),
+    ]
 
 
 def _format_runtime_object_registry(
@@ -344,9 +384,7 @@ def _arrangement_step_edge_count(step: _ArrangementStepLike) -> int:
 def _arrangement_step_edge_blocks(
     step: _ArrangementStepLike,
 ) -> list[tuple[str, Mapping[str, str | None]]]:
-    active_arm = f"{step.active_side}_arm"
-    active_slot = f"{step.active_side}_arm_action"
-    inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
+    active_arm, active_slot, inactive_slot = _arm_action_slots(step.active_side)
     high_preserve_spec = _format_pose_absolute_spec(
         active_arm,
         step.high_position,
@@ -405,40 +443,19 @@ def _arrangement_step_edge_blocks(
         else f"Move `{step.runtime_uid}` down to the final release object pose "
         f"at slot {step.slot_index} without changing orientation"
     )
+    blocks.append(
+        (
+            release_title,
+            {
+                active_slot: release_move_spec,
+                inactive_slot: None,
+            },
+        )
+    )
     blocks.extend(
-        [
-            (
-                release_title,
-                {
-                    active_slot: release_move_spec,
-                    inactive_slot: None,
-                },
-            ),
-            (
-                f"Release `{step.runtime_uid}` in-place without moving the object pose",
-                {
-                    active_slot: _format_release_only_place_spec(active_arm),
-                    inactive_slot: None,
-                },
-            ),
-            (
-                f"Retreat `{active_arm}` upward after release",
-                {
-                    active_slot: _format_empty_hand_retreat_spec(active_arm),
-                    inactive_slot: None,
-                },
-            ),
-            (
-                f"Return `{active_arm}` to its initial pose",
-                {
-                    active_slot: _format_initial_qpos_spec(
-                        active_arm,
-                        sample_interval=30,
-                    ),
-                    inactive_slot: None,
-                },
-            ),
-        ]
+        _single_arm_post_release_blocks(
+            active_arm, active_slot, inactive_slot, step.runtime_uid
+        )
     )
     return blocks
 
@@ -655,9 +672,7 @@ def _stacking_step_edge_blocks(
     object_anchored: bool,
     stack_mode: str,
 ) -> list[tuple[str, Mapping[str, str | None]]]:
-    active_arm = f"{step.active_side}_arm"
-    active_slot = f"{step.active_side}_arm_action"
-    inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
+    active_arm, active_slot, inactive_slot = _arm_action_slots(step.active_side)
     high_preserve_spec = _format_pose_absolute_spec(
         active_arm,
         step.high_position,
@@ -744,41 +759,19 @@ def _stacking_step_edge_blocks(
         else f"Move `{step.runtime_uid}` down to the final stack object pose "
         "without changing orientation"
     )
+    blocks.append(
+        (
+            release_title,
+            {
+                active_slot: release_move_spec,
+                inactive_slot: None,
+            },
+        )
+    )
     blocks.extend(
-        [
-            (
-                release_title,
-                {
-                    active_slot: release_move_spec,
-                    inactive_slot: None,
-                },
-            ),
-            (
-                f"Release `{step.runtime_uid}` in-place without moving the "
-                "object pose",
-                {
-                    active_slot: _format_release_only_place_spec(active_arm),
-                    inactive_slot: None,
-                },
-            ),
-            (
-                f"Retreat `{active_arm}` upward after release",
-                {
-                    active_slot: _format_empty_hand_retreat_spec(active_arm),
-                    inactive_slot: None,
-                },
-            ),
-            (
-                f"Return `{active_arm}` to its initial pose",
-                {
-                    active_slot: _format_initial_qpos_spec(
-                        active_arm,
-                        sample_interval=30,
-                    ),
-                    inactive_slot: None,
-                },
-            ),
-        ]
+        _single_arm_post_release_blocks(
+            active_arm, active_slot, inactive_slot, step.runtime_uid
+        )
     )
     return blocks
 
@@ -790,9 +783,7 @@ def _stacking_step_prompt_block(
     object_anchored: bool,
     stack_mode: str,
 ) -> str:
-    active_arm = f"{step.active_side}_arm"
-    active_slot = f"{step.active_side}_arm_action"
-    inactive_slot = f"{'right' if step.active_side == 'left' else 'left'}_arm_action"
+    active_arm, active_slot, inactive_slot = _arm_action_slots(step.active_side)
     high_preserve_spec = _format_pose_absolute_spec(
         active_arm,
         step.high_position,
@@ -2178,279 +2169,6 @@ def _make_coordinated_pickment_atom_actions_prompt(
     )
 
 
-def make_basket_task_prompt(
-    task_name: str,
-    project_name: str,
-    roles: _BasketRolesLike,
-    *,
-    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
-) -> str:
-    profile = resolve_robot_profile(robot_profile)
-    left_target_text = _left_target_text(roles)
-    right_target_text = _right_target_text(roles)
-    target_pair_text = _target_pair_text(roles)
-    target_plural = _target_plural_text(roles)
-    left_pick_spec = _format_pick_up_spec(
-        "left_arm",
-        roles.left_target_runtime_uid,
-    )
-    right_pick_spec = _format_pick_up_spec(
-        "right_arm",
-        roles.right_target_runtime_uid,
-    )
-    left_high_spec = _format_pose_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
-        sample_interval=45,
-    )
-    right_high_spec = _format_pose_object_spec(
-        "right_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
-        sample_interval=45,
-    )
-    left_place_spec = _format_place_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=80,
-        lift_height=_PLACE_LIFT_HEIGHT,
-    )
-    right_place_spec = _format_place_object_spec(
-        "right_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=80,
-        lift_height=_PLACE_LIFT_HEIGHT,
-    )
-    right_close_spec = _format_gripper_spec(
-        "right_arm",
-        "close",
-        sample_interval=10,
-    )
-    left_initial_spec = _format_initial_qpos_spec(
-        "left_arm",
-        sample_interval=30,
-    )
-    right_initial_spec = _format_initial_qpos_spec(
-        "right_arm",
-        sample_interval=30,
-    )
-    return render_prompt_template(
-        "basket_task.txt",
-        task_name=task_name,
-        robot_display_name=profile.display_name,
-        target_pair_text=target_pair_text,
-        container_runtime_uid=roles.container_runtime_uid,
-        left_target_text=left_target_text,
-        right_target_text=right_target_text,
-        target_plural=target_plural,
-        left_target_runtime_uid=roles.left_target_runtime_uid,
-        right_target_runtime_uid=roles.right_target_runtime_uid,
-        left_pick_spec=left_pick_spec,
-        right_pick_spec=right_pick_spec,
-        left_high_spec=left_high_spec,
-        right_high_spec=right_high_spec,
-        left_place_spec=left_place_spec,
-        right_place_spec=right_place_spec,
-        right_close_spec=right_close_spec,
-        left_initial_spec=left_initial_spec,
-        right_initial_spec=right_initial_spec,
-        project_name=project_name,
-    )
-
-
-def make_basket_task_graph(
-    task_name: str,
-    roles: _BasketRolesLike,
-) -> dict[str, Any]:
-    left_pick_spec = _format_pick_up_spec(
-        "left_arm",
-        roles.left_target_runtime_uid,
-    )
-    right_pick_spec = _format_pick_up_spec(
-        "right_arm",
-        roles.right_target_runtime_uid,
-    )
-    left_high_spec = _format_pose_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
-        sample_interval=45,
-    )
-    right_high_spec = _format_pose_object_spec(
-        "right_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
-        sample_interval=45,
-    )
-    left_place_spec = _format_place_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=80,
-        lift_height=_PLACE_LIFT_HEIGHT,
-    )
-    right_place_spec = _format_place_object_spec(
-        "right_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=80,
-        lift_height=_PLACE_LIFT_HEIGHT,
-    )
-    right_close_spec = _format_gripper_spec(
-        "right_arm",
-        "close",
-        sample_interval=10,
-    )
-    left_initial_spec = _format_initial_qpos_spec(
-        "left_arm",
-        sample_interval=30,
-    )
-    right_initial_spec = _format_initial_qpos_spec(
-        "right_arm",
-        sample_interval=30,
-    )
-    steps = [
-        _nominal_step(
-            "Pick up both target objects simultaneously",
-            {
-                LEFT_ARM_ACTION_KEY: left_pick_spec,
-                RIGHT_ARM_ACTION_KEY: right_pick_spec,
-            },
-        ),
-        _nominal_step(
-            "Move the held left target object above the container while the "
-            "right arm keeps holding its target",
-            {
-                LEFT_ARM_ACTION_KEY: left_high_spec,
-                RIGHT_ARM_ACTION_KEY: right_close_spec,
-            },
-        ),
-        _nominal_step(
-            "Place the held left target object inside the container",
-            {
-                LEFT_ARM_ACTION_KEY: left_place_spec,
-                RIGHT_ARM_ACTION_KEY: right_close_spec,
-            },
-        ),
-        _nominal_step(
-            "Return the left arm to initial while staging the held right target",
-            {
-                LEFT_ARM_ACTION_KEY: left_initial_spec,
-                RIGHT_ARM_ACTION_KEY: right_high_spec,
-            },
-        ),
-        _nominal_step(
-            "Place the held right target object inside the container",
-            {
-                LEFT_ARM_ACTION_KEY: None,
-                RIGHT_ARM_ACTION_KEY: right_place_spec,
-            },
-        ),
-        _nominal_step(
-            "Return the right arm to its initial pose after release",
-            {
-                LEFT_ARM_ACTION_KEY: None,
-                RIGHT_ARM_ACTION_KEY: right_initial_spec,
-            },
-        ),
-    ]
-    return build_nominal_task_graph(task_name=task_name, steps=steps)
-
-
-def make_basket_basic_background(
-    project_name: str,
-    roles: _BasketRolesLike,
-    *,
-    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
-    object_registry: Sequence[Mapping[str, Any]] | None = None,
-) -> str:
-    profile = resolve_robot_profile(robot_profile)
-    left_target_text = _left_target_text(roles)
-    right_target_text = _right_target_text(roles)
-    target_plural = _target_plural_text(roles)
-    registry = _format_runtime_object_registry(object_registry)
-    return render_prompt_template(
-        "basket_background.txt",
-        project_name=project_name,
-        robot_display_name=profile.display_name,
-        robot_context=_robot_context(profile),
-        container_runtime_uid=roles.container_runtime_uid,
-        left_target_runtime_uid=roles.left_target_runtime_uid,
-        left_target_text=left_target_text,
-        left_target_source_uid=roles.left_target_source_uid,
-        right_target_runtime_uid=roles.right_target_runtime_uid,
-        right_target_text=right_target_text,
-        right_target_source_uid=roles.right_target_source_uid,
-        container_source_uid=roles.container_source_uid,
-        object_registry=registry,
-        target_plural=target_plural,
-    )
-
-
-def make_basket_atom_actions_prompt(
-    roles: _BasketRolesLike,
-    *,
-    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
-) -> str:
-    profile = resolve_robot_profile(robot_profile)
-    left_high_spec = _format_pose_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.22),
-        sample_interval=45,
-    )
-    right_high_spec = _format_pose_object_spec(
-        "right_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.22),
-        sample_interval=45,
-    )
-    left_place_spec = _format_place_object_spec(
-        "left_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_LEFT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=80,
-        lift_height=_PLACE_LIFT_HEIGHT,
-    )
-    right_place_spec = _format_place_object_spec(
-        "right_arm",
-        roles.container_runtime_uid,
-        (0.0, _BASKET_RIGHT_RELEASE_OFFSET_Y, 0.12),
-        sample_interval=80,
-        lift_height=_PLACE_LIFT_HEIGHT,
-    )
-    return render_prompt_template(
-        "basket_actions.txt",
-        robot_display_name=profile.display_name,
-        left_target_runtime_uid=roles.left_target_runtime_uid,
-        right_target_runtime_uid=roles.right_target_runtime_uid,
-        left_pick_spec=_format_pick_up_spec(
-            "left_arm",
-            roles.left_target_runtime_uid,
-        ),
-        right_pick_spec=_format_pick_up_spec(
-            "right_arm",
-            roles.right_target_runtime_uid,
-        ),
-        left_high_spec=left_high_spec,
-        left_place_spec=left_place_spec,
-        right_high_spec=right_high_spec,
-        right_place_spec=right_place_spec,
-        holding_close_spec=_format_gripper_spec(
-            "<holding_arm>",
-            "close",
-            sample_interval=10,
-        ),
-        initial_qpos_spec=_format_initial_qpos_spec(
-            "<released_arm>",
-            sample_interval=30,
-        ),
-    )
-
-
 def _format_pick_up_spec(
     robot_name: str,
     obj_name: str,
@@ -2621,27 +2339,6 @@ def _format_pose_object_spec(
             "target_object_pose": target_object_pose,
             "cfg": {"sample_interval": sample_interval},
         }
-    )
-
-
-def _format_place_object_spec(
-    robot_name: str,
-    obj_name: str,
-    offset: tuple[float, float, float] | list[float],
-    *,
-    sample_interval: int,
-    lift_height: float,
-) -> str:
-    x, y, z = offset
-    return _format_place_spec(
-        robot_name,
-        {
-            "reference": "object",
-            "obj_name": obj_name,
-            "offset": [float(x), float(y), float(z)],
-        },
-        sample_interval=sample_interval,
-        lift_height=lift_height,
     )
 
 
@@ -3091,30 +2788,6 @@ def _relative_relation_phrase(relation: str) -> str:
     # Keep this private wrapper for compatibility with existing imports while
     # delegating the vocabulary to the shared generation/runtime contract.
     return _canonical_relative_relation_phrase(relation)
-
-
-def _left_target_text(roles: _BasketRolesLike) -> str:
-    return _display_noun(roles.left_target_noun)
-
-
-def _right_target_text(roles: _BasketRolesLike) -> str:
-    return _display_noun(roles.right_target_noun)
-
-
-def _target_pair_text(roles: _BasketRolesLike) -> str:
-    left_text = _left_target_text(roles)
-    right_text = _right_target_text(roles)
-    if left_text == right_text:
-        return f"two {left_text} objects"
-    return f"the left {left_text} and right {right_text}"
-
-
-def _target_plural_text(roles: _BasketRolesLike) -> str:
-    left_text = _left_target_text(roles)
-    right_text = _right_target_text(roles)
-    if left_text == right_text:
-        return _plural(left_text)
-    return "target objects"
 
 
 def _display_noun(uid: str) -> str:

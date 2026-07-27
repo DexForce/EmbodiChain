@@ -29,7 +29,6 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
-    _BasketTaskRoles,
     _RelativePlacementSpec,
     _RelativePlacementStepSpec,
     _StackingSpec,
@@ -42,12 +41,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
 
 __all__ = [
     "_make_arrangement_extensions_config",
-    "_make_extensions_config",
     "_make_relative_extensions_config",
     "_make_stacking_extensions_config",
     "_object_in_container_success",
     "_validate_arrangement_bundle",
-    "_validate_bundle",
     "_validate_relative_bundle",
     "_validate_stacking_bundle",
     "_validate_success_uids",
@@ -82,32 +79,6 @@ _RELATIVE_AXIS_TOLERANCE = float(_SUCCESS_DEFAULTS["relative_axis_tolerance"])
 _RELATIVE_ZERO_OFFSET_TOLERANCE = float(
     _SUCCESS_DEFAULTS["relative_zero_offset_tolerance"]
 )
-
-
-def _make_extensions_config(
-    roles: _BasketTaskRoles,
-    *,
-    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
-) -> dict[str, Any]:
-    profile = resolve_robot_profile(robot_profile)
-    return {
-        **profile.runtime_extensions(),
-        "ignore_terminations_during_agent": True,
-        "viewer_camera_uid": DEFAULT_VIEWER_CAMERA_UID,
-        "agent_success": {
-            "op": "all",
-            "terms": [
-                _object_in_container_success(
-                    roles.left_target_runtime_uid,
-                    roles.container_runtime_uid,
-                ),
-                _object_in_container_success(
-                    roles.right_target_runtime_uid,
-                    roles.container_runtime_uid,
-                ),
-            ],
-        },
-    }
 
 
 def _object_in_container_success(object_uid: str, container_uid: str) -> dict[str, Any]:
@@ -528,37 +499,6 @@ def _relative_xy_success_terms(
         }
         for axis, offset in (("x", x_offset), ("y", y_offset))
     ]
-
-
-def _validate_bundle(bundle: Mapping[str, Any], roles: _BasketTaskRoles) -> None:
-    gym_config = bundle["gym_config"]
-    if gym_config.get("id") != ACTION_AGENT_ENV_ID:
-        raise ValueError(f"Generated gym config must use {ACTION_AGENT_ENV_ID}.")
-    _validate_robot_control_parts(gym_config)
-
-    rigid_uids = {obj["uid"] for obj in gym_config.get("rigid_object", [])}
-    background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
-    scene_uids = rigid_uids | background_uids
-    required_rigid = {
-        roles.left_target_runtime_uid,
-        roles.right_target_runtime_uid,
-    }
-    if not required_rigid.issubset(rigid_uids):
-        raise ValueError(
-            f"Generated rigid objects missing: {sorted(required_rigid - rigid_uids)}"
-        )
-    if roles.container_runtime_uid not in scene_uids:
-        raise ValueError(
-            f"Generated scene objects missing container: {roles.container_runtime_uid}"
-        )
-
-    success = gym_config["env"]["extensions"]["agent_success"]
-    for term in success.get("terms", []):
-        if (
-            term.get("object") not in rigid_uids
-            or term.get("container") not in scene_uids
-        ):
-            raise ValueError(f"Invalid success term uid reference: {term}")
 
 
 def _validate_relative_bundle(

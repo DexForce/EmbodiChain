@@ -36,6 +36,7 @@ Rules:
 - For place_relative, reference_object may be a rigid_object or a background object such as a pad, tray, basket, or container. For single-object directional tasks from the object's initial position, set reference_object to the moved object or 'self'.
 - If the task says to release an object above a basket/container so it falls into it, use goal_relation='inside'. If it says to place on a non-container support, use goal_relation='on'.
 - orientation_goal captures the held object's intended pose before release. Use 'upright' for 扶正/竖起来, 'lay_flat' for 平放/横放, 'axis_align' for 水平摆正/摆正/alignment, and 'preserve' otherwise.
+- hold_hover cannot change orientation. If the task asks to 扶正/竖起来/平放/摆正 an object (orientation_goal other than 'preserve'), use intent='place_relative' with goal_relation='on' and reference_object set to the object's current support (or 'self'), not hold_hover. Use hold_hover only when the object should be lifted and held in the air in its current orientation.
 - For axis_align, use orientation_reference='reference_object' with orientation_axis='long_axis' for aligning to a pad/box/container long side, or orientation_reference='world_axes' with orientation_axis='x' or 'y' only when a world/table axis is explicit.
 - Do not return numeric offsets, object poses, robot config, success JSON, or full prompt files.
 

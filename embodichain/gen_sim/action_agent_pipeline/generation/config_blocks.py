@@ -30,9 +30,7 @@ import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _ArrangementLineSpec,
-    _BasketTaskRoles,
     _RelativePlacementSpec,
-    _ResolvedTargetReplacement,
     _SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
@@ -40,12 +38,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
     GlbGeometryNormalizer,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
-    _left_target_text,
-    _normalize_runtime_uid,
-    _right_target_text,
-    _target_task_description_text,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
@@ -57,15 +49,9 @@ __all__ = [
     "_make_background_config",
     "_make_arrangement_dataset_config",
     "_make_arrangement_events_config",
-    "_make_dataset_config",
-    "_make_events_config",
-    "_make_extra_rigid_object_config",
     "_make_observations_config",
-    "_make_container_rigid_object_config",
     "_make_relative_dataset_config",
-    "_make_relative_events_config",
     "_make_relative_rigid_object_config",
-    "_make_target_object_config",
     "_container_rigid_object_max_convex_hull_num",
     "_moved_rigid_object_max_convex_hull_num",
     "_relative_rigid_object_max_convex_hull_num",
@@ -115,53 +101,6 @@ def _source_body_scale(obj: _SceneObject) -> list[float]:
     return _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0]))
 
 
-def _make_relative_events_config(
-    spec: _RelativePlacementSpec,
-    registered_runtime_uids: list[str],
-    *,
-    sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = DEFAULT_TASK_NAME,
-    load_template_material: bool = False,
-) -> dict[str, Any]:
-    return {
-        **_make_common_events_config(
-            sensor_config_factory,
-            task_name=task_name,
-            load_template_material=load_template_material,
-        ),
-        "prepare_extra_attr": {
-            "func": "prepare_extra_attr",
-            "mode": "reset",
-            "params": {
-                "attrs": [
-                    {
-                        "name": "object_lengths",
-                        "mode": "callable",
-                        "entity_uids": "all_objects",
-                        "func_name": "compute_object_length",
-                        "func_kwargs": {
-                            "is_svd_frame": True,
-                            "sample_points": 5000,
-                        },
-                    },
-                ]
-            },
-        },
-        "register_info_to_env": {
-            "func": "register_info_to_env",
-            "mode": "reset",
-            "params": {
-                "registry": [
-                    _object_registry_entry(uid)
-                    for uid in sorted(registered_runtime_uids)
-                ],
-                "registration": "affordance_datas",
-                "sim_update": True,
-            },
-        },
-    }
-
-
 def _make_arrangement_events_config(
     registered_runtime_uids: list[str],
     *,
@@ -200,53 +139,6 @@ def _make_arrangement_events_config(
                 "registry": [
                     _object_registry_entry(uid)
                     for uid in sorted(registered_runtime_uids)
-                ],
-                "registration": "affordance_datas",
-                "sim_update": True,
-            },
-        },
-    }
-
-
-def _make_events_config(
-    roles: _BasketTaskRoles,
-    *,
-    sensor_config_factory: Callable[[], list[dict[str, Any]]],
-    task_name: str = DEFAULT_TASK_NAME,
-    load_template_material: bool = False,
-) -> dict[str, Any]:
-    return {
-        **_make_common_events_config(
-            sensor_config_factory,
-            task_name=task_name,
-            load_template_material=load_template_material,
-        ),
-        "prepare_extra_attr": {
-            "func": "prepare_extra_attr",
-            "mode": "reset",
-            "params": {
-                "attrs": [
-                    {
-                        "name": "object_lengths",
-                        "mode": "callable",
-                        "entity_uids": "all_objects",
-                        "func_name": "compute_object_length",
-                        "func_kwargs": {
-                            "is_svd_frame": True,
-                            "sample_points": 5000,
-                        },
-                    },
-                ]
-            },
-        },
-        "register_info_to_env": {
-            "func": "register_info_to_env",
-            "mode": "reset",
-            "params": {
-                "registry": [
-                    _object_registry_entry(roles.left_target_runtime_uid),
-                    _object_registry_entry(roles.right_target_runtime_uid),
-                    _object_registry_entry(roles.container_runtime_uid),
                 ],
                 "registration": "affordance_datas",
                 "sim_update": True,
@@ -526,48 +418,6 @@ def _joint_pattern_count(pattern: str) -> int:
     return count
 
 
-def _make_dataset_config(
-    project_name: str,
-    roles: _BasketTaskRoles,
-    *,
-    robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
-) -> dict[str, Any]:
-    profile = resolve_robot_profile(robot_profile)
-    left_target_text = _left_target_text(roles)
-    right_target_text = _right_target_text(roles)
-    target_description = _target_task_description_text(roles)
-    return {
-        "lerobot": {
-            "func": "LeRobotRecorder",
-            "mode": "save",
-            "save_failed_episodes": True,
-            "params": {
-                "robot_meta": {
-                    "robot_type": profile.robot_meta_type,
-                    "control_freq": 25,
-                },
-                "instruction": {
-                    "lang": (
-                        f"Use the left arm to place the left {left_target_text} into "
-                        f"the {roles.container_runtime_uid}, then use the right "
-                        f"arm to place the right {right_target_text} into the "
-                        f"{roles.container_runtime_uid}."
-                    ),
-                },
-                "extra": {
-                    "scene_type": project_name,
-                    "task_description": (
-                        f"{profile.display_name} {target_description}-to-container "
-                        "placement"
-                    ),
-                    "data_type": "sim",
-                },
-                "use_videos": True,
-            },
-        }
-    }
-
-
 def _make_relative_dataset_config(
     project_name: str,
     spec: _RelativePlacementSpec,
@@ -700,87 +550,6 @@ def _make_background_config(
             _BACKGROUND_MAX_CONVEX_HULL_NUM,
         ),
     }
-
-
-def _make_target_object_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    runtime_uid: str,
-    target_scale: list[float],
-    mesh_normalizer: GlbGeometryNormalizer,
-    replacement: _ResolvedTargetReplacement | None = None,
-) -> dict[str, Any]:
-    config = _make_rigid_object_config(
-        scene_dir,
-        obj,
-        runtime_uid,
-        target_scale,
-        max_convex_hull_num=_TARGET_MAX_CONVEX_HULL_NUM,
-        mesh_fpath=replacement.mesh_path if replacement else None,
-        mesh_normalizer=mesh_normalizer,
-    )
-    config["body_type"] = "dynamic"
-    return config
-
-
-def _make_container_object_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    runtime_uid: str,
-    body_scale: Any,
-    mesh_normalizer: GlbGeometryNormalizer,
-) -> dict[str, Any]:
-    return _make_rigid_object_config(
-        scene_dir,
-        obj,
-        runtime_uid,
-        body_scale,
-        max_convex_hull_num=_role_limited_max_convex_hull_num(
-            obj,
-            _CONTAINER_MAX_CONVEX_HULL_NUM,
-        ),
-        mesh_normalizer=mesh_normalizer,
-    )
-
-
-def _make_container_rigid_object_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    runtime_uid: str,
-    body_scale: Any,
-    mesh_normalizer: GlbGeometryNormalizer,
-) -> dict[str, Any]:
-    config = _make_container_object_config(
-        scene_dir,
-        obj,
-        runtime_uid,
-        body_scale,
-        mesh_normalizer,
-    )
-    config["body_type"] = "dynamic"
-    return config
-
-
-def _make_extra_rigid_object_config(
-    scene_dir: Path,
-    obj: _SceneObject,
-    body_scale: Any,
-    mesh_normalizer: GlbGeometryNormalizer,
-    runtime_uid: str | None = None,
-) -> dict[str, Any]:
-    config = _make_rigid_object_config(
-        scene_dir,
-        obj,
-        runtime_uid or _normalize_runtime_uid(obj.source_uid),
-        body_scale,
-        max_convex_hull_num=_role_limited_max_convex_hull_num(
-            obj,
-            _EXTRA_RIGID_MAX_CONVEX_HULL_NUM,
-        ),
-        mesh_normalizer=mesh_normalizer,
-    )
-    config["body_type"] = "dynamic"
-    return config
 
 
 def _make_relative_rigid_object_config(

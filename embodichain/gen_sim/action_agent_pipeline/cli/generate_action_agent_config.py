@@ -34,15 +34,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     is_prompt2scene_gym_export,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config import (
-    TargetReplacementSpec,
     generate_action_agent_config_from_project,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
     available_robot_profile_choices,
-)
-from embodichain.gen_sim.action_agent_pipeline.cli.target_replacements import (
-    resolve_target_replacements,
 )
 
 __all__ = ["cli"]
@@ -81,8 +77,9 @@ def cli() -> None:
         type=str,
         default=None,
         help=(
-            "Simple natural-language relative-placement task. Providing this "
-            "uses the LLM to generate a constrained config-level prompt/spec."
+            "Natural-language task goal. Required unless --task_file is given. "
+            "The task router classifies it into a supported route and the "
+            "matching deterministic generator derives the config from it."
         ),
     )
     parser.add_argument(
@@ -92,19 +89,10 @@ def cli() -> None:
         help="Optional text file containing --task_description.",
     )
     parser.add_argument(
-        "--use_llm_roles",
-        action="store_true",
-        default=False,
-        help=(
-            "Use the shared LLM only to refine object role mapping. The task "
-            "template and prompts remain deterministic."
-        ),
-    )
-    parser.add_argument(
         "--llm_model",
         type=str,
         default=None,
-        help="Optional LLM model override for --use_llm_roles.",
+        help="Optional LLM model override for task routing and spec derivation.",
     )
     parser.add_argument(
         "--robot-profile",
@@ -227,66 +215,6 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
-        "--target_replacement",
-        "--target-replacement",
-        dest="target_replacement",
-        action="append",
-        nargs="+",
-        metavar="SOURCE_OR_PROMPT",
-        default=[],
-        help=(
-            "Generate one replacement foreground interactive object. Repeat for "
-            "0-N replacements. Accepts either PROMPT for auto-selection from "
-            "numbered rigid_object targets, or SOURCE_UID PROMPT for explicit "
-            "selection."
-        ),
-    )
-    parser.add_argument(
-        "--target_replacement1",
-        "--target-replacement1",
-        nargs="+",
-        metavar="SOURCE_OR_PROMPT",
-        default=None,
-        help=(
-            "Generate <gym_project>/mesh_assets/new1 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config. PROMPT alone "
-            "auto-selects the first numbered foreground rigid object."
-        ),
-    )
-    parser.add_argument(
-        "--target_replacement2",
-        "--target-replacement2",
-        nargs="+",
-        metavar="SOURCE_OR_PROMPT",
-        default=None,
-        help=(
-            "Generate <gym_project>/mesh_assets/new2 from PROMPT and use it "
-            "to replace SOURCE_UID in the generated config. PROMPT alone "
-            "auto-selects the second numbered foreground rigid object."
-        ),
-    )
-    parser.add_argument(
-        "--sync_replacement_names",
-        "--sync-replacement-names",
-        action="store_true",
-        default=False,
-        help=(
-            "Also update replacement target runtime UIDs and generated prompts "
-            "from the replacement prompts."
-        ),
-    )
-    parser.add_argument(
-        "--reuse_target_replacements",
-        "--reuse-target-replacements",
-        dest="reuse_target_replacements",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Reuse existing prompt-generated replacement GLBs when the prompt "
-            "and expected output name match. Defaults to true."
-        ),
-    )
-    parser.add_argument(
         "--acd_method",
         "--acd-method",
         "--convex_decomposition_method",
@@ -322,7 +250,6 @@ def cli() -> None:
     )
     args = parser.parse_args()
     task_description = _resolve_task_description(args)
-    target_replacements = _resolve_target_replacements(args)
     alignment = _resolve_source_alignment(args)
     source_scene_body_scale_mode = _resolve_source_scene_body_scale_mode(args)
 
@@ -331,7 +258,6 @@ def cli() -> None:
         output_dir=args.output_dir,
         task_name=args.task_name,
         task_description=task_description,
-        use_llm_roles=args.use_llm_roles,
         llm_model=args.llm_model,
         robot_profile=args.robot_profile,
         target_body_scale=args.target_body_scale,
@@ -344,9 +270,6 @@ def cli() -> None:
         load_template_material=args.load_template_material,
         inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
         surface_release_clearance=args.surface_release_clearance,
-        target_replacements=target_replacements,
-        sync_replacement_names=args.sync_replacement_names,
-        reuse_target_replacements=args.reuse_target_replacements,
         acd_method=args.acd_method,
         arrangement_debug_visualization=args.arrangement_debug_visualization,
         overwrite=args.overwrite,
@@ -374,22 +297,28 @@ def cli() -> None:
     )
 
 
-def _resolve_task_description(args: argparse.Namespace) -> str | None:
+def _resolve_task_description(args: argparse.Namespace) -> str:
+    """Return the task goal from either the inline flag or the task file.
+
+    A task description is mandatory: the generator has no default task template
+    to fall back to, so an empty goal is a hard error rather than a silent
+    fallback that would produce an unrelated scene.
+    """
     if args.task_description and args.task_file:
         raise ValueError("Use either --task_description or --task_file, not both.")
     if args.task_file:
-        return Path(args.task_file).expanduser().read_text(encoding="utf-8").strip()
-    if args.task_description:
-        return args.task_description.strip()
-    return None
-
-
-def _resolve_target_replacements(
-    args: argparse.Namespace,
-) -> list[TargetReplacementSpec]:
-    return resolve_target_replacements(
-        args, TargetReplacementSpec, Path(args.gym_project)
-    )
+        task_description = (
+            Path(args.task_file).expanduser().read_text(encoding="utf-8").strip()
+        )
+    else:
+        task_description = str(args.task_description or "").strip()
+    if not task_description:
+        raise ValueError(
+            "--task_description (or --task_file) is required. Provide the "
+            "natural-language task goal, for example: "
+            '--task_description "arrange the cans in a line".'
+        )
+    return task_description
 
 
 def _resolve_source_scene_body_scale_mode(args: argparse.Namespace) -> str | None:

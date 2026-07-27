@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
-import json
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
@@ -36,8 +35,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _base_name,
     _string_list,
 )
-from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
-    render_prompt_template,
+from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
+    ROUTER_SYSTEM_MESSAGE,
+    request_json_spec,
 )
 
 __all__ = [
@@ -167,41 +167,17 @@ def _call_task_router_llm(
     scene_summary: list[dict[str, Any]],
     model: str | None,
 ) -> dict[str, Any]:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
-        extract_json_object,
-    )
-    from embodichain.gen_sim.action_agent_pipeline.utils.mllm import (
-        create_chat_openai,
-    )
-
     # Prompt prose is data, while route correction below remains reviewed code.
     # This separation lets prompt wording evolve without hiding route invariants.
-    prompt = render_prompt_template(
-        "task_router.txt",
+    return request_json_spec(
+        template_name="task_router.txt",
+        usage_stage="config_generation.task_router",
         project_name=project_name,
         task_description=task_description,
-        scene_summary=json.dumps(scene_summary, ensure_ascii=False, indent=2),
-    )
-    llm = create_chat_openai(
-        temperature=0.0,
+        scene_summary=scene_summary,
         model=model,
-        usage_stage="config_generation.task_router",
+        system_message=ROUTER_SYSTEM_MESSAGE,
     )
-    response = llm.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "You are a strict JSON router for simulation config "
-                    "generation. Return only the requested JSON object."
-                )
-            ),
-            HumanMessage(content=prompt),
-        ]
-    )
-    content = getattr(response, "content", response)
-    return extract_json_object(content)
 
 
 def _make_task_router_scene_summary(

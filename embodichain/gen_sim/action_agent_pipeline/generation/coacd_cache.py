@@ -20,14 +20,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 import hashlib
-import os
 
-from embodichain.utils.logger import log_info
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    iter_mesh_object_configs,
+)
 
 __all__ = [
     "coacd_cache_path_for_mesh",
     "dexsim_coacd_cache_key_for_mesh",
-    "prewarm_coacd_cache_for_gym_config",
 ]
 
 _DEFAULT_CONVEX_DECOMP_DIR = (
@@ -65,123 +65,10 @@ def dexsim_coacd_cache_key_for_mesh(
     return hashlib.sha256(mesh_key_data.encode("utf-8")).hexdigest()
 
 
-def prewarm_coacd_cache_for_gym_config(
-    gym_config: Mapping[str, Any],
-    *,
-    cache_dir: str | Path | None = None,
-    repo_root: str | Path | None = None,
-) -> list[dict[str, Any]]:
-    """Precompute DexSim environment-side CoACD cache files for mesh objects."""
-
-    entries = []
-    for obj in _iter_mesh_object_configs(gym_config):
-        max_convex_hull_num = int(obj.get("max_convex_hull_num", 1))
-        if max_convex_hull_num <= 1:
-            continue
-        entries.append((obj, max_convex_hull_num))
-    if not entries:
-        return []
-
-    if cache_dir is None:
-        cache_dir = _DEFAULT_CONVEX_DECOMP_DIR
-
-    cache_dir = Path(cache_dir).expanduser().resolve()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    repo_root = Path(repo_root).expanduser().resolve() if repo_root else _repo_root()
-
-    reports: list[dict[str, Any]] = []
-    seen_cache_paths: set[Path] = set()
-    for obj, max_convex_hull_num in entries:
-        uid = str(obj.get("uid", ""))
-        raw_fpath = str(obj.get("shape", {}).get("fpath", ""))
-        mesh_path = _resolve_mesh_path(raw_fpath, repo_root)
-        cache_path = coacd_cache_path_for_mesh(
-            mesh_path,
-            max_convex_hull_num,
-            cache_dir,
-        )
-        report = {
-            "uid": uid,
-            "mesh_path": mesh_path.as_posix(),
-            "mesh_count": 1,
-            "max_convex_hull_num": max_convex_hull_num,
-            "cache_path": cache_path.as_posix(),
-        }
-        if cache_path in seen_cache_paths:
-            report["status"] = "duplicate"
-        elif cache_path.is_file():
-            report["status"] = "hit"
-        else:
-            try:
-                _generate_coacd_cache(mesh_path, cache_path, max_convex_hull_num)
-            except Exception as exc:
-                report["status"] = "skipped"
-                report["reason"] = str(exc)
-            else:
-                report["status"] = "generated"
-        seen_cache_paths.add(cache_path)
-        reports.append(report)
-    return reports
-
-
 def _iter_mesh_object_configs(
     gym_config: Mapping[str, Any],
 ) -> list[Mapping[str, Any]]:
-    objects = []
-    for section in ("background", "rigid_object"):
-        value = gym_config.get(section, [])
-        if isinstance(value, Mapping):
-            value = [value]
-        if not isinstance(value, list):
-            continue
-        for obj in value:
-            if not isinstance(obj, Mapping):
-                continue
-            shape = obj.get("shape", {})
-            if isinstance(shape, Mapping) and shape.get("shape_type") == "Mesh":
-                objects.append(obj)
-    return objects
-
-
-def _resolve_mesh_path(raw_fpath: str, repo_root: Path) -> Path:
-    path = Path(raw_fpath).expanduser()
-    if path.is_absolute():
-        candidate = path.resolve()
-    else:
-        candidate = (repo_root / path).resolve()
-    if not candidate.is_file():
-        raise FileNotFoundError(f"Mesh path for CoACD prewarm not found: {raw_fpath}")
-    return candidate
-
-
-def _generate_coacd_cache(
-    mesh_path: Path,
-    cache_path: Path,
-    max_convex_hull_num: int,
-) -> None:
-    import open3d as o3d
-    from dexsim.kit.meshproc import convex_decomposition_coacd
-    from dexsim.kit.meshproc.utility import mesh_list_to_file
-
-    log_info(
-        "Prewarming environment CoACD cache: "
-        f"mesh={mesh_path.as_posix()}, hulls={max_convex_hull_num}"
-    )
-    in_mesh = o3d.t.io.read_triangle_mesh(mesh_path.as_posix())
-    _, out_mesh_list = convex_decomposition_coacd(
-        in_mesh,
-        max_convex_hull_num=int(max_convex_hull_num),
-    )
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = cache_path.with_name(
-        f"{cache_path.stem}.tmp.{os.getpid()}{cache_path.suffix}"
-    )
-    try:
-        mesh_list_to_file(temp_path.as_posix(), out_mesh_list)
-        os.replace(temp_path, cache_path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
+    return iter_mesh_object_configs(gym_config)
 
 
 def _repo_root() -> Path:

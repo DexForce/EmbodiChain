@@ -30,11 +30,8 @@ __all__ = [
     "_StackingSpec",
     "_StackingStepSpec",
     "GeneratedActionAgentConfigPaths",
-    "TargetReplacementSpec",
-    "_BasketTaskRoles",
     "_RelativePlacementSpec",
     "_RelativePlacementStepSpec",
-    "_ResolvedTargetReplacement",
     "_SceneObject",
 ]
 
@@ -54,44 +51,10 @@ class GeneratedActionAgentConfigPaths:
 
 
 @dataclass(frozen=True)
-class TargetReplacementSpec:
-    """Prompt-to-geometry replacement for one source target object."""
-
-    source_uid: str
-    prompt: str
-    output_dir_name: str
-
-
-@dataclass(frozen=True)
 class _SceneObject:
     source_uid: str
     source_role: str
     config: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class _BasketTaskRoles:
-    table_source_uid: str
-    container_source_uid: str
-    left_target_source_uid: str
-    right_target_source_uid: str
-    container_runtime_uid: str
-    left_target_runtime_uid: str
-    right_target_runtime_uid: str
-    target_noun: str
-    left_target_noun: str
-    right_target_noun: str
-    container_noun: str
-
-
-@dataclass(frozen=True)
-class _ResolvedTargetReplacement:
-    source_uid: str
-    prompt: str
-    output_dir_name: str
-    mesh_path: Path
-    runtime_noun: str
-    reused: bool = False
 
 
 @dataclass(frozen=True)

@@ -26,7 +26,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_config im
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _make_arrangement_dataset_config,
-    _make_dataset_config,
     _make_relative_dataset_config,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
@@ -43,19 +42,6 @@ def test_all_task_routes_generate_manager_level_save_failed_episodes():
         reference_runtime_uid="table",
     )
     configs = [
-        _make_dataset_config(
-            "gym_export",
-            SimpleNamespace(
-                container_runtime_uid="interact_basket",
-                left_target_runtime_uid="interact_left_cube",
-                right_target_runtime_uid="interact_right_cube",
-                target_noun="cube",
-                left_target_noun="cube",
-                right_target_noun="cube",
-                container_noun="basket",
-            ),
-            robot_profile=profile,
-        ),
         _make_relative_dataset_config(
             "gym_export",
             SimpleNamespace(

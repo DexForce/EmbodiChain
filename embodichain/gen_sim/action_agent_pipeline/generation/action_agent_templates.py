@@ -29,7 +29,6 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
 __all__ = [
     "make_dual_franka_panda_robot_config",
     "make_dual_ur_dh_pgi_robot_config",
-    "make_dual_ur5_robot_config",
     "make_light_config",
     "make_sensor_config",
 ]
@@ -59,11 +58,6 @@ _UR_MAX_EFFORT = {
     "ur10": 330.0,
     "ur10e": 330.0,
 }
-
-
-def make_dual_ur5_robot_config(*, robot_init_z: float) -> dict[str, Any]:
-    """Return a fresh DualUR5 robot config template at the requested z position."""
-    return make_dual_ur_dh_pgi_robot_config(ur_type="ur5", robot_init_z=robot_init_z)
 
 
 def make_dual_ur_dh_pgi_robot_config(

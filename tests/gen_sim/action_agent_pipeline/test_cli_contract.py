@@ -20,8 +20,17 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 
+import pytest
+
 from embodichain.gen_sim.action_agent_pipeline.cli import (
     generate_action_agent_config,
+    project_resolution,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_args import (
+    build_parser as build_pipeline_parser,
+)
+from embodichain.gen_sim.action_agent_pipeline.cli.project_resolution import (
+    resolve_task_description_for_generation,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.run_agent import (
     build_parser as build_run_agent_parser,
@@ -29,6 +38,26 @@ from embodichain.gen_sim.action_agent_pipeline.cli.run_agent import (
 from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_MAX_EPISODE_STEPS,
 )
+
+_RETIRED_SCENE_SOURCE_OPTIONS = {
+    "--background",
+    "--gym-project-root",
+    "--image2scene-client-url",
+    "--image2scene-download-dir",
+    "--image2scene-extract-dir",
+    "--image2scene-gen-config",
+    "--image2scene-llm-config",
+    "--image2scene-merged-output",
+    "--image2scene-output-root",
+    "--image2scene-root",
+    "--job-timeout-s",
+    "--job_timeout_s",
+    "--overwrite-gym-project",
+    "--poll-interval",
+    "--server",
+    "--skip-health-check",
+    "--use-image2scene",
+}
 
 
 def test_documented_config_generation_command_remains_accepted(
@@ -54,11 +83,6 @@ def test_documented_config_generation_command_remains_accepted(
         generate_action_agent_config,
         "generate_action_agent_config_from_project",
         fake_generate,
-    )
-    monkeypatch.setattr(
-        generate_action_agent_config,
-        "_resolve_target_replacements",
-        lambda args: [],
     )
     monkeypatch.setattr(
         generate_action_agent_config,
@@ -120,3 +144,73 @@ def test_documented_run_agent_command_remains_accepted() -> None:
     assert args.task_name == "task4_2"
     assert args.regenerate is True
     assert args.headless is True
+
+
+def test_config_generation_requires_a_task_description() -> None:
+    """There is no default task template, so an empty goal must fail loudly."""
+    args = SimpleNamespace(task_description=None, task_file=None)
+
+    with pytest.raises(ValueError, match="--task_description"):
+        generate_action_agent_config._resolve_task_description(args)
+
+
+def test_config_generation_reads_task_description_from_task_file(
+    tmp_path: Path,
+) -> None:
+    task_file = tmp_path / "task.txt"
+    task_file.write_text("  将罐头摆成一排  ", encoding="utf-8")
+    args = SimpleNamespace(task_description=None, task_file=str(task_file))
+
+    assert (
+        generate_action_agent_config._resolve_task_description(args) == "将罐头摆成一排"
+    )
+
+
+def test_pipeline_requires_a_task_description() -> None:
+    """The full pipeline fails before scene resolution rather than mid-run."""
+    with pytest.raises(ValueError, match="--task_description"):
+        resolve_task_description_for_generation(SimpleNamespace(task_description=""))
+
+    assert (
+        resolve_task_description_for_generation(
+            SimpleNamespace(task_description="  stack the cans  ")
+        )
+        == "stack the cans"
+    )
+
+
+@pytest.mark.parametrize(
+    "use_prompt2scene",
+    [False, True],
+    ids=["default", "compatibility-flag"],
+)
+def test_pipeline_resolves_prompt2scene_as_default_source(
+    monkeypatch,
+    tmp_path: Path,
+    use_prompt2scene: bool,
+) -> None:
+    gym_config_path = tmp_path / "gym_config.json"
+    monkeypatch.setattr(
+        project_resolution,
+        "run_prompt2scene_stage",
+        lambda args: gym_config_path,
+    )
+    args = SimpleNamespace(
+        base_history_index=None,
+        base_task_name=None,
+        use_existing_gym_project=False,
+        use_prompt2scene=use_prompt2scene,
+    )
+
+    resolution = project_resolution.resolve_gym_project(args)
+
+    assert resolution == project_resolution.ProjectResolution(
+        path=gym_config_path,
+        mode="prompt2scene",
+    )
+
+
+def test_pipeline_parser_does_not_accept_retired_scene_source_options() -> None:
+    parser = build_pipeline_parser()
+
+    assert _RETIRED_SCENE_SOURCE_OPTIONS.isdisjoint(parser._option_string_actions)

@@ -30,6 +30,9 @@ import struct
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     _SceneObject,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
+    iter_scene_object_configs,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_io import read_glb
 
 __all__ = [
@@ -108,15 +111,7 @@ def _apply_tabletop_z_placement(
 def _iter_generated_scene_object_configs(
     gym_config: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    objects: list[dict[str, Any]] = []
-    for section in ("background", "rigid_object"):
-        value = gym_config.get(section, [])
-        if isinstance(value, Mapping):
-            value = [value]
-        if not isinstance(value, list):
-            continue
-        objects.extend(obj for obj in value if isinstance(obj, dict))
-    return objects
+    return iter_scene_object_configs(gym_config)
 
 
 def _mesh_config_world_zmax(obj_config: Mapping[str, Any]) -> float | None:
@@ -195,9 +190,19 @@ def _mesh_config_world_xy_center(
     ]
 
 
-def _mesh_config_world_xy_bounds(
+def _mesh_config_vertices_and_matrix(
     obj_config: Mapping[str, Any],
-) -> tuple[list[float], list[float]] | None:
+    *,
+    translation: list[float] | None = None,
+) -> tuple[list[list[float]], list[list[float]]] | None:
+    """Load a mesh's vertices and its config transform in one step.
+
+    All mesh-bounds accessors share this prologue: resolve the GLB path, load
+    vertices with the right frame convention, and build the transform matrix.
+    ``translation`` overrides the config's position when the caller wants a
+    local-frame result (e.g. z-min after rotation only); ``None`` uses the
+    object's real world placement.
+    """
     shape = obj_config.get("shape", {})
     if not isinstance(shape, Mapping):
         return None
@@ -210,8 +215,17 @@ def _mesh_config_world_xy_bounds(
     )
     if not vertices:
         return None
+    matrix = _mesh_config_transform_matrix(obj_config, translation=translation)
+    return vertices, matrix
 
-    matrix = _mesh_config_transform_matrix(obj_config)
+
+def _mesh_config_world_xy_bounds(
+    obj_config: Mapping[str, Any],
+) -> tuple[list[float], list[float]] | None:
+    loaded = _mesh_config_vertices_and_matrix(obj_config)
+    if loaded is None:
+        return None
+    vertices, matrix = loaded
     transformed_vertices = [_transform_point(matrix, vertex) for vertex in vertices]
     x_values = [vertex[0] for vertex in transformed_vertices]
     y_values = [vertex[1] for vertex in transformed_vertices]
@@ -224,43 +238,22 @@ def _mesh_config_world_xy_bounds(
 def _mesh_config_local_zmin_after_rotation(
     obj_config: Mapping[str, Any],
 ) -> float | None:
-    shape = obj_config.get("shape", {})
-    if not isinstance(shape, Mapping):
+    # translation=[0,0,0] isolates the rotation effect from the object's world
+    # placement, so this returns the local z-min after rotation only.
+    loaded = _mesh_config_vertices_and_matrix(obj_config, translation=[0.0, 0.0, 0.0])
+    if loaded is None:
         return None
-    mesh_path = shape.get("fpath")
-    if not isinstance(mesh_path, str):
-        return None
-    vertices = _load_mesh_vertices(
-        Path(mesh_path).expanduser().resolve(),
-        gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
-    )
-    if not vertices:
-        return None
-
-    matrix = _mesh_config_transform_matrix(
-        obj_config,
-        translation=[0.0, 0.0, 0.0],
-    )
+    vertices, matrix = loaded
     return min(_transform_point(matrix, vertex)[2] for vertex in vertices)
 
 
 def _mesh_config_world_z_bounds(
     obj_config: Mapping[str, Any],
 ) -> tuple[float, float] | None:
-    shape = obj_config.get("shape", {})
-    if not isinstance(shape, Mapping):
+    loaded = _mesh_config_vertices_and_matrix(obj_config)
+    if loaded is None:
         return None
-    mesh_path = shape.get("fpath")
-    if not isinstance(mesh_path, str):
-        return None
-    vertices = _load_mesh_vertices(
-        Path(mesh_path).expanduser().resolve(),
-        gltf_to_sim_frame=bool(shape.get(_GLTF_TO_SIM_FRAME_KEY, False)),
-    )
-    if not vertices:
-        return None
-
-    matrix = _mesh_config_transform_matrix(obj_config)
+    vertices, matrix = loaded
     z_values = [_transform_point(matrix, vertex)[2] for vertex in vertices]
     return (min(z_values), max(z_values))
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the Image2Tabletop -> config generation -> action-agent pipeline."""
+"""Run scene resolution, config generation, and the action-agent task."""
 
 from __future__ import annotations
 
