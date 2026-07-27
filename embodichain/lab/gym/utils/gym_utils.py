@@ -797,7 +797,7 @@ def add_env_launcher_args_to_parser(
         "--num_envs",
         help="The number of environments to run in parallel. "
         "If not given, falls back to the gym config's `num_envs` (default 1).",
-        default=None,
+        default=1,
         type=int,
     )
     parser.add_argument(
