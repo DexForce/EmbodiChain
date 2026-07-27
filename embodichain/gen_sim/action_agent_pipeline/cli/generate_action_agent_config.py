@@ -27,7 +27,6 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
     DEFAULT_TASK_NAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.cli.pipeline_defaults import (
-    DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES,
     DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
@@ -151,16 +150,6 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
-        "--load_source_meshes_directly",
-        "--load-source-meshes-directly",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help=(
-            "Keep source GLB/GLTF paths and use DexSim's native coordinate "
-            "conversion. Defaults to true for prompt2scene gym_export inputs."
-        ),
-    )
-    parser.add_argument(
         "--load-template-material",
         "--load_template_material",
         dest="load_template_material",
@@ -179,16 +168,6 @@ def cli() -> None:
         help=(
             "World-frame Z rotation applied to generated scene object poses. "
             "Defaults to -90 for prompt2scene gym_export inputs and 0 otherwise."
-        ),
-    )
-    parser.add_argument(
-        "--source_mesh_x_rotation_degrees",
-        "--source-mesh-x-rotation-degrees",
-        type=float,
-        default=None,
-        help=(
-            "Local X-axis rotation baked into normalized GLB/GLTF meshes. "
-            "Ignored when source meshes are loaded directly. Defaults to 0."
         ),
     )
     parser.add_argument(
@@ -264,9 +243,7 @@ def cli() -> None:
         preserve_source_target_body_scale=args.preserve_source_target_body_scale,
         source_scene_body_scale_mode=source_scene_body_scale_mode,
         preserve_source_scene_geometry=alignment["preserve_source_scene_geometry"],
-        load_source_meshes_directly=alignment["load_source_meshes_directly"],
         source_scene_z_rotation_degrees=alignment["source_scene_z_rotation_degrees"],
-        source_mesh_x_rotation_degrees=alignment["source_mesh_x_rotation_degrees"],
         load_template_material=args.load_template_material,
         inside_container_slot_distance_scale=args.inside_container_slot_distance_scale,
         surface_release_clearance=args.surface_release_clearance,
@@ -346,27 +323,15 @@ def _resolve_source_alignment(args: argparse.Namespace) -> dict[str, float | boo
     if preserve_source_scene_geometry is None:
         preserve_source_scene_geometry = is_prompt2scene
 
-    load_source_meshes_directly = args.load_source_meshes_directly
-    if load_source_meshes_directly is None:
-        load_source_meshes_directly = is_prompt2scene
-
     source_scene_z_rotation_degrees = args.source_scene_z_rotation_degrees
     if source_scene_z_rotation_degrees is None:
         source_scene_z_rotation_degrees = (
             DEFAULT_PROMPT2SCENE_SCENE_Z_ROTATION_DEGREES if is_prompt2scene else 0.0
         )
 
-    source_mesh_x_rotation_degrees = args.source_mesh_x_rotation_degrees
-    if source_mesh_x_rotation_degrees is None:
-        source_mesh_x_rotation_degrees = (
-            DEFAULT_PROMPT2SCENE_MESH_X_ROTATION_DEGREES if is_prompt2scene else 0.0
-        )
-
     return {
         "preserve_source_scene_geometry": preserve_source_scene_geometry,
-        "load_source_meshes_directly": load_source_meshes_directly,
         "source_scene_z_rotation_degrees": source_scene_z_rotation_degrees,
-        "source_mesh_x_rotation_degrees": source_mesh_x_rotation_degrees,
     }
 
 

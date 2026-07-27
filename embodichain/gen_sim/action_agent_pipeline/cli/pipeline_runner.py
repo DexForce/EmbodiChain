@@ -130,7 +130,6 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             target_body_scale=effective_target_body_scale,
             source_scene_body_scale_mode=source_scene_body_scale_mode,
             preserve_source_scene_geometry=uses_prompt2scene_alignment,
-            load_source_meshes_directly=uses_prompt2scene_alignment,
             source_scene_z_rotation_degrees=(
                 args.prompt2scene_scene_z_rotation_degrees
                 if uses_prompt2scene_alignment

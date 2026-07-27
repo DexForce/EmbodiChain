@@ -180,9 +180,7 @@ def generate_action_agent_config_from_project(
     source_target_body_scale_multiplier: float | None = None,
     source_scene_body_scale_mode: str | None = None,
     preserve_source_scene_geometry: bool = False,
-    load_source_meshes_directly: bool = False,
     source_scene_z_rotation_degrees: float = 0.0,
-    source_mesh_x_rotation_degrees: float = 0.0,
     load_template_material: bool = False,
     inside_container_slot_distance_scale: float = 1.0,
     surface_release_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE,
@@ -229,13 +227,9 @@ def generate_action_agent_config_from_project(
             behavior is preserved.
         preserve_source_scene_geometry: If true, generated scene objects keep
             source z placement instead of re-snapping objects to the tabletop.
-        load_source_meshes_directly: Deprecated compatibility option. Generated
-            runtime assets are always normalized and baked GLB files.
         source_scene_z_rotation_degrees: World-frame Z rotation applied to
             generated scene object poses after config generation. Mesh paths and
             scales are unchanged.
-        source_mesh_x_rotation_degrees: Deprecated compatibility option. GLB
-            frame conversion is handled by the GLB geometry baker.
         load_template_material: If true, add a startup event that randomly
             selects a table texture from the packaged action-agent texture
             set. If false, preserve the source scene's table appearance.
@@ -319,7 +313,6 @@ def generate_action_agent_config_from_project(
             _with_task_route_summary(bundle, task_route),
             output_dir=output_dir_path,
             mesh_normalizer=mesh_normalizer,
-            load_source_meshes_directly=load_source_meshes_directly,
             acd_method=acd_method,
             overwrite=overwrite,
         )
@@ -354,7 +347,6 @@ def generate_action_agent_config_from_project(
             _with_task_route_summary(bundle, task_route),
             output_dir=output_dir_path,
             mesh_normalizer=mesh_normalizer,
-            load_source_meshes_directly=load_source_meshes_directly,
             acd_method=acd_method,
             overwrite=overwrite,
         )
@@ -399,7 +391,6 @@ def generate_action_agent_config_from_project(
         _with_task_route_summary(bundle, task_route),
         output_dir=output_dir_path,
         mesh_normalizer=mesh_normalizer,
-        load_source_meshes_directly=load_source_meshes_directly,
         acd_method=acd_method,
         overwrite=overwrite,
     )
@@ -890,7 +881,6 @@ def _finalize_and_write_bundle(
     *,
     output_dir: Path,
     mesh_normalizer: GlbGeometryNormalizer,
-    load_source_meshes_directly: bool,
     acd_method: str,
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
