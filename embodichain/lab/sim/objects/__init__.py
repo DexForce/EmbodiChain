@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from ..common import BatchEntity
 from .rigid_object import RigidObject, RigidBodyData, RigidObjectCfg
 from .rigid_object_group import (
@@ -26,7 +28,7 @@ from .cloth_object import ClothObject, ClothBodyData, ClothObjectCfg
 from .articulation import Articulation, ArticulationData, ArticulationCfg
 from .robot import Robot, RobotCfg
 from .light import Light, LightCfg
-from .gizmo import Gizmo
+from .gizmo import Gizmo, GizmoCfg
 from .constraint import RigidConstraint
 
 

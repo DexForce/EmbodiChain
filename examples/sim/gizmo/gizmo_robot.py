@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
-"""
+"""Control a UR10 end effector with dexsim's Newton IK gizmo."""
+
+from __future__ import annotations
 
 import time
 import torch
@@ -23,15 +23,14 @@ import numpy as np
 import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
 )
+from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -75,19 +74,6 @@ def main():
             "arm": ["JOINT[0-9]"],
             "hand": ["FINGER[1-2]"],
         },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [0.0, 1.0, 0.0, 0.0],
-                    [-1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.12],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                num_samples=30,
-            )
-        },
         drive_pros=JointDrivePropertiesCfg(
             stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
             damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
@@ -109,8 +95,23 @@ def main():
 
     time.sleep(0.2)  # Wait for a moment to ensure everything is set up
 
-    # Enable gizmo using the new API
-    sim.enable_gizmo(uid="ur10_gizmo_test", control_part="arm")
+    # The robot needs no EmbodiChain IK solver for interactive gizmo control.
+    # dexsim builds and owns the Newton IK chain from this metadata.
+    gizmo_cfg = GizmoCfg(
+        ik_root_link_name="base_link",
+        ik_end_link_name="ee_link",
+        ik_tcp_pose=[
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.12],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    sim.enable_gizmo(
+        uid="ur10_gizmo_test",
+        control_part="arm",
+        gizmo_cfg=gizmo_cfg,
+    )
     if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
         logger.log_error("Failed to enable gizmo!")
         return
@@ -119,6 +120,7 @@ def main():
 
     logger.log_info("Gizmo-Robot example started!")
     logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    logger.log_info("Press I to show or hide the Robot TCP IK gizmo")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     run_simulation(sim)

@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
-"""
+"""Control a UR10 end effector with dexsim's Newton IK gizmo."""
+
+from __future__ import annotations
 
 import time
 import torch
@@ -30,8 +30,7 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
     JointDrivePropertiesCfg,
 )
-
-from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -68,17 +67,6 @@ def main():
             components=[{"component_type": "arm", "urdf_path": urdf_path}]
         ),
         control_parts={"arm": ["Joint[1-6]"]},
-        solver_cfg={
-            "arm": PinkSolverCfg(
-                urdf_path=urdf_path,
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                pos_eps=1e-2,
-                rot_eps=5e-2,
-                max_iterations=300,
-                dt=0.1,
-            )
-        },
         drive_pros=JointDrivePropertiesCfg(
             stiffness={"Joint[1-6]": 1e4},
             damping={"Joint[1-6]": 1e3},
@@ -97,8 +85,15 @@ def main():
 
     time.sleep(0.2)  # Wait for a moment to ensure everything is set up
 
-    # Enable gizmo using the new API
-    sim.enable_gizmo(uid="ur10_gizmo_test", control_part="arm")
+    # dexsim owns the Newton IK solver used by the interactive controller.
+    sim.enable_gizmo(
+        uid="ur10_gizmo_test",
+        control_part="arm",
+        gizmo_cfg=GizmoCfg(
+            ik_root_link_name="base_link",
+            ik_end_link_name="ee_link",
+        ),
+    )
     if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
         logger.log_error("Failed to enable gizmo!")
         return
@@ -107,6 +102,7 @@ def main():
 
     logger.log_info("Gizmo-Robot example started!")
     logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    logger.log_info("Press I to show or hide the Robot TCP IK gizmo")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     run_simulation(sim)

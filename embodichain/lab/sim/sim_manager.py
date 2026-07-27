@@ -32,7 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import Callable, Dict, List, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Sequence, Union
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -66,7 +66,7 @@ from embodichain.lab.sim.objects import (
     Light,
     RigidConstraint,
 )
-from embodichain.lab.sim.objects.gizmo import Gizmo
+from embodichain.lab.sim.objects.gizmo import Gizmo, GizmoCfg
 from embodichain.lab.sim.sensors import (
     SensorCfg,
     BaseSensor,
@@ -93,6 +93,9 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import look_at_to_pose, pose_inv
+
+if TYPE_CHECKING:
+    from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
 
 __all__ = [
     "SimulationManager",
@@ -159,6 +162,9 @@ class SimulationManagerCfg:
     window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
     """Interactive viewer camera-pose printing settings."""
 
+    enable_entity_gizmo_on_window_open: bool = True
+    """Whether opening a viewer window automatically enables entity gizmo control."""
+
 
 @dataclass
 class _WindowRecordState:
@@ -200,6 +206,7 @@ class SimulationManager:
     _instances = {}
 
     _cleanup_queue: queue.Queue = queue.Queue()
+    _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
 
     SUPPORTED_SENSOR_TYPES = {
         "Camera": Camera,
@@ -249,6 +256,7 @@ class SimulationManager:
         self._world: dexsim.World = dexsim.World(world_config)
 
         self._window: Windows | None = None
+        self._entity_gizmo_config: EntityGizmoConfig | None = None
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
         wr = sim_config.window_record
@@ -326,6 +334,7 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+            self._on_window_opened()
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -616,11 +625,43 @@ class SimulationManager:
     def get_world(self) -> dexsim.World:
         return self._world
 
-    def open_window(self) -> None:
-        """Open the simulation window."""
-        self._world.open_window()
-        self._window = self._world.get_windows()
+    def open_window(
+        self,
+        *,
+        enable_entity_gizmo: bool | None = None,
+        entity_gizmo_config: EntityGizmoConfig | None = None,
+    ) -> None:
+        """Open the simulation window and initialize its interaction controls.
 
+        Entity gizmo control is enabled by default. Set
+        ``enable_entity_gizmo=False`` for a view-only window. When the argument
+        is omitted, :attr:`SimulationManagerCfg.enable_entity_gizmo_on_window_open`
+        determines the behavior.
+
+        Args:
+            enable_entity_gizmo: Whether to enable world-level entity gizmo
+                control for this window. ``None`` uses the simulation
+                configuration default.
+            entity_gizmo_config: Optional native dexsim configuration. Passing
+                a configuration implies entity gizmo control unless explicitly
+                disabled.
+        """
+        if not self.is_window_opened or self._window is None:
+            self._world.open_window()
+        self._window = self._world.get_windows()
+        self.is_window_opened = True
+        self._on_window_opened(
+            enable_entity_gizmo=enable_entity_gizmo,
+            entity_gizmo_config=entity_gizmo_config,
+        )
+
+    def _on_window_opened(
+        self,
+        *,
+        enable_entity_gizmo: bool | None = None,
+        entity_gizmo_config: EntityGizmoConfig | None = None,
+    ) -> None:
+        """Initialize controls shared by constructor-opened and reopened windows."""
         if (
             self._window_record_hotkey_cfg is not None
             and self._window_record_input_control is None
@@ -631,10 +672,31 @@ class SimulationManager:
             and self._window_camera_pose_input_control is None
         ):
             self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
-        self.is_window_opened = True
+
+        if enable_entity_gizmo is None:
+            enable_entity_gizmo = entity_gizmo_config is not None or getattr(
+                self.sim_config,
+                "enable_entity_gizmo_on_window_open",
+                True,
+            )
+
+        try:
+            if enable_entity_gizmo:
+                if entity_gizmo_config is not None:
+                    self.enable_entity_gizmo(entity_gizmo_config)
+                elif not self.has_entity_gizmo():
+                    self.enable_entity_gizmo(self._entity_gizmo_config)
+            elif self.has_entity_gizmo():
+                self.disable_entity_gizmo()
+        except RuntimeError as error:
+            logger.log_warning(
+                f"Entity gizmo control could not be initialized for the window: {error}"
+            )
 
     def close_window(self) -> None:
         """Close the simulation window."""
+        if self.has_entity_gizmo():
+            self.disable_entity_gizmo()
         if self.is_window_recording():
             self.stop_window_record()
         self._world.close_window()
@@ -1620,15 +1682,140 @@ class SimulationManager:
         """
         return list(self._robots.keys())
 
+    def enable_entity_gizmo(
+        self,
+        config: EntityGizmoConfig | None = None,
+    ) -> EntityGizmoManipulator:
+        """Enable dexsim's world-level entity gizmo controller.
+
+        This is a thin lifecycle wrapper around
+        :meth:`dexsim.World.enable_entity_gizmo`. The returned controller owns
+        window selection, hotkey handling, multiple gizmo bindings, temporary
+        physics-state changes, and rigid-body/articulation-root manipulation.
+
+        Args:
+            config: Native dexsim entity-gizmo configuration. When omitted,
+                dexsim's defaults are used.
+
+        Returns:
+            The world-owned dexsim entity gizmo manipulator.
+
+        Raises:
+            RuntimeError: If the installed dexsim build does not provide entity
+                gizmo support or fails to create the controller.
+        """
+        world = getattr(self, "_world", None)
+        enable = getattr(world, "enable_entity_gizmo", None)
+        if not callable(enable):
+            raise RuntimeError(
+                "The installed dexsim build does not provide "
+                "World.enable_entity_gizmo()."
+            )
+
+        controller = enable() if config is None else enable(config)
+        if controller is None:
+            raise RuntimeError("dexsim failed to enable the entity gizmo controller.")
+        self._exclude_default_plane_from_entity_gizmo(controller)
+        self._entity_gizmo_config = config
+        logger.log_info("Dexsim entity gizmo control enabled.")
+        return controller
+
+    def _exclude_default_plane_from_entity_gizmo(
+        self,
+        controller: EntityGizmoManipulator,
+    ) -> None:
+        """Register the EmbodiChain ground as an immovable gizmo target.
+
+        dexsim resolves registered external targets before its generic
+        render-mesh path. Registering the default plane as a static rigid body
+        therefore makes both raycast toggles and programmatic attachment return
+        ``STATIC_RIGID_BODY`` without adding physics to the visual plane.
+        """
+        default_plane = getattr(self, "_default_plane", None)
+        register = getattr(controller, "register_external_target", None)
+        if default_plane is None:
+            return
+        if not callable(register):
+            logger.log_warning(
+                "The installed dexsim build cannot exclude the default plane "
+                "from entity gizmo control."
+            )
+            return
+
+        try:
+            result = register(
+                self._DEFAULT_PLANE_GIZMO_TARGET_ID,
+                dexsim.interaction.EntityGizmoTargetType.RIGID_BODY,
+                default_plane,
+                ActorType.STATIC,
+            )
+        except (AttributeError, TypeError, RuntimeError) as error:
+            logger.log_warning(
+                "Failed to exclude the default plane from entity gizmo "
+                f"control: {error}."
+            )
+            return
+        if result != dexsim.interaction.EntityGizmoResult.SUCCESS:
+            logger.log_warning(
+                "Failed to exclude the default plane from entity gizmo "
+                f"control: {result}."
+            )
+
+    def disable_entity_gizmo(self) -> bool:
+        """Disable dexsim's world-level entity gizmo controller.
+
+        Returns:
+            ``True`` when an active controller was disabled, or ``False`` when
+            entity gizmo control was already disabled.
+
+        Raises:
+            RuntimeError: If the installed dexsim build does not provide entity
+                gizmo support.
+        """
+        world = getattr(self, "_world", None)
+        get_controller = getattr(world, "get_entity_gizmo", None)
+        disable = getattr(world, "disable_entity_gizmo", None)
+        if not callable(get_controller) or not callable(disable):
+            raise RuntimeError(
+                "The installed dexsim build does not provide entity gizmo "
+                "lifecycle APIs."
+            )
+        if get_controller() is None:
+            return False
+
+        disable()
+        logger.log_info("Dexsim entity gizmo control disabled.")
+        return True
+
+    def get_entity_gizmo(self) -> EntityGizmoManipulator | None:
+        """Return dexsim's active world-level entity gizmo controller."""
+        world = getattr(self, "_world", None)
+        get_controller = getattr(world, "get_entity_gizmo", None)
+        if not callable(get_controller):
+            raise RuntimeError(
+                "The installed dexsim build does not provide "
+                "World.get_entity_gizmo()."
+            )
+        return get_controller()
+
+    def has_entity_gizmo(self) -> bool:
+        """Return whether world-level entity gizmo control is enabled."""
+        world = getattr(self, "_world", None)
+        get_controller = getattr(world, "get_entity_gizmo", None)
+        return callable(get_controller) and get_controller() is not None
+
     def enable_gizmo(
-        self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
-    ) -> Gizmo:
+        self,
+        uid: str,
+        control_part: str | None = None,
+        gizmo_cfg: GizmoCfg | None = None,
+    ) -> Gizmo | None:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
             uid (str): UID of the object to attach gizmo to (searches in robots, rigid_objects, sensors, etc.)
             control_part (str | None, optional): Control part name for robots. Defaults to "arm".
-            gizmo_cfg (object, optional): Gizmo configuration object. Defaults to None.
+            gizmo_cfg: Gizmo configuration. Defaults to None.
         """
         # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
@@ -1638,7 +1825,7 @@ class SimulationManager:
             logger.log_warning(
                 f"Gizmo for '{uid}' with control_part '{control_part}' already exists."
             )
-            return
+            return self._gizmos[gizmo_key]
 
         # Search for target object in different collections
         target = None
@@ -1656,17 +1843,13 @@ class SimulationManager:
 
         else:
             logger.log_error(
-                f"Object with uid '{uid}' not found in any collection (robots, rigid_objects, sensors, articulations)."
+                f"Object with uid '{uid}' not found in any supported collection "
+                "(robots, rigid_objects, sensors)."
             )
-            return
+            return None
 
+        gizmo = None
         try:
-            gizmo = Gizmo(target, gizmo_cfg, control_part)
-            self._gizmos[gizmo_key] = gizmo
-            logger.log_info(
-                f"Gizmo enabled for {object_type} '{uid}' with control_part '{control_part}'"
-            )
-
             # Initialize GizmoController if not already done.
             if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
                 window = (
@@ -1674,8 +1857,16 @@ class SimulationManager:
                     if hasattr(self._world, "get_windows")
                     else None
                 )
+                if window is None:
+                    raise RuntimeError("Gizmo requires a simulation window.")
                 self._gizmo_controller = GizmoController()
                 window.add_input_control(self._gizmo_controller)
+
+            gizmo = Gizmo(target, gizmo_cfg, control_part)
+            self._gizmos[gizmo_key] = gizmo
+            logger.log_info(
+                f"Gizmo enabled for {object_type} '{uid}' with control_part '{control_part}'"
+            )
 
         except Exception as e:
             logger.log_error(
@@ -2699,6 +2890,9 @@ class SimulationManager:
 
     def _deferred_destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
+        if self.has_entity_gizmo():
+            self.disable_entity_gizmo()
+
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)
