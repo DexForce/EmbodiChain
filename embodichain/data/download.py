@@ -19,19 +19,19 @@
 Usage::
 
     # List all available assets
-    python -m embodichain.data.download list
+    embodichain data list
 
     # List assets in a specific category
-    python -m embodichain.data.download list --category robot
+    embodichain data list --category robot
 
     # Download a specific asset by name
-    python -m embodichain.data.download download --name CobotMagicArm
+    embodichain data download --name CobotMagicArm
 
     # Download all assets in a category
-    python -m embodichain.data.download download --category robot
+    embodichain data download --category robot
 
     # Download everything
-    python -m embodichain.data.download download --all
+    embodichain data download --all
 """
 
 from __future__ import annotations
@@ -42,10 +42,13 @@ import inspect
 import os
 import shutil
 import sys
-
-import open3d as o3d
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+
+if TYPE_CHECKING:
+    import open3d
 
 # Mapping from category name to the module path that defines the asset classes.
 CATEGORY_MODULES: dict[str, str] = {
@@ -61,12 +64,14 @@ CATEGORY_MODULES: dict[str, str] = {
 
 def _get_asset_classes(module_path: str) -> list[tuple[str, type]]:
     """Return (name, cls) pairs for all DownloadDataset subclasses in *module_path*."""
+    import open3d
+
     module = importlib.import_module(module_path)
     results: list[tuple[str, type]] = []
     for name, obj in inspect.getmembers(module, inspect.isclass):
         if (
-            issubclass(obj, o3d.data.DownloadDataset)
-            and obj is not o3d.data.DownloadDataset
+            issubclass(obj, open3d.data.DownloadDataset)
+            and obj is not open3d.data.DownloadDataset
             and obj.__module__ == module.__name__
         ):
             results.append((name, obj))
@@ -99,7 +104,7 @@ def find_asset_class(
 # ---------------------------------------------------------------------------
 
 
-def _ensure_extract(data_obj: o3d.data.DownloadDataset, prefix: str) -> None:
+def _ensure_extract(data_obj: open3d.data.DownloadDataset, prefix: str) -> None:
     """For non-zip assets, copy the downloaded file into the extract directory.
 
     ``o3d.data.DownloadDataset`` extracts zip archives automatically but
@@ -210,9 +215,15 @@ def cmd_download(args: argparse.Namespace) -> None:
     print(f"\nDone. {len(targets)} asset(s) processed.")
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the data asset CLI.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+    """
     parser = argparse.ArgumentParser(
-        prog="embodichain.data.download",
+        prog="embodichain data",
         description="Pre-download EmbodiChain data assets from HuggingFace.",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -238,7 +249,7 @@ def main() -> None:
         "--all", action="store_true", help="Download every registered asset."
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "list":
         cmd_list(args)
     elif args.command == "download":
@@ -250,3 +261,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = [
+    "CATEGORY_MODULES",
+    "cmd_download",
+    "cmd_list",
+    "download_asset",
+    "find_asset_class",
+    "get_registry",
+    "main",
+]

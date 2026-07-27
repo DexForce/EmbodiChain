@@ -226,13 +226,13 @@ To start training, run:
 
 .. code-block:: bash
 
-   python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+   embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
 
 JSON configs are also supported:
 
 .. code-block:: bash
 
-   python -m embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
+   embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
 
 Outputs
 -------

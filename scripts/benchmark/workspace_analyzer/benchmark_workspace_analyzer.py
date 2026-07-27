@@ -19,7 +19,7 @@ from __future__ import annotations
 """Benchmark script for workspace analyzer performance optimizations.
 
 Measures each optimization independently across multiple sample sizes.
-Run: python -m scripts.benchmark.workspace_analyzer.benchmark_workspace_analyzer
+Run: embodichain benchmark workspace-analyzer
 """
 
 import os

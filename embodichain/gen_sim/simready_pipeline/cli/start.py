@@ -14,18 +14,33 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Command-line interface for the SimReady asset pipeline."""
+
+from __future__ import annotations
+
 import argparse
-from pathlib import Path
 import os
-
-os.environ["PYOPENGL_PLATFORM"] = "egl"
-
-from embodichain.gen_sim.simready_pipeline.pipeline.ingest import ingest_one_asset
-from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
-from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
+from collections.abc import Sequence
+from pathlib import Path
 
 
-def cli_ingest_single(input_dir: str, output_dir: str, category: str):
+def cli_ingest_single(input_dir: str, output_dir: str, category: str) -> None:
+    """Ingest one asset directory.
+
+    Args:
+        input_dir: Directory containing the source asset.
+        output_dir: Root directory for generated assets.
+        category: Semantic category assigned to the asset.
+
+    Raises:
+        FileNotFoundError: If the input directory does not exist.
+    """
+    os.environ["PYOPENGL_PLATFORM"] = "egl"
+
+    from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
+    from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
+    from embodichain.gen_sim.simready_pipeline.pipeline.ingest import ingest_one_asset
+
     input_path = Path(input_dir)
     output_path = Path(output_dir)
 
@@ -47,30 +62,48 @@ def cli_ingest_single(input_dir: str, output_dir: str, category: str):
     )
 
     if asset:
-        print(f"Successfully Processed")
+        print("Successfully processed")
     else:
-        print("no asset returned (might be direct_copy mode)")
+        print("No asset returned (might be direct_copy mode)")
 
 
-def main():
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the SimReady asset pipeline CLI.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+    """
     parser = argparse.ArgumentParser(
-        description="embodichain.gen_sim.simready_pipeline Asset Ingestion Pipeline"
+        prog="embodichain simready",
+        description="Convert a raw asset directory into a SimReady asset.",
     )
 
     parser.add_argument(
-        "--input_dir", type=str, help="Path to the single asset directory"
+        "--input_dir",
+        type=str,
+        required=True,
+        help="Path to the single asset directory.",
     )
-    parser.add_argument("--output_root", type=str, help="Path to the output directory")
+    parser.add_argument(
+        "--output_root",
+        type=str,
+        required=True,
+        help="Root directory for generated assets.",
+    )
     parser.add_argument(
         "--category",
         type=str,
         required=True,
         help="Specify the category for this asset (e.g., 'cup', 'chair')",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cli_ingest_single(args.input_dir, args.output_root, args.category)
 
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = ["cli_ingest_single", "main"]

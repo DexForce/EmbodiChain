@@ -16,7 +16,7 @@
 
 """Run RL benchmark training/evaluation and generate one markdown report.
 
-Run: python -m scripts.benchmark.rl.run_benchmark
+Run: embodichain benchmark rl
 """
 
 from __future__ import annotations

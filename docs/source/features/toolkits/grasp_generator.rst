@@ -236,7 +236,7 @@ EmbodiChain provides a dedicated CLI for interactively annotating grasp regions 
 
 Basic usage::
 
-   python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
+   embodichain annotate-grasp --mesh_path /path/to/object.ply
 
 This will:
 
@@ -247,7 +247,7 @@ This will:
 
 Common options::
 
-   python -m embodichain annotate-grasp \
+   embodichain annotate-grasp \
        --mesh_path /path/to/object.ply \
        --viser_port 15531 \
        --n_sample 20000 \

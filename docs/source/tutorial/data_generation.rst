@@ -142,7 +142,7 @@ The recommended CLI entrypoint is:
 
 .. code-block:: bash
 
-   python -m embodichain run-env \
+   embodichain run-env \
        --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
        --action_config embodichain_tasks/configs/gym/pour_water/action_config.json \
        --headless

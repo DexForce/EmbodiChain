@@ -22,32 +22,25 @@ point pairs to the grasp-annotator cache.
 
 Usage examples::
 
-    python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
-    python -m embodichain annotate-grasp --mesh_path mug.obj
+    embodichain annotate-grasp --mesh_path /path/to/object.ply
+    embodichain annotate-grasp --mesh_path mug.obj
 """
 
 from __future__ import annotations
 
 import argparse
-
-import torch
-import trimesh
-
-from embodichain.toolkits.graspkit.pg_grasp import (
-    AntipodalSamplerCfg,
-    GraspGenerator,
-    GraspGeneratorCfg,
-)
-from embodichain.utils.logger import log_info
+from collections.abc import Sequence
 
 
-def cli() -> None:
+def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for grasp pose annotation.
 
-    Parses CLI arguments, loads the mesh, and launches interactive
-    annotation via the Viser browser UI.
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
     """
     parser = argparse.ArgumentParser(
+        prog="embodichain annotate-grasp",
         description=(
             "Interactively annotate a grasp region on a mesh and "
             "compute antipodal point pairs."
@@ -91,7 +84,17 @@ def cli() -> None:
         help="Compute device, e.g. 'cpu' or 'cuda' (default: cpu).",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    import torch
+    import trimesh
+
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalSamplerCfg,
+        GraspGenerator,
+        GraspGeneratorCfg,
+    )
+    from embodichain.utils.logger import log_info
 
     # Load mesh via trimesh
     log_info(f"Loading mesh from {args.mesh_path}", color="green")
@@ -114,7 +117,7 @@ def cli() -> None:
     generator = GraspGenerator(vertices=vertices, triangles=triangles, cfg=cfg)
     log_info(
         "Annotate the grasp region in the browser window:\n"
-        "  1. Open http://localhost:{port}\n"
+        f"  1. Open http://localhost:{args.viser_port}\n"
         "  2. Click 'Rect Select Region' and drag to select\n"
         "  3. Click 'Confirm Selection' to finish",
         color="green",
@@ -129,3 +132,6 @@ def cli() -> None:
 
 if __name__ == "__main__":
     cli()
+
+
+__all__ = ["cli"]

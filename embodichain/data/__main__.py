@@ -14,8 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Allow ``python -m embodichain.data`` to invoke the download CLI."""
+"""Backward-compatible module entry point for the data CLI.
+
+Prefer ``embodichain data`` or ``python -m embodichain data``.
+"""
+
+from __future__ import annotations
 
 from embodichain.data.download import main
 
-main()
+if __name__ == "__main__":
+    main()
+
+
+__all__ = ["main"]

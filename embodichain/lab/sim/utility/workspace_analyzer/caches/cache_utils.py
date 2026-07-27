@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
@@ -19,37 +18,29 @@
 Cache management utility for workspace analyzer.
 
 Usage:
-    python cache_utils.py list              # List all cache sessions
-    python cache_utils.py info <session>    # Show cache session info
-    python cache_utils.py clean <session>   # Clean specific session
-    python cache_utils.py clean --all       # Clean all cache sessions
-    python cache_utils.py size              # Show total cache size
+    embodichain workspace-cache list              # List all cache sessions
+    embodichain workspace-cache info <session>    # Show cache session info
+    embodichain workspace-cache clean <session>   # Clean specific session
+    embodichain workspace-cache clean --all       # Clean all cache sessions
+    embodichain workspace-cache size              # Show total cache size
 """
 
+from __future__ import annotations
+
 import os
-import sys
 import shutil
-import argparse
-from pathlib import Path
+from collections.abc import Sequence
 from datetime import datetime
+
 from embodichain.utils import logger
 
-# Add current directory to path for local imports
-sys.path.insert(0, os.path.dirname(__file__))
 
-try:
-    from disk_cache import DiskCache
-except ImportError:
-    print("Error: Unable to import DiskCache")
-    sys.exit(1)
-
-
-def get_cache_root():
+def get_cache_root() -> str:
     """Get the root cache directory."""
     return os.path.expanduser("~/.cache/embodichain/workspace_analyzer")
 
 
-def get_dir_size(path):
+def get_dir_size(path: str) -> int:
     """Calculate total size of a directory in bytes."""
     total = 0
     try:
@@ -64,7 +55,7 @@ def get_dir_size(path):
     return total
 
 
-def format_size(bytes_size):
+def format_size(bytes_size: int) -> str:
     """Format bytes to human-readable size."""
     for unit in ["B", "KB", "MB", "GB"]:
         if bytes_size < 1024.0:
@@ -73,7 +64,7 @@ def format_size(bytes_size):
     return f"{bytes_size:.2f} TB"
 
 
-def list_sessions():
+def list_sessions() -> None:
     """List all cache sessions."""
     cache_root = get_cache_root()
 
@@ -122,7 +113,7 @@ def list_sessions():
     logger.log_info(f"\nCache location: {cache_root}")
 
 
-def show_session_info(session_name):
+def show_session_info(session_name: str) -> None:
     """Show detailed information about a cache session."""
     cache_root = get_cache_root()
     session_path = os.path.join(cache_root, session_name)
@@ -161,7 +152,7 @@ def show_session_info(session_name):
             logger.log_info(f"Total poses: {total_poses:,}")
 
 
-def clean_session(session_name):
+def clean_session(session_name: str) -> None:
     """Clean a specific cache session."""
     cache_root = get_cache_root()
     session_path = os.path.join(cache_root, session_name)
@@ -180,7 +171,7 @@ def clean_session(session_name):
         logger.log_info("Cancelled.")
 
 
-def clean_all_sessions():
+def clean_all_sessions() -> None:
     """Clean all cache sessions."""
     cache_root = get_cache_root()
 
@@ -209,7 +200,7 @@ def clean_all_sessions():
         logger.log_info("Cancelled.")
 
 
-def show_total_size():
+def show_total_size() -> None:
     """Show total cache size."""
     cache_root = get_cache_root()
 
@@ -228,50 +219,30 @@ def show_total_size():
     logger.log_info(f"Total size: {format_size(total_size)}")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Manage workspace analyzer cache sessions",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  %(prog)s list                    List all cache sessions
-  %(prog)s info session_20241127   Show session details
-  %(prog)s clean session_20241127  Clean specific session
-  %(prog)s clean --all             Clean all sessions
-  %(prog)s size                    Show total cache size
-        """,
-    )
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the backward-compatible workspace analyzer cache CLI.
 
-    parser.add_argument(
-        "command", choices=["list", "info", "clean", "size"], help="Command to execute"
-    )
-    parser.add_argument(
-        "session", nargs="?", help="Session name (for info/clean commands)"
-    )
-    parser.add_argument(
-        "--all", action="store_true", help="Apply to all sessions (for clean command)"
-    )
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+    """
+    from embodichain.workspace_cache_cli import main as cli_main
 
-    args = parser.parse_args()
-
-    if args.command == "list":
-        list_sessions()
-    elif args.command == "info":
-        if not args.session:
-            print("Error: Session name required for 'info' command")
-            sys.exit(1)
-        show_session_info(args.session)
-    elif args.command == "clean":
-        if args.all:
-            clean_all_sessions()
-        elif args.session:
-            clean_session(args.session)
-        else:
-            print("Error: Specify a session name or use --all flag")
-            sys.exit(1)
-    elif args.command == "size":
-        show_total_size()
+    cli_main(argv)
 
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = [
+    "clean_all_sessions",
+    "clean_session",
+    "format_size",
+    "get_cache_root",
+    "get_dir_size",
+    "list_sessions",
+    "main",
+    "show_session_info",
+    "show_total_size",
+]

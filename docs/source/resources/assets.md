@@ -19,16 +19,16 @@ export EMBODICHAIN_DATASET_ROOT=/mnt/shared/embodichain_datasets
 
 ## Download CLI
 
-The `embodichain.data` module provides a command-line interface for managing assets.
+The unified `embodichain data` command manages downloadable assets.
 
 ### List Available Assets
 
 ```bash
 # List all assets across every category
-python -m embodichain.data list
+embodichain data list
 
 # List assets in a specific category
-python -m embodichain.data list --category robot
+embodichain data list --category robot
 ```
 
 The output shows each asset name and whether it has already been downloaded (`✓`):
@@ -48,13 +48,13 @@ Data root: /home/user/.cache/embodichain_data
 
 ```bash
 # Download a single asset by name
-python -m embodichain.data download --name CobotMagicArm
+embodichain data download --name CobotMagicArm
 
 # Download all assets in a category
-python -m embodichain.data download --category robot
+embodichain data download --category robot
 
 # Download everything
-python -m embodichain.data download --all
+embodichain data download --all
 ```
 
 Downloaded files are saved to `<data_root>/download/` and automatically extracted to `<data_root>/extract/`. Non-zip assets (e.g. `.glb` files) are copied into the extract directory.

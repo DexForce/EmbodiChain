@@ -14,9 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import argparse
 import os
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -44,9 +47,20 @@ from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser()
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+
+    Returns:
+        Parsed training arguments.
+    """
+    parser = argparse.ArgumentParser(
+        prog="embodichain train-rl",
+        description="Train an RL agent from a JSON or YAML config.",
+    )
     parser.add_argument(
         "--config",
         type=str,
@@ -59,7 +73,7 @@ def parse_args():
         default=None,
         help="Enable or disable multi-GPU distributed training",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def train_from_config(config_path: str, distributed: bool | None = None):
@@ -414,7 +428,7 @@ def train_from_config(config_path: str, distributed: bool | None = None):
             logger.log_info("Training finished")
 
 
-def cli() -> None:
+def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for RL training.
 
     Parses CLI arguments and launches training from a config file.
@@ -424,7 +438,7 @@ def cli() -> None:
     ``embodichain_tasks``) are available to ``build_env``. This mirrors the
     ``run_env`` CLI.
     """
-    args = parse_args()
+    args = parse_args(argv)
 
     # Discover all installed task packages and run init hooks (register custom
     # manager modules / asset resolvers) before building any environment.
@@ -436,3 +450,6 @@ def cli() -> None:
 
 if __name__ == "__main__":
     cli()
+
+
+__all__ = ["cli", "parse_args", "train_from_config"]

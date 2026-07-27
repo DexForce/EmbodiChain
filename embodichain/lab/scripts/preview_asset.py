@@ -14,34 +14,34 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Standalone script to preview a USD or mesh asset in the simulation.
+"""Preview a USD or mesh asset in the simulation.
 
 Usage examples::
 
     # Preview a rigid object from USD
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
         --asset_type rigid \\
         --preview
 
     # Preview an articulation from USD
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/robot.usd \\
         --asset_type articulation \\
         --preview
 
     # Headless check (no render window)
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/asset.usda \\
         --headless
 
     # Preview with a built-in environment map
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
         --env_map "Studio"
 
     # Preview with a custom HDR environment map
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
         --env_map /path/to/environment.hdr
 """
@@ -51,6 +51,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from embodichain.utils.logger import log_info, log_warning, log_error
@@ -81,9 +82,8 @@ def build_sim_cfg(args: argparse.Namespace):
 def load_assets(sim: SimulationManager, args: argparse.Namespace):
     """Load one or more assets into the simulation.
 
-    If ``--asset_type`` is not specified and the file is USD, the script will
-    inspect the USD stage for articulation roots to decide between articulation
-    and rigid object.  For non-USD files the default is always ``rigid``.
+    URDF files are always loaded as articulations. Other file types use the
+    value of ``--asset_type``, which defaults to ``rigid``.
 
     Args:
         sim: The simulation manager instance.
@@ -240,13 +240,16 @@ def main(args: argparse.Namespace) -> None:
         sim.destroy()
 
 
-def cli():
+def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for asset preview.
 
-    Parses CLI arguments and launches the preview workflow.
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
     """
     parser = argparse.ArgumentParser(
-        description="Preview a USD or mesh asset in the EmbodiChain simulation."
+        prog="embodichain preview-asset",
+        description="Preview a USD or mesh asset in the EmbodiChain simulation.",
     )
 
     parser.add_argument(
@@ -261,7 +264,7 @@ def cli():
         type=str,
         choices=["rigid", "articulation"],
         default="rigid",
-        help="Asset type. Auto-detected for USD files if not specified (default: rigid).",
+        help="Asset type for non-URDF files (default: rigid).",
     )
     parser.add_argument(
         "--uid",
@@ -298,7 +301,7 @@ def cli():
         "--body_type",
         type=str,
         choices=["dynamic", "kinematic", "static"],
-        default="dynamic",
+        default="kinematic",
         help="Body type for rigid objects (default: kinematic).",
     )
     parser.add_argument(
@@ -309,9 +312,9 @@ def cli():
     )
     parser.add_argument(
         "--fix_base",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Fix the base of articulations (default: True).",
+        help="Fix or unfix the base of articulations (default: fixed).",
     )
     parser.add_argument(
         "--sim_device",
@@ -348,10 +351,13 @@ def cli():
         help="Enter interactive embed mode after loading.",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     main(args)
 
 
 if __name__ == "__main__":
     cli()
+
+
+__all__ = ["build_sim_cfg", "cli", "load_assets", "main", "preview"]

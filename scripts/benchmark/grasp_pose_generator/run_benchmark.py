@@ -20,7 +20,7 @@ Measures how ``grasp_cfg.antipodal_sampler_cfg.n_sample`` and
 ``grasp_cfg.n_top_grasps`` affect antipodal sampling, grasp-pose selection
 latency, and memory usage for the CoffeeCup mesh used in
 ``scripts/tutorials/grasp/grasp_generator.py``.
-Run: python -m scripts.benchmark.grasp_pose_generator.run_benchmark
+Run: embodichain benchmark grasp-pose-generator
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -53,10 +54,11 @@ DEFAULT_N_TOP_GRASPS = [30, 50, 100]
 DEFAULT_MESH_SCALE = 4.0
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments for grasp generator benchmarks."""
     parser = argparse.ArgumentParser(
-        description="Benchmark CoffeeCup grasp pose generation parameter sweeps."
+        prog="embodichain benchmark grasp-pose-generator",
+        description="Benchmark CoffeeCup grasp pose generation parameter sweeps.",
     )
     parser.add_argument(
         "--n-samples",
@@ -89,7 +91,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only benchmark antipodal point generation.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _resolve_device(device_name: str) -> torch.device:
@@ -552,8 +554,9 @@ def run_all_benchmarks(
     print(f"Markdown report saved: {report_path}")
 
 
-if __name__ == "__main__":
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the grasp pose generator benchmark CLI."""
+    args = _parse_args(argv)
     run_all_benchmarks(
         n_samples=args.n_samples,
         n_top_grasps_list=args.n_top_grasps,
@@ -561,3 +564,10 @@ if __name__ == "__main__":
         seed=args.seed,
         skip_pose_selection=args.skip_pose_selection,
     )
+
+
+if __name__ == "__main__":
+    main()
+
+
+__all__ = ["main", "run_all_benchmarks"]
