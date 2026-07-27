@@ -40,6 +40,7 @@ Table of Contents
    :glob:
 
    features/online_data.md
+   features/web_frontend_design.md
    features/generative_sim/index*
    features/workspace_analyzer/index*
    features/interaction/index*
