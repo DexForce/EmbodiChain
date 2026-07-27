@@ -59,7 +59,6 @@ class TestMotionSourceReachEquivalence:
         engine = AtomicActionEngine(mg)
         cfg = MoveEndEffectorCfg(
             motion_source=motion_source,
-            planner_type="toppra" if motion_source == "motion_gen" else None,
             control_part=self.CONTROL_PART,
             sample_interval=self.SAMPLE_INTERVAL,
         )

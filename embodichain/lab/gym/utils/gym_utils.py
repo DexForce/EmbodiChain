@@ -39,6 +39,7 @@ from dexsim.utility import log_debug, log_error
 DEFAULT_MANAGER_MODULES = [
     "embodichain.lab.gym.envs.managers.actions",
     "embodichain.lab.gym.envs.managers.datasets",
+    "embodichain.lab.gym.envs.managers.async_datasets",
     "embodichain.lab.gym.envs.managers.randomization",
     "embodichain.lab.gym.envs.managers.record",
     "embodichain.lab.gym.envs.managers.events",
@@ -787,8 +788,9 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument(
         "--num_envs",
-        help="The number of environments to run in parallel.",
-        default=1,
+        help="The number of environments to run in parallel. "
+        "If not given, falls back to the gym config's `num_envs` (default 1).",
+        default=None,
         type=int,
     )
     parser.add_argument(
@@ -889,7 +891,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         dict: The merged gym configuration dictionary.
     """
     merged_config = deepcopy(gym_config)
-    merged_config["num_envs"] = args.num_envs
+    if args.num_envs is not None:
+        merged_config["num_envs"] = args.num_envs
     merged_config["device"] = args.device
     merged_config["headless"] = args.headless
     merged_config["renderer"] = args.renderer

@@ -1,0 +1,83 @@
+{
+    "id": "StayStillSave-v1",
+    "max_episodes": 4,
+    "num_envs": 4,
+    "env": {
+        "dataset": {
+            "lerobot": {
+                "func": "AsyncLeRobotRecorder",
+                "mode": "save",
+                "save_failed_episodes": true,
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "UR10",
+                        "control_freq": 25
+                    },
+                    "instruction": {
+                        "lang": "Hold still while recording"
+                    },
+                    "extra": {
+                        "scene_type": "benchmark",
+                        "task_description": "stay still",
+                        "data_type": "sim"
+                    },
+                    "use_videos": true,
+                    "image_writer_threads": 4,
+                    "image_writer_processes": 0
+                }
+            }
+        }
+    },
+    "robot": {
+        "uid": "UR10",
+        "fpath": "UniversalRobots/UR10/UR10.urdf",
+        "init_pos": [0.0, 0.0, 0.7775],
+        "init_qpos": [1.57079, -1.57079, 1.57079, -1.57079, -1.57079, -3.14159]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [488.1665344238281, 488.1665344238281, 320.0, 240.0],
+            "extrinsics": {
+                "eye": [1, 0, 3],
+                "target": [0, 0, 1]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "point",
+                "color": [1.0, 1.0, 1.0],
+                "intensity": 50.0,
+                "init_pos": [2, 0, 2],
+                "radius": 10.0
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "CircleTableSimple/circle_table_simple.ply",
+                "compute_uv": true
+            },
+            "attrs": {
+                "mass": 10.0,
+                "static_friction": 0.95,
+                "dynamic_friction": 0.9,
+                "restitution": 0.01
+            },
+            "body_scale": [1, 1, 1],
+            "body_type": "kinematic",
+            "init_pos": [0.8, 0.0, 0.825],
+            "init_rot": [0, 90, 0]
+        }
+    ],
+    "rigid_object": []
+}

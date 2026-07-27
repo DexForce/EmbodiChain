@@ -762,7 +762,11 @@ class EmbodiedEnv(BaseEnv):
         if action_list is None:
             return None
 
-        expected_dim = int(np.prod(self.action_space.shape))
+        # Use the per-env action space, not the (batched) ``action_space`` whose
+        # shape is ``(num_envs, dim)``. Otherwise demo actions shaped
+        # ``(num_envs, dim)`` are rejected with "action dim < expected" for
+        # ``num_envs > 1`` (expected would be ``num_envs * dim``).
+        expected_dim = int(np.prod(self.single_action_space.shape))
 
         if isinstance(action_list, torch.Tensor):
             return self._normalize_demo_action_tensor(action_list, expected_dim)

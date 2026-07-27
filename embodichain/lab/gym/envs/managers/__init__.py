@@ -30,3 +30,23 @@ from .reward_manager import RewardManager
 from .action_manager import *
 from .actions import *
 from .dataset_manager import DatasetManager
+from .datasets import LeRobotRecorder
+from .async_datasets import AsyncLeRobotRecorder
+
+__all__ = [
+    "FunctorCfg",
+    "SceneEntityCfg",
+    "EventCfg",
+    "ObservationCfg",
+    "RewardCfg",
+    "ActionTermCfg",
+    "DatasetFunctorCfg",
+    "Functor",
+    "ManagerBase",
+    "EventManager",
+    "ObservationManager",
+    "RewardManager",
+    "DatasetManager",
+    "LeRobotRecorder",
+    "AsyncLeRobotRecorder",
+]

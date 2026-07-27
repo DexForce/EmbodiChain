@@ -179,20 +179,26 @@ class Place(AtomicAction):
             self.hand_close_qpos, self.hand_open_qpos, n_waypoints=n_open
         )
 
+        # Allocate from the actually-returned phase lengths so collision-aware
+        # planners (which preserve their own sample count) are accommodated.
+        n_down_actual = down_arm.shape[1]
+        n_back_actual = back_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_down + n_open + n_back, self.robot_dof),
+            (self.n_envs, n_down_actual + n_open + n_back_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :n_down, self.arm_joint_ids] = down_arm
-        full[:, :n_down, self.hand_joint_ids] = self.hand_close_qpos
-        full[:, n_down : n_down + n_open, self.arm_joint_ids] = (
+        full[:, :n_down_actual, self.arm_joint_ids] = down_arm
+        full[:, :n_down_actual, self.hand_joint_ids] = self.hand_close_qpos
+        full[:, n_down_actual : n_down_actual + n_open, self.arm_joint_ids] = (
             reach_arm_qpos.unsqueeze(1)
         )
-        full[:, n_down : n_down + n_open, self.hand_joint_ids] = hand_open_path
-        full[:, n_down + n_open :, self.arm_joint_ids] = back_arm
-        full[:, n_down + n_open :, self.hand_joint_ids] = self.hand_open_qpos
+        full[:, n_down_actual : n_down_actual + n_open, self.hand_joint_ids] = (
+            hand_open_path
+        )
+        full[:, n_down_actual + n_open :, self.arm_joint_ids] = back_arm
+        full[:, n_down_actual + n_open :, self.hand_joint_ids] = self.hand_open_qpos
 
         return ActionResult(
             success=success,

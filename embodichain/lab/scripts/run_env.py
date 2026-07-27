@@ -368,19 +368,30 @@ def main(args, env, gym_config):
     log_info("Start offline data generation.", color="green")
     # TODO: Support multiple trajectories per episode generation.
     num_traj = 1
-    for i in range(gym_config.get("max_episodes", 1)):
-        generate_function(
-            env,
-            num_traj,
-            i,
-            save_path=getattr(args, "save_path", ""),
-            save_video=getattr(args, "save_video", False),
-            debug_mode=getattr(args, "debug_mode", False),
-            regenerate=getattr(args, "regenerate", False),
-        )
+    try:
+        for i in range(gym_config.get("max_episodes", 1)):
+            generate_function(
+                env,
+                num_traj,
+                i,
+                save_path=getattr(args, "save_path", ""),
+                save_video=getattr(args, "save_video", False),
+                debug_mode=getattr(args, "debug_mode", False),
+                regenerate=getattr(args, "regenerate", False),
+            )
 
-    # Final reset.
-    _, _ = env.reset()
+        # Final reset (saves the last completed episode).
+        _, _ = env.reset()
+    finally:
+        # Drain the dataset recorder and finalize the LeRobot dataset before
+        # the process exits. This is REQUIRED for AsyncLeRobotRecorder: its
+        # background worker only *enqueues* episodes during reset, so without
+        # close() the worker is killed at exit and no data reaches disk.
+        # env.close() -> dataset_manager.finalize() drains the worker + flushes
+        # meta/stats, then sim.destroy() tears down the sim. sim.destroy() exits
+        # the process without returning, so this MUST be the last thing main()
+        # does.
+        env.close()
 
     if getattr(args, "record_trajectory", False):
         save_dir = args.trajectory_save_dir

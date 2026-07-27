@@ -303,9 +303,14 @@ class ActionCfg:
     motion_source: str = "ik_interp"
     """Trajectory source: 'ik_interp' (default, batched IK + linear interp)
     or 'motion_gen' (batched MotionGenerator)."""
-    planner_type: str | None = None
-    """Planner type for motion_source='motion_gen': 'toppra' | 'neural'.
-    Required when motion_source='motion_gen'."""
+
+    def __post_init__(self) -> None:
+        valid_sources = {"ik_interp", "motion_gen"}
+        if self.motion_source not in valid_sources:
+            raise ValueError(
+                f"motion_source must be one of {sorted(valid_sources)}, "
+                f"but got {self.motion_source!r}."
+            )
 
 
 # =============================================================================
