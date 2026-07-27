@@ -48,6 +48,12 @@ def write_config_bundle(
     bundle: Mapping[str, Any],
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
+    """Write runtime inputs and review diagnostics as one portable bundle.
+
+    The JSON task graph is the executable source. The task prompt, background,
+    and atomic-action text files describe the same generated plan for auditing
+    and backward-compatible tooling; runtime execution does not parse them.
+    """
     paths = GeneratedActionAgentConfigPaths(
         output_dir=output_dir,
         gym_config=output_dir / FAST_GYM_CONFIG_FILENAME,

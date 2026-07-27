@@ -884,6 +884,12 @@ def _finalize_and_write_bundle(
     acd_method: str,
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
+    """Finalize runtime configuration and its matching diagnostic records.
+
+    Geometry metadata is attached before writing so both the executable JSON
+    files and the review summary describe the same deterministic generation
+    result. The task graph remains the sole runtime execution plan.
+    """
     acd_method = _validate_acd_method(acd_method)
     _apply_acd_method(
         bundle["gym_config"],

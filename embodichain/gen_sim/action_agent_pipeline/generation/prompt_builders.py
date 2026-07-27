@@ -14,7 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Prompt and agent-config builders for generated action-agent tasks."""
+"""Build generation prompts, diagnostic records, and action-agent configs.
+
+The ``*_task_prompt``, ``*_basic_background``, and ``*_atom_actions_prompt``
+builders retain their historical names as a compatibility boundary. Their
+outputs are now human-readable diagnostics; runtime execution uses the
+precomputed task graph instead of sending these records to another LLM.
+"""
 
 from __future__ import annotations
 
@@ -188,6 +194,13 @@ class _StackingSpecLike(Protocol):
 
 
 def make_agent_config() -> dict[str, Any]:
+    """Build the stable agent-config schema for deterministic graph execution.
+
+    ``TaskAgent.precomputed_task_graph`` is the authoritative runtime input.
+    ``Agent.prompt_kwargs`` is preserved so existing config consumers can find
+    the accompanying diagnostic text files; the runtime does not interpret
+    those files.
+    """
     return {
         "TaskAgent": {
             "prompt_name": "generate_task_graph",

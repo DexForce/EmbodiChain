@@ -66,14 +66,17 @@ __all__ = [
     "TASK_ROUTES",
 ]
 
-# Artifact names are a public contract: generated agent_config.json refers to
-# these files by relative path and the runtime resolves them from that directory.
+# Artifact names are a public compatibility contract. Runtime execution reads
+# TASK_GRAPH_FILENAME through TaskAgent.precomputed_task_graph. The three text
+# artifacts remain referenced by legacy Agent.prompt_kwargs for human review,
+# but the runtime does not interpret them or send them to another LLM.
 FAST_GYM_CONFIG_FILENAME: Final = "fast_gym_config.json"
 AGENT_CONFIG_FILENAME: Final = "agent_config.json"
 TASK_PROMPT_FILENAME: Final = "task_prompt.txt"
 TASK_GRAPH_FILENAME: Final = "task_graph.json"
 BASIC_BACKGROUND_FILENAME: Final = "basic_background.txt"
 ATOM_ACTIONS_FILENAME: Final = "atom_actions.txt"
+# Runtime-generated cache files are separate from the portable config bundle.
 TASK_GRAPH_CACHE_FILENAME: Final = "agent_task_graph.json"
 COMPILED_GRAPH_FILENAME: Final = "agent_compiled_graph.json"
 

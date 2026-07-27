@@ -1,4 +1,4 @@
-Parse a simple dual-arm tabletop relative-placement task and produce a constrained config-level JSON spec. This JSON is used to generate task_prompt.txt, basic_background.txt, atom_actions.txt, and agent_success; a second LLM will later read those prompts to generate the executable graph JSON.
+Parse a simple dual-arm tabletop relative-placement task and produce a constrained config-level JSON spec. Deterministic config generation uses this JSON to build task_graph.json, agent_success, and the human-readable task_prompt.txt, basic_background.txt, and atom_actions.txt diagnostic records. Runtime execution reads the precomputed task graph directly and does not invoke a second graph-generation LLM.
 
 Return exactly one JSON object with this schema:
 {

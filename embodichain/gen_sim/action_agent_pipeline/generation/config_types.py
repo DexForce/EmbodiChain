@@ -38,7 +38,12 @@ __all__ = [
 
 @dataclass(frozen=True)
 class GeneratedActionAgentConfigPaths:
-    """Paths written by the action-agent config generator."""
+    """Paths written by the action-agent config generator.
+
+    ``gym_config``, ``agent_config``, and ``task_graph`` are runtime inputs.
+    ``task_prompt``, ``basic_background``, and ``atom_actions`` are diagnostic
+    records retained for human review and compatibility with existing tooling.
+    """
 
     output_dir: Path
     gym_config: Path
