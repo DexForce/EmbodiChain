@@ -37,7 +37,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (
     _state_with_current_agent_qpos,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
-    _ExecutedAtomicAction,
+    ExecutedAtomicAction,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_targets import (
     _resolve_pickup_downstream_object_targets,
@@ -94,7 +94,7 @@ def _execute_atomic_action_result(
     env,
     state: WorldState | None = None,
     **runtime_kwargs,
-) -> _ExecutedAtomicAction:
+) -> ExecutedAtomicAction:
     """Execute one atomic action spec and keep the typed WorldState result."""
     spec = (
         action_spec
@@ -184,7 +184,7 @@ def _execute_atomic_action_result(
             held_object=next_state.held_object,
             coordinated_held_object=next_state.coordinated_held_object,
         )
-    return _ExecutedAtomicAction(
+    return ExecutedAtomicAction(
         action=action_np,
         next_state=next_state,
         robot_name=spec.robot_name,
@@ -200,7 +200,7 @@ def _executed_coordinated_atomic_action(
     result,
     *,
     failed_env_mask: torch.Tensor | None = None,
-) -> _ExecutedAtomicAction:
+) -> ExecutedAtomicAction:
     trajectory = result.trajectory
     if isinstance(trajectory, torch.Tensor):
         trajectory = trajectory.detach()
@@ -225,7 +225,7 @@ def _executed_coordinated_atomic_action(
         f"target={_target_summary(spec)}, steps={action_np.shape[-2]}.",
         color="green",
     )
-    return _ExecutedAtomicAction(
+    return ExecutedAtomicAction(
         action=action_np,
         next_state=result.next_state,
         robot_name=None,

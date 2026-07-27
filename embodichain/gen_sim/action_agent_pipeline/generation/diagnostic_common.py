@@ -23,8 +23,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _RelativePlacementLike,
-    _RelativeSpecLike,
+    RelativePlacementLike,
+    RelativeSpecLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     RobotProfile,
@@ -128,7 +128,7 @@ def _format_action_sketch(action_sketch: list[str]) -> str:
     return "\n".join(f"- {item}" for item in action_sketch)
 
 
-def _relative_reference_line(spec: _RelativePlacementLike) -> str:
+def _relative_reference_line(spec: RelativePlacementLike) -> str:
     if getattr(spec, "upright_in_place", False):
         return (
             f"Use `{spec.reference_runtime_uid}` as the support surface while "
@@ -147,7 +147,7 @@ def _relative_reference_line(spec: _RelativePlacementLike) -> str:
 
 def _relative_final_planning_rule(
     project_name: str,
-    spec: _RelativePlacementLike,
+    spec: RelativePlacementLike,
 ) -> str:
     if getattr(spec, "reference_is_initial_pose", False) or getattr(
         spec,
@@ -168,7 +168,7 @@ def _relative_final_planning_rule(
 
 def _dual_relative_final_planning_rule(
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
 ) -> str:
     if any(
         getattr(placement, "reference_is_initial_pose", False)

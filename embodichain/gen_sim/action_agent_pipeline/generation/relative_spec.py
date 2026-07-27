@@ -27,9 +27,9 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
     SIDE_RELATIONS as _SIDE_RELATIONS,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _RelativePlacementSpec,
-    _RelativePlacementStepSpec,
-    _SceneObject,
+    RelativePlacementSpec,
+    RelativePlacementStepSpec,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _base_name,
@@ -49,8 +49,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
     request_json_spec,
 )
 from embodichain.gen_sim.action_agent_pipeline.semantics import (
-    BOTTLE_LIKE_KEYWORDS as _BOTTLE_LIKE_KEYWORDS,
-    CUP_LIKE_KEYWORDS as _CUP_LIKE_KEYWORDS,
     FLAT_CARRIER_KEYWORDS as _FLAT_CARRIER_KEYWORDS,
     SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
     SHORT_CUP_LIKE_KEYWORDS as _SHORT_CUP_LIKE_KEYWORDS,
@@ -192,7 +190,7 @@ _RELATION_ALIASES = {
 
 def _build_relative_placement_spec_with_llm(
     *,
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
     project_name: str,
     task_description: str,
     model: str | None,
@@ -200,7 +198,7 @@ def _build_relative_placement_spec_with_llm(
     staging_z_delta: float,
     pose_sensitive_staging_z_delta: float,
     task_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     background_objects = [
         obj for obj in scene_objects if obj.source_role == "background"
     ]
@@ -246,7 +244,7 @@ def _build_relative_placement_spec_with_llm(
 
 def _build_object_manipulation_spec_with_llm(
     *,
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
     project_name: str,
     task_description: str,
     model: str | None,
@@ -254,7 +252,7 @@ def _build_object_manipulation_spec_with_llm(
     staging_z_delta: float,
     pose_sensitive_staging_z_delta: float,
     task_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     return _build_relative_placement_spec_with_llm(
         scene_objects=scene_objects,
         project_name=project_name,
@@ -309,13 +307,13 @@ def _apply_relative_task_response(
     *,
     response: Mapping[str, Any],
     table_source_uid: str,
-    scene_objects: list[_SceneObject],
-    rigid_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
+    rigid_objects: list[SceneObject],
     task_description: str,
     release_offset_fn: Callable[[str], Sequence[float]],
     staging_z_delta: float,
     pose_sensitive_staging_z_delta: float,
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
         scene_objects,
@@ -407,7 +405,7 @@ def _apply_relative_task_response(
 
     primary = _relative_primary_placement(placements)
 
-    return _RelativePlacementSpec(
+    return RelativePlacementSpec(
         intent=primary.intent,
         table_source_uid=table_source_uid,
         moved_source_uid=primary.moved_source_uid,
@@ -457,7 +455,7 @@ def _coordinated_transport_entry(
 def _canonicalize_flat_coordinated_transport_entries(
     entries: list[Mapping[str, Any]],
     *,
-    rigid_objects: list[_SceneObject],
+    rigid_objects: list[SceneObject],
 ) -> list[Mapping[str, Any]]:
     """Fold flat payload placements into one coordinated transport entry."""
     if len(entries) <= 1:
@@ -573,8 +571,8 @@ def _canonicalize_flat_coordinated_transport_entries(
 def _coordinated_payload_entries(
     coordinated_entry: Mapping[str, Any],
     *,
-    by_uid: Mapping[str, _SceneObject],
-    rigid_objects: list[_SceneObject],
+    by_uid: Mapping[str, SceneObject],
+    rigid_objects: list[SceneObject],
 ) -> list[Mapping[str, Any]]:
     raw_payloads = coordinated_entry.get("payloads", [])
     if (
@@ -631,7 +629,7 @@ def _coordinated_payload_entries(
     return entries
 
 
-def _coordinated_payload_relation(carrier: _SceneObject) -> str:
+def _coordinated_payload_relation(carrier: SceneObject) -> str:
     text = " ".join(
         (
             carrier.source_uid,
@@ -737,8 +735,8 @@ def _with_coordinated_transport_relation(
 
 
 def _relative_primary_placement(
-    placements: tuple[_RelativePlacementStepSpec, ...],
-) -> _RelativePlacementStepSpec:
+    placements: tuple[RelativePlacementStepSpec, ...],
+) -> RelativePlacementStepSpec:
     return next(
         (
             placement
@@ -789,8 +787,8 @@ def _is_dual_arm_task_text(task_description: str) -> bool:
 def _relative_forced_arm_sides(
     placement_entries: list[Mapping[str, Any]],
     *,
-    by_uid: Mapping[str, _SceneObject],
-    rigid_objects: list[_SceneObject],
+    by_uid: Mapping[str, SceneObject],
+    rigid_objects: list[SceneObject],
 ) -> list[str | None]:
     if len(placement_entries) != 2:
         return [None for _ in placement_entries]
@@ -833,9 +831,9 @@ def _relative_forced_arm_sides(
 def _build_relative_placement_step(
     *,
     entry: Mapping[str, Any],
-    by_uid: Mapping[str, _SceneObject],
-    scene_objects: list[_SceneObject],
-    rigid_objects: list[_SceneObject],
+    by_uid: Mapping[str, SceneObject],
+    scene_objects: list[SceneObject],
+    rigid_objects: list[SceneObject],
     runtime_uids: Mapping[str, str],
     table_source_uid: str,
     task_description: str,
@@ -843,7 +841,7 @@ def _build_relative_placement_step(
     release_offset_fn: Callable[[str], Sequence[float]],
     staging_z_delta: float,
     pose_sensitive_staging_z_delta: float,
-) -> _RelativePlacementStepSpec:
+) -> RelativePlacementStepSpec:
     intent = _normalize_manipulation_intent(entry.get("intent"))
     moved_source_uid = _resolve_rigid_source_uid(
         entry.get("moved_object"),
@@ -952,7 +950,7 @@ def _build_relative_placement_step(
             )
         )
 
-    return _RelativePlacementStepSpec(
+    return RelativePlacementStepSpec(
         intent=intent,
         moved_source_uid=moved_source_uid,
         reference_source_uid=reference_source_uid,
@@ -973,7 +971,7 @@ def _build_relative_placement_step(
 
 
 def _validate_relative_placements(
-    placements: tuple[_RelativePlacementStepSpec, ...],
+    placements: tuple[RelativePlacementStepSpec, ...],
 ) -> None:
     if not placements:
         raise ValueError("Object manipulation requires at least one manipulation.")
@@ -1008,8 +1006,8 @@ def _validate_relative_placements(
 
 
 def _order_relative_placements_by_dependency(
-    placements: tuple[_RelativePlacementStepSpec, ...],
-) -> tuple[_RelativePlacementStepSpec, ...]:
+    placements: tuple[RelativePlacementStepSpec, ...],
+) -> tuple[RelativePlacementStepSpec, ...]:
     """Order two placements so a moved reference object is placed first."""
     if len(placements) != 2:
         return placements
@@ -1023,7 +1021,7 @@ def _order_relative_placements_by_dependency(
     return placements
 
 
-def _is_uprightable_object(obj: _SceneObject) -> bool:
+def _is_uprightable_object(obj: SceneObject) -> bool:
     shape = obj.config.get("shape", {}) or {}
     mesh_path = str(shape.get("fpath", "")) if isinstance(shape, Mapping) else ""
     mesh_parts = Path(mesh_path.replace("\\", "/")).parts[-4:] if mesh_path else ()
@@ -1052,7 +1050,7 @@ def _should_upright_in_place(
     intent: str,
     relation: str,
     orientation_goal: str,
-    moved_object: _SceneObject,
+    moved_object: SceneObject,
     reference_source_uid: str,
     table_source_uid: str,
     task_description: str,
@@ -1115,7 +1113,7 @@ def _normalize_hover_height(value: Any) -> float:
 
 def _resolve_rigid_source_uid(
     value: Any,
-    rigid_objects: list[_SceneObject],
+    rigid_objects: list[SceneObject],
     *,
     field_name: str,
 ) -> str:
@@ -1130,7 +1128,7 @@ def _resolve_relative_reference_source_uid(
     value: Any,
     *,
     moved_source_uid: str,
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
 ) -> str:
     if value is not None:
         text = str(value).strip()
@@ -1146,7 +1144,7 @@ def _resolve_relative_reference_source_uid(
 
 def _resolve_scene_source_uid(
     value: Any,
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
     *,
     field_name: str,
 ) -> str:
@@ -1329,7 +1327,7 @@ def _validate_orientation_fields(
 
 
 def _relative_runtime_uid_mapping(
-    rigid_objects: list[_SceneObject],
+    rigid_objects: list[SceneObject],
 ) -> dict[str, str]:
     candidates: dict[str, str] = {}
     for obj in rigid_objects:
@@ -1359,7 +1357,7 @@ def _relative_runtime_uid_mapping(
 
 
 def _relative_scene_runtime_uid_mapping(
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
     *,
     table_source_uid: str,
 ) -> dict[str, str]:
@@ -1400,7 +1398,7 @@ def _default_relative_task_summary(
 
 
 def _default_relative_plan_summary(
-    placements: Sequence[_RelativePlacementStepSpec],
+    placements: Sequence[RelativePlacementStepSpec],
 ) -> str:
     if len(placements) == 1:
         placement = placements[0]
@@ -1425,7 +1423,7 @@ def _default_relative_plan_summary(
 
 
 def _default_relative_action_sketch(
-    placements: Sequence[_RelativePlacementStepSpec],
+    placements: Sequence[RelativePlacementStepSpec],
 ) -> list[str]:
     if len(placements) == 1:
         placement = placements[0]

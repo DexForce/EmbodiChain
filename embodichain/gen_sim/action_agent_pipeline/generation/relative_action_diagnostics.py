@@ -28,8 +28,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders i
     _format_release_only_place_spec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _RelativePlacementLike,
-    _RelativeSpecLike,
+    RelativePlacementLike,
+    RelativeSpecLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
@@ -55,7 +55,7 @@ __all__ = ["make_relative_atom_actions_prompt"]
 
 def _relative_release_action_patterns(
     robot_name: str,
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
 ) -> str:
     if not _is_pose_sensitive_placement(placement):
         return render_prompt_template(
@@ -76,7 +76,7 @@ def _relative_release_action_patterns(
 
 
 def make_relative_atom_actions_prompt(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -113,7 +113,7 @@ def make_relative_atom_actions_prompt(
 
 
 def _make_dual_relative_atom_actions_prompt(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -154,7 +154,7 @@ def _make_dual_relative_atom_actions_prompt(
 
 
 def _make_hold_hover_atom_actions_prompt(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -169,7 +169,7 @@ def _make_hold_hover_atom_actions_prompt(
     )
 
 
-def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
+def _hold_hover_atom_action_block(placement: RelativePlacementLike) -> str:
     active_arm = f"{placement.active_side}_arm"
     return render_prompt_template(
         "hold_hover_action_block.txt",
@@ -186,7 +186,7 @@ def _hold_hover_atom_action_block(placement: _RelativePlacementLike) -> str:
 
 
 def _make_coordinated_pickment_atom_actions_prompt(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:

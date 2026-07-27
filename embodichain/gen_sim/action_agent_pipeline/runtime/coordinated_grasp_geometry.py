@@ -31,7 +31,7 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
-    _CoordinatedGraspPair,
+    CoordinatedGraspPair,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
     _current_arm_positions,
@@ -95,14 +95,14 @@ _COORDINATED_GENERIC_INSET_FRACTIONS = tuple(
 
 
 def _filter_coordinated_payload_collision_candidates(
-    candidates: Sequence[_CoordinatedGraspPair],
+    candidates: Sequence[CoordinatedGraspPair],
     *,
     payload_uids: Sequence[str],
     object_initial_pose: torch.Tensor,
     env,
     device,
     env_id: int = 0,
-) -> list[_CoordinatedGraspPair]:
+) -> list[CoordinatedGraspPair]:
     if not payload_uids or env is None:
         return list(candidates)
     payload_bounds = []
@@ -118,7 +118,7 @@ def _filter_coordinated_payload_collision_candidates(
             )
         )
 
-    def _candidate_is_clear(candidate: _CoordinatedGraspPair) -> bool:
+    def _candidate_is_clear(candidate: CoordinatedGraspPair) -> bool:
         eef_positions = (
             (object_initial_pose @ candidate.left_object_to_eef)[:3, 3],
             (object_initial_pose @ candidate.right_object_to_eef)[:3, 3],
@@ -141,12 +141,12 @@ def _coordinated_grasp_pair_candidates(
     env,
     device,
     env_id: int = 0,
-) -> list[_CoordinatedGraspPair]:
+) -> list[CoordinatedGraspPair]:
     mins = vertices.min(dim=0).values
     maxs = vertices.max(dim=0).values
     center = (mins + maxs) * 0.5
     extents = maxs - mins
-    candidates: list[_CoordinatedGraspPair] = []
+    candidates: list[CoordinatedGraspPair] = []
     grasp_style = _coordinated_grasp_style(
         object_label=object_label,
         vertices=vertices,
@@ -306,7 +306,7 @@ def _coordinated_top_down_grasp_candidates(
     env,
     device,
     env_id: int = 0,
-) -> list[_CoordinatedGraspPair]:
+) -> list[CoordinatedGraspPair]:
     axis_local = torch.zeros(3, dtype=torch.float32, device=device)
     axis_local[axis_index] = 1.0
     separation_axis = _normalize_vector(object_initial_pose[:3, :3] @ axis_local)
@@ -343,7 +343,7 @@ def _coordinated_projected_top_down_grasp_candidates(
     env,
     device,
     env_id: int = 0,
-) -> list[_CoordinatedGraspPair]:
+) -> list[CoordinatedGraspPair]:
     world_vertices = _world_vertices_from_local_vertices(object_initial_pose, vertices)
     world_bounds_min = world_vertices.min(dim=0).values
     world_bounds_max = world_vertices.max(dim=0).values
@@ -361,7 +361,7 @@ def _coordinated_projected_top_down_grasp_candidates(
     lateral_center = (lateral_projections.min() + lateral_projections.max()) * 0.5
     separation_extent = separation_max - separation_min
 
-    candidates: list[_CoordinatedGraspPair] = []
+    candidates: list[CoordinatedGraspPair] = []
     for inset_rank, inset_fraction in enumerate(inset_fractions):
         margin = _coordinated_axis_inset(separation_extent, inset_fraction)
         first_projection = separation_min + margin
@@ -403,7 +403,7 @@ def _coordinated_world_lateral_top_down_grasp_candidates(
     env,
     device,
     env_id: int = 0,
-) -> list[_CoordinatedGraspPair]:
+) -> list[CoordinatedGraspPair]:
     world_bounds_min, world_bounds_max = _world_bounds_from_local_vertices(
         object_initial_pose,
         vertices,
@@ -418,7 +418,7 @@ def _coordinated_world_lateral_top_down_grasp_candidates(
     )
     separation_axis = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32, device=device)
     closing_axis = separation_axis
-    candidates: list[_CoordinatedGraspPair] = []
+    candidates: list[CoordinatedGraspPair] = []
     for inset_rank, inset_fraction in enumerate(inset_fractions):
         margin = _coordinated_axis_inset(world_y_extent, inset_fraction)
         first_world_pos = world_center.clone()
@@ -455,7 +455,7 @@ def _coordinated_world_y_constrained_top_down_grasp_candidates(
     env,
     device,
     env_id: int = 0,
-) -> list[_CoordinatedGraspPair]:
+) -> list[CoordinatedGraspPair]:
     angle_magnitudes = [0.0]
     if max_angle_degrees > 1e-6:
         half_angle = float(max_angle_degrees) * 0.5
@@ -464,7 +464,7 @@ def _coordinated_world_y_constrained_top_down_grasp_candidates(
         if float(max_angle_degrees) - half_angle > 1e-6:
             angle_magnitudes.append(float(max_angle_degrees))
 
-    candidates: list[_CoordinatedGraspPair] = []
+    candidates: list[CoordinatedGraspPair] = []
     for angle_rank, angle_magnitude in enumerate(angle_magnitudes):
         signed_angles = (
             (0.0,) if angle_magnitude == 0.0 else (-angle_magnitude, angle_magnitude)
@@ -719,7 +719,7 @@ def _make_coordinated_top_down_world_grasp_pair(
     score_bias: float,
     axis_kind: str,
     env_id: int = 0,
-) -> _CoordinatedGraspPair:
+) -> CoordinatedGraspPair:
     z_axis = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
     x_axis = _orthogonalized_axis(closing_axis, z_axis)
     y_axis = _normalize_vector(torch.linalg.cross(z_axis, x_axis))
@@ -805,7 +805,7 @@ def _make_coordinated_grasp_pair(
     score_bias: float,
     axis_kind: str,
     env_id: int = 0,
-) -> _CoordinatedGraspPair:
+) -> CoordinatedGraspPair:
     left_world = object_initial_pose @ left_object_to_eef
     right_world = object_initial_pose @ right_object_to_eef
     score = _coordinated_grasp_pair_score(
@@ -815,7 +815,7 @@ def _make_coordinated_grasp_pair(
         device=device,
         env_id=env_id,
     )
-    return _CoordinatedGraspPair(
+    return CoordinatedGraspPair(
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
         priority=int(priority),
@@ -825,7 +825,7 @@ def _make_coordinated_grasp_pair(
 
 
 def _coordinated_grasp_pair_world_y_angle_degrees(
-    candidate: _CoordinatedGraspPair,
+    candidate: CoordinatedGraspPair,
     *,
     object_initial_pose: torch.Tensor,
 ) -> float:

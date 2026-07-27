@@ -44,10 +44,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders i
     _format_release_only_place_spec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _ArrangementStepLike,
-    _RelativePlacementLike,
-    _RelativeSpecLike,
-    _StackingStepLike,
+    ArrangementStepLike,
+    RelativePlacementLike,
+    RelativeSpecLike,
+    StackingStepLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
     NominalGraphStep,
@@ -140,7 +140,7 @@ def _single_arm_post_release_blocks(
 
 
 def _arrangement_step_edge_blocks(
-    step: _ArrangementStepLike,
+    step: ArrangementStepLike,
 ) -> list[tuple[str, Mapping[str, str | None]]]:
     active_arm, active_slot, inactive_slot = _arm_action_slots(step.active_side)
     high_preserve_spec = _format_pose_absolute_spec(
@@ -219,7 +219,7 @@ def _arrangement_step_edge_blocks(
 
 
 def _stacking_step_edge_blocks(
-    step: _StackingStepLike,
+    step: StackingStepLike,
     *,
     object_anchored: bool,
     stack_mode: str,
@@ -329,7 +329,7 @@ def _stacking_step_edge_blocks(
 
 
 def _single_relative_graph_steps(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
 ) -> list[NominalGraphStep]:
     active_arm = f"{spec.active_side}_arm"
     inactive_slot = (
@@ -420,7 +420,7 @@ def _single_relative_graph_steps(
 
 
 def _coordinated_pickment_graph_steps(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
 ) -> list[NominalGraphStep]:
     if spec.coordinated_terminal_behavior is not None:
         carrier = _coordinated_carrier_placement(spec)
@@ -547,8 +547,8 @@ def _coordinated_pickment_graph_steps(
 
 
 def _coordinated_carrier_placement(
-    spec: _RelativeSpecLike,
-) -> _RelativePlacementLike:
+    spec: RelativeSpecLike,
+) -> RelativePlacementLike:
     return next(
         placement
         for placement in spec.placements
@@ -556,13 +556,13 @@ def _coordinated_carrier_placement(
     )
 
 
-def _dual_relative_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
+def _dual_relative_graph_steps(spec: RelativeSpecLike) -> list[NominalGraphStep]:
     edge_blocks = _dual_relative_edge_blocks(spec)
     return [_nominal_step(title, actions) for title, actions in edge_blocks]
 
 
 def _dual_relative_edge_blocks(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
 ) -> list[tuple[str, Mapping[str, str | None]]]:
     first, second = spec.placements
     if _uses_serial_dual_sequence(spec):
@@ -643,7 +643,7 @@ def _dual_relative_edge_blocks(
     return edge_blocks
 
 
-def _uses_serial_dual_sequence(spec: _RelativeSpecLike) -> bool:
+def _uses_serial_dual_sequence(spec: RelativeSpecLike) -> bool:
     """Return whether placement dependencies require sequential execution."""
     first, second = spec.placements
     return (
@@ -657,7 +657,7 @@ def _uses_serial_dual_sequence(spec: _RelativeSpecLike) -> bool:
 
 
 def _serial_relative_edge_blocks(
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
 ) -> list[tuple[str, Mapping[str, str | None]]]:
     edge_blocks: list[tuple[str, Mapping[str, str | None]]] = []
     for placement in spec.placements:
@@ -705,7 +705,7 @@ def _serial_relative_edge_blocks(
     return edge_blocks
 
 
-def _hold_hover_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
+def _hold_hover_graph_steps(spec: RelativeSpecLike) -> list[NominalGraphStep]:
     pick_actions = {
         f"{placement.active_side}_arm_action": _format_pick_up_spec(
             f"{placement.active_side}_arm",
@@ -748,7 +748,7 @@ def _hold_hover_graph_steps(spec: _RelativeSpecLike) -> list[NominalGraphStep]:
 
 def _dual_relative_release_edge_blocks(
     *,
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
     active_arm: str,
     active_slot: str,
     waiting_slot: str,

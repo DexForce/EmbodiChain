@@ -17,7 +17,7 @@
 """Scene-summary and UID plumbing shared by the task-spec generators.
 
 ``arrangement_spec`` and ``stacking_spec`` both turn an LLM response into a
-deterministic spec over the same ``_SceneObject`` list. The helpers that read
+deterministic spec over the same ``SceneObject`` list. The helpers that read
 object attributes, resolve mesh configs, build runtime UIDs, and summarize the
 scene for the model are byte-identical or differ only by a route label. They
 live here so the two routes cannot disagree on what a "resolved mesh" or a
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _SceneObject,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _base_name,
@@ -72,7 +72,7 @@ def object_attributes(value: Any) -> dict[str, dict[str, str]]:
     return attributes
 
 
-def color_hint_for_object(obj: _SceneObject) -> str | None:
+def color_hint_for_object(obj: SceneObject) -> str | None:
     """Best-effort canonical color keyword from uid/description/mesh path.
 
     The LLM is allowed to omit color; this hint lets the prompt still express
@@ -100,7 +100,7 @@ def color_hint_for_object(obj: _SceneObject) -> str | None:
 
 
 def resolved_mesh_config(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> dict[str, Any]:
@@ -122,7 +122,7 @@ def resolved_mesh_config(
 
 
 def rigid_runtime_uid_mapping(
-    rigid_objects: Sequence[_SceneObject],
+    rigid_objects: Sequence[SceneObject],
 ) -> dict[str, str]:
     """Map each source_uid to a stable runtime uid.
 
@@ -146,7 +146,7 @@ def rigid_runtime_uid_mapping(
 
 def resolve_rigid_uid(
     value: str,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
     *,
     field_name: str,
     route_label: str,
@@ -178,10 +178,10 @@ def resolve_rigid_uid(
 
 
 def make_scene_summary(
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
     *,
     scene_dir: Path,
-    size_score_fn: Callable[[_SceneObject, Path], float | None],
+    size_score_fn: Callable[[SceneObject, Path], float | None],
 ) -> list[dict[str, Any]]:
     """Build the per-object summary row list shown to the task-spec LLM.
 

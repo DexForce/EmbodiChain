@@ -23,7 +23,7 @@ from typing import Any
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _SceneObject,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _object_text,
@@ -167,7 +167,7 @@ def iter_mesh_object_configs(
     return objects
 
 
-def _collect_scene_objects(scene_config: Mapping[str, Any]) -> list[_SceneObject]:
+def _collect_scene_objects(scene_config: Mapping[str, Any]) -> list[SceneObject]:
     scene_objects = []
     for source_role in ("background", "rigid_object"):
         for obj_config in scene_config.get(source_role, []) or []:
@@ -175,7 +175,7 @@ def _collect_scene_objects(scene_config: Mapping[str, Any]) -> list[_SceneObject
             if not source_uid:
                 raise ValueError(f"Scene object without uid in {source_role}.")
             scene_objects.append(
-                _SceneObject(
+                SceneObject(
                     source_uid=source_uid,
                     source_role=source_role,
                     config=copy.deepcopy(dict(obj_config)),
@@ -187,7 +187,7 @@ def _collect_scene_objects(scene_config: Mapping[str, Any]) -> list[_SceneObject
     return scene_objects
 
 
-def _pick_table(background_objects: list[_SceneObject]) -> _SceneObject:
+def _pick_table(background_objects: list[SceneObject]) -> SceneObject:
     for obj in background_objects:
         text = _object_text(obj)
         if "table" in text:

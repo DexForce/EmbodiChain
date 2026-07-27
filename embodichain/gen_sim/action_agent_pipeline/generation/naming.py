@@ -21,7 +21,7 @@ from typing import Any
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _SceneObject,
+    SceneObject,
 )
 
 __all__ = [
@@ -64,12 +64,12 @@ _DEFAULT_CONTAINER_RUNTIME_UID_ALIASES = {
 }
 
 
-def _object_text(obj: _SceneObject) -> str:
+def _object_text(obj: SceneObject) -> str:
     shape = obj.config.get("shape", {}) or {}
     return f"{obj.source_uid} {shape.get('fpath', '')}".lower()
 
 
-def _base_name(obj: _SceneObject) -> str:
+def _base_name(obj: SceneObject) -> str:
     base = _DIGIT_SUFFIX_RE.sub("", obj.source_uid)
     if base == obj.source_uid:
         fpath = str(obj.config.get("shape", {}).get("fpath", ""))
@@ -86,7 +86,7 @@ def _target_runtime_suffix(base: str) -> str:
 
 
 def _container_runtime_uid(
-    container: _SceneObject,
+    container: SceneObject,
     aliases: dict[str, str] | None = None,
 ) -> str:
     """Return the runtime UID for the task container.
@@ -122,13 +122,13 @@ def _normalize_runtime_uid(value: str) -> str:
     return uid
 
 
-def _candidate_relative_runtime_uid(obj: _SceneObject) -> str:
+def _candidate_relative_runtime_uid(obj: SceneObject) -> str:
     if _is_container_like(obj):
         return _container_runtime_uid(obj)
     return _target_runtime_suffix(_base_name(obj))
 
 
-def _is_container_like(obj: _SceneObject) -> bool:
+def _is_container_like(obj: SceneObject) -> bool:
     return any(keyword in _object_text(obj) for keyword in _CONTAINER_KEYWORDS)
 
 

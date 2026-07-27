@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 from typing import Any
@@ -31,15 +32,35 @@ from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env 
     AgenticGenSimEnv,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation import config_io
+from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
+    ArrangementSpecLike,
+    ArrangementStepLike,
+    RelativePlacementLike,
+    RelativeSpecLike,
+    StackingSpecLike,
+    StackingStepLike,
+    _ArrangementSpecLike,
+    _ArrangementStepLike,
+    _RelativePlacementLike,
+    _RelativeSpecLike,
+    _StackingSpecLike,
+    _StackingStepLike,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     ArrangementLineSpec,
+    ArrangementLineStepSpec,
     RelativePlacementSpec,
+    RelativePlacementStepSpec,
     SceneObject,
     StackingSpec,
+    StackingStepSpec,
     _ArrangementLineSpec,
+    _ArrangementLineStepSpec,
     _RelativePlacementSpec,
+    _RelativePlacementStepSpec,
     _SceneObject,
     _StackingSpec,
+    _StackingStepSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     write_config_bundle,
@@ -47,6 +68,14 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
 from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
     TaskRouteSpec,
     _TaskRouteSpec,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
+    CoordinatedGraspPair,
+    CoordinatedPayloadRuntimeState,
+    ExecutedAtomicAction,
+    _CoordinatedGraspPair,
+    _CoordinatedPayloadRuntimeState,
+    _ExecutedAtomicAction,
 )
 
 
@@ -134,10 +163,80 @@ def test_config_bundle_restores_previous_snapshot_on_replace_failure(
 
 def test_legacy_private_type_names_are_identity_aliases() -> None:
     assert _SceneObject is SceneObject
+    assert _RelativePlacementStepSpec is RelativePlacementStepSpec
     assert _RelativePlacementSpec is RelativePlacementSpec
+    assert _ArrangementLineStepSpec is ArrangementLineStepSpec
     assert _ArrangementLineSpec is ArrangementLineSpec
+    assert _StackingStepSpec is StackingStepSpec
     assert _StackingSpec is StackingSpec
     assert _TaskRouteSpec is TaskRouteSpec
+    assert _RelativePlacementLike is RelativePlacementLike
+    assert _RelativeSpecLike is RelativeSpecLike
+    assert _ArrangementStepLike is ArrangementStepLike
+    assert _ArrangementSpecLike is ArrangementSpecLike
+    assert _StackingStepLike is StackingStepLike
+    assert _StackingSpecLike is StackingSpecLike
+    assert _ExecutedAtomicAction is ExecutedAtomicAction
+    assert _CoordinatedPayloadRuntimeState is CoordinatedPayloadRuntimeState
+    assert _CoordinatedGraspPair is CoordinatedGraspPair
+
+
+def test_production_modules_do_not_import_legacy_private_types() -> None:
+    package_root = Path(__file__).resolve().parents[1]
+    forbidden_by_module = {
+        "embodichain.gen_sim.action_agent_pipeline.generation.config_types": {
+            "_SceneObject",
+            "_RelativePlacementStepSpec",
+            "_RelativePlacementSpec",
+            "_ArrangementLineStepSpec",
+            "_ArrangementLineSpec",
+            "_StackingStepSpec",
+            "_StackingSpec",
+        },
+        "embodichain.gen_sim.action_agent_pipeline.generation.task_router": {
+            "_TaskRouteSpec",
+        },
+        "embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols": {
+            "_RelativePlacementLike",
+            "_RelativeSpecLike",
+            "_ArrangementStepLike",
+            "_ArrangementSpecLike",
+            "_StackingStepLike",
+            "_StackingSpecLike",
+        },
+        "embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types": {
+            "_ExecutedAtomicAction",
+            "_CoordinatedPayloadRuntimeState",
+            "_CoordinatedGraspPair",
+        },
+    }
+    violations: list[str] = []
+
+    # Compatibility aliases remain in their owner modules, but production
+    # consumers must bind only the public names.
+    for path in package_root.rglob("*.py"):
+        if "tests" in path.relative_to(package_root).parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            forbidden_names = forbidden_by_module.get(node.module or "")
+            if forbidden_names is None:
+                continue
+            for imported_name in node.names:
+                bound_name = imported_name.asname or imported_name.name
+                if (
+                    imported_name.name in forbidden_names
+                    or bound_name in forbidden_names
+                ):
+                    relative_path = path.relative_to(package_root)
+                    violations.append(
+                        f"{relative_path}:{node.lineno} imports "
+                        f"{imported_name.name!r} as {bound_name!r}"
+                    )
+
+    assert not violations, "\n".join(violations)
 
 
 def test_demo_action_list_hook_delegates_to_explicit_execution_method() -> None:

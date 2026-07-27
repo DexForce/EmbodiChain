@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _RelativeSpecLike,
+    RelativeSpecLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.diagnostic_common import (
     _format_runtime_object_registry,
@@ -50,7 +50,7 @@ __all__ = ["make_relative_basic_background"]
 
 def make_relative_basic_background(
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,
@@ -111,7 +111,7 @@ def make_relative_basic_background(
 
 def _make_coordinated_pickment_basic_background(
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,
@@ -151,7 +151,7 @@ def _make_coordinated_pickment_basic_background(
 
 def _make_dual_relative_basic_background(
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,
@@ -206,7 +206,7 @@ def _make_dual_relative_basic_background(
 
 def _make_hold_hover_basic_background(
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,

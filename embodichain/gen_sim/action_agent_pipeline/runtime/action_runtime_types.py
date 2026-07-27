@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Private typed records shared across runtime orchestration modules."""
+"""Typed records shared across runtime orchestration modules."""
 
 from __future__ import annotations
 
@@ -26,6 +26,9 @@ import torch
 from embodichain.lab.sim.atomic_actions import WorldState
 
 __all__ = [
+    "ExecutedAtomicAction",
+    "CoordinatedPayloadRuntimeState",
+    "CoordinatedGraspPair",
     "_ExecutedAtomicAction",
     "_CoordinatedPayloadRuntimeState",
     "_CoordinatedGraspPair",
@@ -33,7 +36,7 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class _ExecutedAtomicAction:
+class ExecutedAtomicAction:
     action: np.ndarray
     next_state: WorldState | None
     robot_name: str | None
@@ -43,7 +46,7 @@ class _ExecutedAtomicAction:
 
 
 @dataclass(frozen=True)
-class _CoordinatedPayloadRuntimeState:
+class CoordinatedPayloadRuntimeState:
     carrier_uid: str
     payload_uids: tuple[str, ...]
     initial_carrier_pose: torch.Tensor
@@ -54,9 +57,16 @@ class _CoordinatedPayloadRuntimeState:
 
 
 @dataclass(frozen=True)
-class _CoordinatedGraspPair:
+class CoordinatedGraspPair:
     left_object_to_eef: torch.Tensor
     right_object_to_eef: torch.Tensor
     priority: int
     score: float
     axis_kind: str
+
+
+# Retain identity aliases so imports written before these DTOs became public
+# keep their isinstance and pickle behavior.
+_ExecutedAtomicAction = ExecutedAtomicAction
+_CoordinatedPayloadRuntimeState = CoordinatedPayloadRuntimeState
+_CoordinatedGraspPair = CoordinatedGraspPair

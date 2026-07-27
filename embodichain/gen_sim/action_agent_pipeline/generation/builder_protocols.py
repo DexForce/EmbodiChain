@@ -22,6 +22,12 @@ from collections.abc import Sequence
 from typing import Protocol
 
 __all__ = [
+    "RelativePlacementLike",
+    "RelativeSpecLike",
+    "ArrangementStepLike",
+    "ArrangementSpecLike",
+    "StackingStepLike",
+    "StackingSpecLike",
     "_RelativePlacementLike",
     "_RelativeSpecLike",
     "_ArrangementStepLike",
@@ -31,7 +37,7 @@ __all__ = [
 ]
 
 
-class _RelativePlacementLike(Protocol):
+class RelativePlacementLike(Protocol):
     intent: str
     active_side: str
     moved_runtime_uid: str
@@ -54,8 +60,8 @@ class _RelativePlacementLike(Protocol):
     surface_clearance: float
 
 
-class _RelativeSpecLike(_RelativePlacementLike, Protocol):
-    placements: Sequence[_RelativePlacementLike]
+class RelativeSpecLike(RelativePlacementLike, Protocol):
+    placements: Sequence[RelativePlacementLike]
     task_prompt_summary: str
     task_description: str
     action_sketch: Sequence[str]
@@ -64,7 +70,7 @@ class _RelativeSpecLike(_RelativePlacementLike, Protocol):
     coordinated_terminal_behavior: str | None
 
 
-class _ArrangementStepLike(Protocol):
+class ArrangementStepLike(Protocol):
     source_uid: str
     runtime_uid: str
     slot_index: int
@@ -78,7 +84,7 @@ class _ArrangementStepLike(Protocol):
     orientation_axis: str
 
 
-class _ArrangementSpecLike(Protocol):
+class ArrangementSpecLike(Protocol):
     task_description: str
     task_prompt_summary: str
     basic_background_notes: str
@@ -89,10 +95,10 @@ class _ArrangementSpecLike(Protocol):
     line_origin_xy: Sequence[float]
     spacing: float
     layout_clearance: float
-    steps: Sequence[_ArrangementStepLike]
+    steps: Sequence[ArrangementStepLike]
 
 
-class _StackingStepLike(Protocol):
+class StackingStepLike(Protocol):
     source_uid: str
     runtime_uid: str
     layer_index: int
@@ -106,7 +112,7 @@ class _StackingStepLike(Protocol):
     orientation_axis: str
 
 
-class _StackingSpecLike(Protocol):
+class StackingSpecLike(Protocol):
     task_description: str
     task_prompt_summary: str
     basic_background_notes: str
@@ -116,4 +122,14 @@ class _StackingSpecLike(Protocol):
     anchor_xy: Sequence[float]
     anchor_source_uid: str | None
     anchor_runtime_uid: str | None
-    steps: Sequence[_StackingStepLike]
+    steps: Sequence[StackingStepLike]
+
+
+# Keep the original internal spellings as identity aliases for downstream
+# modules that imported these protocols before they became public contracts.
+_RelativePlacementLike = RelativePlacementLike
+_RelativeSpecLike = RelativeSpecLike
+_ArrangementStepLike = ArrangementStepLike
+_ArrangementSpecLike = ArrangementSpecLike
+_StackingStepLike = StackingStepLike
+_StackingSpecLike = StackingSpecLike

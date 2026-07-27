@@ -40,7 +40,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (
     _select_arm_parts,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
-    _ExecutedAtomicAction,
+    ExecutedAtomicAction,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
     resolve_arm_side,
@@ -177,7 +177,7 @@ def build_parallel_action_stream(
             runtime_kwargs,
             state=world_states.get("coordinated"),
         )
-        if not isinstance(executed, _ExecutedAtomicAction):
+        if not isinstance(executed, ExecutedAtomicAction):
             raise TypeError("Coordinated action must resolve to an atomic action.")
         action_np = _as_2d_action(
             _executed_action_array(executed),
@@ -301,7 +301,7 @@ def build_parallel_action_stream(
         "right": right_arm_action,
     }.items():
         if (
-            isinstance(executed, _ExecutedAtomicAction)
+            isinstance(executed, ExecutedAtomicAction)
             and executed.next_state is not None
         ):
             next_world_states[side] = executed.next_state
@@ -348,7 +348,7 @@ def init_parallel_world_states(env: Any) -> dict[str, WorldState]:
 
 def _action_failed_env_mask(action: Any) -> torch.Tensor | None:
     """Read the per-environment failure mask from an executed atomic action."""
-    if isinstance(action, _ExecutedAtomicAction):
+    if isinstance(action, ExecutedAtomicAction):
         return action.failed_env_mask
     return None
 
@@ -390,7 +390,7 @@ def _resolve_action_spec(
 
 
 def _executed_action_array(action):
-    if isinstance(action, _ExecutedAtomicAction):
+    if isinstance(action, ExecutedAtomicAction):
         return action.action
     return action
 
@@ -409,7 +409,7 @@ def _validate_arm_action_slot(env, side: str, action) -> None:
 
 
 def _arm_action_robot_name(action) -> str | None:
-    if isinstance(action, _ExecutedAtomicAction):
+    if isinstance(action, ExecutedAtomicAction):
         return action.robot_name
     if isinstance(action, AtomicActionSpec):
         return action.robot_name
@@ -421,7 +421,7 @@ def _arm_action_robot_name(action) -> str | None:
 
 
 def _arm_action_control(action) -> str | None:
-    if isinstance(action, _ExecutedAtomicAction):
+    if isinstance(action, ExecutedAtomicAction):
         return action.control
     if isinstance(action, AtomicActionSpec):
         return action.control
@@ -545,7 +545,7 @@ def _sync_agent_states_from_parallel_actions(
     failed_env_mask: torch.Tensor | None = None,
 ) -> None:
     for executed in arm_actions.values():
-        if not isinstance(executed, _ExecutedAtomicAction):
+        if not isinstance(executed, ExecutedAtomicAction):
             continue
         action_np = _hold_failed_atomic_action_for_state_sync(
             env,
@@ -565,7 +565,7 @@ def _sync_agent_states_from_parallel_actions(
 
 def _hold_failed_atomic_action_for_state_sync(
     env: Any,
-    executed: _ExecutedAtomicAction,
+    executed: ExecutedAtomicAction,
     failed_env_mask: torch.Tensor | None,
 ) -> np.ndarray:
     """Mask cached arm state updates to the same qpos sent to failed envs."""

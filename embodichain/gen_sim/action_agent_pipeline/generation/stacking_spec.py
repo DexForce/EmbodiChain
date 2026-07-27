@@ -28,9 +28,9 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 )
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _SceneObject,
-    _StackingSpec,
-    _StackingStepSpec,
+    SceneObject,
+    StackingSpec,
+    StackingStepSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _TABLETOP_OBJECT_CLEARANCE,
@@ -81,13 +81,13 @@ _ANCHOR_CLEARANCE_RADIUS = float(_DEFAULTS["anchor_clearance_radius"])
 
 def _build_stacking_spec_with_llm(
     *,
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
     project_name: str,
     scene_dir: Path,
     task_description: str,
     model: str | None,
     task_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
-) -> _StackingSpec:
+) -> StackingSpec:
     background_objects = [
         obj for obj in scene_objects if obj.source_role == "background"
     ]
@@ -137,7 +137,7 @@ def _call_stacking_task_llm(
 
 
 def _make_stacking_scene_summary(
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
     *,
     scene_dir: Path,
 ) -> list[dict[str, Any]]:
@@ -152,11 +152,11 @@ def _apply_stacking_task_response(
     *,
     response: Mapping[str, Any],
     table_source_uid: str,
-    scene_objects: list[_SceneObject],
-    rigid_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
+    rigid_objects: list[SceneObject],
     scene_dir: Path,
     task_description: str,
-) -> _StackingSpec:
+) -> StackingSpec:
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     table_obj = by_uid[table_source_uid]
     rigid_by_uid = {obj.source_uid: obj for obj in rigid_objects}
@@ -219,7 +219,7 @@ def _apply_stacking_task_response(
             scene_dir=scene_dir,
         )
         steps.append(
-            _StackingStepSpec(
+            StackingStepSpec(
                 source_uid=source_uid,
                 runtime_uid=runtime_uids[source_uid],
                 layer_index=layer_index,
@@ -245,7 +245,7 @@ def _apply_stacking_task_response(
         summary = "Move the selected objects to the table center and stack them."
     notes = str(response.get("basic_background_notes", "")).strip()
 
-    return _StackingSpec(
+    return StackingSpec(
         table_source_uid=table_source_uid,
         task_description=task_description,
         task_prompt_summary=summary,
@@ -261,9 +261,9 @@ def _apply_stacking_task_response(
 
 
 def _with_stacking_generated_targets(
-    spec: _StackingSpec,
+    spec: StackingSpec,
     gym_config: Mapping[str, Any],
-) -> _StackingSpec:
+) -> StackingSpec:
     object_configs = {
         str(obj.get("uid")): obj
         for obj in _iter_generated_scene_object_configs(gym_config)
@@ -459,7 +459,7 @@ def _generated_table_top_z(
     return float(z_bounds[1])
 
 
-def _make_stacking_summary(spec: _StackingSpec) -> dict[str, Any]:
+def _make_stacking_summary(spec: StackingSpec) -> dict[str, Any]:
     summary = {
         "mode": "stacking",
         "stack_mode": spec.stack_mode,
@@ -497,7 +497,7 @@ def _mesh_config_local_zmax_after_rotation(
 
 def _resolve_stacking_object_uids(
     value: Any,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
     *,
     min_count: int = 2,
 ) -> list[str]:
@@ -519,7 +519,7 @@ def _resolve_stacking_object_uids(
 
 def _resolve_rigid_uid(
     value: str,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
     *,
     field_name: str,
 ) -> str:
@@ -568,7 +568,7 @@ def _normalize_order_by(value: Any) -> str:
 def _normalize_anchor(
     value: Any,
     *,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
 ) -> tuple[str, str | None]:
     if isinstance(value, Mapping):
         anchor_type = str(value.get("type", "")).strip().lower().replace("-", "_")
@@ -606,7 +606,7 @@ def _object_color(
 
 
 def _table_anchor_xy(
-    table_obj: _SceneObject,
+    table_obj: SceneObject,
     anchor: str,
     *,
     scene_dir: Path,
@@ -623,7 +623,7 @@ def _table_anchor_xy(
 
 
 def _stacking_object_size_score(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> float | None:
@@ -638,7 +638,7 @@ def _stacking_object_size_score(
 
 
 def _stacking_object_orientation(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     stack_mode: str,
     scene_dir: Path,

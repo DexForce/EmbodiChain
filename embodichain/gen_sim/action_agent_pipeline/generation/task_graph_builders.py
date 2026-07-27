@@ -21,9 +21,9 @@ from __future__ import annotations
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _ArrangementSpecLike,
-    _RelativeSpecLike,
-    _StackingSpecLike,
+    ArrangementSpecLike,
+    RelativeSpecLike,
+    StackingSpecLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
     build_nominal_task_graph,
@@ -47,7 +47,7 @@ __all__ = [
 
 def make_arrangement_task_graph(
     task_name: str,
-    spec: _ArrangementSpecLike,
+    spec: ArrangementSpecLike,
 ) -> dict[str, Any]:
     steps = []
     for step in spec.steps:
@@ -60,7 +60,7 @@ def make_arrangement_task_graph(
 
 def make_stacking_task_graph(
     task_name: str,
-    spec: _StackingSpecLike,
+    spec: StackingSpecLike,
 ) -> dict[str, Any]:
     steps = []
     for step in spec.steps:
@@ -77,7 +77,7 @@ def make_stacking_task_graph(
 
 def make_relative_task_graph(
     task_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
 ) -> dict[str, Any]:
     if spec.intent == "coordinated_pickment":
         steps = _coordinated_pickment_graph_steps(spec)

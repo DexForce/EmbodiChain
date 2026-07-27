@@ -25,8 +25,8 @@ import numpy as np
 import torch
 
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
-    _CoordinatedPayloadRuntimeState,
-    _ExecutedAtomicAction,
+    CoordinatedPayloadRuntimeState,
+    ExecutedAtomicAction,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.atomic_action_spec import (
     AtomicActionSpec,
@@ -97,7 +97,7 @@ def _record_coordinated_payload_runtime_state(
     setattr(
         env,
         "_action_agent_coordinated_payload_state",
-        _CoordinatedPayloadRuntimeState(
+        CoordinatedPayloadRuntimeState(
             carrier_uid=str(semantics.label),
             payload_uids=payload_uids,
             initial_carrier_pose=carrier_pose.clone(),
@@ -116,7 +116,7 @@ def _coordinated_transport_failure_mask(
 ) -> torch.Tensor:
     num_envs = int(getattr(env, "num_envs", 1))
     runtime_state = getattr(env, "_action_agent_coordinated_payload_state", None)
-    if not isinstance(runtime_state, _CoordinatedPayloadRuntimeState):
+    if not isinstance(runtime_state, CoordinatedPayloadRuntimeState):
         return torch.zeros(num_envs, dtype=torch.bool)
     carrier = env.sim.get_rigid_object(runtime_state.carrier_uid)
     if carrier is None:
@@ -138,7 +138,7 @@ def _coordinated_transport_failure_mask(
     action_classes = {
         action.atomic_action_class
         for action in arm_actions.values()
-        if isinstance(action, _ExecutedAtomicAction)
+        if isinstance(action, ExecutedAtomicAction)
     }
     if coordinated_active:
         from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.success import (

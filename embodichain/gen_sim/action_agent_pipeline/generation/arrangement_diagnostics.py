@@ -22,8 +22,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _ArrangementSpecLike,
-    _ArrangementStepLike,
+    ArrangementSpecLike,
+    ArrangementStepLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.diagnostic_common import (
     _format_indexed_edge_blocks,
@@ -52,7 +52,7 @@ __all__ = [
 def make_arrangement_task_prompt(
     task_name: str,
     project_name: str,
-    spec: _ArrangementSpecLike,
+    spec: ArrangementSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -91,7 +91,7 @@ def make_arrangement_task_prompt(
     )
 
 
-def _arrangement_world_axis(spec: _ArrangementSpecLike) -> str:
+def _arrangement_world_axis(spec: ArrangementSpecLike) -> str:
     if len(spec.steps) >= 2:
         x_values = [float(step.target_xy[0]) for step in spec.steps]
         y_values = [float(step.target_xy[1]) for step in spec.steps]
@@ -103,11 +103,11 @@ def _arrangement_world_axis(spec: _ArrangementSpecLike) -> str:
     return "y"
 
 
-def _arrangement_step_edge_count(step: _ArrangementStepLike) -> int:
+def _arrangement_step_edge_count(step: ArrangementStepLike) -> int:
     return len(_arrangement_step_edge_blocks(step))
 
 
-def _arrangement_step_prompt_block(start_edge: int, step: _ArrangementStepLike) -> str:
+def _arrangement_step_prompt_block(start_edge: int, step: ArrangementStepLike) -> str:
     return _format_indexed_edge_blocks(
         _arrangement_step_edge_blocks(step),
         start_index=start_edge,
@@ -116,7 +116,7 @@ def _arrangement_step_prompt_block(start_edge: int, step: _ArrangementStepLike) 
 
 def make_arrangement_basic_background(
     project_name: str,
-    spec: _ArrangementSpecLike,
+    spec: ArrangementSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,
@@ -140,7 +140,7 @@ def make_arrangement_basic_background(
     )
 
 
-def _arrangement_object_background_line(step: _ArrangementStepLike) -> str:
+def _arrangement_object_background_line(step: ArrangementStepLike) -> str:
     attrs = []
     if step.color:
         attrs.append(f"color={step.color}")
@@ -155,7 +155,7 @@ def _arrangement_object_background_line(step: _ArrangementStepLike) -> str:
 
 
 def make_arrangement_atom_actions_prompt(
-    spec: _ArrangementSpecLike,
+    spec: ArrangementSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -168,7 +168,7 @@ def make_arrangement_atom_actions_prompt(
     )
 
 
-def _arrangement_atom_action_block(step: _ArrangementStepLike) -> str:
+def _arrangement_atom_action_block(step: ArrangementStepLike) -> str:
     active_slot = f"{step.active_side}_arm_action"
     actions = [
         edge_actions[active_slot]

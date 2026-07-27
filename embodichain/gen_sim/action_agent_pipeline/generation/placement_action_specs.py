@@ -39,8 +39,8 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders i
     _format_pose_object_spec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _RelativePlacementLike,
-    _StackingStepLike,
+    RelativePlacementLike,
+    StackingStepLike,
 )
 
 _ACTION_DEFAULTS = generation_defaults_section("action")
@@ -73,7 +73,7 @@ __all__ = [
 
 
 def _format_coordinated_pickment_spec(
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
     *,
     sample_interval: int = 120,
     payload_runtime_uids: Sequence[str] = (),
@@ -149,7 +149,7 @@ def _format_coordinated_pickment_spec(
 
 def _format_relative_pose_spec(
     robot_name: str,
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
     *,
     pose_kind: str,
     sample_interval: int,
@@ -219,7 +219,7 @@ def _format_relative_pose_spec(
 
 def _format_direct_relative_place_spec(
     robot_name: str,
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
 ) -> str:
     """Format an object-aware Place for a preserve-orientation placement."""
     move_spec = json.loads(
@@ -252,7 +252,7 @@ def _format_direct_relative_place_spec(
 
 def _format_stacking_place_spec(
     robot_name: str,
-    step: _StackingStepLike,
+    step: StackingStepLike,
     *,
     object_anchored: bool,
     stack_mode: str,
@@ -300,12 +300,12 @@ def _format_stacking_place_spec(
     )
 
 
-def _surface_release_clearance(placement: _RelativePlacementLike) -> float:
+def _surface_release_clearance(placement: RelativePlacementLike) -> float:
     return float(getattr(placement, "surface_clearance", _SURFACE_RELEASE_CLEARANCE))
 
 
 def _relative_surface_support(
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
     *,
     pose_kind: str,
 ) -> str | None:
@@ -318,7 +318,7 @@ def _relative_surface_support(
 
 def _format_hover_move_spec(
     robot_name: str,
-    placement: _RelativePlacementLike,
+    placement: RelativePlacementLike,
 ) -> str:
     return _compact_json(
         {
@@ -337,12 +337,12 @@ def _format_hover_move_spec(
     )
 
 
-def _is_pose_sensitive_placement(placement: _RelativePlacementLike) -> bool:
+def _is_pose_sensitive_placement(placement: RelativePlacementLike) -> bool:
     return placement.orientation_goal != "preserve"
 
 
 def _relative_pose_step_label(
-    spec: _RelativePlacementLike,
+    spec: RelativePlacementLike,
     label: str,
 ) -> str:
     if getattr(spec, "reference_is_initial_pose", False):

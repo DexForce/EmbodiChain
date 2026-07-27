@@ -28,7 +28,7 @@ import math
 import struct
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _SceneObject,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     iter_scene_object_configs,
@@ -284,7 +284,7 @@ def _mesh_config_transform_matrix(
 
 def _resolve_table_mesh_world_zmax(
     scene_dir: Path,
-    table_obj: _SceneObject,
+    table_obj: SceneObject,
 ) -> float | None:
     shape = table_obj.config.get("shape", {})
     if not isinstance(shape, Mapping):

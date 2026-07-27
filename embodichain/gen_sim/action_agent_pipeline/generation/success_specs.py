@@ -28,10 +28,10 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
     generation_defaults_section,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _ArrangementLineSpec,
-    _RelativePlacementSpec,
-    _RelativePlacementStepSpec,
-    _StackingSpec,
+    ArrangementLineSpec,
+    RelativePlacementSpec,
+    RelativePlacementStepSpec,
+    StackingSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
@@ -93,7 +93,7 @@ def _object_in_container_success(object_uid: str, container_uid: str) -> dict[st
 
 
 def _make_relative_extensions_config(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
@@ -115,7 +115,7 @@ def _make_relative_extensions_config(
 
 
 def _make_arrangement_extensions_config(
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> dict[str, Any]:
@@ -129,7 +129,7 @@ def _make_arrangement_extensions_config(
 
 
 def _make_stacking_extensions_config(
-    spec: _StackingSpec,
+    spec: StackingSpec,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> dict[str, Any]:
@@ -142,7 +142,7 @@ def _make_stacking_extensions_config(
     }
 
 
-def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
+def _make_stacking_success_spec(spec: StackingSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
     for step in spec.steps:
         if step.support_runtime_uid is None:
@@ -185,7 +185,7 @@ def _make_stacking_success_spec(spec: _StackingSpec) -> dict[str, Any]:
     return {"op": "all", "terms": terms}
 
 
-def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]:
+def _make_arrangement_success_spec(spec: ArrangementLineSpec) -> dict[str, Any]:
     terms: list[dict[str, Any]] = []
     # Scale the tolerance with slot spacing, but cap it so adjacent slots can
     # never satisfy each other's success region in a dense arrangement.
@@ -232,7 +232,7 @@ def _make_arrangement_success_spec(spec: _ArrangementLineSpec) -> dict[str, Any]
     return {"op": "all", "terms": terms}
 
 
-def _arrangement_success_axis(spec: _ArrangementLineSpec) -> str:
+def _arrangement_success_axis(spec: ArrangementLineSpec) -> str:
     if len(spec.steps) >= 2:
         x_values = [float(step.target_xy[0]) for step in spec.steps]
         y_values = [float(step.target_xy[1]) for step in spec.steps]
@@ -245,7 +245,7 @@ def _arrangement_success_axis(spec: _ArrangementLineSpec) -> str:
 
 
 def _make_relative_success_spec(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
@@ -356,7 +356,7 @@ def _make_relative_success_spec(
 
 
 def _make_relative_placement_success_spec(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> dict[str, Any]:
@@ -448,7 +448,7 @@ def _make_relative_placement_success_spec(
 
 
 def _make_relative_grasp_pose_overrides(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
 ) -> dict[str, dict[str, Any]]:
     overrides: dict[str, dict[str, Any]] = {}
     for placement in spec.placements:
@@ -481,7 +481,7 @@ def _absolute_xy_success_terms(
 
 
 def _relative_xy_success_terms(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     *,
     side_relation_xy_offsets: Callable[[str], tuple[float, float]],
 ) -> list[dict[str, Any]]:
@@ -503,7 +503,7 @@ def _relative_xy_success_terms(
 
 def _validate_relative_bundle(
     bundle: Mapping[str, Any],
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
 ) -> None:
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != ACTION_AGENT_ENV_ID:
@@ -549,7 +549,7 @@ def _validate_relative_bundle(
 
 def _validate_arrangement_bundle(
     bundle: Mapping[str, Any],
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
 ) -> None:
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != ACTION_AGENT_ENV_ID:
@@ -584,7 +584,7 @@ def _validate_arrangement_bundle(
 
 def _validate_stacking_bundle(
     bundle: Mapping[str, Any],
-    spec: _StackingSpec,
+    spec: StackingSpec,
 ) -> None:
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != ACTION_AGENT_ENV_ID:

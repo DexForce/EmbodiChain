@@ -28,8 +28,8 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 )
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _RelativePlacementSpec,
-    _RelativePlacementStepSpec,
+    RelativePlacementSpec,
+    RelativePlacementStepSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _clean_vector3,
@@ -130,9 +130,9 @@ def _side_relation_xy_offsets(relation: str) -> tuple[float, float]:
 
 
 def _with_self_relative_absolute_targets(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     if not any(placement.reference_is_initial_pose for placement in spec.placements):
         return spec
 
@@ -148,9 +148,9 @@ def _with_self_relative_absolute_targets(
 
 
 def _with_final_auto_arm_sides(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     if spec.intent == "coordinated_pickment" or not spec.placements:
         return spec
 
@@ -196,9 +196,9 @@ def _require_generated_object_position(
 
 
 def _with_self_relative_absolute_target(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     generated_positions: Mapping[str, list[float]],
-) -> _RelativePlacementStepSpec:
+) -> RelativePlacementStepSpec:
     if not placement.reference_is_initial_pose:
         return placement
     initial_position = generated_positions.get(placement.moved_runtime_uid)
@@ -218,11 +218,11 @@ def _with_self_relative_absolute_target(
 
 
 def _with_inside_container_slot_offsets(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
     *,
     slot_distance_scale: float = 1.0,
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     slotted_relations = {"inside"}
     if spec.intent == "coordinated_pickment":
         slotted_relations.add("on")
@@ -306,7 +306,7 @@ def _with_inside_container_slot_offsets(
 def _coordinated_payload_grid_offsets(
     indices: Sequence[int],
     *,
-    placements: Sequence[_RelativePlacementStepSpec],
+    placements: Sequence[RelativePlacementStepSpec],
     object_configs: Mapping[str, Mapping[str, Any]],
     container_config: Mapping[str, Any] | None,
 ) -> dict[int, list[float]]:
@@ -386,7 +386,7 @@ def _payload_aware_slot_distance(
     *,
     axis: str,
     default_distance: float,
-    placements: Sequence[_RelativePlacementStepSpec],
+    placements: Sequence[RelativePlacementStepSpec],
     object_configs: Mapping[str, Mapping[str, Any]],
 ) -> float:
     if len(indices) != 2:
@@ -410,11 +410,11 @@ def _payload_aware_slot_distance(
 
 
 def _with_coordinated_side_release_height_offsets(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
     *,
     table_reference_mode: str = "include",
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     if spec.intent not in {"place_relative", "coordinated_pickment"}:
         return spec
     placements = tuple(
@@ -433,7 +433,7 @@ def _with_coordinated_side_release_height_offsets(
 
 
 def _matches_table_reference_mode(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     *,
     table_source_uid: str,
     table_reference_mode: str,
@@ -449,9 +449,9 @@ def _matches_table_reference_mode(
 
 
 def _with_coordinated_side_release_height_offset(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     gym_config: Mapping[str, Any],
-) -> _RelativePlacementStepSpec:
+) -> RelativePlacementStepSpec:
     if placement.relation not in _SIDE_RELATIONS or placement.reference_is_initial_pose:
         return placement
 
@@ -484,9 +484,9 @@ def _with_coordinated_side_release_height_offset(
 
 
 def _with_relative_release_offset(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     release_offset: Sequence[float],
-) -> _RelativePlacementStepSpec:
+) -> RelativePlacementStepSpec:
     clean_release_offset = [round(float(value), 6) for value in release_offset]
     high_offset = list(clean_release_offset)
     high_offset[2] = round(high_offset[2] + _STAGING_Z_DELTA, 6)
@@ -498,9 +498,9 @@ def _with_relative_release_offset(
 
 
 def _replace_relative_spec_placements(
-    spec: _RelativePlacementSpec,
-    placements: tuple[_RelativePlacementStepSpec, ...],
-) -> _RelativePlacementSpec:
+    spec: RelativePlacementSpec,
+    placements: tuple[RelativePlacementStepSpec, ...],
+) -> RelativePlacementSpec:
     primary = _relative_primary_placement(placements)
     return replace(
         spec,
@@ -528,9 +528,9 @@ def _replace_relative_spec_placements(
 
 
 def _with_coordinated_transport_geometry(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     """Resolve loaded-carrier capacity, slots, and the final transport target."""
     if (
         spec.intent != "coordinated_pickment"
@@ -581,7 +581,7 @@ def _with_coordinated_transport_geometry(
 
 
 def _coordinated_table_config(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
 ) -> Mapping[str, Any] | None:
     backgrounds = gym_config.get("background", [])
@@ -669,9 +669,9 @@ def _coordinated_safe_transport_distance(
 
 
 def _with_on_surface_release_offsets(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     gym_config: Mapping[str, Any],
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     placements = tuple(
         _with_on_surface_release_offset(placement, gym_config)
         for placement in spec.placements
@@ -680,9 +680,9 @@ def _with_on_surface_release_offsets(
 
 
 def _with_on_surface_release_offset(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     gym_config: Mapping[str, Any],
-) -> _RelativePlacementStepSpec:
+) -> RelativePlacementStepSpec:
     if placement.relation != "on" or placement.reference_is_initial_pose:
         return placement
 
@@ -1112,7 +1112,7 @@ def _inside_container_slot_axis(x_extent: float, y_extent: float) -> str:
 def _order_inside_container_slot_indices(
     indices: list[int],
     *,
-    placements: Sequence[_RelativePlacementStepSpec],
+    placements: Sequence[RelativePlacementStepSpec],
     axis: str,
     object_configs: Mapping[str, Mapping[str, Any]],
     container_config: Mapping[str, Any] | None,
@@ -1149,7 +1149,7 @@ def _order_inside_container_slot_indices(
 
 
 def _relative_initial_axis_value(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
     *,
     axis_index: int,
     object_configs: Mapping[str, Mapping[str, Any]],
@@ -1190,7 +1190,7 @@ def _offset_position(
     ]
 
 
-def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
+def _make_relative_summary(spec: RelativePlacementSpec) -> dict[str, Any]:
     if spec.intent == "coordinated_pickment":
         summary = {
             "mode": "coordinated_pickment",
@@ -1248,7 +1248,7 @@ def _make_relative_summary(spec: _RelativePlacementSpec) -> dict[str, Any]:
 
 
 def _relative_placement_summary(
-    placement: _RelativePlacementStepSpec,
+    placement: RelativePlacementStepSpec,
 ) -> dict[str, Any]:
     summary = {
         "intent": placement.intent,

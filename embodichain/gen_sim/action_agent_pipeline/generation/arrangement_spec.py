@@ -27,9 +27,9 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 )
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _ArrangementLineSpec,
-    _ArrangementLineStepSpec,
-    _SceneObject,
+    ArrangementLineSpec,
+    ArrangementLineStepSpec,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _TABLETOP_OBJECT_CLEARANCE,
@@ -125,13 +125,13 @@ _COLOR_NAMES = (
 
 def _build_arrangement_line_spec_with_llm(
     *,
-    scene_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
     project_name: str,
     scene_dir: Path,
     task_description: str,
     model: str | None,
     task_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
-) -> _ArrangementLineSpec:
+) -> ArrangementLineSpec:
     background_objects = [
         obj for obj in scene_objects if obj.source_role == "background"
     ]
@@ -187,7 +187,7 @@ def _call_arrangement_task_llm(
 
 
 def _make_arrangement_scene_summary(
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
     *,
     scene_dir: Path,
 ) -> list[dict[str, Any]]:
@@ -202,12 +202,12 @@ def _apply_arrangement_task_response(
     *,
     response: Mapping[str, Any],
     table_source_uid: str,
-    scene_objects: list[_SceneObject],
-    rigid_objects: list[_SceneObject],
+    scene_objects: list[SceneObject],
+    rigid_objects: list[SceneObject],
     scene_dir: Path,
     task_description: str,
     check_static_obstacles: bool = False,
-) -> _ArrangementLineSpec:
+) -> ArrangementLineSpec:
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     table_obj = by_uid[table_source_uid]
     rigid_by_uid = {obj.source_uid: obj for obj in rigid_objects}
@@ -331,7 +331,7 @@ def _apply_arrangement_task_response(
             release_z=release_position[2],
         )
         steps.append(
-            _ArrangementLineStepSpec(
+            ArrangementLineStepSpec(
                 source_uid=source_uid,
                 runtime_uid=runtime_uids[source_uid],
                 slot_index=slot_index,
@@ -358,7 +358,7 @@ def _apply_arrangement_task_response(
         summary = "Arrange the selected objects in one left-to-right line."
     notes = str(response.get("basic_background_notes", "")).strip()
 
-    return _ArrangementLineSpec(
+    return ArrangementLineSpec(
         table_source_uid=table_source_uid,
         task_description=task_description,
         task_prompt_summary=summary,
@@ -438,15 +438,15 @@ def _arrangement_line_slot_positions(
 def _arrangement_collision_aware_line_slots(
     *,
     anchor_xy: Sequence[float],
-    table_obj: _SceneObject,
-    objects: Sequence[_SceneObject],
+    table_obj: SceneObject,
+    objects: Sequence[SceneObject],
     count: int,
     spacing: float,
     line_axis: str,
     scene_dir: Path,
     clearance: float,
     ignore_self_initial_overlap: bool = False,
-    hard_obstacle_objects: Sequence[_SceneObject] = (),
+    hard_obstacle_objects: Sequence[SceneObject] = (),
 ) -> tuple[list[list[float]], list[float]]:
     axis = _normalize_axis(line_axis)
     if count != len(objects):
@@ -593,7 +593,7 @@ class _ArrangementFootprint:
 
 
 def _arrangement_object_footprint(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> _ArrangementFootprint:
@@ -615,7 +615,7 @@ def _arrangement_object_footprint(
 
 
 def _source_object_xy_bounds(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> tuple[list[float], list[float]] | None:
@@ -683,7 +683,7 @@ def _arrangement_orientation_axis(
 
 
 def _arrangement_object_orientation(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     orientation_axis: str,
     scene_dir: Path,
@@ -705,9 +705,9 @@ def _arrangement_config_orientation(
 
 
 def _with_arrangement_generated_pose_targets(
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     gym_config: Mapping[str, Any],
-) -> _ArrangementLineSpec:
+) -> ArrangementLineSpec:
     table_config = _generated_table_config(gym_config, spec.table_source_uid)
     rigid_configs = _generated_rigid_object_configs(gym_config)
     if table_config is None:
@@ -719,14 +719,14 @@ def _with_arrangement_generated_pose_targets(
         if config is None:
             return _with_arrangement_generated_z_targets_fallback(spec, gym_config)
         generated_objects.append(
-            _SceneObject(
+            SceneObject(
                 source_uid=step.runtime_uid,
                 source_role="rigid_object",
                 config=dict(config),
             )
         )
 
-    table_obj = _SceneObject(
+    table_obj = SceneObject(
         source_uid=str(table_config.get("uid", spec.table_source_uid)),
         source_role="background",
         config=dict(table_config),
@@ -803,7 +803,7 @@ def _with_arrangement_generated_pose_targets(
                 release_position=release_position,
                 high_position=high_position,
                 size_score=_arrangement_object_size_score(
-                    _SceneObject(
+                    SceneObject(
                         source_uid=step.runtime_uid,
                         source_role="rigid_object",
                         config=dict(config),
@@ -826,9 +826,9 @@ def _with_arrangement_generated_pose_targets(
 
 
 def _with_arrangement_generated_z_targets_fallback(
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     gym_config: Mapping[str, Any],
-) -> _ArrangementLineSpec:
+) -> ArrangementLineSpec:
     init_z_by_uid = {
         str(obj.get("uid")): _clean_vector3(obj.get("init_pos", [0.0, 0.0, 0.0]))[2]
         for obj in gym_config.get("rigid_object", [])
@@ -1004,12 +1004,12 @@ def _arrangement_assignment_side(
 
 
 def _arrangement_plan_execution(
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     slots: Sequence[Sequence[float]],
     *,
-    generated_objects: Sequence[_SceneObject],
+    generated_objects: Sequence[SceneObject],
     rigid_configs: Mapping[str, Mapping[str, Any]],
-) -> tuple[str, list[_ArrangementLineStepSpec]] | None:
+) -> tuple[str, list[ArrangementLineStepSpec]] | None:
     groups = [
         [step for step in spec.steps if step.category == category]
         for category in spec.category_order
@@ -1110,12 +1110,12 @@ def _arrangement_plan_execution(
 
 
 def _arrangement_initial_side_order_fallback(
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     slots: Sequence[Sequence[float]],
     *,
     rigid_configs: Mapping[str, Mapping[str, Any]],
     footprint_by_uid: Mapping[str, _ArrangementFootprint],
-) -> tuple[str, list[_ArrangementLineStepSpec]] | None:
+) -> tuple[str, list[ArrangementLineStepSpec]] | None:
     """Match initial world-y order to slot order when category planning fails."""
     categories = {step.category for step in spec.steps}
     if spec.axis != "world_y" or spec.order_by != "explicit" or len(categories) < 2:
@@ -1180,12 +1180,12 @@ def _arrangement_initial_side_order_fallback(
 
 
 def _arrangement_initial_occupancy_schedule(
-    steps: Sequence[_ArrangementLineStepSpec],
+    steps: Sequence[ArrangementLineStepSpec],
     *,
     rigid_configs: Mapping[str, Mapping[str, Any]],
     footprint_by_uid: Mapping[str, _ArrangementFootprint],
     clearance: float,
-) -> tuple[list[_ArrangementLineStepSpec], dict[str, tuple[str, ...]], int] | None:
+) -> tuple[list[ArrangementLineStepSpec], dict[str, tuple[str, ...]], int] | None:
     target_bounds = {
         step.runtime_uid: _slot_xy_bounds(
             step.target_xy,
@@ -1254,7 +1254,7 @@ def _arrangement_initial_occupancy_schedule(
 
 
 def _arrangement_direction_cost(
-    steps: Sequence[_ArrangementLineStepSpec],
+    steps: Sequence[ArrangementLineStepSpec],
     slots: Sequence[Sequence[float]],
     *,
     rigid_configs: Mapping[str, Mapping[str, Any]],
@@ -1288,7 +1288,7 @@ def _arrangement_object_categories(
     value: Any,
     *,
     object_source_uids: Sequence[str],
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
 ) -> dict[str, str]:
     if value is None:
         return {uid: _base_name(rigid_by_uid[uid]) for uid in object_source_uids}
@@ -1308,7 +1308,7 @@ def _arrangement_object_categories(
 
 def _resolve_arrangement_object_uids(
     value: Any,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
 ) -> list[str]:
     values = _string_list(value)
     if not values:
@@ -1326,7 +1326,7 @@ def _resolve_arrangement_object_uids(
 
 def _resolve_rigid_uid(
     value: str,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
     *,
     field_name: str,
 ) -> str:
@@ -1442,11 +1442,11 @@ def _line_origin_with_perpendicular_offset(
 
 
 def _arrangement_hard_obstacle_objects(
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
     *,
     selected_source_uids: set[str],
     table_source_uid: str,
-) -> list[_SceneObject]:
+) -> list[SceneObject]:
     return [
         obj
         for obj in scene_objects
@@ -1460,7 +1460,7 @@ def _generated_arrangement_hard_obstacles(
     *,
     moved_runtime_uids: set[str],
     table_source_uid: str,
-) -> list[_SceneObject]:
+) -> list[SceneObject]:
     obstacles = []
     for config in _iter_generated_scene_object_configs(gym_config):
         if not isinstance(config, Mapping):
@@ -1471,7 +1471,7 @@ def _generated_arrangement_hard_obstacles(
         if runtime_uid in {"table", table_source_uid}:
             continue
         obstacles.append(
-            _SceneObject(
+            SceneObject(
                 source_uid=runtime_uid,
                 source_role="background",
                 config=dict(config),
@@ -1497,7 +1497,7 @@ def _normalize_anchor(value: Any) -> str:
 def _order_uids_by_size(
     source_uids: list[str],
     *,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
     scene_dir: Path,
     descending: bool,
 ) -> list[str]:
@@ -1514,7 +1514,7 @@ def _order_uids_by_size(
 def _order_uids_by_color(
     source_uids: list[str],
     *,
-    rigid_by_uid: Mapping[str, _SceneObject],
+    rigid_by_uid: Mapping[str, SceneObject],
     object_attributes: Mapping[str, Mapping[str, str]],
     ordered_colors: list[str],
 ) -> list[str]:
@@ -1551,7 +1551,7 @@ def _object_color(
 
 
 def _table_anchor_xy(
-    table_obj: _SceneObject,
+    table_obj: SceneObject,
     anchor: str,
     *,
     scene_dir: Path,
@@ -1567,7 +1567,7 @@ def _table_anchor_xy(
 
 
 def _arrangement_spacing(
-    objects: Sequence[_SceneObject],
+    objects: Sequence[SceneObject],
     *,
     scene_dir: Path,
 ) -> float:
@@ -1580,7 +1580,7 @@ def _arrangement_spacing(
 
 
 def _arrangement_object_size_score(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> float | None:
@@ -1593,7 +1593,7 @@ def _arrangement_object_size_score(
 
 
 def _arrangement_object_xy_extent(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> float | None:
@@ -1604,7 +1604,7 @@ def _arrangement_object_xy_extent(
     return max(extents)
 
 
-def _release_z_for_object(obj: _SceneObject) -> float:
+def _release_z_for_object(obj: SceneObject) -> float:
     init_pos = obj.config.get("init_pos")
     if isinstance(init_pos, Sequence) and len(init_pos) == 3:
         return round(float(init_pos[2]) + _DEFAULT_RELEASE_Z, 6)
@@ -1612,7 +1612,7 @@ def _release_z_for_object(obj: _SceneObject) -> float:
 
 
 def _source_mesh_world_bounds(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     scene_dir: Path,
 ) -> tuple[list[float], list[float]] | None:

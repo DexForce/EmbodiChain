@@ -29,7 +29,7 @@ from embodichain.gen_sim.action_agent_pipeline.contracts import (
     TASK_ROUTES as _TASK_ROUTES,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _SceneObject,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
     _base_name,
@@ -145,12 +145,12 @@ _TaskRouteSpec = TaskRouteSpec
 
 def _route_task_with_llm(
     *,
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
     project_name: str,
     task_description: str,
     model: str | None,
     task_router_llm_caller: Callable[..., Mapping[str, Any]] | None = None,
-) -> _TaskRouteSpec:
+) -> TaskRouteSpec:
     scene_summary = _make_task_router_scene_summary(scene_objects)
     if task_router_llm_caller is None:
         task_router_llm_caller = _call_task_router_llm
@@ -188,7 +188,7 @@ def _call_task_router_llm(
 
 
 def _make_task_router_scene_summary(
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -205,9 +205,9 @@ def _make_task_router_scene_summary(
 def _normalize_task_route_response(
     response: Mapping[str, Any],
     *,
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
     task_description: str,
-) -> _TaskRouteSpec:
+) -> TaskRouteSpec:
     route = _normalize_task_route(response.get("route"))
     confidence = _normalize_confidence(response.get("confidence", 0.0))
     reason = str(response.get("reason", "")).strip()
@@ -229,7 +229,7 @@ def _normalize_task_route_response(
     _validate_route_feasibility(route, scene_objects)
     if not reason:
         reason = f"Task router selected {route}."
-    return _TaskRouteSpec(
+    return TaskRouteSpec(
         route=route,
         confidence=confidence,
         reason=reason,
@@ -283,7 +283,7 @@ def _normalize_confidence(value: Any) -> float:
 
 def _validate_candidate_objects(
     candidate_objects: Sequence[str],
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
 ) -> None:
     known_uids = {obj.source_uid for obj in scene_objects}
     unknown = sorted(set(candidate_objects) - known_uids)
@@ -296,7 +296,7 @@ def _validate_candidate_objects(
 
 def _validate_route_feasibility(
     route: str,
-    scene_objects: Sequence[_SceneObject],
+    scene_objects: Sequence[SceneObject],
 ) -> None:
     rigid_count = sum(1 for obj in scene_objects if obj.source_role == "rigid_object")
     if (

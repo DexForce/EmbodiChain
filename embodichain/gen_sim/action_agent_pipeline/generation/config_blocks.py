@@ -29,9 +29,9 @@ import math
 import re
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _ArrangementLineSpec,
-    _RelativePlacementSpec,
-    _SceneObject,
+    ArrangementLineSpec,
+    RelativePlacementSpec,
+    SceneObject,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _clean_vector3,
@@ -97,7 +97,7 @@ def _target_body_scale_vector(
     return _clean_vector3(target_body_scale)
 
 
-def _source_body_scale(obj: _SceneObject) -> list[float]:
+def _source_body_scale(obj: SceneObject) -> list[float]:
     return _clean_vector3(obj.config.get("body_scale", [1.0, 1.0, 1.0]))
 
 
@@ -420,7 +420,7 @@ def _joint_pattern_count(pattern: str) -> int:
 
 def _make_relative_dataset_config(
     project_name: str,
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     relation_phrase: Callable[[str], str],
@@ -456,7 +456,7 @@ def _make_relative_dataset_config(
 
 def _make_arrangement_dataset_config(
     project_name: str,
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> dict[str, Any]:
@@ -485,7 +485,7 @@ def _make_arrangement_dataset_config(
     }
 
 
-def _arrangement_dataset_instruction(spec: _ArrangementLineSpec) -> str:
+def _arrangement_dataset_instruction(spec: ArrangementLineSpec) -> str:
     ordered = ", ".join(step.runtime_uid for step in spec.steps)
     return (
         "Move the selected objects to the table center and arrange them "
@@ -494,7 +494,7 @@ def _arrangement_dataset_instruction(spec: _ArrangementLineSpec) -> str:
 
 
 def _relative_dataset_instruction(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     relation_phrase: Callable[[str], str],
@@ -533,7 +533,7 @@ def _relative_dataset_instruction(
 
 def _make_background_config(
     scene_dir: Path,
-    obj: _SceneObject,
+    obj: SceneObject,
     mesh_normalizer: GlbGeometryNormalizer,
 ) -> dict[str, Any]:
     shape = _make_shape_config(scene_dir, obj.config, mesh_normalizer=mesh_normalizer)
@@ -555,7 +555,7 @@ def _make_background_config(
 def _make_relative_rigid_object_config(
     *,
     scene_dir: Path,
-    obj: _SceneObject,
+    obj: SceneObject,
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
@@ -582,7 +582,7 @@ def _make_relative_rigid_object_config(
 
 def _make_rigid_object_config(
     scene_dir: Path,
-    obj: _SceneObject,
+    obj: SceneObject,
     runtime_uid: str,
     body_scale: Any,
     max_convex_hull_num: int,
@@ -612,7 +612,7 @@ def _make_rigid_object_config(
 
 
 def _role_limited_max_convex_hull_num(
-    obj: _SceneObject,
+    obj: SceneObject,
     role_max_convex_hull_num: int,
 ) -> int:
     source_max_convex_hull_num = obj.config.get("max_convex_hull_num")
@@ -621,19 +621,19 @@ def _role_limited_max_convex_hull_num(
     return max(1, min(int(source_max_convex_hull_num), role_max_convex_hull_num))
 
 
-def _moved_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
+def _moved_rigid_object_max_convex_hull_num(obj: SceneObject) -> int:
     """Return the configured convex-decomposition limit for a moved object."""
     return _role_limited_max_convex_hull_num(obj, _MOVED_MAX_CONVEX_HULL_NUM)
 
 
-def _container_rigid_object_max_convex_hull_num(obj: _SceneObject) -> int:
+def _container_rigid_object_max_convex_hull_num(obj: SceneObject) -> int:
     """Return the configured convex-decomposition limit for a container."""
     return _role_limited_max_convex_hull_num(obj, _CONTAINER_MAX_CONVEX_HULL_NUM)
 
 
 def _relative_rigid_object_max_convex_hull_num(
     runtime_uid: str,
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
 ) -> int:
     for placement in spec.placements:
         if (

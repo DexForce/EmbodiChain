@@ -22,8 +22,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _StackingSpecLike,
-    _StackingStepLike,
+    StackingSpecLike,
+    StackingStepLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.diagnostic_common import (
     _format_runtime_object_registry,
@@ -52,7 +52,7 @@ __all__ = [
 def make_stacking_task_prompt(
     task_name: str,
     project_name: str,
-    spec: _StackingSpecLike,
+    spec: StackingSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -102,13 +102,13 @@ def make_stacking_task_prompt(
     )
 
 
-def _stacking_step_edge_count(step: _StackingStepLike) -> int:
+def _stacking_step_edge_count(step: StackingStepLike) -> int:
     return 3 if step.orientation_goal == "preserve" else 7
 
 
 def _stacking_step_prompt_block(
     start_edge: int,
-    step: _StackingStepLike,
+    step: StackingStepLike,
     *,
     object_anchored: bool,
     stack_mode: str,
@@ -163,7 +163,7 @@ def _stacking_step_prompt_block(
 
 def make_stacking_basic_background(
     project_name: str,
-    spec: _StackingSpecLike,
+    spec: StackingSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,
@@ -190,7 +190,7 @@ def make_stacking_basic_background(
     )
 
 
-def _stacking_object_background_line(step: _StackingStepLike) -> str:
+def _stacking_object_background_line(step: StackingStepLike) -> str:
     attrs = []
     if step.color:
         attrs.append(f"color={step.color}")
@@ -207,7 +207,7 @@ def _stacking_object_background_line(step: _StackingStepLike) -> str:
 
 
 def make_stacking_atom_actions_prompt(
-    spec: _StackingSpecLike,
+    spec: StackingSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -228,7 +228,7 @@ def make_stacking_atom_actions_prompt(
 
 
 def _stacking_atom_action_block(
-    step: _StackingStepLike,
+    step: StackingStepLike,
     *,
     object_anchored: bool,
     stack_mode: str,

@@ -21,7 +21,7 @@ from __future__ import annotations
 import torch
 
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
-    _CoordinatedGraspPair,
+    CoordinatedGraspPair,
 )
 from embodichain.utils.logger import log_warning
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix
@@ -41,7 +41,7 @@ __all__ = [
 
 
 def _select_ik_feasible_coordinated_grasp_pair(
-    candidates: list[_CoordinatedGraspPair],
+    candidates: list[CoordinatedGraspPair],
     *,
     object_initial_pose: torch.Tensor,
     object_target_pose: torch.Tensor | None,
@@ -54,7 +54,7 @@ def _select_ik_feasible_coordinated_grasp_pair(
     env,
     device,
     env_id: int = 0,
-) -> _CoordinatedGraspPair | None:
+) -> CoordinatedGraspPair | None:
     if not _has_coordinated_ik_api(env):
         return candidates[0] if candidates else None
     for candidate in candidates:
@@ -78,7 +78,7 @@ def _select_ik_feasible_coordinated_grasp_pair(
 
 
 def _select_coordinated_grasp_pair_tcp_roll_variant(
-    candidate: _CoordinatedGraspPair,
+    candidate: CoordinatedGraspPair,
     *,
     object_initial_pose: torch.Tensor,
     object_target_pose: torch.Tensor | None,
@@ -91,7 +91,7 @@ def _select_coordinated_grasp_pair_tcp_roll_variant(
     env,
     device,
     env_id: int = 0,
-) -> _CoordinatedGraspPair | None:
+) -> CoordinatedGraspPair | None:
     left_seed, right_seed = _current_coordinated_arm_qpos(env, device, env_id=env_id)
     left_object_to_eef = _select_coordinated_arm_tcp_roll_variant(
         candidate.left_object_to_eef,
@@ -132,7 +132,7 @@ def _select_coordinated_grasp_pair_tcp_roll_variant(
         and right_object_to_eef is candidate.right_object_to_eef
     ):
         return candidate
-    return _CoordinatedGraspPair(
+    return CoordinatedGraspPair(
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
         priority=candidate.priority,

@@ -32,7 +32,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders i
     _format_release_only_place_spec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    _RelativeSpecLike,
+    RelativeSpecLike,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.diagnostic_common import (
     _dual_relative_final_planning_rule,
@@ -76,7 +76,7 @@ __all__ = ["make_relative_task_prompt"]
 def make_relative_task_prompt(
     task_name: str,
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -189,7 +189,7 @@ def make_relative_task_prompt(
 def _make_coordinated_pickment_task_prompt(
     task_name: str,
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -246,7 +246,7 @@ def _make_coordinated_pickment_task_prompt(
 def _make_dual_relative_task_prompt(
     task_name: str,
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -300,7 +300,7 @@ def _make_dual_relative_task_prompt(
 def _make_hold_hover_task_prompt(
     task_name: str,
     project_name: str,
-    spec: _RelativeSpecLike,
+    spec: RelativeSpecLike,
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
@@ -359,7 +359,7 @@ def _make_hold_hover_task_prompt(
     )
 
 
-def _dual_relative_release_rule(spec: _RelativeSpecLike) -> str:
+def _dual_relative_release_rule(spec: RelativeSpecLike) -> str:
     if _uses_serial_dual_sequence(spec):
         return (
             "For this dependent dual-object task, complete the first object's "
