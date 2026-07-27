@@ -56,7 +56,6 @@ __all__ = [
     "SUCCESS_TERM_ALIASES",
     "SUCCESS_TERM_TYPES",
     "SUPPORTED_CONTROLS",
-    "TASK_GRAPH_CACHE_FILENAME",
     "TASK_GRAPH_FILENAME",
     "TASK_PROMPT_FILENAME",
     "TASK_ROUTE_ARRANGEMENT_LINE",
@@ -76,8 +75,8 @@ TASK_PROMPT_FILENAME: Final = "task_prompt.txt"
 TASK_GRAPH_FILENAME: Final = "task_graph.json"
 BASIC_BACKGROUND_FILENAME: Final = "basic_background.txt"
 ATOM_ACTIONS_FILENAME: Final = "atom_actions.txt"
-# Runtime-generated cache files are separate from the portable config bundle.
-TASK_GRAPH_CACHE_FILENAME: Final = "agent_task_graph.json"
+# The derived runtime cache is colocated with its config bundle but is not a
+# required generation artifact and may be deleted or regenerated independently.
 COMPILED_GRAPH_FILENAME: Final = "agent_compiled_graph.json"
 
 # These identifiers cross Gym registration, generated configs, sensor templates,

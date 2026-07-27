@@ -37,11 +37,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     write_config_bundle as _write_config_bundle,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
-    _ArrangementLineSpec,
+    ArrangementLineSpec,
     GeneratedActionAgentConfigPaths,
-    _RelativePlacementSpec,
-    _SceneObject,
-    _StackingSpec,
+    RelativePlacementSpec,
+    SceneObject,
+    StackingSpec,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
@@ -130,20 +130,18 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry impo
     _with_self_relative_absolute_targets,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
+    _build_object_manipulation_spec_with_llm,
+    _call_object_manipulation_task_llm,
     _normalize_relative_relation,
     _relative_relation_phrase,
     _relative_scene_runtime_uid_mapping,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.object_manipulation_spec import (
-    _build_object_manipulation_spec_with_llm,
-    _call_object_manipulation_task_llm,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
     _TASK_ROUTE_ARRANGEMENT_LINE,
     _TASK_ROUTE_OBJECT_MANIPULATION,
     _TASK_ROUTE_STACKING,
     _TASK_ROUTE_UNSUPPORTED,
-    _TaskRouteSpec,
+    TaskRouteSpec,
     _call_task_router_llm,
     _route_task_with_llm,
 )
@@ -442,7 +440,7 @@ def _apply_source_scene_transforms(
     gym_config: dict[str, Any],
     *,
     runtime_uids: Mapping[str, str],
-    by_uid: Mapping[str, _SceneObject],
+    by_uid: Mapping[str, SceneObject],
     table_top_z: float,
     preserve_source_scene_geometry: bool,
     source_scene_body_scale_mode: str | None,
@@ -484,7 +482,7 @@ def _build_arrangement_line_bundle(
     *,
     scene_dir: Path,
     source_config: Mapping[str, Any],
-    spec: _ArrangementLineSpec,
+    spec: ArrangementLineSpec,
     project_name: str,
     task_name: str,
     robot_profile: RobotProfile,
@@ -627,7 +625,7 @@ def _build_arrangement_line_bundle(
     }
 
 
-def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
+def _make_arrangement_summary(spec: ArrangementLineSpec) -> dict[str, Any]:
     return {
         "mode": "arrangement_line",
         "axis": spec.axis,
@@ -661,7 +659,7 @@ def _make_arrangement_summary(spec: _ArrangementLineSpec) -> dict[str, Any]:
     }
 
 
-def _make_arrangement_debug_config(spec: _ArrangementLineSpec) -> dict[str, Any]:
+def _make_arrangement_debug_config(spec: ArrangementLineSpec) -> dict[str, Any]:
     return {
         "slots": [
             {
@@ -682,7 +680,7 @@ def _make_arrangement_debug_config(spec: _ArrangementLineSpec) -> dict[str, Any]
 
 def _with_task_route_summary(
     bundle: Mapping[str, Any],
-    route: _TaskRouteSpec,
+    route: TaskRouteSpec,
 ) -> dict[str, Any]:
     routed_bundle = dict(bundle)
     routed_summary = dict(routed_bundle.get("summary", {}))
@@ -695,7 +693,7 @@ def _build_stacking_bundle(
     *,
     scene_dir: Path,
     source_config: Mapping[str, Any],
-    spec: _StackingSpec,
+    spec: StackingSpec,
     project_name: str,
     task_name: str,
     robot_profile: RobotProfile,
@@ -839,7 +837,7 @@ def _build_stacking_bundle(
 
 def _make_stacking_dataset_config(
     project_name: str,
-    spec: _StackingSpec,
+    spec: StackingSpec,
     *,
     robot_profile: RobotProfile,
 ) -> dict[str, Any]:
@@ -978,8 +976,8 @@ def _maybe_apply_tabletop_z_placement(
 def _source_objects_by_runtime_uid(
     runtime_uids_by_source_uid: Mapping[str, str],
     *,
-    by_uid: Mapping[str, _SceneObject],
-) -> dict[str, _SceneObject]:
+    by_uid: Mapping[str, SceneObject],
+) -> dict[str, SceneObject]:
     return {
         runtime_uid: by_uid[source_uid]
         for source_uid, runtime_uid in runtime_uids_by_source_uid.items()
@@ -989,7 +987,7 @@ def _source_objects_by_runtime_uid(
 
 def _maybe_apply_source_scene_xy_scale(
     gym_config: dict[str, Any],
-    source_objects_by_runtime_uid: Mapping[str, _SceneObject],
+    source_objects_by_runtime_uid: Mapping[str, SceneObject],
     *,
     source_scene_body_scale_mode: str | None,
 ) -> None:
@@ -1022,7 +1020,7 @@ def _scene_xy_scale_anchor(gym_config: Mapping[str, Any]) -> list[float]:
 
 def _scale_scene_init_pos_xy_about_anchor(
     obj_config: dict[str, Any],
-    source_obj: _SceneObject,
+    source_obj: SceneObject,
     anchor_xy: Sequence[float],
 ) -> None:
     source_scale = _source_body_scale(source_obj)
@@ -1052,7 +1050,7 @@ def _scale_ratio(current: float, source: float) -> float:
 
 def _maybe_preserve_source_scene_vertical_contacts(
     gym_config: dict[str, Any],
-    source_objects_by_runtime_uid: Mapping[str, _SceneObject],
+    source_objects_by_runtime_uid: Mapping[str, SceneObject],
     *,
     preserve_source_scene_geometry: bool,
     source_scene_body_scale_mode: str | None,
@@ -1074,7 +1072,7 @@ def _maybe_preserve_source_scene_vertical_contacts(
 
 def _preserve_source_scene_vertical_boundary(
     obj_config: dict[str, Any],
-    source_obj: _SceneObject,
+    source_obj: SceneObject,
 ) -> None:
     source_scale = _source_body_scale(source_obj)
     current_scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
@@ -1182,7 +1180,7 @@ def _round_pose_value(value: float) -> float:
 def _runtime_object_registry(
     runtime_uids_by_source_uid: Mapping[str, str],
     *,
-    by_uid: Mapping[str, _SceneObject],
+    by_uid: Mapping[str, SceneObject],
 ) -> list[dict[str, str]]:
     entries = []
     for source_uid, runtime_uid in sorted(
@@ -1232,9 +1230,9 @@ def _validate_surface_release_clearance(surface_release_clearance: float) -> flo
 
 
 def _with_relative_surface_release_clearance(
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     surface_release_clearance: float,
-) -> _RelativePlacementSpec:
+) -> RelativePlacementSpec:
     placements = tuple(
         replace(placement, surface_clearance=surface_release_clearance)
         for placement in spec.placements
@@ -1247,7 +1245,7 @@ def _with_relative_surface_release_clearance(
 
 
 def _source_scene_body_scale(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     target_body_scale: float | list[float] | tuple[float, float, float],
     mode: str,
@@ -1266,7 +1264,7 @@ def _source_scene_body_scale(
 
 
 def _source_scene_body_scale_override(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     target_body_scale: float | list[float] | tuple[float, float, float],
     source_scene_body_scale_mode: str | None,
@@ -1282,7 +1280,7 @@ def _source_scene_body_scale_override(
 
 def _maybe_apply_source_scene_body_scale(
     obj_config: dict[str, Any],
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     target_body_scale: float | list[float] | tuple[float, float, float],
     source_scene_body_scale_mode: str | None,
@@ -1297,7 +1295,7 @@ def _maybe_apply_source_scene_body_scale(
 
 
 def _relative_target_body_scale(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     target_body_scale: float | list[float] | tuple[float, float, float],
     preserve_source_target_body_scale: bool,
@@ -1321,7 +1319,7 @@ def _relative_target_body_scale(
 
 
 def _relative_generated_object_body_scale(
-    obj: _SceneObject,
+    obj: SceneObject,
     *,
     moved_source_uids: set[str],
     target_body_scale: float | list[float] | tuple[float, float, float],
@@ -1348,7 +1346,7 @@ def _build_relative_placement_bundle(
     *,
     scene_dir: Path,
     source_config: Mapping[str, Any],
-    spec: _RelativePlacementSpec,
+    spec: RelativePlacementSpec,
     project_name: str,
     task_name: str,
     robot_profile: RobotProfile,

@@ -25,6 +25,13 @@ from embodichain.gen_sim.action_agent_pipeline.defaults import (
 )
 
 __all__ = [
+    "ArrangementLineSpec",
+    "ArrangementLineStepSpec",
+    "RelativePlacementSpec",
+    "RelativePlacementStepSpec",
+    "SceneObject",
+    "StackingSpec",
+    "StackingStepSpec",
     "_ArrangementLineSpec",
     "_ArrangementLineStepSpec",
     "_StackingSpec",
@@ -56,14 +63,18 @@ class GeneratedActionAgentConfigPaths:
 
 
 @dataclass(frozen=True)
-class _SceneObject:
+class SceneObject:
+    """One source scene entity used during deterministic config generation."""
+
     source_uid: str
     source_role: str
     config: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class _RelativePlacementStepSpec:
+class RelativePlacementStepSpec:
+    """One normalized object placement in a relative-manipulation task."""
+
     intent: str
     moved_source_uid: str
     reference_source_uid: str
@@ -88,7 +99,9 @@ class _RelativePlacementStepSpec:
 
 
 @dataclass(frozen=True)
-class _RelativePlacementSpec:
+class RelativePlacementSpec:
+    """Normalized semantic and geometric plan for relative manipulation."""
+
     intent: str
     table_source_uid: str
     moved_source_uid: str
@@ -103,7 +116,7 @@ class _RelativePlacementSpec:
     action_sketch: list[str]
     release_offset: list[float]
     high_offset: list[float]
-    placements: tuple[_RelativePlacementStepSpec, ...]
+    placements: tuple[RelativePlacementStepSpec, ...]
     reference_is_initial_pose: bool = False
     release_position: list[float] | None = None
     high_position: list[float] | None = None
@@ -120,7 +133,9 @@ class _RelativePlacementSpec:
 
 
 @dataclass(frozen=True)
-class _ArrangementLineStepSpec:
+class ArrangementLineStepSpec:
+    """One object's resolved slot and execution metadata in a line layout."""
+
     source_uid: str
     runtime_uid: str
     slot_index: int
@@ -139,7 +154,9 @@ class _ArrangementLineStepSpec:
 
 
 @dataclass(frozen=True)
-class _ArrangementLineSpec:
+class ArrangementLineSpec:
+    """Resolved multi-object line-arrangement plan."""
+
     table_source_uid: str
     task_description: str
     task_prompt_summary: str
@@ -148,7 +165,7 @@ class _ArrangementLineSpec:
     order_direction: str
     axis: str
     anchor: str
-    steps: tuple[_ArrangementLineStepSpec, ...]
+    steps: tuple[ArrangementLineStepSpec, ...]
     line_origin_xy: list[float]
     spacing: float
     layout_clearance: float
@@ -157,7 +174,9 @@ class _ArrangementLineSpec:
 
 
 @dataclass(frozen=True)
-class _StackingStepSpec:
+class StackingStepSpec:
+    """One resolved layer in a deterministic stacking plan."""
+
     source_uid: str
     runtime_uid: str
     layer_index: int
@@ -172,7 +191,9 @@ class _StackingStepSpec:
 
 
 @dataclass(frozen=True)
-class _StackingSpec:
+class StackingSpec:
+    """Resolved bottom-to-top stacking plan."""
+
     table_source_uid: str
     task_description: str
     task_prompt_summary: str
@@ -181,6 +202,18 @@ class _StackingSpec:
     order_by: str
     anchor: str
     anchor_xy: list[float]
-    steps: tuple[_StackingStepSpec, ...]
+    steps: tuple[StackingStepSpec, ...]
     anchor_source_uid: str | None = None
     anchor_runtime_uid: str | None = None
+
+
+# Historical private names remain aliases while package-internal consumers
+# migrate. Alias identity matters because callers use these classes in
+# ``dataclasses.replace`` and occasional ``isinstance`` checks.
+_SceneObject = SceneObject
+_RelativePlacementStepSpec = RelativePlacementStepSpec
+_RelativePlacementSpec = RelativePlacementSpec
+_ArrangementLineStepSpec = ArrangementLineStepSpec
+_ArrangementLineSpec = ArrangementLineSpec
+_StackingStepSpec = StackingStepSpec
+_StackingSpec = StackingSpec

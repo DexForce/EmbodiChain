@@ -53,10 +53,7 @@ class CompileAgent:
             setattr(self, key, value)
 
     def generate(self, **kwargs: Any):
-        log_dir = kwargs.get(
-            "log_dir", Path(database_agent_prompt_dir) / self.task_name
-        )
-        file_path = Path(log_dir) / COMPILED_GRAPH_FILENAME
+        file_path = self._compiled_graph_path(kwargs.get("log_dir"))
         task_graph = extract_json_object(kwargs["task_graph"])
         task_graph_hash = _stable_json_hash(task_graph)
 
@@ -87,6 +84,25 @@ class CompileAgent:
         file_path.write_text(content, encoding="utf-8")
         log_info(f"Compiled graph artifact saved to {file_path}")
         return file_path, kwargs, content
+
+    def _compiled_graph_path(self, log_dir: str | Path | None) -> Path:
+        """Resolve the compiled artifact beside its owning config by default.
+
+        An explicit ``log_dir`` remains authoritative for compatibility.
+        Callers without an agent config retain the historical global fallback,
+        while normal CLI runs produce a self-contained config directory.
+        """
+        if log_dir is not None:
+            directory = Path(log_dir).expanduser()
+        elif self.config_dir:
+            directory = Path(self.config_dir).expanduser()
+            # Older direct callers sometimes passed agent_config.json itself
+            # despite the historical ``config_dir`` name.
+            if directory.suffix.lower() == ".json":
+                directory = directory.parent
+        else:
+            directory = Path(database_agent_prompt_dir) / self.task_name
+        return directory / COMPILED_GRAPH_FILENAME
 
     def act(self, graph_file_path, **kwargs: Any):
         graph_file_path = Path(graph_file_path)

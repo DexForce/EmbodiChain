@@ -161,6 +161,8 @@ class AgenticGenSimEnv(EmbodiedEnv):
         self.compile_agent = CompileAgent(
             **sections["CompileAgent"],
             task_name=task_name,
+            # CompileAgent owns file-vs-directory normalization so every caller
+            # follows the same cache-location policy.
             config_dir=agent_config_path,
         )
 
@@ -511,6 +513,17 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     # -------------------- get action list --------------------
     def create_demo_action_list(self, regenerate=False, *args, **kwargs):
+        """Compatibility hook that executes the precomputed task graph online.
+
+        The shared demo runner expects this historical method name. Action
+        Agent cannot return an offline list because atomic actions depend on
+        live simulator state, so execution is delegated to the explicitly
+        named internal method and returns an ``ExecutedActionList`` marker.
+        """
+        return self._execute_precomputed_task_graph(regenerate, *args, **kwargs)
+
+    def _execute_precomputed_task_graph(self, regenerate=False, *args, **kwargs):
+        """Compile and execute the configured task graph against the live env."""
         with timing_scope(
             "action_agent.generate_graph_for_actions",
             metadata={"regenerate": bool(regenerate)},

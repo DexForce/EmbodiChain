@@ -41,6 +41,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
 )
 
 __all__ = [
+    "TaskRouteSpec",
     "_TASK_ROUTE_ARRANGEMENT_LINE",
     "_TASK_ROUTE_OBJECT_MANIPULATION",
     "_TASK_ROUTE_STACKING",
@@ -119,7 +120,9 @@ _STACKING_ROUTE_OVERRIDE_WARNING = (
 
 
 @dataclass(frozen=True)
-class _TaskRouteSpec:
+class TaskRouteSpec:
+    """Validated semantic route selected for one generated task."""
+
     route: str
     confidence: float
     reason: str
@@ -134,6 +137,10 @@ class _TaskRouteSpec:
             "candidate_objects": list(self.candidate_objects),
             "warnings": list(self.warnings),
         }
+
+
+# Preserve the historical package-internal spelling during gradual migration.
+_TaskRouteSpec = TaskRouteSpec
 
 
 def _route_task_with_llm(
