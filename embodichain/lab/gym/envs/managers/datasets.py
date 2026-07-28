@@ -31,10 +31,20 @@ from tensordict import TensorDict
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.data.enum import LeRobotKey
-from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
+
+CAMERA_IMAGE_FRAMES = {
+    "color": "",
+    "color_right": "_right",
+}
+CAMERA_AUXILIARY_FRAMES = {
+    "depth",
+    "depth_right",
+    "mask",
+    "mask_right",
+}
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -363,29 +373,33 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
-
                     for frame_name, space in value.items():
-                        # TODO: Support depth (uint16) and mask (also uint16 or uint8)
-                        if frame_name not in ["color", "color_right"]:
-                            logger.log_error(
-                                f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
                             )
-
-                        features[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = {
-                            "dtype": "video" if self.use_videos else "image",
-                            "shape": (sensor.cfg.height, sensor.cfg.width, 3),
-                            "names": ["height", "width", "channel"],
-                        }
-
-                        if is_stereo:
-                            features[
-                                f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"
-                            ] = {
+                            features[feature_key] = {
                                 "dtype": "video" if self.use_videos else "image",
                                 "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                                 "names": ["height", "width", "channel"],
                             }
+                        elif frame_name in CAMERA_AUXILIARY_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
+                            )
+                            features[feature_key] = {
+                                "dtype": str(space.dtype),
+                                "shape": space.shape,
+                                "names": (
+                                    ["height", "width"]
+                                    if len(space.shape) == 2
+                                    else ["height", "width", "channel"]
+                                ),
+                            }
+                        else:
+                            logger.log_warning(
+                                f"Unsupported camera frame '{frame_name}' in sensor '{sensor_name}'"
+                            )
                 elif isinstance(sensor, ContactSensor):
                     for frame_name, space in value.items():
                         features[f"{sensor_name}.{frame_name}"] = {
@@ -412,6 +426,31 @@ class LeRobotRecorder(Functor):
 
         self._modify_feature_names(features)
         return features
+
+    @staticmethod
+    def _camera_feature_key(sensor_name: str, frame_name: str) -> str:
+        """Return the LeRobot feature key for a camera frame.
+
+        Args:
+            sensor_name: Camera sensor identifier.
+            frame_name: Camera frame name from the observation space.
+
+        Returns:
+            A LeRobot-compatible feature key.
+
+        Raises:
+            ValueError: If the frame is not a supported image, depth, or mask frame.
+        """
+        if frame_name in CAMERA_IMAGE_FRAMES:
+            suffix = CAMERA_IMAGE_FRAMES[frame_name]
+            return f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}{suffix}"
+
+        if frame_name in CAMERA_AUXILIARY_FRAMES:
+            modality, _, side = frame_name.partition("_")
+            suffix = f"_{side}" if side else ""
+            return f"{LeRobotKey.OBS_PREFIX.value}{modality}.{sensor_name}{suffix}"
+
+        raise ValueError(f"Unsupported camera frame: {frame_name}")
 
     def _add_nested_features(
         self, features: Dict, key: str, space: gym.spaces.Dict
@@ -517,18 +556,18 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
+                    for frame_name in value:
+                        if (
+                            frame_name not in CAMERA_IMAGE_FRAMES
+                            and frame_name not in CAMERA_AUXILIARY_FRAMES
+                        ):
+                            continue
 
-                    color_data = obs["sensor"][sensor_name]["color"]
-                    color_img = color_data[:, :, :3].cpu()
-                    frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = color_img
-
-                    if is_stereo:
-                        color_right_data = obs["sensor"][sensor_name]["color_right"]
-                        color_right_img = color_right_data[:, :, :3].cpu()
-                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = (
-                            color_right_img
-                        )
+                        feature_key = self._camera_feature_key(sensor_name, frame_name)
+                        frame_data = obs["sensor"][sensor_name][frame_name]
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            frame_data = frame_data[:, :, :3]
+                        frame[feature_key] = frame_data.cpu()
                 elif isinstance(sensor, ContactSensor):
                     for frame_name in value.keys():
                         frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][

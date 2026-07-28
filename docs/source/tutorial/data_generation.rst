@@ -83,7 +83,14 @@ Important parameters are:
 - **env.control_parts**: Controlled robot parts in the environment.
 
 
-In the current implementation, ``LeRobotRecorder`` stores robot state and action features following LeRobot official format: ``observation.state`` for joint positions, ``action`` for applied actions, and ``observation.images.{sensor_name}`` for camera images.
+``LeRobotRecorder`` stores robot state and action features following the LeRobot
+format: ``observation.state`` for joint positions, ``action`` for applied
+actions, and ``observation.images.{sensor_name}`` for RGB camera images. When a
+camera also produces depth or segmentation data, the recorder preserves those
+numeric arrays under ``observation.depth.{sensor_name}`` and
+``observation.mask.{sensor_name}``. Stereo-camera keys use the ``_right``
+suffix. Depth and mask arrays retain their source dtype and shape; the
+``use_videos`` option applies only to RGB images.
 
 Step 2: Prepare the Action Configuration
 ----------------------------------------
