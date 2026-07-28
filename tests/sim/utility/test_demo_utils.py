@@ -27,7 +27,9 @@ from unittest.mock import Mock, call, patch
 from embodichain.lab.sim.utility.demo_utils import (
     DemoRecording,
     add_demo_args,
+    create_default_sim,
     format_tensor,
+    maybe_init_gpu_physics,
     maybe_open_window,
     maybe_wait_for_user,
     replay_trajectory,
@@ -65,6 +67,44 @@ def test_shutdown_sim_calls_destroy():
     sim = Mock(spec=["destroy"])
     shutdown_sim(sim)
     sim.destroy.assert_called_once()
+
+
+def test_create_default_sim_forwards_num_envs_and_headless():
+    args = SimpleNamespace(headless=True, device="cpu", renderer="auto")
+    with (
+        patch("embodichain.lab.sim.SimulationManager") as mock_sm,
+        patch("embodichain.lab.sim.SimulationManagerCfg") as mock_cfg_cls,
+    ):
+        create_default_sim(args, num_envs=4, add_default_light=False)
+    cfg_kwargs = mock_cfg_cls.call_args.kwargs
+    assert cfg_kwargs["num_envs"] == 4
+    assert cfg_kwargs["headless"] is True
+    mock_sm.assert_called_once_with(mock_cfg_cls.return_value)
+
+
+def test_create_default_sim_adds_light_when_requested():
+    args = SimpleNamespace(headless=True, device="cpu", renderer="auto")
+    with (
+        patch("embodichain.lab.sim.SimulationManager") as mock_sm,
+        patch("embodichain.lab.sim.SimulationManagerCfg"),
+    ):
+        sim = create_default_sim(args, num_envs=1, add_default_light=True)
+    sim.add_light.assert_called_once()
+    mock_sm.return_value.add_light.assert_called_once()
+
+
+def test_maybe_init_gpu_physics_inits_when_enabled():
+    sim = Mock(spec=["is_use_gpu_physics", "init_gpu_physics"])
+    sim.is_use_gpu_physics = True
+    maybe_init_gpu_physics(sim)
+    sim.init_gpu_physics.assert_called_once()
+
+
+def test_maybe_init_gpu_physics_skips_when_disabled():
+    sim = Mock(spec=["is_use_gpu_physics", "init_gpu_physics"])
+    sim.is_use_gpu_physics = False
+    maybe_init_gpu_physics(sim)
+    sim.init_gpu_physics.assert_not_called()
 
 
 def _make_recording_sim():

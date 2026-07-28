@@ -97,17 +97,19 @@ def create_default_sim(
     height: int = 1080,
     physics_dt: float = 1.0 / 100.0,
     arena_space: float = 2.5,
+    num_envs: int = 1,
     add_default_light: bool = True,
 ) -> SimulationManager:
     """Create a SimulationManager with common demo defaults.
 
     Args:
         args: Parsed command-line arguments. Expected to contain ``headless``,
-            ``device``, ``renderer`` and ``arena_space``.
+            ``device`` and ``renderer``.
         width: Window/render width.
         height: Window/render height.
         physics_dt: Physics simulation timestep.
         arena_space: Arena space size.
+        num_envs: Number of parallel environments to simulate.
         add_default_light: Whether to add a default point light.
 
     Returns:
@@ -124,6 +126,7 @@ def create_default_sim(
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=physics_dt,
         arena_space=arena_space,
+        num_envs=num_envs,
     )
     sim = SimulationManager(cfg)
     if add_default_light:
