@@ -61,3 +61,17 @@ own representations, but they must not reimplement these policy decisions.
 The generated runtime UID and ObjectSemantics.label are the shared object
 identity for orientation classification. Generation-only descriptions and mesh
 filenames must not change a policy decision that Runtime cannot reproduce.
+
+Arrangement planning ownership
+------------------------------
+
+The generation.arrangement_spec module is the stable orchestration entry for
+line-arrangement generation. It delegates response normalization to
+generation.arrangement_intent, collision-aware slot geometry to
+generation.arrangement_layout, and arm assignment plus occupancy scheduling to
+generation.arrangement_execution.
+
+These modules form a one-way dependency graph: execution may use layout
+primitives, while intent, layout, and execution must not import the
+arrangement_spec entry module. Moving a helper must preserve the existing
+arrangement_spec import when that name is part of its compatibility surface.
