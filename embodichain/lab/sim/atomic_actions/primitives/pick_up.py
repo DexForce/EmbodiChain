@@ -131,37 +131,12 @@ class PickUp(AtomicAction):
                 ValueError,
             )
 
-    def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
-        sem = target.semantics
-        if target.grasp_xpos is None and not isinstance(
-            sem.affordance, AntipodalAffordance
-        ):
-            logger.log_error(
-                "PickUp requires an AntipodalAffordance when grasp_xpos is not set.",
-                ValueError,
-            )
-        if sem.entity is None:
-            logger.log_error(
-                "PickUp requires an entity on the target semantics.", ValueError
-            )
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
-        )
-        if target.grasp_xpos is None:
-            is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
-        else:
-            grasp_xpos = self.builder.resolve_pose_target(
-                target.grasp_xpos, n_envs=self.n_envs
-            )
-            if self.cfg.rotate_upright is not None:
-                self._apply_upright_rotation(sem, grasp_xpos)
-            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
-        if not self.builder.all_envs_success(is_success):
-            logger.log_warning("PickUp failed to resolve a grasp pose.")
-            return self._fail(state)
+    def _get_full_pickup_trajectory(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_arm_qpos: torch.Tensor,
+        last_qpos: torch.Tensor,
+    ):
         pre_grasp_xpos = self.builder.apply_local_offset(
             grasp_xpos, -self.approach_direction * self.cfg.pre_grasp_distance
         )
@@ -206,15 +181,11 @@ class PickUp(AtomicAction):
             arm_dof=self.arm_dof,
             cfg=self.cfg,
         )
-        success = approach_success & lift_success
+        is_success = approach_success & lift_success
 
         hand_close_path = self.builder.interpolate_hand_qpos(
             self.hand_open_qpos, self.hand_close_qpos, n_waypoints=n_close
         )
-
-        # Allocate from the actually-returned phase lengths so collision-aware
-        # planners (which preserve their own sample count) are not forced into
-        # the requested n_approach / n_lift counts.
         n_approach_actual = approach_arm.shape[1]
         n_lift_actual = lift_arm.shape[1]
         full = torch.empty(
@@ -222,7 +193,7 @@ class PickUp(AtomicAction):
             dtype=torch.float32,
             device=self.device,
         )
-        full[:, :, :] = state.last_qpos.unsqueeze(1)
+        full[:, :, :] = last_qpos.unsqueeze(1)
         full[:, :n_approach_actual, self.arm_joint_ids] = approach_arm
         full[:, :n_approach_actual, self.hand_joint_ids] = self.hand_open_qpos
         full[:, n_approach_actual : n_approach_actual + n_close, self.arm_joint_ids] = (
@@ -235,6 +206,43 @@ class PickUp(AtomicAction):
         full[:, n_approach_actual + n_close :, self.hand_joint_ids] = (
             self.hand_close_qpos
         )
+        return is_success, full
+
+    def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
+        sem = target.semantics
+        if target.grasp_xpos is None and not isinstance(
+            sem.affordance, AntipodalAffordance
+        ):
+            logger.log_error(
+                "PickUp requires an AntipodalAffordance when grasp_xpos is not set.",
+                ValueError,
+            )
+        if sem.entity is None:
+            logger.log_error(
+                "PickUp requires an entity on the target semantics.", ValueError
+            )
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            arm_qpos_from_state(state, self.arm_joint_ids),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+        if target.grasp_xpos is None:
+            is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
+        else:
+            grasp_xpos = self.builder.resolve_pose_target(
+                target.grasp_xpos, n_envs=self.n_envs
+            )
+            if self.cfg.rotate_upright is not None:
+                self._apply_upright_rotation(sem, grasp_xpos)
+            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
+        if not self.builder.all_envs_success(is_success):
+            logger.log_warning("PickUp failed to resolve a grasp pose.")
+            return self._fail(state)
+
+        is_success, full = self._get_full_pickup_trajectory(
+            grasp_xpos, start_arm_qpos, state.last_qpos
+        )
 
         obj_poses = sem.entity.get_local_pose(to_matrix=True)
         object_to_eef = torch.bmm(pose_inv(obj_poses), grasp_xpos)
@@ -242,7 +250,7 @@ class PickUp(AtomicAction):
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         return ActionResult(
-            success=success,
+            success=is_success,
             trajectory=full,
             next_state=WorldState(
                 last_qpos=full[:, -1, :].clone(),

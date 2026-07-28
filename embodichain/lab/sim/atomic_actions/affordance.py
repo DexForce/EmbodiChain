@@ -136,6 +136,29 @@ class AntipodalAffordance(Affordance):
             results.append((grasp_poses, costs))
         return results
 
+    def get_dual_arm_valid_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        left_to_right_arm_direction: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+        middle_empty_ratio: float = 0.4,
+    ) -> list[dict | None]:
+        if self._generator is None:
+            self._init_generator()
+        approach_direction = self._resolve_approach_direction(approach_direction)
+        results = []
+        for i, obj_pose in enumerate(obj_poses):
+            result = self._generator.get_dual_arm_valid_grasp_poses(
+                object_pose=obj_pose,
+                approach_direction=approach_direction,
+                left_to_right_arm_direction=left_to_right_arm_direction,
+                middle_empty_ratio=middle_empty_ratio,
+            )
+            results.append(result)
+        return results
+
     def get_best_grasp_poses(
         self,
         obj_poses: torch.Tensor,

@@ -25,12 +25,15 @@ import torch
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix
 
+from embodichain.lab.sim.planners import MoveType, PlanState
 from ..core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
     CoordinatedHeldObjectState,
     CoordinatedPickmentTarget,
+    GraspTarget,
+    ObjectSemantics,
     WorldState,
 )
 from ..trajectory import TrajectoryBuilder
@@ -387,7 +390,7 @@ class _DualArmHelpers:
 class CoordinatedPickment(AtomicAction):
     """Pick and move a single object pinched by two hands."""
 
-    TargetType: ClassVar[type] = CoordinatedPickmentTarget
+    TargetType: ClassVar[type] = GraspTarget
 
     _assemble_phase = _DualArmHelpers._assemble_phase
     _compose_dual_arm_trajectory = _DualArmHelpers._compose_dual_arm_trajectory
@@ -464,416 +467,258 @@ class CoordinatedPickment(AtomicAction):
                     ValueError,
                 )
 
-    def _resolve_object_initial_pose(
-        self, target: CoordinatedPickmentTarget
-    ) -> torch.Tensor:
-        if target.object_initial_pose is not None:
-            return self._resolve_pose(target.object_initial_pose, "object_initial_pose")
-        if target.object_semantics.entity is None:
-            logger.log_error(
-                "CoordinatedPickmentTarget requires object_initial_pose when "
-                "object_semantics.entity is not provided.",
-                ValueError,
-            )
-        return self._resolve_pose(
-            target.object_semantics.entity.get_local_pose(to_matrix=True),
-            "object_initial_pose",
-        )
-
-    def _resolve_target(
+    def _resolve_grasp_pose(
         self,
-        target: CoordinatedPickmentTarget,
-    ) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        CoordinatedHeldObjectState,
-    ]:
-        object_initial_pose = self._resolve_object_initial_pose(target)
-        object_target_pose = self._resolve_pose(
-            target.object_target_pose, "object_target_pose"
-        )
-        left_object_to_eef = self._resolve_pose(
-            target.left_object_to_eef, "left_object_to_eef"
-        )
-        right_object_to_eef = self._resolve_pose(
-            target.right_object_to_eef, "right_object_to_eef"
-        )
-
-        left_grasp_xpos = torch.bmm(object_initial_pose, left_object_to_eef)
-        right_grasp_xpos = torch.bmm(object_initial_pose, right_object_to_eef)
-        left_target_xpos = torch.bmm(object_target_pose, left_object_to_eef)
-        right_target_xpos = torch.bmm(object_target_pose, right_object_to_eef)
-        held_state = CoordinatedHeldObjectState(
-            semantics=target.object_semantics,
-            left_object_to_eef=left_object_to_eef,
-            right_object_to_eef=right_object_to_eef,
-            left_grasp_xpos=left_grasp_xpos,
-            right_grasp_xpos=right_grasp_xpos,
-        )
-        return (
-            object_initial_pose,
-            object_target_pose,
-            left_grasp_xpos,
-            right_grasp_xpos,
-            left_target_xpos,
-            right_target_xpos,
-            held_state,
-        )
-
-    def _compute_segment_lengths(self) -> dict[str, int]:
-        n_close = max(2, self.cfg.hand_interp_steps)
-        n_hold = max(0, self.cfg.hold_steps)
-        n_motion = self.cfg.sample_interval - n_close - n_hold
-        n_approach = n_motion // 3
-        n_lift = n_motion // 3
-        n_move = n_motion - n_approach - n_lift
-        if min(n_approach, n_lift, n_move) < 2:
-            logger.log_error(
-                "Not enough waypoints for coordinated pickment. Please increase "
-                "sample_interval or decrease hand_interp_steps/hold_steps.",
-                ValueError,
-            )
-        return {
-            "approach": n_approach,
-            "close": n_close,
-            "lift": n_lift,
-            "move": n_move,
-            "hold": n_hold,
-        }
-
-    def get_segment_lengths(self) -> dict[str, int]:
-        return self._compute_segment_lengths()
-
-    def _compute_pre_grasp_xpos(self, grasp_xpos: torch.Tensor) -> torch.Tensor:
-        grasp_z = grasp_xpos[:, :3, 2]
-        return self.builder.apply_local_offset(
-            grasp_xpos, -grasp_z * self.cfg.pre_grasp_distance
-        )
-
-    def _select_motion_keyframe_indices(self, n_waypoints: int) -> torch.Tensor:
-        n_keyframes = min(max(2, int(self.cfg.object_motion_keyframes)), n_waypoints)
-        return (
-            torch.linspace(
-                0,
-                n_waypoints - 1,
-                steps=n_keyframes,
-                device=self.device,
-            )
-            .round()
-            .to(dtype=torch.long)
-        )
-
-    def _as_success_mask(self, success: bool | torch.Tensor) -> torch.Tensor:
-        if isinstance(success, torch.Tensor):
-            success = success.to(device=self.device, dtype=torch.bool).reshape(-1)
-            if success.numel() == 1:
-                return success.repeat(self.n_envs)
-            if success.numel() != self.n_envs:
-                logger.log_error(
-                    "IK success mask must contain one value per environment, "
-                    f"but got shape {tuple(success.shape)}.",
-                    ValueError,
-                )
-            return success
-        return torch.full(
-            (self.n_envs,), bool(success), dtype=torch.bool, device=self.device
-        )
-
-    def _log_ik_failures(
-        self,
-        control_part: str,
-        target_name: str,
-        failed_mask: torch.Tensor,
-    ) -> None:
-        failed_env_ids = torch.nonzero(failed_mask, as_tuple=False).flatten().tolist()
-        if failed_env_ids:
-            logger.log_warning(
-                f"Failed to compute IK for {control_part} {target_name} in "
-                f"environment(s) {failed_env_ids}."
-            )
-
-    def _plan_masked_arm_trajectory(
-        self,
-        control_part: str,
-        start_qpos: torch.Tensor,
-        target_poses: torch.Tensor,
-        n_waypoints: int,
-        active_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        n_state = target_poses.shape[1]
-        keyframe_qpos = torch.zeros(
-            (self.n_envs, n_state, start_qpos.shape[-1]),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        success_mask = active_mask.clone()
-        qpos_seed = start_qpos
-        for target_idx in range(n_state):
-            ik_success, qpos = self.robot.compute_ik(
-                pose=target_poses[:, target_idx],
-                name=control_part,
-                joint_seed=qpos_seed,
-            )
-            ik_success = self._as_success_mask(ik_success)
-            failed_mask = success_mask & ~ik_success
-            self._log_ik_failures(
-                control_part, f"target state {target_idx}", failed_mask
-            )
-            success_mask &= ik_success
-            qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
-            qpos_seed = torch.where(success_mask[:, None], qpos, qpos_seed)
-            keyframe_qpos[:, target_idx] = qpos_seed
-
-        keyframe_qpos = torch.cat([start_qpos.unsqueeze(1), keyframe_qpos], dim=1)
-        trajectory = (
-            self.builder.plan_joint_traj(
-                keyframe_qpos[:, 0], keyframe_qpos[:, -1], n_waypoints
-            )
-            if n_state == 1
-            else self._interpolate_keyframe_qpos(keyframe_qpos, n_waypoints)
-        )
-        return success_mask, trajectory
-
-    def _plan_synchronized_object_motion(
-        self,
+        semantics: ObjectSemantics,
         left_start_qpos: torch.Tensor,
         right_start_qpos: torch.Tensor,
-        object_pose_traj: torch.Tensor,
-        left_object_to_eef: torch.Tensor,
-        right_object_to_eef: torch.Tensor,
-        active_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        n_waypoints = object_pose_traj.shape[1]
-        keyframe_indices = self._select_motion_keyframe_indices(n_waypoints)
-        left_traj = torch.zeros(
-            (self.n_envs, len(keyframe_indices), left_start_qpos.shape[-1]),
+    ):
+        obj_poses = semantics.entity.get_local_pose(to_matrix=True)
+        left_solver = self.robot._solvers.get("left_arm", None)
+        right_solver = self.robot._solvers.get("right_arm", None)
+        if left_solver is None or right_solver is None:
+            logger.log_error(
+                "CoordinatedPickment requires both left_arm and right_arm solvers "
+                "to be configured in the robot.",
+                ValueError,
+            )
+        left_root_pose = self.robot.get_link_pose(
+            link_name=left_solver.root_link_name, to_matrix=True
+        )
+        right_root_pose = self.robot.get_link_pose(
+            link_name=right_solver.root_link_name, to_matrix=True
+        )
+        left_to_right_direc = right_root_pose[:, :3, 3] - left_root_pose[:, :3, 3]
+        left_to_right_direc = left_to_right_direc / torch.linalg.norm(
+            left_to_right_direc, dim=-1, keepdim=True
+        )
+        grasp_poses_result = semantics.affordance.get_dual_arm_valid_grasp_poses(
+            obj_poses=obj_poses,
+            left_to_right_arm_direction=left_to_right_direc,
+            approach_direction=torch.tensor([0.0, 0.0, -1.0], device=self.device),
+        )
+
+        n_envs = obj_poses.shape[0]
+        n_left_max_pose = 0
+        n_right_max_pose = 0
+        for i in range(n_envs):
+            left_result = grasp_poses_result[i]["left"]
+            right_result = grasp_poses_result[i]["right"]
+            if left_result is None or right_result is None:
+                logger.log_warning(
+                    f"Failed to find valid dual-arm grasp poses for {i}-th enviroment."
+                )
+                continue
+            n_left_max_pose = max(n_left_max_pose, left_result["grasp_poses"].shape[0])
+            n_right_max_pose = max(
+                n_right_max_pose, right_result["grasp_poses"].shape[0]
+            )
+        if n_left_max_pose == 0 or n_right_max_pose == 0:
+            logger.log_error(
+                "Failed to find valid dual-arm grasp poses for any environment.",
+                ValueError,
+            )
+
+        left_grasp_xpos_padding = torch.zeros(
+            (n_envs, n_left_max_pose, 4, 4), dtype=torch.float32, device=self.device
+        )
+        right_grasp_xpos_padding = torch.zeros(
+            (n_envs, n_right_max_pose, 4, 4), dtype=torch.float32, device=self.device
+        )
+        left_grasp_costs_padding = torch.full(
+            (n_envs, n_left_max_pose),
+            fill_value=float("inf"),
             dtype=torch.float32,
             device=self.device,
         )
-        right_traj = torch.zeros(
-            (self.n_envs, len(keyframe_indices), right_start_qpos.shape[-1]),
+        right_grasp_costs_padding = torch.full(
+            (n_envs, n_right_max_pose),
+            fill_value=float("inf"),
             dtype=torch.float32,
             device=self.device,
         )
-        left_qpos_seed = left_start_qpos
-        right_qpos_seed = right_start_qpos
-        success_mask = active_mask.clone()
-        for keyframe_col, waypoint_idx in enumerate(keyframe_indices.tolist()):
-            left_xpos = torch.bmm(object_pose_traj[:, waypoint_idx], left_object_to_eef)
-            right_xpos = torch.bmm(
-                object_pose_traj[:, waypoint_idx], right_object_to_eef
-            )
-            left_success, left_qpos = self.robot.compute_ik(
-                pose=left_xpos,
-                name=self.cfg.left_arm_control_part,
-                joint_seed=left_qpos_seed,
-            )
-            right_success, right_qpos = self.robot.compute_ik(
-                pose=right_xpos,
-                name=self.cfg.right_arm_control_part,
-                joint_seed=right_qpos_seed,
-            )
-            left_success = self._as_success_mask(left_success)
-            right_success = self._as_success_mask(right_success)
-            self._log_ik_failures(
-                self.cfg.left_arm_control_part,
-                f"object waypoint {waypoint_idx}",
-                success_mask & ~left_success,
-            )
-            self._log_ik_failures(
-                self.cfg.right_arm_control_part,
-                f"object waypoint {waypoint_idx}",
-                success_mask & ~right_success,
-            )
-            success_mask &= left_success & right_success
-            left_qpos = torch.as_tensor(
-                left_qpos, dtype=torch.float32, device=self.device
-            )
-            right_qpos = torch.as_tensor(
-                right_qpos, dtype=torch.float32, device=self.device
-            )
-            left_qpos_seed = torch.where(
-                success_mask[:, None], left_qpos, left_qpos_seed
-            )
-            right_qpos_seed = torch.where(
-                success_mask[:, None], right_qpos, right_qpos_seed
-            )
-            left_traj[:, keyframe_col] = left_qpos_seed
-            right_traj[:, keyframe_col] = right_qpos_seed
 
-        return (
-            success_mask,
-            self._interpolate_qpos_keyframes(left_traj, keyframe_indices, n_waypoints),
-            self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
-        )
+        for i in range(n_envs):
+            left_result = grasp_poses_result[i]["left"]
+            right_result = grasp_poses_result[i]["right"]
+            if left_result is not None:
+                n_left_pose = left_result["grasp_poses"].shape[0]
+                left_grasp_xpos_padding[i, :n_left_pose] = left_result["grasp_poses"]
+                left_grasp_costs_padding[i, :n_left_pose] = left_result["total_cost"]
+                left_grasp_xpos_padding[i, n_left_pose:] = left_grasp_xpos_padding[
+                    i, :1
+                ]
+                left_grasp_costs_padding[i, n_left_pose:] = left_grasp_costs_padding[
+                    i, :1
+                ]
+            else:
+                left_grasp_xpos_padding[i, :] = torch.eye(4, device=self.device)
+                left_grasp_costs_padding[i, :] = float("inf")
+            if right_result is not None:
+                n_right_pose = right_result["grasp_poses"].shape[0]
+                right_grasp_xpos_padding[i, :n_right_pose] = right_result["grasp_poses"]
+                right_grasp_costs_padding[i, :n_right_pose] = right_result["total_cost"]
+                right_grasp_xpos_padding[i, n_right_pose:] = right_grasp_xpos_padding[
+                    i, :1
+                ]
+                right_grasp_costs_padding[i, n_right_pose:] = right_grasp_costs_padding[
+                    i, :1
+                ]
+            else:
+                right_grasp_xpos_padding[i, :] = torch.eye(4, device=self.device)
+                right_grasp_costs_padding[i, :] = float("inf")
 
-    def execute(
-        self, target: CoordinatedPickmentTarget, state: WorldState
-    ) -> ActionResult:
-        (
-            object_initial_pose,
-            object_target_pose,
-            left_grasp_xpos,
-            right_grasp_xpos,
-            left_target_xpos,
-            right_target_xpos,
-            held_state,
-        ) = self._resolve_target(target)
-        left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(state)
-        segments = self._compute_segment_lengths()
-        left_pre_grasp_xpos = self._compute_pre_grasp_xpos(left_grasp_xpos)
-        right_pre_grasp_xpos = self._compute_pre_grasp_xpos(right_grasp_xpos)
-        left_approach_targets = torch.stack(
-            [left_pre_grasp_xpos, left_grasp_xpos], dim=1
+        # TODO: masked ik valid grasp poses
+        # TODO: find nearest rotation symmetric pose
+        left_best_idx = torch.argmin(left_grasp_costs_padding, dim=1)
+        right_best_idx = torch.argmin(right_grasp_costs_padding, dim=1)
+        left_grasp_xpos = left_grasp_xpos_padding[torch.arange(n_envs), left_best_idx]
+        right_grasp_xpos = right_grasp_xpos_padding[
+            torch.arange(n_envs), right_best_idx
+        ]
+        return left_grasp_xpos, right_grasp_xpos
+
+    def _get_full_pickup_trajectory(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_arm_qpos: torch.Tensor,
+        approach_direction: torch.Tensor,
+        hand_open_qpos: torch.Tensor,
+        hand_close_qpos: torch.Tensor,
+        control_part: str,
+    ):
+        pre_grasp_xpos = self.builder.apply_local_offset(
+            grasp_xpos, -approach_direction * self.cfg.pre_grasp_distance
         )
-        right_approach_targets = torch.stack(
-            [right_pre_grasp_xpos, right_grasp_xpos], dim=1
-        )
-        success_mask = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
-        success_mask, left_approach_traj = self._plan_masked_arm_trajectory(
-            self.cfg.left_arm_control_part,
-            left_start_qpos,
-            left_approach_targets,
-            segments["approach"],
-            success_mask,
-        )
-        success_mask, right_approach_traj = self._plan_masked_arm_trajectory(
-            self.cfg.right_arm_control_part,
-            right_start_qpos,
-            right_approach_targets,
-            segments["approach"],
-            success_mask,
+        arm_dof = start_arm_qpos.shape[-1]
+        hand_dof = hand_open_qpos.shape[-1]
+        n_approach, n_close, n_lift = self.builder.split_three_phase(
+            self.cfg.sample_interval,
+            self.cfg.hand_interp_steps,
+            first_phase_name="approach",
+            third_phase_name="lift",
         )
 
-        left_grasp_qpos = left_approach_traj[:, -1]
-        right_grasp_qpos = right_approach_traj[:, -1]
-        approach_trajectory = self._assemble_phase(
-            state,
-            left_approach_traj,
-            right_approach_traj,
-            self._repeat_qpos(self.left_hand_open_qpos, segments["approach"]),
-            self._repeat_qpos(self.right_hand_open_qpos, segments["approach"]),
-        )
-
-        close_trajectory = self._assemble_phase(
-            state,
-            self._repeat_qpos(left_grasp_qpos, segments["close"]),
-            self._repeat_qpos(right_grasp_qpos, segments["close"]),
-            self._interpolate_qpos(
-                self.left_hand_open_qpos,
-                self.left_hand_close_qpos,
-                segments["close"],
-            ),
-            self._interpolate_qpos(
-                self.right_hand_open_qpos,
-                self.right_hand_close_qpos,
-                segments["close"],
-            ),
-        )
-
-        lift_object_pose = self.builder.apply_local_offset(
-            object_initial_pose,
-            torch.tensor([0.0, 0.0, self.cfg.lift_height], device=self.device),
-        )
-        lift_object_traj = self._interpolate_object_pose(
-            object_initial_pose,
-            lift_object_pose,
-            segments["lift"],
-            include_orientation=False,
-        )
-        success_mask, left_lift_traj, right_lift_traj = (
-            self._plan_synchronized_object_motion(
-                left_grasp_qpos,
-                right_grasp_qpos,
-                lift_object_traj,
-                held_state.left_object_to_eef,
-                held_state.right_object_to_eef,
-                success_mask,
-            )
-        )
-
-        left_lift_qpos = left_lift_traj[:, -1]
-        right_lift_qpos = right_lift_traj[:, -1]
-        lift_trajectory = self._assemble_phase(
-            state,
-            left_lift_traj,
-            right_lift_traj,
-            self._repeat_qpos(self.left_hand_close_qpos, segments["lift"]),
-            self._repeat_qpos(self.right_hand_close_qpos, segments["lift"]),
-        )
-
-        move_object_traj = self._interpolate_object_pose(
-            lift_object_pose,
-            object_target_pose,
-            segments["move"],
-            include_orientation=True,
-        )
-        success_mask, left_move_traj, right_move_traj = (
-            self._plan_synchronized_object_motion(
-                left_lift_qpos,
-                right_lift_qpos,
-                move_object_traj,
-                held_state.left_object_to_eef,
-                held_state.right_object_to_eef,
-                success_mask,
-            )
-        )
-
-        left_target_qpos = left_move_traj[:, -1]
-        right_target_qpos = right_move_traj[:, -1]
-        move_trajectory = self._assemble_phase(
-            state,
-            left_move_traj,
-            right_move_traj,
-            self._repeat_qpos(self.left_hand_close_qpos, segments["move"]),
-            self._repeat_qpos(self.right_hand_close_qpos, segments["move"]),
-        )
-
-        hold_trajectory = torch.empty(
-            (self.n_envs, 0, self.robot_dof), dtype=torch.float32, device=self.device
-        )
-        if segments["hold"] > 0:
-            hold_trajectory = self._assemble_phase(
-                state,
-                self._repeat_qpos(left_target_qpos, segments["hold"]),
-                self._repeat_qpos(right_target_qpos, segments["hold"]),
-                self._repeat_qpos(self.left_hand_close_qpos, segments["hold"]),
-                self._repeat_qpos(self.right_hand_close_qpos, segments["hold"]),
-            )
-
-        full = torch.cat(
+        target_states_list = [
             [
-                approach_trajectory,
-                close_trajectory,
-                lift_trajectory,
-                move_trajectory,
-                hold_trajectory,
-            ],
-            dim=1,
+                PlanState(xpos=pre_grasp_xpos[i], move_type=MoveType.EEF_MOVE),
+                PlanState(xpos=grasp_xpos[i], move_type=MoveType.EEF_MOVE),
+            ]
+            for i in range(self.n_envs)
+        ]
+        approach_success, approach_arm = self.builder.plan_arm_traj(
+            target_states_list,
+            start_arm_qpos,
+            n_approach,
+            control_part=control_part,
+            arm_dof=arm_dof,
+            cfg=self.cfg,
         )
-        full = torch.where(
-            success_mask[:, None, None],
-            full,
-            state.last_qpos.to(self.device)[:, None, :],
+
+        grasp_arm_qpos = approach_arm[:, -1, :]
+        lift_xpos = self.builder.apply_local_offset(
+            grasp_xpos,
+            torch.tensor([0, 0, 1], device=self.device) * self.cfg.lift_height,
         )
-        coordinated_held_object = CoordinatedHeldObjectState(
-            semantics=held_state.semantics,
-            left_object_to_eef=held_state.left_object_to_eef,
-            right_object_to_eef=held_state.right_object_to_eef,
-            left_grasp_xpos=left_target_xpos,
-            right_grasp_xpos=right_target_xpos,
+        target_states_list = [
+            [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
+            for i in range(self.n_envs)
+        ]
+        lift_success, lift_arm = self.builder.plan_arm_traj(
+            target_states_list,
+            grasp_arm_qpos,
+            n_lift,
+            control_part=control_part,
+            arm_dof=arm_dof,
+            cfg=self.cfg,
+        )
+        is_success = approach_success & lift_success
+
+        hand_close_path = self.builder.interpolate_hand_qpos(
+            hand_open_qpos, hand_close_qpos, n_waypoints=n_close
+        )
+        n_approach_actual = approach_arm.shape[1]
+        n_lift_actual = lift_arm.shape[1]
+
+        full_arm_traj = torch.empty(
+            (self.n_envs, n_approach_actual + n_close + n_lift_actual, arm_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full_hand_traj = torch.empty(
+            (self.n_envs, n_approach_actual + n_close + n_lift_actual, hand_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        # approach
+        full_arm_traj[:, :n_approach_actual, :] = approach_arm
+        full_hand_traj[:, :n_approach_actual, :] = hand_open_qpos
+        # close
+        full_arm_traj[:, n_approach_actual : n_approach_actual + n_close, :] = (
+            grasp_arm_qpos.unsqueeze(1)
+        )
+        full_hand_traj[:, n_approach_actual : n_approach_actual + n_close, :] = (
+            hand_close_path
+        )
+        # lift
+        full_arm_traj[:, n_approach_actual + n_close :, :] = lift_arm
+        full_hand_traj[:, n_approach_actual + n_close :, :] = hand_close_qpos
+        return is_success, full_arm_traj, full_hand_traj
+
+    def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
+        left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(state)
+        left_grasp_xpos, right_grasp_xpos = self._resolve_grasp_pose(
+            target.semantics, left_start_qpos, right_start_qpos
+        )
+        is_left_success, left_arm_traj, left_hand_traj = (
+            self._get_full_pickup_trajectory(
+                grasp_xpos=left_grasp_xpos,
+                start_arm_qpos=left_start_qpos,
+                approach_direction=torch.tensor([0, 0, -1], device=self.device),
+                hand_open_qpos=self.left_hand_open_qpos,
+                hand_close_qpos=self.left_hand_close_qpos,
+                control_part=self.cfg.left_arm_control_part,
+            )
+        )
+        is_right_success, right_arm_traj, right_hand_traj = (
+            self._get_full_pickup_trajectory(
+                grasp_xpos=right_grasp_xpos,
+                start_arm_qpos=right_start_qpos,
+                approach_direction=torch.tensor([0, 0, -1], device=self.device),
+                hand_open_qpos=self.right_hand_open_qpos,
+                hand_close_qpos=self.right_hand_close_qpos,
+                control_part=self.cfg.right_arm_control_part,
+            )
+        )
+        is_success = is_left_success & is_right_success
+        last_qpos = state.last_qpos.to(self.device)
+        full_dof = last_qpos.shape[-1]
+        n_left_waypoints = left_arm_traj.shape[1]
+        n_right_waypoints = right_arm_traj.shape[1]
+        n_waypoints = max(n_left_waypoints, n_right_waypoints)
+        full_trajectory = torch.empty(
+            (self.n_envs, n_waypoints, full_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full_trajectory[:, :, :] = last_qpos.unsqueeze(1)
+
+        # pading trajectory end to match the max length
+        full_trajectory[:, :n_left_waypoints, self.left_arm_joint_ids] = left_arm_traj
+        full_trajectory[:, :n_left_waypoints, self.left_hand_joint_ids] = left_hand_traj
+        full_trajectory[:, :n_right_waypoints, self.right_arm_joint_ids] = (
+            right_arm_traj
+        )
+        full_trajectory[:, :n_right_waypoints, self.right_hand_joint_ids] = (
+            right_hand_traj
         )
         return ActionResult(
-            success=success_mask,
-            trajectory=full,
+            success=is_success,
+            trajectory=full_trajectory,
             next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(),
+                last_qpos=full_trajectory[:, -1, :].clone(),
                 held_object=None,
-                coordinated_held_object=coordinated_held_object,
+                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 

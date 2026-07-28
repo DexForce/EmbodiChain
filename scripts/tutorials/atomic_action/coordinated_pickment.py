@@ -40,12 +40,11 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
+    GraspTarget,
     Affordance,
     AtomicActionEngine,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
-    CoordinatedPickmentTarget,
-    ObjectSemantics,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -60,6 +59,7 @@ from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    create_antipodal_semantics,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_toppra_motion_generator,
@@ -72,6 +72,10 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 PICKMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
+GRIPPER_MAX_OPEN_WIDTH = 0.080
+GRIPPER_FINGER_LENGTH = 0.088
+GRIPPER_ROOT_Z_WIDTH = 0.096
+GRIPPER_Y_THICKNESS = 0.040
 GRIPPER_TCP_Z = 0.121
 ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
@@ -375,16 +379,6 @@ def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> No
     obj.clear_dynamics()
 
 
-def create_object_semantics(obj: RigidObject, label: str) -> ObjectSemantics:
-    """Create minimal object semantics for manually specified grasps."""
-    return ObjectSemantics(
-        label=label,
-        geometry={},
-        affordance=Affordance(object_label=label),
-        entity=obj,
-    )
-
-
 def get_hand_open_close_qpos(
     robot: Robot,
     hand_control_part: str,
@@ -473,153 +467,10 @@ def rotate_pose_about_world_z(pose: torch.Tensor, yaw_deg: float) -> torch.Tenso
     return rotated_pose
 
 
-def build_object_grasp_poses(
-    object_pose: torch.Tensor,
-    local_vertices: torch.Tensor,
-    preset: PickmentObjectPreset,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build left/right TCP poses that pinch opposite sides of the object."""
-    local_min, local_max = compute_local_bounds(local_vertices)
-    extents = local_max - local_min
-    long_axis_idx = int(torch.argmax(extents).item())
-    axis_local = torch.zeros(3, dtype=torch.float32, device=device)
-    axis_local[long_axis_idx] = 1.0
-    long_axis = normalize_vector(
-        object_pose[:3, :3] @ axis_local,
-        torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device),
-    )
-
-    local_center = 0.5 * (local_min + local_max)
-    margin = extents[long_axis_idx] * preset.grasp_end_margin_ratio
-    left_local = local_center.clone()
-    right_local = local_center.clone()
-    left_local[long_axis_idx] = local_min[long_axis_idx] + margin
-    right_local[long_axis_idx] = local_max[long_axis_idx] - margin
-
-    world_min, world_max = compute_world_bounds(object_pose, local_vertices)
-    left_position = object_pose[:3, 3] + object_pose[:3, :3] @ left_local.to(device)
-    right_position = object_pose[:3, 3] + object_pose[:3, :3] @ right_local.to(device)
-    if preset.grasp_z_ratio is None:
-        grasp_z = world_max[2] + preset.grasp_z_clearance
-    else:
-        grasp_z = (
-            world_min[2]
-            + (world_max[2] - world_min[2]) * preset.grasp_z_ratio
-            + preset.grasp_z_clearance
-        )
-    left_position[2] = grasp_z
-    right_position[2] = grasp_z
-
-    z_axis = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
-    x_axis = normalize_vector(
-        torch.cross(long_axis, z_axis, dim=0),
-        torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device),
-    )
-    y_axis = normalize_vector(torch.cross(z_axis, x_axis, dim=0), long_axis)
-
-    left_pose = torch.eye(4, dtype=torch.float32, device=device)
-    left_pose[:3, 0] = x_axis
-    left_pose[:3, 1] = y_axis
-    left_pose[:3, 2] = z_axis
-    left_pose[:3, 3] = left_position
-
-    right_pose = torch.eye(4, dtype=torch.float32, device=device)
-    right_pose[:3, 0] = -x_axis
-    right_pose[:3, 1] = -y_axis
-    right_pose[:3, 2] = z_axis
-    right_pose[:3, 3] = right_position
-    return left_pose, right_pose
-
-
-def build_object_target_pose(
-    object_pose: torch.Tensor,
-    object_vertices: torch.Tensor,
-    preset: PickmentObjectPreset,
-    device: torch.device,
-) -> torch.Tensor:
-    """Build the target pose for the whole object."""
-    pose = rotate_pose_about_world_z(
-        object_pose.clone().to(device=device, dtype=torch.float32),
-        preset.target_world_yaw_deg,
-    )
-    pose[:3, 3] += torch.tensor(
-        preset.target_translation, dtype=torch.float32, device=device
-    )
-    bottom_z = compute_world_bounds(pose, object_vertices)[0][2]
-    pose[2, 3] += SUPPORT_SURFACE_Z + preset.surface_clearance + 0.10 - bottom_z
-    return pose
-
-
 def format_tensor(tensor: torch.Tensor) -> str:
     """Format tensor values for compact logging."""
     rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
     return str(rounded.tolist())
-
-
-def log_action_plan(
-    robot: Robot,
-    action_name: str,
-    traj: torch.Tensor,
-    joint_ids: list[int],
-    segments: dict[str, int] | None = None,
-) -> None:
-    """Log common action plan details."""
-    joint_names = [robot.joint_names[joint_id] for joint_id in joint_ids]
-    logger.log_info(f"{action_name} joint ids: {joint_ids}")
-    logger.log_info(f"{action_name} joint names: {joint_names}")
-    logger.log_info(f"{action_name} trajectory shape: {tuple(traj.shape)}")
-    if segments is not None:
-        logger.log_info(f"{action_name} trajectory segments: {segments}")
-
-
-def log_scene_targets(
-    object_label: str,
-    object_pose: torch.Tensor,
-    target_pose: torch.Tensor,
-    left_grasp_pose: torch.Tensor,
-    right_grasp_pose: torch.Tensor,
-) -> None:
-    """Log compact object and grasp target positions."""
-    logger.log_info(
-        "pickment scene: "
-        f"object={object_label}, "
-        f"object_origin={format_tensor(object_pose[:3, 3])}, "
-        f"target_origin={format_tensor(target_pose[:3, 3])}, "
-        f"left_grasp={format_tensor(left_grasp_pose[:3, 3])}, "
-        f"right_grasp={format_tensor(right_grasp_pose[:3, 3])}"
-    )
-
-
-def draw_pickment_target_axes(
-    sim: SimulationManager,
-    object_target_pose: torch.Tensor,
-    left_grasp_pose: torch.Tensor,
-    right_grasp_pose: torch.Tensor,
-    num_envs: int,
-) -> None:
-    """Draw semantic axes for the target object pose and two grasp TCP poses."""
-    draw_axis_marker(
-        sim,
-        "coordinated_pickment_object_target_axis",
-        broadcast_pose_batch(object_target_pose, num_envs=num_envs),
-        axis_len=0.12,
-        axis_size=0.005,
-    )
-    draw_axis_marker(
-        sim,
-        "coordinated_pickment_left_grasp_axis",
-        broadcast_pose_batch(left_grasp_pose, num_envs=num_envs),
-        axis_len=0.07,
-        axis_size=0.0035,
-    )
-    draw_axis_marker(
-        sim,
-        "coordinated_pickment_right_grasp_axis",
-        broadcast_pose_batch(right_grasp_pose, num_envs=num_envs),
-        axis_len=0.07,
-        axis_size=0.0035,
-    )
 
 
 def log_execution_state(
@@ -652,10 +503,9 @@ def run_coordinated_pickment_demo(
     settle_object(sim, obj, step=0)
     object_pose_batch = clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
-    object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
-    n_envs = object_pose_batch.shape[0]
-    object_vertices = get_local_vertices(obj)
-    object_semantics = create_object_semantics(obj, preset.label)
+    object_semantics = create_antipodal_semantics(
+        obj, label="dual_arm_pick", n_sample=10000, force_reannotate=False
+    )
     motion_gen = create_toppra_motion_generator(robot)
 
     left_open, left_close = get_hand_open_close_qpos(
@@ -687,70 +537,22 @@ def run_coordinated_pickment_demo(
     engine = AtomicActionEngine(motion_generator=motion_gen)
     engine.register(pickment_action)
 
-    left_grasp_pose, right_grasp_pose = build_object_grasp_poses(
-        object_pose,
-        object_vertices,
-        preset,
-        sim.device,
-    )
-    target_pose = build_object_target_pose(
-        object_pose,
-        object_vertices,
-        preset,
-        sim.device,
-    )
-    log_scene_targets(
-        preset.label,
-        object_pose,
-        target_pose,
-        left_grasp_pose,
-        right_grasp_pose,
-    )
-    if not args.no_vis_eef_axis:
-        draw_pickment_target_axes(
-            sim,
-            target_pose,
-            left_grasp_pose,
-            right_grasp_pose,
-            num_envs=n_envs,
-        )
-
-    left_object_to_eef = torch.bmm(
-        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
-        broadcast_pose_batch(left_grasp_pose, num_envs=n_envs),
-    )
-    right_object_to_eef = torch.bmm(
-        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
-        broadcast_pose_batch(right_grasp_pose, num_envs=n_envs),
-    )
-    pickment_target = CoordinatedPickmentTarget(
-        object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
-        object_semantics=object_semantics,
-        left_object_to_eef=left_object_to_eef,
-        right_object_to_eef=right_object_to_eef,
-        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
-    )
-
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to plan pickment..."
     )
 
     start_time = time.time()
-    success, traj, _ = engine.run([("coordinated_pickment", pickment_target)])
+
+    success, traj, _ = engine.run(
+        [("coordinated_pickment", GraspTarget(object_semantics))]
+    )
+
     logger.log_info(
         f"Plan coordinated pickment cost time: {time.time() - start_time:.2f} seconds"
     )
     if not success.all():
         logger.log_warning("Failed to plan coordinated pickment trajectory.")
         return
-    joint_ids = list(range(robot.dof))
-    log_action_plan(
-        robot,
-        "coordinated_pickment",
-        traj,
-        joint_ids,
-        pickment_action.get_segment_lengths(),
-    )
 
     if args.diagnose_plan:
         return
