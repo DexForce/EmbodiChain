@@ -14,17 +14,61 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Stable cross-stage contracts for the action-agent pipeline.
+"""Compatibility facade for the action-agent serialized protocol.
 
-This module intentionally contains protocol values rather than tuning knobs.
-Generation, prompt construction, graph compilation, and runtime execution all
-exchange these exact strings, so keeping one authoritative definition prevents
-otherwise silent drift between stages.
+New production modules must import from the owning ``protocol`` submodule or
+from ``config.defaults`` for numeric fallback policy. This explicit facade
+keeps historical external imports stable without retaining duplicate owners.
 """
 
 from __future__ import annotations
 
-from typing import Final
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    ROBOTIQ_ARG2F_140_CLOSE_QPOS,
+    ROBOTIQ_ARG2F_140_OPEN_QPOS,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
+    ARM_ACTION_KEYS,
+    ATOMIC_ACTION_CLASSES,
+    CONTROL_ARM,
+    CONTROL_HAND,
+    DUAL_ARM_NAME,
+    LEFT_ARM_ACTION_KEY,
+    LEFT_ARM_NAME,
+    MAX_COORDINATED_PAYLOADS,
+    OBJECT_ORIENTATION_AXES,
+    OBJECT_ORIENTATION_GOALS,
+    POSE_REFERENCES,
+    RIGHT_ARM_ACTION_KEY,
+    RIGHT_ARM_NAME,
+    SUPPORTED_CONTROLS,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
+    ACTION_AGENT_ENV_ID,
+    AGENT_CONFIG_FILENAME,
+    ATOM_ACTIONS_FILENAME,
+    BASIC_BACKGROUND_FILENAME,
+    COMPILED_GRAPH_FILENAME,
+    DEFAULT_VIEWER_CAMERA_UID,
+    FAST_GYM_CONFIG_FILENAME,
+    TASK_GRAPH_FILENAME,
+    TASK_PROMPT_FILENAME,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.success import (
+    SUCCESS_TERM_ALIASES,
+    SUCCESS_TERM_TYPES,
+    SuccessTerm,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.tasks import (
+    MANIPULATION_INTENTS,
+    RELATIVE_RELATIONS,
+    SIDE_RELATIONS,
+    TASK_ROUTE_ARRANGEMENT_LINE,
+    TASK_ROUTE_OBJECT_MANIPULATION,
+    TASK_ROUTE_STACKING,
+    TASK_ROUTE_UNSUPPORTED,
+    TASK_ROUTES,
+)
 
 __all__ = [
     "ACTION_AGENT_ENV_ID",
@@ -64,129 +108,3 @@ __all__ = [
     "TASK_ROUTE_UNSUPPORTED",
     "TASK_ROUTES",
 ]
-
-# Artifact names are a public compatibility contract. Runtime execution reads
-# TASK_GRAPH_FILENAME through TaskAgent.precomputed_task_graph. The three text
-# artifacts remain referenced by legacy Agent.prompt_kwargs for human review,
-# but the runtime does not interpret them or send them to another LLM.
-FAST_GYM_CONFIG_FILENAME: Final = "fast_gym_config.json"
-AGENT_CONFIG_FILENAME: Final = "agent_config.json"
-TASK_PROMPT_FILENAME: Final = "task_prompt.txt"
-TASK_GRAPH_FILENAME: Final = "task_graph.json"
-BASIC_BACKGROUND_FILENAME: Final = "basic_background.txt"
-ATOM_ACTIONS_FILENAME: Final = "atom_actions.txt"
-# The derived runtime cache is colocated with its config bundle but is not a
-# required generation artifact and may be deleted or regenerated independently.
-COMPILED_GRAPH_FILENAME: Final = "agent_compiled_graph.json"
-
-# These identifiers cross Gym registration, generated configs, sensor templates,
-# graph generation, and runtime dispatch. They must change as one protocol.
-ACTION_AGENT_ENV_ID: Final = "AtomicActionsAgent-v3"
-DEFAULT_VIEWER_CAMERA_UID: Final = "cam_high"
-
-LEFT_ARM_NAME: Final = "left_arm"
-RIGHT_ARM_NAME: Final = "right_arm"
-DUAL_ARM_NAME: Final = "dual_arm"
-LEFT_ARM_ACTION_KEY: Final = "left_arm_action"
-RIGHT_ARM_ACTION_KEY: Final = "right_arm_action"
-ARM_ACTION_KEYS: Final = frozenset({LEFT_ARM_ACTION_KEY, RIGHT_ARM_ACTION_KEY})
-
-# Keep the Robotiq fallback in one place. Robot profiles remain authoritative;
-# the environment uses these values only for legacy configs without profile data.
-ROBOTIQ_ARG2F_140_OPEN_QPOS: Final = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-ROBOTIQ_ARG2F_140_CLOSE_QPOS: Final = (0.7, -0.7, 0.7, -0.7, -0.7, 0.7)
-
-TASK_ROUTE_STACKING: Final = "stacking"
-TASK_ROUTE_ARRANGEMENT_LINE: Final = "arrangement_line"
-TASK_ROUTE_OBJECT_MANIPULATION: Final = "object_manipulation"
-TASK_ROUTE_UNSUPPORTED: Final = "unsupported"
-TASK_ROUTES: Final = frozenset(
-    {
-        TASK_ROUTE_STACKING,
-        TASK_ROUTE_ARRANGEMENT_LINE,
-        TASK_ROUTE_OBJECT_MANIPULATION,
-        TASK_ROUTE_UNSUPPORTED,
-    }
-)
-
-RELATIVE_RELATIONS: Final = frozenset(
-    {
-        "inside",
-        "on",
-        "left_of",
-        "right_of",
-        "front_of",
-        "behind",
-        "front_left_of",
-        "back_left_of",
-        "front_right_of",
-        "back_right_of",
-    }
-)
-SIDE_RELATIONS: Final = RELATIVE_RELATIONS - {"inside", "on"}
-MANIPULATION_INTENTS: Final = frozenset(
-    {"place_relative", "hold_hover", "coordinated_pickment"}
-)
-OBJECT_ORIENTATION_GOALS: Final = frozenset(
-    {"preserve", "upright", "lay_flat", "axis_align"}
-)
-OBJECT_ORIENTATION_AXES: Final = frozenset(
-    {"none", "x", "y", "long_axis", "short_axis"}
-)
-POSE_REFERENCES: Final = frozenset({"object", "absolute", "relative"})
-MAX_COORDINATED_PAYLOADS: Final = 4
-
-ATOMIC_ACTION_CLASSES: Final = frozenset(
-    {
-        "CoordinatedPickment",
-        "PickUp",
-        "MoveEndEffector",
-        "MoveJoints",
-        "MoveHeldObject",
-        "Place",
-    }
-)
-CONTROL_ARM: Final = "arm"
-CONTROL_HAND: Final = "hand"
-SUPPORTED_CONTROLS: Final = frozenset({CONTROL_ARM, CONTROL_HAND})
-
-
-class SuccessTerm:
-    """Canonical success predicate names serialized into generated configs."""
-
-    OBJECT_POSITION_NEAR: Final = "object_position_near"
-    OBJECT_XY_NEAR: Final = "object_xy_near"
-    OBJECT_IN_CONTAINER: Final = "object_in_container"
-    OBJECT_ON_OBJECT: Final = "object_on_object"
-    OBJECT_NOT_FALLEN: Final = "object_not_fallen"
-    OBJECT_AXIS_OFFSET_NEAR: Final = "object_axis_offset_near"
-    OBJECT_AXIS_NEAR: Final = "object_axis_near"
-    OBJECTS_COLLINEAR: Final = "objects_collinear"
-    OBJECTS_ORDERED: Final = "objects_ordered"
-    OBJECT_LIFTED: Final = "object_lifted"
-    OBJECT_HELD_BY_GRIPPER: Final = "object_held_by_gripper"
-    OBJECT_HELD_BY_BOTH_GRIPPERS: Final = "object_held_by_both_grippers"
-    BOTH_GRIPPERS_OPEN: Final = "both_grippers_open"
-    GRIPPERS_CLEAR_OF_OBJECT: Final = "grippers_clear_of_object"
-    BOTH_ARMS_AT_INITIAL_QPOS: Final = "both_arms_at_initial_qpos"
-
-
-SUCCESS_TERM_TYPES: Final = frozenset(
-    value
-    for name, value in vars(SuccessTerm).items()
-    if name.isupper() and isinstance(value, str)
-)
-
-# Aliases are accepted only for backward compatibility. New generated configs
-# always emit the canonical value on the right-hand side.
-SUCCESS_TERM_ALIASES: Final = {
-    "object_near_position": SuccessTerm.OBJECT_POSITION_NEAR,
-    "object_near_xy": SuccessTerm.OBJECT_XY_NEAR,
-    "object_on": SuccessTerm.OBJECT_ON_OBJECT,
-    "on_object": SuccessTerm.OBJECT_ON_OBJECT,
-    "not_fallen": SuccessTerm.OBJECT_NOT_FALLEN,
-    "object_relative_axis_near": SuccessTerm.OBJECT_AXIS_OFFSET_NEAR,
-    "object_coordinate_near": SuccessTerm.OBJECT_AXIS_NEAR,
-    "object_height_above_initial": SuccessTerm.OBJECT_LIFTED,
-    "object_gripper_near": SuccessTerm.OBJECT_HELD_BY_GRIPPER,
-}

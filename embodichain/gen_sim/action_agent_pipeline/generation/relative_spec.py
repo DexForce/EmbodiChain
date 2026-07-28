@@ -20,9 +20,17 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
-    MANIPULATION_INTENTS as _SUPPORTED_MANIPULATION_INTENTS,
+from embodichain.gen_sim.action_agent_pipeline.domain.object_semantics import (
+    FLAT_CARRIER_KEYWORDS as _FLAT_CARRIER_KEYWORDS,
+    SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
+    SHORT_CUP_LIKE_KEYWORDS as _SHORT_CUP_LIKE_KEYWORDS,
+    UPRIGHTABLE_KEYWORDS as _UPRIGHTABLE_KEYWORDS,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
     MAX_COORDINATED_PAYLOADS as _MAX_COORDINATED_PAYLOADS,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.tasks import (
+    MANIPULATION_INTENTS as _SUPPORTED_MANIPULATION_INTENTS,
     RELATIVE_RELATIONS as _RELATIVE_RELATIONS,
     SIDE_RELATIONS as _SIDE_RELATIONS,
 )
@@ -48,11 +56,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
 from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
     request_json_spec,
 )
-from embodichain.gen_sim.action_agent_pipeline.semantics import (
-    FLAT_CARRIER_KEYWORDS as _FLAT_CARRIER_KEYWORDS,
-    SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
-    SHORT_CUP_LIKE_KEYWORDS as _SHORT_CUP_LIKE_KEYWORDS,
-    UPRIGHTABLE_KEYWORDS as _UPRIGHTABLE_KEYWORDS,
+from embodichain.gen_sim.action_agent_pipeline.generation.relation_language import (
     relative_relation_phrase as _canonical_relative_relation_phrase,
 )
 

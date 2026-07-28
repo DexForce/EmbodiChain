@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 import re
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.tasks import (
     TASK_ROUTE_ARRANGEMENT_LINE as _TASK_ROUTE_ARRANGEMENT_LINE,
     TASK_ROUTE_OBJECT_MANIPULATION as _TASK_ROUTE_OBJECT_MANIPULATION,
     TASK_ROUTE_STACKING as _TASK_ROUTE_STACKING,

@@ -23,7 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     ROBOTIQ_ARG2F_140_CLOSE_QPOS as _ROBOTIQ_ARG2F_140_CLOSE_QPOS,
     ROBOTIQ_ARG2F_140_OPEN_QPOS as _ROBOTIQ_ARG2F_140_OPEN_QPOS,
 )

@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
     ARM_ACTION_KEYS,
     LEFT_ARM_ACTION_KEY,
     RIGHT_ARM_ACTION_KEY,

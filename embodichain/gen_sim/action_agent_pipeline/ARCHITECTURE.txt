@@ -1,0 +1,51 @@
+Action Agent Pipeline Architecture
+==================================
+
+Dependency direction
+--------------------
+
+The package follows this dependency direction:
+
+    config / protocol / domain
+                |
+                v
+        generation / runtime
+                |
+                v
+         agents / env_adapters
+                |
+                v
+                 cli
+
+The generation and runtime layers are peers. They must not import each other.
+Shared serialized values belong to protocol, shared object classification
+knowledge belongs to domain, and tunable or numeric fallback policy belongs to
+config.
+
+Canonical imports
+-----------------
+
+Production modules import constants from their owning modules, for example:
+
+    protocol.artifacts
+    protocol.actions
+    protocol.tasks
+    protocol.success
+    domain.object_semantics
+    generation.relation_language
+    config.defaults
+
+This keeps each dependency narrow and makes ownership visible at the import
+site.
+
+Compatibility facades
+---------------------
+
+The root contracts.py, semantics.py, and defaults.py modules preserve public
+imports used by external callers and recorded tooling. They contain explicit
+re-exports only and are not canonical dependencies for production modules.
+The env_adapters/tableware/success.py module serves the same purpose for the
+historical success-evaluator path.
+
+Compatibility aliases have no scheduled removal. New production code must not
+import through a facade, and architecture tests enforce this rule.

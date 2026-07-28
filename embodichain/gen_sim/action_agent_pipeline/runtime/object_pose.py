@@ -51,7 +51,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
     _object_world_vertices,
     _orthogonalized_axis,
 )
-from embodichain.gen_sim.action_agent_pipeline.semantics import (
+from embodichain.gen_sim.action_agent_pipeline.domain.object_semantics import (
     BOTTLE_LIKE_KEYWORDS as _BOTTLE_LIKE_KEYWORDS,
     SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
 )

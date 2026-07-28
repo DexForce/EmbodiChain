@@ -23,13 +23,15 @@ from typing import Any
 import math
 import warnings
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import ACTION_AGENT_ENV_ID
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_GENERATED_CONFIG_TASK_NAME,
     DEFAULT_MAX_EPISODES,
     DEFAULT_MAX_EPISODE_STEPS,
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     DEFAULT_TARGET_BODY_SCALE,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
+    ACTION_AGENT_ENV_ID,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     read_json as _read_json,

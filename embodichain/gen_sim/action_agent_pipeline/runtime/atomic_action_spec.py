@@ -29,7 +29,7 @@ from typing import Any
 
 import numpy as np
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
     ATOMIC_ACTION_CLASSES as SUPPORTED_ATOMIC_ACTION_CLASSES,
     MAX_COORDINATED_PAYLOADS as _MAX_COORDINATED_PAYLOADS,
     OBJECT_ORIENTATION_AXES as SUPPORTED_OBJECT_ORIENTATION_AXES,

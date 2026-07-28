@@ -30,9 +30,11 @@ from typing import Any
 
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
     LEFT_ARM_NAME,
     RIGHT_ARM_NAME,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.success import (
     SUCCESS_TERM_ALIASES,
     SuccessTerm,
 )

@@ -32,13 +32,35 @@ from embodichain.gen_sim.action_agent_pipeline.runtime import success_evaluator
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _PACKAGE_PREFIX = "embodichain.gen_sim.action_agent_pipeline"
+_COMPATIBILITY_FACADES = {
+    f"{_PACKAGE_PREFIX}.contracts": {
+        f"{_PACKAGE_PREFIX}.config.defaults",
+        f"{_PACKAGE_PREFIX}.protocol.actions",
+        f"{_PACKAGE_PREFIX}.protocol.artifacts",
+        f"{_PACKAGE_PREFIX}.protocol.success",
+        f"{_PACKAGE_PREFIX}.protocol.tasks",
+    },
+    f"{_PACKAGE_PREFIX}.defaults": {
+        f"{_PACKAGE_PREFIX}.config.defaults",
+    },
+    f"{_PACKAGE_PREFIX}.semantics": {
+        f"{_PACKAGE_PREFIX}.domain.object_semantics",
+        f"{_PACKAGE_PREFIX}.generation.relation_language",
+    },
+    f"{_PACKAGE_PREFIX}.env_adapters.tableware.success": {
+        f"{_PACKAGE_PREFIX}.runtime.success_evaluator",
+    },
+}
 _LAYER_NAMES = {
     "agents",
     "cli",
+    "compatibility",
     "config",
+    "domain",
     "env_adapters",
     "generation",
     "prompts",
+    "protocol",
     "runtime",
     "tests",
     "utils",
@@ -49,13 +71,25 @@ _LAYER_NAMES = {
 # function body, which are still architectural dependencies.
 _FORBIDDEN_TARGETS = {
     "config": _LAYER_NAMES - {"config"},
-    "core": _LAYER_NAMES - {"config"},
+    "domain": _LAYER_NAMES - {"domain"},
+    "protocol": _LAYER_NAMES - {"protocol"},
+    "core": {
+        "agents",
+        "cli",
+        "compatibility",
+        "env_adapters",
+        "generation",
+        "prompts",
+        "runtime",
+        "utils",
+    },
+    "compatibility": set(),
     "prompts": {"agents", "cli", "env_adapters", "generation", "runtime"},
     "utils": {"agents", "cli", "env_adapters", "generation", "runtime"},
-    "generation": {"agents", "cli", "env_adapters", "runtime"},
-    "runtime": {"agents", "cli", "env_adapters", "generation"},
-    "agents": {"cli", "env_adapters", "generation"},
-    "env_adapters": {"cli", "generation"},
+    "generation": {"agents", "cli", "compatibility", "env_adapters", "runtime"},
+    "runtime": {"agents", "cli", "compatibility", "env_adapters", "generation"},
+    "agents": {"cli", "compatibility", "env_adapters", "generation"},
+    "env_adapters": {"cli", "compatibility", "generation"},
     "cli": set(),
 }
 
@@ -104,6 +138,44 @@ def test_package_layers_follow_the_declared_dependency_direction() -> None:
                     f"{path.relative_to(_PACKAGE_ROOT)}:{line_number} "
                     f"{source_layer} imports forbidden {target_layer} module "
                     f"{target_module}"
+                )
+    assert not violations, "\n".join(violations)
+
+
+def test_production_modules_do_not_import_compatibility_facades() -> None:
+    violations: list[str] = []
+    for path in _production_module_paths():
+        source_module = _path_module(path)
+        if source_module in _COMPATIBILITY_FACADES:
+            continue
+        for target_module, line_number in _pipeline_imports(path):
+            if target_module in _COMPATIBILITY_FACADES:
+                violations.append(
+                    f"{path.relative_to(_PACKAGE_ROOT)}:{line_number} imports "
+                    f"compatibility facade {target_module}"
+                )
+    assert not violations, "\n".join(violations)
+
+
+def test_compatibility_facades_only_import_canonical_owners() -> None:
+    module_paths = {_path_module(path): path for path in _production_module_paths()}
+    violations: list[str] = []
+    for facade_module, allowed_targets in _COMPATIBILITY_FACADES.items():
+        path = module_paths[facade_module]
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef))
+            for node in tree.body
+        ):
+            violations.append(
+                f"{path.relative_to(_PACKAGE_ROOT)} defines behavior instead of "
+                "only re-exporting canonical owners"
+            )
+        for target_module, line_number in _pipeline_imports(path):
+            if target_module not in allowed_targets:
+                violations.append(
+                    f"{path.relative_to(_PACKAGE_ROOT)}:{line_number} imports "
+                    f"non-canonical facade target {target_module}"
                 )
     assert not violations, "\n".join(violations)
 
@@ -171,11 +243,15 @@ def _path_module(path: Path) -> str:
 
 
 def _path_layer(path: Path) -> str:
+    if _path_module(path) in _COMPATIBILITY_FACADES:
+        return "compatibility"
     relative = path.relative_to(_PACKAGE_ROOT)
     return relative.parts[0] if len(relative.parts) > 1 else "core"
 
 
 def _module_layer(module_name: str) -> str:
+    if module_name in _COMPATIBILITY_FACADES:
+        return "compatibility"
     relative = module_name.removeprefix(f"{_PACKAGE_PREFIX}.")
     first_component = relative.split(".", maxsplit=1)[0]
     return first_component if first_component in _LAYER_NAMES else "core"

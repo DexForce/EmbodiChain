@@ -29,7 +29,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
     LEFT_ARM_ACTION_KEY,
     RIGHT_ARM_ACTION_KEY,
 )

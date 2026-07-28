@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     DEFAULT_VIEWER_CAMERA_UID,
 )
 

@@ -23,7 +23,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     AGENT_CONFIG_FILENAME,
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,

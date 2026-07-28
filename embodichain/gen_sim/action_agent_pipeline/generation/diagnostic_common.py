@@ -30,7 +30,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
     RobotProfile,
     resolve_robot_profile,
 )
-from embodichain.gen_sim.action_agent_pipeline.semantics import (
+from embodichain.gen_sim.action_agent_pipeline.generation.relation_language import (
     relative_relation_phrase as _canonical_relative_relation_phrase,
 )
 

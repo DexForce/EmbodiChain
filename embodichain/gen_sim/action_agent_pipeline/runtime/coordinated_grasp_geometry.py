@@ -44,7 +44,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
     _world_pose_to_object_pose,
     _world_vertices_from_local_vertices,
 )
-from embodichain.gen_sim.action_agent_pipeline.semantics import (
+from embodichain.gen_sim.action_agent_pipeline.domain.object_semantics import (
     CONTAINER_LIKE_KEYWORDS as _COORDINATED_CONTAINER_LIKE_KEYWORDS,
     ROD_LIKE_KEYWORDS as _COORDINATED_ROD_LIKE_KEYWORDS,
 )

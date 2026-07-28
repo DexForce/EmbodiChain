@@ -21,14 +21,14 @@ from typing import Any
 
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
-    ACTION_AGENT_ENV_ID,
-    DEFAULT_VIEWER_CAMERA_UID,
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
+    DEFAULT_MAX_EPISODE_STEPS,
     ROBOTIQ_ARG2F_140_CLOSE_QPOS as _ROBOTIQ_ARG2F_140_CLOSE_QPOS,
     ROBOTIQ_ARG2F_140_OPEN_QPOS as _ROBOTIQ_ARG2F_140_OPEN_QPOS,
 )
-from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
-    DEFAULT_MAX_EPISODE_STEPS,
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
+    ACTION_AGENT_ENV_ID,
+    DEFAULT_VIEWER_CAMERA_UID,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.success_evaluator import (
     evaluate_configured_success,

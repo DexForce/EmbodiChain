@@ -21,6 +21,14 @@ task:
   max_episodes: 1
   max_episode_steps: 2000
 
+# Legacy environment configs may omit gripper states. Keep the shared fallback
+# beside other package-wide policy rather than treating numeric poses as a
+# serialized protocol.
+robot_fallbacks:
+  robotiq_arg2f_140:
+    open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    close_qpos: [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
+
 visual_material:
   table:
     entity_uid: table

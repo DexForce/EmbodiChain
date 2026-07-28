@@ -14,14 +14,29 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Shared semantic vocabulary used by generation and runtime heuristics.
+"""Compatibility facade for object semantics and relation prompt language.
 
-These labels are deliberately kept in Python instead of the numeric defaults
-YAML: they define classification behavior and should change through reviewed
-code rather than through an unvalidated experiment override.
+Object classifiers are owned by ``domain.object_semantics``. Generation-only
+English rendering is owned by ``generation.relation_language``. Keeping this
+facade preserves historical imports while making new dependencies explicit.
 """
 
 from __future__ import annotations
+
+from embodichain.gen_sim.action_agent_pipeline.domain.object_semantics import (
+    BOTTLE_LIKE_KEYWORDS,
+    CONTAINER_LIKE_KEYWORDS,
+    CUP_LIKE_KEYWORDS,
+    FLAT_CARRIER_KEYWORDS,
+    ROD_LIKE_KEYWORDS,
+    SHORT_BOTTLE_LIKE_KEYWORDS,
+    SHORT_CUP_LIKE_KEYWORDS,
+    UPRIGHTABLE_KEYWORDS,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.relation_language import (
+    RELATIVE_RELATION_PHRASES,
+    relative_relation_phrase,
+)
 
 __all__ = [
     "BOTTLE_LIKE_KEYWORDS",
@@ -35,106 +50,3 @@ __all__ = [
     "UPRIGHTABLE_KEYWORDS",
     "relative_relation_phrase",
 ]
-
-BOTTLE_LIKE_KEYWORDS = (
-    "bottle",
-    "can",
-    "jar",
-    "tin",
-    "soda",
-    "cola",
-    "罐头",
-    "易拉罐",
-    "瓶",
-    "瓶子",
-)
-CUP_LIKE_KEYWORDS = (
-    "cup",
-    "mug",
-    "paper cup",
-    "water cup",
-    "纸杯",
-    "水杯",
-    "杯子",
-    "马克杯",
-    "茶杯",
-)
-SHORT_BOTTLE_LIKE_KEYWORDS = frozenset({"can", "jar", "tin"})
-SHORT_CUP_LIKE_KEYWORDS = frozenset({"cup", "mug"})
-UPRIGHTABLE_KEYWORDS = (*BOTTLE_LIKE_KEYWORDS, *CUP_LIKE_KEYWORDS)
-
-CONTAINER_LIKE_KEYWORDS = (
-    "pot",
-    "pan",
-    "wok",
-    "skillet",
-    "saucepan",
-    "tray",
-    "plate",
-    "bowl",
-    "basket",
-    "container",
-    "dish",
-    "basin",
-    "cup",
-    "mug",
-    "锅",
-    "平底锅",
-    "炒锅",
-    "托盘",
-    "盘",
-    "盘子",
-    "碗",
-    "篮",
-    "篮子",
-    "容器",
-    "盆",
-    "杯",
-)
-ROD_LIKE_KEYWORDS = (
-    "umbrella",
-    "rod",
-    "bar",
-    "stick",
-    "tube",
-    "cylinder",
-    "cylindrical",
-    "pole",
-    "baton",
-    "rectangular",
-    "cuboid",
-    "雨伞",
-    "伞",
-    "杆",
-    "棒",
-    "棍",
-    "柱",
-    "圆柱",
-    "长方体",
-    "矩形",
-    "木条",
-)
-FLAT_CARRIER_KEYWORDS = ("plate", "dish", "platter", "盘", "盘子")
-
-RELATIVE_RELATION_PHRASES = {
-    "inside": "inside",
-    "on": "on top of",
-    "left_of": "to the left of",
-    "right_of": "to the right of",
-    "front_of": "in front of",
-    "behind": "behind",
-    "front_left_of": "to the front-left of",
-    "back_left_of": "to the back-left of",
-    "front_right_of": "to the front-right of",
-    "back_right_of": "to the back-right of",
-}
-
-
-def relative_relation_phrase(relation: str) -> str:
-    """Return the canonical English phrase used in prompts and datasets."""
-    try:
-        return RELATIVE_RELATION_PHRASES[relation]
-    except KeyError as exc:
-        raise ValueError(
-            f"Unsupported relative placement relation: {relation!r}."
-        ) from exc

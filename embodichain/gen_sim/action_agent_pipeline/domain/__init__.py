@@ -14,30 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Canonical package-wide configuration for the action-agent pipeline."""
+"""Dependency-free domain knowledge shared by pipeline stages."""
 
 from __future__ import annotations
 
-from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
-    ACTION_AGENT_DEFAULTS,
-    DEFAULT_GENERATED_CONFIG_TASK_NAME,
-    DEFAULT_MAX_EPISODES,
-    DEFAULT_MAX_EPISODE_STEPS,
-    ROBOTIQ_ARG2F_140_CLOSE_QPOS,
-    ROBOTIQ_ARG2F_140_OPEN_QPOS,
-    DEFAULT_SURFACE_RELEASE_CLEARANCE,
-    DEFAULT_TARGET_BODY_SCALE,
-    defaults_section,
-)
-
-__all__ = [
-    "ACTION_AGENT_DEFAULTS",
-    "DEFAULT_GENERATED_CONFIG_TASK_NAME",
-    "DEFAULT_MAX_EPISODES",
-    "DEFAULT_MAX_EPISODE_STEPS",
-    "ROBOTIQ_ARG2F_140_CLOSE_QPOS",
-    "ROBOTIQ_ARG2F_140_OPEN_QPOS",
-    "DEFAULT_SURFACE_RELEASE_CLEARANCE",
-    "DEFAULT_TARGET_BODY_SCALE",
-    "defaults_section",
-]
+__all__: list[str] = []

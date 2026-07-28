@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,
     TASK_GRAPH_FILENAME,

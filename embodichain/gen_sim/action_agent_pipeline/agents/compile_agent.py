@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     COMPILED_GRAPH_FILENAME,
     TASK_GRAPH_FILENAME,
 )

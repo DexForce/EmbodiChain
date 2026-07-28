@@ -26,11 +26,11 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
     defaults_section,
 )
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import DUAL_ARM_NAME
 from embodichain.gen_sim.action_agent_pipeline.generation.action_spec_builders import (
     _add_surface_z_policy,
     _compact_json,

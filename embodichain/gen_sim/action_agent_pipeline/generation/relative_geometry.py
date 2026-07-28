@@ -22,10 +22,10 @@ import math
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     defaults_section,
 )
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import DUAL_ARM_NAME
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     RelativePlacementSpec,

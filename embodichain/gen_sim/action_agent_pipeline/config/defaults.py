@@ -35,6 +35,8 @@ __all__ = [
     "DEFAULT_GENERATED_CONFIG_TASK_NAME",
     "DEFAULT_MAX_EPISODES",
     "DEFAULT_MAX_EPISODE_STEPS",
+    "ROBOTIQ_ARG2F_140_CLOSE_QPOS",
+    "ROBOTIQ_ARG2F_140_OPEN_QPOS",
     "DEFAULT_SURFACE_RELEASE_CLEARANCE",
     "DEFAULT_TARGET_BODY_SCALE",
     "DEFAULT_TASK_NAME",
@@ -76,6 +78,25 @@ generation_defaults_section = defaults_section
 
 _TASK_DEFAULTS = defaults_section("task")
 _GEOMETRY_DEFAULTS = defaults_section("geometry")
+_ROBOT_FALLBACKS = defaults_section("robot_fallbacks")
+_ROBOTIQ_ARG2F_140_FALLBACKS = _ROBOT_FALLBACKS.get("robotiq_arg2f_140")
+if not isinstance(_ROBOTIQ_ARG2F_140_FALLBACKS, dict):
+    raise ValueError(
+        "Action-agent robot_fallbacks.robotiq_arg2f_140 must be a mapping in "
+        f"{_DEFAULTS_PATH}."
+    )
+
+
+def _six_element_float_tuple(key: str) -> tuple[float, ...]:
+    """Load one Robotiq state while preserving the historical tuple contract."""
+    values = _ROBOTIQ_ARG2F_140_FALLBACKS.get(key)
+    if not isinstance(values, list) or len(values) != 6:
+        raise ValueError(
+            "Action-agent robot_fallbacks.robotiq_arg2f_140."
+            f"{key} must contain exactly six values in {_DEFAULTS_PATH}."
+        )
+    return tuple(float(value) for value in values)
+
 
 DEFAULT_GENERATED_CONFIG_TASK_NAME = str(_TASK_DEFAULTS["default_name"])
 DEFAULT_MAX_EPISODES = int(_TASK_DEFAULTS["max_episodes"])
@@ -84,6 +105,8 @@ DEFAULT_TARGET_BODY_SCALE = float(_GEOMETRY_DEFAULTS["target_body_scale"])
 DEFAULT_SURFACE_RELEASE_CLEARANCE = float(
     _GEOMETRY_DEFAULTS["surface_release_clearance"]
 )
+ROBOTIQ_ARG2F_140_OPEN_QPOS = _six_element_float_tuple("open_qpos")
+ROBOTIQ_ARG2F_140_CLOSE_QPOS = _six_element_float_tuple("close_qpos")
 
 # The short name is a public compatibility contract. Internally, use the
 # explicit generated-config name so it cannot be confused with the pipeline

@@ -24,10 +24,10 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import DUAL_ARM_NAME
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     defaults_section,
 )
+from embodichain.gen_sim.action_agent_pipeline.protocol.actions import DUAL_ARM_NAME
 from embodichain.gen_sim.action_agent_pipeline.runtime.atom_action_utils import (
     get_arm_states,
     resolve_arm_side,

@@ -19,9 +19,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.contracts import (
+from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     ACTION_AGENT_ENV_ID,
     DEFAULT_VIEWER_CAMERA_UID,
+)
+from embodichain.gen_sim.action_agent_pipeline.protocol.success import (
     SuccessTerm,
 )
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
