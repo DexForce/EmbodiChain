@@ -49,6 +49,14 @@ except ImportError:
     CAMERA_AVAILABLE = False
     Camera = None
 
+# Depth sidecar video tests require an HEVC encoder in the bundled FFmpeg build.
+try:
+    from embodichain.data_pipeline.depth_video import detect_depth_encoder
+
+    _HAS_DEPTH_CODEC = detect_depth_encoder("libx265") is not None
+except ImportError:
+    _HAS_DEPTH_CODEC = False
+
 
 class MockRobot:
     """Mock robot for dataset functor tests."""
@@ -390,6 +398,209 @@ class TestLeRobotRecorderFeatures:
             features = recorder._build_features()
 
         assert "observation.normal.camera" not in features
+
+    @pytest.mark.skipif(not _HAS_DEPTH_CODEC, reason="libx265/hevc not available")
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_build_features_excludes_depth_when_video_enabled(
+        self, mock_lerobot_dataset
+    ):
+        """Depth is excluded from numeric features when depth video is on."""
+        env = MockEnvForDataset(num_joints=6)
+        env.single_observation_space["sensor"]["camera"].update(
+            {
+                "depth": Mock(dtype=np.dtype("float32"), shape=(32, 48)),
+                "depth_right": Mock(dtype=np.dtype("float32"), shape=(32, 48)),
+                "mask": Mock(dtype=np.dtype("int32"), shape=(32, 48)),
+            }
+        )
+
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": "/tmp/test_dataset",
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+                "use_videos": False,
+                "depth_video": {"enable": True, "depth_min": 0.1, "depth_max": 3.0},
+            }
+        )
+
+        original_isinstance = isinstance
+
+        def mock_isinstance(obj, class_or_tuple):
+            if isinstance(obj, MockSensor) and (
+                class_or_tuple is Camera
+                or (isinstance(class_or_tuple, tuple) and Camera in class_or_tuple)
+            ):
+                return True
+            return original_isinstance(obj, class_or_tuple)
+
+        with patch(
+            "embodichain.lab.gym.envs.managers.datasets.isinstance",
+            side_effect=mock_isinstance,
+        ):
+            recorder = LeRobotRecorder(cfg, env)
+            features = recorder._build_features()
+
+        # Depth is offloaded to sidecar videos -> not a numeric feature.
+        assert "observation.depth.camera" not in features
+        assert "observation.depth.camera_right" not in features
+        # Mask remains a numeric feature.
+        assert features["observation.mask.camera"]["dtype"] == "int32"
+        # Both depth sensors were registered for the sidecar writer.
+        assert set(recorder._depth_sensor_specs) == {"camera", "camera_right"}
+
+    @pytest.mark.skipif(not _HAS_DEPTH_CODEC, reason="libx265/hevc not available")
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_build_features_keeps_numeric_depth_with_fallback(
+        self, mock_lerobot_dataset
+    ):
+        """keep_numeric_fallback retains depth as a numeric feature too."""
+        env = MockEnvForDataset(num_joints=6)
+        env.single_observation_space["sensor"]["camera"].update(
+            {
+                "depth": Mock(dtype=np.dtype("float32"), shape=(32, 48)),
+                "mask": Mock(dtype=np.dtype("int32"), shape=(32, 48)),
+            }
+        )
+
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": "/tmp/test_dataset",
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+                "use_videos": False,
+                "depth_video": {
+                    "enable": True,
+                    "depth_min": 0.1,
+                    "depth_max": 3.0,
+                    "keep_numeric_fallback": True,
+                },
+            }
+        )
+
+        original_isinstance = isinstance
+
+        def mock_isinstance(obj, class_or_tuple):
+            if isinstance(obj, MockSensor) and (
+                class_or_tuple is Camera
+                or (isinstance(class_or_tuple, tuple) and Camera in class_or_tuple)
+            ):
+                return True
+            return original_isinstance(obj, class_or_tuple)
+
+        with patch(
+            "embodichain.lab.gym.envs.managers.datasets.isinstance",
+            side_effect=mock_isinstance,
+        ):
+            recorder = LeRobotRecorder(cfg, env)
+            features = recorder._build_features()
+
+        # Depth is both a numeric feature AND registered for the sidecar writer.
+        assert features["observation.depth.camera"]["dtype"] == "float32"
+        assert "camera" in recorder._depth_sensor_specs
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+class TestLeRobotRecorderDepthSidecar:
+    """Integration tests for depth sidecar video writing during save."""
+
+    @pytest.mark.skipif(not _HAS_DEPTH_CODEC, reason="libx265/hevc not available")
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_save_episode_writes_depth_sidecar(self, mock_lerobot_dataset, tmp_path):
+        """A real episode writes depth sidecar MP4s and metadata."""
+        env = MockEnvForDataset(num_joints=6)
+        env._sensors["camera"].cfg.height = 32
+        env._sensors["camera"].cfg.width = 48
+        env.single_observation_space["sensor"]["camera"].update(
+            {
+                "color": Mock(dtype=np.dtype("uint8"), shape=(32, 48, 4)),
+                "depth": Mock(dtype=np.dtype("float32"), shape=(32, 48)),
+                "mask": Mock(dtype=np.dtype("int32"), shape=(32, 48)),
+            }
+        )
+
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+                "use_videos": False,
+                "depth_video": {"enable": True, "depth_min": 0.1, "depth_max": 3.0},
+            }
+        )
+
+        original_isinstance = isinstance
+
+        def mock_isinstance(obj, class_or_tuple):
+            if isinstance(obj, MockSensor) and (
+                class_or_tuple is Camera
+                or (isinstance(class_or_tuple, tuple) and Camera in class_or_tuple)
+            ):
+                return True
+            return original_isinstance(obj, class_or_tuple)
+
+        with patch(
+            "embodichain.lab.gym.envs.managers.datasets.isinstance",
+            side_effect=mock_isinstance,
+        ):
+            recorder = LeRobotRecorder(cfg, env)
+
+            depth = torch.linspace(0.2, 2.8, 32 * 48, dtype=torch.float32).reshape(
+                32, 48
+            )
+            obs_list = []
+            for i in range(3):
+                obs_list.append(
+                    TensorDict(
+                        {
+                            "robot": {
+                                "qpos": torch.zeros(6),
+                                "qvel": torch.zeros(6),
+                                "qf": torch.zeros(6),
+                            },
+                            "sensor": {
+                                "camera": {
+                                    "color": torch.zeros(32, 48, 4, dtype=torch.uint8),
+                                    "depth": depth + 0.01 * i,
+                                    "mask": torch.zeros(32, 48, dtype=torch.int32),
+                                }
+                            },
+                        },
+                        batch_size=[],
+                    )
+                )
+            action_list = [torch.zeros(6) for _ in range(3)]
+
+            ok = recorder._save_single_episode(0, obs_list, action_list)
+            assert ok
+
+        # The depth sidecar video and metadata were written.
+        ds_root = recorder.dataset_full_path
+        assert (ds_root / "depth_videos" / "camera" / "episode_000000.mp4").exists()
+        assert (ds_root / "depth_meta.json").exists()
+
+        # LeRobot's add_frame never received a depth key (RGB-only pipeline).
+        for call in mock_dataset_instance.add_frame.call_args_list:
+            frame = call.args[0]
+            assert not any(k.startswith("observation.depth.") for k in frame)
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")

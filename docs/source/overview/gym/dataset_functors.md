@@ -84,6 +84,8 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
   - Number of background threads for per-frame PNG writing (lerobot ``AsyncImageWriter``). When > 0, ``add_frame`` no longer blocks on ``PIL.Image.save``. Applies to both recorders. Try 4 threads per camera as a starting point.
 * - ``image_writer_processes``
   - Number of background processes for image writing (alternative to threads; higher spawn cost, more isolation). Use 0 to rely on threads only.
+* - ``depth_video``
+  - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See [Compressed depth sidecar](#compressed-depth-sidecar).
 ```
 
 ### Recorded Data
@@ -94,14 +96,76 @@ The LeRobotRecorder saves the following data for each frame:
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
 - ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
-- ``observation.depth.{sensor_name}``: Native numeric depth arrays
-- ``observation.depth.{sensor_name}_right``: Right-camera depth arrays
 - ``observation.mask.{sensor_name}``: Native numeric segmentation-mask arrays
 - ``observation.mask.{sensor_name}_right``: Right-camera segmentation-mask arrays
 
 Depth and mask features keep the dtype and shape declared by the sensor
-observation space. They are stored as numeric LeRobot array features rather than
-images, so enabling ``use_videos`` affects only the RGB image features.
+observation space. Masks are always stored as numeric LeRobot array features
+(exact, lossless) so ``use_videos`` affects only the RGB image features.
+
+Depth has two storage modes:
+
+- **Numeric** (default): ``observation.depth.{sensor_name}`` numeric arrays, exact
+  but storage-heavy for dense high-resolution depth.
+- **Compressed sidecar** (when ``depth_video.enable=True``): depth is written as
+  ``gray12le``/HEVC MP4s alongside the dataset (see below), and the numeric
+  feature is dropped unless ``keep_numeric_fallback=True``.
+
+## Compressed depth sidecar
+
+When ``depth_video.enable=True`` and an HEVC encoder (``libx265``) is available,
+``LeRobotRecorder`` writes each episode's depth maps as a single-channel
+``gray12le`` video encoded losslessly with HEVC. This is issue #424 *Path A*:
+an EmbodiChain-owned depth writer that works on Python 3.10/3.11 with LeRobot
+0.4.4, without modifying the installed LeRobot package.
+
+- Depth is quantized to 12-bit codes (logarithmic by default) and packed into
+  the ``gray12le`` pixel format. With ``lossless=True`` (default) the 12-bit
+  codes survive the encode/decode round-trip bit-exactly; the only error is the
+  configurable float32 → 12-bit quantization step (typically sub-millimetre).
+- Depth never enters LeRobot's RGB-only image/video pipeline; it lives in a
+  sidecar tree next to the dataset:
+
+  ```text
+  <dataset_root>/
+  ├── data/                 # LeRobot: state / action / mask
+  ├── videos/               # LeRobot: RGB videos
+  ├── depth_videos/         # depth sidecar
+  │   └── <sensor>[_right]/episode_000000.mp4
+  └── depth_meta.json       # quantization params + per-episode index
+  ```
+
+- The metadata schema (``is_depth_map``, ``video.depth_min/max/shift/use_log``,
+  ``video.codec``, ``video.pix_fmt``) is aligned with the official LeRobot 0.6.0
+  depth pipeline, so sidecar videos remain readable once EmbodiChain upgrades to
+  Python 3.12 (issue #424, Path B).
+- If no HEVC encoder is available, recording silently falls back to numeric
+  depth features (PR #422) rather than failing.
+- Segmentation masks are always kept as exact numeric features; they are never
+  run through a lossy video codec.
+
+```{attention}
+12-bit quantization is **not** bit-exact relative to the original float32 or
+uint16 depth input. Applications requiring exact source values must set
+``keep_numeric_fallback=True`` (stores both the sidecar video and the raw
+numeric feature) or keep depth numeric.
+```
+
+Read sidecar depth back with :func:`~embodichain.data_pipeline.depth_video.load_depth_dataset`,
+which composes the LeRobot dataset with a :class:`~embodichain.data_pipeline.depth_video.DepthVideoLibrary`:
+
+```python
+from embodichain.data_pipeline.depth_video import load_depth_dataset
+
+dataset, depth = load_depth_dataset("/path/to/dataset_root")
+# depth in metres, shape (1, H, W), aligned to the LeRobot episode/frame index:
+frame = dataset[0]
+depth_map = depth.get(
+    episode_index=int(frame["episode_index"]),
+    sensor_key="camera",
+    frame_index_in_episode=int(frame["episode_data_index"]),
+)
+```
 
 ### Dataset Recording vs Video Recording
 
@@ -229,7 +293,41 @@ dataset = {
 }
 ```
 
-The async recorder drains its background worker during ``finalize()``, so make sure ``env.close()`` (or ``dataset_manager.finalize()``) runs at the end of collection.
+The async recorder drains its background worker during ``finalize()``, so make sure ``env.close()`` (or ``dataset_manager.finalize()`) runs at the end of collection.
+
+### Compressed depth recording
+
+To record camera depth as compressed sidecar videos (issue #424, Path A), pass a
+``depth_video`` config. Depth is encoded losslessly as ``gray12le``/HEVC;
+stereo cameras get a ``_right`` sidecar automatically.
+
+```python
+from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
+
+dataset = {
+    "lerobot_recorder": DatasetFunctorCfg(
+        func="embodichain.lab.gym.envs.managers.datasets.LeRobotRecorder",
+        params={
+            "save_path": "/path/to/dataset/root",
+            "robot_meta": {"robot_type": "dexforce_w1", "control_freq": 30},
+            "instruction": {"lang": "pick the cube"},
+            "extra": {"scene_type": "table", "task_description": "pick_and_place"},
+            "use_videos": False,
+            "depth_video": {
+                "enable": True,
+                "depth_min": 0.05,   # metres mapped to quantum 0
+                "depth_max": 5.0,    # metres mapped to quantum 4095
+                "shift": 3.5,        # log-mode offset (metres)
+                "use_log": True,     # logarithmic quantization
+                "lossless": True,    # 12-bit codes preserved bit-exactly
+                "input_unit": "m",
+                "output_unit": "m",
+                # "keep_numeric_fallback": True,  # also keep raw numeric depth
+            },
+        },
+    ),
+}
+```
 
 ## Dataset Manager Modes
 

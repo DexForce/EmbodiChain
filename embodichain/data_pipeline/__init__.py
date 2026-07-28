@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from . import datasets
+from . import depth_video
 from . import engine
 
-__all__ = ["datasets", "engine"]
+__all__ = ["datasets", "depth_video", "engine"]
