@@ -149,12 +149,12 @@ class PickUpDemo(DemoBase):
             f"approach_direction={format_tensor(self.approach_direction)}"
         )
         start_time = time.time()
-        is_success, traj, _ = self.atomic_engine.run(
+        success, traj, _ = self.atomic_engine.run(
             steps=[("pick_up", GraspTarget(semantics=self.semantics))]
         )
         cost_time = time.time() - start_time
         logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-        if not is_success:
+        if not success.all():
             logger.log_warning("Failed to plan pickup demo trajectory.")
             return
 

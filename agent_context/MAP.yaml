@@ -36,7 +36,7 @@ topics:
     source_of_truth:
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/embodied_env.py
-      - embodichain/lab/gym/envs/tasks/
+      - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
     related_topics:
       - manager-functor
@@ -54,6 +54,10 @@ topics:
       - action manager
       - dataset manager
       - functor cfg
+      - lerobot recorder
+      - async dataset recorder
+      - async save
+      - 数据保存
     keywords:
       - manager
       - functor
@@ -68,6 +72,13 @@ topics:
       - event
       - action
       - dataset
+      - LeRobotRecorder
+      - AsyncLeRobotRecorder
+      - recorder
+      - save
+      - async
+      - image_writer_threads
+      - finalize
     paths:
       - topics/manager-functor/manager-functor.md
     source_of_truth:
@@ -76,6 +87,9 @@ topics:
       - embodichain/lab/gym/envs/managers/observation_manager.py
       - embodichain/lab/gym/envs/managers/reward_manager.py
       - embodichain/lab/gym/envs/managers/event_manager.py
+      - embodichain/lab/gym/envs/managers/dataset_manager.py
+      - embodichain/lab/gym/envs/managers/datasets.py
+      - embodichain/lab/gym/envs/managers/async_datasets.py
     related_topics:
       - env-framework
       - randomization
@@ -221,6 +235,8 @@ topics:
     source_of_truth:
       - embodichain/lab/sim/planners/base_planner.py
       - embodichain/lab/sim/planners/toppra_planner.py
+      - embodichain/lab/sim/planners/curobo/curobo_planner.py
+      - embodichain/lab/sim/planners/curobo/curobo_yaml.py
       - embodichain/lab/sim/planners/motion_generator.py
     related_topics:
       - robot-system
@@ -324,4 +340,42 @@ topics:
     related_topics:
       - manager-functor
       - env-framework
+    status: active
+
+  - id: atomic-actions
+    title: Atomic Actions
+    aliases:
+      - atomic action
+      - atomic actions
+      - motion primitive
+      - action primitive
+      - AtomicAction
+      - AtomicActionEngine
+      - TrajectoryBuilder
+      - 原子动作
+    keywords:
+      - atomic
+      - action
+      - AtomicAction
+      - AtomicActionEngine
+      - TrajectoryBuilder
+      - ActionResult
+      - WorldState
+      - ActionCfg
+      - motion_source
+      - plan_arm_traj
+      - register_action
+    paths:
+      - topics/atomic-actions/atomic-actions.md
+    source_of_truth:
+      - embodichain/lab/sim/atomic_actions/core.py
+      - embodichain/lab/sim/atomic_actions/engine.py
+      - embodichain/lab/sim/atomic_actions/trajectory.py
+      - embodichain/lab/sim/atomic_actions/primitives/
+      - embodichain/lab/sim/atomic_actions/actions.py
+      - embodichain/lab/sim/atomic_actions/__init__.py
+    related_topics:
+      - motion-planning
+      - robot-system
+      - ik-solvers
     status: active

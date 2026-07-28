@@ -285,14 +285,19 @@ class BaseSolver(metaclass=ABCMeta):
             )
 
     def update_with_robot_limit(self, robot_qpos_limits: torch.Tensor):
-        """Update with robot joint limits.
-            Make sure the solver's joint limits are within the robot's joint limits.
+        """Intersect solver joint limits with the robot's effective qpos limits.
+
+        Robot-side articulation limits are the hard physical bound. Solver-specific
+        limits from ``SolverCfg.user_qpos_limits`` may be even tighter for planning.
+        The final solver limits must satisfy both constraints.
 
         Args:
-            robot_qpos_limits (torch.Tensor): [DOF, 2] tensor of joint limits from the robot data
+            robot_qpos_limits (torch.Tensor): [DOF, 2] tensor of joint limits from
+                the robot data.
         """
         robot_lower_limits = robot_qpos_limits[:, 0]
         robot_upper_limits = robot_qpos_limits[:, 1]
+
         if self.lower_qpos_limits is not None:
             if torch.any(self.lower_qpos_limits < robot_lower_limits):
                 logger.log_warning(
@@ -303,6 +308,7 @@ class BaseSolver(metaclass=ABCMeta):
                 )
         else:
             self.lower_qpos_limits = robot_lower_limits
+
         if self.upper_qpos_limits is not None:
             if torch.any(self.upper_qpos_limits > robot_upper_limits):
                 logger.log_warning(

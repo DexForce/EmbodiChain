@@ -1,0 +1,299 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Place atomic action implementation."""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+import torch
+
+from embodichain.lab.sim.planners import MoveType, PlanState
+from embodichain.utils import configclass, logger
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
+
+from ._helpers import arm_qpos_from_state
+from ..core import (
+    ActionCfg,
+    ActionResult,
+    AtomicAction,
+    EndEffectorPoseTarget,
+    WorldState,
+)
+from ..trajectory import TrajectoryBuilder
+
+
+@configclass
+class PlaceCfg(ActionCfg):
+    name: str = "place"
+    """Name of the action, used for identification and logging."""
+
+    sample_interval: int = 80
+    """Number of waypoints for the full trajectory (down + hand + back)."""
+
+    hand_interp_steps: int = 5
+    """Number of waypoints for the gripper open interpolation phase."""
+
+    hand_control_part: str = "hand"
+    """Name of the robot part that controls the hand joints."""
+
+    hand_open_qpos: torch.Tensor | None = None
+    """Joint positions for the open hand state, shape ``[hand_dof,]``."""
+
+    hand_close_qpos: torch.Tensor | None = None
+    """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+
+    lift_height: float = 0.1
+    """Height (m) to retract the end-effector after opening the gripper."""
+
+    max_approach_retract_z: float | None = None
+    """Optional maximum world-frame TCP z for approach and retract poses (m)."""
+
+    cartesian_waypoint_count: int = 1
+    """Number of fixed-orientation Cartesian keyframes per translation segment."""
+
+
+class Place(AtomicAction):
+    """Lower the held object to a place pose, open the gripper, retract.
+
+    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
+    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    down phase visits every waypoint in order; approaching from above the
+    first waypoint, descending through each waypoint, then opening the gripper
+    at the final waypoint and retracting to above the last waypoint. Starting
+    joint positions are inherited from ``WorldState.last_qpos``.
+    """
+
+    TargetType: ClassVar[type] = EndEffectorPoseTarget
+
+    def __init__(
+        self,
+        motion_generator,
+        cfg: PlaceCfg | None = None,
+    ) -> None:
+        super().__init__(motion_generator, cfg or PlaceCfg())
+        self.builder = TrajectoryBuilder(motion_generator)
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.arm_dof = len(self.arm_joint_ids)
+        self.robot_dof = self.robot.dof
+
+        if self.cfg.hand_open_qpos is None:
+            logger.log_error("hand_open_qpos must be specified in PlaceCfg", ValueError)
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error(
+                "hand_close_qpos must be specified in PlaceCfg", ValueError
+            )
+        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+        if self.cfg.cartesian_waypoint_count < 1:
+            logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
+
+    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+        place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+        if place_xpos.dim() == 3:
+            place_xpos = place_xpos.unsqueeze(1)
+
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            arm_qpos_from_state(state, self.arm_joint_ids),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+        if target.tcp_symmetry == "z_roll_180":
+            place_xpos = self._select_tcp_symmetric_place_variant(
+                place_xpos, start_arm_qpos
+            )
+        n_down, n_open, n_back = self.builder.split_three_phase(
+            self.cfg.sample_interval,
+            self.cfg.hand_interp_steps,
+            first_phase_name="approach",
+            third_phase_name="back",
+        )
+
+        approach_xpos = self._lifted_pose(place_xpos[:, 0])
+        retract_xpos = self._lifted_pose(place_xpos[:, -1])
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_arm_qpos,
+            name=self.cfg.control_part,
+            to_matrix=True,
+        )
+        down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
+        down_xpos = self._translation_keyframes(start_xpos, down_xpos)
+
+        target_states_list = [
+            [
+                PlanState(xpos=down_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(down_xpos.shape[1])
+            ]
+            for i in range(self.n_envs)
+        ]
+        down_success, down_arm = self.builder.plan_arm_traj(
+            target_states_list,
+            start_arm_qpos,
+            n_down,
+            control_part=self.cfg.control_part,
+            arm_dof=self.arm_dof,
+            cfg=self.cfg,
+        )
+        reach_arm_qpos = down_arm[:, -1, :]
+
+        back_xpos = self._translation_keyframes(
+            place_xpos[:, -1], retract_xpos.unsqueeze(1)
+        )
+        target_states_list = [
+            [
+                PlanState(xpos=back_xpos[i, j], move_type=MoveType.EEF_MOVE)
+                for j in range(back_xpos.shape[1])
+            ]
+            for i in range(self.n_envs)
+        ]
+        back_success, back_arm = self.builder.plan_arm_traj(
+            target_states_list,
+            reach_arm_qpos,
+            n_back,
+            control_part=self.cfg.control_part,
+            arm_dof=self.arm_dof,
+            cfg=self.cfg,
+        )
+        success = down_success & back_success
+
+        hand_open_path = self.builder.interpolate_hand_qpos(
+            self.hand_close_qpos, self.hand_open_qpos, n_waypoints=n_open
+        )
+
+        # Allocate from the actually-returned phase lengths so collision-aware
+        # planners (which preserve their own sample count) are accommodated.
+        n_down_actual = down_arm.shape[1]
+        n_back_actual = back_arm.shape[1]
+        full = torch.empty(
+            (self.n_envs, n_down_actual + n_open + n_back_actual, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full[:, :, :] = state.last_qpos.unsqueeze(1)
+        full[:, :n_down_actual, self.arm_joint_ids] = down_arm
+        full[:, :n_down_actual, self.hand_joint_ids] = self.hand_close_qpos
+        full[:, n_down_actual : n_down_actual + n_open, self.arm_joint_ids] = (
+            reach_arm_qpos.unsqueeze(1)
+        )
+        full[:, n_down_actual : n_down_actual + n_open, self.hand_joint_ids] = (
+            hand_open_path
+        )
+        full[:, n_down_actual + n_open :, self.arm_joint_ids] = back_arm
+        full[:, n_down_actual + n_open :, self.hand_joint_ids] = self.hand_open_qpos
+
+        return ActionResult(
+            success=success,
+            trajectory=full,
+            next_state=WorldState(
+                last_qpos=full[:, -1, :].clone(),
+                held_object=None,
+                coordinated_held_object=state.coordinated_held_object,
+            ),
+        )
+
+    def _lifted_pose(self, release_xpos: torch.Tensor) -> torch.Tensor:
+        """Build an above-release pose while respecting the optional TCP z cap."""
+        lifted_xpos = release_xpos.clone()
+        lifted_z = release_xpos[:, 2, 3] + self.cfg.lift_height
+        if self.cfg.max_approach_retract_z is not None:
+            max_z = torch.as_tensor(
+                self.cfg.max_approach_retract_z,
+                dtype=release_xpos.dtype,
+                device=release_xpos.device,
+            )
+            lifted_z = torch.maximum(
+                release_xpos[:, 2, 3],
+                torch.clamp_max(lifted_z, max_z),
+            )
+        lifted_xpos[:, 2, 3] = lifted_z
+        return lifted_xpos
+
+    def _translation_keyframes(
+        self, start_xpos: torch.Tensor, target_xpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Interpolate translations while holding each segment's target rotation."""
+        count = self.cfg.cartesian_waypoint_count
+        if count == 1:
+            return target_xpos
+
+        segment_starts = torch.cat(
+            [start_xpos.unsqueeze(1), target_xpos[:, :-1]], dim=1
+        )
+        alpha = torch.linspace(
+            1.0 / count,
+            1.0,
+            count,
+            dtype=target_xpos.dtype,
+            device=self.device,
+        )
+        keyframes = target_xpos.unsqueeze(2).repeat(1, 1, count, 1, 1)
+        start_position = segment_starts[..., :3, 3].unsqueeze(2)
+        target_position = target_xpos[..., :3, 3].unsqueeze(2)
+        keyframes[..., :3, 3] = start_position + alpha[None, None, :, None] * (
+            target_position - start_position
+        )
+        return keyframes.flatten(1, 2)
+
+    def _fail(self, state: WorldState) -> ActionResult:
+        return ActionResult(
+            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
+            trajectory=torch.empty(
+                (self.n_envs, 0, self.robot_dof),
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            next_state=state,
+        )
+
+    def _select_tcp_symmetric_place_variant(
+        self, place_xpos: torch.Tensor, start_qpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Choose the closest TCP z-roll variant for an opt-in place target."""
+        mirrored_place_xpos = place_xpos.clone()
+        mirrored_place_xpos[..., :3, 0] = -mirrored_place_xpos[..., :3, 0]
+        mirrored_place_xpos[..., :3, 1] = -mirrored_place_xpos[..., :3, 1]
+        place_variants = torch.stack([place_xpos, mirrored_place_xpos], dim=2)
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=self.cfg.control_part,
+            to_matrix=True,
+        )
+        start_quat = quat_from_matrix(start_xpos[:, :3, :3])
+        first_waypoint_quat = quat_from_matrix(place_variants[:, 0, :, :3, :3])
+        start_quat = start_quat[:, None, :].expand_as(first_waypoint_quat)
+        rotation_error = quat_error_magnitude(
+            first_waypoint_quat.reshape(-1, 4),
+            start_quat.reshape(-1, 4),
+        ).reshape(self.n_envs, 2)
+        best_variant_idx = rotation_error.argmin(dim=1)
+
+        env_idx = torch.arange(self.n_envs, device=self.device)[:, None]
+        waypoint_idx = torch.arange(place_xpos.shape[1], device=self.device)[None, :]
+        return place_variants[
+            env_idx,
+            waypoint_idx,
+            best_variant_idx[:, None],
+        ]
+
+
+__all__ = ["Place", "PlaceCfg"]

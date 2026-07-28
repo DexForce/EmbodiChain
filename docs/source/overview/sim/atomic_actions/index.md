@@ -5,6 +5,10 @@
 
 Atomic actions are the building blocks for automated robot motion generation. Each action encapsulates a complete, self-contained motion primitive — such as picking up an object or moving to a pose — that can be chained together to form complex manipulation workflows.
 
+```{note}
+Atomic actions currently support gripper-based manipulation only. Dexterous-hand manipulation is not supported yet.
+```
+
 ## Design Overview
 
 The module is organized into three layers:
@@ -16,7 +20,8 @@ AtomicActionEngine          ← orchestrates a sequence of (name, typed_target) 
     │       │
     │       └── MotionGenerator   ← low-level trajectory planner (IK + trajectory optimization)
     │
-    └── WorldState           ← threaded action-to-action (last_qpos + held_object)
+    └── WorldState           ← threaded action-to-action
+                               (last_qpos + held_object/coordinated_held_object)
 ```
 
 Each action receives a typed target and a `WorldState`, runs its planning pipeline, and
@@ -25,7 +30,7 @@ the `next_state` of each action as the input state of the next, then concatenate
 trajectories into one contiguous sequence:
 
 ```
-GraspTarget(semantics) ──► AtomicAction.execute(target, state)
+GraspTarget(semantics, grasp_xpos=None) ──► AtomicAction.execute(target, state)
 EndEffectorPoseTarget(xpos)                │
 JointPositionTarget(qpos)                  ├─ IK solve when pose-based
 NamedJointPositionTarget(name)             ├─ Motion plan / interpolation
@@ -59,10 +64,10 @@ and every action declares the target type, or tuple of target types, it accepts 
 
 | Target | Constructor | Used by |
 |---|---|---|
-| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos)` | `MoveEndEffector`, `Place`, `Press` |
+| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget` | `JointPositionTarget(qpos)` | `MoveJoints` |
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
-| `GraspTarget` | `GraspTarget(semantics)` | `PickUp` |
+| `GraspTarget` | `GraspTarget(semantics, grasp_xpos=None)` | `PickUp` |
 | `HeldObjectPoseTarget` | `HeldObjectPoseTarget(object_target_pose)` | `MoveHeldObject` |
 | `CoordinatedPickmentTarget` | `CoordinatedPickmentTarget(...)` | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget` | `CoordinatedPlacementTarget(...)` | `CoordinatedPlacement` |
@@ -98,16 +103,17 @@ action's `TargetType` before calling `execute`:
 
 | Target | Holds | Accepted by |
 |---|---|---|
-| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)` | `MoveEndEffector`, `Place`, `Press` |
+| `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)`; `Place` may opt into TCP z-roll 180 equivalence | `MoveEndEffector`, `Place`, `Press` |
 | `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)` | `MoveJoints` |
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
-| `GraspTarget(semantics)` | `ObjectSemantics` (affordance + entity) | `PickUp` |
+| `GraspTarget(semantics, grasp_xpos=None)` | `ObjectSemantics` plus an optional preselected TCP grasp pose | `PickUp` |
 | `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
 | `CoordinatedPickmentTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget(...)` | Two held-object states plus object-centric placing/support target poses | `CoordinatedPlacement` |
 
-`WorldState` is threaded between actions and carries the robot's `last_qpos` plus an optional
-`held_object: HeldObjectState`. The built-in actions update it as follows:
+`WorldState` is threaded between actions and carries the robot's `last_qpos` plus optional
+`held_object: HeldObjectState` and `coordinated_held_object: CoordinatedHeldObjectState`.
+The built-in actions update it as follows:
 
 | Action | Effect on `held_object` |
 |---|---|
@@ -220,6 +226,10 @@ is_success, traj, final_state = engine.run(
 
 You can add any motion primitive by subclassing `AtomicAction`, composing a
 `TrajectoryBuilder` for the shared planning math, and registering an instance with the engine.
+Built-in primitives live one action per module under
+`embodichain/lab/sim/atomic_actions/primitives/`, while
+`embodichain.lab.sim.atomic_actions` remains the public import surface and
+`embodichain.lab.sim.atomic_actions.actions` stays as a compatibility re-export.
 
 ### Step 1 — Define the config
 

@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
     CoordinatedHeldObjectState,
     CoordinatedPickmentTarget,
+    CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
     HeldObjectPoseTarget,
@@ -44,6 +45,17 @@ class TestTypedTargets:
     def test_pose_target_holds_tensor(self):
         x = torch.eye(4)
         assert EndEffectorPoseTarget(xpos=x).xpos is x
+        assert EndEffectorPoseTarget(xpos=x).tcp_symmetry == "none"
+
+    def test_pose_target_can_declare_tcp_symmetry(self):
+        target = EndEffectorPoseTarget(xpos=torch.eye(4), tcp_symmetry="z_roll_180")
+        assert target.tcp_symmetry == "z_roll_180"
+
+    def test_pose_target_rejects_unknown_tcp_symmetry(self):
+        with pytest.raises(ValueError, match="tcp_symmetry"):
+            EndEffectorPoseTarget(
+                xpos=torch.eye(4), tcp_symmetry="yaw_90"  # type: ignore[arg-type]
+            )
 
     def test_pose_target_is_frozen(self):
         t = EndEffectorPoseTarget(xpos=torch.eye(4))
@@ -98,6 +110,22 @@ class TestTypedTargets:
         )
         assert target.object_semantics is sem
         assert target.left_object_to_eef.shape == (4, 4)
+
+    def test_coordinated_placement_target_holds_both_held_objects(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="block")
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        target = CoordinatedPlacementTarget(
+            placing_object_target_pose=torch.eye(4),
+            support_object_target_pose=torch.eye(4),
+            placing_held_object=held,
+            support_held_object=held,
+        )
+        assert target.placing_held_object is held
+        assert target.support_object_target_pose.shape == (4, 4)
 
 
 class TestObjectSemantics:
@@ -176,10 +204,7 @@ class TestWorldState:
             left_grasp_xpos=torch.eye(4).unsqueeze(0),
             right_grasp_xpos=torch.eye(4).unsqueeze(0),
         )
-        ws = WorldState(
-            last_qpos=torch.zeros(1, 14),
-            coordinated_held_object=held,
-        )
+        ws = WorldState(last_qpos=torch.zeros(1, 14), coordinated_held_object=held)
         assert ws.coordinated_held_object is held
 
 

@@ -18,19 +18,29 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from embodichain.lab.sim.planners import PlanState
+from embodichain.lab.sim.planners import PlanState, PlanResult, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
+
+
+def _resolve_runtime_device(device: torch.device | str) -> torch.device:
+    """Resolve an indexless CUDA device to the active concrete GPU index."""
+    resolved = torch.device(device)
+    if resolved.type == "cuda" and resolved.index is None:
+        return torch.device(f"cuda:{torch.cuda.current_device()}")
+    return resolved
 
 
 class TrajectoryBuilder:
@@ -44,7 +54,7 @@ class TrajectoryBuilder:
     def __init__(self, motion_generator: MotionGenerator) -> None:
         self.motion_generator = motion_generator
         self.robot = motion_generator.robot
-        self.device = self.robot.device
+        self.device = _resolve_runtime_device(self.robot.device)
 
     # ------------------------------------------------------------------
     # Success / shape helpers
@@ -286,27 +296,6 @@ class TrajectoryBuilder:
         return first, second, third
 
     # ------------------------------------------------------------------
-    # MotionGen options
-    # ------------------------------------------------------------------
-
-    def build_motion_gen_options(
-        self,
-        start_qpos: torch.Tensor,
-        *,
-        sample_interval: int,
-        control_part: str,
-    ) -> MotionGenOptions:
-        """Build planner options. Reads ``start_qpos[0]`` because the planner shares options across envs; pass the full batched tensor for type uniformity with other helpers."""
-        return MotionGenOptions(
-            start_qpos=start_qpos[0],
-            control_part=control_part,
-            is_interpolate=True,
-            is_linear=False,
-            interpolate_position_step=0.001,
-            plan_opts=ToppraPlanOptions(sample_interval=sample_interval),
-        )
-
-    # ------------------------------------------------------------------
     # Arm trajectory planning
     # ------------------------------------------------------------------
 
@@ -318,8 +307,43 @@ class TrajectoryBuilder:
         *,
         control_part: str,
         arm_dof: int,
-    ) -> tuple[bool, torch.Tensor]:
-        """Plan batched arm trajectories for all environments."""
+        cfg: "ActionCfg | None" = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Plan batched arm trajectories for all environments.
+
+        Returns ``(success:(B,), trajectory:(B, n_waypoints, arm_dof))``.
+        ``cfg.motion_source`` selects 'ik_interp' (default) or 'motion_gen'.
+        """
+        motion_source = (
+            getattr(cfg, "motion_source", "ik_interp") if cfg else "ik_interp"
+        )
+        if motion_source == "motion_gen":
+            return self._plan_motion_gen(
+                target_states_list,
+                start_qpos,
+                n_waypoints,
+                control_part=control_part,
+                arm_dof=arm_dof,
+                cfg=cfg,
+            )
+        return self._plan_ik_interp(
+            target_states_list,
+            start_qpos,
+            n_waypoints,
+            control_part=control_part,
+            arm_dof=arm_dof,
+        )
+
+    def _plan_ik_interp(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Batched IK + interpolation fallback trajectory source."""
         n_envs = start_qpos.shape[0]
         n_state = len(target_states_list[0])
         xpos_traj = torch.zeros(
@@ -332,6 +356,7 @@ class TrajectoryBuilder:
         trajectory = torch.zeros(
             (n_envs, n_state, arm_dof), dtype=torch.float32, device=self.device
         )
+        success = torch.ones(n_envs, dtype=torch.bool, device=self.device)
         qpos_seed = start_qpos
         for j in range(n_state):
             is_success, qpos = self.robot.compute_ik(
@@ -341,14 +366,218 @@ class TrajectoryBuilder:
                 logger.log_warning(
                     f"Failed to compute IK for target state {j} in some environments."
                 )
-                return False, trajectory
+                success = success & is_success
             trajectory[:, j] = qpos
             qpos_seed = qpos
         trajectory = torch.concatenate([start_qpos.unsqueeze(1), trajectory], dim=1)
+        # Failed envs: hold start qpos across all waypoints
+        if not success.all():
+            held = start_qpos.unsqueeze(1).repeat(1, trajectory.shape[1], 1)
+            trajectory = torch.where(success[:, None, None], trajectory, held)
         interp = interpolate_with_distance(
             trajectory=trajectory, interp_num=n_waypoints, device=self.device
         )
-        return True, interp
+        return success, interp
+
+    def _plan_motion_gen(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+        cfg: "ActionCfg | None",
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Motion-generator trajectory source for Cartesian (EEF) targets."""
+        if self.motion_generator is None:
+            logger.log_error(
+                "motion_source='motion_gen' requires a MotionGenerator on the engine",
+                ValueError,
+            )
+        n_envs = start_qpos.shape[0]
+        plan_states = self._to_batched_plan_states(target_states_list, n_envs)
+        plan_opts = self._build_plan_opts(cfg, n_waypoints)
+        result: PlanResult = self.motion_generator.generate(
+            plan_states,
+            options=MotionGenOptions(
+                start_qpos=start_qpos,
+                control_part=control_part,
+                plan_opts=plan_opts,
+                is_interpolate=True,
+            ),
+        )
+        return self._process_motion_gen_result(result, start_qpos, n_waypoints, arm_dof)
+
+    def _process_motion_gen_result(
+        self,
+        result: PlanResult,
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        arm_dof: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Validate a MotionGenerator PlanResult and apply sample/hold policy."""
+        success = (
+            result.success.to(self.device)
+            if isinstance(result.success, torch.Tensor)
+            else torch.tensor(result.success, device=self.device)
+        )
+        positions = result.positions
+        n_envs = start_qpos.shape[0]
+        if positions is None or positions.ndim != 3:
+            logger.log_error(
+                "MotionGenerator returned no (B, N, controlled_dof) positions",
+                ValueError,
+            )
+        if positions.shape[0] != n_envs or positions.shape[2] != arm_dof:
+            logger.log_error(
+                f"MotionGenerator returned incompatible trajectory shape "
+                f"{tuple(positions.shape)}; expected (..., {arm_dof}) on "
+                f"{n_envs} envs.",
+                ValueError,
+            )
+        if positions.device != self.device or not torch.isfinite(positions).all():
+            logger.log_error(
+                "MotionGenerator returned non-finite or wrong-device positions",
+                ValueError,
+            )
+        if not self.motion_generator.planner.preserve_plan_samples:
+            if positions.shape[1] != n_waypoints:
+                positions = interpolate_with_distance(
+                    trajectory=positions, interp_num=n_waypoints, device=self.device
+                )
+        positions = positions.to(self.device)
+        # Failed envs hold start qpos across all waypoints.
+        if not success.all():
+            held = start_qpos.unsqueeze(1).repeat(1, positions.shape[1], 1)
+            positions = torch.where(success[:, None, None], positions, held)
+        return success, positions
+
+    def _to_batched_plan_states(
+        self, target_states_list: list[list[PlanState]], n_envs: int
+    ) -> list[PlanState]:
+        """Convert per-env PlanState lists into a batched list[PlanState].
+
+        Each output PlanState carries a leading batch dim ``B`` so it matches
+        the planner contract.
+        """
+        n_state = len(target_states_list[0])
+        batched: list[PlanState] = []
+        for j in range(n_state):
+            sample = target_states_list[0][j]
+            if sample.xpos is not None:
+                xpos = torch.stack(
+                    [target_states_list[i][j].xpos for i in range(n_envs)]
+                )  # (B, 4, 4)
+                batched.append(
+                    PlanState(
+                        xpos=xpos,
+                        move_type=MoveType.EEF_MOVE,
+                        move_part=sample.move_part,
+                    )
+                )
+            else:
+                qpos = torch.stack(
+                    [target_states_list[i][j].qpos for i in range(n_envs)]
+                )  # (B, DOF)
+                batched.append(
+                    PlanState(
+                        qpos=qpos,
+                        move_type=MoveType.JOINT_MOVE,
+                        move_part=sample.move_part,
+                    )
+                )
+        return batched
+
+    def _build_plan_opts(self, cfg: "ActionCfg | None", n_waypoints: int):
+        """Build planner options from action configuration (three-way factory)."""
+        configured_plan_opts = getattr(cfg, "plan_opts", None)
+        if configured_plan_opts is not None:
+            # Planner.with_motion_context may populate runtime fields such as
+            # start_qpos and control_part, so never mutate the action config's
+            # reusable options object.
+            return deepcopy(configured_plan_opts)
+        planner_type = self.motion_generator.planner.cfg.planner_type
+        if planner_type == "toppra":
+            constraints: dict = {}
+            vl = getattr(cfg, "velocity_limit", None)
+            al = getattr(cfg, "acceleration_limit", None)
+            constraints["velocity"] = vl if vl is not None else 0.2
+            constraints["acceleration"] = al if al is not None else 0.5
+            return ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=n_waypoints,
+                constraints=constraints,
+            )
+        if planner_type == "neural":
+            from embodichain.lab.sim.planners.neural_planner import NeuralPlanOptions
+
+            return NeuralPlanOptions()
+        if planner_type == "curobo":
+            from embodichain.lab.sim.planners.curobo.curobo_planner import (
+                CuroboPlanOptions,
+            )
+
+            return CuroboPlanOptions(max_attempts=getattr(cfg, "max_attempts", None))
+        logger.log_error(
+            f"Unknown planner_type {planner_type!r} for motion_source='motion_gen'.",
+            ValueError,
+        )
+
+    def plan_joint_motion(
+        self,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+        cfg: "ActionCfg | None" = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Plan a joint-space trajectory through one or more target waypoints.
+
+        For ``motion_source='motion_gen'``, this delegates only when the
+        selected backend includes :attr:`MoveType.JOINT_MOVE` in its supported
+        target types. Cartesian-only backends (such as the neural planner)
+        retain the deterministic local joint interpolation for joint-only
+        phases. ``motion_source='ik_interp'`` always uses that local
+        interpolation.
+
+        Returns:
+            ``(success:(B,), trajectory:(B, N, arm_dof))``.
+        """
+        motion_source = (
+            getattr(cfg, "motion_source", "ik_interp") if cfg else "ik_interp"
+        )
+        if motion_source == "motion_gen":
+            if self.motion_generator is None:
+                logger.log_error(
+                    "motion_source='motion_gen' requires a MotionGenerator on the engine",
+                    ValueError,
+                )
+            if self.motion_generator.planner.supports_move_type(MoveType.JOINT_MOVE):
+                if target_qpos.dim() == 2:
+                    target_qpos = target_qpos.unsqueeze(1)  # (B, 1, D)
+                plan_states = [
+                    PlanState(qpos=target_qpos[:, j], move_type=MoveType.JOINT_MOVE)
+                    for j in range(target_qpos.shape[1])
+                ]
+                plan_opts = self._build_plan_opts(cfg, n_waypoints)
+                result: PlanResult = self.motion_generator.generate(
+                    plan_states,
+                    options=MotionGenOptions(
+                        start_qpos=start_qpos,
+                        control_part=control_part,
+                        plan_opts=plan_opts,
+                        is_interpolate=True,
+                    ),
+                )
+                return self._process_motion_gen_result(
+                    result, start_qpos, n_waypoints, arm_dof
+                )
+        success = torch.ones(start_qpos.shape[0], dtype=torch.bool, device=self.device)
+        trajectory = self.plan_joint_traj(start_qpos, target_qpos, n_waypoints)
+        return success, trajectory
 
     def plan_joint_traj(
         self,

@@ -18,7 +18,7 @@
 
 Measures planning latency, memory usage, trajectory success, and final arm joint
 error for named and explicit joint-position targets.
-Run: python -m scripts.benchmark.atomic_action.move_joints_benchmark
+Run: embodichain benchmark atomic-action --action move_joints
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@ The SimReady asset pipeline converts raw mesh archives into normalized simulatio
 Run the pipeline on a single asset directory:
 
 ```bash
-python -m embodichain.gen_sim.simready_pipeline.cli.start \
+embodichain simready \
     --input_dir /path/to/raw_mesh_folder \
     --output_root /path/to/output_folder \
     --category YourCategory
@@ -16,7 +16,7 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 Preview the generated SimReady mesh:
 
 ```bash
-python -m embodichain preview-asset \
+embodichain preview-asset \
     --asset_path /path/to/sim_ready_asset_or_usd_asset \
     --asset_type rigid
 ```

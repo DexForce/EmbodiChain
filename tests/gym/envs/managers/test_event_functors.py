@@ -117,6 +117,64 @@ class MockArticulationEntity:
         return 0
 
 
+class MockLight:
+    """Mock light for event functor tests.
+
+    Supports both global lights (num_instances=1 for sun/direction)
+    and per-environment batched lights (num_instances=num_envs).
+    """
+
+    def __init__(
+        self,
+        uid: str = "test_light",
+        num_envs: int = 4,
+        light_type: str = "point",
+        init_pos: tuple = (0.0, 0.0, 2.0),
+        direction: tuple = (0.0, 0.0, -1.0),
+        intensity: float = 30.0,
+        color: tuple = (1.0, 1.0, 1.0),
+    ):
+        self.uid = uid
+
+        # Config-like attributes
+        class CfgProxy:
+            pass
+
+        self.cfg = CfgProxy()
+        self.cfg.light_type = light_type
+        self.cfg.init_pos = init_pos
+        self.cfg.direction = direction
+        self.cfg.intensity = intensity
+        self.cfg.color = color
+
+        self.device = torch.device("cpu")
+        self.is_global = light_type in ("sun", "direction")
+        self.num_instances = 1 if self.is_global else num_envs
+
+        # Track calls for assertions
+        self._last_set_color = None
+        self._last_set_intensity = None
+        self._last_set_local_pose = None
+        self._last_set_direction = None
+        self._last_env_ids = None
+
+    def set_color(self, color, env_ids=None):
+        self._last_set_color = color
+        self._last_env_ids = env_ids
+
+    def set_intensity(self, intensity, env_ids=None):
+        self._last_set_intensity = intensity
+        self._last_env_ids = env_ids
+
+    def set_local_pose(self, pose, env_ids=None, to_matrix=False):
+        self._last_set_local_pose = pose
+        self._last_env_ids = env_ids
+
+    def set_direction(self, direction, env_ids=None):
+        self._last_set_direction = direction
+        self._last_env_ids = env_ids
+
+
 class MockArticulation:
     """Mock articulation for event functor tests."""
 
@@ -238,6 +296,7 @@ class MockSim:
         self._articulations = {}
         self._robots = {}
         self._rigid_object_groups = {}
+        self._lights = {}
 
     def get_rigid_object(self, uid: str):
         return self._rigid_objects.get(uid)
@@ -290,6 +349,13 @@ class MockSim:
         self._last_emission_color = color
         self._last_emission_intensity = intensity
 
+    def get_light(self, uid: str):
+        return self._lights.get(uid)
+
+    def add_light(self, light: MockLight):
+        self._lights[light.uid] = light
+        return light
+
 
 class MockEnv:
     """Mock environment for event functor tests."""
@@ -333,7 +399,9 @@ from embodichain.lab.gym.envs.managers.randomization.spatial import (
 )
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_indirect_lighting,
+    randomize_light,
 )
+from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers import FunctorCfg
 
 
@@ -1010,3 +1078,260 @@ class TestRandomizeIndirectLighting:
 
         # Over 20 draws from [0, 1000] all values being identical is astronomically unlikely
         assert len(intensities) > 1
+
+
+# --------------------------------------------------------------------------
+# randomize_light tests
+# --------------------------------------------------------------------------
+
+
+class TestRandomizeLight:
+    """Tests for the randomize_light function."""
+
+    # ------------------------------------------------------------------
+    # Per-environment batched light tests (point light)
+    # ------------------------------------------------------------------
+
+    def test_randomize_color(self):
+        """color_range randomizes the light color for all envs."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_pt", num_envs=4, light_type="point")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_pt")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            color_range=[[0.2, 0.2, 0.2], [0.8, 0.8, 0.8]],
+        )
+
+        assert light._last_set_color is not None
+        assert light._last_set_color.shape == (4, 3)
+        # All values should be within [0.2, 0.8]
+        assert (light._last_set_color >= 0.2).all()
+        assert (light._last_set_color <= 0.8).all()
+
+    def test_randomize_intensity(self):
+        """intensity_range randomizes the light intensity for all envs.
+
+        The intensity_range is additive: random value is added to cfg.intensity.
+        """
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_pt", num_envs=4, light_type="point")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_pt")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Use a small additive range so we can bound the result
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            intensity_range=(10.0, 20.0),
+        )
+
+        assert light._last_set_intensity is not None
+        assert light._last_set_intensity.shape == (4,)
+        # init_intensity=30 + rand(10,20) => [40, 50]
+        assert (light._last_set_intensity >= 40.0).all()
+        assert (light._last_set_intensity <= 50.0).all()
+
+    def test_randomize_position(self):
+        """position_range randomizes the light position for batched lights."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_pt", num_envs=4, light_type="point")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_pt")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            position_range=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+        )
+
+        assert light._last_set_local_pose is not None
+        assert light._last_set_local_pose.shape == (4, 3)
+
+    def test_randomize_direction(self):
+        """direction_range randomizes the light direction for spot lights."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_spot", num_envs=4, light_type="spot")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_spot")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            direction_range=[[-0.2, -0.2, -0.2], [0.2, 0.2, 0.2]],
+        )
+
+        assert light._last_set_direction is not None
+        assert light._last_set_direction.shape == (4, 3)
+
+    def test_direction_range_ignored_for_point_light(self):
+        """direction_range is ignored for point lights (no crash)."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_pt", num_envs=4, light_type="point")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_pt")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            direction_range=[[-0.1, -0.1, -0.1], [0.1, 0.1, 0.1]],
+        )
+
+        # direction should NOT have been set for point light
+        assert light._last_set_direction is None
+
+    def test_combined_randomization(self):
+        """All four ranges can be combined in one call."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_spot", num_envs=4, light_type="spot")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_spot")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            position_range=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+            color_range=[[0.2, 0.2, 0.2], [0.8, 0.8, 0.8]],
+            intensity_range=(50.0, 100.0),
+            direction_range=[[-0.1, -0.1, -0.1], [0.1, 0.1, 0.1]],
+        )
+
+        assert light._last_set_local_pose is not None
+        assert light._last_set_color is not None
+        assert light._last_set_intensity is not None
+        assert light._last_set_direction is not None
+
+    def test_light_not_found_returns_early(self):
+        """No crash when light UID is not registered."""
+        env = MockEnv(num_envs=4)
+        entity_cfg = SceneEntityCfg(uid="nonexistent")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        # Should not raise
+        try:
+            randomize_light(
+                env,
+                env_ids,
+                entity_cfg,
+                color_range=[[0.2, 0.2, 0.2], [0.8, 0.8, 0.8]],
+            )
+        except Exception as e:
+            pytest.fail(f"randomize_light should not crash on missing light: {e}")
+
+    # ------------------------------------------------------------------
+    # Global scene light tests (sun, direction)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("light_type", ["sun", "direction"])
+    def test_global_light_position_range_ignored(self, light_type):
+        """position_range is ignored for global lights (sun/direction)."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_global", num_envs=1, light_type=light_type)
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_global")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            position_range=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+        )
+
+        # set_local_pose should NOT be called for global lights
+        assert light._last_set_local_pose is None
+
+    @pytest.mark.parametrize("light_type", ["sun", "direction"])
+    def test_global_light_color_applied_single_instance(self, light_type):
+        """color_range works for global lights — single instance broadcast."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_global", num_envs=1, light_type=light_type)
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_global")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            color_range=[[0.3, 0.3, 0.3], [0.7, 0.7, 0.7]],
+        )
+
+        assert light._last_set_color is not None
+        # Global light: single instance, color shape should be (1, 3)
+        assert light._last_set_color.shape == (1, 3)
+        # env_ids=None for single-instance lights
+        assert light._last_env_ids is None
+
+    @pytest.mark.parametrize("light_type", ["sun", "direction"])
+    def test_global_light_intensity_applied_single_instance(self, light_type):
+        """intensity_range works for global lights — single instance."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_global", num_envs=1, light_type=light_type)
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_global")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            intensity_range=(50.0, 100.0),
+        )
+
+        assert light._last_set_intensity is not None
+        assert light._last_set_intensity.shape == (1,)
+
+    @pytest.mark.parametrize("light_type", ["sun", "direction"])
+    def test_global_light_direction_range_applied(self, light_type):
+        """direction_range works for global lights (sun/direction)."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_global", num_envs=1, light_type=light_type)
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_global")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(
+            env,
+            env_ids,
+            entity_cfg,
+            direction_range=[[-0.2, -0.2, -0.2], [0.2, 0.2, 0.2]],
+        )
+
+        assert light._last_set_direction is not None
+        assert light._last_set_direction.shape == (1, 3)
+        assert light._last_env_ids is None
+
+    # ------------------------------------------------------------------
+    # Edge cases
+    # ------------------------------------------------------------------
+
+    def test_no_ranges_does_nothing(self):
+        """Calling with no ranges set does not crash."""
+        env = MockEnv(num_envs=4)
+        light = MockLight("test_pt", num_envs=4, light_type="point")
+        env.sim.add_light(light)
+        entity_cfg = SceneEntityCfg(uid="test_pt")
+        env_ids = torch.tensor([0, 1, 2, 3])
+
+        randomize_light(env, env_ids, entity_cfg)
+
+        # Nothing should have been called
+        assert light._last_set_color is None
+        assert light._last_set_intensity is None
+        assert light._last_set_local_pose is None
+        assert light._last_set_direction is None

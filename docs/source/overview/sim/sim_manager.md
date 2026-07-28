@@ -56,7 +56,9 @@ The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parame
 | `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
 | `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
 
-For more parameters and details, refer to the [PhysicsCfg](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.PhysicsCfg) documentation.
+PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
+is evaluated on every solver iteration. These solver implementation details use
+fixed defaults and are not exposed by `PhysicsCfg`.
 
 ### Render Configuration
 
@@ -65,8 +67,13 @@ The {class}`~cfg.RenderCfg` class controls the rendering backend and quality set
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
-| `enable_denoiser` | `bool` | `True` | Whether to enable denoising. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'`. |
-| `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'` and `enable_denoiser` is `False`. |
+| `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least 1. |
+| `tone_mapping_enabled` | `bool` | `False` | Whether to map HDR RGB output with the modified Reinhard curve. |
+| `tone_mapping_exposure` | `float` | `1.0` | Non-negative fixed linear exposure multiplier applied before tone mapping. |
+
+Ray-traced output always uses DexSim's default OptiX denoiser. Tone mapping
+affects RGB output only; depth, segmentation masks, normals, and position
+buffers remain unchanged.
 
 #### Automatic Renderer Selection
 
@@ -96,9 +103,10 @@ from embodichain.lab.sim.cfg import RenderCfg
 
 sim_config = SimulationManagerCfg(
     render_cfg=RenderCfg(
-        renderer="fast-rt",    # Use full ray tracing (overrides auto-selection)
-        enable_denoiser=True,  # Enable denoising
-        spp=64,                # Samples per pixel (used when denoiser is off)
+        renderer="fast-rt",         # Override automatic renderer selection
+        spp=4,                      # Render four samples per pixel
+        tone_mapping_enabled=True,  # Convert HDR RGB to display-referred RGB
+        tone_mapping_exposure=1.0,  # Fixed exposure for reproducible frames
     )
 )
 ```

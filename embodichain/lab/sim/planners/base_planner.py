@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 import functools
@@ -23,7 +25,7 @@ from dataclasses import MISSING
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
-from .utils import PlanState, PlanResult
+from .utils import MoveType, PlanState, PlanResult
 
 __all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
 
@@ -40,6 +42,45 @@ class BasePlannerCfg:
 @configclass
 class PlanOptions:
     pass
+
+
+def _infer_batch_size(target_states: list[PlanState]) -> int | None:
+    """Return the leading batch dim B of the first tensor found in target_states, or None if none."""
+    for s in target_states:
+        for t in (s.qpos, s.xpos, s.qvel, s.qacc):
+            if isinstance(t, torch.Tensor) and t.dim() >= 1:
+                return int(t.shape[0])
+    return None
+
+
+def _check_batch_consistency(
+    target_states: list[PlanState],
+    expected_b: int | None,
+    robot_num_instances: int | None,
+) -> int:
+    """Validate that all PlanState tensors share the same leading B and match the robot."""
+    bs = set()
+    for s in target_states:
+        b = _infer_batch_size([s])
+        if b is not None:
+            bs.add(b)
+    if len(bs) > 1:
+        logger.log_error(
+            f"All PlanState entries must share the same batch dim B, got {sorted(bs)}",
+            ValueError,
+        )
+    b = bs.pop() if bs else 1
+    if expected_b is not None and b != expected_b:
+        logger.log_error(
+            f"Batch dim B={b} does not match robot.num_instances={expected_b}",
+            ValueError,
+        )
+    if robot_num_instances is not None and b not in (1, robot_num_instances):
+        logger.log_error(
+            f"Batch dim B={b} must be 1 or robot.num_instances={robot_num_instances}",
+            ValueError,
+        )
+    return b
 
 
 def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
@@ -77,6 +118,12 @@ def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
                     f"(or a subclass), but got {type(options).__name__}.",
                     TypeError,
                 )
+            target_states = kwargs.get("target_states", args[0] if args else None)
+            if target_states is not None and hasattr(self, "robot"):
+                robot_num = getattr(self.robot, "num_instances", None)
+                _check_batch_consistency(
+                    target_states, expected_b=robot_num, robot_num_instances=robot_num
+                )
             return func(self, *args, **kwargs)
 
         return wrapper
@@ -110,6 +157,62 @@ class BasePlanner(ABC):
 
         self.device = self.robot.device
 
+    supported_move_types: frozenset[MoveType] = frozenset()
+    """Movement target types accepted directly by this planner.
+
+    :class:`MotionGenerator` uses this declaration to validate targets and
+    determine whether Cartesian targets must first be converted into joint
+    waypoints for a joint-only backend.
+    """
+
+    preserve_plan_samples: bool = False
+    """Whether callers must retain this planner's returned sample points exactly.
+
+    When ``True``, ``TrajectoryBuilder`` returns the planner's trajectory
+    without resampling, preserving collision-checked samples. When ``False``
+    (the default), the builder may normalize the trajectory to a requested
+    waypoint count.
+    """
+
+    def supports_move_type(self, move_type: MoveType) -> bool:
+        """Return whether the planner accepts a movement target type directly.
+
+        Args:
+            move_type: Movement target type to query.
+
+        Returns:
+            ``True`` when :meth:`plan` accepts the target type without
+            :class:`MotionGenerator` preprocessing.
+        """
+        return move_type in self.supported_move_types
+
+    def default_plan_options(self) -> PlanOptions:
+        """Return backend-default planning options."""
+        return PlanOptions()
+
+    def with_motion_context(
+        self,
+        options: PlanOptions,
+        *,
+        start_qpos: torch.Tensor | None,
+        control_part: str | None,
+    ) -> PlanOptions:
+        """Attach MotionGenerator runtime context to backend options.
+
+        The base planner has no context fields and therefore returns ``options``
+        unchanged. Backends with contextual options override this method.
+
+        Args:
+            options: The backend's planning options, already constructed (either
+                by the caller or via :meth:`default_plan_options`).
+            start_qpos: Optional starting joint configuration ``(B, DOF)``.
+            control_part: Optional control-part name.
+
+        Returns:
+            The (possibly mutated) planning options carrying the context.
+        """
+        return options
+
     @validate_plan_options
     @abstractmethod
     def plan(
@@ -123,17 +226,21 @@ class BasePlanner(ABC):
         planning algorithm.
 
         Args:
-            target_states: List of dictionaries containing target states
+            target_states: list of :class:`PlanState` waypoints. Tensor fields
+                carry a leading batch dim ``B`` (e.g. ``qpos`` is ``(B, DOF)``).
 
         Returns:
-            PlanResult: An object containing:
-                - success: bool, whether planning succeeded
-                - positions: torch.Tensor (N, DOF), joint positions along trajectory
-                - velocities: torch.Tensor (N, DOF), joint velocities along trajectory
-                - accelerations: torch.Tensor (N, DOF), joint accelerations along trajectory
-                - times: torch.Tensor (N,), time stamps for each point
-                - duration: float, total trajectory duration
-                - error_msg: Optional error message if planning failed
+            PlanResult: An env-batched object containing:
+                - success: torch.Tensor ``(B,)`` bool, per-env success
+                - positions: torch.Tensor ``(B, N, DOF)``, joint positions
+                - velocities: torch.Tensor ``(B, N, DOF)`` or ``None``, joint
+                  velocities. Populated by planners that compute dynamics; may be
+                  ``None`` for planners that do not.
+                - accelerations: torch.Tensor ``(B, N, DOF)`` or ``None``, joint
+                  accelerations. Populated by planners that compute dynamics; may
+                  be ``None`` for planners that do not.
+                - dt: torch.Tensor ``(B, N)``, per-point time deltas
+                - duration: torch.Tensor ``(B,)``, total trajectory duration per env
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 

@@ -206,7 +206,9 @@ class URSolver(BaseSolver):
             return all_solutions_validity, all_solutions
         # Select ik qpos based on the closest distance to the seed qpos
         qpos_seed_expanded = qpos_seed.unsqueeze(1).expand(-1, N_SOL, -1)
-        distances = torch.norm(all_solutions - qpos_seed_expanded, dim=-1)
+        distances = torch.norm(
+            self.ik_nearest_weight * (all_solutions - qpos_seed_expanded), dim=-1
+        )
         # fill invalid solutions with inf distance
         distances[~all_solutions_validity] = float("inf")
         closest_indices = torch.argmin(distances, dim=1)

@@ -172,7 +172,12 @@ def custom_post_init(obj):
         # duplicate data members that are mutable
         if not callable(value) and not isinstance(ann, property):
             try:
-                setattr(obj, key, deepcopy(value))
+                # MISSING is a sentinel singleton — preserve its identity so that
+                # ``is MISSING`` / ``is not MISSING`` checks work on configclass
+                # instances. deepcopy() would create a new _MISSING_TYPE object,
+                # breaking identity comparison.
+                if value is not MISSING:
+                    setattr(obj, key, deepcopy(value))
             except AttributeError as e:
                 from IPython import embed
 
@@ -617,6 +622,12 @@ def _return_f(f: Any) -> Callable[[], Any]:
             else:
                 return f.default_factory
         else:
+            # MISSING is a sentinel singleton — preserve its identity so that
+            # ``is MISSING`` / ``is not MISSING`` checks work on configclass
+            # instances. deepcopy() would create a new _MISSING_TYPE object,
+            # breaking identity comparison.
+            if f is MISSING:
+                return f
             return deepcopy(f)
 
     return _wrap

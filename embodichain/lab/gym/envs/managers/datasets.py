@@ -31,10 +31,20 @@ from tensordict import TensorDict
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.data.enum import LeRobotKey
-from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
+
+CAMERA_IMAGE_FRAMES = {
+    "color": "",
+    "color_right": "_right",
+}
+CAMERA_AUXILIARY_FRAMES = {
+    "depth",
+    "depth_right",
+    "mask",
+    "mask_right",
+}
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -95,6 +105,15 @@ class LeRobotRecorder(Functor):
         # Experimental parameters for extra episode info saving.
         self.use_videos = params.get("use_videos", False)
 
+        # Async image writing (lerobot official AsyncImageWriter).
+        # When > 0, per-frame PNG writes are offloaded to a thread/process pool
+        # so add_frame() no longer blocks on PIL.Image.save(). This is the
+        # single biggest lever for saving throughput with camera sensors.
+        # Threads share the process (cheap, GIL-released by PIL C path);
+        # processes add isolation at a higher spawn cost.
+        self.image_writer_threads = int(params.get("image_writer_threads", 0))
+        self.image_writer_processes = int(params.get("image_writer_processes", 0))
+
         # LeRobot dataset instance
         self.dataset: Optional[LeRobotDataset] = None
         self.dataset_full_path: Optional[Path] = None
@@ -122,6 +141,7 @@ class LeRobotRecorder(Functor):
         instruction: Optional[str] = None,
         extra: Optional[Dict] = None,
         use_videos: bool = False,
+        **kwargs,
     ) -> None:
         """Main entry point for the recorder functor.
 
@@ -131,6 +151,15 @@ class LeRobotRecorder(Functor):
         Args:
             env: The environment instance.
             env_ids: Environment IDs to save. If None, attempts to save all environments.
+            save_path: Unused at call time (honored at construction).
+            robot_meta: Unused at call time (honored at construction).
+            instruction: Unused at call time (honored at construction).
+            extra: Unused at call time (honored at construction).
+            use_videos: Unused at call time (honored at construction).
+            **kwargs: Construction-only params (e.g. ``image_writer_threads``,
+                ``image_writer_processes``, ``save_path``) passed through by
+                ``DatasetManager.apply`` via ``**functor_cfg.params``. They are
+                read in :meth:`__init__` and ignored here.
         """
         # If env_ids is None, check all environments for completed episodes
         if env_ids is None:
@@ -146,55 +175,85 @@ class LeRobotRecorder(Functor):
         self,
         env_ids: torch.Tensor,
     ) -> None:
-        """Save completed episodes for specified environments."""
-        task = self.instruction.get("lang", "unknown_task")
+        """Save completed episodes for specified environments.
 
-        # Process each environment
+        This reads each env's slice from the rollout buffer and delegates to
+        :meth:`_save_single_episode`. The slice read happens in the caller
+        thread so that subclasses (e.g. :class:`AsyncLeRobotRecorder`) can
+        clone the slice and defer the actual conversion/disk-write to a
+        background worker without racing the buffer reuse on reset.
+        """
+        step = self._env.current_rollout_step
         for env_id in env_ids.cpu().tolist():
-            # Get buffer for this environment (already contains single-env data)
-            obs_list = self._env.rollout_buffer["obs"][
-                env_id, : self._env.current_rollout_step
-            ]
-            action_list = self._env.rollout_buffer["actions"][
-                env_id, : self._env.current_rollout_step
-            ]
+            obs_list = self._env.rollout_buffer["obs"][env_id, :step]
+            action_list = self._env.rollout_buffer["actions"][env_id, :step]
+            self._save_single_episode(env_id, obs_list, action_list)
 
-            if len(obs_list) == 0:
-                logger.log_warning(f"No episode data to save for env {env_id}")
-                continue
+    def _save_single_episode(
+        self,
+        env_id: int,
+        obs_list: Any,
+        action_list: Any,
+    ) -> bool:
+        """Convert and persist one episode already sliced from the buffer.
 
-            # Align obs and action
-            if len(obs_list) > len(action_list):
-                obs_list = obs_list[:-1]
+        This operates purely on the provided ``obs_list`` / ``action_list``
+        (which may be live buffer views or detached clones) and never touches
+        ``self._env.rollout_buffer`` or ``self._env.current_rollout_step``,
+        so it is safe to call from a background thread on cloned data.
 
-            # Update metadata
-            extra_info = self.extra.copy() if self.extra else {}
-            fps = self.dataset.meta.info.get("fps", 30)
-            current_episode_time = len(obs_list) / fps if fps > 0 else 0
+        Args:
+            env_id: Environment id (used for logging only).
+            obs_list: Per-frame observations for the episode.
+            action_list: Per-frame actions for the episode.
 
-            episode_extra_info = extra_info.copy()
-            self.total_time += current_episode_time
-            episode_extra_info["total_time"] = self.total_time
+        Returns:
+            True if the episode was saved successfully, False otherwise.
+        """
+        task = (
+            self.instruction.get("lang", "unknown_task")
+            if self.instruction
+            else "unknown_task"
+        )
 
-            try:
-                for obs, action in tqdm.tqdm(
-                    zip(obs_list, action_list),
-                    total=len(obs_list),
-                    desc=f"Converting env {env_id} episode to LeRobot format",
-                ):
-                    frame = self._convert_frame_to_lerobot(obs, action, task)
-                    self.dataset.add_frame(frame)
+        if len(obs_list) == 0:
+            logger.log_warning(f"No episode data to save for env {env_id}")
+            return False
 
-                self.dataset.save_episode()
+        # Align obs and action (obs may be one longer than action)
+        if len(obs_list) > len(action_list):
+            obs_list = obs_list[:-1]
 
-                logger.log_info(
-                    f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
-                    f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
-                )
+        # Update metadata
+        extra_info = self.extra.copy() if self.extra else {}
+        fps = self.dataset.meta.info.get("fps", 30)
+        current_episode_time = len(obs_list) / fps if fps > 0 else 0
 
-                self.curr_episode += 1
-            except Exception as e:
-                logger.log_error(f"Failed to save episode {env_id}: {e}")
+        episode_extra_info = extra_info.copy()
+        self.total_time += current_episode_time
+        episode_extra_info["total_time"] = self.total_time
+
+        try:
+            for obs, action in tqdm.tqdm(
+                zip(obs_list, action_list),
+                total=len(obs_list),
+                desc=f"Converting env {env_id} episode to LeRobot format",
+            ):
+                frame = self._convert_frame_to_lerobot(obs, action, task)
+                self.dataset.add_frame(frame)
+
+            self.dataset.save_episode()
+
+            logger.log_info(
+                f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
+                f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
+            )
+
+            self.curr_episode += 1
+            return True
+        except Exception as e:
+            logger.log_error(f"Failed to save episode {env_id}: {e}")
+            return False
 
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
@@ -205,6 +264,10 @@ class LeRobotRecorder(Functor):
 
         try:
             if self.dataset is not None:
+                # Flush + stop the async image writer (if enabled) so every
+                # queued PNG write lands on disk before metadata is finalized.
+                if self.dataset.image_writer is not None:
+                    self.dataset.stop_image_writer()
                 self.dataset.finalize()
                 logger.log_info(
                     f"[LeRobotRecorder] Dataset finalized successfully\n"
@@ -263,6 +326,8 @@ class LeRobotRecorder(Functor):
             features=features,
             use_videos=self.use_videos,
             metadata_buffer_size=1,
+            image_writer_processes=self.image_writer_processes,
+            image_writer_threads=self.image_writer_threads,
         )
         logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 
@@ -308,29 +373,33 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
-
                     for frame_name, space in value.items():
-                        # TODO: Support depth (uint16) and mask (also uint16 or uint8)
-                        if frame_name not in ["color", "color_right"]:
-                            logger.log_error(
-                                f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
                             )
-
-                        features[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = {
-                            "dtype": "video" if self.use_videos else "image",
-                            "shape": (sensor.cfg.height, sensor.cfg.width, 3),
-                            "names": ["height", "width", "channel"],
-                        }
-
-                        if is_stereo:
-                            features[
-                                f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"
-                            ] = {
+                            features[feature_key] = {
                                 "dtype": "video" if self.use_videos else "image",
                                 "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                                 "names": ["height", "width", "channel"],
                             }
+                        elif frame_name in CAMERA_AUXILIARY_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
+                            )
+                            features[feature_key] = {
+                                "dtype": str(space.dtype),
+                                "shape": space.shape,
+                                "names": (
+                                    ["height", "width"]
+                                    if len(space.shape) == 2
+                                    else ["height", "width", "channel"]
+                                ),
+                            }
+                        else:
+                            logger.log_warning(
+                                f"Unsupported camera frame '{frame_name}' in sensor '{sensor_name}'"
+                            )
                 elif isinstance(sensor, ContactSensor):
                     for frame_name, space in value.items():
                         features[f"{sensor_name}.{frame_name}"] = {
@@ -357,6 +426,31 @@ class LeRobotRecorder(Functor):
 
         self._modify_feature_names(features)
         return features
+
+    @staticmethod
+    def _camera_feature_key(sensor_name: str, frame_name: str) -> str:
+        """Return the LeRobot feature key for a camera frame.
+
+        Args:
+            sensor_name: Camera sensor identifier.
+            frame_name: Camera frame name from the observation space.
+
+        Returns:
+            A LeRobot-compatible feature key.
+
+        Raises:
+            ValueError: If the frame is not a supported image, depth, or mask frame.
+        """
+        if frame_name in CAMERA_IMAGE_FRAMES:
+            suffix = CAMERA_IMAGE_FRAMES[frame_name]
+            return f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}{suffix}"
+
+        if frame_name in CAMERA_AUXILIARY_FRAMES:
+            modality, _, side = frame_name.partition("_")
+            suffix = f"_{side}" if side else ""
+            return f"{LeRobotKey.OBS_PREFIX.value}{modality}.{sensor_name}{suffix}"
+
+        raise ValueError(f"Unsupported camera frame: {frame_name}")
 
     def _add_nested_features(
         self, features: Dict, key: str, space: gym.spaces.Dict
@@ -462,18 +556,18 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
+                    for frame_name in value:
+                        if (
+                            frame_name not in CAMERA_IMAGE_FRAMES
+                            and frame_name not in CAMERA_AUXILIARY_FRAMES
+                        ):
+                            continue
 
-                    color_data = obs["sensor"][sensor_name]["color"]
-                    color_img = color_data[:, :, :3].cpu()
-                    frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = color_img
-
-                    if is_stereo:
-                        color_right_data = obs["sensor"][sensor_name]["color_right"]
-                        color_right_img = color_right_data[:, :, :3].cpu()
-                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = (
-                            color_right_img
-                        )
+                        feature_key = self._camera_feature_key(sensor_name, frame_name)
+                        frame_data = obs["sensor"][sensor_name][frame_name]
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            frame_data = frame_data[:, :, :3]
+                        frame[feature_key] = frame_data.cpu()
                 elif isinstance(sensor, ContactSensor):
                     for frame_name in value.keys():
                         frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][

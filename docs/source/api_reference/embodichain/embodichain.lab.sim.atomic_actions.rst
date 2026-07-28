@@ -44,7 +44,22 @@ embodichain.lab.sim.atomic_actions
       CoordinatedPlacement
       AtomicActionEngine
 
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   embodichain.lab.sim.atomic_actions.primitives
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Layout
+------
+
+The public API is exported from ``embodichain.lab.sim.atomic_actions``. Built-in
+primitive implementations live under
+``embodichain.lab.sim.atomic_actions.primitives`` and
+``embodichain.lab.sim.atomic_actions.actions`` remains a compatibility re-export
+for existing imports.
 
 Core
 ----

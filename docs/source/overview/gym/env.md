@@ -109,31 +109,126 @@ The {class}`~envs.EmbodiedEnvCfg` class exposes the following additional paramet
 
 ```python
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs.managers import (
+    ActionTermCfg,
+    DatasetFunctorCfg,
+    EventCfg,
+    ObservationCfg,
+    RewardCfg,
+    SceneEntityCfg,
+)
 from embodichain.utils import configclass
 
 @configclass
+class MyEventCfg:
+    randomize_object_pose: EventCfg = EventCfg(
+        func="randomize_rigid_object_pose",
+        mode="reset",
+        params={
+            "entity_cfg": SceneEntityCfg(uid="cube"),
+            "position_range": [[-0.08, -0.08, 0.0], [0.08, 0.08, 0.0]],
+            "relative_position": True,
+        },
+    )
+    record_debug_video: EventCfg = EventCfg(
+        func="record_camera_data",
+        mode="interval",
+        interval_step=1,
+        params={
+            "name": "overview_cam",
+            "eye": (1.0, 0.0, 1.2),
+            "target": (0.0, 0.0, 0.4),
+            "save_path": "./outputs/videos",
+        },
+    )
+
+
+@configclass
+class MyObservationCfg:
+    object_pose: ObservationCfg = ObservationCfg(
+        func="get_object_pose",
+        mode="add",
+        name="object/cube/pose",
+        params={
+            "entity_cfg": SceneEntityCfg(uid="cube"),
+            "to_matrix": False,
+        },
+    )
+    normalized_qpos: ObservationCfg = ObservationCfg(
+        func="normalize_robot_joint_data",
+        mode="modify",
+        name="robot/qpos",
+        params={},
+    )
+
+
+@configclass
+class MyRewardCfg:
+    approach_target: RewardCfg = RewardCfg(
+        func="distance_to_target",
+        weight=1.0,
+        params={
+            "entity_cfg": SceneEntityCfg(uid="cube"),
+            "target_pose_key": "goal_pose",
+            "exponential": True,
+            "sigma": 0.2,
+        },
+    )
+    success_bonus: RewardCfg = RewardCfg(
+        func="success_reward",
+        weight=10.0,
+        params={},
+    )
+
+
+@configclass
+class MyActionCfg:
+    delta_qpos: ActionTermCfg = ActionTermCfg(
+        func="DeltaQposTerm",
+        params={"scale": 0.1},
+    )
+
+
+@configclass
+class MyDatasetCfg:
+    lerobot: DatasetFunctorCfg = DatasetFunctorCfg(
+        func="LeRobotRecorder",
+        params={
+            "save_path": "./outputs/datasets/my_task",
+            "robot_meta": {"robot_type": "my_robot", "control_freq": 25},
+            "instruction": {"lang": "move the cube to the goal"},
+            "use_videos": False,
+        },
+    )
+
+
+@configclass
 class MyTaskEnvCfg(EmbodiedEnvCfg):
-    # 1. Define Scene Components
-    robot = ...          # Robot configuration
-    sensor = [...]       # List of sensors (e.g., Cameras)
-    light = ...          # Lighting configuration
+    # Scene assets are task-specific and usually come from existing robot/object cfgs.
+    robot = ...
+    sensor = [...]
+    rigid_object = [...]
 
-    # 2. Define Objects
-    rigid_object = [...]       # Dynamic objects (e.g., tools, debris)
-    rigid_object_group = [...] # Object groups (efficient for many similar objects)
-    articulation = [...]       # Articulated objects (e.g., cabinets)
+    # Manager configs plug into the shared environment lifecycle.
+    events = MyEventCfg()
+    observations = MyObservationCfg()
+    rewards = MyRewardCfg()
+    actions = MyActionCfg()
+    dataset = MyDatasetCfg()
 
-    # 3. Define Managers
-    events = ...         # Event settings (Randomization, etc.)
-    observations = ...   # Custom observation spec
-    dataset = ...        # Data collection settings
-
-    # 4. Action Manager (for RL tasks)
-    actions = ...        # Action preprocessing (e.g., DeltaQposTerm with scale)
-    extensions = {       # Task-specific parameters (e.g., success_threshold)
+    init_rollout_buffer = True
+    extensions = {
         "success_threshold": 0.1,
     }
 ```
+
+This example shows the typical division of responsibilities:
+
+- ``events`` mutate or record the scene during ``startup``, ``reset``, or ``interval`` phases.
+- ``observations`` expose task state to policies or data pipelines.
+- ``rewards`` shape RL behavior.
+- ``actions`` define how policy outputs map to robot control commands.
+- ``dataset`` controls structured episode export, independent from debug-video recording.
 
 ## Manager Systems
 
@@ -184,6 +279,10 @@ The manager operates in a single mode ``"save"`` which handles both recording an
  * ``robot_meta``: Robot metadata dictionary (required for LeRobot format).
  * ``instruction``: Task instruction dictionary.
  * ``use_videos``: Whether to save video recordings of episodes.
+
+```{note}
+The Dataset Manager handles structured training data. If you want debug or demo videos from a dedicated camera, use {class}`~envs.managers.record.record_camera_data` documented in {doc}`event_functors`.
+```
 
 The dataset manager is called automatically during {meth}`~envs.Env.step()`, ensuring all observation-action pairs are recorded without additional user code.
 

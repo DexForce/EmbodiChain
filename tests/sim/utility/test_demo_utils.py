@@ -93,14 +93,14 @@ def test_create_default_sim_adds_light_when_requested():
     mock_sm.return_value.add_light.assert_called_once()
 
 
-def test_maybe_init_gpu_physics_inits_when_enabled():
+def test_maybe_init_physics_inits_when_enabled():
     sim = Mock(spec=["is_use_gpu_physics", "init_gpu_physics"])
     sim.is_use_gpu_physics = True
     maybe_init_gpu_physics(sim)
     sim.init_gpu_physics.assert_called_once()
 
 
-def test_maybe_init_gpu_physics_skips_when_disabled():
+def test_maybe_init_physics_skips_when_disabled():
     sim = Mock(spec=["is_use_gpu_physics", "init_gpu_physics"])
     sim.is_use_gpu_physics = False
     maybe_init_gpu_physics(sim)

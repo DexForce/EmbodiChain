@@ -5,6 +5,13 @@
 
 This page lists all available action terms that can be used with the Action Manager. Action terms are configured using {class}`~cfg.ActionTermCfg` and are responsible for processing raw actions from the policy and converting them to the format expected by the robot (e.g., qpos, qvel, qf).
 
+## Quick Reference
+
+- Use this page when defining the policy-facing action space for RL or closed-loop control tasks.
+- Action terms are configured with {class}`~cfg.ActionTermCfg`.
+- Action terms transform one batched policy action into robot control commands for all environments.
+- Check each term's ``action_dim`` to determine how many values the policy must output.
+
 ````{tip}
 **Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new action term with the correct class structure, `ActionTermCfg` registration, and module placement in `actions.py`.
 ````

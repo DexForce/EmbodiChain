@@ -18,6 +18,7 @@ import os
 import dexsim
 import open3d as o3d
 
+from dataclasses import MISSING
 from typing import List, Union
 
 from dexsim.types import (
@@ -72,6 +73,37 @@ def get_dexsim_arena_num() -> int:
     """
     arenas = get_dexsim_arenas()
     return len(arenas)
+
+
+def _resolve_mesh_collision_params(
+    cfg: RigidObjectCfg,
+) -> tuple[int, str, int]:
+    """Resolve legacy and shape-level mesh collision parameters."""
+
+    def is_missing(value) -> bool:
+        # deepcopy() can produce a distinct instance of dataclasses.MISSING.
+        return value is MISSING or isinstance(value, type(MISSING))
+
+    max_convex_hull_num = next(
+        value
+        for value in (
+            cfg.max_convex_hull_num,
+            cfg.shape.max_convex_hull_num,
+            1,
+        )
+        if not is_missing(value)
+    )
+    acd_method = next(
+        value
+        for value in (cfg.acd_method, cfg.shape.acd_method, "coacd")
+        if not is_missing(value)
+    )
+    sdf_resolution = next(
+        value
+        for value in (cfg.sdf_resolution, cfg.shape.sdf_resolution, 0)
+        if not is_missing(value)
+    )
+    return max_convex_hull_num, acd_method, sdf_resolution
 
 
 def get_dexsim_drive_type(drive_type: str) -> DriveType:
@@ -277,7 +309,9 @@ def load_mesh_objects_from_cfg(
         option.smooth = cfg.shape.load_option.smooth
 
         cfg: RigidObjectCfg
-        max_convex_hull_num = cfg.max_convex_hull_num
+        max_convex_hull_num, acd_method, sdf_resolution = (
+            _resolve_mesh_collision_params(cfg)
+        )
         fpath = cfg.shape.fpath
 
         compute_uv = cfg.shape.compute_uv
@@ -308,7 +342,7 @@ def load_mesh_objects_from_cfg(
 
         for i, env in enumerate(env_list):
             if max_convex_hull_num > 1:
-                obj = env.load_actor_with_coacd(
+                obj = env.load_actor_with_acd(
                     fpath,
                     duplicate=True,
                     attach_scene=True,
@@ -316,13 +350,14 @@ def load_mesh_objects_from_cfg(
                     cache_path=cache_dir,
                     actor_type=body_type,
                     max_convex_hull_num=max_convex_hull_num,
+                    method=acd_method,
                 )
-            elif cfg.sdf_resolution > 0:
+            elif sdf_resolution > 0:
                 obj = env.load_actor(
                     fpath, duplicate=True, attach_scene=True, option=option
                 )
                 sdf_cfg = SDFConfig()
-                sdf_cfg.resolution = cfg.sdf_resolution
+                sdf_cfg.resolution = sdf_resolution
                 obj.add_physical_body(
                     body_type,
                     RigidBodyShape.SDF,

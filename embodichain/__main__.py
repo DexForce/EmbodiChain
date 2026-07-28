@@ -14,100 +14,156 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified CLI entry point for ``python -m embodichain``.
+"""Unified command-line interface for EmbodiChain.
 
-Usage examples::
-
-    python -m embodichain preview-asset --asset_path /path/to/asset.usda --preview
-    python -m embodichain run-env --env_name my_env
-    python -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.json
-    python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
+The ``embodichain`` console script and ``python -m embodichain`` both dispatch
+through this module.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+
+from embodichain import __version__
 
 
-def main() -> None:
-    """Dispatch to the appropriate sub-command CLI."""
+@dataclass(frozen=True)
+class Command:
+    """Description of one lazily imported CLI command."""
+
+    name: str
+    target: str
+    help: str
+
+
+COMMANDS = (
+    Command(
+        name="data",
+        target="embodichain.data.download:main",
+        help="List and download EmbodiChain data assets.",
+    ),
+    Command(
+        name="simready",
+        target="embodichain.gen_sim.simready_pipeline.cli.start:main",
+        help="Convert a raw asset directory into a SimReady asset.",
+    ),
+    Command(
+        name="preview-asset",
+        target="embodichain.lab.scripts.preview_asset:cli",
+        help="Preview a USD, URDF, or mesh asset in simulation.",
+    ),
+    Command(
+        name="run-env",
+        target="embodichain.lab.scripts.run_env:cli",
+        help="Run an environment for data generation or preview.",
+    ),
+    Command(
+        name="train-rl",
+        target="embodichain.learning.rl.train:cli",
+        help="Train an RL agent from a JSON or YAML config.",
+    ),
+    Command(
+        name="annotate-grasp",
+        target="embodichain.toolkits.graspkit.scripts.annotate_grasp:cli",
+        help="Interactively annotate a grasp region on a mesh.",
+    ),
+    Command(
+        name="decompose-urdf",
+        target="embodichain.toolkits.acd.cli:main",
+        help="Generate convex collision meshes for a URDF.",
+    ),
+    Command(
+        name="benchmark",
+        target="scripts.benchmark.__main__:main",
+        help="Run EmbodiChain performance benchmarks.",
+    ),
+    Command(
+        name="workspace-cache",
+        target="embodichain.workspace_cache_cli:main",
+        help="Inspect and clean workspace analyzer caches.",
+    ),
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser.
+
+    Returns:
+        The parser used for top-level help and command validation.
+    """
     parser = argparse.ArgumentParser(
         prog="embodichain",
         description="EmbodiChain command-line interface.",
     )
-    subparsers = parser.add_subparsers(dest="command")
-
-    # -- preview-asset -------------------------------------------------------
-    preview_asset_parser = subparsers.add_parser(
-        "preview-asset",
-        help="Preview a USD or mesh asset in the simulation.",
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
-    # Import and wire up the existing CLI so argparse is handled by the
-    # sub-command module itself.  We pass ``parse_known_args`` style by
-    # letting the sub-command parser own its own arguments.
-    from embodichain.lab.scripts.preview_asset import cli as preview_asset_cli
-
-    preview_asset_parser.set_defaults(func=preview_asset_cli)
-
-    # Re-add the preview-asset arguments here so ``--help`` works on the
-    # sub-command.  We delegate to the existing ``cli()`` which calls
-    # ``parse_args()`` internally, so we pass through the raw argv.
-    # Instead of duplicating argument definitions, we let the sub-command
-    # module handle its own argument parsing by slicing sys.argv.
-
-    # -- run-env -------------------------------------------------------------
-    run_env_parser = subparsers.add_parser(
-        "run-env",
-        help="Run an environment for data generation or preview.",
+    subparsers = parser.add_subparsers(
+        dest="command",
+        metavar="COMMAND",
+        title="commands",
     )
-    from embodichain.lab.scripts.run_env import cli as run_env_cli
+    for command in COMMANDS:
+        # The command module owns its parser. Disabling help here lets
+        # ``embodichain <command> --help`` reach that complete parser.
+        subparsers.add_parser(
+            command.name,
+            add_help=False,
+            help=command.help,
+            description=command.help,
+        )
+    return parser
 
-    run_env_parser.set_defaults(func=run_env_cli)
 
-    # -- annotate-grasp ------------------------------------------------------
-    annotate_grasp_parser = subparsers.add_parser(
-        "annotate-grasp",
-        help="Interactively annotate grasp region on a mesh.",
-    )
-    from embodichain.toolkits.graspkit.scripts.annotate_grasp import (
-        cli as annotate_grasp_cli,
-    )
+def _load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
+    """Load a command handler from a ``module:attribute`` target."""
+    module_name, attribute = target.split(":", maxsplit=1)
+    module = importlib.import_module(module_name)
+    return getattr(module, attribute)
 
-    annotate_grasp_parser.set_defaults(func=annotate_grasp_cli)
 
-    # -- train-rl ------------------------------------------------------------
-    train_rl_parser = subparsers.add_parser(
-        "train-rl",
-        help="Train an RL agent from a config file (.json, .yaml, or .yml).",
-    )
-    from embodichain.learning.rl.train import cli as train_rl_cli
+def main(argv: Sequence[str] | None = None) -> None:
+    """Dispatch a command through the unified CLI.
 
-    train_rl_parser.set_defaults(func=train_rl_cli)
+    Args:
+        argv: Arguments excluding the executable name. Uses ``sys.argv`` when
+            omitted.
+    """
+    parser = build_parser()
+    arguments = list(sys.argv[1:] if argv is None else argv)
 
-    # -- Parse ---------------------------------------------------------------
-    # If no sub-command is given, print help and exit.
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+    if not arguments:
         parser.print_help()
-        sys.exit(0)
+        return
 
-    # Determine which sub-command was selected, then reconstruct argv so
-    # that each sub-command's ``cli()`` can call ``parse_args()`` normally.
-    known, _ = parser.parse_known_args()
+    if arguments[0] in {"-h", "--help"}:
+        parser.parse_args(arguments)
+        return
 
-    if hasattr(known, "func"):
-        # Rewrite sys.argv so the sub-command's argparse sees only its own args.
-        subcommand_argv = [f"embodichain {sys.argv[1]}"] + sys.argv[2:]
-        original_argv = sys.argv
-        sys.argv = subcommand_argv
-        try:
-            known.func()
-        finally:
-            sys.argv = original_argv
-    else:
-        parser.print_help()
-        sys.exit(1)
+    if arguments[0] == "--version":
+        parser.parse_args(arguments)
+        return
+
+    command_by_name = {command.name: command for command in COMMANDS}
+    command = command_by_name.get(arguments[0])
+    if command is None:
+        parser.error(
+            f"argument COMMAND: invalid choice: {arguments[0]!r} "
+            f"(choose from {', '.join(command_by_name)})"
+        )
+
+    handler = _load_handler(command.target)
+    handler(arguments[1:])
 
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = ["COMMANDS", "Command", "build_parser", "main"]

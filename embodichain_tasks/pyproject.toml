@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embodichain_tasks"
+dynamic = ["version"]
+description = "Official task environments for EmbodiChain"
+requires-python = ">=3.10"
+dependencies = [
+    "embodichain",
+]
+
+[project.entry-points."embodichain.tasks"]
+"embodichain_tasks" = "embodichain_tasks"
+
+[tool.setuptools.packages.find]
+include = ["embodichain_tasks*"]
+
+[tool.setuptools.dynamic]
+version = { file = ["VERSION"] }

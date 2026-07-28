@@ -167,7 +167,7 @@ class MoveHeldObjectDemo(DemoBase):
             object_target_pose=self.object_target_pose
         )
         start_time = time.time()
-        is_success, traj, _ = self.atomic_engine.run(
+        success, traj, _ = self.atomic_engine.run(
             steps=[
                 ("move_end_effector", EndEffectorPoseTarget(xpos=self.move_target)),
                 ("pick_up", GraspTarget(semantics=self.semantics)),
@@ -176,7 +176,7 @@ class MoveHeldObjectDemo(DemoBase):
         )
         cost_time = time.time() - start_time
         logger.log_info(f"Plan trajectory cost time: {cost_time:.2f} seconds")
-        if not is_success:
+        if not success.all():
             logger.log_warning("Failed to plan move_held_object demo trajectory.")
             return
 

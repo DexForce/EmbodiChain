@@ -666,9 +666,10 @@ class BaseEnv(gym.Env):
             **kwargs,
         )
 
-        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
-        if len(reset_env_ids) > 0:
-            obs, _ = self.reset(options={"reset_ids": reset_env_ids})
+        if not getattr(self, "_replay_no_auto_reset", False):
+            reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+            if len(reset_env_ids) > 0:
+                obs, _ = self.reset(options={"reset_ids": reset_env_ids})
 
         return obs, rewards, terminateds, truncateds, info
 

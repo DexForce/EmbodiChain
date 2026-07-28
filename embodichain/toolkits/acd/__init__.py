@@ -13,6 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-from .urdf_modifider import generate_urdf_collision_convexes
+
+"""Approximate convex decomposition toolkit."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .urdf_modifider import generate_urdf_collision_convexes
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import APIs with optional geometry dependencies."""
+    if name == "generate_urdf_collision_convexes":
+        from .urdf_modifider import generate_urdf_collision_convexes
+
+        return generate_urdf_collision_convexes
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["generate_urdf_collision_convexes"]

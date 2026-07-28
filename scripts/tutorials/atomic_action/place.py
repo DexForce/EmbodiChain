@@ -155,13 +155,13 @@ class PlaceDemo(DemoBase):
         multi_waypoint_xpos = self.place_eef_poses.unsqueeze(0).repeat(n_envs, 1, 1, 1)
         place_target = EndEffectorPoseTarget(xpos=multi_waypoint_xpos)
         logger.log_info("Planning PickUp precondition -> Place release trajectory")
-        is_success, traj, _ = self.atomic_engine.run(
+        success, traj, _ = self.atomic_engine.run(
             steps=[
                 ("pick_up", GraspTarget(semantics=self.semantics)),
                 ("place", place_target),
             ]
         )
-        if not is_success:
+        if not success.all():
             logger.log_warning("Failed to plan Place demo trajectory.")
             return
 

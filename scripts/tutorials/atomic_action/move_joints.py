@@ -106,13 +106,13 @@ class MoveJointsDemo(DemoBase):
             "Planning MoveJoints: NamedJointPositionTarget('ready') -> "
             "multi-waypoint trajectory (mid -> home)"
         )
-        is_success, traj, _ = self.atomic_engine.run(
+        success, traj, _ = self.atomic_engine.run(
             steps=[
                 ("move_joints", NamedJointPositionTarget(name="ready")),
                 ("move_joints", JointPositionTarget(qpos=multi_waypoint_qpos)),
             ]
         )
-        if not is_success:
+        if not success.all():
             logger.log_warning("Failed to plan MoveJoints demo trajectory.")
             return
 

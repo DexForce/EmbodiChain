@@ -36,90 +36,53 @@ if str(_REPO_ROOT) not in sys.path:
 
 import numpy as np
 import torch
-from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
+    AtomicActionEngine,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
     CoordinatedPickmentTarget,
     ObjectSemantics,
-    WorldState,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
-    LightCfg,
-    RenderCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
     RobotCfg,
     URDFCfg,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator, ToppraPlannerCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
+    create_toppra_motion_generator,
+    create_tutorial_simulation,
     draw_axis_marker,
-    get_tutorial_window_size,
-    start_auto_play_recording,
-    stop_auto_play_recording,
+    prepare_tutorial_scene,
+    replay_trajectory,
 )
-
-DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (-90.0, 0.0, 0.0)
-
-
-def transform_baseline_pose(
-    init_pos: tuple[float, float, float],
-    init_rot: tuple[float, float, float],
-    *,
-    z_offset: float = 0.0,
-    mesh_frame_correction_euler_deg: tuple[float, float, float] = (
-        DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG
-    ),
-    world_yaw_correction_deg: float = 0.0,
-) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-    """Apply mesh-frame correction while preserving baseline world placement."""
-    pos = np.asarray(init_pos, dtype=np.float64)
-    pos[2] += z_offset
-    rot = (
-        SciRotation.from_euler("Z", world_yaw_correction_deg, degrees=True)
-        * SciRotation.from_euler("XYZ", init_rot, degrees=True)
-        * SciRotation.from_euler("XYZ", mesh_frame_correction_euler_deg, degrees=True)
-    ).as_euler("XYZ", degrees=True)
-    return tuple(float(value) for value in pos), tuple(float(value) for value in rot)
-
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 PICKMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
-TABLE_MESH_PATH = f"{PICKMENT_ASSET_ROOT}/table.glb"
 GRIPPER_TCP_Z = 0.121
 ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
 RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
-TABLE_TOP_Z = 0.65
-BASELINE_TABLE_TOP_Z = 0.3621708124799265
-SCENE_Z_OFFSET = TABLE_TOP_Z - BASELINE_TABLE_TOP_Z
-BASELINE_TABLE_INIT_POS = (
-    0.00014585733079742588,
-    0.00023304896730074557,
-    -0.019599792839044783,
-)
-BASELINE_TABLE_INIT_ROT = (
-    0.0001074673904926984,
-    0.00865572768366991,
-    -90.6562109309317,
-)
-TABLE_INIT_POS, TABLE_INIT_ROT = transform_baseline_pose(
-    BASELINE_TABLE_INIT_POS,
-    BASELINE_TABLE_INIT_ROT,
-    z_offset=SCENE_Z_OFFSET,
+SUPPORT_SURFACE_Z = 0.65
+SUPPORT_SURFACE_SIZE = (0.60, 0.60, 0.02)
+SUPPORT_SURFACE_CENTER = (
+    0.0,
+    0.0,
+    SUPPORT_SURFACE_Z - 0.5 * SUPPORT_SURFACE_SIZE[2],
 )
 PICKMENT_RECORD_LOOK_AT = (
     (-0.25, 0.02, 2.5),
@@ -136,7 +99,7 @@ class PickmentObjectPreset:
     mesh_path: str
     init_xy: tuple[float, float]
     init_rot: tuple[float, float, float]
-    table_clearance: float
+    surface_clearance: float
     body_scale: tuple[float, float, float]
     grasp_end_margin_ratio: float
     grasp_z_clearance: float
@@ -151,9 +114,9 @@ OBJECT_PRESETS = {
         label="pencil",
         mesh_path=f"{PICKMENT_ASSET_ROOT}/pencil.glb",
         init_xy=(-0.02, 0.02),
-        # Rotate the imported pencil from its default upright orientation to a tabletop pose.
+        # Rotate the imported pencil from its default upright orientation to a supported pose.
         init_rot=(90.0, 0.0, 0.0),
-        table_clearance=0.008,
+        surface_clearance=0.008,
         body_scale=(2.0, 2.0, 2.0),
         grasp_end_margin_ratio=0.12,
         grasp_z_clearance=0.015,
@@ -166,7 +129,7 @@ OBJECT_PRESETS = {
         mesh_path=f"{PICKMENT_ASSET_ROOT}/pot.glb",
         init_xy=(-0.02, 0.02),
         init_rot=(-90.0, 90.0, 0.0),
-        table_clearance=0.008,
+        surface_clearance=0.008,
         body_scale=(2.0, 2.0, 2.0),
         grasp_end_margin_ratio=0.08,
         grasp_z_clearance=0.01,
@@ -189,7 +152,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
     parser = argparse.ArgumentParser(description="Dual-arm coordinated pickment demo")
     add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(device="cuda", renderer="hybrid")
+    parser.set_defaults(device="cpu", renderer="hybrid")
     parser.add_argument(
         "--diagnose_plan",
         action="store_true",
@@ -268,31 +231,6 @@ def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
     transform[:3, :3] = rotation_z(yaw)
     transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
     return transform
-
-
-def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
-    """Create the simulation manager and a light."""
-    width, height = get_tutorial_window_size(args)
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            width=width,
-            height=height,
-            headless=True,
-            sim_device=args.device,
-            render_cfg=RenderCfg(renderer=args.renderer),
-            physics_dt=1.0 / 100.0,
-            arena_space=3.0,
-        )
-    )
-    sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=(0.0, -0.4, 3.0),
-        )
-    )
-    return sim
 
 
 def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
@@ -374,21 +312,20 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
     return sim.add_robot(cfg=cfg)
 
 
-def create_table(sim: SimulationManager) -> RigidObject:
-    """Create the table mesh used by the pickment scene."""
+def create_support_surface(sim: SimulationManager) -> RigidObject:
+    """Create a compact support slab under the staged object."""
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
-            uid="table",
-            shape=MeshCfg(fpath=get_cached_data_path(TABLE_MESH_PATH)),
+            uid="support_surface",
+            shape=CubeCfg(size=list(SUPPORT_SURFACE_SIZE)),
             attrs=RigidBodyAttributesCfg(
                 mass=10.0,
                 dynamic_friction=0.9,
                 static_friction=0.95,
                 restitution=0.01,
             ),
-            body_type="kinematic",
-            init_pos=list(TABLE_INIT_POS),
-            init_rot=list(TABLE_INIT_ROT),
+            body_type="static",
+            init_pos=list(SUPPORT_SURFACE_CENTER),
         )
     )
 
@@ -397,7 +334,7 @@ def create_pickment_object(
     sim: SimulationManager,
     preset: PickmentObjectPreset,
 ) -> RigidObject:
-    """Create the selected object mesh on the table."""
+    """Create the selected object mesh on the support surface."""
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=preset.label,
@@ -418,12 +355,12 @@ def create_pickment_object(
                 max_depenetration_velocity=2.0,
             ),
             max_convex_hull_num=16,
-            init_pos=[preset.init_xy[0], preset.init_xy[1], TABLE_TOP_Z],
+            init_pos=[preset.init_xy[0], preset.init_xy[1], SUPPORT_SURFACE_Z],
             init_rot=list(preset.init_rot),
             body_scale=preset.body_scale,
         )
     )
-    obj.cfg.init_pos = compute_tabletop_init_pos(obj, preset)
+    obj.cfg.init_pos = compute_supported_init_pos(obj, preset)
     obj.reset()
     return obj
 
@@ -477,18 +414,18 @@ def compute_local_bounds(vertices: torch.Tensor) -> tuple[torch.Tensor, torch.Te
     return vertices.min(dim=0).values, vertices.max(dim=0).values
 
 
-def compute_tabletop_init_pos(
+def compute_supported_init_pos(
     obj: RigidObject,
     preset: PickmentObjectPreset,
 ) -> tuple[float, float, float]:
-    """Place an object so its rotated mesh bottom sits on the table."""
+    """Place an object so its rotated mesh bottom sits on the support surface."""
     vertices = get_local_vertices(obj)
     rot = torch.as_tensor(preset.init_rot, dtype=torch.float32, device=vertices.device)
     rot = rot.unsqueeze(0) * torch.pi / 180.0
     upright_rot = matrix_from_euler(rot, "XYZ")[0]
     rotated_vertices = vertices @ upright_rot.T
     bottom_z = rotated_vertices[:, 2].min().item()
-    z = TABLE_TOP_Z + preset.table_clearance - bottom_z
+    z = SUPPORT_SURFACE_Z + preset.surface_clearance - bottom_z
     return (preset.init_xy[0], preset.init_xy[1], z)
 
 
@@ -610,7 +547,7 @@ def build_object_target_pose(
         preset.target_translation, dtype=torch.float32, device=device
     )
     bottom_z = compute_world_bounds(pose, object_vertices)[0][2]
-    pose[2, 3] += TABLE_TOP_Z + preset.table_clearance + 0.10 - bottom_z
+    pose[2, 3] += SUPPORT_SURFACE_Z + preset.surface_clearance + 0.10 - bottom_z
     return pose
 
 
@@ -659,26 +596,27 @@ def draw_pickment_target_axes(
     object_target_pose: torch.Tensor,
     left_grasp_pose: torch.Tensor,
     right_grasp_pose: torch.Tensor,
+    num_envs: int,
 ) -> None:
     """Draw semantic axes for the target object pose and two grasp TCP poses."""
     draw_axis_marker(
         sim,
         "coordinated_pickment_object_target_axis",
-        object_target_pose,
+        broadcast_pose_batch(object_target_pose, num_envs=num_envs),
         axis_len=0.12,
         axis_size=0.005,
     )
     draw_axis_marker(
         sim,
         "coordinated_pickment_left_grasp_axis",
-        left_grasp_pose,
+        broadcast_pose_batch(left_grasp_pose, num_envs=num_envs),
         axis_len=0.07,
         axis_size=0.0035,
     )
     draw_axis_marker(
         sim,
         "coordinated_pickment_right_grasp_axis",
-        right_grasp_pose,
+        broadcast_pose_batch(right_grasp_pose, num_envs=num_envs),
         axis_len=0.07,
         axis_size=0.0035,
     )
@@ -702,24 +640,6 @@ def log_execution_state(
     )
 
 
-def execute_trajectory(
-    sim: SimulationManager,
-    robot: Robot,
-    traj: torch.Tensor,
-    obj: RigidObject,
-    debug_state: bool,
-) -> None:
-    """Play a planned trajectory in simulation."""
-    total_steps = traj.shape[1]
-    log_stride = max(1, total_steps // 10)
-    for i in range(total_steps):
-        robot.set_qpos(traj[:, i, :])
-        sim.update(step=TRAJECTORY_SIM_STEPS)
-        if debug_state and (i % log_stride == 0 or i == total_steps - 1):
-            log_execution_state(robot, obj, i, total_steps)
-        time.sleep(1e-2)
-
-
 def run_coordinated_pickment_demo(
     args: argparse.Namespace,
     sim: SimulationManager,
@@ -727,17 +647,16 @@ def run_coordinated_pickment_demo(
 ) -> None:
     """Plan and optionally execute coordinated object pickment."""
     preset = OBJECT_PRESETS[args.object]
-    create_table(sim)
+    create_support_surface(sim)
     obj = create_pickment_object(sim, preset)
     settle_object(sim, obj, step=0)
-    object_pose = obj.get_local_pose(to_matrix=True)[0].to(
-        device=sim.device, dtype=torch.float32
-    )
+    object_pose_batch = clone_local_pose_from_first_env(obj)
+    obj.clear_dynamics()
+    object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
+    n_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
     object_semantics = create_object_semantics(obj, preset.label)
-    motion_gen = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
-    )
+    motion_gen = create_toppra_motion_generator(robot)
 
     left_open, left_close = get_hand_open_close_qpos(
         robot, "left_hand", sim.device, preset.hand_close_qpos
@@ -765,6 +684,8 @@ def run_coordinated_pickment_demo(
             object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
         ),
     )
+    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine.register(pickment_action)
 
     left_grasp_pose, right_grasp_pose = build_object_grasp_poses(
         object_pose,
@@ -791,42 +712,37 @@ def run_coordinated_pickment_demo(
             target_pose,
             left_grasp_pose,
             right_grasp_pose,
+            num_envs=n_envs,
         )
 
     left_object_to_eef = torch.bmm(
-        invert_pose(object_pose.unsqueeze(0)),
-        left_grasp_pose.unsqueeze(0),
+        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
+        broadcast_pose_batch(left_grasp_pose, num_envs=n_envs),
     )
     right_object_to_eef = torch.bmm(
-        invert_pose(object_pose.unsqueeze(0)),
-        right_grasp_pose.unsqueeze(0),
+        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
+        broadcast_pose_batch(right_grasp_pose, num_envs=n_envs),
     )
     pickment_target = CoordinatedPickmentTarget(
-        object_target_pose=target_pose,
+        object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
         object_semantics=object_semantics,
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
-        object_initial_pose=object_pose,
+        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
     )
 
-    wait_for_user = not args.auto_play and not args.headless_play
-    if not args.diagnose_plan and not args.headless_play:
-        sim.open_window()
-        if wait_for_user:
-            input("Inspect the scene, then press Enter to plan pickment...")
+    wait_for_user = prepare_tutorial_scene(
+        sim, args, "Inspect the scene, then press Enter to plan pickment..."
+    )
 
     start_time = time.time()
-    result = pickment_action.execute(
-        pickment_target,
-        WorldState(last_qpos=robot.get_qpos().clone()),
-    )
+    success, traj, _ = engine.run([("coordinated_pickment", pickment_target)])
     logger.log_info(
         f"Plan coordinated pickment cost time: {time.time() - start_time:.2f} seconds"
     )
-    if not result.success:
+    if not success.all():
         logger.log_warning("Failed to plan coordinated pickment trajectory.")
         return
-    traj = result.trajectory
     joint_ids = list(range(robot.dof))
     log_action_plan(
         robot,
@@ -841,22 +757,24 @@ def run_coordinated_pickment_demo(
 
     if wait_for_user:
         input("Press Enter to execute coordinated pickment...")
-    recording_started = start_auto_play_recording(
+
+    def log_execution(step_idx: int, total_steps: int) -> None:
+        if args.debug_state and (
+            step_idx % max(1, total_steps // 10) == 0 or step_idx == total_steps - 1
+        ):
+            log_execution_state(robot, obj, step_idx, total_steps)
+
+    replay_trajectory(
         sim,
+        robot,
+        traj,
         args,
         video_prefix=f"coordinated_pickment_{args.object}_auto_play",
+        hold_steps=0,
+        trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+        on_trajectory_step=log_execution,
         look_at=PICKMENT_RECORD_LOOK_AT,
     )
-    try:
-        execute_trajectory(
-            sim,
-            robot,
-            traj,
-            obj,
-            args.debug_state,
-        )
-    finally:
-        stop_auto_play_recording(sim, recording_started)
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 
@@ -864,7 +782,11 @@ def run_coordinated_pickment_demo(
 def main() -> None:
     """Run the coordinated pickment demo."""
     args = parse_arguments()
-    sim = initialize_simulation(args)
+    sim = create_tutorial_simulation(
+        args,
+        arena_space=3.0,
+        light_pos=(0.0, -0.4, 3.0),
+    )
     robot = create_dual_ur5_robot(sim)
     run_coordinated_pickment_demo(args, sim, robot)
 

@@ -343,16 +343,35 @@ class ManagerBase(ABC):
         # check statically if the functor's arguments are matched by params
         functor_params = list(functor_cfg.params.keys())
         args = inspect.signature(func_static).parameters
+        # A functor that declares **kwargs explicitly opts into accepting
+        # arbitrary extra params (e.g. construction-only params such as
+        # ``image_writer_threads`` that are read in ``__init__`` but not used
+        # in ``__call__``). In that case the strict received-vs-expected check
+        # below does not apply, and VAR_KEYWORD/VAR_POSITIONAL are excluded
+        # from the positional arg count so they don't trip ``len(args)``.
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in args.values()
+        )
+        _var_kinds = (
+            inspect.Parameter.VAR_KEYWORD,
+            inspect.Parameter.VAR_POSITIONAL,
+        )
         args_with_defaults = [
-            arg for arg in args if args[arg].default is not inspect.Parameter.empty
+            arg
+            for arg in args
+            if args[arg].default is not inspect.Parameter.empty
+            and args[arg].kind not in _var_kinds
         ]
         args_without_defaults = [
-            arg for arg in args if args[arg].default is inspect.Parameter.empty
+            arg
+            for arg in args
+            if args[arg].default is inspect.Parameter.empty
+            and args[arg].kind not in _var_kinds
         ]
         args = args_without_defaults + args_with_defaults
         # ignore first two arguments for env and env_ids
         # Think: Check for cases when kwargs are set inside the function?
-        if len(args) > min_argc:
+        if len(args) > min_argc and not has_var_keyword:
             if set(args[min_argc:]) != set(functor_params + args_with_defaults):
                 raise ValueError(
                     f"The functor '{functor_name}' expects mandatory parameters: {args_without_defaults[min_argc:]}"

@@ -40,6 +40,24 @@ To get started with EmbodiChain, follow these steps:
 - [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html)
 - [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html)
 
+## Task Environments
+
+EmbodiChain's task environments are decoupled from the core framework: the
+official tasks (tableware, RL, special) ship in the separate
+[`embodichain_tasks`](embodichain_tasks/) package, and any installed package
+declaring an `embodichain.tasks` entry point is auto-discovered. Launch any
+registered task with the unified CLI:
+
+```bash
+embodichain run-env --gym_config path/to/gym_config.json
+```
+
+To build your own task environments, start from the
+[embodichain_task_template](https://github.com/DexForce/embodichain_task_template)
+repository: fork it, implement an `EmbodiedEnv` subclass with `@register_env`,
+add a gym config, `pip install -e .`, then launch with `embodichain run-env`.
+See [`embodichain_tasks/README.md`](embodichain_tasks/README.md) for details.
+
 ## Contribution Guide
 
 We welcome contributions! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for guidelines on how to get started.

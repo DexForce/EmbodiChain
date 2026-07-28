@@ -106,7 +106,7 @@ class MoveEndEffectorDemo(DemoBase):
             f"xpos0={format_tensor(self.target_pose[:3, 3])} -> "
             f"xpos1={format_tensor(self.side_pose[:3, 3])}"
         )
-        is_success, traj, _ = self.atomic_engine.run(
+        success, traj, _ = self.atomic_engine.run(
             steps=[
                 (
                     "move_end_effector",
@@ -114,7 +114,7 @@ class MoveEndEffectorDemo(DemoBase):
                 )
             ]
         )
-        if not is_success:
+        if not success.all():
             logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")
             return
 

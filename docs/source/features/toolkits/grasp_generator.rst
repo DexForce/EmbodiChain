@@ -1,12 +1,31 @@
-Generating and Executing Robot Grasps
-======================================
+Parallel-Gripper Grasp Generation
+=================================
 
 .. currentmodule:: embodichain.lab.sim
 
-This tutorial demonstrates how to generate antipodal grasp poses for a target object and execute a full grasp trajectory with a robot arm. It covers scene initialization, robot and object creation, interactive grasp region annotation, grasp pose computation, and trajectory execution in the simulation loop.
+The GraspKit toolkit generates feasible grasp poses for parallel-jaw grippers
+from a target object's triangle mesh. It supports programmatic antipodal
+sampling, browser-based grasp-region annotation, collision filtering, candidate
+ranking, and on-disk caching of sampled contact pairs.
 
-The Code
-~~~~~~~~
+This page also demonstrates how to execute a generated pose with a robot arm. It
+covers scene initialization, robot and object creation, grasp pose computation,
+and trajectory execution in the simulation loop.
+
+Processing Pipeline
+-------------------
+
+Grasp generation has three stages:
+
+1. Sample surface points and find antipodal contact pairs on the full mesh or an
+   annotated region.
+2. Construct 6-DoF grasp frames that align the gripper opening axis with each
+   contact pair and respect the requested approach direction.
+3. Remove candidates that collide with the object or ground, rank the remaining
+   poses, and return the best candidates with their required opening lengths.
+
+Tutorial Source
+---------------
 
 The tutorial corresponds to the ``grasp_generator.py`` script in the ``scripts/tutorials/grasp`` directory.
 
@@ -18,11 +37,11 @@ The tutorial corresponds to the ``grasp_generator.py`` script in the ``scripts/t
       :linenos:
 
 
-The Code Explained
-~~~~~~~~~~~~~~~~~~
+Tutorial Walkthrough
+--------------------
 
 Configuring the simulation
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Command-line arguments are parsed with ``argparse`` to select the number of parallel environments, the compute device, and optional rendering features such as renderer backend and headless mode.
 
@@ -39,7 +58,7 @@ The parsed arguments are passed to ``initialize_simulation``, which builds a :cl
    :end-at: return sim
 
 Creating a robot and a target object
-------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A UR10 arm with a parallel-jaw gripper is created via :meth:`SimulationManager.add_robot`. The gripper URDF and drive properties are configured so that the arm joints and finger joints can be controlled independently.
 
@@ -52,11 +71,11 @@ The target object (a mug) is loaded as a :class:`objects.RigidObject` from a PLY
 
 .. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
    :language: python
-   :start-at: def create_mug(sim: SimulationManager):
+   :start-at: def create_obj(sim: SimulationManager):
    :end-at: return mug
 
 Annotating and computing grasp poses
--------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Grasp generation is performed by :class:`~embodichain.toolkits.graspkit.pg_grasp.GraspGenerator`, which runs an antipodal sampler on the object mesh. The mesh data (vertices and triangles) is extracted from the :class:`objects.RigidObject` via its accessor methods. A :class:`~embodichain.toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls sampler parameters (sample count, gripper jaw limits) and the interactive annotation workflow:
 
@@ -64,7 +83,9 @@ Grasp generation is performed by :class:`~embodichain.toolkits.graspkit.pg_grasp
 2. Use *Rect Select Region* to highlight the area of the object that should be grasped.
 3. Click *Confirm Selection* to finalize the region.
 
-After annotation, antipodal point pairs are cached to disk and automatically reused unless user call `GraspGenerator.annotate()`.
+After annotation, antipodal point pairs are cached to disk and automatically
+reused. Call :meth:`~embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.annotate`
+again to select a new region.
 
 For each environment, a grasp pose is computed by calling :meth:`~embodichain.toolkits.graspkit.pg_grasp.GraspGenerator.get_grasp_poses` with the object pose and desired approach direction. The result is a ``(4, 4)`` homogeneous transformation matrix representing the grasp frame in world coordinates. Set ``visualize=True`` to open an Open3D window showing the selected grasp on the object.
 
@@ -76,7 +97,7 @@ The approach direction is the unit vector along which the gripper approaches the
    :end-at: logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 
 Building and executing the grasp trajectory
--------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Once a grasp pose is obtained, a waypoint trajectory is built that moves the arm from its rest configuration to an approach pose (offset above the grasp), down to the grasp pose, closes the fingers, lifts, and returns. The trajectory is interpolated for smooth motion and executed step-by-step in the simulation loop.
 
@@ -85,8 +106,11 @@ Once a grasp pose is obtained, a waypoint trajectory is built that moves the arm
    :start-at: def get_grasp_traj(sim: SimulationManager
    :end-at: return interp_trajectory
 
-Configuring GraspGeneratorCfg
-------------------------------
+Configuration
+-------------
+
+GraspGeneratorCfg
+~~~~~~~~~~~~~~~~~
 
 :class:`~embodichain.toolkits.graspkit.pg_grasp.GraspGeneratorCfg` controls the overall grasp annotation workflow. The key parameters are listed below.
 
@@ -107,14 +131,23 @@ Configuring GraspGeneratorCfg
      - ``AntipodalSamplerCfg()``
      - Nested configuration for the antipodal point sampler. See the table below for its parameters.
    * - ``max_deviation_angle``
-     - ``π / 12``
+     - ``π / 6``
      - Maximum allowed angle (in radians) between the specified approach direction and the axis connecting an antipodal point pair. Pairs that deviate more than this threshold are discarded.
+   * - ``n_deviated_approach_directions``
+     - ``4``
+     - Number of evenly deviated approach directions considered while sampling grasp poses.
+   * - ``n_top_grasps``
+     - ``50``
+     - Maximum number of top-ranked grasp poses returned after filtering and scoring.
    * - ``is_partial_annotate``
-     - ``True``
+     - ``False``
      - When ``True``, the annotator allows selecting a partial region of the mesh for grasp sampling. If ``False``, the entire mesh is used.
    * - ``is_filter_ground_collision``
      - ``True``
      - Whether to filter out grasp poses that would cause the gripper to  collide.
+
+AntipodalSamplerCfg
+~~~~~~~~~~~~~~~~~~~
 
 The ``antipodal_sampler_cfg`` field accepts an :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalSamplerCfg` instance, which controls how antipodal point pairs are sampled on the mesh surface.
 
@@ -138,8 +171,8 @@ The ``antipodal_sampler_cfg`` field accepts an :class:`~embodichain.toolkits.gra
      - ``0.001``
      - Minimum allowed distance (in metres) between an antipodal pair. Pairs closer together than this value are discarded to avoid degenerate or self-intersecting grasps.
 
-Configuring GripperCollisionCfg
--------------------------------
+GripperCollisionCfg
+~~~~~~~~~~~~~~~~~~~
 
 :class:`~embodichain.toolkits.graspkit.pg_grasp.GripperCollisionCfg` models the geometry of a parallel-jaw gripper as a point cloud and is used to filter out grasp candidates that would collide with the object. All length parameters are in metres.
 
@@ -176,8 +209,8 @@ Configuring GripperCollisionCfg
      - Extra clearance added to the gripper open length during collision checking to account for pose uncertainty or mesh inaccuracies.
 
 
-The Code Execution
-~~~~~~~~~~~~~~~~~~
+Running the Tutorial
+--------------------
 
 To run the script, execute the following command from the project root:
 
@@ -197,13 +230,13 @@ After confirming the grasp region in the browser, the script will compute a gras
 
 
 Grasp Annotation CLI
-~~~~~~~~~~~~~~~~~~~~
+--------------------
 
 EmbodiChain provides a dedicated CLI for interactively annotating grasp regions on a mesh and caching the resulting antipodal point pairs, without requiring a full simulation environment.
 
 Basic usage::
 
-   python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
+   embodichain annotate-grasp --mesh_path /path/to/object.ply
 
 This will:
 
@@ -214,12 +247,12 @@ This will:
 
 Common options::
 
-   python -m embodichain annotate-grasp \
+   embodichain annotate-grasp \
        --mesh_path /path/to/object.ply \
        --viser_port 15531 \
        --n_sample 20000 \
        --max_length 0.1 \
-       --min_length 0.001 \
+       --min_length 0.001
 
 .. list-table:: CLI options
    :header-rows: 1
