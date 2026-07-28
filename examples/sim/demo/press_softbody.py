@@ -19,182 +19,159 @@ This script demonstrates the creation and simulation of a robot with a soft obje
 and performs a pressing task in a simulated environment.
 """
 
+from __future__ import annotations
+
 import argparse
+
 import numpy as np
-import time
 import torch
 
 from dexsim.utility.path import get_resources_data_path
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Robot, SoftObject
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
-from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.data import get_data_path
-from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    LightCfg,
     SoftObjectCfg,
-    SoftbodyVoxelAttributesCfg,
     SoftbodyPhysicalAttributesCfg,
+    SoftbodyVoxelAttributesCfg,
 )
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.demo_base import DemoBase
+from embodichain.lab.sim.objects import Robot, SoftObject
 from embodichain.lab.sim.robots import URRobotCfg
+from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    setup_print_options,
+)
+from embodichain.utils import logger
 
 
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
+class PressSoftbodyDemo(DemoBase):
+    """Press a soft cow with the end link of a UR10 robot."""
 
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments, device, and rendering options.
-    """
+    def setup(self) -> None:
+        """Create the simulation, robot and soft object, then open the viewer."""
+        self.sim = create_default_sim(
+            self.args,
+            arena_space=5.0,
+            num_envs=self.args.num_envs,
+            add_default_light=False,
+        )
+        self.robot = self._create_robot()
+        self.soft_cow = self._create_soft_cow()
+        maybe_init_gpu_physics(self.sim)
+        maybe_open_window(self.sim, self.args)
+
+    def run(self) -> None:
+        """Press the cow and keep the simulation live until interrupted."""
+        self._press_cow()
+
+        logger.log_info("\n Press Ctrl+C to exit simulation loop.")
+        if self.args.auto_play:
+            return
+        try:
+            while True:
+                self.sim.update(step=10)
+        except KeyboardInterrupt:
+            logger.log_info("\n Exit")
+
+    def _create_robot(self) -> Robot:
+        """Create and configure a UR10 robot in the simulation.
+
+        Returns:
+            The configured robot instance added to the simulation.
+        """
+        cfg = URRobotCfg.from_dict(
+            {
+                "robot_type": "ur10",
+                "uid": "UR10",
+                "solver_cfg": {"arm": {"tcp": np.eye(4)}},
+                "init_qpos": [
+                    0.0,
+                    -np.pi / 2,
+                    -np.pi / 2,
+                    np.pi / 2,
+                    -np.pi / 2,
+                    0.0,
+                ],
+            }
+        )
+        return self.sim.add_robot(cfg=cfg)
+
+    def _create_soft_cow(self) -> SoftObject:
+        """Create the soft cow object in the simulation.
+
+        Returns:
+            The soft cow object.
+        """
+        cow: SoftObject = self.sim.add_soft_object(
+            cfg=SoftObjectCfg(
+                uid="cow",
+                shape=MeshCfg(
+                    fpath=get_resources_data_path("Model", "cow", "cow2.obj"),
+                ),
+                init_rot=[0, 90, 0],
+                init_pos=[0.45, -0.1, 0.12],
+                voxel_attr=SoftbodyVoxelAttributesCfg(
+                    simulation_mesh_resolution=8,
+                    maximal_edge_length=0.5,
+                ),
+                physical_attr=SoftbodyPhysicalAttributesCfg(
+                    youngs=5e3,
+                    poissons=0.45,
+                    density=100,
+                    dynamic_friction=0.1,
+                ),
+            ),
+        )
+        return cow
+
+    def _press_cow(self) -> None:
+        """Drive the robot end link to press the soft cow."""
+        start_qpos = self.robot.get_qpos()
+        arm_ids = self.robot.get_joint_ids("arm")
+        arm_start_qpos = start_qpos[:, arm_ids]
+
+        arm_start_xpos = self.robot.compute_fk(
+            arm_start_qpos, name="arm", to_matrix=True
+        )
+        press_xpos = arm_start_xpos.clone()
+        press_xpos[:, :3, 3] = torch.tensor(
+            [0.5, -0.1, 0.005], device=press_xpos.device
+        )
+
+        approach_xpos = press_xpos.clone()
+        approach_xpos[:, 2, 3] += 0.05
+
+        is_success, approach_qpos = self.robot.compute_ik(
+            approach_xpos, joint_seed=arm_start_qpos, name="arm"
+        )
+
+        arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos])
+        interp_trajectory = interpolate_with_distance(
+            trajectory=arm_trajectory[None, :, :], interp_num=50, device=self.sim.device
+        )
+        interp_trajectory = interp_trajectory[0]
+        for qpos in interp_trajectory:
+            self.robot.set_qpos(
+                qpos.unsqueeze(0).repeat(self.sim.num_envs, 1), joint_ids=arm_ids
+            )
+            self.sim.update(step=5)
+
+
+def main() -> None:
+    """Entry point for the press-softbody demo."""
+    setup_print_options()
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
-    return parser.parse_args()
-
-
-def initialize_simulation(args):
-    """
-    Initialize the simulation environment based on the provided arguments.
-
-    Args:
-        args (argparse.Namespace): Parsed command-line arguments.
-
-    Returns:
-        SimulationManager: Configured simulation manager instance.
-    """
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device="cuda",
-        render_cfg=RenderCfg(renderer=args.renderer),
-        physics_dt=1.0 / 100.0,
-        num_envs=args.num_envs,
-    )
-    sim = SimulationManager(config)
-
-    return sim
-
-
-def create_robot(sim: SimulationManager):
-    """
-    Create and configure a robot with an arm and a dexterous hand in the simulation.
-
-    Args:
-        sim (SimulationManager): The simulation manager instance.
-
-    Returns:
-        Robot: The configured robot instance added to the simulation.
-    """
-    cfg = URRobotCfg.from_dict(
-        {
-            "robot_type": "ur10",
-            "uid": "UR10",
-            "solver_cfg": {"arm": {"tcp": np.eye(4)}},
-            "init_qpos": [
-                0.0,
-                -np.pi / 2,
-                -np.pi / 2,
-                np.pi / 2,
-                -np.pi / 2,
-                0.0,
-            ],
-        }
-    )
-    return sim.add_robot(cfg=cfg)
-
-
-def create_soft_cow(sim: SimulationManager) -> SoftObject:
-    """create soft cow object in the simulation
-
-    Args:
-        sim (SimulationManager): The simulation manager instance.
-
-    Returns:
-        SoftObject: soft cow object
-    """
-    cow: SoftObject = sim.add_soft_object(
-        cfg=SoftObjectCfg(
-            uid="cow",
-            shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow2.obj"),
-            ),
-            init_rot=[0, 90, 0],
-            init_pos=[0.45, -0.1, 0.12],
-            voxel_attr=SoftbodyVoxelAttributesCfg(
-                simulation_mesh_resolution=8,
-                maximal_edge_length=0.5,
-            ),
-            physical_attr=SoftbodyPhysicalAttributesCfg(
-                youngs=5e3,
-                poissons=0.45,
-                density=100,
-                dynamic_friction=0.1,
-            ),
-        ),
-    )
-    return cow
-
-
-def press_cow(sim: SimulationManager, robot: Robot):
-    """robot press cow softbody with its end link
-
-    Args:
-        sim (SimulationManager): The simulation manager instance.
-        robot (Robot): The robot instance to be controlled.
-    """
-    start_qpos = robot.get_qpos()
-    arm_ids = robot.get_joint_ids("arm")
-    arm_start_qpos = start_qpos[:, arm_ids]
-
-    arm_start_xpos = robot.compute_fk(arm_start_qpos, name="arm", to_matrix=True)
-    press_xpos = arm_start_xpos.clone()
-    press_xpos[:, :3, 3] = torch.tensor([0.5, -0.1, 0.005], device=press_xpos.device)
-
-    approach_xpos = press_xpos.clone()
-    approach_xpos[:, 2, 3] += 0.05
-
-    is_success, approach_qpos = robot.compute_ik(
-        approach_xpos, joint_seed=arm_start_qpos, name="arm"
-    )
-
-    arm_trajectory = torch.concatenate([arm_start_qpos, approach_qpos])
-    interp_trajectory = interpolate_with_distance(
-        trajectory=arm_trajectory[None, :, :], interp_num=50, device=sim.device
-    )
-    interp_trajectory = interp_trajectory[0]
-    for qpos in interp_trajectory:
-        robot.set_qpos(qpos.unsqueeze(0).repeat(sim.num_envs, 1), joint_ids=arm_ids)
-        sim.update(step=5)
-
-
-def main():
-    """
-    Main function to demonstrate robot simulation.
-
-    This function initializes the simulation, creates the robot and other objects,
-    and performs the press softbody task.
-    """
-    args = parse_arguments()
-    sim = initialize_simulation(args)
-
-    robot = create_robot(sim)
-    soft_cow = create_soft_cow(sim)
-    sim.init_gpu_physics()
-    sim.open_window()
-
-    press_cow(sim, robot)
-
-    logger.log_info("\n Press Ctrl+C to exit simulation loop.")
-    try:
-        while True:
-            sim.update(step=10)
-    except KeyboardInterrupt:
-        logger.log_info("\n Exit")
+    parser = add_demo_args(parser)
+    # Soft-body simulation requires GPU physics; default to CUDA.
+    parser.set_defaults(device="cuda")
+    args = parser.parse_args()
+    PressSoftbodyDemo(args).main()
 
 
 if __name__ == "__main__":
