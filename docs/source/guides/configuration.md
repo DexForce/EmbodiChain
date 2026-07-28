@@ -141,27 +141,44 @@ When a training config references a gym config (via `trainer.gym_config`), the n
 
 ```json
 {
+    "id": "EmbodiedEnv-v1",
+    "num_envs": 4,
     "max_episodes": 100,
     "max_episode_steps": 600,
+    "physics_config": {
+        "gravity": [0.0, 0.0, -9.81],
+        "bounce_threshold": 2.0,
+        "enable_ccd": false,
+        "length_tolerance": 0.05,
+        "speed_tolerance": 0.25
+    },
+    "render_cfg": {
+        "renderer": "auto",
+        "spp": 1,
+        "tone_mapping_enabled": false,
+        "tone_mapping_exposure": 1.0
+    },
+    "robot": {
+        "uid": "robot",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "robots/my_robot/my_robot.urdf"
+                }
+            ]
+        }
+    },
+    "sensor": [
+        {
+            "uid": "cam_high",
+            "type": "StereoCamera",
+            "height": 540,
+            "width": 960
+        }
+    ],
     "env": {
-        "num_envs": 4,
-        "sim_cfg": {
-            "sim_device": "cuda:0",
-            "headless": true
-        },
-        "robot": {
-            "uid": "robot",
-            "urdf_cfg": {"fpath": "robots/my_robot/my_robot.urdf"}
-        },
         "control_parts": ["arm"],
-        "sensor": [
-            {
-                "uid": "cam_high",
-                "type": "StereoCamera",
-                "height": 540,
-                "width": 960
-            }
-        ],
         "actions": {
             "delta_qpos": {
                 "func": "DeltaQposTerm",

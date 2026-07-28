@@ -56,7 +56,9 @@ The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parame
 | `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
 | `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
 
-For more parameters and details, refer to the [PhysicsCfg](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.PhysicsCfg) documentation.
+PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
+is evaluated on every solver iteration. These solver implementation details use
+fixed defaults and are not exposed by `PhysicsCfg`.
 
 ### Render Configuration
 

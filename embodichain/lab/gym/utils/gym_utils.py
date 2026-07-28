@@ -411,7 +411,10 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
+        PhysicsCfg,
+        RenderCfg,
     )
+    from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.sim.sensors import SensorCfg
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.gym.envs.managers import (
@@ -444,6 +447,24 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
+
+    physics_config = deepcopy(config.get("physics_config", {}))
+    if "gravity" in physics_config:
+        physics_config["gravity"] = np.asarray(physics_config["gravity"])
+
+    render_config = deepcopy(config.get("render_cfg", {}))
+    if "renderer" in config:
+        # Keep the existing flat renderer option as the command-line override.
+        render_config["renderer"] = config["renderer"]
+
+    env_cfg.sim_cfg = SimulationManagerCfg(
+        headless=config.get("headless", False),
+        sim_device=config.get("device", "cpu"),
+        render_cfg=RenderCfg(**render_config),
+        gpu_id=config.get("gpu_id", 0),
+        arena_space=config.get("arena_space", 5.0),
+        physics_config=PhysicsCfg(**physics_config),
+    )
 
     # parser robot config
     # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
@@ -816,8 +837,10 @@ def add_env_launcher_args_to_parser(
         "--renderer",
         type=str,
         choices=["auto", "hybrid", "fast-rt", "rt"],
-        default="auto",
-        help="Renderer backend to use for the simulation.",
+        default=None if require_gym_config else "auto",
+        help="Renderer backend to use for the simulation. When loading a gym "
+        "config, the configured render_cfg.renderer is used unless this option "
+        "is provided.",
     )
     parser.add_argument(
         "--arena_space",
@@ -902,7 +925,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["num_envs"] = args.num_envs
     merged_config["device"] = args.device
     merged_config["headless"] = args.headless
-    merged_config["renderer"] = args.renderer
+    if args.renderer is not None:
+        merged_config["renderer"] = args.renderer
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
@@ -927,8 +951,6 @@ def build_env_cfg_from_args(
     """
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
-    from embodichain.lab.sim import SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
 
     gym_config = load_config(args.gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
@@ -960,14 +982,6 @@ def build_env_cfg_from_args(
     if args.action_config is not None:
         action_config = load_config(args.action_config)
         action_config["action_config"] = action_config
-
-    cfg.sim_cfg = SimulationManagerCfg(
-        headless=gym_config["headless"],
-        sim_device=gym_config["device"],
-        render_cfg=RenderCfg(renderer=gym_config["renderer"]),
-        gpu_id=gym_config["gpu_id"],
-        arena_space=gym_config["arena_space"],
-    )
 
     return cfg, gym_config, action_config
 
