@@ -21,7 +21,28 @@ import pytest
 
 from dexsim.types import DenoiserType, Renderer, ToneMappingType
 
-from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim.cfg import PhysicsCfg, RenderCfg
+
+
+def test_physics_cfg_does_not_expose_fixed_solver_options() -> None:
+    """Fixed solver implementation details are not part of the public config."""
+    physics_cfg = PhysicsCfg()
+
+    assert not hasattr(physics_cfg, "enable_pcm")
+    assert not hasattr(physics_cfg, "enable_tgs")
+    assert not hasattr(physics_cfg, "enable_enhanced_determinism")
+    assert not hasattr(physics_cfg, "enable_friction_every_iteration")
+
+
+def test_physics_cfg_applies_fixed_solver_defaults() -> None:
+    """Removed solver options retain their established DexSim defaults."""
+    physics_args = PhysicsCfg(enable_ccd=True).to_dexsim_args()
+
+    assert physics_args["enable_pcm"] is True
+    assert physics_args["enable_tgs"] is True
+    assert physics_args["enable_ccd"] is True
+    assert physics_args["enable_enhanced_determinism"] is False
+    assert physics_args["enable_friction_every_iteration"] is True
 
 
 def test_render_cfg_applies_default_denoiser() -> None:

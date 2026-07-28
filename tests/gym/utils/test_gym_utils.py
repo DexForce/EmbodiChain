@@ -28,6 +28,7 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.gym.utils.gym_utils import (
+    add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
     build_trajectory_buffer,
     config_to_cfg,
@@ -299,6 +300,20 @@ def test_merge_args_with_gym_config_keeps_default_max_episodes():
     assert merged_config["max_episodes"] == 3
 
 
+def test_launcher_preserves_gym_renderer_when_cli_omits_override():
+    """A required gym config supplies the renderer unless CLI overrides it."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "gym_config.yaml"])
+    gym_config = {"id": "Dummy-v0", "render_cfg": {"renderer": "rt"}}
+    merged_config = merge_args_with_gym_config(args, gym_config)
+
+    assert args.renderer is None
+    assert "renderer" not in merged_config
+    assert merged_config["render_cfg"]["renderer"] == "rt"
+
+
 def test_sensor_and_extra_obs_together():
     """Test that both sensors and extra observations work together."""
     config = {
@@ -394,6 +409,19 @@ class TestConfigToCfgFromFile:
         config = {
             "id": "EmbodiedEnv-v1",
             "max_episode_steps": 100,
+            "physics_config": {
+                "gravity": [0.0, 0.0, -1.62],
+                "bounce_threshold": 1.5,
+                "enable_ccd": True,
+                "length_tolerance": 0.02,
+                "speed_tolerance": 0.1,
+            },
+            "render_cfg": {
+                "renderer": "rt",
+                "spp": 4,
+                "tone_mapping_enabled": True,
+                "tone_mapping_exposure": 1.25,
+            },
             "env": {
                 "events": {},
                 "observations": {},
@@ -423,6 +451,17 @@ class TestConfigToCfgFromFile:
 
         assert cfg.max_episode_steps == 100
         assert cfg.robot.uid == "TestRobot"
+        np.testing.assert_array_equal(
+            cfg.sim_cfg.physics_config.gravity, [0.0, 0.0, -1.62]
+        )
+        assert cfg.sim_cfg.physics_config.bounce_threshold == 1.5
+        assert cfg.sim_cfg.physics_config.enable_ccd is True
+        assert cfg.sim_cfg.physics_config.length_tolerance == 0.02
+        assert cfg.sim_cfg.physics_config.speed_tolerance == 0.1
+        assert cfg.sim_cfg.render_cfg.renderer == "rt"
+        assert cfg.sim_cfg.render_cfg.spp == 4
+        assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
+        assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
 
     def test_json_dataset_save_failed_episodes_parses_from_top_level(self, tmp_path):
         config = {
@@ -469,6 +508,15 @@ class TestConfigToCfgFromFile:
         config = {
             "id": "EmbodiedEnv-v1",
             "max_episode_steps": 100,
+            "physics_config": {
+                "gravity": [0.0, 0.0, -3.71],
+                "enable_ccd": True,
+            },
+            "render_cfg": {
+                "renderer": "rt",
+                "spp": 8,
+                "tone_mapping_enabled": True,
+            },
             "env": {"events": {}, "observations": {}, "rewards": {}},
             "robot": {
                 "uid": "TestRobot",
@@ -492,7 +540,7 @@ class TestConfigToCfgFromFile:
             num_envs=1,
             device="cpu",
             headless=True,
-            renderer="rasterization",
+            renderer="fast-rt",
             gpu_id=0,
             arena_space=2.0,
             max_episodes=None,
@@ -509,6 +557,13 @@ class TestConfigToCfgFromFile:
 
         assert merged_config["max_episode_steps"] == 321
         assert cfg.max_episode_steps == 321
+        np.testing.assert_array_equal(
+            cfg.sim_cfg.physics_config.gravity, [0.0, 0.0, -3.71]
+        )
+        assert cfg.sim_cfg.physics_config.enable_ccd is True
+        assert cfg.sim_cfg.render_cfg.renderer == "fast-rt"
+        assert cfg.sim_cfg.render_cfg.spp == 8
+        assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
 
     @pytest.mark.parametrize(
         ("replay_mode", "expected"),
