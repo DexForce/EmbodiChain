@@ -75,3 +75,37 @@ These modules form a one-way dependency graph: execution may use layout
 primitives, while intent, layout, and execution must not import the
 arrangement_spec entry module. Moving a helper must preserve the existing
 arrangement_spec import when that name is part of its compatibility surface.
+
+Relative planning ownership
+---------------------------
+
+The generation.relative_spec module is the stable orchestration entry for
+relative-manipulation specs. Semantic normalization and runtime UID resolution
+belong to generation.relative_intent. Coordinated payload canonicalization,
+direction, terminal behavior, and forced-arm assignment belong to
+generation.relative_coordinated_spec.
+
+Relative geometry is split by policy boundary. generation.relative_offsets
+owns basic offsets, absolute self-relative targets, and final arm assignment;
+generation.relative_slot_geometry owns deterministic container slots;
+generation.relative_transport_geometry owns coordinated carrier motion and
+side-release height; generation.relative_surface_geometry owns surface contact
+and orientation-aware mesh height. These modules may depend on
+generation.relative_intent and relative_offsets, but they must not import
+relative_spec or the relative_geometry compatibility aggregator.
+
+Config bundle ownership
+-----------------------
+
+The generation.action_agent_config module is the public generation entry and
+task-route dispatcher. Route-specific bundle construction belongs to
+generation.config_bundle_builders, source-scene transform ordering and
+body-scale policy belong to generation.scene_transforms, shared robot and
+registry helpers belong to generation.bundle_support, and mesh finalization
+plus artifact writing belong to generation.bundle_finalization.
+
+Bundle builders keep the arrangement, stacking, and relative flows explicit.
+They may use scene_transforms and bundle_support, but none of these owner
+modules may import action_agent_config. Compatibility aliases in the entry
+module preserve established private import paths without moving ownership back
+into the dispatcher.
