@@ -465,6 +465,7 @@ def gravity_settle_assets_on_table(
                 body_scale=tuple(table_y_up_scale),
                 body_type="static",
                 max_convex_hull_num=max_convex_hull_num,
+                acd_method="vhacd",  # Use vhacd by default.
             )
         )
         simulated_assets: dict[str, object] = {}
@@ -481,6 +482,7 @@ def gravity_settle_assets_on_table(
                     body_scale=tuple(asset_info["y_up_scale"]),
                     body_type="dynamic",
                     max_convex_hull_num=max_convex_hull_num,
+                    acd_method="vhacd",  # Use vhacd by default.
                 )
             )
 
