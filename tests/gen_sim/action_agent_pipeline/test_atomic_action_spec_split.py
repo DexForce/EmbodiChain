@@ -21,11 +21,14 @@ from pathlib import Path
 
 import pytest
 
+import embodichain.gen_sim.action_agent_pipeline as action_agent_pipeline_package
 from embodichain.gen_sim.action_agent_pipeline.runtime import atom_actions
 from embodichain.gen_sim.action_agent_pipeline.runtime.atomic_action_spec import (
     AtomicActionSpec,
     normalize_atomic_action_spec,
 )
+
+_PACKAGE_ROOT = Path(next(iter(action_agent_pipeline_package.__path__))).resolve()
 
 
 @pytest.mark.parametrize(
@@ -143,7 +146,6 @@ def test_atom_actions_facade_preserves_type_and_normalizer_identity() -> None:
 
 
 def test_new_builder_and_runtime_modules_do_not_import_their_facades() -> None:
-    package_root = Path(__file__).resolve().parents[1]
     generation_modules = (
         "builder_protocols.py",
         "placement_action_specs.py",
@@ -174,16 +176,15 @@ def test_new_builder_and_runtime_modules_do_not_import_their_facades() -> None:
     )
 
     for filename in generation_modules:
-        source = (package_root / "generation" / filename).read_text(encoding="utf-8")
+        source = (_PACKAGE_ROOT / "generation" / filename).read_text(encoding="utf-8")
         assert "generation.prompt_builders" not in source
     for filename in runtime_modules:
-        source = (package_root / "runtime" / filename).read_text(encoding="utf-8")
+        source = (_PACKAGE_ROOT / "runtime" / filename).read_text(encoding="utf-8")
         assert "runtime.atom_actions" not in source
 
 
 def test_new_internal_module_import_graph_is_acyclic() -> None:
-    package_root = Path(__file__).resolve().parents[1]
-    roots = (package_root / "generation", package_root / "runtime")
+    roots = (_PACKAGE_ROOT / "generation", _PACKAGE_ROOT / "runtime")
     module_paths = {
         f"embodichain.gen_sim.action_agent_pipeline.{root.name}.{path.stem}": path
         for root in roots

@@ -38,6 +38,29 @@ Production modules import constants from their owning modules, for example:
 This keeps each dependency narrow and makes ownership visible at the import
 site.
 
+Static dependency visibility
+----------------------------
+
+Package-internal dependencies must be recoverable from source without executing
+production code. Architecture tests resolve absolute imports, relative imports,
+parent-package submodule imports, and dynamic imports whose target is a string
+literal. The same normalized dependency set drives layer, compatibility facade,
+canonical owner, and cycle checks.
+
+Non-literal dynamic imports are prohibited because variable, configured, or
+constructed module names make the static dependency graph unverifiable. A
+future plugin loader must live behind a documented boundary with a narrow,
+explicit architecture-test exemption rather than weakening this package-wide
+rule.
+
+Test placement
+--------------
+
+Action-agent tests live under tests/gen_sim/action_agent_pipeline, matching the
+repository-wide pytest layout. The production package must not contain its own
+tests package; this keeps architecture checks in the default CI test run and
+prevents test modules from being included in distributable Python packages.
+
 Compatibility facades
 ---------------------
 

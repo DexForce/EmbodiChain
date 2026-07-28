@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+import embodichain.gen_sim.action_agent_pipeline as action_agent_pipeline_package
 from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import CompileAgent
 from embodichain.gen_sim.action_agent_pipeline.contracts import (
     COMPILED_GRAPH_FILENAME,
@@ -77,6 +78,8 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types impo
     _CoordinatedPayloadRuntimeState,
     _ExecutedAtomicAction,
 )
+
+_PACKAGE_ROOT = Path(next(iter(action_agent_pipeline_package.__path__))).resolve()
 
 
 def test_compiled_graph_defaults_to_owning_config_directory(tmp_path: Path) -> None:
@@ -182,7 +185,6 @@ def test_legacy_private_type_names_are_identity_aliases() -> None:
 
 
 def test_production_modules_do_not_import_legacy_private_types() -> None:
-    package_root = Path(__file__).resolve().parents[1]
     forbidden_by_module = {
         "embodichain.gen_sim.action_agent_pipeline.generation.config_types": {
             "_SceneObject",
@@ -214,8 +216,8 @@ def test_production_modules_do_not_import_legacy_private_types() -> None:
 
     # Compatibility aliases remain in their owner modules, but production
     # consumers must bind only the public names.
-    for path in package_root.rglob("*.py"):
-        if "tests" in path.relative_to(package_root).parts:
+    for path in _PACKAGE_ROOT.rglob("*.py"):
+        if "tests" in path.relative_to(_PACKAGE_ROOT).parts:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -230,7 +232,7 @@ def test_production_modules_do_not_import_legacy_private_types() -> None:
                     imported_name.name in forbidden_names
                     or bound_name in forbidden_names
                 ):
-                    relative_path = path.relative_to(package_root)
+                    relative_path = path.relative_to(_PACKAGE_ROOT)
                     violations.append(
                         f"{relative_path}:{node.lineno} imports "
                         f"{imported_name.name!r} as {bound_name!r}"
