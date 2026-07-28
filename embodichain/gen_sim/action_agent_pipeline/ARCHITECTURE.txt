@@ -49,3 +49,15 @@ historical success-evaluator path.
 
 Compatibility aliases have no scheduled removal. New production code must not
 import through a facade, and architecture tests enforce this rule.
+
+Orientation policy ownership
+----------------------------
+
+The domain.orientation_policy module is the canonical owner of principal-axis
+ordering, upright and lay-flat target rotations, and generation-time rotated
+z-min prediction. Generation and runtime modules may adapt mesh data to their
+own representations, but they must not reimplement these policy decisions.
+
+The generated runtime UID and ObjectSemantics.label are the shared object
+identity for orientation classification. Generation-only descriptions and mesh
+filenames must not change a policy decision that Runtime cannot reproduce.

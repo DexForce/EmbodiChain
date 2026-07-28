@@ -25,6 +25,12 @@ from typing import Any
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     defaults_section,
 )
+from embodichain.gen_sim.action_agent_pipeline.domain.orientation_policy import (
+    _is_normalized_local_z_label,
+    principal_local_axis_order,
+    resolve_target_rotation,
+    rotated_local_z_min,
+)
 from embodichain.gen_sim.action_agent_pipeline.protocol.actions import DUAL_ARM_NAME
 
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -48,9 +54,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _arm_side_for_position,
-)
-from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
-    match_asset_orientation_keyword,
 )
 
 __all__ = [
@@ -744,12 +747,14 @@ def _with_on_surface_release_offset(
 
 
 def _pickup_upright_direction(obj_config: Mapping[str, Any]) -> list[float] | None:
-    if _mesh_config_local_z_is_upright_semantic(obj_config):
+    object_label = str(obj_config.get("uid", ""))
+    if _is_normalized_local_z_label(object_label):
         return [0.0, 0.0, 1.0]
     vertices = _mesh_config_scaled_vertices(obj_config)
     if not vertices:
         return None
-    return [round(float(value), 6) for value in _principal_local_axes(vertices)[0]]
+    axis_index = principal_local_axis_order(_local_vertex_bounds(vertices))[0]
+    return [1.0 if index == axis_index else 0.0 for index in range(3)]
 
 
 def _target_local_zmin_for_orientation(
@@ -766,38 +771,7 @@ def _target_local_zmin_for_orientation(
 
 
 def _upright_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
-    vertices = _mesh_config_scaled_vertices(obj_config)
-    if not vertices:
-        return None
-
-    preview_rotation = _mesh_config_rotation_basis(obj_config)
-    if _mesh_config_local_z_is_upright_semantic(obj_config):
-        rotation = _semantic_local_z_upright_rotation(preview_rotation)
-    else:
-        rotation = _preview_aware_upright_rotation(
-            vertices,
-            preview_rotation,
-        )
-    return min(_matrix_vector_mul(rotation, vertex)[2] for vertex in vertices)
-
-
-def _mesh_config_local_z_is_upright_semantic(obj_config: Mapping[str, Any]) -> bool:
-    uid = str(obj_config.get("uid", ""))
-    description = str(obj_config.get("description", ""))
-    shape = obj_config.get("shape", {})
-    mesh_name = ""
-    if isinstance(shape, Mapping):
-        mesh_path = shape.get("fpath")
-        if isinstance(mesh_path, str):
-            mesh_name = Path(mesh_path).stem
-    return (
-        match_asset_orientation_keyword(
-            object_id=uid,
-            name=" ".join([uid, mesh_name]),
-            description=description,
-        )
-        is not None
-    )
+    return _oriented_local_zmin(obj_config, orientation_goal="upright")
 
 
 def _mesh_config_scaled_vertices(
@@ -830,230 +804,45 @@ def _mesh_config_rotation_basis(
     columns = []
     for index in range(3):
         column = [float(matrix[row][index]) for row in range(3)]
-        columns.append(_normalize_vector(column))
+        norm = math.sqrt(sum(value * value for value in column))
+        if norm < 1e-6:
+            raise ValueError("Mesh config rotation contains a near-zero basis column.")
+        columns.append([value / norm for value in column])
     return _columns_to_matrix(columns)
-
-
-def _preview_aware_upright_rotation(
-    vertices: Sequence[Sequence[float]],
-    preview_rotation: Sequence[Sequence[float]],
-) -> list[list[float]]:
-    axes = _principal_local_axes(vertices)
-    long_axis = axes[0]
-    secondary_axes = list(axes[1:])
-    candidates: list[tuple[float, list[list[float]]]] = []
-    for secondary_axis in [
-        *secondary_axes,
-        *[_scale_vector(axis, -1.0) for axis in secondary_axes],
-    ]:
-        preview_secondary = _matrix_vector_mul(preview_rotation, secondary_axis)
-        world_secondary = [preview_secondary[0], preview_secondary[1], 0.0]
-        if _vector_norm(world_secondary) < 1e-6:
-            continue
-        rotation = _rotation_from_axis_targets(
-            local_primary=long_axis,
-            world_primary=[0.0, 0.0, 1.0],
-            local_secondary=secondary_axis,
-            world_secondary=world_secondary,
-        )
-        candidates.append(
-            (_rotation_distance_score(rotation, preview_rotation), rotation)
-        )
-    if candidates:
-        return min(candidates, key=lambda item: item[0])[1]
-    return _rotation_from_axis_targets(
-        local_primary=long_axis,
-        world_primary=[0.0, 0.0, 1.0],
-        local_secondary=axes[2],
-        world_secondary=[1.0, 0.0, 0.0],
-    )
-
-
-def _semantic_local_z_upright_rotation(
-    preview_rotation: Sequence[Sequence[float]],
-) -> list[list[float]]:
-    local_z = [0.0, 0.0, 1.0]
-    secondary_axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-    candidates: list[tuple[float, list[list[float]]]] = []
-    for secondary_axis in [
-        *secondary_axes,
-        *[_scale_vector(axis, -1.0) for axis in secondary_axes],
-    ]:
-        preview_secondary = _matrix_vector_mul(preview_rotation, secondary_axis)
-        world_secondary = [preview_secondary[0], preview_secondary[1], 0.0]
-        if _vector_norm(world_secondary) < 1e-6:
-            continue
-        rotation = _rotation_from_axis_targets(
-            local_primary=local_z,
-            world_primary=[0.0, 0.0, 1.0],
-            local_secondary=secondary_axis,
-            world_secondary=world_secondary,
-        )
-        candidates.append(
-            (_rotation_distance_score(rotation, preview_rotation), rotation)
-        )
-    if candidates:
-        return min(candidates, key=lambda item: item[0])[1]
-    return _rotation_from_axis_targets(
-        local_primary=local_z,
-        world_primary=[0.0, 0.0, 1.0],
-        local_secondary=[1.0, 0.0, 0.0],
-        world_secondary=[1.0, 0.0, 0.0],
-    )
-
-
-def _principal_local_axes(
-    vertices: Sequence[Sequence[float]],
-) -> list[list[float]]:
-    mins = [min(float(vertex[index]) for vertex in vertices) for index in range(3)]
-    maxs = [max(float(vertex[index]) for vertex in vertices) for index in range(3)]
-    extents = [maxs[index] - mins[index] for index in range(3)]
-    order = sorted(range(3), key=lambda index: extents[index], reverse=True)
-    return [[1.0 if axis == index else 0.0 for axis in range(3)] for index in order]
-
-
-def _rotation_from_axis_targets(
-    *,
-    local_primary: Sequence[float],
-    world_primary: Sequence[float],
-    local_secondary: Sequence[float],
-    world_secondary: Sequence[float],
-) -> list[list[float]]:
-    local_primary = _normalize_vector(local_primary)
-    world_primary = _normalize_vector(world_primary)
-    local_secondary = _orthogonalized_axis(local_secondary, local_primary)
-    world_secondary = _orthogonalized_axis(world_secondary, world_primary)
-    local_basis = _columns_to_matrix(
-        [
-            local_primary,
-            local_secondary,
-            _normalize_vector(_cross(local_primary, local_secondary)),
-        ]
-    )
-    world_basis = _columns_to_matrix(
-        [
-            world_primary,
-            world_secondary,
-            _normalize_vector(_cross(world_primary, world_secondary)),
-        ]
-    )
-    return _matrix_multiply(world_basis, _matrix_transpose(local_basis))
-
-
-def _orthogonalized_axis(
-    axis: Sequence[float],
-    reference: Sequence[float],
-) -> list[float]:
-    dot = _dot(axis, reference)
-    projected = [
-        float(axis[index]) - dot * float(reference[index]) for index in range(3)
-    ]
-    if _vector_norm(projected) < 1e-6:
-        fallback = [1.0, 0.0, 0.0]
-        if abs(_dot(fallback, reference)) > 0.9:
-            fallback = [0.0, 1.0, 0.0]
-        fallback_dot = _dot(fallback, reference)
-        projected = [
-            fallback[index] - fallback_dot * float(reference[index])
-            for index in range(3)
-        ]
-    return _normalize_vector(projected)
-
-
-def _rotation_distance_score(
-    rotation: Sequence[Sequence[float]],
-    preview_rotation: Sequence[Sequence[float]],
-) -> float:
-    delta = _matrix_multiply(rotation, _matrix_transpose(preview_rotation))
-    return -sum(float(delta[index][index]) for index in range(3))
 
 
 def _columns_to_matrix(columns: Sequence[Sequence[float]]) -> list[list[float]]:
     return [[float(columns[col][row]) for col in range(3)] for row in range(3)]
 
 
-def _matrix_multiply(
-    left: Sequence[Sequence[float]],
-    right: Sequence[Sequence[float]],
-) -> list[list[float]]:
-    return [
-        [
-            sum(float(left[row][k]) * float(right[k][col]) for k in range(3))
-            for col in range(3)
-        ]
-        for row in range(3)
-    ]
-
-
-def _matrix_transpose(matrix: Sequence[Sequence[float]]) -> list[list[float]]:
-    return [[float(matrix[col][row]) for col in range(3)] for row in range(3)]
-
-
-def _matrix_vector_mul(
-    matrix: Sequence[Sequence[float]],
-    vector: Sequence[float],
-) -> list[float]:
-    return [
-        sum(float(matrix[row][col]) * float(vector[col]) for col in range(3))
-        for row in range(3)
-    ]
-
-
-def _normalize_vector(vector: Sequence[float]) -> list[float]:
-    norm = _vector_norm(vector)
-    if norm < 1e-6:
-        raise ValueError("Cannot normalize a near-zero vector.")
-    return [float(value) / norm for value in vector]
-
-
-def _scale_vector(vector: Sequence[float], scale: float) -> list[float]:
-    return [float(value) * float(scale) for value in vector]
-
-
-def _dot(left: Sequence[float], right: Sequence[float]) -> float:
-    return sum(float(left[index]) * float(right[index]) for index in range(3))
-
-
-def _cross(left: Sequence[float], right: Sequence[float]) -> list[float]:
-    return [
-        float(left[1]) * float(right[2]) - float(left[2]) * float(right[1]),
-        float(left[2]) * float(right[0]) - float(left[0]) * float(right[2]),
-        float(left[0]) * float(right[1]) - float(left[1]) * float(right[0]),
-    ]
-
-
-def _vector_norm(vector: Sequence[float]) -> float:
-    return math.sqrt(sum(float(value) * float(value) for value in vector))
-
-
 def _lay_flat_local_zmin(obj_config: Mapping[str, Any]) -> float | None:
-    shape = obj_config.get("shape", {})
-    if not isinstance(shape, Mapping):
-        return None
-    mesh_path = shape.get("fpath")
-    if not isinstance(mesh_path, str):
-        return None
+    return _oriented_local_zmin(obj_config, orientation_goal="lay_flat")
 
-    from pathlib import Path
 
-    from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
-        _load_mesh_vertices,
-    )
-
-    vertices = _load_mesh_vertices(Path(mesh_path).expanduser().resolve())
+def _oriented_local_zmin(
+    obj_config: Mapping[str, Any],
+    *,
+    orientation_goal: str,
+) -> float | None:
+    vertices = _mesh_config_scaled_vertices(obj_config)
     if not vertices:
         return None
-    scale = _clean_vector3(obj_config.get("body_scale", [1.0, 1.0, 1.0]))
-    extents = [
-        (
-            max(vertex[index] for vertex in vertices)
-            - min(vertex[index] for vertex in vertices)
-        )
-        * scale[index]
-        for index in range(3)
-    ]
-    sorted_extents = sorted(float(extent) for extent in extents)
-    return -0.5 * sorted_extents[1]
+    rotation = resolve_target_rotation(
+        orientation_goal=orientation_goal,
+        local_bounds=_local_vertex_bounds(vertices),
+        current_rotation=_mesh_config_rotation_basis(obj_config),
+        object_label=str(obj_config.get("uid", "")),
+    )
+    return rotated_local_z_min(vertices, rotation)
+
+
+def _local_vertex_bounds(
+    vertices: Sequence[Sequence[float]],
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    return (
+        tuple(min(float(vertex[index]) for vertex in vertices) for index in range(3)),
+        tuple(max(float(vertex[index]) for vertex in vertices) for index in range(3)),
+    )
 
 
 def _inside_container_slot_axis_and_distance(

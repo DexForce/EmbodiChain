@@ -32,6 +32,16 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
 )
+from embodichain.gen_sim.action_agent_pipeline.domain.orientation_policy import (
+    _has_bottle_like_keyword as _policy_has_bottle_like_keyword,
+    _is_bottle_like as _policy_is_bottle_like,
+    _is_normalized_local_z_label,
+    _preview_preserving_upright_rotation as _policy_preview_upright_rotation,
+    _rotation_distance_score as _policy_rotation_distance_score,
+    _rotation_from_axis_targets as _policy_rotation_from_axis_targets,
+    principal_local_axis_order,
+    resolve_target_rotation,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (
     _select_arm_parts,
     _state_to_hand_qpos,
@@ -49,14 +59,6 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
     _ensure_batched_pose_tensor,
     _normalize_vector,
     _object_world_vertices,
-    _orthogonalized_axis,
-)
-from embodichain.gen_sim.action_agent_pipeline.domain.object_semantics import (
-    BOTTLE_LIKE_KEYWORDS as _BOTTLE_LIKE_KEYWORDS,
-    SHORT_BOTTLE_LIKE_KEYWORDS as _SHORT_BOTTLE_LIKE_KEYWORDS,
-)
-from embodichain.gen_sim.prompt2scene.workflows.asset_orientation_normalization import (
-    match_asset_orientation_keyword,
 )
 from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
@@ -310,30 +312,20 @@ def _resolve_object_orientation(
         current_rotation = current_rotation[0]
 
     mesh_vertices = _held_object_mesh_vertices(state, env.robot.device)
+    if orientation_goal in {"upright", "lay_flat"}:
+        rotation = resolve_target_rotation(
+            orientation_goal=orientation_goal,
+            local_bounds=_tensor_local_bounds(mesh_vertices),
+            current_rotation=_tensor_matrix3(current_rotation),
+            object_label=_held_object_label(state),
+        )
+        return torch.tensor(
+            rotation,
+            dtype=current_rotation.dtype,
+            device=current_rotation.device,
+        )
+
     local_axes = _principal_local_axes(mesh_vertices)
-    long_axis = local_axes[:, 0]
-    up_axis = local_axes[:, 2]
-    if orientation_goal == "upright":
-        if _held_object_local_z_is_upright_semantic(state):
-            return _semantic_local_z_upright_rotation(current_rotation)
-        if _is_bottle_like_held_object(state, mesh_vertices):
-            return _preview_aware_upright_rotation(
-                local_axes=local_axes,
-                current_rotation=current_rotation,
-            )
-        return _rotation_from_axis_targets(
-            local_primary=long_axis,
-            world_primary=torch.tensor([0.0, 0.0, 1.0], device=env.robot.device),
-            local_secondary=up_axis,
-            world_secondary=torch.tensor([1.0, 0.0, 0.0], device=env.robot.device),
-        )
-    if orientation_goal == "lay_flat":
-        return _rotation_from_axis_targets(
-            local_primary=long_axis,
-            world_primary=torch.tensor([1.0, 0.0, 0.0], device=env.robot.device),
-            local_secondary=up_axis,
-            world_secondary=torch.tensor([0.0, 0.0, 1.0], device=env.robot.device),
-        )
     if orientation_goal == "axis_align":
         target_direction = _axis_align_target_direction(
             env,
@@ -431,92 +423,75 @@ def _held_object_mesh_vertices(state: WorldState, device) -> torch.Tensor:
     return vertices
 
 
+def _held_object_label(state: WorldState) -> str:
+    held = state.held_object
+    if held is None:
+        return ""
+    return str(getattr(held.semantics, "label", ""))
+
+
+def _tensor_local_bounds(
+    vertices: torch.Tensor,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    # Only six scalar bounds cross the device boundary; the full mesh stays on
+    # its Runtime device for the final exact z-min calculation.
+    mins = _tensor_vector3(vertices.min(dim=0).values)
+    maxs = _tensor_vector3(vertices.max(dim=0).values)
+    return mins, maxs
+
+
+def _tensor_vector3(vector: torch.Tensor) -> tuple[float, float, float]:
+    values = vector.detach().cpu().tolist()
+    return tuple(float(value) for value in values)
+
+
+def _tensor_matrix3(
+    matrix: torch.Tensor,
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    values = matrix.detach().cpu().tolist()
+    return tuple(tuple(float(value) for value in row) for row in values)
+
+
+def _matrix3_tensor(
+    matrix,
+    reference: torch.Tensor,
+) -> torch.Tensor:
+    return torch.tensor(matrix, dtype=reference.dtype, device=reference.device)
+
+
 def _principal_local_axes(vertices: torch.Tensor) -> torch.Tensor:
-    mins = vertices.min(dim=0).values
-    maxs = vertices.max(dim=0).values
-    extents = maxs - mins
-    order = torch.argsort(extents, descending=True)
-    axes = torch.eye(3, dtype=torch.float32, device=vertices.device)[:, order]
+    order = principal_local_axis_order(_tensor_local_bounds(vertices))
+    order_tensor = torch.tensor(order, dtype=torch.long, device=vertices.device)
+    axes = torch.eye(3, dtype=torch.float32, device=vertices.device)[:, order_tensor]
     return axes
 
 
 def _is_bottle_like_held_object(state: WorldState, vertices: torch.Tensor) -> bool:
-    held = state.held_object
-    if held is None:
-        return False
-    label = str(getattr(held.semantics, "label", "")).lower()
-    if _has_bottle_like_keyword(label):
-        return True
-    extents = vertices.max(dim=0).values - vertices.min(dim=0).values
-    sorted_extents = torch.sort(extents).values
-    min_extent = torch.clamp(sorted_extents[0], min=1e-6)
-    mid_extent = torch.clamp(sorted_extents[1], min=1e-6)
-    long_extent = sorted_extents[2]
-    return bool(
-        float(long_extent / mid_extent) >= 1.6
-        and float(mid_extent / min_extent) <= 1.35
+    return _policy_is_bottle_like(
+        _held_object_label(state),
+        _tensor_local_bounds(vertices),
     )
 
 
 def _held_object_local_z_is_upright_semantic(state: WorldState) -> bool:
-    held = state.held_object
-    if held is None:
-        return False
-    label = str(getattr(held.semantics, "label", ""))
-    return (
-        match_asset_orientation_keyword(
-            object_id=label,
-            name=label,
-            description="",
-        )
-        is not None
-    )
+    return _is_normalized_local_z_label(_held_object_label(state))
 
 
 def _has_bottle_like_keyword(text: str) -> bool:
-    tokens = (
-        text.replace("_", " ").replace("-", " ").replace("/", " ").replace(".", " ")
-    ).split()
-    return any(
-        keyword in tokens if keyword in _SHORT_BOTTLE_LIKE_KEYWORDS else keyword in text
-        for keyword in _BOTTLE_LIKE_KEYWORDS
-    )
+    return _policy_has_bottle_like_keyword(text)
 
 
 def _semantic_local_z_upright_rotation(current_rotation: torch.Tensor) -> torch.Tensor:
-    device = current_rotation.device
-    local_z = torch.tensor([0.0, 0.0, 1.0], device=device)
-    secondary_axes = [
-        torch.tensor([1.0, 0.0, 0.0], device=device),
-        torch.tensor([0.0, 1.0, 0.0], device=device),
-    ]
-    candidates: list[tuple[float, torch.Tensor]] = []
-    for secondary_axis in [
-        *secondary_axes,
-        *[-axis for axis in secondary_axes],
-    ]:
-        preview_secondary = current_rotation @ secondary_axis
-        world_secondary = preview_secondary.clone()
-        world_secondary[2] = 0.0
-        if float(torch.linalg.norm(world_secondary)) < 1e-6:
-            continue
-        rotation = _rotation_from_axis_targets(
-            local_primary=local_z,
-            world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
-            local_secondary=secondary_axis,
-            world_secondary=world_secondary,
-        )
-        candidates.append(
-            (_rotation_distance_score(rotation, current_rotation), rotation)
-        )
-    if candidates:
-        return min(candidates, key=lambda item: item[0])[1]
-    return _rotation_from_axis_targets(
-        local_primary=local_z,
-        world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
-        local_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
-        world_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
+    rotation = _policy_preview_upright_rotation(
+        primary_axis=(0.0, 0.0, 1.0),
+        secondary_axes=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        current_rotation=_tensor_matrix3(current_rotation),
     )
+    return _matrix3_tensor(rotation, current_rotation)
 
 
 def _preview_aware_upright_rotation(
@@ -524,46 +499,25 @@ def _preview_aware_upright_rotation(
     local_axes: torch.Tensor,
     current_rotation: torch.Tensor,
 ) -> torch.Tensor:
-    device = current_rotation.device
-    long_axis = local_axes[:, 0]
-    secondary_axes = [local_axes[:, index] for index in range(1, local_axes.shape[1])]
-    candidates: list[tuple[float, torch.Tensor]] = []
-    for secondary_axis in [
-        *secondary_axes,
-        *[-axis for axis in secondary_axes],
-    ]:
-        preview_secondary = current_rotation @ secondary_axis.to(
-            device=device, dtype=torch.float32
-        )
-        world_secondary = preview_secondary.clone()
-        world_secondary[2] = 0.0
-        if float(torch.linalg.norm(world_secondary)) < 1e-6:
-            continue
-        rotation = _rotation_from_axis_targets(
-            local_primary=long_axis,
-            world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
-            local_secondary=secondary_axis,
-            world_secondary=world_secondary,
-        )
-        candidates.append(
-            (_rotation_distance_score(rotation, current_rotation), rotation)
-        )
-    if candidates:
-        return min(candidates, key=lambda item: item[0])[1]
-    return _rotation_from_axis_targets(
-        local_primary=long_axis,
-        world_primary=torch.tensor([0.0, 0.0, 1.0], device=device),
-        local_secondary=local_axes[:, 2],
-        world_secondary=torch.tensor([1.0, 0.0, 0.0], device=device),
+    rotation = _policy_preview_upright_rotation(
+        primary_axis=_tensor_vector3(local_axes[:, 0]),
+        secondary_axes=tuple(
+            _tensor_vector3(local_axes[:, index])
+            for index in range(1, local_axes.shape[1])
+        ),
+        current_rotation=_tensor_matrix3(current_rotation),
     )
+    return _matrix3_tensor(rotation, current_rotation)
 
 
 def _rotation_distance_score(
     rotation: torch.Tensor,
     reference_rotation: torch.Tensor,
 ) -> float:
-    delta = rotation @ reference_rotation.transpose(0, 1)
-    return float(-torch.trace(delta))
+    return _policy_rotation_distance_score(
+        _tensor_matrix3(rotation),
+        _tensor_matrix3(reference_rotation),
+    )
 
 
 def _axis_align_target_direction(
@@ -690,35 +644,13 @@ def _rotation_from_axis_targets(
     local_secondary: torch.Tensor,
     world_secondary: torch.Tensor,
 ) -> torch.Tensor:
-    device = world_primary.device
-    dtype = torch.float32
-    local_primary = _normalize_vector(local_primary.to(device=device, dtype=dtype))
-    world_primary = _normalize_vector(world_primary.to(device=device, dtype=dtype))
-    local_secondary = _orthogonalized_axis(
-        local_secondary.to(device=device, dtype=dtype),
-        local_primary,
+    rotation = _policy_rotation_from_axis_targets(
+        local_primary=_tensor_vector3(local_primary),
+        world_primary=_tensor_vector3(world_primary),
+        local_secondary=_tensor_vector3(local_secondary),
+        world_secondary=_tensor_vector3(world_secondary),
     )
-    world_secondary = _orthogonalized_axis(
-        world_secondary.to(device=device, dtype=dtype),
-        world_primary,
-    )
-    local_basis = torch.stack(
-        [
-            local_primary,
-            local_secondary,
-            _normalize_vector(torch.linalg.cross(local_primary, local_secondary)),
-        ],
-        dim=1,
-    )
-    world_basis = torch.stack(
-        [
-            world_primary,
-            world_secondary,
-            _normalize_vector(torch.linalg.cross(world_primary, world_secondary)),
-        ],
-        dim=1,
-    )
-    return world_basis @ local_basis.transpose(0, 1)
+    return _matrix3_tensor(rotation, world_primary)
 
 
 def _resolve_qpos_target(env, spec: AtomicActionSpec):
