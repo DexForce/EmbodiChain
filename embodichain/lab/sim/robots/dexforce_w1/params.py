@@ -24,6 +24,7 @@ from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmKind,
     DexforceW1Version,
 )
+from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 
 
 @dataclass
@@ -54,18 +55,17 @@ class W1ArmKineParams:
     qpos_limits: np.ndarray = field(init=False)
 
     def __post_init__(self):
-        if self.version == DexforceW1Version.V021:
-            self.d_list = np.array([0.0, 0.0, 0.260, 0.0, 0.166, 0.098, 0.0])
-            self.link_lengths = np.array(
-                [
-                    self.d_list[0] + self.d_list[1],
-                    self.d_list[2] + self.d_list[3],
-                    self.d_list[4] + self.d_list[5],
-                    self.d_list[6],
-                ]
-            )
-        else:
-            raise ValueError(f"W1Version {self.version} are not supported.")
+        spec = get_w1_version_spec(self.version)
+        spec.validate_arm_kind(self.arm_kind)
+        self.d_list = np.asarray(spec.arm_d_lists[self.arm_kind], dtype=float)
+        self.link_lengths = np.array(
+            [
+                self.d_list[0] + self.d_list[1],
+                self.d_list[2] + self.d_list[3],
+                self.d_list[4] + self.d_list[5],
+                self.d_list[6],
+            ]
+        )
 
         # helpers: create DH rows and clamp limits
         def dh_row(d, alpha, a, theta):
@@ -78,7 +78,7 @@ class W1ArmKineParams:
             [
                 [1.0, 0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.1025],
+                [0.0, 0.0, 1.0, spec.arm_base_z[self.arm_kind]],
                 [0.0, 0.0, 0.0, 1.0],
             ]
         )

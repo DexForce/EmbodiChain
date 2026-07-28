@@ -17,6 +17,7 @@ Dexforce W1 is a versatile robot developed by DexForce Technology Co., Ltd., sup
 ## Key Features
 
 - Supports multiple arm types (industrial, anthropomorphic)
+- Supports version-owned asset layouts and calibration parameters
 - Configurable left/right hand brand and version
 - Flexible URDF assembly and simulation configuration
 - Compatible with SimulationManager simulation environment
@@ -37,11 +38,12 @@ hand_types = {
     DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
 }
 hand_versions = {
-    DexforceW1ArmSide.LEFT: DexforceW1Version.V021,
-    DexforceW1ArmSide.RIGHT: DexforceW1Version.V021,
+    DexforceW1ArmSide.LEFT: DexforceW1Version.V025,
+    DexforceW1ArmSide.RIGHT: DexforceW1Version.V025,
 }
 cfg = build_dexforce_w1_cfg(
     arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
+    version=DexforceW1Version.V025,
     hand_types=hand_types,
     hand_versions=hand_versions,
 )
@@ -56,13 +58,13 @@ This method allows fast setup using a dictionary, suitable for simple scenarios 
 **Parameters:**
 
 - `uid`: Unique robot identifier (string).
-- `version`: Robot version, e.g., `v021`.
+- `version`: Robot version, e.g., `v021` or `v025`.
 - `arm_kind`: Arm type, e.g., `anthropomorphic` or `industrial` (string).
 
 ```python
 from embodichain.lab.sim.robots import DexforceW1Cfg
 cfg = DexforceW1Cfg.from_dict(
-    {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
+    {"uid": "dexforce_w1", "version": "v025", "arm_kind": "anthropomorphic"}
 )
 robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
@@ -100,5 +102,53 @@ Choose `build_dexforce_w1_cfg` for maximum flexibility and hardware customizatio
 |-------------------------|-------------------------------------------------------|------------------------------------|
 | `DexforceW1ArmKind`     | `ANTHROPOMORPHIC`, `INDUSTRIAL`                       | Arm type                           |
 | `DexforceW1HandBrand`   | `BRAINCO_HAND`, `DH_PGC_GRIPPER`, `DH_PGC_GRIPPER_M`  | Hand brand                         |
-| `DexforceW1Version`     | `V021`                                                | Release version                    |
+| `DexforceW1Version`     | `V021`, `V025`                                        | Release version                    |
 | `DexforceW1ArmSide`     | `LEFT`, `RIGHT`                                       | Left/right hand identifier         |
+
+## V025 asset layout and version extension
+
+V025 uses one unified Hugging Face archive:
+
+```text
+dexforce_w1/v025/w1.zip
+└── w1/
+    ├── robot.urdf
+    ├── chassis.urdf
+    ├── torso.urdf
+    ├── head.urdf
+    ├── left_arm.urdf
+    ├── right_arm.urdf
+    ├── visual/
+    └── collision/
+```
+
+The runtime downloads this archive once. Direct FK/IK uses `robot.urdf` or the
+arm URDFs, while configurable robot assembly reads all components from the same
+extracted directory. The V025 head already contains the `eyes` link and joint,
+so the assembly builder does not inject a duplicate eyes sensor.
+
+V025 currently provides anthropomorphic arm assets only. Selecting
+`version="v025"` with `arm_kind="industrial"` fails with a clear configuration
+error instead of silently loading V021 arms.
+
+Per-component version overrides are supported for controlled migrations:
+
+```python
+cfg = DexforceW1Cfg.from_dict(
+    {
+        "uid": "dexforce_w1",
+        "version": "v021",
+        "arm_kind": "anthropomorphic",
+        "component_versions": {
+            "left_arm": "v025",
+            "right_arm": "v025",
+        },
+    }
+)
+```
+
+To add another W1 revision, register its enum value and download dataset, then
+add one `W1VersionSpec` entry in
+`embodichain/lab/sim/robots/dexforce_w1/specs.py`. Builders, control parts,
+assembly, TCP selection, analytical parameters and FK/IK do not require
+revision-specific branches.

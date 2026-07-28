@@ -1270,8 +1270,7 @@ class URDFCfg:
     """Case normalization policy applied to joint/link names during URDF assembly.
 
     Supported values per key are ``"upper"``, ``"lower"`` or ``"original"``
-    (legacy alias ``"none"``). The default upper-cases joints and lower-cases
-    links. Set ``{"joint": "original"}`` to preserve the source URDF casing.
+    (legacy alias ``"none"``). The default preserves source URDF casing.
     """
 
     def __init__(

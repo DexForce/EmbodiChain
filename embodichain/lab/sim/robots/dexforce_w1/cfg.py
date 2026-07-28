@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import typing
 import torch
 
@@ -27,19 +26,22 @@ from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1ArmKind,
     DexforceW1Version,
+    DexforceW1Type,
 )
 from embodichain.lab.sim.robots.dexforce_w1.utils import (
     build_dexforce_w1_cfg,
 )
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.robots.dexforce_w1.specs import (
+    get_w1_version_spec,
+    normalize_component_versions,
+)
 from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
-from embodichain.data import get_data_path
-from embodichain.utils import configclass, logger
+from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     import pytorch_kinematics as pk
@@ -52,6 +54,7 @@ class DexforceW1Cfg(RobotCfg):
     version: DexforceW1Version = DexforceW1Version.V021
     arm_kind: DexforceW1ArmKind = DexforceW1ArmKind.ANTHROPOMORPHIC
     with_default_eef: bool = True
+    component_versions: dict | None = None
 
     @classmethod
     def from_dict(
@@ -89,8 +92,11 @@ class DexforceW1Cfg(RobotCfg):
             DexforceW1ArmKind(arm_kind) if isinstance(arm_kind, str) else arm_kind
         )
         self.with_default_eef = with_default_eef
+        self.component_versions = normalize_component_versions(
+            init_dict.get("component_versions")
+        )
 
-        # urdf_cfg + control_parts (build_dexforce_w1_cfg no longer sets solver_cfg)
+        # Build the version-matched URDF assembly and control-part definitions.
         if self.arm_kind == DexforceW1ArmKind.INDUSTRIAL:
             hand_types = {
                 DexforceW1ArmSide.LEFT: DexforceW1HandBrand.DH_PGC_GRIPPER_M,
@@ -107,9 +113,12 @@ class DexforceW1Cfg(RobotCfg):
         }
         base_cfg = build_dexforce_w1_cfg(
             arm_kind=self.arm_kind,
+            version=self.version,
             hand_types=hand_types,
             hand_versions=hand_versions,
             include_hand=with_default_eef,
+            component_versions=self.component_versions,
+            solver_cfg={},
         )
         self.urdf_cfg = base_cfg.urdf_cfg
         self.control_parts = base_cfg.control_parts
@@ -125,70 +134,50 @@ class DexforceW1Cfg(RobotCfg):
         self.solver_cfg = self._build_default_solver_cfg(arm_kind=self.arm_kind)
 
     def _build_default_solver_cfg(self, arm_kind: DexforceW1ArmKind):
-        """Build the default SRS solver config for the given arm kind.
-
-        Note: the W1ArmKineParams below intentionally use DexforceW1Version.V021
-        (matching the original behavior -- version does not flow into the solver).
-        """
+        """Build the version-matched default SRS solver configuration."""
         from embodichain.lab.sim.solvers import SRSSolverCfg
         from embodichain.lab.sim.robots.dexforce_w1.params import (
             W1ArmKineParams,
         )
 
         if arm_kind == DexforceW1ArmKind.INDUSTRIAL:
+            left_arm_type = DexforceW1Type.LEFT_ARM2
+            right_arm_type = DexforceW1Type.RIGHT_ARM2
+        else:
+            left_arm_type = DexforceW1Type.LEFT_ARM1
+            right_arm_type = DexforceW1Type.RIGHT_ARM1
+        left_version = self.component_versions.get(left_arm_type, self.version)
+        right_version = self.component_versions.get(right_arm_type, self.version)
+        left_version_spec = get_w1_version_spec(left_version)
+        right_version_spec = get_w1_version_spec(right_version)
+        left_version_spec.validate_arm_kind(arm_kind)
+        right_version_spec.validate_arm_kind(arm_kind)
+
+        if arm_kind == DexforceW1ArmKind.INDUSTRIAL:
             w1_left_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.LEFT,
                 arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-                version=DexforceW1Version.V021,
+                version=left_version,
             )
             w1_right_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.RIGHT,
                 arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-                version=DexforceW1Version.V021,
-            )
-            left_arm_tcp = np.array(
-                [
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.15],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            )
-            right_arm_tcp = np.array(
-                [
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.15],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
+                version=right_version,
             )
         else:
             w1_left_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.LEFT,
                 arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-                version=DexforceW1Version.V021,
+                version=left_version,
             )
             w1_right_arm_params = W1ArmKineParams(
                 arm_side=DexforceW1ArmSide.RIGHT,
                 arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-                version=DexforceW1Version.V021,
+                version=right_version,
             )
-            left_arm_tcp = np.array(
-                [
-                    [-1.0, 0.0, 0.0, 0.012],
-                    [0.0, 0.0, 1.0, 0.0675],
-                    [0.0, 1.0, 0.0, 0.127],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            )
-            right_arm_tcp = np.array(
-                [
-                    [1.0, 0.0, 0.0, 0.012],
-                    [0.0, 0.0, -1.0, -0.0675],
-                    [0.0, 1.0, 0.0, 0.127],
-                    [0.0, 0.0, 0.0, 1.0],
-                ]
-            )
+
+        left_arm_tcp = left_version_spec.tcp(arm_kind, DexforceW1ArmSide.LEFT)
+        right_arm_tcp = right_version_spec.tcp(arm_kind, DexforceW1ArmSide.RIGHT)
 
         return {
             "right_arm": SRSSolverCfg(
@@ -281,16 +270,33 @@ class DexforceW1Cfg(RobotCfg):
 
     # to_dict, to_string, save_to_file inherited from RobotCfg
 
-    def _pk_urdf_path(self) -> str:
-        """URDF used for FK/IK serial chains, by arm kind.
+    def _pk_urdf_path(self, arm_side: DexforceW1ArmSide) -> str:
+        """Return the selected arm component URDF for FK/IK.
 
         .. attention::
             The root_link->end_link kinematics here must match the arms in the
             simulation (assembled) URDF. A DOF drift guard in the tests checks this.
         """
+        from embodichain.lab.sim.robots.dexforce_w1.utils import arm_manager
+
         if self.arm_kind == DexforceW1ArmKind.INDUSTRIAL:
-            return get_data_path("DexforceW1V021/DexforceW1_v02_2.urdf")
-        return get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
+            component_type = (
+                DexforceW1Type.LEFT_ARM2
+                if arm_side == DexforceW1ArmSide.LEFT
+                else DexforceW1Type.RIGHT_ARM2
+            )
+        else:
+            component_type = (
+                DexforceW1Type.LEFT_ARM1
+                if arm_side == DexforceW1ArmSide.LEFT
+                else DexforceW1Type.RIGHT_ARM1
+            )
+        version = (self.component_versions or {}).get(component_type, self.version)
+        return arm_manager.get_urdf(
+            kind=self.arm_kind,
+            side=arm_side,
+            version=version,
+        )
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
@@ -299,16 +305,14 @@ class DexforceW1Cfg(RobotCfg):
             create_pk_serial_chain,
         )
 
-        urdf_path = self._pk_urdf_path()
-
         left_arm_chain = create_pk_serial_chain(
-            urdf_path=urdf_path,
+            urdf_path=self._pk_urdf_path(DexforceW1ArmSide.LEFT),
             device=device,
             end_link_name="left_ee",
             root_link_name="left_arm_base",
         )
         right_arm_chain = create_pk_serial_chain(
-            urdf_path=urdf_path,
+            urdf_path=self._pk_urdf_path(DexforceW1ArmSide.RIGHT),
             device=device,
             end_link_name="right_ee",
             root_link_name="right_arm_base",

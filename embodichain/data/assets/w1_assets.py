@@ -30,6 +30,9 @@ from embodichain.data.constants import (
 #   - DexforceW1V021:
 #       Represents the complete humanoid robot asset,
 #       including both industrial arms and anthropomorphic arms.
+#   - DexforceW1V025:
+#       Unified V025 archive containing the anthropomorphic full robot and
+#       all component URDFs used by runtime assembly.
 #
 # Component Assets:
 #   - DexforceW1ChassisV021:   Chassis component
@@ -67,6 +70,39 @@ class DexforceW1V021(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, w1_assets, "DexforceW1V021.zip"),
             "3cc3a0bfd1c50ebed5bee9dadeee6756",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class DexforceW1V025(EmbodiChainDataset):
+    """Dataset class for the unified Dexforce W1 V025 release archive.
+
+    Expected Hugging Face path and archive layout::
+
+        dexforce_w1/v025/w1.zip
+        w1/robot.urdf
+        w1/chassis.urdf
+        w1/torso.urdf
+        w1/head.urdf
+        w1/left_arm.urdf
+        w1/right_arm.urdf
+
+    The same archive supports both direct full-robot loading and component
+    assembly, so runtime code does not download duplicate component archives.
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(
+                EMBODICHAIN_DOWNLOAD_PREFIX,
+                w1_assets,
+                "v025",
+                "w1.zip",
+            ),
+            "a983814a05b20ba12fce02883cfd1d7e",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
