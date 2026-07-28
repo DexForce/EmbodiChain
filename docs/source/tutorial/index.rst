@@ -20,17 +20,18 @@ Follow the tutorials in this order for the best learning experience:
 8. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
 9. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
 10. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
+11. :doc:`writing_demo_scripts` — Write reusable demo scripts with ``DemoBase`` and shared utilities.
 
 **Phase 2: Environments**
 
-11. :doc:`basic_env` — Create a simple Gymnasium environment with ``BaseEnv``. Prerequisite: Phase 1 basics.
-12. :doc:`modular_env` — Build a config-driven environment with ``EmbodiedEnv``, managers, and randomization. Prerequisite: :doc:`basic_env`.
-13. :doc:`data_generation` — Generate expert demonstration datasets for imitation learning. Prerequisite: :doc:`modular_env`.
-14. :doc:`rl` — Train RL agents with PPO or GRPO. Prerequisite: :doc:`basic_env`.
+12. :doc:`basic_env` — Create a simple Gymnasium environment with ``BaseEnv``. Prerequisite: Phase 1 basics.
+13. :doc:`modular_env` — Build a config-driven environment with ``EmbodiedEnv``, managers, and randomization. Prerequisite: :doc:`basic_env`.
+14. :doc:`data_generation` — Generate expert demonstration datasets for imitation learning. Prerequisite: :doc:`modular_env`.
+15. :doc:`rl` — Train RL agents with PPO or GRPO. Prerequisite: :doc:`basic_env`.
 
 **Phase 3: Extending the Framework**
 
-15. :doc:`add_robot` — Add a new robot model to EmbodiChain.
+16. :doc:`add_robot` — Add a new robot model to EmbodiChain.
 
 .. toctree::
    :maxdepth: 1
@@ -48,6 +49,7 @@ Follow the tutorials in this order for the best learning experience:
    motion_gen
    atomic_actions
    gizmo
+   writing_demo_scripts
    basic_env
    modular_env
    data_generation
