@@ -139,14 +139,18 @@ class ObservationManager(ManagerBase):
 
         # iterate over all the observation functors
         for mode, functor_cfgs in self._mode_functor_cfgs.items():
-            for functor_cfg in functor_cfgs:
+            for functor_name, functor_cfg in zip(
+                self._mode_functor_names[mode], functor_cfgs
+            ):
                 functor_cfg: ObservationCfg
 
                 if mode == "modify":
                     data = fetch_data_from_dict(obs, functor_cfg.name)
-                    data = functor_cfg.func(self._env, data, **functor_cfg.params)
+                    data = self._call_functor(
+                        functor_name, functor_cfg, self._env, data
+                    )
                 elif mode == "add":
-                    data = functor_cfg.func(self._env, obs, **functor_cfg.params)
+                    data = self._call_functor(functor_name, functor_cfg, self._env, obs)
                     assign_data_to_dict(obs, functor_cfg.name, data)
                 else:
                     logger.log_error(f"Unsupported observation mode '{mode}'.")

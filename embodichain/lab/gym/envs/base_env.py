@@ -27,6 +27,7 @@ from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera
 from embodichain.lab.gym.utils import gym_utils
+from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
 
@@ -68,9 +69,14 @@ class EnvCfg:
     """
 
     max_episode_steps: int = 300
-    """The maximum number of steps per episode. If set to -1, there is no limit on the episode length, and the episode will 
+    """The maximum number of steps per episode. If set to -1, there is no limit on the episode length, and the episode will
     only end when the task is successfully completed or failed.
     """
+
+    profiler: EnvProfilerCfg | None = None
+    """Optional profiler for reset/step time & GPU-memory breakdown. ``None``
+    (default) disables profiling entirely. See :class:`EnvProfilerCfg` for the
+    independent time / memory toggles."""
 
 
 class BaseEnv(gym.Env):
@@ -128,6 +134,10 @@ class BaseEnv(gym.Env):
         self.control_freq = self.sim_freq // self.cfg.sim_steps_per_control
 
         self._setup_scene(**kwargs)
+
+        # Profiler for reset/step time & memory breakdown. Created after the
+        # scene so ``self.device`` is available. No-op when cfg.profiler is None.
+        self._profiler = EnvProfiler(self.cfg.profiler, self.device)
 
         # TODO: To be removed.
         if self.device.type == "cuda":
@@ -366,11 +376,13 @@ class BaseEnv(gym.Env):
         obs = TensorDict({}, batch_size=[self.num_envs], device=self.device)
 
         fetch_only = True
-        self.sim.render_camera_group(self._camera_group_ids)
+        with self._profiler.section("render_camera_group"):
+            self.sim.render_camera_group(self._camera_group_ids)
 
-        for sensor_name, sensor in self.sensors.items():
-            sensor.update(fetch_only=fetch_only)
-            obs[sensor_name] = sensor.get_data()
+        with self._profiler.section("sensor_fetch"):
+            for sensor_name, sensor in self.sensors.items():
+                sensor.update(fetch_only=fetch_only)
+                obs[sensor_name] = sensor.get_data()
         return obs
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
@@ -402,17 +414,20 @@ class BaseEnv(gym.Env):
             The observation dictionary.
         """
 
-        obs = TensorDict(
-            dict(robot=self.robot.get_proprioception()[:, self.active_joint_ids]),
-            batch_size=[self.num_envs],
-            device=self.device,
-        )
+        with self._profiler.section("proprio"):
+            obs = TensorDict(
+                dict(robot=self.robot.get_proprioception()[:, self.active_joint_ids]),
+                batch_size=[self.num_envs],
+                device=self.device,
+            )
 
-        sensor_obs = self._get_sensor_obs(**kwargs)
+        with self._profiler.section("sensor"):
+            sensor_obs = self._get_sensor_obs(**kwargs)
         if len(sensor_obs.keys()) > 0:
             obs["sensor"] = sensor_obs
 
-        obs = self._extend_obs(obs=obs, **kwargs)
+        with self._profiler.section("extend"):
+            obs = self._extend_obs(obs=obs, **kwargs)
 
         return obs
 
@@ -590,23 +605,32 @@ class BaseEnv(gym.Env):
         if options is None:
             options = dict()
 
-        reset_ids = options.get(
-            "reset_ids",
-            torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
-        )
+        with self._profiler.section("reset", is_root=True):
+            reset_ids = options.get(
+                "reset_ids",
+                torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
+            )
 
-        # Save task success status before resetting objects
-        self._task_success = self.is_task_success()
+            # Save task success status before resetting objects
+            with self._profiler.section("is_task_success"):
+                self._task_success = self.is_task_success()
 
-        self.sim.reset_objects_state(
-            env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
-        )
+            with self._profiler.section("reset_objects_state"):
+                self.sim.reset_objects_state(
+                    env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
+                )
 
-        # Reset hook for user to perform any custom reset logic.
-        self._initialize_episode(reset_ids, **options)
-        self._elapsed_steps[reset_ids] = 0
+            # Reset hook for user to perform any custom reset logic.
+            with self._profiler.section("initialize_episode"):
+                self._initialize_episode(reset_ids, **options)
+            self._elapsed_steps[reset_ids] = 0
 
-        return self.get_obs(**options), self.get_info(**options)
+            with self._profiler.section("get_obs"):
+                obs = self.get_obs(**options)
+            with self._profiler.section("get_info"):
+                info = self.get_info(**options)
+
+        return obs, info
 
     def step(
         self, action: EnvAction, **kwargs
@@ -620,56 +644,68 @@ class BaseEnv(gym.Env):
             A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
         """
 
-        action = self._preprocess_action(action=action)
-        action = self._step_action(action=action)
+        with self._profiler.section("step", is_root=True):
+            with self._profiler.section("preprocess_action"):
+                action = self._preprocess_action(action=action)
+            with self._profiler.section("step_action"):
+                action = self._step_action(action=action)
 
-        self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
-        self._update_sim_state(**kwargs)
+            with self._profiler.section("sim_update"):
+                self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
+            with self._profiler.section("update_sim_state"):
+                self._update_sim_state(**kwargs)
 
-        obs = self.get_obs(**kwargs)
-        info = self.get_info(**kwargs)
-        rewards = self.get_reward(obs=obs, action=action, info=info)
-        rewards = self._extend_reward(
-            rewards=rewards, obs=obs, action=action, info=info
-        )
+            with self._profiler.section("get_obs"):
+                obs = self.get_obs(**kwargs)
+            with self._profiler.section("get_info"):
+                info = self.get_info(**kwargs)
+            with self._profiler.section("reward"):
+                rewards = self.get_reward(obs=obs, action=action, info=info)
+                rewards = self._extend_reward(
+                    rewards=rewards, obs=obs, action=action, info=info
+                )
 
-        # Apply postprocessing to the action after all computations are done.
-        action = self._postprocess_action(action=action)
+            # Apply postprocessing to the action after all computations are done.
+            with self._profiler.section("postprocess_action"):
+                action = self._postprocess_action(action=action)
 
-        self._elapsed_steps += 1
+            self._elapsed_steps += 1
 
-        terminateds = torch.logical_or(
-            info.get(
-                "success",
-                torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
-            ),
-            info.get(
-                "fail", torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-            ),
-        )
-        truncateds = self.check_truncated(obs=obs, info=info)
-        truncateds = truncateds | (self._elapsed_steps >= self.max_episode_steps)
+            terminateds = torch.logical_or(
+                info.get(
+                    "success",
+                    torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+                ),
+                info.get(
+                    "fail",
+                    torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+                ),
+            )
+            truncateds = self.check_truncated(obs=obs, info=info)
+            truncateds = truncateds | (self._elapsed_steps >= self.max_episode_steps)
 
-        if self.cfg.ignore_terminations:
-            terminateds[:] = False
+            if self.cfg.ignore_terminations:
+                terminateds[:] = False
 
-        dones = terminateds | truncateds
+            dones = terminateds | truncateds
 
-        self._hook_after_sim_step(
-            obs=obs,
-            action=action,
-            rewards=rewards,
-            dones=dones,
-            info=info,
-            terminateds=terminateds,
-            truncateds=truncateds,
-            **kwargs,
-        )
+            with self._profiler.section("hook_after"):
+                self._hook_after_sim_step(
+                    obs=obs,
+                    action=action,
+                    rewards=rewards,
+                    dones=dones,
+                    info=info,
+                    terminateds=terminateds,
+                    truncateds=truncateds,
+                    **kwargs,
+                )
 
-        if not getattr(self, "_replay_no_auto_reset", False):
-            reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
-            if len(reset_env_ids) > 0:
-                obs, _ = self.reset(options={"reset_ids": reset_env_ids})
+            if not getattr(self, "_replay_no_auto_reset", False):
+                reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+                if len(reset_env_ids) > 0:
+                    with self._profiler.section("auto_reset"):
+                        obs, _ = self.reset(options={"reset_ids": reset_env_ids})
 
         return obs, rewards, terminateds, truncateds, info
 
@@ -683,4 +719,7 @@ class BaseEnv(gym.Env):
 
     def close(self) -> None:
         """Close the environment and release resources."""
+        # Report before sim.destroy(): destroy() exits the process without
+        # returning to Python, so the report must be flushed first.
+        self._profiler.report()
         self.sim.destroy()

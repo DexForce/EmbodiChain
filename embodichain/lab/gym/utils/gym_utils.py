@@ -883,6 +883,20 @@ def add_env_launcher_args_to_parser(
         default=None,
         type=str,
     )
+    parser.add_argument(
+        "--profile",
+        help="Enable per-section time profiling of reset/step (prints a report "
+        "on env.close()).",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--profile_output",
+        help="If set, also dump the profiling report as JSON to this path on "
+        "env.close().",
+        default=None,
+        type=str,
+    )
 
 
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
@@ -943,6 +957,14 @@ def build_env_cfg_from_args(
     cfg.record_trajectory = getattr(args, "record_trajectory", False)
     if getattr(args, "trajectory_save_dir", None):
         cfg.trajectory_save_dir = args.trajectory_save_dir
+
+    if getattr(args, "profile", False):
+        from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
+
+        cfg.profiler = EnvProfilerCfg(
+            enable_time=True,
+            output_path=getattr(args, "profile_output", None),
+        )
 
     if args.preview:
         # In preview mode, we typically don't want to save data
