@@ -117,6 +117,39 @@ arm URDFs, while configurable robot assembly reads all components from the same
 extracted directory. The V025 head already contains the `eyes` link and joint,
 so the assembly builder does not inject a duplicate eyes sensor.
 
+### Version-owned end-effector offset
+
+Different arm revisions may place the physical mounting surface at different
+positions relative to the arm `ee` frame. This difference belongs to the W1
+revision, not to a BrainCo hand, DH gripper, PIKA gripper, or any other
+end-effector.
+
+`W1VersionSpec.default_eef_attach_xpos` is the single source of truth for this
+revision offset:
+
+| Version | Left arm | Right arm |
+|---------|----------|-----------|
+| V021 | Identity | Identity |
+| V025 | `+0.012 m` along the `ee` frame Z axis | `+0.012 m` along the `ee` frame Z axis |
+
+The final assembly transform and solver TCP are derived as follows:
+
+```python
+final_attach_xpos = version_attach_xpos @ eef_attach_xpos
+final_tcp = version_attach_xpos @ solver_tcp
+```
+
+Therefore, the V025 offset affects both the assembled end-effector position and
+FK/IK results. The offset is also applied when callers provide a custom
+`hand_attach_xposes` value, a custom `left_hand`/`right_hand` component
+transform, or an explicit arm TCP through `DexforceW1Cfg.from_dict`.
+Serialization removes the derived offset and restores it on loading, so a
+configuration round trip does not apply the offset twice.
+
+Do not manually add the 12 mm correction to an end-effector transform or TCP.
+Those values must describe the end-effector relative to the standard mounting
+surface; the W1 version layer adds the robot revision correction.
+
 Per-component version overrides are supported for controlled migrations:
 
 ```python
@@ -132,8 +165,19 @@ cfg = DexforceW1Cfg.from_dict(
 )
 ```
 
-To add another W1 revision, register its enum value and download dataset, then
-add one `W1VersionSpec` entry in
-`embodichain/lab/sim/robots/dexforce_w1/specs.py`. Builders, control parts,
-assembly, TCP selection, analytical parameters and FK/IK do not require
-revision-specific branches.
+To add another W1 revision:
+
+1. Register the new `DexforceW1Version` value and dataset archive.
+2. Add one `W1VersionSpec` entry in
+   `embodichain/lab/sim/robots/dexforce_w1/specs.py`.
+3. Register component URDF paths and the full-robot URDF path.
+4. Set the arm kinematic parameters and
+   `default_eef_attach_xpos` for both sides. Use identity only after confirming
+   that the arm `ee` frame is already at the physical mounting surface.
+5. Verify that the same version offset is present in both the assembled
+   end-effector pose and the final FK/IK TCP.
+6. Validate hand/gripper mounting, wrist cameras, FK/IK, VR teleoperation, and
+   real2sim task regression.
+
+Builders, control parts, assembly, TCP selection, analytical parameters and
+FK/IK then use the version specification without revision-specific branches.
