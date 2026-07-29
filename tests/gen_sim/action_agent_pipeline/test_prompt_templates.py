@@ -23,6 +23,7 @@ from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
 )
 
 _TEMPLATE_NAMES = (
+    "task_interpretation.txt",
     "task_router.txt",
     "relative_placement_spec.txt",
     "object_manipulation_spec.txt",
@@ -50,3 +51,16 @@ def test_config_generation_prompt_templates_render_strictly(template_name: str) 
 def test_prompt_template_loader_rejects_directory_escape() -> None:
     with pytest.raises(ValueError, match="must be a file name"):
         render_prompt_template("../task_router.txt")
+
+
+def test_unified_prompt_preserves_passive_stacking_anchor_rule() -> None:
+    prompt = render_prompt_template(
+        "task_interpretation.txt",
+        project_name="task3_2",
+        task_description="把纸杯叠放到爆米花桶上，把蓝色耳机叠放到爆米花桶上",
+        scene_summary='[{"source_uid": "interact_popcorn_bucket"}]',
+    )
+
+    assert "belongs only in anchor.object" in prompt
+    assert "must not be included in objects or bottom_to_top" in prompt
+    assert "successive instructions stack A and B onto the same named root C" in prompt

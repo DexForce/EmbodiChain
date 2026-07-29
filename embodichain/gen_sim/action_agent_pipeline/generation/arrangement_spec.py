@@ -83,6 +83,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation._spec_scene_helpers im
 __all__ = [
     "_apply_arrangement_task_response",
     "_arrangement_line_slot_positions",
+    "_build_arrangement_line_spec_from_response",
     "_build_arrangement_line_spec_with_llm",
     "_call_arrangement_task_llm",
     "_make_arrangement_scene_summary",
@@ -116,7 +117,7 @@ def _build_arrangement_line_spec_with_llm(
             "Arrangement generation requires at least two movable objects."
         )
 
-    table = _pick_table(background_objects)
+    _pick_table(background_objects)
     scene_summary = _make_arrangement_scene_summary(
         scene_objects,
         scene_dir=scene_dir,
@@ -129,6 +130,34 @@ def _build_arrangement_line_spec_with_llm(
         scene_summary=scene_summary,
         model=model,
     )
+    return _build_arrangement_line_spec_from_response(
+        response=response,
+        scene_objects=scene_objects,
+        scene_dir=scene_dir,
+        task_description=task_description,
+    )
+
+
+def _build_arrangement_line_spec_from_response(
+    *,
+    response: Mapping[str, Any],
+    scene_objects: list[SceneObject],
+    scene_dir: Path,
+    task_description: str,
+) -> ArrangementLineSpec:
+    """Build a deterministic arrangement spec from parsed model semantics."""
+    background_objects = [
+        obj for obj in scene_objects if obj.source_role == "background"
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    if not background_objects:
+        raise ValueError("Arrangement generation requires a background table.")
+    if len(rigid_objects) < 2:
+        raise ValueError(
+            "Arrangement generation requires at least two movable objects."
+        )
+
+    table = _pick_table(background_objects)
     return _apply_arrangement_task_response(
         response=response,
         table_source_uid=table.source_uid,

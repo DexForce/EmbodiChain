@@ -14,12 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Shared LLM boundary for config-generation task specs.
+"""Shared JSON LLM boundary for config-generation semantics.
 
-Every task route (router, arrangement, stacking, object manipulation) asks the
-model the same shape of question: render a reviewable prompt template over the
-scene summary, request one strict JSON object, and parse it. Only the template,
-the usage-tracking stage, and the system framing differ.
+The primary config-generation path requests one combined task interpretation.
+Legacy route-specific helpers use this same boundary so their compatibility
+entry points retain identical rendering, invocation, and parsing behavior.
+Only the template, usage-tracking stage, and system framing differ.
 
 Centralizing the call keeps that boundary narrow and auditable: the model
 selects *semantic* intent only, while slot geometry, support heights, arm
@@ -64,8 +64,8 @@ def request_json_spec(
         template_name: Prompt template under ``prompts/templates``. The template
             owns all model-facing prose so wording can change without touching
             the invariants enforced by the caller's normalization code.
-        usage_stage: Token-accounting label, conventionally
-            ``config_generation.<route>``.
+        usage_stage: Token-accounting label, such as
+            ``config_generation.task_interpretation``.
         project_name: Scene project name interpolated into the template.
         task_description: Natural-language task goal.
         scene_summary: Per-object summary rows serialized into the template.

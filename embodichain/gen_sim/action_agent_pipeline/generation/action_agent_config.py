@@ -26,8 +26,7 @@ from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_TARGET_BODY_SCALE,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
-    _build_arrangement_line_spec_with_llm,
-    _call_arrangement_task_llm,
+    _build_arrangement_line_spec_from_response,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.bundle_finalization import (
     _finalize_and_write_bundle,
@@ -58,8 +57,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_offsets impor
     _relative_release_offset,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_spec import (
-    _build_object_manipulation_spec_with_llm,
-    _call_object_manipulation_task_llm,
+    _build_object_manipulation_spec_from_response,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
@@ -75,24 +73,23 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_transforms impor
     _validate_source_scene_body_scale_mode,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
-    _build_stacking_spec_with_llm,
-    _call_stacking_task_llm,
+    _build_stacking_spec_from_response,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.task_interpretation import (
+    _call_task_interpretation_llm,
+    _interpret_task_with_llm,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.task_router import (
     _TASK_ROUTE_ARRANGEMENT_LINE,
     _TASK_ROUTE_OBJECT_MANIPULATION,
     _TASK_ROUTE_STACKING,
     _TASK_ROUTE_UNSUPPORTED,
-    _call_task_router_llm,
-    _route_task_with_llm,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
     _validate_arrangement_bundle,
     _validate_relative_bundle,
     _validate_stacking_bundle,
 )
-
-_call_relative_task_llm = _call_object_manipulation_task_llm
 
 __all__ = [
     "GeneratedActionAgentConfigPaths",
@@ -127,11 +124,10 @@ def generate_action_agent_config_from_project(
 ) -> GeneratedActionAgentConfigPaths:
     """Generate action-agent configs from an exported gym project.
 
-    ``task_description`` is required: the task router classifies it into one of
-    the supported routes (stacking, arrangement line, object manipulation) and
-    the matching deterministic generator derives every pose, slot, and graph
-    edge from the scene geometry. The LLM boundary stays narrow -- it only
-    selects semantic intent, never numeric placement.
+    ``task_description`` is required: one LLM interpretation selects a supported
+    route (stacking, arrangement line, object manipulation) and its semantic
+    intent. The matching deterministic generator then derives every pose, slot,
+    and graph edge from scene geometry.
 
     Args:
         gym_project: Project root, formatted scene folder, ``gym_config.json``,
@@ -140,7 +136,7 @@ def generate_action_agent_config_from_project(
         task_name: Name passed to ``run_agent``.
         task_description: Natural-language task goal. Required; an empty value
             raises because there is no default task template to fall back to.
-        llm_model: Optional model override for task routing and spec derivation.
+        llm_model: Optional model override for the combined task interpretation.
         robot_profile: Robot profile ID or profile instance used to generate the
             robot config, runtime arm-slot mapping, prompts, and dataset robot
             metadata. Defaults to ``dual_ur10``.
@@ -211,21 +207,20 @@ def generate_action_agent_config_from_project(
     )
 
     scene_objects = _collect_scene_objects(source_config)
-    task_route = _route_task_with_llm(
+    interpretation = _interpret_task_with_llm(
         scene_objects=scene_objects,
         project_name=project_name,
         task_description=task_description,
         model=llm_model,
-        task_router_llm_caller=_call_task_router_llm,
+        task_llm_caller=_call_task_interpretation_llm,
     )
+    task_route = interpretation.task_route
     if task_route.route == _TASK_ROUTE_STACKING:
-        spec = _build_stacking_spec_with_llm(
+        spec = _build_stacking_spec_from_response(
+            response=interpretation.spec,
             scene_objects=scene_objects,
-            project_name=project_name,
             scene_dir=scene_dir,
             task_description=task_description,
-            model=llm_model,
-            task_llm_caller=_call_stacking_task_llm,
         )
         bundle = _build_stacking_bundle(
             scene_dir=scene_dir,
@@ -252,13 +247,11 @@ def generate_action_agent_config_from_project(
             overwrite=overwrite,
         )
     if task_route.route == _TASK_ROUTE_ARRANGEMENT_LINE:
-        spec = _build_arrangement_line_spec_with_llm(
+        spec = _build_arrangement_line_spec_from_response(
+            response=interpretation.spec,
             scene_objects=scene_objects,
-            project_name=project_name,
             scene_dir=scene_dir,
             task_description=task_description,
-            model=llm_model,
-            task_llm_caller=_call_arrangement_task_llm,
         )
         bundle = _build_arrangement_line_bundle(
             scene_dir=scene_dir,
@@ -291,15 +284,13 @@ def generate_action_agent_config_from_project(
         )
     if task_route.route != _TASK_ROUTE_OBJECT_MANIPULATION:
         raise ValueError(f"Unsupported task route: {task_route.route!r}.")
-    spec = _build_object_manipulation_spec_with_llm(
+    spec = _build_object_manipulation_spec_from_response(
+        response=interpretation.spec,
         scene_objects=scene_objects,
-        project_name=project_name,
         task_description=task_description,
-        model=llm_model,
         release_offset_fn=_relative_release_offset,
         staging_z_delta=_STAGING_Z_DELTA,
         pose_sensitive_staging_z_delta=_POSE_SENSITIVE_STAGING_Z_DELTA,
-        task_llm_caller=_call_relative_task_llm,
     )
     bundle = _build_relative_placement_bundle(
         scene_dir=scene_dir,

@@ -30,19 +30,19 @@ from embodichain.gen_sim.action_agent_pipeline.generation import scene_transform
     [
         (
             "stacking",
-            "_build_stacking_spec_with_llm",
+            "_build_stacking_spec_from_response",
             "_build_stacking_bundle",
             "_validate_stacking_bundle",
         ),
         (
             "arrangement_line",
-            "_build_arrangement_line_spec_with_llm",
+            "_build_arrangement_line_spec_from_response",
             "_build_arrangement_line_bundle",
             "_validate_arrangement_bundle",
         ),
         (
             "object_manipulation",
-            "_build_object_manipulation_spec_with_llm",
+            "_build_object_manipulation_spec_from_response",
             "_build_relative_placement_bundle",
             "_validate_relative_bundle",
         ),
@@ -59,6 +59,7 @@ def test_config_generation_dispatches_each_route_once(
     calls: list[tuple[str, object]] = []
     source_path = tmp_path / "gym_config.json"
     source_path.write_text("{}", encoding="utf-8")
+    semantic_spec = {"selected_route": route}
     spec = SimpleNamespace(route=route)
     bundle = {"gym_config": {}, "summary": {}}
     expected = object()
@@ -88,11 +89,15 @@ def test_config_generation_dispatches_each_route_once(
     )
     monkeypatch.setattr(
         action_agent_config,
-        "_route_task_with_llm",
-        lambda **kwargs: SimpleNamespace(
-            route=route,
-            reason="",
-            to_summary=lambda: {"route": route},
+        "_interpret_task_with_llm",
+        lambda **kwargs: calls.append(("interpret", kwargs))
+        or SimpleNamespace(
+            task_route=SimpleNamespace(
+                route=route,
+                reason="",
+                to_summary=lambda: {"route": route},
+            ),
+            spec=semantic_spec,
         ),
     )
     monkeypatch.setattr(
@@ -128,13 +133,15 @@ def test_config_generation_dispatches_each_route_once(
     assert result is expected
     assert [name for name, _ in calls] == [
         "profile",
+        "interpret",
         "spec",
         "bundle",
         "validate",
         "finalize",
     ]
     assert calls[0] == ("profile", "franka")
-    assert calls[2][1]["robot_profile"] == "resolved_franka"
+    assert calls[2][1]["response"] is semantic_spec
+    assert calls[3][1]["robot_profile"] == "resolved_franka"
 
 
 def test_config_generation_preserves_unsupported_route_error(
@@ -164,8 +171,14 @@ def test_config_generation_preserves_unsupported_route_error(
     )
     monkeypatch.setattr(
         action_agent_config,
-        "_route_task_with_llm",
-        lambda **kwargs: SimpleNamespace(route="unsupported", reason="not supported"),
+        "_interpret_task_with_llm",
+        lambda **kwargs: SimpleNamespace(
+            task_route=SimpleNamespace(
+                route="unsupported",
+                reason="not supported",
+            ),
+            spec={},
+        ),
     )
 
     with pytest.raises(ValueError, match="not supported"):
@@ -203,8 +216,11 @@ def test_config_generation_preserves_unknown_route_error(
     )
     monkeypatch.setattr(
         action_agent_config,
-        "_route_task_with_llm",
-        lambda **kwargs: SimpleNamespace(route="future_route", reason=""),
+        "_interpret_task_with_llm",
+        lambda **kwargs: SimpleNamespace(
+            task_route=SimpleNamespace(route="future_route", reason=""),
+            spec={},
+        ),
     )
 
     with pytest.raises(ValueError, match="future_route"):

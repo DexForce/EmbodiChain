@@ -71,6 +71,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.spec_llm import (
 
 __all__ = [
     "_SIDE_RELATIONS",
+    "_build_object_manipulation_spec_from_response",
     "_build_object_manipulation_spec_with_llm",
     "_build_relative_placement_spec_with_llm",
     "_call_object_manipulation_task_llm",
@@ -102,7 +103,7 @@ def _build_relative_placement_spec_with_llm(
             "Relative placement generation requires a movable rigid object."
         )
 
-    table = _pick_table(background_objects)
+    _pick_table(background_objects)
     if task_llm_caller is None:
         task_llm_caller = _call_relative_task_llm
     response = task_llm_caller(
@@ -122,6 +123,38 @@ def _build_relative_placement_spec_with_llm(
         ],
         model=model,
     )
+    return _build_object_manipulation_spec_from_response(
+        response=response,
+        scene_objects=scene_objects,
+        task_description=task_description,
+        release_offset_fn=release_offset_fn,
+        staging_z_delta=staging_z_delta,
+        pose_sensitive_staging_z_delta=pose_sensitive_staging_z_delta,
+    )
+
+
+def _build_object_manipulation_spec_from_response(
+    *,
+    response: Mapping[str, Any],
+    scene_objects: list[SceneObject],
+    task_description: str,
+    release_offset_fn: Callable[[str], Sequence[float]],
+    staging_z_delta: float,
+    pose_sensitive_staging_z_delta: float,
+) -> RelativePlacementSpec:
+    """Build a deterministic manipulation spec from parsed model semantics."""
+    background_objects = [
+        obj for obj in scene_objects if obj.source_role == "background"
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    if not background_objects:
+        raise ValueError("Relative placement generation requires a background table.")
+    if not rigid_objects:
+        raise ValueError(
+            "Relative placement generation requires a movable rigid object."
+        )
+
+    table = _pick_table(background_objects)
     return _apply_relative_task_response(
         response=response,
         table_source_uid=table.source_uid,

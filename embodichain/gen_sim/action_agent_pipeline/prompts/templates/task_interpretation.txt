@@ -1,0 +1,113 @@
+Interpret one tabletop robot task in a single pass. Select exactly one config-generation route and return that route's semantic spec. Do not generate target coordinates, offsets, robot or arm assignments, success conditions, atomic actions, or task graphs.
+
+Return exactly one JSON object with this outer schema:
+{
+  "schema_version": "task_interpretation_v1",
+  "route": "stacking|arrangement_line|object_manipulation|unsupported",
+  "confidence": 0.0,
+  "reason": "<short route rationale>",
+  "candidate_objects": ["<central source_uid>", "..."],
+  "warnings": ["<optional warning>", "..."],
+  "spec": {}
+}
+
+General rules:
+- Base the route primarily on the task description. Use the scene only to resolve available object identities, roles, colors, container semantics, and counts.
+- Use only source_uid values from the supplied scene. candidate_objects may include central passive references or supports; route-specific moved-object fields may include only the roles allowed below.
+- spec must exactly follow the schema for the selected route. For unsupported, return an empty spec.
+- Do not use markdown.
+
+Route selection:
+- Choose arrangement_line when multiple tabletop objects should form one global row, line, column, left-to-right order, color order, size order, or other one-dimensional arrangement. This includes 摆成一排, 排成一行, 排列, 排序, 从左到右, and 由大到小.
+- Choose stacking only when the task asks to build, reorder, or move objects into one vertical stack, pile, or nested stack. Explicit positive stacking verbs such as 叠放, 堆叠, 摞, stack, pile, or nest select stacking, including when moved objects are stacked onto one named passive support.
+- Do not choose stacking merely because one moved object is placed, put, or moved on top of a support. Without an explicit stacking goal, that is object_manipulation.
+- Choose object_manipulation for one or two moved objects with relative placement, insertion, support-surface placement, directional movement, orientation adjustment, pickup, holding, hovering, or shared-object cooperative transport.
+- Choose unsupported for tasks these routes cannot represent, including pouring, opening articulated objects, cutting, deformable manipulation, or long tool-use workflows.
+
+When route is arrangement_line, use this spec:
+{
+  "objects": ["<rigid_object source_uid>", "..."],
+  "category_order": ["<category>", "..."],
+  "object_categories": {"<source_uid>": "<category>"},
+  "order_by": "size|color|explicit",
+  "order_direction": "ascending|descending|given",
+  "ordered_attributes": ["red", "green", "blue"],
+  "object_attributes": {"<source_uid>": {"color": "red"}},
+  "anchor": "table_center",
+  "line_axis": "world_y",
+  "task_prompt_summary": "<short execution summary>",
+  "basic_background_notes": "<short notes>"
+}
+
+Arrangement rules:
+- Use each rigid object's source_uid and description to distinguish requested categories from distractors.
+- Include every instance of each requested category and exclude unrelated objects.
+- objects contains exactly the selected objects grouped in category_order, and object_categories annotates every selected object.
+- Use order_by="size" for large/small ordering, with descending for large-to-small and ascending for small-to-large.
+- Use order_by="color" for a requested color sequence. Put the sequence in ordered_attributes and provide each selected object's color.
+- Always use anchor="table_center" and line_axis="world_y".
+
+When route is stacking, use this spec:
+{
+  "objects": ["<actively moved rigid_object source_uid>", "..."],
+  "stack_mode": "on_top|nested",
+  "bottom_to_top": ["<source_uid bottom>", "..."],
+  "order_by": "explicit|size",
+  "object_attributes": {"<source_uid>": {"color": "red"}},
+  "anchor": "table_center" | {"type": "object", "object": "<passive support source_uid>"},
+  "task_prompt_summary": "<short execution summary>",
+  "basic_background_notes": "<short notes>"
+}
+
+Stacking rules:
+- This route creates exactly one vertical stack or nested stack.
+- Include every actively moved object in objects. A named root base, support, bucket, or container that stays in place belongs only in anchor.object and must not be included in objects or bottom_to_top.
+- Use on_top for solid objects that should be vertically stacked. Use nested for bowls or cup-like containers placed inside each other.
+- For explicit "blue on green and green on red", return bottom_to_top=[red, green, blue].
+- For "A stack on B, then B stack on C", C is the passive anchor and bottom_to_top=[B, A].
+- When successive instructions stack A and B onto the same named root C, C is the passive anchor and bottom_to_top=[A, B] in instruction order. B rests on the current stack top, not directly on C.
+- If no order is given for nested objects, use order_by="size" and an empty bottom_to_top; deterministic code sorts large-to-small.
+- Use anchor="table_center" only for a free stack with no named root support. Whenever the task names the root support or container, use the object anchor.
+
+When route is object_manipulation, use this spec:
+{
+  "manipulations": [
+    {
+      "intent": "place_relative|hold_hover|coordinated_pickment",
+      "moved_object": "<rigid_object source_uid>",
+      "arm": "left|right|auto",
+      "reference_object": "<scene source_uid, moved_object, or self>",
+      "goal_relation": "inside|on|left_of|right_of|front_of|behind|front_left_of|back_left_of|front_right_of|back_right_of",
+      "hover_height": 0.10,
+      "orientation_goal": "preserve|upright|lay_flat|axis_align",
+      "orientation_reference": "none|world_axes|reference_object",
+      "orientation_axis": "none|x|y|long_axis|short_axis",
+      "payloads": [{"object": "<source_uid>", "arm": "left|right|auto", "slot": "left|right|center"}],
+      "direction": "front|back|left|right|front_left|front_right|back_left|back_right|none",
+      "terminal_behavior": "hold|place"
+    }
+  ],
+  "task_prompt_summary": "<one or two sentence execution summary>",
+  "basic_background_notes": "<short notes>",
+  "action_sketch": ["<short deterministic action sketch>"]
+}
+
+Object-manipulation rules:
+- Use coordinated_pickment when both arms pick, lift, carry, or move one shared object. Return exactly one manipulation with arm="auto".
+- A coordinated_pickment may contain zero to four payloads that must first be placed on or inside the shared carrier. Payloads must differ from the carrier.
+- For coordinated_pickment, direction describes carrier motion. Use none for lifting in place. Use terminal_behavior="hold" for 端起, 举起, 悬空, 保持, or hold; otherwise movement defaults to place.
+- Use hold_hover when an object is lifted and held without release or orientation change. Omit reference_object and goal_relation, preserve orientation, and use 0.10 m unless a height is specified.
+- Use place_relative for placing, stacking onto, moving beside, inserting, releasing, or changing object orientation at a spatial target. Include reference_object and goal_relation.
+- A dual-arm task moving two separate objects has exactly two manipulations, different moved objects, and one left plus one right arm. Use auto only when the user did not choose the arm.
+- Do not mix top-level intent families. Payloads belong only inside the single coordinated_pickment.
+- A reference may be a rigid or background object. For movement relative to the object's initial position, use the moved object or self.
+- Use inside for release into a container and on for placement on a non-container support.
+- Use upright for 扶正 or 竖起来, lay_flat for 平放 or 横放, axis_align for 水平摆正, 摆正, or alignment, and preserve otherwise.
+- Orientation-changing tasks use place_relative with relation on and the current support or self, never hold_hover.
+- For axis_align, align long_axis to a reference object's long side, or use world x/y only when the task explicitly names a world/table axis.
+
+Project: $project_name
+Task description:
+$task_description
+Scene objects:
+$scene_summary

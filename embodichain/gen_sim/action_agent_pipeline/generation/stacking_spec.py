@@ -61,6 +61,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation._spec_scene_helpers im
 from embodichain.utils.logger import log_warning
 
 __all__ = [
+    "_build_stacking_spec_from_response",
     "_build_stacking_spec_with_llm",
     "_call_stacking_task_llm",
     "_make_stacking_summary",
@@ -97,7 +98,7 @@ def _build_stacking_spec_with_llm(
     if len(rigid_objects) < 2:
         raise ValueError("Stacking generation requires at least two movable objects.")
 
-    table = _pick_table(background_objects)
+    _pick_table(background_objects)
     scene_summary = _make_stacking_scene_summary(scene_objects, scene_dir=scene_dir)
     if task_llm_caller is None:
         task_llm_caller = _call_stacking_task_llm
@@ -107,6 +108,32 @@ def _build_stacking_spec_with_llm(
         scene_summary=scene_summary,
         model=model,
     )
+    return _build_stacking_spec_from_response(
+        response=response,
+        scene_objects=scene_objects,
+        scene_dir=scene_dir,
+        task_description=task_description,
+    )
+
+
+def _build_stacking_spec_from_response(
+    *,
+    response: Mapping[str, Any],
+    scene_objects: list[SceneObject],
+    scene_dir: Path,
+    task_description: str,
+) -> StackingSpec:
+    """Build a deterministic stacking spec from parsed model semantics."""
+    background_objects = [
+        obj for obj in scene_objects if obj.source_role == "background"
+    ]
+    rigid_objects = [obj for obj in scene_objects if obj.source_role == "rigid_object"]
+    if not background_objects:
+        raise ValueError("Stacking generation requires a background table.")
+    if len(rigid_objects) < 2:
+        raise ValueError("Stacking generation requires at least two movable objects.")
+
+    table = _pick_table(background_objects)
     return _apply_stacking_task_response(
         response=response,
         table_source_uid=table.source_uid,
