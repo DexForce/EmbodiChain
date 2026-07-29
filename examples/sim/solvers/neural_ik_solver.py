@@ -13,233 +13,176 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+"""Demonstrate batched neural IK on Franka Panda."""
+
+from __future__ import annotations
+
 import argparse
-import math
 import time
 
 import numpy as np
 import torch
-from IPython import embed
 
 from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
-from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.solvers import NeuralIKSolverCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    maybe_wait_for_user,
+    setup_print_options,
+    shutdown_sim,
+)
+
+TARGET_OFFSETS = (
+    (0.3, 0.4, -0.2),
+    (0.2, 0.0, 0.0),
+    (0.0, 0.2, 0.0),
+    (0.0, -0.2, -0.1),
+    (-0.2, 0.0, 0.0),
+    (0.0, -0.2, 0.0),
+    (0.0, 0.0, -0.15),
+    (-0.2, 0.2, 0.0),
+    (0.0, 0.2, -0.15),
+)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="NeuralIKSolver example")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Compute device for tensors and the neural IK solver (default: cpu).",
+def main() -> None:
+    """Solve and replay one neural-IK Cartesian path per environment."""
+    parser = add_demo_args(
+        argparse.ArgumentParser(description="Run the NeuralIKSolver example.")
     )
     parser.add_argument(
-        "--num-envs",
+        "--num_steps",
+        "--num-steps",
         type=int,
-        default=1,
-        help="Number of parallel environments to simulate. IK is solved for all "
-        "environments simultaneously at each step (default: 1).",
+        default=50,
+        help="Number of Cartesian interpolation steps.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available.")
+    setup_print_options()
 
-
-def _resolve_device(device: str) -> str:
-    if device == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError(
-            "CUDA was requested but is not available. Use --device cpu or install "
-            "a CUDA-enabled PyTorch build."
-        )
-    return device
-
-
-def _squeeze_ik_qpos(ik_qpos: torch.Tensor) -> torch.Tensor:
-    """Normalize IK output to (num_envs, dof)."""
-    if ik_qpos.dim() == 3:
-        return ik_qpos[:, 0, :]
-    return ik_qpos
-
-
-def _pose_with_arena_offset(
-    pose: torch.Tensor | np.ndarray, arena_offset: torch.Tensor
-) -> np.ndarray:
-    """Convert arena-local 4x4 pose to world frame by adding arena translation."""
-    if isinstance(pose, torch.Tensor):
-        xpos = pose.detach().cpu().numpy()
-    else:
-        xpos = np.asarray(pose)
-    xpos = np.array(xpos, copy=True, dtype=np.float64)
-    offset = arena_offset.detach().cpu().numpy().reshape(3)
-    if xpos.ndim == 2:
-        xpos[:3, 3] += offset
-    elif xpos.ndim == 3:
-        xpos[:, :3, 3] += offset
-    return xpos
-
-
-def main():
-    args = parse_args()
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
-
-    sim_device = _resolve_device(args.device)
-    num_envs = args.num_envs
-
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device=sim_device,
-        num_envs=num_envs,
-        arena_space=2.0,
-    )
-    sim = SimulationManager(config)
-
+    # Download before allocating simulation resources so download errors do
+    # not leave a partially initialized renderer behind.
     checkpoint_path = download_neural_ik_checkpoint()
-
-    cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
-    cfg.solver_cfg["arm"] = NeuralIKSolverCfg(
-        end_link_name="fr3_hand_tcp",
-        root_link_name="base",
-        tcp=[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        checkpoint_path=checkpoint_path,
-        num_arm_joints=7,
-        max_steps=30,
-        action_scale=0.2,
-        hidden_dims=[256, 256],
-        pos_eps=0.1,
-        rot_eps=0.5,
+    sim = create_default_sim(
+        args,
+        num_envs=args.num_envs,
+        arena_space=2.0,
+        add_default_light=False,
     )
-
-    robot: Robot = sim.add_robot(cfg=cfg)
-
-    sim.open_window()
-
-    arm_name = "arm"
-    device = robot.device
-
-    seed_qpos = torch.tensor(
-        [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
-        dtype=torch.float32,
-        device=device,
-    )
-    qpos = seed_qpos.unsqueeze(0).expand(num_envs, -1).clone()
-    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
-    time.sleep(3.0)
-
-    fk_xpos = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
-    print(f"fk_xpos shape: {tuple(fk_xpos.shape)}")
-
-    start_pose = fk_xpos.clone()
-    end_pose = fk_xpos.clone()
-
-    # Per-environment target offsets (cycle if num_envs exceeds preset count)
-    move_vecs = torch.tensor(
-        [
-            [0.3, 0.4, -0.2],
-            [0.2, 0.0, 0.0],
-            [0.0, 0.2, 0.0],
-            [0.0, -0.2, -0.1],
-            [-0.2, 0.0, 0.0],
-            [0.0, -0.2, 0.0],
-            [0.0, 0.0, -0.15],
-            [-0.2, 0.2, 0.0],
-            [0.0, 0.2, -0.15],
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
-    for env_id in range(num_envs):
-        end_pose[env_id, :3, 3] += move_vecs[env_id % move_vecs.shape[0]]
-
-    num_steps = 50
-    interpolated_poses = torch.stack(
-        [
-            torch.lerp(start_pose, end_pose, t)
-            for t in torch.linspace(0.0, 1.0, num_steps, device=device)
-        ],
-        dim=1,
-    )
-
-    ik_qpos = qpos.clone()
-    ik_qpos_results: list[torch.Tensor] = []
-    ik_success_flags: list[torch.Tensor] = []
-
-    print(
-        f"\nRunning {num_steps} batch IK steps: num_envs={num_envs}, device='{sim_device}' ..."
-    )
-    ik_compute_begin = time.time()
-    for step in range(num_steps):
-        poses = interpolated_poses[:, step, :, :]
-        res, ik_qpos_new = robot.compute_ik(
-            pose=poses, joint_seed=ik_qpos, name=arm_name
+    try:
+        cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
+        cfg.solver_cfg["arm"] = NeuralIKSolverCfg(
+            end_link_name="fr3_hand_tcp",
+            root_link_name="base",
+            tcp=np.eye(4).tolist(),
+            checkpoint_path=checkpoint_path,
+            num_arm_joints=7,
+            max_steps=30,
+            action_scale=0.2,
+            hidden_dims=[256, 256],
+            pos_eps=0.1,
+            rot_eps=0.5,
         )
-        ik_qpos = _squeeze_ik_qpos(ik_qpos_new)
-        ik_qpos_results.append(ik_qpos.clone())
-        ik_success_flags.append(res)
-    ik_compute_end = time.time()
-    print(
-        f"IK compute time for {num_steps} steps and {num_envs} envs: "
-        f"{ik_compute_end - ik_compute_begin:.4f}s"
-    )
+        robot = sim.add_robot(cfg=cfg)
+        maybe_init_gpu_physics(sim)
+        maybe_open_window(sim, args)
 
-    # Draw target and achieved EE axes for each environment (final step)
-    final_step = num_steps - 1
-    final_ik_qpos = ik_qpos_results[final_step]
-    final_res = ik_success_flags[final_step]
-    ik_xpos_all = robot.compute_fk(qpos=final_ik_qpos, name=arm_name, to_matrix=True)
-    arena_offsets = sim.arena_offsets
+        arm_name = "arm"
+        qpos = torch.tensor(
+            [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
+            dtype=torch.float32,
+            device=robot.device,
+        ).repeat(args.num_envs, 1)
+        robot.set_qpos(qpos, joint_ids=robot.get_joint_ids(arm_name))
 
-    for env_id in range(num_envs):
-        target_axis = _pose_with_arena_offset(end_pose[env_id], arena_offsets[env_id])
-        sim.draw_marker(
-            cfg=MarkerCfg(
-                name=f"fk_target_env{env_id}",
-                marker_type="axis",
-                axis_xpos=target_axis,
-                axis_size=0.002,
-                axis_len=0.005,
-                arena_index=-1,
-            )
+        start_pose = robot.compute_fk(
+            qpos=qpos,
+            name=arm_name,
+            to_matrix=True,
         )
-
-        if final_res[env_id]:
-            ik_axis = _pose_with_arena_offset(
-                ik_xpos_all[env_id], arena_offsets[env_id]
-            )
-            sim.draw_marker(
-                cfg=MarkerCfg(
-                    name=f"ik_result_env{env_id}",
-                    marker_type="axis",
-                    axis_xpos=ik_axis,
-                    axis_size=0.002,
-                    axis_len=0.005,
-                    arena_index=-1,
+        target_pose = start_pose.clone()
+        target_pose[:, :3, 3] += torch.tensor(
+            [
+                TARGET_OFFSETS[env_id % len(TARGET_OFFSETS)]
+                for env_id in range(args.num_envs)
+            ],
+            dtype=target_pose.dtype,
+            device=target_pose.device,
+        )
+        poses = torch.stack(
+            [
+                torch.lerp(start_pose, target_pose, t)
+                for t in torch.linspace(
+                    0.0,
+                    1.0,
+                    args.num_steps,
+                    device=robot.device,
                 )
-            )
+            ],
+            dim=1,
+        )
 
-    # Animate: batch-apply IK qpos for successful envs, then step simulation
-    joint_ids = robot.get_joint_ids(arm_name)
-    for step in range(num_steps):
-        ik_qpos_step = ik_qpos_results[step]
-        res = ik_success_flags[step]
-        if res.any():
-            success_ids = res.nonzero(as_tuple=True)[0]
-            robot.set_qpos(
-                qpos=ik_qpos_step[success_ids],
-                joint_ids=joint_ids,
-                env_ids=success_ids,
+        qpos_history = []
+        success_history = []
+        seed = qpos
+        started_at = time.perf_counter()
+        for pose in poses.unbind(dim=1):
+            success, solution = robot.compute_ik(
+                pose=pose,
+                joint_seed=seed,
+                name=arm_name,
             )
-        sim.update(step=5)
+            seed = solution[:, 0, :] if solution.dim() == 3 else solution
+            qpos_history.append(seed.clone())
+            success_history.append(torch.as_tensor(success, device=robot.device))
+        print(
+            f"Solved {args.num_steps} x {args.num_envs} neural IK targets in "
+            f"{time.perf_counter() - started_at:.4f} seconds"
+        )
 
-    embed(header="NeuralIKSolver example. Press Ctrl+D to exit.")
+        final_pose = robot.compute_fk(
+            qpos=qpos_history[-1],
+            name=arm_name,
+            to_matrix=True,
+        )
+        if not args.no_vis_eef_axis:
+            for env_id in range(args.num_envs):
+                for suffix, pose in (
+                    ("target", target_pose[env_id]),
+                    ("result", final_pose[env_id]),
+                ):
+                    sim.draw_marker(
+                        cfg=MarkerCfg(
+                            name=f"neural_ik_{suffix}_{env_id}",
+                            marker_type="axis",
+                            axis_xpos=pose,
+                            axis_size=0.002,
+                            axis_len=0.005,
+                            arena_index=env_id,
+                        )
+                    )
+
+        joint_ids = robot.get_joint_ids(arm_name)
+        for solution, success in zip(qpos_history, success_history):
+            success_ids = success.nonzero(as_tuple=True)[0]
+            if success_ids.numel():
+                robot.set_qpos(
+                    solution[success_ids],
+                    joint_ids=joint_ids,
+                    env_ids=success_ids,
+                )
+            sim.update(step=5)
+        maybe_wait_for_user(args, "Press Enter to exit...")
+    finally:
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

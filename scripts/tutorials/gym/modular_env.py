@@ -14,9 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
+"""Configure and run a manager-based modular environment."""
 
-from typing import List, Dict, Any
+from __future__ import annotations
+
+import argparse
+
+import gymnasium as gym
+import torch
 
 import embodichain.lab.gym.envs.managers.randomization as rand
 import embodichain.lab.gym.envs.managers.events as events
@@ -109,7 +114,7 @@ class ExampleCfg(EmbodiedEnvCfg):
     )
 
     # Define the sensor configuration using StereoCameraCfg
-    sensor: List[SensorCfg] = [
+    sensor: list[SensorCfg] = [
         StereoCameraCfg(
             uid="eye_in_head",
             width=960,
@@ -125,7 +130,7 @@ class ExampleCfg(EmbodiedEnvCfg):
         )
     ]
 
-    background: List[RigidObjectCfg] = [
+    background: list[RigidObjectCfg] = [
         RigidObjectCfg(
             uid="table",
             shape=MeshCfg(
@@ -144,7 +149,7 @@ class ExampleCfg(EmbodiedEnvCfg):
         ),
     ]
 
-    rigid_object: List[RigidObjectCfg] = [
+    rigid_object: list[RigidObjectCfg] = [
         RigidObjectCfg(
             uid="fork",
             shape=MeshCfg(
@@ -155,7 +160,7 @@ class ExampleCfg(EmbodiedEnvCfg):
         ),
     ]
 
-    articulation_cfg: List[ArticulationCfg] = [
+    articulation_cfg: list[ArticulationCfg] = [
         ArticulationCfg(
             uid="drawer",
             fpath="SlidingBoxDrawer/SlidingBoxDrawer.urdf",
@@ -175,14 +180,12 @@ class ModularEnv(EmbodiedEnv):
     and uses custom event and observation managers.
     """
 
-    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
+    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs) -> None:
         super().__init__(cfg, **kwargs)
 
 
-if __name__ == "__main__":
-    import gymnasium as gym
-    import argparse
-
+def main() -> None:
+    """Run five short episodes of the modular environment."""
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
@@ -202,9 +205,20 @@ if __name__ == "__main__":
     # Create the Gym environment
     env = gym.make("ModularEnv-v1", cfg=env_cfg)
 
-    for i in range(5):
-        obs, info = env.reset()
+    try:
+        device = env.get_wrapper_attr("device")
+        for _ in range(5):
+            env.reset()
+            for _ in range(100):
+                action = torch.zeros(
+                    env.action_space.shape,
+                    dtype=torch.float32,
+                    device=device,
+                )
+                env.step(action)
+    finally:
+        env.close()
 
-        for i in range(100):
-            action = torch.zeros(env.action_space.shape, dtype=torch.float32)
-            obs, reward, done, truncated, info = env.step(action)
+
+if __name__ == "__main__":
+    main()

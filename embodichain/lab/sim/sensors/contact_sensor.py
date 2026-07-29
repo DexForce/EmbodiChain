@@ -166,15 +166,18 @@ class ContactSensor(BaseSensor):
             self.item_user_ids = torch.cat(
                 (self.item_user_ids, rigid_object.get_user_ids())
             )
-            env_ids = torch.tensor(
+            env_ids = torch.as_tensor(
                 rigid_object._all_indices, dtype=torch.int32, device=self.device
             )
             self.item_env_ids = torch.cat((self.item_env_ids, env_ids))
 
         for articulation_cfg in config.articulation_cfg_list:
-            articulation = self._sim.get_articulation(articulation_cfg.articulation_uid)
-            if articulation is None:
+            if articulation_cfg.articulation_uid in self._sim.get_robot_uid_list():
                 articulation = self._sim.get_robot(articulation_cfg.articulation_uid)
+            else:
+                articulation = self._sim.get_articulation(
+                    articulation_cfg.articulation_uid
+                )
             if articulation is None:
                 logger.log_warning(
                     f"Articulation with uid '{articulation_cfg.articulation_uid}' not found in simulation."
@@ -189,12 +192,13 @@ class ContactSensor(BaseSensor):
             for link_name in link_names:
                 if link_name not in all_link_names:
                     logger.log_warning(
-                        f"Link {link_name} not found in articulation {articulation_cfg.uid}."
+                        f"Link {link_name} not found in articulation "
+                        f"{articulation_cfg.articulation_uid}."
                     )
                     continue
                 link_user_ids = articulation.get_user_ids(link_name).reshape(-1)
                 self.item_user_ids = torch.cat((self.item_user_ids, link_user_ids))
-                env_ids = torch.tensor(
+                env_ids = torch.as_tensor(
                     articulation._all_indices, dtype=torch.int32, device=self.device
                 )
                 self.item_env_ids = torch.cat((self.item_env_ids, env_ids))

@@ -18,17 +18,26 @@
 This script demonstrates how to create a rigid object group using SimulationManager.
 """
 
-import argparse
-import time
+from __future__ import annotations
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
-from embodichain.lab.sim.shapes import CubeCfg
+import argparse
+
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import (
-    RigidObjectGroup,
     RigidObjectGroupCfg,
     RigidObjectCfg,
+)
+from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
+    shutdown_sim,
 )
 
 
@@ -39,25 +48,15 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
-        width=1920,
-        height=1080,
-        headless=True,
-        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
-        render_cfg=RenderCfg(
-            renderer=args.renderer
-        ),  # Enable ray tracing for better visuals
+    sim = create_default_sim(
+        args,
         num_envs=args.num_envs,
         arena_space=3.0,
+        add_default_light=False,
     )
-
-    # Create the simulation instance
-    sim = SimulationManager(sim_cfg)
 
     physics_attrs = RigidBodyAttributesCfg(
         mass=1.0,
@@ -67,7 +66,7 @@ def main():
     )
 
     # Add objects to the scene
-    obj_group: RigidObjectGroup = sim.add_rigid_object_group(
+    sim.add_rigid_object_group(
         cfg=RigidObjectGroupCfg(
             uid="obj_group",
             rigid_objects={
@@ -98,52 +97,25 @@ def main():
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
+    maybe_init_gpu_physics(sim)
+    maybe_open_window(sim, args)
 
     # Run the simulation
-    run_simulation(sim)
+    run_simulation(sim, args)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, args: argparse.Namespace) -> None:
     """Run the simulation loop.
 
     Args:
         sim: The SimulationManager instance to run
     """
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
-    step_count = 0
-
     try:
-        last_time = time.time()
-        last_step = 0
-        while True:
-            # Update physics simulation
-            sim.update(step=1)
-            step_count += 1
-
-            # Print FPS every second
-            if step_count % 100 == 0:
-                current_time = time.time()
-                elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
-                print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
-                last_time = current_time
-                last_step = step_count
-
-    except KeyboardInterrupt:
-        print("\n[INFO]: Stopping simulation...")
+        with DemoRecording(sim, args, prefix="create_rigid_object_group"):
+            run_simulation_loop(sim, max_steps=resolve_demo_steps(args))
     finally:
-        # Clean up resources
-        sim.destroy()
+        shutdown_sim(sim)
         print("[INFO]: Simulation terminated successfully")
 
 

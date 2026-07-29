@@ -19,44 +19,46 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It shows the basic setup of simulation context, adding objects, and sensors.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from embodichain.lab.sim.objects import RigidObjectCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    resolve_demo_steps,
+    shutdown_sim,
+)
 from embodichain.utils import logger
 
 
-def main():
+def main() -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
+    sim = create_default_sim(
+        args,
         width=1920,
         height=1080,
-        headless=args.headless,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
-        render_cfg=RenderCfg(
-            renderer=args.renderer
-        ),  # Enable ray tracing for better visuals
+        add_default_light=False,
     )
 
-    # Create the simulation instance
-    sim = SimulationManager(sim_cfg)
-
     # Add two cubes to the scene
-    cube1: RigidObject = sim.add_rigid_object(
+    sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube1",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
@@ -70,7 +72,7 @@ def main():
             init_pos=[0.0, 0.0, 1.0],
         )
     )
-    cube2: RigidObject = sim.add_rigid_object(
+    sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube2",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
@@ -100,24 +102,21 @@ def main():
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
+    maybe_init_gpu_physics(sim)
+    maybe_open_window(sim, args)
 
     # Run the simulation
-    run_simulation(sim)
+    run_simulation(sim, max_steps=resolve_demo_steps(args))
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, max_steps: int | None = None) -> None:
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     step_count = 0
     gizmo_enabled = True
     try:
         last_time = time.time()
         last_step = 0
-        while True:
+        while max_steps is None or step_count < max_steps:
             sim.update(step=1)
 
             # Update all gizmos if any are enabled
@@ -128,7 +127,8 @@ def run_simulation(sim: SimulationManager):
             # Disable gizmo after 200000 steps (example)
             if step_count == 200000 and gizmo_enabled:
                 logger.log_info("Disabling gizmo at step 200000")
-                sim.disable_gizmo("cube")
+                sim.disable_gizmo("cube1")
+                sim.disable_gizmo("cube2")
                 gizmo_enabled = False
 
             # Print FPS every second
@@ -146,7 +146,7 @@ def run_simulation(sim: SimulationManager):
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
-        sim.destroy()
+        shutdown_sim(sim)
         logger.log_info("Simulation terminated successfully")
 
 

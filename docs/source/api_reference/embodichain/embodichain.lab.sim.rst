@@ -15,6 +15,7 @@ management, materials, sensors, planning/IK utilities, and action helpers.
    :toctree: .
 
    sim_manager
+   demo_base
    cfg
    common
    material
@@ -43,6 +44,14 @@ Simulation Manager
    :undoc-members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+Demo Base
+---------
+
+.. automodule:: embodichain.lab.sim.demo_base
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Configuration
 -------------

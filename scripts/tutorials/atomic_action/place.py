@@ -19,46 +19,64 @@
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+import time
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
+    AntipodalAffordance,
     AtomicActionEngine,
     EndEffectorPoseTarget,
     GraspTarget,
+    ObjectSemantics,
     PickUp,
     PickUpCfg,
     Place,
     PlaceCfg,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.demo_base import DemoBase
 from embodichain.lab.sim.objects import RigidObject
-from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    maybe_wait_for_user,
+    setup_print_options,
+)
+from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
+    AntipodalSamplerCfg,
+    GraspGeneratorCfg,
+)
+from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
+    GripperCollisionCfg,
+)
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
-    broadcast_pose_batch,
-    broadcast_waypoint_pose_batch,
-    clone_local_pose_from_first_env,
-    create_antipodal_semantics,
-    create_toppra_motion_generator,
-    create_tutorial_simulation,
+    create_ur5_gripper_robot_cfg,
     draw_axis_marker,
-    get_hand_open_close_qpos,
-    initialize_pre_pick_robot_pose,
-    prepare_tutorial_scene,
-    replay_trajectory,
+    get_tutorial_window_size,
 )
 
-OBJECT_SIZE = (0.05, 0.05, 0.05)
+GRIPPER_MAX_OPEN_WIDTH = 0.080
+GRIPPER_FINGER_LENGTH = 0.088
+GRIPPER_ROOT_Z_WIDTH = 0.096
+GRIPPER_Y_THICKNESS = 0.040
+
+OBJECT_LABEL = "sugar_box"
+OBJECT_MESH_PATH = "SugarBox/sugar_box_usd/sugar_box.usda"
 OBJECT_XY = (-0.42, -0.08)
+OBJECT_MIN_HAND_CLOSE_QPOS = 0.024
+OBJECT_APPROACH_DIRECTION = (0.0, 0.0, -1.0)
+OBJECT_INIT_ROT = (0.0, 0.0, 0.0)
+OBJECT_BODY_SCALE = (0.8, 0.8, 0.8)
+OBJECT_MASS = 0.05
+OBJECT_USE_USD_PROPERTIES = False
+
 PICK_SAMPLE_INTERVAL = 120
 PLACE_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
@@ -66,155 +84,273 @@ POST_TRAJECTORY_STEPS = 240
 PLACE_LIFT_HEIGHT = 0.14
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the Place tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Pick up a cube and place it at a target pose."
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--n_sample", type=int, default=10000)
-    parser.add_argument("--force_reannotate", action="store_true")
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
-    return parser.parse_args()
+class PlaceDemo(DemoBase):
+    """Demo that picks up an object and places it at a target end-effector pose."""
 
+    def setup(self) -> None:
+        """Create simulation, robot, object, motion generator and action engine."""
+        width, height = get_tutorial_window_size(self.args)
+        self.sim = create_default_sim(
+            self.args,
+            width=width,
+            height=height,
+            physics_dt=1.0 / 100.0,
+            arena_space=2.5,
+        )
+        self.robot = self.sim.add_robot(
+            cfg=create_ur5_gripper_robot_cfg(init_pos=(0.0, 0.0, 0.0))
+        )
+        self.obj = self._create_pick_object()
 
-def create_pick_object(sim) -> RigidObject:
-    """Create a settled cube for the PickUp and Place sequence."""
-    obj = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="cube",
-            shape=CubeCfg(size=list(OBJECT_SIZE)),
+        motion_gen = MotionGenerator(
+            cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
+        )
+
+        hand_open, hand_close = self._get_hand_open_close_qpos()
+        self._initialize_pre_pick_robot_pose(hand_open)
+        pickup_cfg = PickUpCfg(
+            control_part="arm",
+            hand_control_part="hand",
+            hand_open_qpos=hand_open,
+            hand_close_qpos=hand_close,
+            approach_direction=torch.tensor(
+                OBJECT_APPROACH_DIRECTION,
+                dtype=torch.float32,
+                device=self.sim.device,
+            ),
+            pre_grasp_distance=0.15,
+            lift_height=0.16,
+            sample_interval=PICK_SAMPLE_INTERVAL,
+            hand_interp_steps=HAND_INTERP_STEPS,
+        )
+        place_cfg = PlaceCfg(
+            control_part="arm",
+            hand_control_part="hand",
+            hand_open_qpos=hand_open,
+            hand_close_qpos=hand_close,
+            lift_height=PLACE_LIFT_HEIGHT,
+            sample_interval=PLACE_SAMPLE_INTERVAL,
+            hand_interp_steps=HAND_INTERP_STEPS,
+        )
+
+        self.atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+        self.atomic_engine.register(PickUp(motion_gen, cfg=pickup_cfg))
+        self.atomic_engine.register(Place(motion_gen, cfg=place_cfg))
+
+        self.semantics = self._create_object_semantics()
+        self.place_eef_poses = self._make_place_eef_poses()
+
+        maybe_open_window(self.sim, self.args)
+        if not self.args.no_vis_eef_axis:
+            draw_axis_marker(self.sim, "place_target_axis", self.place_eef_poses[-1])
+
+    def run(self) -> None:
+        """Plan and replay the PickUp -> Place trajectory."""
+        maybe_wait_for_user(
+            self.args,
+            "Inspect the object, then press Enter to plan PickUp -> Place...",
+        )
+
+        n_envs = self.robot.get_qpos().shape[0]
+        multi_waypoint_xpos = self.place_eef_poses.unsqueeze(0).repeat(n_envs, 1, 1, 1)
+        place_target = EndEffectorPoseTarget(xpos=multi_waypoint_xpos)
+        logger.log_info("Planning PickUp precondition -> Place release trajectory")
+        success, traj, _ = self.atomic_engine.run(
+            steps=[
+                ("pick_up", GraspTarget(semantics=self.semantics)),
+                ("place", place_target),
+            ]
+        )
+        if not success.all():
+            logger.log_warning("Failed to plan Place demo trajectory.")
+            return
+
+        maybe_wait_for_user(self.args, "Press Enter to replay the Place demo...")
+
+        with DemoRecording(self.sim, self.args, prefix="place_auto_play"):
+            self._replay_place_trajectory(traj)
+
+        maybe_wait_for_user(self.args, "Press Enter to exit the simulation...")
+
+    def _create_pick_object(self) -> RigidObject:
+        cfg = RigidObjectCfg(
+            uid=OBJECT_LABEL,
+            shape=MeshCfg(fpath=get_data_path(OBJECT_MESH_PATH)),
             attrs=RigidBodyAttributesCfg(
-                mass=0.05,
+                mass=OBJECT_MASS,
                 dynamic_friction=0.97,
                 static_friction=0.99,
                 enable_ccd=True,
             ),
             max_convex_hull_num=16,
-            init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
+            init_pos=[OBJECT_XY[0], OBJECT_XY[1], 0.05],
+            init_rot=OBJECT_INIT_ROT,
+            body_scale=OBJECT_BODY_SCALE,
+            use_usd_properties=OBJECT_USE_USD_PROPERTIES,
         )
-    )
-    sim.update(step=10)
-    clone_local_pose_from_first_env(obj)
-    obj.clear_dynamics()
-    return obj
+        obj = self.sim.add_rigid_object(cfg=cfg)
 
+        # Set the object to a stable pose on the ground by simulating a few steps.
+        self.sim.update(step=10)
+        return obj
 
-def make_place_eef_poses(device: torch.device) -> torch.Tensor:
-    """Build hover and release waypoints for the multi-waypoint Place target."""
-    rotation = torch.tensor(
-        [
-            [0.0539, 0.9985, -0.0022],
-            [0.9977, -0.0540, -0.0401],
-            [-0.0401, 0.0, -0.9992],
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
-    poses = []
-    for position in ((-0.40, 0.48, 0.20), (-0.40, 0.48, 0.10)):
-        pose = torch.eye(4, dtype=torch.float32, device=device)
-        pose[:3, :3], pose[:3, 3] = rotation, torch.tensor(position, device=device)
-        poses.append(pose)
-    return torch.stack(poses)
+    def _get_hand_open_close_qpos(self) -> tuple[torch.Tensor, torch.Tensor]:
+        hand_limits = self.robot.get_qpos_limits(name="hand")[0].to(
+            device=self.sim.device, dtype=torch.float32
+        )
+        hand_open = hand_limits[:, 0]
+        hand_close_limit = hand_limits[:, 1]
+        hand_close = torch.minimum(
+            hand_close_limit,
+            torch.full_like(hand_close_limit, OBJECT_MIN_HAND_CLOSE_QPOS),
+        )
+        return hand_open, hand_close
+
+    def _build_grasp_generator_cfg(self) -> GraspGeneratorCfg:
+        return GraspGeneratorCfg(
+            viser_port=11801,
+            antipodal_sampler_cfg=AntipodalSamplerCfg(
+                n_sample=self.args.n_sample,
+                max_length=GRIPPER_MAX_OPEN_WIDTH,
+                min_length=0.003,
+            ),
+            is_partial_annotate=False,
+            is_filter_ground_collision=False,
+        )
+
+    def _build_gripper_collision_cfg(self) -> GripperCollisionCfg:
+        return GripperCollisionCfg(
+            max_open_length=GRIPPER_MAX_OPEN_WIDTH,
+            finger_length=GRIPPER_FINGER_LENGTH,
+            y_thickness=GRIPPER_Y_THICKNESS,
+            root_z_width=GRIPPER_ROOT_Z_WIDTH,
+            open_check_margin=0.002,
+            point_sample_dense=0.012,
+        )
+
+    def _create_object_semantics(self) -> ObjectSemantics:
+        return ObjectSemantics(
+            label=OBJECT_LABEL,
+            geometry={
+                "mesh_vertices": self.obj.get_vertices(env_ids=[0], scale=True)[0],
+                "mesh_triangles": self.obj.get_triangles(env_ids=[0])[0],
+            },
+            affordance=AntipodalAffordance(
+                mesh_vertices=self.obj.get_vertices(env_ids=[0], scale=True)[0],
+                mesh_triangles=self.obj.get_triangles(env_ids=[0])[0],
+                gripper_collision_cfg=self._build_gripper_collision_cfg(),
+                generator_cfg=self._build_grasp_generator_cfg(),
+                force_reannotate=self.args.force_reannotate,
+            ),
+            entity=self.obj,
+        )
+
+    def _make_pre_pick_eef_pose(self, position: torch.Tensor) -> torch.Tensor:
+        pose = self.robot.compute_fk(
+            qpos=self.robot.get_qpos(name="arm"),
+            name="arm",
+            to_matrix=True,
+        ).clone()
+        pose[:, :3, 3] = position
+        return pose
+
+    def _initialize_pre_pick_robot_pose(self, hand_open: torch.Tensor) -> None:
+        obj_pose = self.obj.get_local_pose(to_matrix=True)
+        move_position = obj_pose[:, :3, 3].clone()
+        move_position[:, 2] = 0.36
+        pre_pick_pose = self._make_pre_pick_eef_pose(move_position)
+        ik_success, arm_qpos = self.robot.compute_ik(
+            pose=pre_pick_pose,
+            joint_seed=self.robot.get_qpos(name="arm"),
+            name="arm",
+        )
+        if not torch.all(ik_success):
+            raise RuntimeError("Failed to initialize the robot at the pre-pick pose.")
+
+        n_envs = self.robot.get_qpos().shape[0]
+        hand_qpos = hand_open.unsqueeze(0).repeat(n_envs, 1)
+        for target in (False, True):
+            self.robot.set_qpos(arm_qpos, name="arm", target=target)
+            self.robot.set_qpos(hand_qpos, name="hand", target=target)
+        self.robot.clear_dynamics()
+
+    def _make_place_eef_poses(self) -> torch.Tensor:
+        """Build a multi-waypoint place trajectory ``(n_waypoint, 4, 4)``.
+
+        Two waypoints are returned: a higher hover pose and the final release pose.
+        ``Place`` approaches from above the first waypoint, descends through each
+        waypoint in order, opens the gripper at the last, and retracts — so this
+        exercises the multi-waypoint descent path.
+        """
+        rotation = torch.tensor(
+            [
+                [0.0539, 0.9985, -0.0022],
+                [0.9977, -0.0540, -0.0401],
+                [-0.0401, -0.0000, -0.9992],
+            ],
+            dtype=torch.float32,
+            device=self.sim.device,
+        )
+        hover_pose = torch.eye(4, dtype=torch.float32, device=self.sim.device)
+        hover_pose[:3, :3] = rotation
+        hover_pose[:3, 3] = torch.tensor(
+            [-0.40, 0.48, 0.20], dtype=torch.float32, device=self.sim.device
+        )
+        place_pose = torch.eye(4, dtype=torch.float32, device=self.sim.device)
+        place_pose[:3, :3] = rotation
+        place_pose[:3, 3] = torch.tensor(
+            [-0.40, 0.48, 0.10], dtype=torch.float32, device=self.sim.device
+        )
+        return torch.stack([hover_pose, place_pose], dim=0)
+
+    def _replay_place_trajectory(self, traj: torch.Tensor) -> None:
+        post_grasp_clear_step = self._compute_pick_close_end_step()
+        should_clear_object_dynamics = True
+        for i in range(traj.shape[1]):
+            self.robot.set_qpos(traj[:, i, :])
+            self.sim.update(step=4)
+            if should_clear_object_dynamics and i + 1 >= post_grasp_clear_step:
+                self.obj.clear_dynamics()
+                should_clear_object_dynamics = False
+                logger.log_info(f"Object dynamics cleared after grasp at step={i}")
+            time.sleep(1e-2)
+
+        logger.log_info("Place opens the gripper and clears WorldState.held_object.")
+        final_qpos = traj[:, -1, :]
+        for _ in range(POST_TRAJECTORY_STEPS):
+            self.robot.set_qpos(final_qpos)
+            self.sim.update(step=2)
+            time.sleep(1e-2)
+
+    @staticmethod
+    def _compute_pick_close_end_step() -> int:
+        motion_waypoints = PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS
+        n_approach = int(round(motion_waypoints) * 0.6)
+        return n_approach + HAND_INTERP_STEPS
 
 
 def main() -> None:
-    """Plan and replay PickUp followed by a multi-waypoint Place."""
-    args = parse_arguments()
-    sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
-    obj = create_pick_object(sim)
-    motion_gen = create_toppra_motion_generator(robot)
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
-    initialize_pre_pick_robot_pose(robot, obj, hand_open)
-
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        PickUp(
-            motion_gen,
-            cfg=PickUpCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    """Entry point for the Place demo."""
+    setup_print_options()
+    parser = argparse.ArgumentParser(
+        description="Demonstrate Place by picking an object and releasing it at a target pose."
     )
-    engine.register(
-        Place(
-            motion_gen,
-            cfg=PlaceCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                lift_height=PLACE_LIFT_HEIGHT,
-                sample_interval=PLACE_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    parser = add_demo_args(parser)
+    parser.add_argument(
+        "--n_sample",
+        "--n-sample",
+        type=int,
+        default=10000,
+        help="Number of samples for antipodal grasp generation.",
     )
-
-    semantics = create_antipodal_semantics(
-        obj,
-        label="cube",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
+    parser.add_argument(
+        "--force_reannotate",
+        "--force-reannotate",
+        action="store_true",
+        help="Force grasp region re-annotation instead of using cached data.",
     )
-    place_poses = make_place_eef_poses(sim.device)
-    if not args.no_vis_eef_axis:
-        draw_axis_marker(
-            sim,
-            "place_target_axis",
-            broadcast_pose_batch(place_poses[-1], robot.get_qpos().shape[0]),
-        )
-    wait_for_user = prepare_tutorial_scene(
-        sim, args, "Inspect the cube, then press Enter to plan PickUp -> Place..."
-    )
-
-    success, trajectory, _ = engine.run(
-        [
-            ("pick_up", GraspTarget(semantics)),
-            (
-                "place",
-                EndEffectorPoseTarget(
-                    broadcast_waypoint_pose_batch(
-                        place_poses, robot.get_qpos().shape[0]
-                    )
-                ),
-            ),
-        ]
-    )
-    if not success.all():
-        logger.log_warning("Failed to plan Place demo trajectory.")
-        return
-
-    if wait_for_user:
-        input("Press Enter to replay the Place demo...")
-    clear_after_step = (
-        round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
-    )
-    dynamics_cleared = False
-
-    def clear_object_dynamics(step_idx: int, _: int) -> None:
-        nonlocal dynamics_cleared
-        if not dynamics_cleared and step_idx + 1 >= clear_after_step:
-            obj.clear_dynamics()
-            dynamics_cleared = True
-
-    replay_trajectory(
-        sim,
-        robot,
-        trajectory,
-        args,
-        video_prefix="place_auto_play",
-        hold_steps=POST_TRAJECTORY_STEPS,
-        on_trajectory_step=clear_object_dynamics,
-    )
-    if wait_for_user:
-        input("Press Enter to exit the simulation...")
+    args = parser.parse_args()
+    PlaceDemo(args).main()
 
 
 if __name__ == "__main__":

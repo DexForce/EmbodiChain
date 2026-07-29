@@ -18,21 +18,30 @@
 This script demonstrates how to export a simulation scene to a usd file using the SimulationManager.
 """
 
+from __future__ import annotations
+
 import argparse
+
 import numpy as np
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.objects import Robot, RigidObject
+
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.objects import Articulation, Robot, RigidObject
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    LightCfg,
-    JointDrivePropertiesCfg,
-    RigidObjectCfg,
-    RigidBodyAttributesCfg,
     ArticulationCfg,
+    JointDrivePropertiesCfg,
+    RigidBodyAttributesCfg,
+    RigidObjectCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
+    shutdown_sim,
+)
 from embodichain.utils import logger
 
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
@@ -48,7 +57,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     return parser.parse_args()
 
 
@@ -62,26 +71,11 @@ def initialize_simulation(args) -> SimulationManager:
     Returns:
         SimulationManager: Configured simulation manager instance.
     """
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
-        physics_dt=1.0 / 100.0,
+    return create_default_sim(
+        args,
         num_envs=1,
         arena_space=2.5,
     )
-    sim = SimulationManager(config)
-
-    light = sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=(1.0, 0, 3.0),
-        )
-    )
-
-    return sim
 
 
 def create_robot(sim: SimulationManager) -> Robot:
@@ -189,7 +183,7 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return scoop
 
 
-def create_caffe(sim: SimulationManager) -> Robot:
+def create_caffe(sim: SimulationManager) -> Articulation:
     """
     Create a caffe (container) articulated object in the simulation.
 
@@ -197,7 +191,7 @@ def create_caffe(sim: SimulationManager) -> Robot:
         sim (SimulationManager): The simulation manager instance.
 
     Returns:
-        Robot: The caffe object added to the simulation.
+        Articulation: The caffe object added to the simulation.
     """
     container_cfg = ArticulationCfg(
         uid="caffe",
@@ -212,8 +206,7 @@ def create_caffe(sim: SimulationManager) -> Robot:
         ),
     )
     print(f"Loading URDF file from: {container_cfg.fpath}")
-    container = sim.add_articulation(cfg=container_cfg)
-    return container
+    return sim.add_articulation(cfg=container_cfg)
 
 
 def create_cup(sim: SimulationManager) -> RigidObject:
@@ -252,23 +245,21 @@ def main():
     args = parse_arguments()
     sim = initialize_simulation(args)
 
-    robot = create_robot(sim)
-    table = create_table(sim)
-    caffe = create_caffe(sim)
-    cup = create_cup(sim)
+    try:
+        create_robot(sim)
+        create_table(sim)
+        create_caffe(sim)
+        create_cup(sim)
 
-    sim.export_usd("w1_coffee_scene.usda")
+        sim.export_usd("w1_coffee_scene.usda")
+        logger.log_info("Scene exported successfully.")
 
-    logger.log_info("Scene exported successfully.")
-
-    if not args.headless:
-        sim.open_window()
-        logger.log_info("Press Ctrl+C to exit.")
-        try:
-            while True:
-                sim.update(step=1)
-        except KeyboardInterrupt:
-            logger.log_info("\nExit")
+        maybe_open_window(sim, args)
+        if not args.headless or args.auto_play:
+            logger.log_info("Press Ctrl+C to exit.")
+            run_simulation_loop(sim, max_steps=resolve_demo_steps(args))
+    finally:
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

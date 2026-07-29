@@ -314,6 +314,20 @@ def test_launcher_preserves_gym_renderer_when_cli_omits_override():
     assert merged_config["render_cfg"]["renderer"] == "rt"
 
 
+def test_launcher_accepts_hyphenated_common_options():
+    """Hyphenated aliases should map to the existing underscore destinations."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+
+    args = parser.parse_args(
+        ["--num-envs", "4", "--arena-space", "3.5", "--gpu-id", "2"]
+    )
+
+    assert args.num_envs == 4
+    assert args.arena_space == 3.5
+    assert args.gpu_id == 2
+
+
 def test_sensor_and_extra_obs_together():
     """Test that both sensors and extra observations work together."""
     config = {

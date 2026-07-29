@@ -22,49 +22,53 @@ This example demonstrates how to create an interactive simulation scene with:
 Both objects can be interactively controlled through their respective gizmos.
 """
 
-import time
-import torch
-import numpy as np
-import argparse
-import cv2
+from __future__ import annotations
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+import argparse
+import time
+
+import cv2
+import numpy as np
+import torch
+
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
+    JointDrivePropertiesCfg,
+    RigidBodyAttributesCfg,
+    RigidObjectCfg,
     RobotCfg,
     URDFCfg,
-    JointDrivePropertiesCfg,
-    RigidObjectCfg,
-    RigidBodyAttributesCfg,
 )
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    resolve_demo_steps,
+    shutdown_sim,
+)
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
 
-def main():
+def main() -> None:
     """Main function to create and run the simulation scene."""
 
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
+    sim = create_default_sim(
+        args,
         width=1920,
         height=1080,
-        headless=args.headless,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
+        add_default_light=False,
     )
-
-    sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
 
     # Get DexForce W1 URDF path
@@ -112,14 +116,14 @@ def main():
             [0, 0, -np.pi / 4, np.pi / 4, -np.pi / 2, 0.0, np.pi / 4, 0.0]
         ],  # WAIST + LEFT_J[1-7]
         dtype=torch.float32,
-        device="cpu",
+        device=robot.device,
     )
     right_arm_qpos = torch.tensor(
         [
             [0, 0, np.pi / 4, -np.pi / 4, np.pi / 2, 0.0, -np.pi / 4, 0.0]
         ],  # WAIST + RIGHT_J[1-7]
         dtype=torch.float32,
-        device="cpu",
+        device=robot.device,
     )
 
     left_joint_ids = robot.get_joint_ids("left_arm")
@@ -141,7 +145,7 @@ def main():
         ),
         init_pos=[1.0, 0.0, 0.5],  # Position to the side of the robot
     )
-    cube = sim.add_rigid_object(cube_cfg)
+    sim.add_rigid_object(cube_cfg)
 
     camera_cfg = CameraCfg(
         uid="scene_camera",
@@ -158,30 +162,27 @@ def main():
             up=(0.0, 0.0, 1.0),
         ),
     )
-    camera = sim.add_sensor(sensor_cfg=camera_cfg)
+    sim.add_sensor(sensor_cfg=camera_cfg)
 
-    # Enable gizmo for all assets after all are created and initialized
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
-    if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
-        logger.log_error("Failed to enable left arm gizmo!")
-        return
+    if not args.headless:
+        gizmos = (
+            ("w1_gizmo_test", "left_arm"),
+            ("w1_gizmo_test", "right_arm"),
+            ("interactive_cube", None),
+            ("scene_camera", None),
+        )
+        for uid, control_part in gizmos:
+            if control_part is None:
+                sim.enable_gizmo(uid=uid)
+                enabled = sim.has_gizmo(uid)
+            else:
+                sim.enable_gizmo(uid=uid, control_part=control_part)
+                enabled = sim.has_gizmo(uid, control_part=control_part)
+            if not enabled:
+                shutdown_sim(sim)
+                raise RuntimeError(f"Failed to enable gizmo for {uid}.")
 
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="right_arm")
-    if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
-        logger.log_error("Failed to enable right arm gizmo!")
-        return
-
-    sim.enable_gizmo(uid="interactive_cube")
-    if not sim.has_gizmo("interactive_cube"):
-        logger.log_error("Failed to enable gizmo for cube!")
-        return
-
-    sim.enable_gizmo(uid="scene_camera")
-    if not sim.has_gizmo("scene_camera"):
-        logger.log_error("Failed to enable gizmo for camera!")
-        return
-
-    sim.open_window()
+    maybe_open_window(sim, args)
 
     logger.log_info("Gizmo Scene example started!")
     logger.log_info("Four gizmos are active in the scene:")
@@ -191,23 +192,27 @@ def main():
     logger.log_info("4. Camera gizmo - Use to drag and orient the camera")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, args)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+) -> None:
     step_count = 0
     # Get the camera instance by uid
     camera = sim.get_sensor("scene_camera")
     try:
         last_time = time.time()
         last_step = 0
-        while True:
+        max_steps = resolve_demo_steps(args)
+        while max_steps is None or step_count < max_steps:
             time.sleep(0.033)  # 30Hz
             sim.update_gizmos()
             step_count += 1
 
             # Display camera view in a window every 5 steps
-            if camera is not None and step_count % 5 == 0:
+            if not args.headless and camera is not None and step_count % 5 == 0:
                 camera.update()
                 data = camera.get_data()
                 if "color" in data:
@@ -243,7 +248,7 @@ def run_simulation(sim: SimulationManager):
         logger.log_info("\nStopping simulation...")
     finally:
         cv2.destroyAllWindows()
-        sim.destroy()
+        shutdown_sim(sim)
         logger.log_info("Simulation terminated successfully")
 
 

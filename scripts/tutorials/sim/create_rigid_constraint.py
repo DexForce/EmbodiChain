@@ -23,16 +23,23 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import (
-    RigidObjectCfg,
-    RigidConstraintCfg,
     RigidBodyAttributesCfg,
-    RenderCfg,
+    RigidConstraintCfg,
+    RigidObjectCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    shutdown_sim,
+)
 
 # Number of physics sub-steps per update call.
 STEPS_PER_UPDATE = 1
@@ -49,7 +56,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Attach and detach two cubes via a fixed rigid constraint"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
     # The simulation teardown (``SimulationManager.destroy``) calls ``os._exit``,
@@ -57,19 +64,12 @@ def main():
     # ``print`` below is visible even when the script is piped to a file.
     sys.stdout.reconfigure(line_buffering=True)
 
-    # Configure the simulation.
-    sim_cfg = SimulationManagerCfg(
-        width=1920,
-        height=1080,
-        headless=args.headless,
-        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
+    sim = create_default_sim(
+        args,
         num_envs=args.num_envs,
         arena_space=3.0,
+        add_default_light=False,
     )
-
-    sim = SimulationManager(sim_cfg)
 
     # Shared physics attributes for the two cubes.
     physics_attrs = RigidBodyAttributesCfg(
@@ -99,46 +99,45 @@ def main():
         )
     )
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    maybe_init_gpu_physics(sim)
 
     print("[INFO]: Scene setup complete with two cubes (cube_a, cube_b).")
 
-    # --- Phase 1: attach the two cubes with a fixed constraint ---------------
-    # With default (None) local frames the constraint welds the cubes at their
-    # *current* relative pose: local_frame_a defaults to identity and
-    # local_frame_b is computed as inv(pose_B) @ pose_A, so the offset is
-    # preserved rather than the two origins being pulled together.
-    constraint = sim.create_rigid_constraint(
-        cfg=RigidConstraintCfg(
-            name="cube_weld",
-            rigid_object_a_uid="cube_a",
-            rigid_object_b_uid="cube_b",
+    try:
+        # With default local frames the constraint preserves the cubes'
+        # current relative pose instead of pulling their origins together.
+        sim.create_rigid_constraint(
+            cfg=RigidConstraintCfg(
+                name="cube_weld",
+                rigid_object_a_uid="cube_a",
+                rigid_object_b_uid="cube_b",
+            )
         )
-    )
-    print("[INFO]: Created constraint 'cube_weld' between cube_a and cube_b.")
+        print("[INFO]: Created constraint 'cube_weld' between cube_a and cube_b.")
 
-    # Open the viewer (unless --headless) so the welded motion is visible.
-    if not args.headless:
-        sim.open_window()
+        maybe_open_window(sim, args)
 
-    print("[INFO]: Stepping physics while ATTACHED (relative pose held):")
-    _run_phase(sim, cube_a, cube_b, attached=True)
+        with DemoRecording(sim, args, prefix="create_rigid_constraint"):
+            print("[INFO]: Stepping physics while ATTACHED (relative pose held):")
+            _run_phase(sim, cube_a, cube_b)
 
-    # --- Phase 2: remove the constraint ------------------------------------
-    sim.remove_rigid_constraint("cube_weld")
-    assert "cube_weld" not in sim.get_rigid_constraint_uid_list()
-    print("\n[INFO]: Removed constraint 'cube_weld'. cube_a and cube_b are now free.")
+            sim.remove_rigid_constraint("cube_weld")
+            assert "cube_weld" not in sim.get_rigid_constraint_uid_list()
+            print(
+                "\n[INFO]: Removed constraint 'cube_weld'. "
+                "cube_a and cube_b are now free."
+            )
 
-    import time
+            # Give an interactive viewer a moment to show the removal.
+            if not args.headless:
+                time.sleep(2.0)
 
-    time.sleep(2.0)  # Wait a moment so the viewer can show the constraint removal.
+            print("[INFO]: Stepping physics while DETACHED (relative pose may drift):")
+            _run_phase(sim, cube_a, cube_b)
 
-    print("[INFO]: Stepping physics while DETACHED (relative pose may drift):")
-    _run_phase(sim, cube_a, cube_b, attached=False)
-
-    print("\n[INFO]: Tutorial complete.")
-    sim.destroy()
+        print("\n[INFO]: Tutorial complete.")
+    finally:
+        shutdown_sim(sim)
 
 
 def _relative_z(cube_a, cube_b) -> float:
@@ -160,14 +159,13 @@ def _relative_z(cube_a, cube_b) -> float:
     return float(pose_b[0, 2, 3] - pose_a[0, 2, 3])
 
 
-def _run_phase(sim, cube_a, cube_b, attached: bool) -> None:
+def _run_phase(sim, cube_a, cube_b) -> None:
     """Step the simulation for one phase and print the bodies' relative z.
 
     Args:
         sim: The :class:`SimulationManager`.
         cube_a: The first :class:`RigidObject`.
         cube_b: The second :class:`RigidObject`.
-        attached: True while the constraint is active, False after removal.
     """
     rel_z = _relative_z(cube_a, cube_b)
     print(f"  step {0:4d}: relative z (cube_b - cube_a) = {rel_z:.4f} m")

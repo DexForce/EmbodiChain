@@ -95,13 +95,29 @@ def _sim_worker_fn(
             Remains set permanently thereafter.
         close_signal: Event set by the main process to request a graceful shutdown.
     """
+    from threading import RLock
+
     import gymnasium as gym
     from embodichain.lab.gym.utils.gym_utils import (
         config_to_cfg,
         get_manager_modules,
     )
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.utils.logger import log_info, log_warning, log_error
+
+    # The worker starts in a fresh interpreter. Discover task packages and
+    # extension hooks here so custom environments and manager functors are
+    # registered before gym.make() is called.
+    discover_task_packages()
+    execute_init_hooks()
+    # This worker is the only tqdm writer. A thread-only lock avoids leaking
+    # tqdm's multiprocessing semaphore when SimulationManager exits the worker
+    # with os._exit() during native resource teardown.
+    tqdm.set_lock(RLock())
 
     gym_config: dict = cfg.gym_config
     action_config: dict = cfg.action_config
@@ -351,6 +367,11 @@ class OnlineDataEngine:
         self._fill_signal.set()
 
         while not self.is_init:
+            if not self._sim_process.is_alive():
+                raise RuntimeError(
+                    "OnlineDataEngine simulation subprocess exited before "
+                    "initializing the shared buffer."
+                )
             time.sleep(0.5)
 
     # -----------------------------------------------------------------------
@@ -525,21 +546,34 @@ class OnlineDataEngine:
         Safe to call multiple times — subsequent calls are no-ops if the
         subprocess has already been terminated.
         """
-        if self._sim_process is None or not self._sim_process.is_alive():
+        process = self._sim_process
+        if process is None:
             return
 
-        # Ask the subprocess to stop and unblock it if it is waiting on fill_signal.
-        self._close_signal.set()
-        self._fill_signal.set()
+        was_alive = process.is_alive()
+        if was_alive:
+            # Ask the subprocess to stop and unblock it if it is waiting on
+            # fill_signal.
+            self._close_signal.set()
+            self._fill_signal.set()
 
-        # Allow time for a graceful exit (close_signal is checked between steps).
-        self._sim_process.join(timeout=5.0)
+            # Allow time for a graceful exit (close_signal is checked between
+            # steps).
+            process.join(timeout=5.0)
 
-        if self._sim_process.is_alive():
-            self._sim_process.terminate()
-            self._sim_process.join(timeout=3.0)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=3.0)
 
-        log_info("[OnlineDataEngine] Simulation subprocess terminated.", color="green")
+        if not process.is_alive():
+            process.close()
+            self._sim_process = None
+
+        if was_alive:
+            log_info(
+                "[OnlineDataEngine] Simulation subprocess terminated.",
+                color="green",
+            )
 
     def __del__(self) -> None:
         self.stop()

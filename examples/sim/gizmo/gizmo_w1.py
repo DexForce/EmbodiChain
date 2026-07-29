@@ -17,46 +17,43 @@
 Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
 """
 
-import time
-import torch
-import numpy as np
-import argparse
+from __future__ import annotations
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    RobotCfg,
-    URDFCfg,
-    JointDrivePropertiesCfg,
+import argparse
+import time
+
+import numpy as np
+import torch
+
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    resolve_demo_steps,
+    shutdown_sim,
 )
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
-from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 
 
-def main():
+def main() -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
+    sim = create_default_sim(
+        args,
         width=1920,
         height=1080,
-        headless=args.headless,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
+        add_default_light=False,
     )
-
-    sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
 
     cfg = DexforceW1Cfg.from_dict(
@@ -132,14 +129,14 @@ def main():
             [0, 0, -np.pi / 4, np.pi / 4, -np.pi / 2, 0.0, np.pi / 4, 0.0]
         ],  # WAIST + LEFT_J[1-7]
         dtype=torch.float32,
-        device="cpu",
+        device=robot.device,
     )
     right_arm_qpos = torch.tensor(
         [
             [0, 0, np.pi / 4, -np.pi / 4, np.pi / 2, 0.0, -np.pi / 4, 0.0]
         ],  # WAIST + RIGHT_J[1-7]
         dtype=torch.float32,
-        device="cpu",
+        device=robot.device,
     )
 
     left_joint_ids = robot.get_joint_ids("left_arm")
@@ -151,31 +148,29 @@ def main():
     time.sleep(0.2)  # Wait for a moment to ensure everything is set up
 
     # Enable gizmo for both arms using the new API
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
-    if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
-        logger.log_error("Failed to enable left arm gizmo!")
-        return
+    if not args.headless:
+        sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
+        sim.enable_gizmo(uid="w1_gizmo_test", control_part="right_arm")
+        for arm_name in ("left_arm", "right_arm"):
+            if not sim.has_gizmo("w1_gizmo_test", control_part=arm_name):
+                shutdown_sim(sim)
+                raise RuntimeError(f"Failed to enable {arm_name} gizmo.")
 
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="right_arm")
-    if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
-        logger.log_error("Failed to enable right arm gizmo!")
-        return
-
-    sim.open_window()
+    maybe_open_window(sim, args)
 
     logger.log_info("Gizmo-DexForce W1 example started!")
     logger.log_info("Use the gizmos to drag both robot arms' end-effectors")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, max_steps=resolve_demo_steps(args))
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, max_steps: int | None = None) -> None:
     step_count = 0
     try:
         last_time = time.time()
         last_step = 0
-        while True:
+        while max_steps is None or step_count < max_steps:
             time.sleep(0.033)  # 30Hz
             # Update all gizmos managed by sim
             sim.update_gizmos()
@@ -195,7 +190,7 @@ def run_simulation(sim: SimulationManager):
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
-        sim.destroy()
+        shutdown_sim(sim)
         logger.log_info("Simulation terminated successfully")
 
 

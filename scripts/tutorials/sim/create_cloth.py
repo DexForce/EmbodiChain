@@ -19,24 +19,34 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It shows the basic setup of simulation context, adding objects, lighting, and sensors.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import tempfile
-import time
-import torch
+
 import open3d as o3d
-from dexsim.utility.path import get_resources_data_path
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+import torch
+
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    RigidObjectCfg,
     RigidBodyAttributesCfg,
     ClothObjectCfg,
     ClothPhysicalAttributesCfg,
+    RigidObjectCfg,
 )
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
 from embodichain.lab.sim.objects import ClothObject
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
+    shutdown_sim,
+)
 
 
 def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
@@ -80,22 +90,16 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
+    # Cloth simulation requires GPU physics.
+    parser.set_defaults(device="cuda")
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
-        width=1920,
-        height=1080,
-        headless=True,
+    sim = create_default_sim(
+        args,
         num_envs=args.num_envs,
-        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device="cuda",  # soft simulation only supports cuda device
-        render_cfg=RenderCfg(renderer=args.renderer),
+        add_default_light=False,
     )
-
-    # Create the simulation instance
-    sim = SimulationManager(sim_cfg)
 
     print("[INFO]: Scene setup complete!")
 
@@ -142,61 +146,42 @@ def main():
         init_pos=[0.5, 0.0, 0.04],
         init_rot=[0.0, 0.0, 0.0],
     )
-    padding_box = sim.add_rigid_object(cfg=padding_box_cfg)
+    sim.add_rigid_object(cfg=padding_box_cfg)
     print("[INFO]: Add soft object complete!")
 
     # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
+    maybe_init_gpu_physics(sim)
+    maybe_open_window(sim, args)
 
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Run the simulation
-    run_simulation(sim, cloth)
+    run_simulation(sim, cloth, args)
 
 
-def run_simulation(sim: SimulationManager, cloth: ClothObject) -> None:
+def run_simulation(
+    sim: SimulationManager,
+    cloth: ClothObject,
+    args: argparse.Namespace,
+) -> None:
     """Run the simulation loop.
 
     Args:
         sim: The SimulationManager instance to run
-        soft_obj: soft object
+        cloth: Cloth object to reset periodically.
+        args: Parsed demo arguments.
     """
 
-    # Initialize GPU physics
-    sim.init_gpu_physics()
-
-    step_count = 0
-
     try:
-        last_time = time.time()
-        last_step = 0
-        while True:
-            # Update physics simulation
-            sim.update(step=1)
-            step_count += 1
-
-            # Print FPS every second
-            if step_count % 100 == 0:
-                current_time = time.time()
-                elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
-                print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
-                last_time = current_time
-                last_step = step_count
-                if step_count % 500 == 0:
-                    cloth.reset()
-
-    except KeyboardInterrupt:
-        print("\n[INFO]: Stopping simulation...")
+        with DemoRecording(sim, args, prefix="create_cloth"):
+            run_simulation_loop(
+                sim,
+                max_steps=resolve_demo_steps(args),
+                on_step=lambda step: cloth.reset() if step % 500 == 0 else None,
+            )
     finally:
-        # Clean up resources
-        sim.destroy()
+        shutdown_sim(sim)
         print("[INFO]: Simulation terminated successfully")
 
 

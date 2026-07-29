@@ -14,113 +14,120 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import time
-import numpy as np
-import matplotlib.pyplot as plt
+"""Capture a batch of mono or stereo camera images."""
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, LightCfg
+from __future__ import annotations
+
+import argparse
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.objects import RigidObject, Light
 from embodichain.lab.sim.sensors import (
     Camera,
     StereoCamera,
     CameraCfg,
     StereoCameraCfg,
 )
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    setup_print_options,
+    shutdown_sim,
+)
 
 
-def main(args):
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device=args.device,
+def run(args: argparse.Namespace) -> None:
+    """Render and save or display one batch of camera frames."""
+    sim = create_default_sim(
+        args,
         num_envs=args.num_envs,
         arena_space=2,
-        render_cfg=RenderCfg(renderer=args.renderer),
+        add_default_light=False,
     )
-    sim = SimulationManager(config)
-
-    rigid_obj: RigidObject = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="obj",
-            shape=MeshCfg(fpath=get_data_path("Chair/chair.glb")),
-            init_pos=(0, 0, 0.2),
-        )
-    )
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
-    if args.headless is False:
-        sim.open_window()
-
-    import torch
-
-    torch.set_printoptions(precision=4, sci_mode=False)
-
-    eye = (0.0, 0, 2.0)
-    target = (0.0, 0.0, 0.0)
-    if args.sensor_type == "stereo":
-        camera: StereoCamera = sim.add_sensor(
-            sensor_cfg=StereoCameraCfg(
-                width=640,
-                height=480,
-                extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target),
+    try:
+        sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="obj",
+                shape=MeshCfg(fpath=get_data_path("Chair/chair.glb")),
+                init_pos=(0, 0, 0.2),
             )
         )
-    else:
-        camera: Camera = sim.add_sensor(
-            sensor_cfg=CameraCfg(
-                width=640,
-                height=480,
-                extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target),
-            )
-        )
+        maybe_init_gpu_physics(sim)
+        maybe_open_window(sim, args)
+        setup_print_options()
 
-    # TODO: To be removed
-    sim.reset_objects_state()
-
-    t0 = time.time()
-    camera.update()
-    print(f"Camera update time: {time.time() - t0:.4f} seconds")
-
-    data_frame = camera.get_data()
-
-    t0 = time.time()
-    rgba = data_frame["color"].cpu().numpy()
-    if args.sensor_type == "stereo":
-        rgba_right = data_frame["color_right"].cpu().numpy()
-
-    # plot rgba into a grid of images
-    grid_x = np.ceil(np.sqrt(args.num_envs)).astype(int)
-    grid_y = np.ceil(args.num_envs / grid_x).astype(int)
-    fig, axs = plt.subplots(grid_x, grid_y, figsize=(12, 6), squeeze=False)
-    axs = axs.flatten()
-    for i in range(args.num_envs):
-
+        eye = (0.0, 0, 2.0)
+        target = (0.0, 0.0, 0.0)
         if args.sensor_type == "stereo":
-            image = np.concatenate((rgba[i], rgba_right[i]), axis=1)
+            camera: Camera | StereoCamera = sim.add_sensor(
+                sensor_cfg=StereoCameraCfg(
+                    width=640,
+                    height=480,
+                    extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target),
+                )
+            )
         else:
-            image = rgba[i]
-        axs[i].imshow(image)
-        axs[i].axis("off")
-        axs[i].set_title(f"Env {i}")
+            camera = sim.add_sensor(
+                sensor_cfg=CameraCfg(
+                    width=640,
+                    height=480,
+                    extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target),
+                )
+            )
 
-    if args.headless:
-        plt.savefig(f"camera_data.png")
-    else:
-        plt.show()
+        sim.reset_objects_state()
+
+        started_at = time.perf_counter()
+        camera.update()
+        print(f"Camera update time: {time.perf_counter() - started_at:.4f} seconds")
+
+        data_frame = camera.get_data()
+        rgba = data_frame["color"].cpu().numpy()
+        rgba_right = (
+            data_frame["color_right"].cpu().numpy()
+            if args.sensor_type == "stereo"
+            else None
+        )
+
+        grid_x = int(np.ceil(np.sqrt(args.num_envs)))
+        grid_y = int(np.ceil(args.num_envs / grid_x))
+        fig, axs = plt.subplots(grid_x, grid_y, figsize=(12, 6), squeeze=False)
+        for env_id, axis in enumerate(axs.flatten()):
+            axis.axis("off")
+            if env_id >= args.num_envs:
+                continue
+            image = (
+                np.concatenate((rgba[env_id], rgba_right[env_id]), axis=1)
+                if rgba_right is not None
+                else rgba[env_id]
+            )
+            axis.imshow(image)
+            axis.set_title(f"Env {env_id}")
+
+        if args.headless:
+            fig.savefig("camera_data.png")
+        else:
+            plt.show()
+        plt.close(fig)
+    finally:
+        shutdown_sim(sim)
 
 
-if __name__ == "__main__":
-    import argparse
-
+def main() -> None:
+    """Parse command-line arguments and capture a camera batch."""
     parser = argparse.ArgumentParser(description="Run the batch robot simulation.")
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     parser.add_argument(
         "--sensor_type",
+        "--sensor-type",
         type=str,
         default="camera",
         choices=["stereo", "camera"],
@@ -128,4 +135,8 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    main(args)
+    run(args)
+
+
+if __name__ == "__main__":
+    main()

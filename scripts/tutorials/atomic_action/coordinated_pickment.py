@@ -37,7 +37,6 @@ if str(_REPO_ROOT) not in sys.path:
 import numpy as np
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -57,6 +56,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.utility.demo_utils import add_demo_args, shutdown_sim
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -151,25 +151,23 @@ TRAJECTORY_SIM_STEPS = 4
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
     parser = argparse.ArgumentParser(description="Dual-arm coordinated pickment demo")
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     parser.set_defaults(device="cpu", renderer="hybrid")
     parser.add_argument(
         "--diagnose_plan",
+        "--diagnose-plan",
         action="store_true",
         help="Plan and print diagnostics without playing the trajectory.",
     )
     parser.add_argument(
         "--debug_state",
+        "--debug-state",
         action="store_true",
         help="Log hand targets and object poses during execution.",
     )
     parser.add_argument(
-        "--auto_play",
-        action="store_true",
-        help="Run the viewer demo without waiting for keyboard input.",
-    )
-    parser.add_argument(
         "--headless_play",
+        "--headless-play",
         action="store_true",
         help="Execute planned trajectories without opening the viewer window.",
     )
@@ -178,11 +176,6 @@ def parse_arguments() -> argparse.Namespace:
         choices=sorted(OBJECT_PRESETS),
         default="pencil",
         help="Object mesh to grasp in the coordinated pickment demo.",
-    )
-    parser.add_argument(
-        "--no_vis_eef_axis",
-        action="store_true",
-        help="Do not draw the pickment target/grasp coordinate frames before planning.",
     )
     return parser.parse_args()
 
@@ -787,8 +780,11 @@ def main() -> None:
         arena_space=3.0,
         light_pos=(0.0, -0.4, 3.0),
     )
-    robot = create_dual_ur5_robot(sim)
-    run_coordinated_pickment_demo(args, sim, robot)
+    try:
+        robot = create_dual_ur5_robot(sim)
+        run_coordinated_pickment_demo(args, sim, robot)
+    finally:
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

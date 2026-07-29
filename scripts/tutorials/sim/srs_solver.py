@@ -14,70 +14,87 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Demonstrate batched FK and IK with the SRS solver."""
+
+from __future__ import annotations
+
+import argparse
 import time
+
 import numpy as np
 import torch
 
-from IPython import embed
-
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    maybe_wait_for_user,
+    setup_print_options,
+    shutdown_sim,
+)
 
 
-def main():
-    # Set print options for better readability
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
+def main() -> None:
+    """Run the SRS solver tutorial."""
+    parser = add_demo_args(
+        argparse.ArgumentParser(description="Run the SRS FK/IK tutorial.")
+    )
+    args = parser.parse_args()
+    setup_print_options()
 
-    # Initialize simulation
-    sim_device = "cpu"
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            headless=False, sim_device=sim_device, width=2200, height=1200
+    sim = create_default_sim(
+        args,
+        width=2200,
+        height=1200,
+        add_default_light=False,
+    )
+
+    try:
+        sim.set_manual_update(False)
+
+        robot: Robot = sim.add_robot(
+            cfg=DexforceW1Cfg.from_dict({"uid": "dexforce_w1"})
         )
-    )
+        arm_name = "left_arm"
+        qpos = torch.tensor(
+            [[0.0, 0.0, 0.0, -np.pi / 2, 0.0, 0.0, 0.0]],
+            dtype=torch.float32,
+        )
+        robot.set_qpos(qpos, joint_ids=robot.get_joint_ids(arm_name))
 
-    sim.set_manual_update(False)
+        if not args.auto_play:
+            time.sleep(0.5)
 
-    robot: Robot = sim.add_robot(cfg=DexforceW1Cfg.from_dict({"uid": "dexforce_w1"}))
-    arm_name = "left_arm"
-    # Set initial joint positions for left arm
-    qpos_fk_list = [
-        torch.tensor([[0.0, 0.0, 0.0, -np.pi / 2, 0.0, 0.0, 0.0]], dtype=torch.float32),
-    ]
-    robot.set_qpos(qpos_fk_list[0], joint_ids=robot.get_joint_ids(arm_name))
+        fk_pose = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
 
-    time.sleep(0.5)
+        started_at = time.perf_counter()
+        success, ik_qpos = robot.compute_ik(
+            pose=fk_pose,
+            name=arm_name,
+            return_all_solutions=True,
+        )
+        elapsed = time.perf_counter() - started_at
+        print(
+            f"Batch IK computation time for {len(fk_pose)} poses: {elapsed:.6f} seconds"
+        )
+        print("IK success:", success)
 
-    fk_xpos_batch = torch.cat(qpos_fk_list, dim=0)
+        first_solution = ik_qpos[:, 0, :] if ik_qpos.dim() == 3 else ik_qpos
+        robot.set_qpos(first_solution, joint_ids=robot.get_joint_ids(arm_name))
+        ik_pose = robot.compute_fk(
+            qpos=first_solution,
+            name=arm_name,
+            to_matrix=True,
+        )
 
-    fk_xpos_list = robot.compute_fk(qpos=fk_xpos_batch, name=arm_name, to_matrix=True)
-
-    start_time = time.time()
-    res, ik_qpos = robot.compute_ik(
-        pose=fk_xpos_list,
-        name=arm_name,
-        # joint_seed=qpos_fk_list[0],
-        return_all_solutions=True,
-    )
-    end_time = time.time()
-    print(
-        f"Batch IK computation time for {len(fk_xpos_list)} poses: {end_time - start_time:.6f} seconds"
-    )
-
-    if ik_qpos.dim() == 3:
-        first_solutions = ik_qpos[:, 0, :]
-    else:
-        first_solutions = ik_qpos
-    robot.set_qpos(first_solutions, joint_ids=robot.get_joint_ids(arm_name))
-
-    ik_xpos_list = robot.compute_fk(qpos=first_solutions, name=arm_name, to_matrix=True)
-
-    print("fk_xpos_list: ", fk_xpos_list)
-    print("ik_xpos_list: ", ik_xpos_list)
-
-    embed(header="Test SRSSolver example. Press Ctrl-D to exit.")
+        print("FK poses:", fk_pose)
+        print("IK poses:", ik_pose)
+        maybe_open_window(sim, args)
+        maybe_wait_for_user(args, "Press Enter to exit...")
+    finally:
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

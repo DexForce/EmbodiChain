@@ -18,43 +18,44 @@ This script demonstrates how to use the Gizmo class for interactive camera contr
 It shows how to create a gizmo attached to a camera for real-time pose manipulation.
 """
 
+from __future__ import annotations
+
 import argparse
-import cv2
-import numpy as np
 import time
-import torch
 
-torch.set_printoptions(precision=4, sci_mode=False)
+import cv2
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.sensors import Camera, CameraCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    resolve_demo_steps,
+    shutdown_sim,
+)
 from embodichain.utils import logger
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
-def main():
+def main() -> None:
     """Main function to demonstrate camera gizmo manipulation."""
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Create and simulate a camera with gizmo in SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
+    sim = create_default_sim(
+        args,
         width=1920,
         height=1080,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
+        add_default_light=False,
     )
-
-    # Create simulation context
-    sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
 
     # Add some objects to the scene for camera to observe
@@ -96,15 +97,13 @@ def main():
     # Wait for initialization
     time.sleep(0.2)
 
-    # Enable gizmo for interactive camera control using the new unified API
-    sim.enable_gizmo(uid="gizmo_camera")
-    if not sim.has_gizmo("gizmo_camera"):
-        logger.log_error("Failed to enable gizmo for camera!")
-        return
-
-    # Open simulation window (if not headless)
     if not args.headless:
-        sim.open_window()
+        sim.enable_gizmo(uid="gizmo_camera")
+        if not sim.has_gizmo("gizmo_camera"):
+            shutdown_sim(sim)
+            raise RuntimeError("Failed to enable gizmo for camera.")
+
+    maybe_open_window(sim, args)
 
     logger.log_info("Gizmo-Camera tutorial started!")
     logger.log_info(
@@ -116,10 +115,14 @@ def main():
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     # Run simulation loop
-    run_simulation(sim, camera)
+    run_simulation(sim, camera, args)
 
 
-def run_simulation(sim, camera):
+def run_simulation(
+    sim: SimulationManager,
+    camera: Camera,
+    args: argparse.Namespace,
+) -> None:
     """Run the simulation loop with gizmo updates."""
     step_count = 0
     last_time = time.time()
@@ -131,7 +134,8 @@ def run_simulation(sim, camera):
     )
 
     try:
-        while True:
+        max_steps = resolve_demo_steps(args)
+        while max_steps is None or step_count < max_steps:
             # Update all gizmos managed by sim (including camera gizmo)
             sim.update_gizmos()
 
@@ -145,7 +149,7 @@ def run_simulation(sim, camera):
             step_count += 1
 
             # Display camera view in separate window
-            if step_count % 5 == 0:  # Update display every 5 steps for performance
+            if not args.headless and step_count % 5 == 0:
                 data = camera.get_data()
                 if "color" in data:
                     # Get RGB image and convert for OpenCV display
@@ -153,25 +157,18 @@ def run_simulation(sim, camera):
                     # Convert RGB to BGR for OpenCV
                     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
 
-                # Add text overlay
-                cv2.putText(
-                    bgr_image,
-                    "Press 'h' to toggle camera gizmo visibility",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
-
-                # Display the image
-                cv2.imshow("Gizmo Camera View", bgr_image)
-
-                # Check for key press
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("h"):
-                    # Toggle the camera gizmo visibility using SimulationManager API
-                    sim.toggle_gizmo_visibility("gizmo_camera")
+                    cv2.putText(
+                        bgr_image,
+                        "Press 'h' to toggle camera gizmo visibility",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
+                    )
+                    cv2.imshow("Gizmo Camera View", bgr_image)
+                    if cv2.waitKey(1) & 0xFF == ord("h"):
+                        sim.toggle_gizmo_visibility("gizmo_camera")
 
             # Example: Destroy gizmo after certain steps to test cleanup
             if step_count == 30000 and sim.has_gizmo("gizmo_camera"):
@@ -209,7 +206,7 @@ def run_simulation(sim, camera):
         # Disable gizmo if it exists
         if sim.has_gizmo("gizmo_camera"):
             sim.disable_gizmo("gizmo_camera")
-        sim.destroy()
+        shutdown_sim(sim)
         logger.log_info("Simulation terminated successfully")
 
 

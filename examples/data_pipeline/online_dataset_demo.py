@@ -28,14 +28,12 @@ streaming live simulation data.  Two DataLoader patterns are shown:
 
 Usage::
 
-    python examples/data_pipeline/online_dataset_demo.py
+    python examples/data_pipeline/online_dataset_demo.py --device cpu
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import time
 from pathlib import Path
 
 from torch.utils.data import DataLoader
@@ -48,14 +46,51 @@ from embodichain.data_pipeline.datasets import OnlineDataset
 from embodichain.data_pipeline.engine.data import OnlineDataEngine, OnlineDataEngineCfg
 from embodichain.utils.logger import log_info
 
+DEFAULT_CONFIG = (
+    Path(__file__).resolve().parents[2]
+    / "embodichain_tasks/configs/gym/special/simple_task_ur10.json"
+)
+
+
+def _positive_int(value: str) -> int:
+    """Parse a positive integer command-line option."""
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="OnlineDataset demo")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Gym configuration file.",
+    )
     parser.add_argument(
         "--device",
         type=str,
         default="cpu",
         help="Simulation device, e.g. 'cpu' or 'cuda:0' (default: cpu).",
+    )
+    parser.add_argument(
+        "--renderer",
+        choices=["auto", "hybrid", "fast-rt", "rt"],
+        default="auto",
+        help="Renderer backend used by the simulation worker.",
+    )
+    parser.add_argument(
+        "--gpu-id",
+        type=int,
+        default=0,
+        help="GPU used by the simulation worker.",
+    )
+    parser.add_argument(
+        "--num-batches",
+        type=_positive_int,
+        default=5,
+        help="Number of batches shown for each dataset mode.",
     )
     return parser.parse_args()
 
@@ -66,29 +101,28 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
-    """Construct and start an OnlineDataEngine from the given CLI args."""
-    config_path = Path("embodichain_tasks/configs/gym/special/simple_task_ur10.json")
-    if not config_path.exists():
+    """Construct an OnlineDataEngine from the given CLI args."""
+    if not args.config.is_file():
         raise FileNotFoundError(
-            f"Gym config not found: {config_path}. "
-            "Provide a valid path via --config."
+            f"Gym config not found: {args.config}. Provide a valid path via --config."
         )
 
     from embodichain.utils.utility import load_config
 
-    gym_config = load_config(config_path)
+    gym_config = load_config(args.config)
 
     gym_config["headless"] = True
-    gym_config.setdefault("renderer", True)
-    gym_config["gpu_id"] = 0
+    gym_config["renderer"] = args.renderer
+    gym_config["gpu_id"] = args.gpu_id
     gym_config["device"] = args.device
     cfg = OnlineDataEngineCfg(
-        buffer_size=2, state_dim=6, gym_config=gym_config, buffer_device=args.device
+        buffer_size=2,
+        state_dim=6,
+        gym_config=gym_config,
+        # The engine shares this buffer with its simulation subprocess.
+        buffer_device="cpu",
     )
-    engine = OnlineDataEngine(cfg)
-    engine.start()
-
-    return engine
+    return OnlineDataEngine(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +259,13 @@ def main() -> None:
     engine = _build_engine(args)
 
     try:
-        _demo_item_mode(engine, chunk_size=32, num_batches=5)
-        _demo_batch_mode(engine, chunk_size=32, num_batches=5)
-        _demo_uniform_dynamic(engine, num_batches=5)
-        _demo_gmm_dynamic(engine, num_batches=5)
+        engine.start()
+        _demo_item_mode(engine, chunk_size=32, num_batches=args.num_batches)
+        _demo_batch_mode(engine, chunk_size=32, num_batches=args.num_batches)
+        _demo_uniform_dynamic(engine, num_batches=args.num_batches)
+        _demo_gmm_dynamic(engine, num_batches=args.num_batches)
     finally:
-        # engine.stop()
+        engine.stop()
         log_info("[Demo] Engine stopped.", color="green")
 
 

@@ -14,20 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""
-This script demonstrates how to create a simulation scene using SimulationManager.
-It shows the basic setup of simulation context, adding objects, and sensors.
-"""
+"""Create a grasping scene and report filtered robot/object contacts."""
+
+from __future__ import annotations
 
 import argparse
 import time
+
 import torch
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    RigidBodyAttributesCfg,
-)
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.sensors import (
     ContactSensorCfg,
     ArticulationContactFilterCfg,
@@ -35,11 +32,22 @@ from embodichain.lab.sim.sensors import (
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot, RobotCfg
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
+    shutdown_sim,
+)
 
 
 def create_cube(
-    sim: SimulationManager, uid: str, position: list = (0.0, 0.0, 0)
+    sim: SimulationManager,
+    uid: str,
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> RigidObject:
     """create cube
 
@@ -70,7 +78,11 @@ def create_cube(
     return cube
 
 
-def robot_grasp_pose(robot: Robot, cube: RigidObject, sim: SimulationManager):
+def robot_grasp_pose(
+    robot: Robot,
+    cube: RigidObject,
+    sim: SimulationManager,
+) -> None:
     sim.update(step=100)
     arm_ids = robot.get_joint_ids("arm")
     gripper_ids = robot.get_joint_ids("hand")
@@ -85,12 +97,14 @@ def robot_grasp_pose(robot: Robot, cube: RigidObject, sim: SimulationManager):
     approach_xpos = target_xpos.clone()
     approach_xpos[:, 2, 3] += 0.1
 
-    is_success, approach_qpos = robot.compute_ik(
+    approach_success, approach_qpos = robot.compute_ik(
         pose=approach_xpos, joint_seed=rest_arm_qpos, name="arm"
     )
-    is_success, target_qpos = robot.compute_ik(
+    target_success, target_qpos = robot.compute_ik(
         pose=target_xpos, joint_seed=approach_qpos, name="arm"
     )
+    if not (approach_success.all() and target_success.all()):
+        raise RuntimeError("Failed to solve the cube grasp pose.")
     robot.set_qpos(approach_qpos, joint_ids=arm_ids)
     sim.update(step=40)
 
@@ -106,7 +120,9 @@ def robot_grasp_pose(robot: Robot, cube: RigidObject, sim: SimulationManager):
 
 
 def create_robot(
-    sim: SimulationManager, uid: str, position: list = (0.0, 0.0, 0)
+    sim: SimulationManager,
+    uid: str,
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> Robot:
     """create robot
 
@@ -149,9 +165,9 @@ def create_robot(
         "init_pos": position,
         "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
         "drive_pros": {
-            "stiffness": {"JOINT[1-6]": 1e4, "FINGER[1-2]_JOINT": 1e2},
-            "damping": {"JOINT[1-6]": 1e3, "FINGER[1-2]_JOINT": 1e1},
-            "max_effort": {"JOINT[1-6]": 1e5, "FINGER[1-2]_JOINT": 1e3},
+            "stiffness": {"Joint[1-6]": 1e4, "finger[1-2]_joint": 1e2},
+            "damping": {"Joint[1-6]": 1e3, "finger[1-2]_joint": 1e1},
+            "max_effort": {"Joint[1-6]": 1e5, "finger[1-2]_joint": 1e3},
         },
         "solver_cfg": {
             "arm": {
@@ -166,69 +182,56 @@ def create_robot(
                 ],
             }
         },
-        "control_parts": {"arm": ["JOINT[1-6]"], "hand": ["FINGER[1-2]_JOINT"]},
+        "control_parts": {
+            "arm": ["Joint[1-6]"],
+            "hand": ["finger[1-2]_joint"],
+        },
     }
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(robot_cfg_dict))
     return robot
 
 
-def main():
+def main() -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
-        width=1920,
-        height=1080,
+    sim = create_default_sim(
+        args,
         num_envs=args.num_envs,
-        headless=True,
-        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
-        render_cfg=RenderCfg(
-            renderer=args.renderer
-        ),  # Enable ray tracing for better visuals
+        add_default_light=False,
     )
 
-    # Create the simulation instance
-    sim = SimulationManager(sim_cfg)
+    try:
+        create_cube(sim, "cube0", position=(0.0, 0.0, 0.03))
+        create_cube(sim, "cube1", position=(0.0, 0.0, 0.06))
+        cube2 = create_cube(sim, "cube2", position=(0.0, 0.0, 0.09))
+        robot = create_robot(sim, "UR10_PGI", position=(0.5, 0.0, 0.0))
 
-    # Add objects to the scene
-    cube0 = create_cube(sim, "cube0", position=[0.0, 0.0, 0.03])
-    cube1 = create_cube(sim, "cube1", position=[0.0, 0.0, 0.06])
-    cube2 = create_cube(sim, "cube2", position=[0.0, 0.0, 0.09])
-    robot = create_robot(sim, "UR10_PGI", position=[0.5, 0.0, 0.0])
+        print("[INFO]: Scene setup complete!")
+        print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
 
-    print("[INFO]: Scene setup complete!")
-    print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
-    print("[INFO]: Press Ctrl+C to stop the simulation")
-
-    # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
-
-    robot_grasp_pose(robot, cube2, sim)
-    # Run the simulation
-    run_simulation(sim)
+        maybe_init_gpu_physics(sim)
+        maybe_open_window(sim, args)
+        robot_grasp_pose(robot, cube2, sim)
+        run_simulation(sim, args)
+    finally:
+        shutdown_sim(sim)
+        print("[INFO]: Simulation terminated successfully")
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, args: argparse.Namespace) -> None:
     """Run the simulation loop.
 
     Args:
         sim: The SimulationManager instance to run
     """
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
-    step_count = 0
     # contact filter config
     contact_filter_cfg = ContactSensorCfg()
     contact_filter_cfg.rigid_uid_list = ["cube0", "cube1", "cube2"]
@@ -240,45 +243,38 @@ def run_simulation(sim: SimulationManager):
 
     contact_sensor = sim.add_sensor(sensor_cfg=contact_filter_cfg)
 
-    try:
-        accmulated_cost_time = 0.0
-        while True:
-            # Update physics simulation
-            sim.update(step=1)
-            start_time = time.time()
-            contact_sensor.update()
-            contact_report = contact_sensor.get_data()
-            accmulated_cost_time += time.time() - start_time
-            step_count += 1
+    accumulated_cost_time = 0.0
 
-            # Print FPS every second
-            if step_count % 100 == 0:
-                average_cost_time = accmulated_cost_time / 100.0
-                print(
-                    f"[INFO]: Fetch contact cost time: {average_cost_time * 1000:.2f} ms, num_envs: {sim.num_envs}"
-                )
-                # filter contact report for a rigid object with a articulation link
-                cube2_user_ids = sim.get_rigid_object("cube2").get_user_ids()
-                finger1_user_ids = (
-                    sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
-                )
-                filter_user_ids = torch.cat([cube2_user_ids, finger1_user_ids])
-                filter_contact_report = contact_sensor.filter_by_user_ids(
-                    filter_user_ids
-                )
-                # print("filter_contact_report", filter_contact_report)
-                # visualize contact points
-                contact_sensor.set_contact_point_visibility(
-                    visible=True, rgba=(0.0, 0.0, 1.0, 1.0), point_size=6.0
-                )
-                accmulated_cost_time = 0.0
+    def update_contact(step: int) -> None:
+        """Update the sensor and periodically report/filter contacts."""
+        nonlocal accumulated_cost_time
+        started_at = time.perf_counter()
+        contact_sensor.update()
+        contact_sensor.get_data()
+        accumulated_cost_time += time.perf_counter() - started_at
 
-    except KeyboardInterrupt:
-        print("\n[INFO]: Stopping simulation...")
-    finally:
-        # Clean up resources
-        sim.destroy()
-        print("[INFO]: Simulation terminated successfully")
+        if step % 100 != 0:
+            return
+        print(
+            "[INFO]: Fetch contact cost time: "
+            f"{accumulated_cost_time * 10:.2f} ms, num_envs: {sim.num_envs}"
+        )
+        cube_ids = sim.get_rigid_object("cube2").get_user_ids()
+        finger_ids = sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
+        contact_sensor.filter_by_user_ids(torch.cat([cube_ids, finger_ids]))
+        contact_sensor.set_contact_point_visibility(
+            visible=True,
+            rgba=(0.0, 0.0, 1.0, 1.0),
+            point_size=6.0,
+        )
+        accumulated_cost_time = 0.0
+
+    with DemoRecording(sim, args, prefix="contact_sensor"):
+        run_simulation_loop(
+            sim,
+            max_steps=resolve_demo_steps(args),
+            on_step=update_contact,
+        )
 
 
 if __name__ == "__main__":

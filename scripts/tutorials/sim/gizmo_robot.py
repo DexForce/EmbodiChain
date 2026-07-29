@@ -17,22 +17,30 @@
 Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
 """
 
-import time
-import torch
-import numpy as np
-import argparse
+from __future__ import annotations
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+import argparse
+import time
+
+import numpy as np
+import torch
+
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
+    JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
-    JointDrivePropertiesCfg,
 )
 
 from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    resolve_demo_steps,
+    shutdown_sim,
+)
 from embodichain.utils import logger
 
 
@@ -43,19 +51,16 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
+    sim = create_default_sim(
+        args,
         width=1920,
         height=1080,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
+        add_default_light=False,
     )
-
-    sim = SimulationManager(sim_cfg)
     sim.set_manual_update(False)
 
     # Get UR10 URDF path
@@ -101,23 +106,24 @@ def main():
     sim.enable_gizmo(uid="ur10_gizmo_test", control_part="arm")
     if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
         logger.log_error("Failed to enable gizmo!")
+        shutdown_sim(sim)
         return
 
-    sim.open_window()
+    maybe_open_window(sim, args)
 
     logger.log_info("Gizmo-Robot example started!")
     logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, max_steps=resolve_demo_steps(args))
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, max_steps: int | None = None) -> None:
     step_count = 0
     try:
         last_time = time.time()
         last_step = 0
-        while True:
+        while max_steps is None or step_count < max_steps:
             time.sleep(0.033)  # 30Hz
             # Update all gizmos managed by sim
             sim.update_gizmos()
@@ -137,7 +143,7 @@ def run_simulation(sim: SimulationManager):
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
-        sim.destroy()
+        shutdown_sim(sim)
         logger.log_info("Simulation terminated successfully")
 
 
