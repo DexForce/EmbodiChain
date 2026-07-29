@@ -666,6 +666,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
             reward = RewardCfg(
                 func=reward_func,
                 mode=reward_params_modified["mode"],
+                weight=float(reward_params_modified.get("weight", 1.0)),
                 params=reward_params_modified["params"],
             )
 
