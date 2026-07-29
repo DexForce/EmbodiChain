@@ -31,7 +31,7 @@ matplotlib.use("Agg", force=True)
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.font_manager import FontProperties, fontManager
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch
 import networkx as nx
 
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
@@ -63,6 +63,11 @@ _SKIPPED = "#94A3B8"
 _PENDING = "#CBD5E1"
 _PNG_DPI = 150
 _MAX_EDGES_PER_ROW = 5
+_NODE_LINK_RADIUS = 0.38
+_NODE_LINK_ROW_GAP = 1.95
+_NODE_LINK_ACTOR_LANE_OFFSET = 5.15
+_NODE_LINK_LANE_FOLD = 1.35
+_NODE_LINK_WORLD_FOLD = 1.20
 
 
 @dataclass(frozen=True)
@@ -109,6 +114,7 @@ class _TaskGroup:
     actor_text: str
     goal: Mapping[str, Any] | None
     postcondition: Mapping[str, Any] | None
+    depends_on: tuple[str, ...]
     edges: tuple[Mapping[str, Any], ...]
     derived: bool
     runtime: Mapping[str, Any] | None = None
@@ -124,6 +130,15 @@ class _TimelineRow:
     is_last: bool
 
 
+@dataclass(frozen=True)
+class _NodeLinkGroupLayout:
+    """Stable geometry for one semantic-step subgraph."""
+
+    group: _TaskGroup
+    top: float
+    bottom: float
+
+
 def render_seed_task_graph_png(seed_graph: Mapping[str, Any]) -> bytes:
     """Render every Seed v2 state and symbolic action in execution order."""
     validate_seed_task_graph(seed_graph)
@@ -136,7 +151,7 @@ def render_task_graph_png(task_graph: Mapping[str, Any]) -> bytes:
 
 
 def _render_graph_timeline(task_graph: Mapping[str, Any]) -> bytes:
-    """Render one complete state-action graph using a stable shared layout."""
+    """Render one complete state-action graph using a stable node-link layout."""
     graph, node_records, edge_records = _validated_task_display_graph(task_graph)
     if not _is_single_chain(graph, task_graph):
         return _render_task_dag(task_graph, graph, node_records, edge_records)
@@ -144,7 +159,6 @@ def _render_graph_timeline(task_graph: Mapping[str, Any]) -> bytes:
     ordered_edges = _ordered_chain_edges(graph, task_graph, edge_records)
     groups = _task_groups(task_graph, ordered_edges)
     group_by_edge = _group_by_edge(groups)
-    rows = _timeline_rows(ordered_edges, group_by_edge)
     display_edges = {
         str(edge["id"]): _display_edge(
             edge,
@@ -157,11 +171,50 @@ def _render_graph_timeline(task_graph: Mapping[str, Any]) -> bytes:
         ordered_edges,
         group_by_edge,
     )
+    ordered_groups = _groups_in_execution_order(ordered_edges, group_by_edge)
+    return _render_compact_node_link_graph(
+        task_graph,
+        ordered_groups,
+        display_edges=display_edges,
+        display_nodes=display_nodes,
+        node_count=len(node_records),
+        edge_count=len(edge_records),
+    )
 
-    row_height = 2.25
-    top = 1.25
-    canvas_height = max(5.4, top + len(rows) * row_height + 0.6)
-    canvas_width = 14.8
+
+def _groups_in_execution_order(
+    ordered_edges: Sequence[Mapping[str, Any]],
+    group_by_edge: Mapping[str, _TaskGroup],
+) -> list[_TaskGroup]:
+    """Return semantic groups in first-edge order without duplicating a group."""
+    result: list[_TaskGroup] = []
+    seen: set[str] = set()
+    for edge in ordered_edges:
+        group = group_by_edge[str(edge["id"])]
+        if group.group_id in seen:
+            continue
+        seen.add(group.group_id)
+        result.append(group)
+    return result
+
+
+def _render_compact_node_link_graph(
+    task_graph: Mapping[str, Any],
+    groups: Sequence[_TaskGroup],
+    *,
+    display_edges: Mapping[str, _DisplayEdge],
+    display_nodes: Mapping[str, _DisplayNode],
+    node_count: int,
+    edge_count: int,
+) -> bytes:
+    """Render circular state nodes and labeled directed action edges."""
+    canvas_width = 17.4
+    positions, group_layouts = _compact_node_link_layout(
+        groups,
+        display_edges=display_edges,
+        center_x=canvas_width / 2.0,
+    )
+    canvas_height = max(6.0, group_layouts[-1].bottom + 0.9)
     figure = _make_figure(canvas_width, canvas_height)
     try:
         axis = figure.subplots()
@@ -171,38 +224,482 @@ def _render_graph_timeline(task_graph: Mapping[str, Any]) -> bytes:
         _draw_task_header(
             axis,
             task_graph,
-            node_count=len(node_records),
-            edge_count=len(edge_records),
+            node_count=node_count,
+            edge_count=edge_count,
             group_count=len(groups),
         )
+        _draw_node_link_lanes(
+            axis,
+            top=1.17,
+            bottom=canvas_height - 0.42,
+            canvas_width=canvas_width,
+            center_x=canvas_width / 2.0,
+        )
+        for layout in group_layouts:
+            _draw_node_link_group(axis, layout, canvas_width=canvas_width)
 
-        previous_endpoint: tuple[float, float] | None = None
-        for row_index, row in enumerate(rows):
-            y = top + row_index * row_height
-            direction = 1 if row_index % 2 == 0 else -1
-            previous_endpoint = _draw_timeline_row(
+        incoming_colors: dict[str, str] = {}
+        for group in groups:
+            for edge_index, edge_record in enumerate(group.edges):
+                edge = display_edges[str(edge_record["id"])]
+                incoming_colors[edge.target] = _display_edge_color(edge)
+                _draw_node_link_edge(
+                    axis,
+                    edge,
+                    source=positions[edge.source],
+                    target=positions[edge.target],
+                    edge_index=edge_index,
+                )
+        for node_id, position in positions.items():
+            _draw_node_link_state(
                 axis,
-                row,
-                display_edges=display_edges,
-                display_nodes=display_nodes,
-                direction=direction,
-                y=y,
-                canvas_width=canvas_width,
-                previous_endpoint=previous_endpoint,
+                display_nodes[node_id],
+                center=position,
+                incoming_color=incoming_colors.get(node_id),
             )
 
         axis.text(
-            canvas_width - 0.45,
-            canvas_height - 0.2,
+            canvas_width - 0.5,
+            canvas_height - 0.18,
             _graph_footer(task_graph),
             ha="right",
             va="bottom",
             color=_MUTED,
-            fontproperties=_font(size=6.2),
+            fontproperties=_font(size=6.0),
         )
         return _figure_png_bytes(figure)
     finally:
         figure.clear()
+
+
+def _compact_node_link_layout(
+    groups: Sequence[_TaskGroup],
+    *,
+    display_edges: Mapping[str, _DisplayEdge],
+    center_x: float,
+) -> tuple[dict[str, tuple[float, float]], list[_NodeLinkGroupLayout]]:
+    """Fold each semantic step inside deterministic actor-specific swimlanes."""
+    first_edge = display_edges[str(groups[0].edges[0]["id"])]
+    positions = {first_edge.source: (center_x, 2.30)}
+    layouts: list[_NodeLinkGroupLayout] = []
+    current_node_id = first_edge.source
+
+    for group_index, group in enumerate(groups):
+        source_y = positions[current_node_id][1]
+        edge_count = len(group.edges)
+        intermediate_count = max(0, edge_count - 1)
+        intermediate_rows = (intermediate_count + 1) // 2
+        final_y = source_y + (intermediate_rows + 1) * _NODE_LINK_ROW_GAP
+        for edge_index, edge_record in enumerate(group.edges):
+            edge = display_edges[str(edge_record["id"])]
+            if edge.source != current_node_id:
+                raise ValueError(
+                    "Semantic group order does not follow the Task graph chain."
+                )
+            if edge_index == edge_count - 1:
+                target_position = (center_x, final_y)
+            else:
+                row = edge_index // 2 + 1
+                target_position = (
+                    _node_link_lane_target_x(
+                        _display_edge_lane(edge),
+                        center_x=center_x,
+                        edge_index=edge_index,
+                    ),
+                    source_y + row * _NODE_LINK_ROW_GAP,
+                )
+            positions[edge.target] = target_position
+            current_node_id = edge.target
+        layouts.append(
+            _NodeLinkGroupLayout(
+                group=group,
+                top=source_y - (0.52 if group_index == 0 else 0.0),
+                bottom=final_y,
+            )
+        )
+    return positions, layouts
+
+
+def _node_link_lane_target_x(
+    lane: str,
+    *,
+    center_x: float,
+    edge_index: int,
+) -> float:
+    """Place states reached by an action inside that action's visual lane."""
+    fold_direction = 1.0 if edge_index % 2 == 0 else -1.0
+    if lane == "left":
+        lane_center = center_x - _NODE_LINK_ACTOR_LANE_OFFSET
+        return lane_center + fold_direction * _NODE_LINK_LANE_FOLD
+    if lane == "right":
+        lane_center = center_x + _NODE_LINK_ACTOR_LANE_OFFSET
+        return lane_center - fold_direction * _NODE_LINK_LANE_FOLD
+    return center_x - fold_direction * _NODE_LINK_WORLD_FOLD
+
+
+def _draw_node_link_lanes(
+    axis: Any,
+    *,
+    top: float,
+    bottom: float,
+    canvas_width: float,
+    center_x: float,
+) -> None:
+    """Draw persistent arm and world lanes behind every semantic group."""
+    world_half_width = 2.55
+    gap = 0.08
+    lane_specs = (
+        (
+            0.54,
+            center_x - world_half_width - gap,
+            "#EEF8F5",
+            _LEFT,
+            "LEFT ARM  [L]",
+        ),
+        (
+            center_x - world_half_width,
+            center_x + world_half_width,
+            "#F3F5F7",
+            _AUTO,
+            "WORLD / AUTO",
+        ),
+        (
+            center_x + world_half_width + gap,
+            canvas_width - 0.54,
+            "#FFF5E8",
+            _RIGHT,
+            "RIGHT ARM  [R]",
+        ),
+    )
+    for left, right, face_color, accent, label in lane_specs:
+        axis.add_patch(
+            FancyBboxPatch(
+                (left, top),
+                right - left,
+                bottom - top,
+                boxstyle="round,pad=0.0,rounding_size=0.06",
+                facecolor=face_color,
+                edgecolor="#DDE4E9",
+                linewidth=0.65,
+                zorder=-6,
+            )
+        )
+        axis.plot(
+            [left, right],
+            [top, top],
+            color=accent,
+            linewidth=2.2,
+            solid_capstyle="butt",
+            zorder=-5,
+        )
+        axis.text(
+            (left + right) / 2.0,
+            top + 0.25,
+            label,
+            ha="center",
+            va="center",
+            color=accent,
+            fontproperties=_font(size=6.6, weight="bold"),
+            zorder=2,
+        )
+
+
+def _draw_node_link_group(
+    axis: Any,
+    layout: _NodeLinkGroupLayout,
+    *,
+    canvas_width: float,
+) -> None:
+    """Draw semantic ownership as a quiet cluster behind its state graph."""
+    group = layout.group
+    actor = _group_actor_badge(group)
+    accent = _group_actor_color(actor)
+    axis.add_patch(
+        FancyBboxPatch(
+            (0.54, layout.top),
+            canvas_width - 1.08,
+            layout.bottom - layout.top,
+            boxstyle="round,pad=0.01,rounding_size=0.08",
+            facecolor=(1.0, 1.0, 1.0, 0.28),
+            edgecolor=accent,
+            linewidth=0.9,
+            zorder=-3,
+        )
+    )
+    axis.text(
+        0.78,
+        layout.top + 0.23,
+        (
+            f"{_compact_id(group.group_id)}  ·  "
+            f"{_compact_group_name(group)}  ·  "
+            f"{_humanize_uid(group.object_uid)}  ·  {actor}"
+        ),
+        ha="left",
+        va="center",
+        color=accent,
+        fontproperties=_font(size=7.0, weight="bold"),
+        zorder=2,
+    )
+    detail_parts = []
+    if group.goal:
+        detail_parts.append(_compiled_goal_summary(group.object_uid, group.goal))
+    if group.depends_on:
+        detail_parts.append(
+            "depends: "
+            + ", ".join(_compact_id(step_id) for step_id in group.depends_on)
+        )
+    axis.text(
+        canvas_width - 0.78,
+        layout.top + 0.23,
+        _truncate("  ·  ".join(detail_parts), 88),
+        ha="right",
+        va="center",
+        color=_MUTED,
+        fontproperties=_font(size=5.9),
+        zorder=2,
+    )
+    if group.postcondition:
+        marker, marker_color = _node_link_postcondition_marker(group)
+        axis.text(
+            canvas_width - 0.78,
+            layout.bottom - 0.20,
+            f"{marker}  ·  {_postcondition_summary(group.postcondition)}",
+            ha="right",
+            va="center",
+            color=marker_color,
+            fontproperties=_font(size=5.8, weight="bold"),
+            zorder=2,
+        )
+
+
+def _node_link_postcondition_marker(group: _TaskGroup) -> tuple[str, str]:
+    runtime = (
+        group.runtime.get("postcondition")
+        if isinstance(group.runtime, Mapping)
+        else None
+    )
+    success = runtime.get("success") if isinstance(runtime, Mapping) else None
+    if runtime is None:
+        return "EXPECT", _MUTED
+    if success is True:
+        return "PASS", _SUCCESS
+    if success is False:
+        return "FAILED", _FAILED
+    return "PENDING", _PENDING
+
+
+def _draw_node_link_edge(
+    axis: Any,
+    edge: _DisplayEdge,
+    *,
+    source: tuple[float, float],
+    target: tuple[float, float],
+    edge_index: int,
+) -> None:
+    """Draw one curved directed edge with its complete symbolic action label."""
+    color = _display_edge_color(edge)
+    lane = _display_edge_lane(edge)
+    linestyle = (
+        (0, (4, 2))
+        if lane == "auto"
+        or {action.status for action in edge.actions if action.status}
+        in ({"pending"}, {"skipped"})
+        else "solid"
+    )
+    curvature = _node_link_edge_curvature(source, target, edge_index=edge_index)
+    axis.add_patch(
+        FancyArrowPatch(
+            source,
+            target,
+            arrowstyle="-|>",
+            mutation_scale=11,
+            linewidth=2.0 if lane == "coordinated" else 1.55,
+            linestyle=linestyle,
+            color=color,
+            connectionstyle=f"arc3,rad={curvature}",
+            shrinkA=22,
+            shrinkB=22,
+            zorder=1,
+        )
+    )
+    label_x, label_y = _node_link_edge_label_position(
+        source,
+        target,
+        edge_index=edge_index,
+    )
+    axis.text(
+        label_x,
+        label_y,
+        "\n".join(_node_link_edge_lines(edge)),
+        ha="center",
+        va="center",
+        color=_TEXT,
+        bbox={
+            "boxstyle": "round,pad=0.18",
+            "facecolor": "#FFFFFF",
+            "edgecolor": color,
+            "linewidth": 0.75,
+            "alpha": 0.96,
+        },
+        fontproperties=_font(size=5.4, weight="bold"),
+        linespacing=1.0,
+        zorder=4,
+    )
+
+
+def _node_link_edge_curvature(
+    source: tuple[float, float],
+    target: tuple[float, float],
+    *,
+    edge_index: int,
+) -> float:
+    if abs(source[1] - target[1]) < 1e-6:
+        return 0.14 if source[0] < target[0] else -0.14
+    if abs(source[0] - target[0]) < 1e-6:
+        return 0.0
+    return 0.06 if edge_index % 2 == 0 else -0.06
+
+
+def _node_link_edge_label_position(
+    source: tuple[float, float],
+    target: tuple[float, float],
+    *,
+    edge_index: int,
+) -> tuple[float, float]:
+    mid_x = (source[0] + target[0]) / 2.0
+    mid_y = (source[1] + target[1]) / 2.0
+    dx = target[0] - source[0]
+    dy = target[1] - source[1]
+    if abs(dy) < 1e-6:
+        return mid_x, mid_y - 0.28
+    norm = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+    sign = -1.0 if edge_index % 2 else 1.0
+    offset = 0.23
+    return (
+        mid_x - dy / norm * offset * sign,
+        mid_y + dx / norm * offset * sign,
+    )
+
+
+def _node_link_edge_lines(edge: _DisplayEdge) -> list[str]:
+    if not edge.actions:
+        return [f"{_compact_id(edge.edge_id)}  [–] UnknownAction"]
+    if len(edge.actions) == 1:
+        action = edge.actions[0]
+        lines = [f"{_compact_id(edge.edge_id)}  [{action.arm}] {action.action_class}"]
+        if action.primary:
+            lines.append(_truncate(action.primary, 38))
+        if action.detail:
+            lines.append(_truncate(action.detail, 42))
+        return lines[:3]
+    lines = [f"{_compact_id(edge.edge_id)}  [L+R] coordinated actions"]
+    for action in edge.actions:
+        text = f"[{action.arm}] {action.action_class}"
+        if action.detail:
+            text += f" · {action.detail}"
+        elif action.primary:
+            text += f" · {action.primary}"
+        lines.append(_truncate(text, 52))
+    return lines[:3]
+
+
+def _draw_node_link_state(
+    axis: Any,
+    node: _DisplayNode,
+    *,
+    center: tuple[float, float],
+    incoming_color: str | None,
+) -> None:
+    """Draw one circular state node and its object/state caption."""
+    if node.is_start:
+        face_color, text_color, edge_color = _START, "#FFFFFF", _START
+    elif node.runtime_status == "failed":
+        face_color, text_color, edge_color = "#FDEDEC", _FAILED, _FAILED
+    elif node.runtime_status == "skipped":
+        face_color, text_color, edge_color = "#EEF1F3", _MUTED, _SKIPPED
+    elif node.runtime_status == "pending":
+        face_color, text_color, edge_color = "#F5F7F8", _MUTED, _PENDING
+    elif node.is_goal:
+        face_color, text_color, edge_color = _GOAL, "#FFFFFF", _GOAL
+    else:
+        face_color = "#FFFFFF"
+        text_color = _TEXT
+        edge_color = incoming_color or _BORDER
+    axis.add_patch(
+        Circle(
+            center,
+            radius=_NODE_LINK_RADIUS,
+            facecolor=face_color,
+            edgecolor=edge_color,
+            linewidth=1.8 if node.is_start or node.is_goal else 1.35,
+            zorder=6,
+        )
+    )
+    axis.text(
+        center[0],
+        center[1],
+        f"{_compact_id(node.node_id)}\n{node.state}",
+        ha="center",
+        va="center",
+        color=text_color,
+        fontproperties=_font(size=5.4, weight="bold"),
+        linespacing=0.95,
+        zorder=7,
+    )
+    if node.detail:
+        axis.text(
+            center[0],
+            center[1] + _NODE_LINK_RADIUS + 0.16,
+            _truncate(node.detail, 30),
+            ha="center",
+            va="top",
+            color=_MUTED if not node.is_goal else _SUCCESS,
+            fontproperties=_font(size=5.4, weight="bold"),
+            zorder=7,
+        )
+
+
+def _group_actor_badge(group: _TaskGroup) -> str:
+    assigned = (
+        group.runtime.get("assigned_arm")
+        if isinstance(group.runtime, Mapping)
+        else None
+    )
+    if assigned == "left_arm":
+        return "[L]"
+    if assigned == "right_arm":
+        return "[R]"
+    if assigned == "coordinated":
+        return "[L+R]"
+    actor = group.actor_text
+    if "left_arm + right_arm" in actor or "coordinated" in actor:
+        return "[L+R]"
+    if "left_arm" in actor:
+        return "[L]"
+    if "right_arm" in actor:
+        return "[R]"
+    return "[AUTO]"
+
+
+def _group_actor_color(actor_badge: str) -> str:
+    if actor_badge == "[L]":
+        return _LEFT
+    if actor_badge == "[R]":
+        return _RIGHT
+    if actor_badge == "[L+R]":
+        return _DUAL
+    return _AUTO
+
+
+def _display_edge_lane(edge: _DisplayEdge) -> str:
+    arms = {action.arm for action in edge.actions}
+    if "L+R" in arms or {"L", "R"}.issubset(arms):
+        return "coordinated"
+    if arms == {"L"}:
+        return "left"
+    if arms == {"R"}:
+        return "right"
+    return "auto"
 
 
 def _draw_seed_header(axis: Any, seed_graph: Mapping[str, Any]) -> None:
@@ -460,9 +957,9 @@ def _draw_task_header(
 ) -> None:
     is_seed = task_graph.get("schema_version") == "seed_task_graph_v2"
     title = (
-        "Executable Seed State-Action Timeline"
+        "Executable Seed Directed State-Action Graph"
         if is_seed
-        else "Runtime Grounded State-Action Timeline"
+        else "Runtime Grounded Directed State-Action Graph"
     )
     axis.text(
         0.65,
@@ -1136,6 +1633,9 @@ def _task_groups(
                         if isinstance(step.get("postcondition"), Mapping)
                         else None
                     ),
+                    depends_on=tuple(
+                        str(dependency) for dependency in (step.get("depends_on") or [])
+                    ),
                     edges=group_edges,
                     derived=False,
                     runtime=(
@@ -1204,6 +1704,7 @@ def _inferred_group(
         actor_text=actor_text,
         goal=None,
         postcondition=None,
+        depends_on=(),
         edges=edges,
         derived=True,
         runtime=None,
@@ -1647,7 +2148,7 @@ def _postcondition_summary(postcondition: Mapping[str, Any]) -> str:
 def _compact_group_name(group: _TaskGroup) -> str:
     if group.derived:
         return group.group_id.replace("_", " ").upper()
-    return _compact_id(group.group_id)
+    return group.operator.replace("_", " ").upper()
 
 
 def _actor_text(actor: Any) -> str:
@@ -1699,7 +2200,7 @@ def _truncate(value: str, limit: int) -> str:
 
 def _make_figure(width: float, height: float) -> Figure:
     safe_width = min(max(width, 6.0), 28.0)
-    safe_height = min(max(height, 4.0), 32.0)
+    safe_height = min(max(height, 4.0), 40.0)
     return Figure(
         figsize=(safe_width, safe_height),
         dpi=_PNG_DPI,
