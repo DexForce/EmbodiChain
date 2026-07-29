@@ -110,6 +110,7 @@ class AntipodalAffordance(Affordance):
         approach_direction: torch.Tensor = torch.tensor(
             [0, 0, -1], dtype=torch.float32
         ),
+        object_part: str = "center",
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         if self._generator is None:
             self._init_generator()
@@ -117,7 +118,9 @@ class AntipodalAffordance(Affordance):
         results = []
         for i, obj_pose in enumerate(obj_poses):
             is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
-                obj_pose, approach_direction
+                object_pose=obj_pose,
+                approach_direction=approach_direction,
+                object_part=object_part,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)

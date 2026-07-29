@@ -60,8 +60,8 @@ DEFAULT_AXIS_SIZE = 0.003
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
 GRIPPER_TCP_Z = 0.15
-GRIPPER_MAX_OPEN_WIDTH = 0.080
-GRIPPER_FINGER_LENGTH = 0.088
+GRIPPER_MAX_OPEN_WIDTH = 0.100
+GRIPPER_FINGER_LENGTH = 0.12
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
@@ -224,7 +224,7 @@ def create_antipodal_semantics(
                 antipodal_sampler_cfg=AntipodalSamplerCfg(
                     n_sample=n_sample,
                     max_length=GRIPPER_MAX_OPEN_WIDTH,
-                    min_length=0.003,
+                    min_length=0.005,
                 ),
                 is_partial_annotate=False,
                 is_filter_ground_collision=False,

@@ -610,6 +610,7 @@ class GraspGenerator:
         self,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
+        object_part: str = "center",
         visualize_collision: bool = False,
     ):
         if self._hit_point_pairs is None:
@@ -629,9 +630,30 @@ class GraspGenerator:
         hit_points_ = self._apply_transform(hit_points, object_pose)
         mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
 
+        if object_part == "bottom":
+            z_max = mesh_vert_transformed[:, 2].max()
+            z_min = mesh_vert_transformed[:, 2].min()
+            z_threshold = z_min + (z_max - z_min) * 0.45
+            z_mask = (origin_points_[:, 2] < z_threshold) | (
+                hit_points_[:, 2] < z_threshold
+            )
+            origin_points_masked = origin_points_[z_mask]
+            hit_points_masked = hit_points_[z_mask]
+        elif object_part == "top":
+            z_max = mesh_vert_transformed[:, 2].max()
+            z_min = mesh_vert_transformed[:, 2].min()
+            z_threshold = z_min + (z_max - z_min) * 0.6
+            z_mask = (origin_points_[:, 2] > z_threshold) | (
+                hit_points_[:, 2] > z_threshold
+            )
+            origin_points_masked = origin_points_[z_mask]
+            hit_points_masked = hit_points_[z_mask]
+        else:
+            origin_points_masked = origin_points_
+            hit_points_masked = hit_points_
         return self._filter_valid_grasp_poses(
-            hit_points_=hit_points_,
-            origin_points_=origin_points_,
+            origin_points_=origin_points_masked,
+            hit_points_=hit_points_masked,
             object_pose=object_pose,
             approach_direction=approach_direction,
             mesh_vert_transformed=mesh_vert_transformed,
@@ -724,7 +746,6 @@ class GraspGenerator:
                 "total_cost": total_cost_right,
             },
         }
-        # import ipdb; ipdb.set_trace()
         # self.visualize_grasp_poses(
         #     obj_pose=object_pose,
         #     grasp_poses=torch.vstack([grasp_poses_left, grasp_poses_right]),
@@ -734,8 +755,8 @@ class GraspGenerator:
 
     def _filter_valid_grasp_poses(
         self,
-        hit_points_: torch.Tensor,
         origin_points_: torch.Tensor,
+        hit_points_: torch.Tensor,
         approach_direction: torch.Tensor,
         mesh_vert_transformed: torch.Tensor,
         object_pose: torch.Tensor,
@@ -845,7 +866,11 @@ class GraspGenerator:
             top_grasp_poses = valid_grasp_poses
             top_open_lengths = valid_open_lengths
             top_total_cost = total_cost
-
+        # self.visualize_grasp_poses(
+        #     obj_pose=object_pose,
+        #     grasp_poses=top_grasp_poses,
+        #     open_lengths=top_open_lengths,
+        # )
         return True, top_grasp_poses, top_open_lengths, top_total_cost
 
     def get_grasp_poses(

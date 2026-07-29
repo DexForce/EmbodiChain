@@ -66,6 +66,9 @@ class PickUpCfg(ActionCfg):
     hand_close_qpos: torch.Tensor | None = None
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
 
+    pick_object_part: str = "center"
+    """Name of the object part to pick up (used for grasp pose generation). Currently support [center | top | bottom]."""
+
     lift_height: float = 0.1
     """Height (m) to lift the end-effector after closing the gripper."""
 
@@ -277,6 +280,7 @@ class PickUp(AtomicAction):
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses,
             approach_direction=self.approach_direction,
+            object_part=self.cfg.pick_object_part,
         )
         n_envs = obj_poses.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
@@ -330,9 +334,8 @@ class PickUp(AtomicAction):
         )
 
         pre_grasp_variants = grasp_variants.clone()
-        pre_grasp_variants[..., :3, 3] -= (
-            self.approach_direction * self.cfg.pre_grasp_distance
-        )
+        pre_grasp_z = pre_grasp_variants[..., :3, 2]
+        pre_grasp_variants[..., :3, 3] -= pre_grasp_z * self.cfg.pre_grasp_distance
         lift_variants = grasp_variants.clone()
         lift_variants[..., :3, 3] += torch.tensor(
             [0.0, 0.0, self.cfg.lift_height],
