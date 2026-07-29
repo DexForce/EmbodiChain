@@ -73,7 +73,7 @@ Key parameters
 | ``attrs``           | RigidBodyAttributesCfg           | Rigid-body physics attributes    |
 +---------------------+----------------------------------+----------------------------------+
 | variant fields      | enum / str / bool                | Optional subclass fields         |
-|                     |                                  | (e.g. ``version``, ``arm_kind``) |
+|                     |                                  | (e.g. ``version``)               |
 +---------------------+----------------------------------+----------------------------------+
 | ``_pk_urdf_path``   | property or method → str         | URDF for the FK/IK serial chain  |
 +---------------------+----------------------------------+----------------------------------+

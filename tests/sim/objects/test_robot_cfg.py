@@ -23,7 +23,6 @@ import pytest
 from embodichain.lab.sim.cfg import RobotCfg, JointDrivePropertiesCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.robots.dexforce_w1.types import (
-    DexforceW1ArmKind,
     DexforceW1Version,
 )
 from embodichain.lab.sim.solvers import SRSSolverCfg
@@ -32,22 +31,23 @@ from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
 
 def test_dexforce_w1_roundtrip():
-    cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
-    )
+    cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
     d = cfg.to_dict()
     assert d["uid"] == "dexforce_w1"
-    assert d["arm_kind"] == "anthropomorphic"
     cfg2 = DexforceW1Cfg.from_dict(d)
     assert cfg2.uid == "dexforce_w1"
-    assert cfg2.arm_kind == DexforceW1ArmKind.ANTHROPOMORPHIC
     assert cfg2.version == DexforceW1Version.V021
 
 
 def test_dexforce_w1_solver_cfg_is_srs_and_set_once():
-    cfg = DexforceW1Cfg.from_dict({"arm_kind": "industrial"})
+    cfg = DexforceW1Cfg.from_dict({})
     assert isinstance(cfg.solver_cfg["left_arm"], SRSSolverCfg)
     assert isinstance(cfg.solver_cfg["right_arm"], SRSSolverCfg)
+
+
+def test_dexforce_w1_rejects_unknown_fields():
+    with pytest.raises(ValueError, match="Unknown DexforceW1 configuration fields"):
+        DexforceW1Cfg.from_dict({"unsupported_variant": "value"})
 
 
 class _RoundTripVariant(enum.Enum):
@@ -139,7 +139,7 @@ def _dof_of_pk_chain(chain) -> int:
 
 def test_dexforce_w1_pk_dof_matches_control_parts():
     pytest.importorskip("pytorch_kinematics")
-    cfg = DexforceW1Cfg.from_dict({"arm_kind": "anthropomorphic"})
+    cfg = DexforceW1Cfg.from_dict({})
     try:
         chains = cfg.build_pk_serial_chain()
     except Exception as exc:

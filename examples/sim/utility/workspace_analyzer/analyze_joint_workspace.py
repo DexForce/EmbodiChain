@@ -33,9 +33,7 @@ if __name__ == "__main__":
     sim_manager = SimulationManager(config)
     sim_manager.set_manual_update(False)
 
-    cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"}
-    )
+    cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
     robot = sim_manager.add_robot(cfg=cfg)
     print("DexforceW1 robot added to the simulation.")
 

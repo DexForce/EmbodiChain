@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Dict
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1HandBrand,
     DexforceW1ArmSide,
-    DexforceW1ArmKind,
     DexforceW1Version,
     DexforceW1Type,
 )
@@ -52,7 +51,6 @@ class DexforceW1Cfg(RobotCfg):
     """DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters."""
 
     version: DexforceW1Version = DexforceW1Version.V021
-    arm_kind: DexforceW1ArmKind = DexforceW1ArmKind.ANTHROPOMORPHIC
     with_default_eef: bool = True
     component_versions: dict | None = None
 
@@ -69,6 +67,11 @@ class DexforceW1Cfg(RobotCfg):
             A DexforceW1Cfg instance. Defaults are built via
             :meth:`_build_defaults`, then ``init_dict`` overrides are merged.
         """
+        unknown_fields = set(init_dict) - set(cls.__dataclass_fields__)
+        if unknown_fields:
+            unknown = ", ".join(sorted(unknown_fields))
+            raise ValueError(f"Unknown DexforceW1 configuration fields: {unknown}")
+
         cfg = cls()
         cfg._build_defaults(init_dict)
         return merge_robot_cfg(cfg, init_dict)
@@ -76,20 +79,16 @@ class DexforceW1Cfg(RobotCfg):
     def _build_defaults(self, init_dict: dict | None = None) -> None:
         """Build default urdf/control/solver/physics from variant fields.
 
-        Reads ``version``/``arm_kind``/``with_default_eef`` from ``init_dict``,
+        Reads ``version``/``with_default_eef`` from ``init_dict``,
         sets them on ``self``, then populates ``urdf_cfg``, ``control_parts``,
         ``solver_cfg``, ``drive_pros`` and ``attrs``.
         """
         init_dict = init_dict or {}
         version = init_dict.get("version", DexforceW1Version.V021)
-        arm_kind = init_dict.get("arm_kind", DexforceW1ArmKind.ANTHROPOMORPHIC)
         with_default_eef = init_dict.get("with_default_eef", True)
 
         self.version = (
             DexforceW1Version(version) if isinstance(version, str) else version
-        )
-        self.arm_kind = (
-            DexforceW1ArmKind(arm_kind) if isinstance(arm_kind, str) else arm_kind
         )
         self.with_default_eef = with_default_eef
         self.component_versions = normalize_component_versions(
@@ -97,22 +96,15 @@ class DexforceW1Cfg(RobotCfg):
         )
 
         # Build the version-matched URDF assembly and control-part definitions.
-        if self.arm_kind == DexforceW1ArmKind.INDUSTRIAL:
-            hand_types = {
-                DexforceW1ArmSide.LEFT: DexforceW1HandBrand.DH_PGC_GRIPPER_M,
-                DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.DH_PGC_GRIPPER_M,
-            }
-        else:
-            hand_types = {
-                DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
-                DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
-            }
+        hand_types = {
+            DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
+            DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
+        }
         hand_versions = {
             DexforceW1ArmSide.LEFT: self.version,
             DexforceW1ArmSide.RIGHT: self.version,
         }
         base_cfg = build_dexforce_w1_cfg(
-            arm_kind=self.arm_kind,
             version=self.version,
             hand_types=hand_types,
             hand_versions=hand_versions,
@@ -124,60 +116,37 @@ class DexforceW1Cfg(RobotCfg):
         self.control_parts = base_cfg.control_parts
 
         # physics
-        physics = self._build_default_physics_cfgs(
-            arm_kind=self.arm_kind, with_default_eef=with_default_eef
-        )
+        physics = self._build_default_physics_cfgs(with_default_eef=with_default_eef)
         for key, value in physics.items():
             setattr(self, key, value)
 
         # solver (set exactly once -- was previously double-set)
-        self.solver_cfg = self._build_default_solver_cfg(arm_kind=self.arm_kind)
+        self.solver_cfg = self._build_default_solver_cfg()
 
-    def _build_default_solver_cfg(self, arm_kind: DexforceW1ArmKind):
+    def _build_default_solver_cfg(self):
         """Build the version-matched default SRS solver configuration."""
         from embodichain.lab.sim.solvers import SRSSolverCfg
         from embodichain.lab.sim.robots.dexforce_w1.params import (
             W1ArmKineParams,
         )
 
-        if arm_kind == DexforceW1ArmKind.INDUSTRIAL:
-            left_arm_type = DexforceW1Type.LEFT_ARM2
-            right_arm_type = DexforceW1Type.RIGHT_ARM2
-        else:
-            left_arm_type = DexforceW1Type.LEFT_ARM1
-            right_arm_type = DexforceW1Type.RIGHT_ARM1
-        left_version = self.component_versions.get(left_arm_type, self.version)
-        right_version = self.component_versions.get(right_arm_type, self.version)
+        left_arm_component = DexforceW1Type.LEFT_ARM
+        right_arm_component = DexforceW1Type.RIGHT_ARM
+        left_version = self.component_versions.get(left_arm_component, self.version)
+        right_version = self.component_versions.get(right_arm_component, self.version)
         left_version_spec = get_w1_version_spec(left_version)
         right_version_spec = get_w1_version_spec(right_version)
-        left_version_spec.validate_arm_kind(arm_kind)
-        right_version_spec.validate_arm_kind(arm_kind)
+        w1_left_arm_params = W1ArmKineParams(
+            arm_side=DexforceW1ArmSide.LEFT,
+            version=left_version,
+        )
+        w1_right_arm_params = W1ArmKineParams(
+            arm_side=DexforceW1ArmSide.RIGHT,
+            version=right_version,
+        )
 
-        if arm_kind == DexforceW1ArmKind.INDUSTRIAL:
-            w1_left_arm_params = W1ArmKineParams(
-                arm_side=DexforceW1ArmSide.LEFT,
-                arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-                version=left_version,
-            )
-            w1_right_arm_params = W1ArmKineParams(
-                arm_side=DexforceW1ArmSide.RIGHT,
-                arm_kind=DexforceW1ArmKind.INDUSTRIAL,
-                version=right_version,
-            )
-        else:
-            w1_left_arm_params = W1ArmKineParams(
-                arm_side=DexforceW1ArmSide.LEFT,
-                arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-                version=left_version,
-            )
-            w1_right_arm_params = W1ArmKineParams(
-                arm_side=DexforceW1ArmSide.RIGHT,
-                arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
-                version=right_version,
-            )
-
-        left_arm_tcp = left_version_spec.tcp(arm_kind, DexforceW1ArmSide.LEFT)
-        right_arm_tcp = right_version_spec.tcp(arm_kind, DexforceW1ArmSide.RIGHT)
+        left_arm_tcp = left_version_spec.tcp(DexforceW1ArmSide.LEFT)
+        right_arm_tcp = right_version_spec.tcp(DexforceW1ArmSide.RIGHT)
 
         return {
             "right_arm": SRSSolverCfg(
@@ -205,12 +174,11 @@ class DexforceW1Cfg(RobotCfg):
         }
 
     def _build_default_physics_cfgs(
-        self, arm_kind: DexforceW1ArmKind, with_default_eef: bool = True
+        self, with_default_eef: bool = True
     ) -> typing.Dict[str, typing.Any]:
         """Build default physics configurations for DexforceW1.
 
         Args:
-            arm_kind: The arm kind enum.
             with_default_eef: Whether to include default end-effector configurations
 
         Returns:
@@ -225,7 +193,6 @@ class DexforceW1Cfg(RobotCfg):
         DEFAULT_EEF_HAND_JOINT_NAMES = (
             "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)"
         )
-        DEFAULT_EEF_GRIPPER_JOINT_NAMES = "(LEFT|RIGHT)_FINGER[1-2]"
         ARM_JOINTS = "(RIGHT|LEFT)_J[0-9]"
         BODY_JOINTS = "(ANKLE|KNEE|BUTTOCK|WAIST)"
         HEAD_JOINTS = "(NECK1|NECK2)"
@@ -242,11 +209,7 @@ class DexforceW1Cfg(RobotCfg):
         drive_pros = JointDrivePropertiesCfg(**joint_params)
 
         if with_default_eef:
-            eef_joint_names = (
-                DEFAULT_EEF_HAND_JOINT_NAMES
-                if arm_kind == DexforceW1ArmKind.ANTHROPOMORPHIC
-                else DEFAULT_EEF_GRIPPER_JOINT_NAMES
-            )
+            eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
             drive_pros.stiffness.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["stiffness"]}
             )
@@ -279,24 +242,13 @@ class DexforceW1Cfg(RobotCfg):
         """
         from embodichain.lab.sim.robots.dexforce_w1.utils import arm_manager
 
-        if self.arm_kind == DexforceW1ArmKind.INDUSTRIAL:
-            component_type = (
-                DexforceW1Type.LEFT_ARM2
-                if arm_side == DexforceW1ArmSide.LEFT
-                else DexforceW1Type.RIGHT_ARM2
-            )
-        else:
-            component_type = (
-                DexforceW1Type.LEFT_ARM1
-                if arm_side == DexforceW1ArmSide.LEFT
-                else DexforceW1Type.RIGHT_ARM1
-            )
-        version = (self.component_versions or {}).get(component_type, self.version)
-        return arm_manager.get_urdf(
-            kind=self.arm_kind,
-            side=arm_side,
-            version=version,
+        component_type = (
+            DexforceW1Type.LEFT_ARM
+            if arm_side == DexforceW1ArmSide.LEFT
+            else DexforceW1Type.RIGHT_ARM
         )
+        version = (self.component_versions or {}).get(component_type, self.version)
+        return arm_manager.get_urdf(side=arm_side, version=version)
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
@@ -330,16 +282,11 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=5, suppress=True)
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.robots.dexforce_w1.types import (
-        DexforceW1ArmKind,
-    )
 
     config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
     sim = SimulationManager(config)
 
-    cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "anthropomorphic"}
-    )
+    cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
 
     robot = sim.add_robot(cfg=cfg)
     sim.update(step=1)

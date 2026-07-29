@@ -33,7 +33,7 @@ ObjectBaseCfg          uid, init_pos, init_rot, init_local_pose
   │                     disable_self_collision, init_qpos, body_scale,
   │                     build_pk_chain, use_usd_properties
       └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, drive_pros (override default to "force")
-          ├─ DexforceW1Cfg   version, arm_kind, with_default_eef
+          ├─ DexforceW1Cfg   version, with_default_eef
           └─ CobotMagicCfg   (dual-arm defaults)
 ```
 
@@ -46,7 +46,7 @@ Key fields on `RobotCfg`:
 | `solver_cfg` | `SolverCfg \| Dict[str, SolverCfg] \| None` | IK solver config; dict keys must match `control_parts` keys |
 | `drive_pros` | `JointDrivePropertiesCfg` | Default drive type is `"force"` (overrides Articulation's `"none"`) |
 | `attrs` | `RigidBodyAttributesCfg` | Rigid-body physics attributes (mass, friction, damping, ...) |
-| variant fields | `enum \| str \| bool` | Optional subclass fields (e.g. `version`, `arm_kind`, `with_default_eef`) |
+| variant fields | `enum \| str \| bool` | Optional subclass fields (e.g. `version`, `with_default_eef`) |
 | `_pk_urdf_path` | `property \| method → str` | URDF for the FK/IK serial chain (one source, so it can't drift from sim) |
 
 ## The robot config protocol
@@ -134,7 +134,7 @@ Serialization (`to_dict` / `save_to_file`) is inherited — no need to implement
 
 | Robot | Config Class | Module | Structure | Notes |
 |---|---|---|---|---|
-| DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `params.py`, `utils.py`) | Humanoid; versions: V021; arm kinds: ANTHROPOMORPHIC, INDUSTRIAL; component types: chassis, torso, eyes, head, left/right arm/hand |
+| DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `params.py`, `utils.py`) | Humanoid; versioned chassis, torso, head, left/right arm and hand components |
 | CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; uses OPW solver |
 
 ## Common Failure Modes

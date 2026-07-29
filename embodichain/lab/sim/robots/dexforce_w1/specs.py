@@ -20,7 +20,6 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from .types import (
-    DexforceW1ArmKind,
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1Type,
@@ -34,35 +33,21 @@ __all__ = [
 ]
 
 
-_INDUSTRIAL_TCP = (
-    (1.0, 0.0, 0.0, 0.0),
-    (0.0, 1.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, 0.15),
-    (0.0, 0.0, 0.0, 1.0),
-)
-_LEFT_ANTHROPOMORPHIC_TCP = (
+_LEFT_TCP = (
     (-1.0, 0.0, 0.0, 0.012),
     (0.0, 0.0, 1.0, 0.0675),
     (0.0, 1.0, 0.0, 0.127),
     (0.0, 0.0, 0.0, 1.0),
 )
-_RIGHT_ANTHROPOMORPHIC_TCP = (
+_RIGHT_TCP = (
     (1.0, 0.0, 0.0, 0.012),
     (0.0, 0.0, -1.0, -0.0675),
     (0.0, 1.0, 0.0, 0.127),
     (0.0, 0.0, 0.0, 1.0),
 )
 _DEFAULT_TCP = {
-    (DexforceW1ArmKind.INDUSTRIAL, DexforceW1ArmSide.LEFT): _INDUSTRIAL_TCP,
-    (DexforceW1ArmKind.INDUSTRIAL, DexforceW1ArmSide.RIGHT): _INDUSTRIAL_TCP,
-    (
-        DexforceW1ArmKind.ANTHROPOMORPHIC,
-        DexforceW1ArmSide.LEFT,
-    ): _LEFT_ANTHROPOMORPHIC_TCP,
-    (
-        DexforceW1ArmKind.ANTHROPOMORPHIC,
-        DexforceW1ArmSide.RIGHT,
-    ): _RIGHT_ANTHROPOMORPHIC_TCP,
+    DexforceW1ArmSide.LEFT: _LEFT_TCP,
+    DexforceW1ArmSide.RIGHT: _RIGHT_TCP,
 }
 
 
@@ -71,12 +56,11 @@ class W1VersionSpec:
     """Asset layout and calibrated defaults belonging to one W1 revision."""
 
     version: DexforceW1Version
-    supported_arm_kinds: frozenset[DexforceW1ArmKind]
     component_urdfs: dict[DexforceW1Type, str]
-    full_robot_urdfs: dict[DexforceW1ArmKind, str]
-    arm_d_lists: dict[DexforceW1ArmKind, tuple[float, ...]]
-    arm_base_z: dict[DexforceW1ArmKind, float]
-    solver_tcp: dict[tuple[DexforceW1ArmKind, DexforceW1ArmSide], tuple]
+    full_robot_urdf_path: str
+    arm_d_list: tuple[float, ...]
+    arm_base_z: float
+    solver_tcp: dict[DexforceW1ArmSide, tuple]
     eyes_attach_xpos: tuple[tuple[float, ...], ...]
     wrist_camera_rpy: tuple[float, float, float]
     wrist_camera_xyz: tuple[float, float, float]
@@ -86,14 +70,6 @@ class W1VersionSpec:
     @property
     def assembly_name(self) -> str:
         return f"DexforceW1V{self.version.value.removeprefix('v')}"
-
-    def validate_arm_kind(self, arm_kind: DexforceW1ArmKind) -> None:
-        if arm_kind not in self.supported_arm_kinds:
-            supported = ", ".join(kind.value for kind in self.supported_arm_kinds)
-            raise ValueError(
-                f"W1 {self.version.value} does not provide a "
-                f"{arm_kind.value} arm asset. Supported arm kinds: {supported}."
-            )
 
     def component_urdf(self, component_type: DexforceW1Type) -> str:
         try:
@@ -105,9 +81,8 @@ class W1VersionSpec:
             ) from exc
         return self._resolve_local_urdf(urdf_path)
 
-    def full_robot_urdf(self, arm_kind: DexforceW1ArmKind) -> str:
-        self.validate_arm_kind(arm_kind)
-        return self._resolve_local_urdf(self.full_robot_urdfs[arm_kind])
+    def full_robot_urdf(self) -> str:
+        return self._resolve_local_urdf(self.full_robot_urdf_path)
 
     def _resolve_local_urdf(self, registered_path: str) -> str:
         """Resolve a version-specific local asset override when configured."""
@@ -133,32 +108,20 @@ class W1VersionSpec:
             f"'{registered_path}' was not found. Expected {expected}."
         )
 
-    def tcp(
-        self, arm_kind: DexforceW1ArmKind, arm_side: DexforceW1ArmSide
-    ) -> np.ndarray:
-        self.validate_arm_kind(arm_kind)
-        return np.asarray(self.solver_tcp[(arm_kind, arm_side)], dtype=float).copy()
+    def tcp(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
+        return np.asarray(self.solver_tcp[arm_side], dtype=float).copy()
 
     def hand_attach_xpos(
         self,
         brand: DexforceW1HandBrand,
-        arm_kind: DexforceW1ArmKind,
         arm_side: DexforceW1ArmSide,
     ) -> np.ndarray:
         """Return the default transform from the arm flange to an external EEF."""
-        self.validate_arm_kind(arm_kind)
         is_left = arm_side == DexforceW1ArmSide.LEFT
         result = np.eye(4)
         if brand == DexforceW1HandBrand.BRAINCO_HAND:
-            rotations = {
-                (DexforceW1ArmKind.INDUSTRIAL, True): [90, 0, 0],
-                (DexforceW1ArmKind.INDUSTRIAL, False): [90, 0, 180],
-                (DexforceW1ArmKind.ANTHROPOMORPHIC, True): [90, 0, 180],
-                (DexforceW1ArmKind.ANTHROPOMORPHIC, False): [90, 0, 0],
-            }
-            result[:3, :3] = R.from_euler(
-                "xyz", rotations[(arm_kind, is_left)], degrees=True
-            ).as_matrix()
+            rotation = [90, 0, 180] if is_left else [90, 0, 0]
+            result[:3, :3] = R.from_euler("xyz", rotation, degrees=True).as_matrix()
         elif brand == DexforceW1HandBrand.DH_PGC_GRIPPER:
             result[2, 3] = 0.015
             result[:3, :3] = R.from_rotvec([0, 0, 90], degrees=True).as_matrix()
@@ -187,17 +150,15 @@ _V021_COMPONENT_URDFS = {
     DexforceW1Type.TORSO: "DexforceW1TorsoV021/torso.urdf",
     DexforceW1Type.EYES: "DexforceW1EyesV021/eyes.urdf",
     DexforceW1Type.HEAD: "DexforceW1HeadV021/head.urdf",
-    DexforceW1Type.LEFT_ARM1: "DexforceW1LeftArm1V021/left_arm.urdf",
-    DexforceW1Type.RIGHT_ARM1: "DexforceW1RightArm1V021/right_arm.urdf",
-    DexforceW1Type.LEFT_ARM2: "DexforceW1LeftArm2V021/left_arm.urdf",
-    DexforceW1Type.RIGHT_ARM2: "DexforceW1RightArm2V021/right_arm.urdf",
+    DexforceW1Type.LEFT_ARM: "DexforceW1LeftArmV021/left_arm.urdf",
+    DexforceW1Type.RIGHT_ARM: "DexforceW1RightArmV021/right_arm.urdf",
 }
 _V025_COMPONENT_URDFS = {
     DexforceW1Type.CHASSIS: "DexforceW1V025/w1/chassis.urdf",
     DexforceW1Type.TORSO: "DexforceW1V025/w1/torso.urdf",
     DexforceW1Type.HEAD: "DexforceW1V025/w1/head.urdf",
-    DexforceW1Type.LEFT_ARM1: "DexforceW1V025/w1/left_arm.urdf",
-    DexforceW1Type.RIGHT_ARM1: "DexforceW1V025/w1/right_arm.urdf",
+    DexforceW1Type.LEFT_ARM: "DexforceW1V025/w1/left_arm.urdf",
+    DexforceW1Type.RIGHT_ARM: "DexforceW1V025/w1/right_arm.urdf",
 }
 _SHARED_D_LIST = (0.0, 0.0, 0.260, 0.0, 0.166, 0.098, 0.0)
 _EYES_ATTACH_XPOS = (
@@ -212,20 +173,10 @@ _WRIST_CAMERA_XYZ = (0.08, 0.0, 0.06)
 _W1_VERSION_SPECS = {
     DexforceW1Version.V021: W1VersionSpec(
         version=DexforceW1Version.V021,
-        supported_arm_kinds=frozenset(DexforceW1ArmKind),
         component_urdfs=_V021_COMPONENT_URDFS,
-        full_robot_urdfs={
-            DexforceW1ArmKind.ANTHROPOMORPHIC: ("DexforceW1V021/DexforceW1_v02_1.urdf"),
-            DexforceW1ArmKind.INDUSTRIAL: "DexforceW1V021/DexforceW1_v02_2.urdf",
-        },
-        arm_d_lists={
-            DexforceW1ArmKind.ANTHROPOMORPHIC: _SHARED_D_LIST,
-            DexforceW1ArmKind.INDUSTRIAL: _SHARED_D_LIST,
-        },
-        arm_base_z={
-            DexforceW1ArmKind.ANTHROPOMORPHIC: 0.1025,
-            DexforceW1ArmKind.INDUSTRIAL: 0.1025,
-        },
+        full_robot_urdf_path="DexforceW1V021/DexforceW1_v02_1.urdf",
+        arm_d_list=_SHARED_D_LIST,
+        arm_base_z=0.1025,
         solver_tcp=_DEFAULT_TCP,
         eyes_attach_xpos=_EYES_ATTACH_XPOS,
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
@@ -233,21 +184,12 @@ _W1_VERSION_SPECS = {
     ),
     DexforceW1Version.V025: W1VersionSpec(
         version=DexforceW1Version.V025,
-        supported_arm_kinds=frozenset({DexforceW1ArmKind.ANTHROPOMORPHIC}),
         component_urdfs=_V025_COMPONENT_URDFS,
-        full_robot_urdfs={
-            DexforceW1ArmKind.ANTHROPOMORPHIC: "DexforceW1V025/w1/robot.urdf",
-        },
-        arm_d_lists={
-            # Verified against left_arm.urdf/right_arm.urdf in the V025 release.
-            DexforceW1ArmKind.ANTHROPOMORPHIC: _SHARED_D_LIST,
-        },
-        arm_base_z={DexforceW1ArmKind.ANTHROPOMORPHIC: 0.1025},
-        solver_tcp={
-            key: value
-            for key, value in _DEFAULT_TCP.items()
-            if key[0] == DexforceW1ArmKind.ANTHROPOMORPHIC
-        },
+        full_robot_urdf_path="DexforceW1V025/w1/robot.urdf",
+        # Verified against left_arm.urdf/right_arm.urdf in the V025 release.
+        arm_d_list=_SHARED_D_LIST,
+        arm_base_z=0.1025,
+        solver_tcp=_DEFAULT_TCP,
         eyes_attach_xpos=_EYES_ATTACH_XPOS,
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
         wrist_camera_xyz=_WRIST_CAMERA_XYZ,

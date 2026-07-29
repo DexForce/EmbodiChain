@@ -93,6 +93,7 @@ def create_robot(sim: SimulationManager) -> Robot:
     cfg = DexforceW1Cfg.from_dict(
         {
             "uid": "dexforce_w1",
+            "version": "v025",
             "init_pos": [0.4, -0.5, 0.0],
         }
     )

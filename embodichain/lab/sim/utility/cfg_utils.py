@@ -84,7 +84,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
     """
 
     # Only parse keys the base RobotCfg recognizes, so subclass-only variant
-    # fields (version, arm_kind, ...) set by _build_defaults don't trigger
+    # fields (version, ...) set by _build_defaults don't trigger
     # spurious "Key not found in RobotCfg" warnings from the base from_dict.
     # NOTE: check RobotCfg.__dataclass_fields__ (not hasattr(base_cfg, k))
     # because base_cfg is the subclass instance which has subclass-only fields,
@@ -217,7 +217,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                 )
         else:
             # Only apply keys the base RobotCfg.from_dict recognized.
-            # Subclass-only variant fields (e.g. version, arm_kind) are not
+            # Subclass-only variant fields (e.g. version) are not
             # present on a plain RobotCfg and are already set by _build_defaults;
             # skip them instead of raising AttributeError.
             if hasattr(robot_cfg, key):

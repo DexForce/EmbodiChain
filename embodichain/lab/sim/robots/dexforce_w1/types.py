@@ -18,7 +18,6 @@ import enum
 
 __all__ = [
     "DexforceW1Version",
-    "DexforceW1ArmKind",
     "DexforceW1ArmSide",
     "DexforceW1Type",
     "DexforceW1HandBrand",
@@ -30,13 +29,6 @@ class DexforceW1Version(enum.Enum):
 
     V021 = "v021"
     V025 = "v025"
-
-
-class DexforceW1ArmKind(enum.Enum):
-    """Arm type for DexforceW1: anthropomorphic or industrial."""
-
-    ANTHROPOMORPHIC = "anthropomorphic"
-    INDUSTRIAL = "industrial"
 
 
 class DexforceW1ArmSide(enum.Enum):
@@ -53,10 +45,8 @@ class DexforceW1Type(enum.Enum):
     TORSO = "torso"
     EYES = "eyes"
     HEAD = "head"
-    LEFT_ARM1 = "left_arm"  # Anthropomorphic left arm
-    RIGHT_ARM1 = "right_arm"  # Anthropomorphic right arm
-    LEFT_ARM2 = "left_arm2"  # Industrial left arm
-    RIGHT_ARM2 = "right_arm2"  # Industrial right arm
+    LEFT_ARM = "left_arm"
+    RIGHT_ARM = "right_arm"
     LEFT_HAND = "left_hand"
     RIGHT_HAND = "right_hand"
     FULL_BODY = "full_body"  # Full robot

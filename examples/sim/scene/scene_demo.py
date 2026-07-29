@@ -165,7 +165,6 @@ def main():
                     {
                         "uid": "dexforce_w1",
                         "version": "v021",
-                        "arm_kind": "anthropomorphic",
                         "init_pos": [-1, -0.5, 0],
                         "init_rot": [0, 0, 90],
                     }
