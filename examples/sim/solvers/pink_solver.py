@@ -13,161 +13,135 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-import os
+
+"""Demonstrate iterative Pink IK along a Cartesian path."""
+
+from __future__ import annotations
+
+import argparse
 import time
+
 import numpy as np
 import torch
-from IPython import embed
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    maybe_wait_for_user,
+    setup_print_options,
+    shutdown_sim,
+)
 
 
-def main():
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
-
-    # Set up simulation with specified device (CPU or CUDA)
-    sim_device = "cpu"
-    config = SimulationManagerCfg(headless=False, sim_device=sim_device)
-    sim = SimulationManager(config)
-    sim.set_manual_update(False)
-
-    # Load robot URDF file
-    urdf = get_data_path("Rokae/SR5/SR5.urdf")
-
-    assert os.path.isfile(urdf)
-
-    cfg_dict = {
-        "fpath": urdf,
-        "control_parts": {
-            "main_arm": [
-                "joint1",
-                "joint2",
-                "joint3",
-                "joint4",
-                "joint5",
-                "joint6",
-            ],
-        },
-        "solver_cfg": {
-            "main_arm": {
-                "class_type": "PinkSolver",
-                "end_link_name": "ee_link",
-                "root_link_name": "base_link",
-            },
-        },
-    }
-
-    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
-
-    # Define a sample target pose as a 1x4x4 homogeneous matrix
-    rad = torch.deg2rad(torch.tensor(45.0))
-
-    arm_name = "main_arm"
-    fk_qpos = torch.full((1, 6), rad, dtype=torch.float32, device="cpu")
-
-    # Set initial joint positions
-    qpos = torch.from_numpy(np.array([0.0, 0.0, np.pi / 2, 0.0, np.pi / 2, 0.0])).to(
-        fk_qpos.device
+def main() -> None:
+    """Solve a short Cartesian path with Pink."""
+    parser = add_demo_args(
+        argparse.ArgumentParser(description="Run the Pink solver example.")
     )
-    qpos = qpos.unsqueeze(0)
-    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids("main_arm"))
-    import time
-
-    time.sleep(3.0)
-    fk_xpos = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
-    print(f"fk_xpos: {fk_xpos}")
-    start_pose = fk_xpos.clone()[0]  # Start pose
-    end_pose = fk_xpos.clone()[0]  # End pose
-
-    end_pose[:3, 3] = end_pose[:3, 3][:3] + torch.tensor(
-        [0.0, 0.4, 0.0], device=fk_xpos.device
+    parser.add_argument(
+        "--num_steps",
+        "--num-steps",
+        type=int,
+        default=100,
+        help="Number of Cartesian interpolation steps.",
     )
+    args = parser.parse_args()
+    setup_print_options()
 
-    num_steps = 100
-
-    # Interpolate poses between start and end
-    interpolated_poses = [
-        torch.lerp(start_pose, end_pose, t) for t in np.linspace(0, 1, num_steps)
-    ]
-
-    ik_qpos = qpos
-
-    qpos = ik_qpos
-    res, ik_qpos = robot.compute_ik(pose=end_pose, joint_seed=qpos, name=arm_name)
-    import time
-
-    a = time.time()
-    if ik_qpos.dim() == 3:
-        ik_xpos = robot.compute_fk(qpos=ik_qpos[0][0], name=arm_name, to_matrix=True)
-    else:
-        ik_xpos = robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
-    b = time.time()
-    print(f"ik time: {b-a}")
-
-    ik_xpos = ik_xpos
-
-    sim.draw_marker(
-        cfg=MarkerCfg(
-            name="fk_xpos",
-            marker_type="axis",
-            axis_xpos=np.array(end_pose.tolist()),
-            axis_size=0.002,
-            axis_len=0.005,
+    sim = create_default_sim(args, add_default_light=False)
+    try:
+        robot = sim.add_robot(
+            cfg=RobotCfg.from_dict(
+                {
+                    "fpath": get_data_path("Rokae/SR5/SR5.urdf"),
+                    "control_parts": {
+                        "main_arm": [f"joint{i}" for i in range(1, 7)],
+                    },
+                    "solver_cfg": {
+                        "main_arm": {
+                            "class_type": "PinkSolver",
+                            "end_link_name": "ee_link",
+                            "root_link_name": "base_link",
+                        },
+                    },
+                }
+            )
         )
-    )
+        maybe_open_window(sim, args)
 
-    sim.draw_marker(
-        cfg=MarkerCfg(
-            name="ik_xpos",
-            marker_type="axis",
-            axis_xpos=np.array(ik_xpos.tolist()),
-            axis_size=0.002,
-            axis_len=0.005,
+        arm_name = "main_arm"
+        qpos = torch.tensor(
+            [[0.0, 0.0, np.pi / 2, 0.0, np.pi / 2, 0.0]],
+            dtype=torch.float32,
+            device=robot.device,
         )
-    )
-
-    for i, pose in enumerate(interpolated_poses):
-        print(f"Step {i}: Moving to pose:\n{pose}")
-        start_time = time.time()
-        res, ik_qpos = robot.compute_ik(pose=pose, joint_seed=ik_qpos, name=arm_name)
-        end_time = time.time()
-        compute_time = end_time - start_time
-        print(f"Step {i}: IK computation time: {compute_time:.6f} seconds")
-
-        print(f"IK result: {res}, ik_qpos: {ik_qpos}")
-        if not res:
-            print(f"Step {i}: IK failed for pose:\n{pose}")
-            continue
-
-        # Set robot joint positions
-        if ik_qpos.dim() == 3:
-            robot.set_qpos(qpos=ik_qpos[0][0], joint_ids=robot.get_joint_ids(arm_name))
-        else:
-            robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
-
-        # Visualize current pose
-        ik_xpos = robot.compute_fk(qpos=ik_qpos, name=arm_name, to_matrix=True)
-        ik_xpos = ik_xpos
-
+        robot.set_qpos(qpos, joint_ids=robot.get_joint_ids(arm_name))
+        start_pose = robot.compute_fk(
+            qpos=qpos,
+            name=arm_name,
+            to_matrix=True,
+        )
+        target_pose = start_pose.clone()
+        target_pose[:, 1, 3] += 0.4
         sim.draw_marker(
             cfg=MarkerCfg(
-                name=f"ik_xpos_step_{i}",
+                name="pink_target",
                 marker_type="axis",
-                axis_xpos=np.array(ik_xpos.tolist()),
+                axis_xpos=target_pose,
                 axis_size=0.002,
                 axis_len=0.005,
             )
         )
 
-        # Add delay to simulate motion
-        time.sleep(0.005)
+        poses = torch.stack(
+            [
+                torch.lerp(start_pose, target_pose, t)
+                for t in torch.linspace(
+                    0.0,
+                    1.0,
+                    args.num_steps,
+                    device=robot.device,
+                )
+            ],
+            dim=1,
+        )
+        started_at = time.perf_counter()
+        for pose in poses.unbind(dim=1):
+            success, solution = robot.compute_ik(
+                pose=pose,
+                joint_seed=qpos,
+                name=arm_name,
+            )
+            if not torch.as_tensor(success).all():
+                raise RuntimeError("Pink IK failed along the Cartesian path.")
+            qpos = solution[:, 0, :] if solution.dim() == 3 else solution
+            robot.set_qpos(qpos, joint_ids=robot.get_joint_ids(arm_name))
+            sim.update(step=1)
+        print(
+            f"Solved {args.num_steps} Pink IK steps in "
+            f"{time.perf_counter() - started_at:.6f} seconds"
+        )
 
-    embed(header="Test PinkSolver example. Press Ctrl+D to exit.")
+        achieved_pose = robot.compute_fk(
+            qpos=qpos,
+            name=arm_name,
+            to_matrix=True,
+        )
+        sim.draw_marker(
+            cfg=MarkerCfg(
+                name="pink_result",
+                marker_type="axis",
+                axis_xpos=achieved_pose,
+                axis_size=0.002,
+                axis_len=0.005,
+            )
+        )
+        maybe_wait_for_user(args, "Press Enter to exit...")
+    finally:
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

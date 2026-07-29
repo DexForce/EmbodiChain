@@ -17,15 +17,12 @@
 from __future__ import annotations
 
 import argparse
-import time
 from collections.abc import Sequence
 
 import numpy as np
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import (
     MotionGenCfg,
@@ -37,12 +34,20 @@ from embodichain.lab.sim.planners import (
 )
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    setup_print_options,
+    shutdown_sim,
+)
 
 RECORD_WIDTH = 1920
 RECORD_HEIGHT = 1080
 DEFAULT_ARENA_SPACE = 3.0
 DEFAULT_RECORD_TARGET_Z = 0.95
-DEFAULT_RECORD_MAX_MEMORY = 2048
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,35 +55,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate and replay MotionGenerator trajectories for one or more environments."
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--arena-space",
-        type=float,
-        default=DEFAULT_ARENA_SPACE,
-        help="Spacing between replicated tutorial environments.",
-    )
-    parser.add_argument(
-        "--step-delay",
-        type=float,
-        default=0.1,
-        help="Seconds to wait between trajectory waypoints during playback.",
-    )
-    parser.add_argument(
-        "--record-fps",
-        type=int,
-        default=20,
-        help="Output video FPS for headless recording.",
-    )
-    parser.add_argument(
-        "--record-save-path",
-        type=str,
-        default=None,
-        help="Optional mp4 output path for headless recording.",
-    )
-    parser.add_argument(
-        "--disable-record",
-        action="store_true",
-        help="Disable automatic whole-scene recording in headless mode.",
+    add_demo_args(parser)
+    parser.set_defaults(
+        arena_space=DEFAULT_ARENA_SPACE,
+        record_fps=20,
     )
     return parser.parse_args()
 
@@ -183,133 +163,101 @@ def create_demo_trajectory(
     return [qpos_begin, qpos_mid, qpos_final], [xpos_begin, xpos_mid, xpos_final]
 
 
-def start_headless_recording(
-    sim: SimulationManager,
-    args: argparse.Namespace,
-) -> bool:
-    """Start headless viewer recording with a whole-scene camera."""
-    if not args.headless or args.disable_record:
-        return False
-
-    look_at = compute_record_look_at(
-        num_envs=sim.num_envs,
-        arena_space=sim.sim_config.arena_space,
-    )
-    if not sim.start_window_record(
-        save_path=args.record_save_path,
-        fps=args.record_fps,
-        max_memory=DEFAULT_RECORD_MAX_MEMORY,
-        video_prefix="motion_generator_headless",
-        look_at=look_at,
-        use_sim_time=False,
-    ):
-        raise RuntimeError("Failed to start headless recording")
-
-    print("[INFO]: Headless recording enabled.")
-    print(
-        "[INFO]: The output path is reported by `SimulationManager.start_window_record()`."
-    )
-    return True
-
-
 def main() -> None:
     """Run the motion-generator tutorial."""
     args = parse_args()
 
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
+    setup_print_options()
 
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            width=RECORD_WIDTH,
-            height=RECORD_HEIGHT,
-            headless=True,
-            physics_dt=1.0 / 100.0,
-            sim_device=args.device,
-            render_cfg=RenderCfg(renderer=args.renderer),
-            num_envs=args.num_envs,
-            arena_space=args.arena_space,
-        )
+    sim = create_default_sim(
+        args,
+        width=RECORD_WIDTH,
+        height=RECORD_HEIGHT,
+        num_envs=args.num_envs,
+        arena_space=args.arena_space,
+        add_default_light=False,
     )
-
-    robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
-    arm_name = "left_arm"
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
-    if not args.headless:
-        sim.open_window()
-
-    print(
-        f"[INFO]: Running motion generator tutorial with {sim.num_envs} environment(s)"
-    )
-
-    recording_started = start_headless_recording(sim, args)
     try:
-        qpos_list, xpos_list = create_demo_trajectory(
-            robot=robot,
-            arm_name=arm_name,
-            num_envs=sim.num_envs,
+        robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
+        arm_name = "left_arm"
+        maybe_init_gpu_physics(sim)
+        maybe_open_window(sim, args)
+        print(
+            f"[INFO]: Running motion generator tutorial with {sim.num_envs} environment(s)"
         )
 
-        motion_generator = MotionGenerator(
-            cfg=MotionGenCfg(
-                planner_cfg=ToppraPlannerCfg(
-                    robot_uid=robot.uid,
+        look_at = compute_record_look_at(
+            num_envs=sim.num_envs,
+            arena_space=sim.sim_config.arena_space,
+        )
+        with DemoRecording(
+            sim,
+            args,
+            prefix="motion_generator",
+            look_at=look_at,
+        ):
+            qpos_list, xpos_list = create_demo_trajectory(
+                robot=robot,
+                arm_name=arm_name,
+                num_envs=sim.num_envs,
+            )
+
+            motion_generator = MotionGenerator(
+                cfg=MotionGenCfg(
+                    planner_cfg=ToppraPlannerCfg(
+                        robot_uid=robot.uid,
+                    )
                 )
             )
-        )
 
-        options = MotionGenOptions(
-            control_part=arm_name,
-            start_qpos=qpos_list[0],
-            is_interpolate=True,
-            is_linear=False,
-            plan_opts=ToppraPlanOptions(
-                constraints={
-                    "velocity": 0.2,
-                    "acceleration": 0.5,
-                },
-                sample_method=TrajectorySampleMethod.QUANTITY,
-                sample_interval=20,
-            ),
-        )
-
-        joint_plan = motion_generator.generate(
-            target_states=[PlanState.from_qpos(qpos) for qpos in qpos_list],
-            options=options,
-        )
-        if joint_plan.positions is None:
-            raise RuntimeError("Joint-space planning did not produce any positions.")
-        move_robot_along_trajectory(
-            sim=sim,
-            robot=robot,
-            arm_name=arm_name,
-            qpos_trajectory=joint_plan.positions,
-        )
-
-        options.is_linear = True
-        cartesian_plan = motion_generator.generate(
-            target_states=[PlanState.from_xpos(xpos) for xpos in xpos_list],
-            options=options,
-        )
-        if cartesian_plan.positions is None:
-            raise RuntimeError(
-                "Cartesian-space planning did not produce any positions."
+            options = MotionGenOptions(
+                control_part=arm_name,
+                start_qpos=qpos_list[0],
+                is_interpolate=True,
+                is_linear=False,
+                plan_opts=ToppraPlanOptions(
+                    constraints={
+                        "velocity": 0.2,
+                        "acceleration": 0.5,
+                    },
+                    sample_method=TrajectorySampleMethod.QUANTITY,
+                    sample_interval=20,
+                ),
             )
-        sim.reset()
-        move_robot_along_trajectory(
-            sim=sim,
-            robot=robot,
-            arm_name=arm_name,
-            qpos_trajectory=cartesian_plan.positions,
-        )
+
+            joint_plan = motion_generator.generate(
+                target_states=[PlanState.from_qpos(qpos) for qpos in qpos_list],
+                options=options,
+            )
+            if joint_plan.positions is None:
+                raise RuntimeError(
+                    "Joint-space planning did not produce any positions."
+                )
+            move_robot_along_trajectory(
+                sim=sim,
+                robot=robot,
+                arm_name=arm_name,
+                qpos_trajectory=joint_plan.positions,
+            )
+
+            options.is_linear = True
+            cartesian_plan = motion_generator.generate(
+                target_states=[PlanState.from_xpos(xpos) for xpos in xpos_list],
+                options=options,
+            )
+            if cartesian_plan.positions is None:
+                raise RuntimeError(
+                    "Cartesian-space planning did not produce any positions."
+                )
+            sim.reset()
+            move_robot_along_trajectory(
+                sim=sim,
+                robot=robot,
+                arm_name=arm_name,
+                qpos_trajectory=cartesian_plan.positions,
+            )
     finally:
-        if sim.is_window_recording():
-            sim.stop_window_record()
-            sim.wait_window_record_saves()
-        sim.destroy()
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

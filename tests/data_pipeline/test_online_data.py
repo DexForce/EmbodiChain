@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import unittest
+from unittest.mock import Mock
+
 import pytest
 
 import torch
@@ -137,6 +139,29 @@ class TestOnlineDataEngine:
         self.engine = _make_fake_engine()
 
     # -----------------------------------------------------------------------
+
+    def test_start_raises_when_worker_exits_before_initialization(self) -> None:
+        """A failed simulation worker must not leave start() waiting forever."""
+        engine = object.__new__(OnlineDataEngine)
+        engine.cfg = Mock()
+        engine.shared_buffer = Mock()
+        engine._lock_index = Mock()
+        engine._fill_signal = Mock()
+        engine._init_signal = Mock()
+        engine._init_signal.is_set.return_value = False
+        engine._close_signal = Mock()
+
+        process = Mock()
+        process.pid = 1234
+        process.is_alive.return_value = False
+        engine._mp_ctx = Mock()
+        engine._mp_ctx.Process.return_value = process
+
+        with pytest.raises(RuntimeError, match="exited before initializing"):
+            engine.start()
+
+        process.start.assert_called_once()
+        engine._fill_signal.set.assert_called_once()
 
     def test_sample_batch_shape(self) -> None:
         """sample_batch returns TensorDict with shape [batch_size, chunk_size]."""

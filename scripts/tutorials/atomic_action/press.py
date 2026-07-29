@@ -360,17 +360,20 @@ def main() -> None:
     parser = add_demo_args(parser)
     parser.add_argument(
         "--debug_state",
+        "--debug-state",
         action="store_true",
         help="Log the block pose during replay.",
     )
     parser.add_argument(
         "--press_tolerance",
+        "--press-tolerance",
         type=float,
         default=DEFAULT_PRESS_TOLERANCE,
         help="XY tolerance in meters for checking whether press reaches block center.",
     )
     parser.add_argument(
         "--block_pos",
+        "--block-pos",
         type=float,
         nargs=2,
         default=BLOCK_CENTER[:2],

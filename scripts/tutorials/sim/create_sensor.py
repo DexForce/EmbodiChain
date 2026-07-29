@@ -19,21 +19,20 @@ This script demonstrates how to create and simulate a camera sensor attached to 
 It shows how to configure a camera sensor, attach it to the robot's end-effector, and visualize the sensor's output during simulation.
 """
 
+from __future__ import annotations
+
 import argparse
+
+import cv2
 import numpy as np
 import torch
-import cv2
-
-torch.set_printoptions(precision=4, sci_mode=False)
 
 from scipy.spatial.transform import Rotation as R
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -41,12 +40,23 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.data import get_data_path
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
+    setup_print_options,
+    shutdown_sim,
+)
 
 ACTION_SWITCH_INTERVAL = 100
 ACTION_CYCLE_STEPS = 2 * ACTION_SWITCH_INTERVAL
 
 
-def mask_to_color_map(mask, user_ids, fix_seed=True):
+def mask_to_color_map(mask, user_ids):
     """
     Convert instance mask into color map.
     :param mask: Instance mask map.
@@ -78,25 +88,24 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create and simulate a robot in SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     parser.add_argument(
         "--attach_sensor",
+        "--attach-sensor",
         action="store_true",
         help="Attach sensor to robot end-effector",
     )
     args = parser.parse_args()
+    setup_print_options()
 
     # Initialize simulation
     print("Creating simulation...")
-    config = SimulationManagerCfg(
-        headless=True,
-        sim_device=args.device,
+    sim = create_default_sim(
+        args,
         arena_space=3.0,
-        render_cfg=RenderCfg(renderer=args.renderer),
-        physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
+        add_default_light=False,
     )
-    sim = SimulationManager(config)
 
     # Create robot configuration
     robot = create_robot(sim)
@@ -113,15 +122,13 @@ def main():
     sim.add_rigid_object(cfg=cube_cfg)
 
     # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    maybe_init_gpu_physics(sim)
 
     # Open visualization window if not headless
-    if not args.headless:
-        sim.open_window()
+    maybe_open_window(sim, args)
 
     # Run simulation loop
-    run_simulation(sim, robot, sensor)
+    run_simulation(sim, robot, sensor, args)
 
 
 def create_sensor(sim: SimulationManager, args):
@@ -132,7 +139,7 @@ def create_sensor(sim: SimulationManager, args):
 
     # extrinsics params
     pos = [0.09, 0.05, 0.04]
-    quat = R.from_euler("xyz", [-35, 135, 0], degrees=True).as_quat().tolist()
+    quat_xyzw = R.from_euler("xyz", [-35, 135, 0], degrees=True).as_quat()
 
     # If attach_sensor is True, attach to robot end-effector; otherwise, place it in the scene
     if args.attach_sensor:
@@ -140,8 +147,10 @@ def create_sensor(sim: SimulationManager, args):
     else:
         parent = None
         pos = [1.2, -0.2, 1.5]
-        quat = R.from_euler("xyz", [0, 180, 0], degrees=True).as_quat().tolist()
-        quat = [quat[3], quat[0], quat[1], quat[2]]  # Convert to (w, x, y, z)
+        quat_xyzw = R.from_euler("xyz", [0, 180, 0], degrees=True).as_quat()
+
+    # CameraCfg uses (w, x, y, z), while SciPy returns (x, y, z, w).
+    quat = [quat_xyzw[3], *quat_xyzw[:3]]
 
     # create camera sensor and attach to robot end-effector
     camera: Camera = sim.add_sensor(
@@ -271,14 +280,17 @@ def get_sensor_image(camera: Camera, headless=False, step_count=0):
         plt.close(fig)
 
 
-def run_simulation(sim: SimulationManager, robot: Robot, camera: Camera):
+def run_simulation(
+    sim: SimulationManager,
+    robot: Robot,
+    camera: Camera,
+    args: argparse.Namespace,
+) -> None:
     """Run the simulation loop with robot and camera sensor control."""
 
     print("Starting simulation...")
     print("Robot will move through different poses")
     print("Press Ctrl+C to stop")
-
-    step_count = 0
 
     arm_joint_ids = robot.get_joint_ids("arm")
     # Define some target joint positions for demonstration
@@ -299,33 +311,32 @@ def run_simulation(sim: SimulationManager, robot: Robot, camera: Camera):
         .repeat(sim.num_envs, 1)
     )
 
+    def update_target(step: int) -> None:
+        """Move the robot and capture images at each target switch."""
+        cycle_step = (step - 1) % ACTION_CYCLE_STEPS
+
+        if cycle_step == 0:
+            robot.set_qpos(qpos=arm_position1, joint_ids=arm_joint_ids)
+            print("Moving to arm position 1")
+
+            get_sensor_image(camera, headless=args.headless, step_count=step)
+
+        if cycle_step == ACTION_SWITCH_INTERVAL:
+            robot.set_qpos(qpos=arm_position2, joint_ids=arm_joint_ids)
+            print("Moving to arm position 2")
+
+            get_sensor_image(camera, headless=args.headless, step_count=step)
+
     try:
-        while True:
-            # Update physics
-            sim.update(step=1)
-            cycle_step = step_count % ACTION_CYCLE_STEPS
-
-            if cycle_step == 0:
-                robot.set_qpos(qpos=arm_position1, joint_ids=arm_joint_ids)
-                print(f"Moving to arm position 1")
-
-                # Refresh and get image from sensor
-                get_sensor_image(camera)
-
-            if cycle_step == ACTION_SWITCH_INTERVAL:
-                robot.set_qpos(qpos=arm_position2, joint_ids=arm_joint_ids)
-                print(f"Moving to arm position 2")
-
-                # Refresh and get image from sensor
-                get_sensor_image(camera)
-
-            step_count += 1
-
-    except KeyboardInterrupt:
-        print("Stopping simulation...")
+        with DemoRecording(sim, args, prefix="create_sensor"):
+            run_simulation_loop(
+                sim,
+                max_steps=resolve_demo_steps(args),
+                on_step=update_target,
+            )
     finally:
         print("Cleaning up...")
-        sim.destroy()
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

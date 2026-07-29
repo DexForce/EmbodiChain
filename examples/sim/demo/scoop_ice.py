@@ -22,8 +22,6 @@ and performs a scoop ice task in a simulated environment.
 from __future__ import annotations
 
 import argparse
-import time
-
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
@@ -45,9 +43,12 @@ from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
     add_demo_args,
     create_default_sim,
     maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
     setup_print_options,
 )
 from embodichain.utils import logger
@@ -81,17 +82,15 @@ class ScoopIceDemo(DemoBase):
 
     def run(self) -> None:
         """Grasp the scoop, perform the scoop task, then keep the sim live."""
-        self._scoop_grasp()
-        self._scoop_ice()
-
-        logger.log_info("\n Press Ctrl+C to exit simulation loop.")
-        if self.args.auto_play:
-            return
-        try:
-            while True:
-                time.sleep(1e-2)
-        except KeyboardInterrupt:
-            logger.log_info("\n Exit")
+        with DemoRecording(self.sim, self.args, prefix="scoop_ice"):
+            self._scoop_grasp()
+            self._scoop_ice()
+            logger.log_info("\n Press Ctrl+C to exit simulation loop.")
+            run_simulation_loop(
+                self.sim,
+                max_steps=resolve_demo_steps(self.args),
+                sleep=1e-2,
+            )
 
     def _randomize_ice_positions(self) -> None:
         """Randomly drop ice cubes into the container within a specified range."""

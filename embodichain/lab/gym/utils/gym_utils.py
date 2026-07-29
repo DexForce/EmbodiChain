@@ -816,6 +816,7 @@ def add_env_launcher_args_to_parser(
     """
     parser.add_argument(
         "--num_envs",
+        "--num-envs",
         help="The number of environments to run in parallel. "
         "If not given, falls back to the gym config's `num_envs` (default 1).",
         default=1,
@@ -844,12 +845,14 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--arena_space",
+        "--arena-space",
         help="The size of the arena space.",
         default=5.0,
         type=float,
     )
     parser.add_argument(
         "--gpu_id",
+        "--gpu-id",
         help="The GPU ID to use for the simulation.",
         default=0,
         type=int,

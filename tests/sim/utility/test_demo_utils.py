@@ -25,6 +25,7 @@ import torch
 from unittest.mock import Mock, call, patch
 
 from embodichain.lab.sim.utility.demo_utils import (
+    DEFAULT_DEMO_LOOK_AT,
     DemoRecording,
     add_demo_args,
     create_default_sim,
@@ -33,6 +34,8 @@ from embodichain.lab.sim.utility.demo_utils import (
     maybe_open_window,
     maybe_wait_for_user,
     replay_trajectory,
+    resolve_demo_steps,
+    run_simulation_loop,
     setup_print_options,
     shutdown_sim,
 )
@@ -41,12 +44,34 @@ from embodichain.lab.sim.utility.demo_utils import (
 def test_add_demo_args_adds_expected_flags():
     parser = argparse.ArgumentParser()
     parser = add_demo_args(parser)
-    args = parser.parse_args(["--headless", "--auto_play", "--record_fps", "60"])
+    args = parser.parse_args(
+        [
+            "--headless",
+            "--auto-play",
+            "--record-fps",
+            "60",
+            "--num-envs",
+            "2",
+            "--arena-space",
+            "3.0",
+            "--gpu-id",
+            "1",
+        ]
+    )
     assert args.headless is True
     assert args.auto_play is True
     assert args.record_fps == 60
     assert args.record_steps is None
     assert args.no_vis_eef_axis is False
+    assert args.num_envs == 2
+    assert args.arena_space == 3.0
+    assert args.gpu_id == 1
+
+
+def test_add_demo_args_rejects_non_positive_record_steps():
+    parser = add_demo_args(argparse.ArgumentParser())
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--record_steps", "0"])
 
 
 def test_format_tensor_rounds_and_moves_to_cpu():
@@ -69,8 +94,29 @@ def test_shutdown_sim_calls_destroy():
     sim.destroy.assert_called_once()
 
 
+def test_shutdown_sim_finishes_active_recording_before_destroy():
+    sim = Mock(
+        spec=[
+            "destroy",
+            "is_window_recording",
+            "stop_window_record",
+            "wait_window_record_saves",
+        ]
+    )
+    sim.is_window_recording.return_value = True
+
+    shutdown_sim(sim)
+
+    assert sim.method_calls == [
+        call.is_window_recording(),
+        call.stop_window_record(),
+        call.wait_window_record_saves(),
+        call.destroy(),
+    ]
+
+
 def test_create_default_sim_forwards_num_envs_and_headless():
-    args = SimpleNamespace(headless=True, device="cpu", renderer="auto")
+    args = SimpleNamespace(headless=True, device="cpu", renderer="auto", gpu_id=2)
     with (
         patch("embodichain.lab.sim.SimulationManager") as mock_sm,
         patch("embodichain.lab.sim.SimulationManagerCfg") as mock_cfg_cls,
@@ -79,6 +125,7 @@ def test_create_default_sim_forwards_num_envs_and_headless():
     cfg_kwargs = mock_cfg_cls.call_args.kwargs
     assert cfg_kwargs["num_envs"] == 4
     assert cfg_kwargs["headless"] is True
+    assert cfg_kwargs["gpu_id"] == 2
     mock_sm.assert_called_once_with(mock_cfg_cls.return_value)
 
 
@@ -155,7 +202,7 @@ def test_demo_recording_starts_and_stops_window_record():
     assert call_kwargs["video_prefix"] == "demo"
     assert "/tmp/recordings" in call_kwargs["save_path"]
     assert call_kwargs["save_path"].endswith(".mp4")
-    assert call_kwargs["look_at"] is None
+    assert call_kwargs["look_at"] == DEFAULT_DEMO_LOOK_AT
     sim.stop_window_record.assert_called_once()
     sim.wait_window_record_saves.assert_called_once()
 
@@ -174,6 +221,22 @@ def test_demo_recording_passes_look_at():
         pass
     call_kwargs = sim.start_window_record.call_args.kwargs
     assert call_kwargs["look_at"] == look_at
+
+
+def test_demo_recording_uses_exact_mp4_path():
+    sim = _make_recording_sim()
+    args = SimpleNamespace(
+        record_steps=10,
+        record_fps=30,
+        record_save_path="/tmp/custom_demo.mp4",
+        auto_play=False,
+        headless=False,
+    )
+    with DemoRecording(sim, args, prefix="ignored"):
+        pass
+    call_kwargs = sim.start_window_record.call_args.kwargs
+    assert call_kwargs["save_path"] == "/tmp/custom_demo.mp4"
+    assert call_kwargs["look_at"] is None
 
 
 def test_demo_recording_warns_and_skips_on_start_failure():
@@ -218,6 +281,42 @@ def test_maybe_wait_for_user_skips_when_auto_play():
     with patch("builtins.input") as mock_input:
         maybe_wait_for_user(args, "Press enter")
     mock_input.assert_not_called()
+
+
+def test_resolve_demo_steps_prefers_explicit_record_steps():
+    args = SimpleNamespace(auto_play=True, record_steps=12)
+    assert resolve_demo_steps(args, auto_play_steps=5) == 12
+
+
+def test_resolve_demo_steps_makes_auto_play_finite():
+    assert (
+        resolve_demo_steps(
+            SimpleNamespace(auto_play=True, record_steps=None),
+            auto_play_steps=5,
+        )
+        == 5
+    )
+    assert (
+        resolve_demo_steps(SimpleNamespace(auto_play=False, record_steps=None)) is None
+    )
+
+
+def test_run_simulation_loop_updates_until_limit_and_calls_hook():
+    sim = Mock(spec=["update", "num_envs"])
+    sim.num_envs = 2
+    on_step = Mock()
+
+    completed = run_simulation_loop(
+        sim,
+        max_steps=3,
+        steps_per_update=2,
+        log_interval=None,
+        on_step=on_step,
+    )
+
+    assert completed == 3
+    assert sim.update.call_args_list == [call(step=2), call(step=2), call(step=2)]
+    assert on_step.call_args_list == [call(1), call(2), call(3)]
 
 
 def test_replay_trajectory_sets_qpos_and_updates_sim():

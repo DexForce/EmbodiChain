@@ -14,41 +14,68 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
-import numpy as np
-from IPython import embed
+"""Analyze the sampled joint-space workspace of DexForce W1."""
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from __future__ import annotations
+
+import argparse
+
 from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_open_window,
+    maybe_wait_for_user,
+    setup_print_options,
+    shutdown_sim,
+)
 from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
     WorkspaceAnalyzer,
 )
 
+
+def main() -> None:
+    """Run joint-space workspace analysis."""
+    parser = add_demo_args(
+        argparse.ArgumentParser(description="Analyze the W1 joint workspace.")
+    )
+    parser.add_argument(
+        "--num_samples",
+        "--num-samples",
+        type=int,
+        default=30000,
+        help="Number of joint configurations to sample.",
+    )
+    args = parser.parse_args()
+    setup_print_options()
+
+    sim = create_default_sim(args, add_default_light=False)
+    try:
+        sim.set_manual_update(False)
+        robot = sim.add_robot(
+            cfg=DexforceW1Cfg.from_dict(
+                {
+                    "uid": "dexforce_w1",
+                    "version": "v021",
+                    "arm_kind": "industrial",
+                }
+            )
+        )
+        maybe_open_window(sim, args)
+        print("DexforceW1 robot added to the simulation.")
+
+        results = WorkspaceAnalyzer(robot=robot, sim_manager=sim).analyze(
+            num_samples=args.num_samples,
+            visualize=not args.headless,
+        )
+        print("\nJoint Space Results:")
+        print(f"  Valid points: {results['num_valid']} / {results['num_samples']}")
+        print(f"  Analysis time: {results['analysis_time']:.2f}s")
+        print(f"  Metrics: {results['metrics']}")
+        maybe_wait_for_user(args, "Press Enter to exit...")
+    finally:
+        shutdown_sim(sim)
+
+
 if __name__ == "__main__":
-    # Example usage
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
-
-    config = SimulationManagerCfg(headless=False, sim_device="cpu")
-    sim_manager = SimulationManager(config)
-    sim_manager.set_manual_update(False)
-
-    cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"}
-    )
-    robot = sim_manager.add_robot(cfg=cfg)
-    print("DexforceW1 robot added to the simulation.")
-
-    print("Example: Joint Space Analysis")
-
-    wa_joint = WorkspaceAnalyzer(robot=robot, sim_manager=sim_manager)
-    results_joint = wa_joint.analyze(num_samples=30000, visualize=True)
-
-    print(f"\nJoint Space Results:")
-    print(
-        f"  Valid points: {results_joint['num_valid']} / {results_joint['num_samples']}"
-    )
-    print(f"  Analysis time: {results_joint['analysis_time']:.2f}s")
-    print(f"  Metrics: {results_joint['metrics']}")
-
-    embed(header="End of Joint Space Analysis Example")
+    main()

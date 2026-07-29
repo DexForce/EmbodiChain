@@ -26,7 +26,7 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Robot
@@ -43,8 +43,17 @@ __all__ = [
     "maybe_open_window",
     "maybe_wait_for_user",
     "maybe_pause_for_inspection",
+    "DEFAULT_DEMO_LOOK_AT",
+    "resolve_demo_steps",
+    "run_simulation_loop",
     "replay_trajectory",
 ]
+
+DEFAULT_DEMO_LOOK_AT = (
+    (2.6, -2.2, 1.6),
+    (0.0, 0.0, 0.45),
+    (0.0, 0.0, 1.0),
+)
 
 
 def add_demo_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -61,26 +70,36 @@ def add_demo_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     add_env_launcher_args_to_parser(parser)
     parser.add_argument(
         "--auto_play",
+        "--auto-play",
         action="store_true",
         help="Skip interactive prompts and run the demo automatically.",
     )
     parser.add_argument(
         "--record_steps",
-        type=int,
+        "--record-steps",
+        type=_positive_int,
         default=None,
-        help="Number of simulation steps to record. If None, no recording is started.",
+        help=(
+            "Number of simulation updates to record. Continuous demos also use "
+            "this as their run limit. If omitted, recording is disabled."
+        ),
     )
     parser.add_argument(
         "--record_fps",
-        type=int,
+        "--record-fps",
+        type=_positive_int,
         default=30,
         help="Frames per second for the recorded video.",
     )
     parser.add_argument(
         "--record_save_path",
+        "--record-save-path",
         type=str,
         default=None,
-        help="Directory to save recorded videos. Defaults to ./recordings.",
+        help=(
+            "Output .mp4 path or directory for recorded videos. "
+            "Defaults to ./recordings."
+        ),
     )
     parser.add_argument(
         "--no_vis_eef_axis",
@@ -88,6 +107,14 @@ def add_demo_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help="Disable end-effector axis visualization.",
     )
     return parser
+
+
+def _positive_int(value: str) -> int:
+    """Parse a strictly positive integer for an argparse option."""
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
 
 
 def create_default_sim(
@@ -127,6 +154,7 @@ def create_default_sim(
         physics_dt=physics_dt,
         arena_space=arena_space,
         num_envs=num_envs,
+        gpu_id=getattr(args, "gpu_id", 0),
     )
     sim = SimulationManager(cfg)
     if add_default_light:
@@ -147,7 +175,16 @@ def shutdown_sim(sim: SimulationManager) -> None:
     Args:
         sim: The simulation manager to destroy.
     """
-    sim.destroy()
+    # Recording owns renderer resources and must finish before teardown. Use
+    # attribute checks so this helper remains useful with lightweight test
+    # doubles and older SimulationManager implementations.
+    is_recording = getattr(sim, "is_window_recording", None)
+    try:
+        if callable(is_recording) and is_recording():
+            sim.stop_window_record()
+            sim.wait_window_record_saves()
+    finally:
+        sim.destroy()
 
 
 def setup_print_options() -> None:
@@ -191,7 +228,8 @@ class DemoRecording:
         args: Parsed command-line arguments. Expected to contain
             ``record_steps``, ``record_fps`` and ``record_save_path``.
         prefix: Prefix used for the generated video filename.
-        look_at: Optional camera look-at tuple for the recording.
+        look_at: Optional camera look-at tuple for the recording. Headless
+            recording uses :data:`DEFAULT_DEMO_LOOK_AT` when omitted.
     """
 
     def __init__(
@@ -204,7 +242,11 @@ class DemoRecording:
         self.sim = sim
         self.args = args
         self.prefix = prefix
-        self.look_at = look_at
+        self.look_at = (
+            DEFAULT_DEMO_LOOK_AT
+            if look_at is None and getattr(args, "headless", False)
+            else look_at
+        )
         self.is_active = False
 
     def __enter__(self) -> DemoRecording:
@@ -216,10 +258,14 @@ class DemoRecording:
         import warnings
         from pathlib import Path
 
-        save_dir = Path(self.args.record_save_path or "./recordings")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = str(save_dir / f"{self.prefix}_{timestamp}.mp4")
+        requested_path = Path(self.args.record_save_path or "./recordings")
+        if requested_path.suffix.lower() == ".mp4":
+            requested_path.parent.mkdir(parents=True, exist_ok=True)
+            save_path = str(requested_path)
+        else:
+            requested_path.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = str(requested_path / f"{self.prefix}_{timestamp}.mp4")
 
         original_width = self.sim.sim_config.width
         original_height = self.sim.sim_config.height
@@ -288,6 +334,108 @@ def maybe_pause_for_inspection(args: argparse.Namespace) -> None:
         args: Parsed arguments containing ``auto_play``.
     """
     maybe_wait_for_user(args, "Demo finished. Press Enter to exit...")
+
+
+def resolve_demo_steps(
+    args: argparse.Namespace,
+    *,
+    auto_play_steps: int = 300,
+) -> int | None:
+    """Resolve the run limit for a continuous demo.
+
+    Explicit ``--record_steps`` takes precedence. ``--auto_play`` uses a
+    finite default so non-interactive smoke runs terminate on their own.
+    Interactive runs remain open until interrupted.
+
+    Args:
+        args: Parsed demo arguments.
+        auto_play_steps: Default update count used by ``--auto_play``.
+
+    Returns:
+        Maximum number of updates, or ``None`` for an interactive run.
+
+    Raises:
+        ValueError: If ``auto_play_steps`` is not positive.
+    """
+    if auto_play_steps < 1:
+        raise ValueError("auto_play_steps must be at least 1")
+    record_steps = getattr(args, "record_steps", None)
+    if record_steps is not None:
+        return record_steps
+    return auto_play_steps if getattr(args, "auto_play", False) else None
+
+
+def run_simulation_loop(
+    sim: SimulationManager,
+    *,
+    max_steps: int | None = None,
+    steps_per_update: int = 1,
+    sleep: float = 0.0,
+    log_interval: int | None = 100,
+    on_step: Callable[[int], None] | None = None,
+) -> int:
+    """Run a standard simulation update loop.
+
+    The function intentionally does not destroy ``sim``; callers should use
+    :class:`~embodichain.lab.sim.demo_base.DemoBase` or ``try/finally`` so
+    setup failures and loop failures share the same cleanup path.
+
+    Args:
+        sim: Simulation manager to update.
+        max_steps: Optional number of update calls before returning.
+        steps_per_update: Physics steps advanced by each update call.
+        sleep: Optional wall-clock delay after each update.
+        log_interval: Print aggregate FPS every this many updates. Set to
+            ``None`` to disable progress logging.
+        on_step: Optional callback receiving the one-based update count.
+
+    Returns:
+        Number of completed update calls.
+
+    Raises:
+        ValueError: If a numeric loop option is outside its valid range.
+    """
+    if max_steps is not None and max_steps < 1:
+        raise ValueError("max_steps must be at least 1")
+    if steps_per_update < 1:
+        raise ValueError("steps_per_update must be at least 1")
+    if sleep < 0:
+        raise ValueError("sleep must be non-negative")
+    if log_interval is not None and log_interval < 1:
+        raise ValueError("log_interval must be at least 1")
+
+    started_at = time.monotonic()
+    last_log_at = started_at
+    last_log_step = 0
+    step_count = 0
+
+    try:
+        while max_steps is None or step_count < max_steps:
+            sim.update(step=steps_per_update)
+            step_count += 1
+            if on_step is not None:
+                on_step(step_count)
+            if sleep:
+                time.sleep(sleep)
+
+            if log_interval is not None and step_count % log_interval == 0:
+                now = time.monotonic()
+                elapsed = now - last_log_at
+                fps = (
+                    sim.num_envs
+                    * (step_count - last_log_step)
+                    * steps_per_update
+                    / elapsed
+                    if elapsed > 0
+                    else 0.0
+                )
+                print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
+                last_log_at = now
+                last_log_step = step_count
+    except KeyboardInterrupt:
+        print("\n[INFO]: Stopping simulation...")
+
+    return step_count
 
 
 def replay_trajectory(

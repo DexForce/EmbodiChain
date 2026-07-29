@@ -42,6 +42,7 @@ from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
     add_demo_args,
     create_default_sim,
     maybe_init_gpu_physics,
@@ -89,10 +90,10 @@ class PickUpClothDemo(DemoBase):
 
         maybe_wait_for_user(self.args, "Press Enter to start grabbing cloth...")
 
-        n_waypoint = grab_traj.shape[1]
-        for i in range(n_waypoint):
-            self.robot.set_qpos(grab_traj[:, i, :])
-            self.sim.update(step=3)
+        with DemoRecording(self.sim, self.args, prefix="pick_up_cloth"):
+            for qpos in grab_traj.unbind(dim=1):
+                self.robot.set_qpos(qpos)
+                self.sim.update(step=3)
 
         maybe_wait_for_user(self.args, "Press Enter to exit the simulation...")
 

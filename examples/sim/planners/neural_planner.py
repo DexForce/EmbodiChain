@@ -31,9 +31,8 @@ import numpy as np
 import torch
 
 from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.planners import (
@@ -45,12 +44,20 @@ from embodichain.lab.sim.planners import (
     PlanState,
 )
 from embodichain.lab.sim.planners.neural_planner import NeuralPlanOptions
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    shutdown_sim,
+)
 
 
 def parse_args() -> argparse.Namespace:
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser = argparse.ArgumentParser(description="NeuralPlanner waypoint example")
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     parser.set_defaults(device=default_device, arena_space=2.0)
     parser.add_argument(
         "--num-waypoints",
@@ -203,25 +210,21 @@ def main() -> None:
         resolved_device.index if resolved_device.type == "cuda" else int(args.gpu_id)
     )
     assert effective_gpu_id is not None
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            headless=args.headless,
-            sim_device=sim_device,
-            num_envs=args.num_envs,
-            arena_space=args.arena_space,
-            gpu_id=effective_gpu_id,
-            render_cfg=RenderCfg(renderer=args.renderer),
-        )
+    args.device = sim_device
+    args.gpu_id = effective_gpu_id
+    sim = create_default_sim(
+        args,
+        num_envs=args.num_envs,
+        arena_space=args.arena_space,
+        add_default_light=False,
     )
     try:
         robot = create_franka(sim)
         arm_name = "arm"
         device = robot.device
 
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
-        if not args.headless:
-            sim.open_window()
+        maybe_init_gpu_physics(sim)
+        maybe_open_window(sim, args)
 
         start_qpos = torch.tensor(
             [0.0, -np.pi / 4, 0.0, -3 * np.pi / 4, 0.0, np.pi / 2, np.pi / 4],
@@ -278,21 +281,22 @@ def main() -> None:
                 f"NeuralPlanner failed for environment(s) {failed_env_ids}."
             )
 
-        play_trajectory(
-            sim,
-            robot,
-            arm_name,
-            result.positions,
-            step_repeat=args.step_repeat,
-        )
-        sim.update(step=args.hold_steps)
+        with DemoRecording(sim, args, prefix="neural_planner"):
+            play_trajectory(
+                sim,
+                robot,
+                arm_name,
+                result.positions,
+                step_repeat=args.step_repeat,
+            )
+            sim.update(step=args.hold_steps)
 
         if args.interactive:
             from IPython import embed
 
             embed(header="NeuralPlanner example. Press Ctrl+D to exit.")
     finally:
-        sim.destroy()
+        shutdown_sim(sim)
         SimulationManager.flush_cleanup_queue()
 
 

@@ -14,9 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
-import numpy as np
+"""Minimal Gym environment with random joint-space reach commands."""
+
+from __future__ import annotations
+
+import argparse
+import time
+
 import gymnasium as gym
+import numpy as np
+import torch
 
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.sim import SimulationManagerCfg
@@ -34,6 +41,7 @@ from embodichain.lab.gym.utils.registration import register_env
 
 @register_env("RandomReach-v1", override=True)
 class RandomReachEnv(BaseEnv):
+    """Environment that moves a UR10 toward random joint targets."""
 
     robot_init_qpos = np.array(
         [1.57079, -1.57079, 1.57079, -1.57079, -1.57079, -3.14159]
@@ -41,18 +49,21 @@ class RandomReachEnv(BaseEnv):
 
     def __init__(
         self,
-        num_envs=1,
-        headless=False,
-        device="cpu",
-        renderer="hybrid",
+        num_envs: int = 1,
+        headless: bool = False,
+        device: str = "cpu",
+        renderer: str = "hybrid",
+        gpu_id: int = 0,
+        arena_space: float = 2.0,
         **kwargs,
-    ):
+    ) -> None:
         env_cfg = EnvCfg(
             sim_cfg=SimulationManagerCfg(
                 headless=headless,
-                arena_space=2.0,
+                arena_space=arena_space,
                 sim_device=device,
                 render_cfg=RenderCfg(renderer=renderer),
+                gpu_id=gpu_id,
             ),
             num_envs=num_envs,
         )
@@ -113,10 +124,8 @@ class RandomReachEnv(BaseEnv):
         return obs
 
 
-if __name__ == "__main__":
-    import argparse
-    import time
-
+def main() -> None:
+    """Run a short random-reach throughput demo."""
     from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
     parser = argparse.ArgumentParser(
@@ -131,50 +140,41 @@ if __name__ == "__main__":
         headless=args.headless,
         device=args.device,
         renderer=args.renderer,
+        gpu_id=args.gpu_id,
+        arena_space=args.arena_space,
     )
 
-    for episode in range(10):
-        print("Episode:", episode)
-        env.reset()
-        start_time = time.time()
-        total_steps = 0
-
-        for i in range(100):
-            action = env.action_space.sample()
-            action = torch.as_tensor(
-                action, dtype=torch.float32, device=env.get_wrapper_attr("device")
+    try:
+        device = env.get_wrapper_attr("device")
+        num_envs = env.get_wrapper_attr("num_envs")
+        init_pose = (
+            torch.as_tensor(
+                env.unwrapped.robot_init_qpos,
+                dtype=torch.float32,
+                device=device,
             )
+            .unsqueeze(0)
+            .repeat(num_envs, 1)
+        )
 
-            init_pose = env.unwrapped.robot_init_qpos
-            init_pose = (
-                torch.as_tensor(
-                    init_pose,
-                    dtype=torch.float32,
-                    device=env.get_wrapper_attr("device"),
-                )
-                .unsqueeze_(0)
-                .repeat(env.get_wrapper_attr("num_envs"), 1)
-            )
-            action = (
-                init_pose
-                + torch.rand_like(
-                    action, dtype=torch.float32, device=env.get_wrapper_attr("device")
-                )
-                * 0.2
-                - 0.1
-            )
+        for episode in range(10):
+            print("Episode:", episode)
+            env.reset()
+            started_at = time.perf_counter()
 
-            obs, reward, done, truncated, info = env.step(action)
-            total_steps += env.get_wrapper_attr("num_envs")
+            for _ in range(100):
+                action = init_pose + torch.rand_like(init_pose) * 0.2 - 0.1
+                env.step(action)
 
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        if elapsed_time > 0:
-            fps = total_steps / elapsed_time
-            print(f"Total steps: {total_steps}")
-            print(f"Elapsed time: {elapsed_time:.2f} seconds")
-            print(f"FPS: {fps:.2f}")
-        else:
-            print("Elapsed time is too short to calculate FPS.")
+            elapsed = time.perf_counter() - started_at
+            total_steps = 100 * num_envs
+            if elapsed > 0:
+                print(f"Total steps: {total_steps}")
+                print(f"Elapsed time: {elapsed:.2f} seconds")
+                print(f"FPS: {total_steps / elapsed:.2f}")
+    finally:
+        env.close()
 
-    env.close()
+
+if __name__ == "__main__":
+    main()

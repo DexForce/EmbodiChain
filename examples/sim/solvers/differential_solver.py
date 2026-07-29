@@ -13,237 +13,174 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-import os
+
+"""Demonstrate batched differential IK on an SR5 robot."""
+
+from __future__ import annotations
+
+import argparse
 import time
+
 import numpy as np
 import torch
-from IPython import embed
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.cfg import MarkerCfg, RobotCfg
+from embodichain.lab.sim.utility.demo_utils import (
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    maybe_wait_for_user,
+    setup_print_options,
+    shutdown_sim,
+)
+
+TARGET_OFFSETS = (
+    (0.3, 0.0, 0.0),
+    (0.2, -0.2, 0.0),
+    (0.0, 0.0, 0.2),
+    (0.2, 0.0, 0.2),
+    (-0.3, 0.0, 0.0),
+    (-0.2, 0.2, 0.0),
+    (0.0, 0.0, -0.2),
+    (-0.2, 0.0, -0.2),
+    (0.1, 0.1, -0.1),
+)
 
 
-def main(visualize: bool = True):
-    np.set_printoptions(precision=5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
-
-    # Set up simulation with specified device (CPU or CUDA)
-    sim_device = "cpu"
-    num_envs = 9  # Number of parallel arenas/environments
-    config = SimulationManagerCfg(
-        headless=False, sim_device=sim_device, arena_space=1.5, num_envs=num_envs
+def main() -> None:
+    """Solve and replay one Cartesian path per environment."""
+    parser = add_demo_args(
+        argparse.ArgumentParser(description="Run batched differential IK.")
     )
-    sim = SimulationManager(config)
-    sim.set_manual_update(False)
-
-    # Load robot URDF file
-    urdf = get_data_path("Rokae/SR5/SR5.urdf")
-    assert os.path.isfile(urdf)
-
-    # Robot configuration
-    cfg_dict = {
-        "fpath": urdf,
-        "control_parts": {
-            "main_arm": [
-                "joint1",
-                "joint2",
-                "joint3",
-                "joint4",
-                "joint5",
-                "joint6",
-            ],
-        },
-        "solver_cfg": {
-            "main_arm": {
-                "class_type": "DifferentialSolver",
-                "end_link_name": "ee_link",
-                "root_link_name": "base_link",
-            },
-        },
-    }
-
-    robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
-
-    # Prepare initial joint positions for all environments
-    rad = torch.deg2rad(torch.tensor(45.0))
-    arm_name = "main_arm"
-    fk_qpos = torch.full((num_envs, 6), rad, dtype=torch.float32, device="cpu")
-    # All envs start with the same qpos (can be randomized)
-    qpos = torch.from_numpy(np.array([0.0, 0.0, np.pi / 2, 0.0, np.pi / 2, 0.0])).to(
-        fk_qpos.device
+    parser.set_defaults(num_envs=9)
+    parser.add_argument(
+        "--num_steps",
+        "--num-steps",
+        type=int,
+        default=100,
+        help="Number of Cartesian interpolation steps.",
     )
-    qpos = qpos.unsqueeze(0).repeat(num_envs, 1)
-    robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
+    args = parser.parse_args()
+    setup_print_options()
 
-    time.sleep(3.0)
-    fk_xpos = robot.compute_fk(
-        qpos=qpos, name=arm_name, to_matrix=True
-    )  # (num_envs, 4, 4)
-
-    # Prepare batch start and end poses for all envs
-    start_pose = fk_xpos.clone()  # (num_envs, 4, 4)
-    end_pose = fk_xpos.clone()
-    move_vecs = torch.tensor(
-        [
-            [0.3, 0.0, 0.0],
-            [0.2, -0.2, 0.0],
-            [0.0, 0.0, 0.2],
-            [0.2, 0.0, 0.2],
-            [-0.3, 0.0, 0.0],
-            [-0.2, 0.2, 0.0],
-            [0.0, 0.0, -0.2],
-            [-0.2, 0.0, -0.2],
-            [0.1, 0.1, -0.1],
-        ],
-        dtype=end_pose.dtype,
-        device=end_pose.device,
+    sim = create_default_sim(
+        args,
+        num_envs=args.num_envs,
+        arena_space=1.5,
+        add_default_light=False,
     )
-    end_pose[
-        :, :3, 3
-    ] += move_vecs  # Move each env's end-effector in a different direction
-
-    num_steps = 100
-    # Interpolate poses for each env
-    interpolated_poses = torch.stack(
-        [torch.lerp(start_pose, end_pose, t) for t in np.linspace(0, 1, num_steps)],
-        dim=1,
-    )  # (num_envs, num_steps, 4, 4)
-
-    # Initial joint positions for all envs
-    ik_qpos = qpos.clone()
-
-    ik_qpos_results = []
-    ik_success_flags = []
-
-    ik_compute_begin = time.time()
-    # Batch IK solving for each step
-    for step in range(num_steps):
-        poses = interpolated_poses[:, step, :, :]  # (num_envs, 4, 4)
-        if poses.shape[0] != num_envs:
-            poses = poses.expand(num_envs, *poses.shape[1:])
-        if ik_qpos.shape[0] != num_envs:
-            ik_qpos = ik_qpos.expand(num_envs, *ik_qpos.shape[1:])
-        assert (
-            poses.shape[0] == num_envs
-        ), f"poses batch mismatch: {poses.shape[0]} vs {num_envs}"
-        assert (
-            ik_qpos.shape[0] == num_envs
-        ), f"ik_qpos batch mismatch: {ik_qpos.shape[0]} vs {num_envs}"
-
-        # Parallel batch IK solving
-        res, ik_qpos_new = robot.compute_ik(
-            pose=poses, joint_seed=ik_qpos, name=arm_name
+    try:
+        robot = sim.add_robot(
+            cfg=RobotCfg.from_dict(
+                {
+                    "fpath": get_data_path("Rokae/SR5/SR5.urdf"),
+                    "control_parts": {
+                        "main_arm": [f"joint{i}" for i in range(1, 7)],
+                    },
+                    "solver_cfg": {
+                        "main_arm": {
+                            "class_type": "DifferentialSolver",
+                            "end_link_name": "ee_link",
+                            "root_link_name": "base_link",
+                        },
+                    },
+                }
+            )
         )
-        ik_qpos_results.append(ik_qpos_new.clone())
-        ik_success_flags.append(res)
-        ik_qpos = ik_qpos_new  # Update joint seed
-    ik_compute_end = time.time()
-    print(
-        f"IK compute time for {num_steps} steps and {num_envs} envs: {ik_compute_end - ik_compute_begin:.4f} seconds"
-    )
+        maybe_init_gpu_physics(sim)
+        maybe_open_window(sim, args)
 
-    # Collect visualization data for all steps and environments
-    if visualize:
-        draw_data = [[] for _ in range(num_envs)]
-    for env_id in range(num_envs):
-        for step in range(num_steps):
-            ik_qpos_new = ik_qpos_results[step]
-            ik_xpos = robot.compute_fk(qpos=ik_qpos_new, name=arm_name, to_matrix=True)
-            local_pose = robot._entities[env_id].get_world_pose()
-            if visualize:
-                fk_axis = local_pose @ end_pose[env_id].cpu().numpy()
-                ik_axis = local_pose @ ik_xpos[env_id].cpu().numpy()
-                local_axis = local_pose @ ik_xpos[env_id].cpu().numpy()
-
-                draw_data[env_id].append(
-                    {
-                        "step": step,
-                        "fk_axis": fk_axis,
-                        "ik_axis": ik_axis,
-                        "local_axis": local_axis,
-                    }
+        arm_name = "main_arm"
+        qpos = torch.tensor(
+            [0.0, 0.0, np.pi / 2, 0.0, np.pi / 2, 0.0],
+            dtype=torch.float32,
+            device=robot.device,
+        ).repeat(args.num_envs, 1)
+        robot.set_qpos(qpos, joint_ids=robot.get_joint_ids(arm_name))
+        start_pose = robot.compute_fk(
+            qpos=qpos,
+            name=arm_name,
+            to_matrix=True,
+        )
+        target_pose = start_pose.clone()
+        offsets = torch.tensor(
+            [
+                TARGET_OFFSETS[env_id % len(TARGET_OFFSETS)]
+                for env_id in range(args.num_envs)
+            ],
+            dtype=target_pose.dtype,
+            device=target_pose.device,
+        )
+        target_pose[:, :3, 3] += offsets
+        poses = torch.stack(
+            [
+                torch.lerp(start_pose, target_pose, t)
+                for t in torch.linspace(
+                    0.0,
+                    1.0,
+                    args.num_steps,
+                    device=robot.device,
                 )
+            ],
+            dim=1,
+        )
 
-    if visualize:
-        # Batch draw all steps' data for each environment
-        for env_id in range(num_envs):
-            # Only draw fk_axis and ik_axis once per env (first step)
-            fk_axis = draw_data[env_id][0]["fk_axis"]
-            ik_axis = draw_data[env_id][0]["ik_axis"]
-
-            sim.draw_marker(
-                cfg=MarkerCfg(
-                    name=f"fk_axis_env{env_id}",
-                    marker_type="axis",
-                    axis_xpos=fk_axis,
-                    axis_size=0.002,
-                    axis_len=0.005,
-                    arena_index=env_id,
-                )
+        qpos_history = []
+        success_history = []
+        seed = qpos
+        started_at = time.perf_counter()
+        for pose in poses.unbind(dim=1):
+            success, solution = robot.compute_ik(
+                pose=pose,
+                joint_seed=seed,
+                name=arm_name,
             )
+            seed = solution[:, 0, :] if solution.dim() == 3 else solution
+            qpos_history.append(seed.clone())
+            success_history.append(torch.as_tensor(success, device=robot.device))
+        print(
+            f"Solved {args.num_steps} x {args.num_envs} differential IK targets in "
+            f"{time.perf_counter() - started_at:.4f} seconds"
+        )
 
-            sim.draw_marker(
-                cfg=MarkerCfg(
-                    name=f"ik_axis_env{env_id}",
-                    marker_type="axis",
-                    axis_xpos=ik_axis,
-                    axis_size=0.002,
-                    axis_len=0.005,
-                    arena_index=env_id,
-                )
-            )
-
-            # Draw the whole local_axis trajectory as a single call
-            local_axes = np.stack(
-                [item["local_axis"] for item in draw_data[env_id]], axis=0
-            )  # (num_steps, 4, 4) or (num_steps, 3)
-
-            sim.draw_marker(
-                cfg=MarkerCfg(
-                    name=f"local_axis_env{env_id}_trajectory",
-                    marker_type="axis",
-                    axis_xpos=local_axes,
-                    axis_size=0.002,
-                    axis_len=0.005,
-                    arena_index=env_id,
-                )
-            )
-
-    # Optionally, set qpos for each step (replay or animate)
-    for step in range(num_steps):
-        ik_qpos_new = ik_qpos_results[step]
-        res = ik_success_flags[step]
-        # Only set qpos for successful IK results
-        if isinstance(res, (list, np.ndarray, torch.Tensor)):
-            for env_id, success in enumerate(res):
-                if success:
-                    q = (
-                        ik_qpos_new[env_id]
-                        if ik_qpos_new.dim() == 3
-                        else ik_qpos_new[env_id]
+        final_pose = robot.compute_fk(
+            qpos=qpos_history[-1],
+            name=arm_name,
+            to_matrix=True,
+        )
+        if not args.no_vis_eef_axis:
+            for env_id in range(args.num_envs):
+                for suffix, pose in (
+                    ("target", target_pose[env_id]),
+                    ("result", final_pose[env_id]),
+                ):
+                    sim.draw_marker(
+                        cfg=MarkerCfg(
+                            name=f"differential_{suffix}_{env_id}",
+                            marker_type="axis",
+                            axis_xpos=pose,
+                            axis_size=0.002,
+                            axis_len=0.005,
+                            arena_index=env_id,
+                        )
                     )
-                    robot.set_qpos(
-                        qpos=q,
-                        joint_ids=robot.get_joint_ids(arm_name),
-                        env_ids=[env_id],
-                    )
-        else:
-            # fallback: set all
-            if ik_qpos_new.dim() == 3:
-                robot.set_qpos(
-                    qpos=ik_qpos_new[:, 0, :], joint_ids=robot.get_joint_ids(arm_name)
-                )
-            else:
-                robot.set_qpos(
-                    qpos=ik_qpos_new, joint_ids=robot.get_joint_ids(arm_name)
-                )
-        time.sleep(0.005)
 
-    embed(header="Test DifferentialSolver example. Press Ctrl+D to exit.")
+        joint_ids = robot.get_joint_ids(arm_name)
+        for solution, success in zip(qpos_history, success_history):
+            success_ids = success.nonzero(as_tuple=True)[0]
+            if success_ids.numel():
+                robot.set_qpos(
+                    solution[success_ids],
+                    joint_ids=joint_ids,
+                    env_ids=success_ids,
+                )
+            sim.update(step=1)
+        maybe_wait_for_user(args, "Press Enter to exit...")
+    finally:
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":
-    main(visualize=True)
+    main()

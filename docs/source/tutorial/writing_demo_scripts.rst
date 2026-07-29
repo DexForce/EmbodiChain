@@ -19,7 +19,9 @@ The layer has two parts:
     These helpers build on top of
     :func:`~embodichain.lab.gym.utils.gym_utils.add_env_launcher_args_to_parser`; they
     add demo-specific flags (``--auto_play``, ``--record_steps``, ``--record_fps``,
-    ``--record_save_path``, ``--no_vis_eef_axis``) rather than replacing it.
+    ``--record_save_path``, ``--no_vis_eef_axis``) rather than replacing it. Common
+    multi-word options accept both underscore and hyphen spellings, for example
+    ``--record_steps`` and ``--record-steps``.
 
 Command-line Arguments
 ----------------------
@@ -37,20 +39,23 @@ standard launcher arguments plus the demo flags above:
     parser = add_demo_args(parser)
     args = parser.parse_args()
 
-``--auto_play`` skips every interactive ``input()`` prompt (see :ref:`the helpers <demo-window-helpers>`)
-so the demo can run end-to-end in CI or headless. ``--record_steps`` enables video recording
-for that many steps (see :ref:`recording <demo-recording>`).
+``--auto_play`` skips every interactive ``input()`` prompt (see
+:ref:`the helpers <demo-window-helpers>`) so the demo can run end-to-end in CI or
+headless. For continuous demos it also selects a finite default run length.
+``--record_steps`` enables video recording and gives continuous demos an explicit
+simulation-update limit (see :ref:`recording <demo-recording>`).
 
 Creating and Tearing Down the Simulation
 -----------------------------------------
 
 :func:`~embodichain.lab.sim.utility.demo_utils.create_default_sim` builds a
 :class:`~embodichain.lab.sim.SimulationManager` from the parsed ``args``
-(``headless``, ``device``, ``renderer``) with sensible defaults and optionally a main
-light. Pass ``num_envs`` for parallel-environment demos, and ``add_default_light=False``
-if you want to set up your own lighting.
+(``headless``, ``device``, ``renderer``, ``gpu_id``) with sensible defaults and
+optionally a main light. Pass ``num_envs`` for parallel-environment demos, and
+``add_default_light=False`` if you want to set up your own lighting.
 
-:func:`~embodichain.lab.sim.utility.demo_utils.shutdown_sim` calls ``sim.destroy()``.
+:func:`~embodichain.lab.sim.utility.demo_utils.shutdown_sim` finishes any active
+recording and calls ``sim.destroy()``.
 **Always** destroy the simulation before the process exits, otherwise the interpreter
 segfaults (exit 139) during teardown.
 
@@ -70,6 +75,11 @@ same code path works for interactive and ``--auto_play`` runs:
   ``input(prompt)`` unless ``--auto_play``.
 - :func:`~embodichain.lab.sim.utility.demo_utils.maybe_pause_for_inspection` - the same,
   with an end-of-demo prompt.
+- :func:`~embodichain.lab.sim.utility.demo_utils.resolve_demo_steps` - resolves an
+  explicit recording limit or a finite ``--auto_play`` limit while leaving interactive
+  runs unbounded.
+- :func:`~embodichain.lab.sim.utility.demo_utils.run_simulation_loop` - runs the common
+  update/FPS loop with optional sleep, step callback, and maximum update count.
 
 .. _demo-recording:
 
@@ -79,8 +89,10 @@ Recording
 :class:`~embodichain.lab.sim.utility.demo_utils.DemoRecording` is a context manager that
 starts window recording when ``args.record_steps`` is set, generates a timestamped file
 name under ``--record_save_path`` (default ``./recordings``), and stops + flushes the
-video on exit. If recording fails to start it warns and continues instead of aborting the
-demo.
+video on exit. A path ending in ``.mp4`` is used as the exact output path; other paths are
+treated as output directories. Headless runs use a default fixed camera when the caller
+does not provide ``look_at``. If recording fails to start it warns and continues instead
+of aborting the demo.
 
 .. code-block:: python
 
@@ -149,25 +161,25 @@ runs in a ``finally`` block, and exposes :meth:`main` to drive the lifecycle:
     if __name__ == "__main__":
         main()
 
-Because :meth:`~embodichain.lab.sim.demo_base.DemoBase.main` wraps :meth:`run` in
-``try / finally``, the simulation is always destroyed - even if :meth:`run` raises or the
-user interrupts with ``Ctrl+C``.
+Because :meth:`~embodichain.lab.sim.demo_base.DemoBase.main` wraps both :meth:`setup`
+and :meth:`run` in ``try / finally``, the simulation is always destroyed - even if setup
+fails after allocating the simulation, :meth:`run` raises, or the user interrupts with
+``Ctrl+C``.
 
 .. tip::
-    Demos that keep the viewer open until ``Ctrl+C`` should guard the keep-alive loop with
-    ``if not self.args.auto_play:`` so ``--auto_play`` runs terminate and can be used in
-    integration tests.
+    Demos that keep the viewer open until ``Ctrl+C`` should use
+    ``run_simulation_loop(..., max_steps=resolve_demo_steps(args))`` so interactive runs
+    stay open while ``--auto_play`` and ``--record_steps`` runs terminate automatically.
 
 Reference Implementations
 -------------------------
 
 The migrated demo scripts are good references:
 
-- ``scripts/tutorials/atomic_action/`` - the six atomic-action tutorials
-  (``move_joints``, ``move_end_effector``, ``pickup``, ``place``, ``move_held_object``,
-  ``press``) all use ``DemoBase``.
+- ``scripts/tutorials/atomic_action/`` - the atomic-action tutorials use the shared
+  argument, recording, and cleanup conventions; the single-arm demos use ``DemoBase``.
 - ``examples/sim/demo/`` - ``press_softbody``, ``pick_up_cloth``, ``grasp_cup_to_caffe``
   and ``scoop_ice`` use ``DemoBase`` for lifecycle and the shared helpers for args,
   recording and cleanup.
-- ``scripts/tutorials/atomic_action/tutorial_utils.py`` re-exports the generic helpers
-  alongside UR5+gripper-specific configuration.
+- ``scripts/tutorials/sim/`` and the focused examples under ``examples/sim/`` show the
+  flat-function style for short scene, sensor, solver, gizmo, and planner demos.

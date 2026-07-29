@@ -339,12 +339,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--n_sample",
+        "--n-sample",
         type=int,
         default=10000,
         help="Number of samples for antipodal grasp generation.",
     )
     parser.add_argument(
         "--force_reannotate",
+        "--force-reannotate",
         action="store_true",
         help="Force grasp region re-annotation instead of using cached data.",
     )
@@ -356,6 +358,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--custom_approach_direction",
+        "--custom-approach-direction",
         type=float,
         nargs=3,
         default=None,

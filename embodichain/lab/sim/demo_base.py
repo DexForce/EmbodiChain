@@ -60,8 +60,8 @@ class DemoBase(ABC):
 
     def main(self) -> None:
         """Run the full demo lifecycle."""
-        self.setup()
         try:
+            self.setup()
             self.run()
         finally:
             self.cleanup()

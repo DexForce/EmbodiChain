@@ -18,24 +18,32 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It supports loading kitchen/factory/office scenes via EmbodiChainDataset.
 """
 
+from __future__ import annotations
+
 import argparse
-import time
-from pathlib import Path
 import math
+from pathlib import Path
+
 import embodichain.utils.logger as logger
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    RigidBodyAttributesCfg,
     LightCfg,
-    RobotCfg,
-    URDFCfg,
+    RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.data.assets.scene_assets import SceneData
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
+    shutdown_sim,
+)
 
 
 def resolve_asset_path(scene_name: str) -> str:
@@ -54,7 +62,7 @@ def resolve_asset_path(scene_name: str) -> str:
         logger.log_info(f"Using local asset: {local_gltf}")
         return str(local_gltf)
 
-    scene_data = SceneData()
+    SceneData()
 
     extracted_dir = Path(EMBODICHAIN_DEFAULT_DATA_ROOT) / "extract" / "SceneData"
     glb_path = extracted_dir / f"{scene_name}.glb"
@@ -72,22 +80,24 @@ def resolve_asset_path(scene_name: str) -> str:
     )
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+) -> None:
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     try:
-        while True:
-            time.sleep(0.01)
-    except KeyboardInterrupt:
-        logger.log_info("\n Stopping simulation...")
+        with DemoRecording(sim, args, prefix=f"scene_{args.scene}"):
+            run_simulation_loop(
+                sim,
+                max_steps=resolve_demo_steps(args),
+                sleep=0.01,
+            )
     finally:
-        sim.destroy()
+        shutdown_sim(sim)
         logger.log_info("Simulation terminated successfully.")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
@@ -98,7 +108,7 @@ def main():
         choices=["kitchen", "factory", "office", "local"],
         help="Choose which scene to load",
     )
-    add_env_launcher_args_to_parser(parser)
+    add_demo_args(parser)
     args = parser.parse_args()
 
     logger.log_info(f"Initializing scene '{args.scene}'")
@@ -111,24 +121,20 @@ def main():
         print(f"Failed to download or resolve scene asset: {e}")
         return
 
-    sim_cfg = SimulationManagerCfg(
+    sim = create_default_sim(
+        args,
         width=1920,
         height=1080,
-        headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=10.0,
+        add_default_light=False,
     )
-    sim = SimulationManager(sim_cfg)
 
     num_lights = 8
     radius = 5
     height = 8
     intensity = 50
-    lights = []
-
     for i in range(num_lights):
         angle = 2 * math.pi * i / num_lights
         x = radius * math.cos(angle)
@@ -136,7 +142,7 @@ def main():
         z = height
         uid = f"l{i+1}"
         cfg = LightCfg(uid=uid, intensity=intensity, radius=600, init_pos=[x, y, z])
-        lights.append(sim.add_light(cfg))
+        sim.add_light(cfg)
 
     physics_attrs = RigidBodyAttributesCfg(
         mass=10,
@@ -147,7 +153,7 @@ def main():
 
     try:
         logger.log_info(f"Loading scene asset into simulation: {asset_path}")
-        scene_obj: RigidObject = sim.add_rigid_object(
+        sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid=args.scene,
                 shape=MeshCfg(fpath=asset_path),
@@ -160,7 +166,7 @@ def main():
         if args.scene == "factory":
             from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 
-            w1_robot: Robot = sim.add_robot(
+            sim.add_robot(
                 cfg=DexforceW1Cfg.from_dict(
                     {
                         "uid": "dexforce_w1",
@@ -174,15 +180,17 @@ def main():
 
     except Exception as e:
         logger.log_info(f"Failed to load scene asset: {e}")
+        shutdown_sim(sim)
         return
 
     logger.log_info(f"Scene '{args.scene}' setup complete!")
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    sim.open_window()
+    maybe_init_gpu_physics(sim)
+    maybe_open_window(sim, args)
 
-    run_simulation(sim)
+    run_simulation(sim, args)
 
 
 if __name__ == "__main__":

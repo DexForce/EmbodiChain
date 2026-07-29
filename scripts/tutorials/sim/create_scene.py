@@ -22,14 +22,24 @@ It shows the basic setup of simulation context, adding objects, and sensors.
 """
 
 import argparse
-import time
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
+from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
+    add_demo_args,
+    create_default_sim,
+    maybe_init_gpu_physics,
+    maybe_open_window,
+    run_simulation_loop,
+    shutdown_sim,
+)
+
+DEFAULT_HEADLESS_STEPS = 1000
+RECORD_LOOK_AT = ((2.6, -2.2, 1.6), (0.0, 0.0, 0.45), (0.0, 0.0, 1.0))
 
 
 def main():
@@ -39,46 +49,21 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--record-steps",
-        type=int,
-        default=1000,
-        help="Number of simulation steps to record before exiting in headless mode.",
-    )
-    parser.add_argument(
-        "--record-fps",
-        type=int,
-        default=20,
-        help="Output video FPS for headless recording.",
-    )
-    parser.add_argument(
-        "--record-save-path",
-        type=str,
-        default=None,
-        help="Optional mp4 output path for headless recording.",
-    )
+    add_demo_args(parser)
+    parser.set_defaults(record_fps=20)
     args = parser.parse_args()
+    if args.headless and args.record_steps is None:
+        args.record_steps = DEFAULT_HEADLESS_STEPS
 
-    # Configure the simulation
-    sim_cfg = SimulationManagerCfg(
-        width=1920,
-        height=1080,
-        headless=True,
-        physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
-        render_cfg=RenderCfg(
-            renderer=args.renderer,
-        ),
+    sim = create_default_sim(
+        args,
         num_envs=args.num_envs,
         arena_space=3.0,
+        add_default_light=False,
     )
 
-    # Create the simulation instance
-    sim = SimulationManager(sim_cfg)
-
     # Add cube object to the scene
-    cube: RigidObject = sim.add_rigid_object(
+    sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
@@ -95,7 +80,7 @@ def main():
 
     # Add chair object to the scene
     path = get_data_path("Chair/chair.glb")
-    chair: RigidObject = sim.add_rigid_object(
+    sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="chair",
             shape=MeshCfg(fpath=path),
@@ -114,84 +99,33 @@ def main():
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
+    maybe_init_gpu_physics(sim)
+    maybe_open_window(sim, args)
 
-    if args.headless:
-        if not sim.start_window_record(
-            save_path=args.record_save_path,
-            fps=args.record_fps,
-            max_memory=2048,
-            video_prefix="create_scene_headless",
-            look_at=((2.6, -2.2, 1.6), (0.0, 0.0, 0.45), (0.0, 0.0, 1.0)),
-        ):
-            raise RuntimeError("Failed to start headless recording")
-        print("[INFO]: Headless recording enabled.")
-        print(
-            "[INFO]: The output path is reported by `SimulationManager.start_window_record()`."
-        )
-        print(f"[INFO]: Running {args.record_steps} steps before exporting the video")
-
-    # Run the simulation
-    run_simulation(
-        sim,
-        max_steps=args.record_steps if args.headless else None,
-    )
+    run_simulation(sim, args)
 
 
 def run_simulation(
     sim: SimulationManager,
-    max_steps: int | None = None,
-):
+    args: argparse.Namespace,
+) -> None:
     """Run the simulation loop.
 
     Args:
         sim: The SimulationManager instance to run.
-        max_steps: Optional maximum number of simulation steps to execute.
+        args: Parsed demo arguments.
     """
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
-    step_count = 0
-
     try:
-        last_time = time.time()
-        last_step = 0
-        while True:
-            # Update physics simulation
-            sim.update(step=1)
-            step_count += 1
-
-            # Print FPS every second
-            if step_count % 100 == 0:
-                current_time = time.time()
-                elapsed = current_time - last_time
-                fps = (
-                    sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
-                )
-                print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
-                last_time = current_time
-                last_step = step_count
-
-            if max_steps is not None and step_count >= max_steps:
-                print(
-                    f"[INFO]: Reached {max_steps} steps. Exporting headless recording..."
-                )
-                break
-
-    except KeyboardInterrupt:
-        print("\n[INFO]: Stopping simulation...")
+        with DemoRecording(
+            sim,
+            args,
+            prefix="create_scene",
+            look_at=RECORD_LOOK_AT,
+        ):
+            run_simulation_loop(sim, max_steps=args.record_steps)
     finally:
-        if sim.is_window_recording():
-            sim.stop_window_record()
-            sim.wait_window_record_saves()
-
-        # Clean up resources
-        sim.destroy()
+        shutdown_sim(sim)
 
 
 if __name__ == "__main__":

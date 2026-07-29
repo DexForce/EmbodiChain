@@ -40,10 +40,13 @@ from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.utility.demo_utils import (
+    DemoRecording,
     add_demo_args,
     create_default_sim,
     maybe_init_gpu_physics,
     maybe_open_window,
+    resolve_demo_steps,
+    run_simulation_loop,
     setup_print_options,
 )
 from embodichain.utils import logger
@@ -75,16 +78,14 @@ class GraspCupToCaffeDemo(DemoBase):
 
     def run(self) -> None:
         """Execute the grasp-and-place trajectory and keep the sim live."""
-        self._run_simulation()
-
-        logger.log_info("\n Press Ctrl+C to exit simulation loop.")
-        if self.args.auto_play:
-            return
-        try:
-            while True:
-                self.sim.update(step=10)
-        except KeyboardInterrupt:
-            logger.log_info("\n Exit")
+        with DemoRecording(self.sim, self.args, prefix="grasp_cup_to_caffe"):
+            self._run_simulation()
+            logger.log_info("\n Press Ctrl+C to exit simulation loop.")
+            run_simulation_loop(
+                self.sim,
+                max_steps=resolve_demo_steps(self.args),
+                steps_per_update=10,
+            )
 
     def _create_robot(self) -> Robot:
         """Create and configure the dexforce_w1 robot.

@@ -50,3 +50,18 @@ def test_demo_base_cleanup_runs_even_if_run_raises():
     with pytest.raises(RuntimeError, match="boom"):
         demo.main()
     demo.sim.destroy.assert_called_once()
+
+
+def test_demo_base_cleanup_runs_even_if_setup_raises_after_creating_sim():
+    class BrokenSetupDemo(DemoBase):
+        def setup(self):
+            self.sim = Mock(spec=["destroy"])
+            raise RuntimeError("setup failed")
+
+        def run(self):
+            raise AssertionError("run must not be called")
+
+    demo = BrokenSetupDemo(SimpleNamespace())
+    with pytest.raises(RuntimeError, match="setup failed"):
+        demo.main()
+    demo.sim.destroy.assert_called_once()
