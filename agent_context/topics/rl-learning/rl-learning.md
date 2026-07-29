@@ -60,8 +60,9 @@ It bridges reward, joint-state, and end-effector gradients from
 `newton.eval_fk` and a Warp tape into PyTorch. It is not a dynamics simulator
 or a task implementation for NMG.
 
-The training demo samples new initial joints and FK-reachable targets for every
-update, then evaluates the learned policy on held-out random seeds:
+The training demo runs APG through `DifferentiableTrainer`, samples new initial
+joints and FK-reachable targets for every update, then evaluates the learned
+policy on held-out random seeds:
 
 ```bash
 python -m embodichain.learning.rl.experimental.newton.train_planar_reach \

@@ -92,10 +92,16 @@ class _NewtonPlanarReachStep(torch.autograd.Function):
             device=model.device,
             requires_grad=True,
         )
-        target_xy_wp = wp.from_torch(
+        target_xy_source_wp = wp.from_torch(
             sim_state["target_xy"].detach().reshape(-1).contiguous(),
             dtype=wp.float32,
         )
+        target_xy_wp = wp.empty(
+            num_envs * 2,
+            dtype=wp.float32,
+            device=model.device,
+        )
+        wp.copy(target_xy_wp, target_xy_source_wp)
         reward_wp = wp.zeros(
             num_envs,
             dtype=wp.float32,
@@ -142,6 +148,7 @@ class _NewtonPlanarReachStep(torch.autograd.Function):
         ctx.current_q_wp = current_q_wp
         ctx.next_q_wp = next_q_wp
         ctx.reward_wp = reward_wp
+        ctx.target_xy_wp = target_xy_wp
         ctx.fk_state = fk_state
         ctx.end_indices = end_indices
         ctx.action_shape = action.shape

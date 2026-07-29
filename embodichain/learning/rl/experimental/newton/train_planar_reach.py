@@ -29,6 +29,10 @@ from embodichain.learning.rl.collector import (
     DifferentiableCollector,
     DifferentiableRollout,
 )
+from embodichain.learning.rl.differentiable_trainer import (
+    DifferentiableTrainer,
+    DifferentiableTrainerCfg,
+)
 from embodichain.learning.rl.models import ActorOnly, MLP
 from embodichain.utils import configclass
 
@@ -81,7 +85,7 @@ def train_planar_reach(
             device=cfg.device,
             action_scale=cfg.action_scale,
             success_threshold=0.0,
-            max_episode_steps=cfg.horizon + 1,
+            max_episode_steps=cfg.horizon,
             initial_joint_scale=cfg.initial_joint_scale,
             target_joint_scale=cfg.target_joint_scale,
         )
@@ -115,16 +119,26 @@ def train_planar_reach(
         ),
         policy,
     )
-    train_collector = DifferentiableCollector(train_env, policy, device)
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            segment_length=cfg.horizon,
+            deterministic_actions=True,
+        ),
+        train_env,
+        policy,
+        algorithm,
+    )
     eval_collector = DifferentiableCollector(eval_env, policy, device)
 
     initial_metrics = _evaluate(eval_collector, cfg)
-    skipped_updates = 0
-    for update in range(cfg.num_updates):
-        train_collector.reset(seed=cfg.seed if update == 0 else None)
-        rollout = train_collector.collect(cfg.horizon, deterministic=True)
-        update_metrics = algorithm.update(rollout)
-        skipped_updates += int(update_metrics["skipped_update"])
+    trainer.collector.reset(seed=cfg.seed)
+    training_summary = trainer.train(
+        total_timesteps=cfg.num_updates * cfg.horizon * cfg.num_envs
+    )
+    skipped_updates = sum(
+        int(entry["train/skipped_update"])
+        for entry in training_summary["train_history"]
+    )
 
     final_metrics = _evaluate(eval_collector, cfg)
     return {
@@ -132,7 +146,8 @@ def train_planar_reach(
         "eval_seed": cfg.eval_seed,
         "eval_samples": cfg.eval_batches * cfg.num_envs,
         "num_envs": cfg.num_envs,
-        "num_updates": cfg.num_updates,
+        "num_updates": training_summary["num_updates"],
+        "global_step": training_summary["global_step"],
         "horizon": cfg.horizon,
         "initial_return": initial_metrics["return"],
         "final_return": final_metrics["return"],

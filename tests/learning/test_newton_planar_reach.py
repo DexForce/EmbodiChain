@@ -162,6 +162,34 @@ def test_newton_reward_gradient_matches_finite_difference() -> None:
     assert analytic_gradient == pytest.approx(finite_difference, rel=2e-3, abs=2e-3)
 
 
+def test_auto_reset_keeps_reward_gradient_target_snapshot() -> None:
+    env = NewtonPlanarReachEnv(
+        NewtonPlanarReachEnvCfg(
+            num_envs=2,
+            device="cpu",
+            max_episode_steps=1,
+            success_threshold=0.0,
+        )
+    )
+    env.reset(seed=7)
+    action = torch.tensor([[0.1, -0.2], [0.05, 0.15]], requires_grad=True)
+    _, reward, _, truncated, _ = env.step(action)
+    reward.sum().backward()
+    analytic_gradient = action.grad[0, 0].item()
+
+    epsilon = 1e-3
+    positive = action.detach().clone()
+    negative = action.detach().clone()
+    positive[0, 0] += epsilon
+    negative[0, 0] -= epsilon
+    finite_difference = (_reward_at(env, positive) - _reward_at(env, negative)) / (
+        2.0 * epsilon
+    )
+
+    assert truncated.all()
+    assert analytic_gradient == pytest.approx(finite_difference, rel=2e-3, abs=2e-3)
+
+
 def test_detach_state_preserves_values_and_removes_graph() -> None:
     env = NewtonPlanarReachEnv(
         NewtonPlanarReachEnvCfg(
@@ -299,6 +327,8 @@ def test_apg_training_generalizes_to_held_out_reaches() -> None:
     )
 
     assert result["skipped_updates"] == 0
+    assert result["num_updates"] == 300
+    assert result["global_step"] == 300 * 16 * 32
     assert result["final_return"] > result["initial_return"]
     assert (
         result["final_mean_min_distance"] < 0.25 * result["initial_mean_min_distance"]
