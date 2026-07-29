@@ -56,8 +56,9 @@ APG directly with `DifferentiableTrainer`.
 ### Newton Reference
 
 `experimental/newton/planar_reach.py` is an FK-only two-link test environment.
-It bridges `newton.eval_fk` and Warp tape gradients into PyTorch. It is not a
-dynamics simulator or a task implementation for NMG.
+It bridges reward, joint-state, and end-effector gradients from
+`newton.eval_fk` and a Warp tape into PyTorch. It is not a dynamics simulator
+or a task implementation for NMG.
 
 The training demo samples new initial joints and FK-reachable targets for every
 update, then evaluates the learned policy on held-out random seeds:
@@ -68,7 +69,7 @@ python -m embodichain.learning.rl.experimental.newton.train_planar_reach \
 ```
 
 With the default seeds, 600 updates improve the mean minimum distance from
-`1.85` to `0.049` and reach a `73.0%` success rate across 512 held-out samples
+`1.85` to `0.039` and reach an `86.7%` success rate across 512 held-out samples
 at the `0.05` threshold. Tests also cover analytical FK, finite-difference
 gradients, TBPTT, APG updates, and held-out improvement.
 

@@ -79,6 +79,32 @@ def _policy_objective_at(weight: float, *, seed: int = 17) -> float:
     return segmented_discounted_return(rollout, gamma=0.95).mean().detach().item()
 
 
+def _feature_policy_objective_at(
+    weight: float,
+    feature_index: int,
+    *,
+    seed: int = 17,
+) -> float:
+    env = NewtonPlanarReachEnv(
+        NewtonPlanarReachEnvCfg(
+            num_envs=1,
+            device="cpu",
+            success_threshold=0.0,
+            max_episode_steps=16,
+        )
+    )
+    actor = nn.Linear(8, 2, bias=False)
+    nn.init.zeros_(actor.weight)
+    with torch.no_grad():
+        actor.weight[0, 0] = 0.05
+        actor.weight[0, feature_index] = weight
+    policy = ActorOnly(8, 2, env.device, actor=actor)
+    collector = DifferentiableCollector(env, policy, env.device)
+    collector.reset(seed=seed)
+    rollout = collector.collect(num_steps=3, deterministic=True)
+    return segmented_discounted_return(rollout, gamma=0.95).mean().detach().item()
+
+
 def test_newton_env_satisfies_contract_and_fk_matches_analytical_pose() -> None:
     env = _make_env()
     observation, _ = env.reset(seed=3)
@@ -185,6 +211,45 @@ def test_multistep_policy_gradient_matches_finite_difference() -> None:
     epsilon = 1e-3
     finite_difference = (
         _policy_objective_at(0.05 + epsilon) - _policy_objective_at(0.05 - epsilon)
+    ) / (2.0 * epsilon)
+
+    assert analytic_gradient == pytest.approx(
+        finite_difference,
+        rel=5e-3,
+        abs=5e-3,
+    )
+
+
+@pytest.mark.parametrize("feature_index", [2, 6])
+def test_multistep_observation_gradient_matches_finite_difference(
+    feature_index: int,
+) -> None:
+    env = NewtonPlanarReachEnv(
+        NewtonPlanarReachEnvCfg(
+            num_envs=1,
+            device="cpu",
+            success_threshold=0.0,
+            max_episode_steps=16,
+        )
+    )
+    actor = nn.Linear(8, 2, bias=False)
+    nn.init.zeros_(actor.weight)
+    with torch.no_grad():
+        actor.weight[0, 0] = 0.05
+        actor.weight[0, feature_index] = 0.03
+    policy = ActorOnly(8, 2, env.device, actor=actor)
+    collector = DifferentiableCollector(env, policy, env.device)
+    collector.reset(seed=17)
+    rollout = collector.collect(num_steps=3, deterministic=True)
+    objective = segmented_discounted_return(rollout, gamma=0.95).mean()
+    analytic_gradient = torch.autograd.grad(objective, actor.weight)[0][
+        0, feature_index
+    ].item()
+
+    epsilon = 1e-3
+    finite_difference = (
+        _feature_policy_objective_at(0.03 + epsilon, feature_index)
+        - _feature_policy_objective_at(0.03 - epsilon, feature_index)
     ) / (2.0 * epsilon)
 
     assert analytic_gradient == pytest.approx(

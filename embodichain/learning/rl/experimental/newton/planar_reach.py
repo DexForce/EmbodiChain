@@ -73,7 +73,7 @@ class _NewtonPlanarReachStep(torch.autograd.Function):
         action: torch.Tensor,
         current_q: torch.Tensor,
         sim_state: dict[str, Any],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         model = sim_state["model"]
         num_envs = sim_state["num_envs"]
         action_wp = wp.from_torch(
@@ -135,24 +135,31 @@ class _NewtonPlanarReachStep(torch.autograd.Function):
         body_q = wp.to_torch(fk_state.body_q)
         end_indices = wp.to_torch(sim_state["end_body_indices"]).long()
         end_xy = body_q[end_indices, :2].detach().clone()
+        next_q = wp.to_torch(next_q_wp).detach().clone().reshape(current_q.shape)
 
         ctx.tape = tape
         ctx.action_wp = action_wp
         ctx.current_q_wp = current_q_wp
+        ctx.next_q_wp = next_q_wp
         ctx.reward_wp = reward_wp
+        ctx.fk_state = fk_state
+        ctx.end_indices = end_indices
         ctx.action_shape = action.shape
         ctx.current_q_shape = current_q.shape
-        ctx.mark_non_differentiable(end_xy)
-        return wp.to_torch(reward_wp).detach().clone(), end_xy
+        return wp.to_torch(reward_wp).detach().clone(), next_q, end_xy
 
     @staticmethod
     def backward(
         ctx: Any,
         reward_gradient: torch.Tensor | None,
+        next_q_gradient: torch.Tensor | None,
         end_xy_gradient: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, None]:
-        del end_xy_gradient
-        if reward_gradient is None:
+        if (
+            reward_gradient is None
+            and next_q_gradient is None
+            and end_xy_gradient is None
+        ):
             action_gradient = torch.zeros_like(wp.to_torch(ctx.action_wp)).reshape(
                 ctx.action_shape
             )
@@ -161,11 +168,22 @@ class _NewtonPlanarReachStep(torch.autograd.Function):
             ).reshape(ctx.current_q_shape)
             return action_gradient, current_q_gradient, None
 
-        reward_gradient_wp = wp.from_torch(
-            reward_gradient.detach().contiguous(),
-            dtype=wp.float32,
-        )
-        wp.copy(ctx.reward_wp.grad, reward_gradient_wp)
+        if reward_gradient is not None:
+            reward_gradient_wp = wp.from_torch(
+                reward_gradient.detach().contiguous(),
+                dtype=wp.float32,
+            )
+            wp.copy(ctx.reward_wp.grad, reward_gradient_wp)
+        if next_q_gradient is not None:
+            next_q_gradient_wp = wp.from_torch(
+                next_q_gradient.detach().reshape(-1).contiguous(),
+                dtype=wp.float32,
+            )
+            wp.copy(ctx.next_q_wp.grad, next_q_gradient_wp)
+        if end_xy_gradient is not None:
+            body_q_gradient = wp.to_torch(ctx.fk_state.body_q.grad)
+            body_q_gradient.zero_()
+            body_q_gradient[ctx.end_indices, :2] = end_xy_gradient.detach()
         ctx.tape.backward()
         action_gradient = (
             wp.to_torch(ctx.action_wp.grad).clone().reshape(ctx.action_shape)
@@ -254,6 +272,8 @@ class NewtonPlanarReachEnv:
         if seed is not None:
             self._generator.manual_seed(seed)
         self._joint_q = self._joint_q.detach()
+        self._end_xy = self._end_xy.detach()
+        self._last_action = self._last_action.detach()
         env_ids = torch.arange(self.num_envs, device=self.device)
         self._reset_envs(env_ids)
         return self._get_observation(), {}
@@ -273,7 +293,7 @@ class NewtonPlanarReachEnv:
             )
         action = action.to(device=self.device, dtype=torch.float32).clamp(-1.0, 1.0)
         current_q = self._joint_q
-        reward, end_xy = _NewtonPlanarReachStep.apply(
+        reward, next_q, end_xy = _NewtonPlanarReachStep.apply(
             action,
             current_q,
             {
@@ -285,15 +305,11 @@ class NewtonPlanarReachEnv:
                 "joint_limit": self.cfg.joint_limit,
             },
         )
-        next_q = (current_q + action * self.cfg.action_scale).clamp(
-            -self.cfg.joint_limit,
-            self.cfg.joint_limit,
-        )
         self._joint_q = next_q
         self._end_xy = end_xy
 
         self._step_count += 1
-        self._last_action = action.detach().clone()
+        self._last_action = action
         distance = torch.linalg.vector_norm(end_xy - self._target_xy, dim=-1)
         terminated = distance < self.cfg.success_threshold
         truncated = self._step_count >= self.cfg.max_episode_steps
@@ -320,6 +336,8 @@ class NewtonPlanarReachEnv:
     def detach_state(self) -> torch.Tensor:
         """Return the current observation at a truncated-gradient boundary."""
         self._joint_q = self._joint_q.detach()
+        self._end_xy = self._end_xy.detach()
+        self._last_action = self._last_action.detach()
         return self._get_observation().detach()
 
     def _build_model(self) -> tuple[Any, wp.array]:
@@ -403,10 +421,14 @@ class NewtonPlanarReachEnv:
         )
         reset_mask[env_ids] = True
         self._joint_q = torch.where(reset_mask, reset_q, self._joint_q)
+        self._last_action = torch.where(
+            reset_mask,
+            torch.zeros_like(self._last_action),
+            self._last_action,
+        )
         with torch.no_grad():
             wp.to_torch(self._state.joint_q).copy_(self._joint_q.detach().reshape(-1))
         self._target_xy[env_ids] = self._analytical_end_xy(target_q)
-        self._last_action[env_ids] = 0.0
         self._step_count[env_ids] = 0
         newton.eval_fk(
             self._model,
@@ -416,7 +438,9 @@ class NewtonPlanarReachEnv:
         )
         body_q = wp.to_torch(self._state.body_q)
         end_indices = wp.to_torch(self._end_body_indices).long()
-        self._end_xy[env_ids] = body_q[end_indices[env_ids], :2]
+        reset_end_xy = torch.zeros_like(self._end_xy)
+        reset_end_xy[env_ids] = body_q[end_indices[env_ids], :2]
+        self._end_xy = torch.where(reset_mask, reset_end_xy, self._end_xy)
 
     def _sample_joint_positions(self, count: int, scale: float) -> torch.Tensor:
         return (

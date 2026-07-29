@@ -47,7 +47,7 @@ class NewtonPlanarReachTrainingCfg:
     eval_batches: int = 4
     num_envs: int = 128
     num_updates: int = 600
-    horizon: int = 24
+    horizon: int = 32
     learning_rate: float = 3e-3
     action_scale: float = 0.25
     success_threshold: float = 0.05
@@ -184,7 +184,7 @@ def _parse_args() -> NewtonPlanarReachTrainingCfg:
     parser.add_argument("--eval-batches", type=int, default=4)
     parser.add_argument("--num-envs", type=int, default=128)
     parser.add_argument("--num-updates", type=int, default=600)
-    parser.add_argument("--horizon", type=int, default=24)
+    parser.add_argument("--horizon", type=int, default=32)
     args = parser.parse_args()
     return NewtonPlanarReachTrainingCfg(
         device=args.device,
