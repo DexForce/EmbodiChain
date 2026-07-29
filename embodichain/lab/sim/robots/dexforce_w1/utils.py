@@ -432,14 +432,20 @@ def build_dexforce_w1_assembly_urdf_cfg(
             )
             urdf_path = hand_manager.get_urdf(hand_brand, arm_side, hand_version)
 
-            attach_xpos = (hand_attach_xposes or {}).get(
-                arm_side,
-                hand_manager.get_attach_xpos(
+            custom_attach_xpos = (hand_attach_xposes or {}).get(arm_side)
+            if custom_attach_xpos is None:
+                attach_xpos = hand_manager.get_attach_xpos(
                     hand_brand,
                     arm_side,
                     get_version(arm_manager.get_component_type(arm_side)),
-                ),
-            )
+                )
+            else:
+                arm_spec = get_w1_version_spec(
+                    get_version(arm_manager.get_component_type(arm_side))
+                )
+                attach_xpos = arm_spec.compose_eef_attach_xpos(
+                    arm_side, custom_attach_xpos
+                )
             components.append(
                 {
                     "component_type": f"{arm_side.value}_hand",

@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import typing
+
+import numpy as np
 import torch
 
 from typing import TYPE_CHECKING, Dict
@@ -74,7 +76,92 @@ class DexforceW1Cfg(RobotCfg):
 
         cfg = cls()
         cfg._build_defaults(init_dict)
-        return merge_robot_cfg(cfg, init_dict)
+        cfg = merge_robot_cfg(cfg, init_dict)
+        cfg._compose_user_eef_overrides(init_dict)
+        return cfg
+
+    def _arm_version(self, arm_side: DexforceW1ArmSide) -> DexforceW1Version:
+        component_type = (
+            DexforceW1Type.LEFT_ARM
+            if arm_side == DexforceW1ArmSide.LEFT
+            else DexforceW1Type.RIGHT_ARM
+        )
+        return (self.component_versions or {}).get(component_type, self.version)
+
+    def _compose_user_eef_overrides(self, init_dict: dict) -> None:
+        """Apply the version offset to user-supplied EEF transforms and TCPs."""
+        side_by_component = {
+            "left_hand": DexforceW1ArmSide.LEFT,
+            "right_hand": DexforceW1ArmSide.RIGHT,
+        }
+        urdf_cfg = init_dict.get("urdf_cfg")
+        components = (
+            urdf_cfg.get("components", []) if isinstance(urdf_cfg, dict) else []
+        )
+        if isinstance(components, dict):
+            component_names = set(components)
+        else:
+            component_names = {
+                component.get("component_type")
+                for component in components
+                if isinstance(component, dict)
+            }
+
+        for component_name, arm_side in side_by_component.items():
+            if component_name not in component_names:
+                continue
+            component = self.urdf_cfg.components.get(component_name)
+            if component is None:
+                continue
+            spec = get_w1_version_spec(self._arm_version(arm_side))
+            component["transform"] = spec.compose_eef_attach_xpos(
+                arm_side, component["transform"]
+            )
+
+        solver_cfg = init_dict.get("solver_cfg")
+        if not isinstance(solver_cfg, dict):
+            return
+        for arm_side in DexforceW1ArmSide:
+            part_name = f"{arm_side.value}_arm"
+            part_override = solver_cfg.get(part_name)
+            if not isinstance(part_override, dict) or "tcp" not in part_override:
+                continue
+            solver = self.solver_cfg.get(part_name)
+            if solver is None:
+                continue
+            spec = get_w1_version_spec(self._arm_version(arm_side))
+            solver.tcp = spec.compose_eef_attach_xpos(arm_side, solver.tcp)
+
+    def to_dict(self):
+        """Serialize EEF-specific transforms without the derived version offset."""
+        data = super().to_dict()
+        side_by_component = {
+            "left_hand": DexforceW1ArmSide.LEFT,
+            "right_hand": DexforceW1ArmSide.RIGHT,
+        }
+        components = data.get("urdf_cfg", {}).get("components", {})
+        for component_name, arm_side in side_by_component.items():
+            component = components.get(component_name)
+            if not isinstance(component, dict) or component.get("transform") is None:
+                continue
+            spec = get_w1_version_spec(self._arm_version(arm_side))
+            offset_inv = np.linalg.inv(spec.eef_attach_xpos(arm_side))
+            component["transform"] = (
+                offset_inv @ np.asarray(component["transform"], dtype=float)
+            ).tolist()
+
+        solver_cfg = data.get("solver_cfg", {})
+        for arm_side in DexforceW1ArmSide:
+            part_name = f"{arm_side.value}_arm"
+            solver = solver_cfg.get(part_name)
+            if not isinstance(solver, dict) or solver.get("tcp") is None:
+                continue
+            spec = get_w1_version_spec(self._arm_version(arm_side))
+            offset_inv = np.linalg.inv(spec.eef_attach_xpos(arm_side))
+            solver["tcp"] = (
+                offset_inv @ np.asarray(solver["tcp"], dtype=float)
+            ).tolist()
+        return data
 
     def _build_defaults(self, init_dict: dict | None = None) -> None:
         """Build default urdf/control/solver/physics from variant fields.
@@ -130,10 +217,8 @@ class DexforceW1Cfg(RobotCfg):
             W1ArmKineParams,
         )
 
-        left_arm_component = DexforceW1Type.LEFT_ARM
-        right_arm_component = DexforceW1Type.RIGHT_ARM
-        left_version = self.component_versions.get(left_arm_component, self.version)
-        right_version = self.component_versions.get(right_arm_component, self.version)
+        left_version = self._arm_version(DexforceW1ArmSide.LEFT)
+        right_version = self._arm_version(DexforceW1ArmSide.RIGHT)
         left_version_spec = get_w1_version_spec(left_version)
         right_version_spec = get_w1_version_spec(right_version)
         w1_left_arm_params = W1ArmKineParams(

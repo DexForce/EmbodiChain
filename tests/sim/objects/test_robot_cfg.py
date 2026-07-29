@@ -23,8 +23,11 @@ import pytest
 from embodichain.lab.sim.cfg import RobotCfg, JointDrivePropertiesCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.robots.dexforce_w1.types import (
+    DexforceW1ArmSide,
+    DexforceW1HandBrand,
     DexforceW1Version,
 )
+from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -48,6 +51,37 @@ def test_dexforce_w1_solver_cfg_is_srs_and_set_once():
 def test_dexforce_w1_rejects_unknown_fields():
     with pytest.raises(ValueError, match="Unknown DexforceW1 configuration fields"):
         DexforceW1Cfg.from_dict({"unsupported_variant": "value"})
+
+
+def test_w1_v025_eef_offset_applies_to_attach_and_tcp():
+    v021 = get_w1_version_spec(DexforceW1Version.V021)
+    v025 = get_w1_version_spec(DexforceW1Version.V025)
+    expected_offset = np.eye(4)
+    expected_offset[2, 3] = 0.012
+
+    for arm_side in DexforceW1ArmSide:
+        np.testing.assert_allclose(v021.eef_attach_xpos(arm_side), np.eye(4))
+        np.testing.assert_allclose(v025.eef_attach_xpos(arm_side), expected_offset)
+        np.testing.assert_allclose(
+            v025.tcp(arm_side),
+            expected_offset @ v021.tcp(arm_side),
+        )
+        np.testing.assert_allclose(
+            v025.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
+            expected_offset
+            @ v021.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
+        )
+
+
+def test_w1_v025_eef_offset_composes_with_custom_attach():
+    spec = get_w1_version_spec(DexforceW1Version.V025)
+    custom_attach = np.eye(4)
+    custom_attach[:3, 3] = [0.01, -0.02, 0.03]
+
+    result = spec.compose_eef_attach_xpos(DexforceW1ArmSide.RIGHT, custom_attach)
+
+    np.testing.assert_allclose(result[:3, 3], [0.01, -0.02, 0.042])
+    np.testing.assert_allclose(result[:3, :3], np.eye(3))
 
 
 class _RoundTripVariant(enum.Enum):

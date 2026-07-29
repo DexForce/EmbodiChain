@@ -60,6 +60,7 @@ class W1VersionSpec:
     full_robot_urdf_path: str
     arm_d_list: tuple[float, ...]
     arm_base_z: float
+    default_eef_attach_xpos: dict[DexforceW1ArmSide, tuple]
     solver_tcp: dict[DexforceW1ArmSide, tuple]
     eyes_attach_xpos: tuple[tuple[float, ...], ...]
     wrist_camera_rpy: tuple[float, float, float]
@@ -108,8 +109,29 @@ class W1VersionSpec:
             f"'{registered_path}' was not found. Expected {expected}."
         )
 
+    def eef_attach_xpos(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
+        """Return the version-owned transform applied before every EEF."""
+        return np.asarray(self.default_eef_attach_xpos[arm_side], dtype=float).copy()
+
+    def compose_eef_attach_xpos(
+        self,
+        arm_side: DexforceW1ArmSide,
+        eef_xpos: np.ndarray,
+    ) -> np.ndarray:
+        """Compose the W1 revision offset with an EEF-specific transform."""
+        eef_xpos = np.asarray(eef_xpos, dtype=float)
+        if eef_xpos.shape != (4, 4):
+            raise ValueError(
+                f"EEF transform must have shape (4, 4), got {eef_xpos.shape}."
+            )
+        return self.eef_attach_xpos(arm_side) @ eef_xpos
+
     def tcp(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
-        return np.asarray(self.solver_tcp[arm_side], dtype=float).copy()
+        """Return the final EE-to-TCP transform for this W1 revision."""
+        return self.compose_eef_attach_xpos(
+            arm_side,
+            np.asarray(self.solver_tcp[arm_side], dtype=float),
+        )
 
     def hand_attach_xpos(
         self,
@@ -129,7 +151,7 @@ class W1VersionSpec:
             result[:3, :3] = R.from_rotvec([0, 0, 90], degrees=True).as_matrix()
         else:
             raise ValueError(f"Unknown hand brand: {brand}")
-        return result
+        return self.compose_eef_attach_xpos(arm_side, result)
 
     def eyes_xpos(self) -> np.ndarray:
         return np.asarray(self.eyes_attach_xpos, dtype=float).copy()
@@ -169,6 +191,27 @@ _EYES_ATTACH_XPOS = (
 )
 _WRIST_CAMERA_RPY = (2.79252648, 0.0, 1.57079633)
 _WRIST_CAMERA_XYZ = (0.08, 0.0, 0.06)
+_IDENTITY_XPOS = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.0),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_V021_DEFAULT_EEF_ATTACH_XPOS = {
+    DexforceW1ArmSide.LEFT: _IDENTITY_XPOS,
+    DexforceW1ArmSide.RIGHT: _IDENTITY_XPOS,
+}
+# Calibrated outward flange offset shared by every V025 end effector.
+_V025_EEF_ATTACH_XPOS = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.012),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_V025_DEFAULT_EEF_ATTACH_XPOS = {
+    DexforceW1ArmSide.LEFT: _V025_EEF_ATTACH_XPOS,
+    DexforceW1ArmSide.RIGHT: _V025_EEF_ATTACH_XPOS,
+}
 
 _W1_VERSION_SPECS = {
     DexforceW1Version.V021: W1VersionSpec(
@@ -177,6 +220,7 @@ _W1_VERSION_SPECS = {
         full_robot_urdf_path="DexforceW1V021/DexforceW1_v02_1.urdf",
         arm_d_list=_SHARED_D_LIST,
         arm_base_z=0.1025,
+        default_eef_attach_xpos=_V021_DEFAULT_EEF_ATTACH_XPOS,
         solver_tcp=_DEFAULT_TCP,
         eyes_attach_xpos=_EYES_ATTACH_XPOS,
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
@@ -189,6 +233,7 @@ _W1_VERSION_SPECS = {
         # Verified against left_arm.urdf/right_arm.urdf in the V025 release.
         arm_d_list=_SHARED_D_LIST,
         arm_base_z=0.1025,
+        default_eef_attach_xpos=_V025_DEFAULT_EEF_ATTACH_XPOS,
         solver_tcp=_DEFAULT_TCP,
         eyes_attach_xpos=_EYES_ATTACH_XPOS,
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
