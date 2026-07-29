@@ -19,6 +19,8 @@ This script demonstrates the creation and simulation of dexforce w1 robot,
 and performs a grasp cup to coffee machine task in a simulated environment.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import torch
@@ -26,6 +28,7 @@ from tqdm import tqdm
 from typing import Union
 from scipy.spatial.transform import Rotation as R
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -74,6 +77,7 @@ def initialize_simulation(args) -> SimulationManager:
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         arena_space=2.5,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -425,7 +429,7 @@ def main():
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
     apply_random_xy_perturbation(caffe, max_perturbation=0.05)
 
-    if not args.headless:
+    if not args.headless and not args.viser:
         sim.open_window()
 
     if sim.is_use_gpu_physics:

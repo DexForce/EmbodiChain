@@ -17,12 +17,15 @@
 Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
 """
 
+from __future__ import annotations
+
 import time
 import torch
 import numpy as np
 import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -53,6 +56,7 @@ def main():
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
     sim = SimulationManager(sim_cfg)

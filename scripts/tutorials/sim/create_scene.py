@@ -14,12 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from __future__ import annotations
-
 """
 This script demonstrates how to create a simulation scene using SimulationManager.
 It shows the basic setup of simulation context, adding objects, and sensors.
 """
+
+from __future__ import annotations
 
 import argparse
 import time
@@ -29,10 +29,11 @@ from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.data import get_data_path
 
 
-def main():
+def main() -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
@@ -44,7 +45,9 @@ def main():
         "--record-steps",
         type=int,
         default=1000,
-        help="Number of simulation steps to record before exiting in headless mode.",
+        help=(
+            "Number of simulation steps before exiting in headless recording " "mode."
+        ),
     )
     parser.add_argument(
         "--record-fps",
@@ -59,7 +62,6 @@ def main():
         help="Optional mp4 output path for headless recording.",
     )
     args = parser.parse_args()
-
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
@@ -72,6 +74,7 @@ def main():
         ),
         num_envs=args.num_envs,
         arena_space=3.0,
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance
@@ -114,10 +117,10 @@ def main():
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
+    if not args.headless and not args.viser:
         sim.open_window()
 
-    if args.headless:
+    if args.headless and not args.viser:
         if not sim.start_window_record(
             save_path=args.record_save_path,
             fps=args.record_fps,
@@ -142,7 +145,7 @@ def main():
 def run_simulation(
     sim: SimulationManager,
     max_steps: int | None = None,
-):
+) -> None:
     """Run the simulation loop.
 
     Args:
@@ -178,9 +181,7 @@ def run_simulation(
                 last_step = step_count
 
             if max_steps is not None and step_count >= max_steps:
-                print(
-                    f"[INFO]: Reached {max_steps} steps. Exporting headless recording..."
-                )
+                print(f"[INFO]: Reached {max_steps} steps. Stopping simulation...")
                 break
 
     except KeyboardInterrupt:

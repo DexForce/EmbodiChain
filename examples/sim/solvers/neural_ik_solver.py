@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
 import argparse
 import math
 import time
@@ -27,10 +30,15 @@ from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.solvers import NeuralIKSolverCfg
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="NeuralIKSolver example")
+    add_viser_args_to_parser(parser)
     parser.add_argument(
         "--device",
         type=str,
@@ -81,7 +89,7 @@ def _pose_with_arena_offset(
     return xpos
 
 
-def main():
+def main() -> None:
     args = parse_args()
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -94,6 +102,7 @@ def main():
         sim_device=sim_device,
         num_envs=num_envs,
         arena_space=2.0,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -120,7 +129,8 @@ def main():
 
     robot: Robot = sim.add_robot(cfg=cfg)
 
-    sim.open_window()
+    if not args.viser:
+        sim.open_window()
 
     arm_name = "arm"
     device = robot.device

@@ -22,6 +22,8 @@ This example demonstrates how to create an interactive simulation scene with:
 Both objects can be interactively controlled through their respective gizmos.
 """
 
+from __future__ import annotations
+
 import time
 import torch
 import numpy as np
@@ -29,6 +31,7 @@ import argparse
 import cv2
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RobotCfg,
@@ -62,6 +65,7 @@ def main():
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
     sim = SimulationManager(sim_cfg)

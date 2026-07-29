@@ -19,6 +19,8 @@ This script demonstrates the creation and simulation of a robot with a soft obje
 and performs a pressing task in a simulated environment.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
@@ -28,6 +30,7 @@ import torch
 from dexsim.utility.path import get_resources_data_path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, SoftObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
@@ -258,6 +261,7 @@ def main():
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance
@@ -267,7 +271,8 @@ def main():
     cloth = create_cloth(sim)
     padding_box = create_padding_box(sim)
     sim.init_gpu_physics()
-    sim.open_window()
+    if not args.headless and not args.viser:
+        sim.open_window()
     sim.update(step=10)  # Let the cloth settle before interaction
 
     grasp_xpos = torch.tensor(

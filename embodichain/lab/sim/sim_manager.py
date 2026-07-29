@@ -32,7 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import Callable, Dict, List, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Sequence, Union
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -91,8 +91,17 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import look_at_to_pose, pose_inv
+
+if TYPE_CHECKING:
+    from embodichain.lab.visualization import (
+        RuntimeHealth,
+        RuntimeStats,
+        SceneManifest,
+        VisualizationRuntime,
+    )
 
 __all__ = [
     "SimulationManager",
@@ -115,7 +124,12 @@ class SimulationManagerCfg:
     """The height of the simulation window."""
 
     headless: bool = False
-    """Whether to run the simulation in headless mode (no Window)."""
+    """Whether to run without an automatically opened native window.
+
+    This is forced to ``True`` when the Viser backend is enabled. Call
+    :meth:`SimulationManager.open_window` explicitly when a native window is
+    still required, such as for Gizmo interaction.
+    """
 
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
     """The rendering configuration parameters."""
@@ -158,6 +172,14 @@ class SimulationManagerCfg:
 
     window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
     """Interactive viewer camera-pose printing settings."""
+
+    visualization: VisualizationCfg = field(default_factory=VisualizationCfg)
+    """Live browser visualization settings."""
+
+    def __post_init__(self) -> None:
+        """Apply visualization-dependent simulation defaults."""
+        if self.visualization.backend == "viser":
+            self.headless = True
 
 
 @dataclass
@@ -306,6 +328,13 @@ class SimulationManager:
         self._sensors: Dict[str, BaseSensor] = dict()
         self._lights: Dict[str, _Light] = dict()
 
+        self._visualization_runtime = None
+        self._visualization_topology_revision = 0
+        self._visualization_manifest_topology_revision = -1
+        self._visualization_sim_step = 0
+        self._visualization_sim_time = 0.0
+        self._visualization_error_reported = False
+
         # material placeholder.
         self._visual_materials: Dict[str, VisualMaterial] = dict()
 
@@ -323,6 +352,7 @@ class SimulationManager:
         self.set_manual_update(True)
 
         self._build_multiple_arenas(sim_config.num_envs)
+        self.start_visualization()
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
@@ -451,6 +481,147 @@ class SimulationManager:
         uid_list.extend(list(self._cloth_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
+
+    @property
+    def visualization_runtime(self) -> VisualizationRuntime | None:
+        """Return the active visualization runtime, if one has been started."""
+        return self._visualization_runtime
+
+    @property
+    def visualization_health(self) -> RuntimeHealth:
+        """Return current visualization service and client health."""
+        from embodichain.lab.visualization import RuntimeHealth
+
+        if self._visualization_runtime is not None:
+            return self._visualization_runtime.health
+        configured = self.sim_config.visualization.backend == "viser"
+        return RuntimeHealth(
+            status="stopped" if configured else "disabled",
+            running=False,
+            endpoint=None,
+            client_count=0,
+            published_scene_revision=0,
+        )
+
+    @property
+    def visualization_stats(self) -> RuntimeStats | None:
+        """Return visualization telemetry, or ``None`` before startup."""
+        if self._visualization_runtime is None:
+            return None
+        return self._visualization_runtime.stats
+
+    def notify_visualization_topology_changed(self) -> int:
+        """Mark scene topology dirty and return its new local revision."""
+        self._visualization_topology_revision += 1
+        return self._visualization_topology_revision
+
+    def start_visualization(self) -> VisualizationRuntime | None:
+        """Start the configured live visualizer and publish the current scene."""
+        if self.sim_config.visualization.backend == "none":
+            return None
+        if self._visualization_runtime is not None:
+            if self._visualization_runtime.is_running:
+                return self._visualization_runtime
+            self._visualization_runtime.stop()
+            self._visualization_runtime = None
+
+        from embodichain.lab.visualization import SceneExporter, VisualizationRuntime
+
+        runtime = VisualizationRuntime(
+            SceneExporter(self, self.sim_config.visualization),
+            self.sim_config.visualization,
+        )
+        runtime.start()
+        self._visualization_runtime = runtime
+        self._visualization_manifest_topology_revision = (
+            self._visualization_topology_revision
+        )
+        self._visualization_error_reported = False
+        logger.log_info(f"Viser visualization ready at {runtime.endpoint}")
+        runtime.capture(
+            sim_step=self._visualization_sim_step,
+            sim_time=self._visualization_sim_time,
+            force=True,
+        )
+        return runtime
+
+    def refresh_visualization(self) -> SceneManifest | None:
+        """Publish current scene topology when Viser is active."""
+        runtime = self.start_visualization()
+        if runtime is None:
+            return None
+        manifest = runtime.refresh_scene()
+        self._visualization_manifest_topology_revision = (
+            self._visualization_topology_revision
+        )
+        return manifest
+
+    def capture_visualization(
+        self,
+        force: bool = False,
+        *,
+        capture_camera_images: bool = True,
+    ) -> bool:
+        """Capture current scene data for the configured visualizer.
+
+        Args:
+            force: Whether to bypass visualization frame-rate limiting.
+            capture_camera_images: Whether camera images may be captured.
+
+        Returns:
+            Whether scene or camera data was captured.
+        """
+        runtime = self.start_visualization()
+        if runtime is None:
+            return False
+        if (
+            self._visualization_manifest_topology_revision
+            != self._visualization_topology_revision
+        ):
+            self.refresh_visualization()
+        return runtime.capture(
+            sim_step=self._visualization_sim_step,
+            sim_time=self._visualization_sim_time,
+            force=force,
+            capture_camera_images=capture_camera_images,
+        )
+
+    def capture_visualization_safely(
+        self,
+        force: bool = False,
+        *,
+        capture_camera_images: bool = True,
+    ) -> None:
+        """Update visualization without allowing failures to stop simulation.
+
+        The first visualization failure is logged and subsequent captures are
+        skipped until the runtime is restarted.
+
+        Args:
+            force: Whether to bypass visualization frame-rate limiting.
+            capture_camera_images: Whether camera images may be captured.
+        """
+        if self._visualization_error_reported:
+            return
+        try:
+            self.capture_visualization(
+                force=force,
+                capture_camera_images=capture_camera_images,
+            )
+        except Exception as error:
+            if not self._visualization_error_reported:
+                logger.log_warning(f"Viser visualization update failed: {error!r}")
+                self._visualization_error_reported = True
+
+    def stop_visualization(self) -> None:
+        """Stop the visualization server and release its worker thread."""
+        runtime = self._visualization_runtime
+        if runtime is None:
+            return
+        try:
+            runtime.stop()
+        finally:
+            self._visualization_runtime = None
 
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
@@ -581,12 +752,18 @@ class SimulationManager:
                 physics_dt = self.sim_config.physics_dt
             for i in range(step):
                 self._world.update(physics_dt)
+                self._visualization_sim_step += 1
+                self._visualization_sim_time += physics_dt
                 if (
                     self._window_record_state is not None
                     and self._window_record_state.capture_from_sim_update
                 ):
                     self._step_window_record_from_sim_update(
                         self._window_record_state, physics_dt
+                    )
+                if self.sim_config.visualization.backend == "viser":
+                    self.capture_visualization_safely(
+                        capture_camera_images=i == step - 1
                     )
 
         else:
@@ -966,6 +1143,7 @@ class SimulationManager:
             rigid_obj.set_visual_material(mat)
 
         self._rigid_objects[uid] = rigid_obj
+        self.notify_visualization_topology_changed()
 
         return rigid_obj
 
@@ -997,6 +1175,7 @@ class SimulationManager:
 
         soft_obj = SoftObject(cfg=cfg, entities=obj_list, device=self.device)
         self._soft_objects[uid] = soft_obj
+        self.notify_visualization_topology_changed()
         return soft_obj
 
     def add_cloth_object(self, cfg: ClothObjectCfg) -> ClothObject:
@@ -1027,6 +1206,7 @@ class SimulationManager:
 
         cloth_obj = ClothObject(cfg=cfg, entities=obj_list, device=self.device)
         self._cloth_objects[uid] = cloth_obj
+        self.notify_visualization_topology_changed()
         return cloth_obj
 
     def get_rigid_object(self, uid: str) -> RigidObject | None:
@@ -1384,6 +1564,7 @@ class SimulationManager:
         )
 
         self._rigid_object_groups[uid] = rigid_obj_group
+        self.notify_visualization_topology_changed()
 
         return rigid_obj_group
 
@@ -1500,6 +1681,7 @@ class SimulationManager:
         articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
 
         self._articulations[uid] = articulation
+        self.notify_visualization_topology_changed()
 
         return articulation
 
@@ -1594,6 +1776,7 @@ class SimulationManager:
         robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
 
         self._robots[uid] = robot
+        self.notify_visualization_topology_changed()
 
         return robot
 
@@ -1820,6 +2003,8 @@ class SimulationManager:
         sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
 
         self._sensors[sensor_uid] = sensor
+        if sensor_type == "Camera":
+            self.notify_visualization_topology_changed()
 
         # Check if the sensor needs to change the parent frame.
 
@@ -1863,31 +2048,37 @@ class SimulationManager:
         if uid in self._rigid_objects:
             obj = self._rigid_objects.pop(uid)
             obj.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._soft_objects:
             obj = self._soft_objects.pop(uid)
             obj.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._cloth_objects:
             obj = self._cloth_objects.pop(uid)
             obj.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._rigid_object_groups:
             group = self._rigid_object_groups.pop(uid)
             group.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._articulations:
             art = self._articulations.pop(uid)
             art.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._robots:
             robot = self._robots.pop(uid)
             robot.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         return False
@@ -2683,6 +2874,11 @@ class SimulationManager:
             exit_process (bool | None): Whether to call os._exit(0) after queuing
                 the destruction task. If None, reads EMBODICHAIN_SIM_EXIT_PROCESS.
         """
+
+        try:
+            self.stop_visualization()
+        except Exception as error:
+            logger.log_warning(f"Failed to stop Viser visualization cleanly: {error!r}")
 
         if exit_process is None:
             exit_process = (

@@ -54,6 +54,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    visualization_cfg_from_args,
+)
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     EndEffectorPoseTarget,
@@ -237,6 +241,7 @@ def _build_scene(
     renderer: str = "auto",
     arena_space: float = 2.0,
     gpu_id: int = 0,
+    visualization: VisualizationCfg | None = None,
 ) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
     """Create the batched robot scene with an identical cuboid in each arena."""
     sim = SimulationManager(
@@ -247,6 +252,7 @@ def _build_scene(
             arena_space=arena_space,
             gpu_id=gpu_id,
             render_cfg=RenderCfg(renderer=renderer),
+            visualization=visualization or VisualizationCfg(),
         )
     )
     if robot_type == "franka":
@@ -689,6 +695,7 @@ def main() -> None:
             args.renderer,
             args.arena_space,
             effective_gpu_id,
+            visualization_cfg_from_args(args),
         )
         if sim.is_use_gpu_physics:
             sim.init_gpu_physics()
@@ -713,7 +720,7 @@ def main() -> None:
 
         # Delay viewer/recorder startup until the robot and every obstacle have
         # been loaded and placed at their final initial poses.
-        if not args.headless:
+        if not args.headless and not args.viser:
             sim.open_window()
         _start_headless_recording(sim, args)
         if args.hold_steps:

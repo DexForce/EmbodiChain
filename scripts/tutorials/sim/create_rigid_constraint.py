@@ -25,6 +25,7 @@ import argparse
 import sys
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
@@ -67,6 +68,7 @@ def main():
         render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=3.0,
+        visualization=visualization_cfg_from_args(args),
     )
 
     sim = SimulationManager(sim_cfg)
@@ -119,7 +121,7 @@ def main():
     print("[INFO]: Created constraint 'cube_weld' between cube_a and cube_b.")
 
     # Open the viewer (unless --headless) so the welded motion is visible.
-    if not args.headless:
+    if not args.headless and not args.viser:
         sim.open_window()
 
     print("[INFO]: Stepping physics while ATTACHED (relative pose held):")

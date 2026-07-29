@@ -18,12 +18,15 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It supports loading kitchen/factory/office scenes via EmbodiChainDataset.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 from pathlib import Path
 import math
 import embodichain.utils.logger as logger
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RigidBodyAttributesCfg,
@@ -120,6 +123,7 @@ def main():
         render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=10.0,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(sim_cfg)
 
@@ -180,7 +184,8 @@ def main():
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    sim.open_window()
+    if not args.headless and not args.viser:
+        sim.open_window()
 
     run_simulation(sim)
 

@@ -18,11 +18,14 @@
 This script demonstrates how to create a rigid object group using SimulationManager.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import (
@@ -54,6 +57,7 @@ def main():
         ),  # Enable ray tracing for better visuals
         num_envs=args.num_envs,
         arena_space=3.0,
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance
@@ -98,7 +102,7 @@ def main():
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
+    if not args.headless and not args.viser:
         sim.open_window()
 
     # Run the simulation

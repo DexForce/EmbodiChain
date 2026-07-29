@@ -19,12 +19,15 @@ This script demonstrates the creation and simulation of a robot that grasps a ri
 in a simulated environment using the SimulationManager and grasp planning utilities.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
@@ -82,6 +85,7 @@ def initialize_simulation(args) -> SimulationManager:
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -231,7 +235,8 @@ if __name__ == "__main__":
         is_filter_ground_collision=True,
         n_top_grasps=30,
     )
-    sim.open_window()
+    if not args.headless and not args.viser:
+        sim.open_window()
 
     # Annotate part of the mug to be grasped by following the instructions in the visualization window:
     # 1. View grasp object in browser (e.g http://localhost:11801)

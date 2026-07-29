@@ -137,6 +137,17 @@ embodichain run-env --gym_config config.yaml --preview
 # Headless execution
 embodichain run-env --gym_config config.yaml --headless
 
+# Headless browser visualization
+embodichain run-env --gym_config config.yaml --viser
+
+# Publish selected environments at controlled rates
+embodichain run-env --gym_config config.yaml \
+    --viser \
+    --viser-env-ids 0 2 \
+    --viser-fps 15 \
+    --viser-image-fps 2 \
+    --viser-soft-body-fps 5
+
 # Generate data AND record trajectories for later replay
 embodichain run-env --gym_config config.yaml --record_trajectory
 # trajectories auto-save to ~/.cache/embodichain_data/trajectories/<run_id>/
@@ -177,6 +188,18 @@ embodichain run-env --gym_config config.yaml \
 | ``--replay_mode`` | ``kinematic`` | Replay mode: ``kinematic`` (exact, physics off), ``dynamic`` (feed recorded actions, physics on), ``control`` (interactive scrubber) |
 | ``--profile`` | ``False`` | Enable per-section wall-time profiling of reset/step; prints a breakdown report on ``env.close()`` |
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON to this path on ``env.close()`` |
+| ``--viser`` | ``False`` | Enable the read-only Viser browser scene and force headless execution |
+| ``--viser-host`` | ``127.0.0.1`` | Viser bind interface |
+| ``--viser-port`` | ``8080`` | Viser HTTP/WebSocket port |
+| ``--viser-fps`` | ``15.0`` | Maximum rigid pose and overlay update rate |
+| ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-env` captures after every environment step |
+| ``--viser-soft-body-fps`` | ``5.0`` | Maximum cloth and soft-body vertex rate |
+| ``--viser-env-ids`` | ``0`` | Space-separated environment IDs published to Viser |
+
+The Viser panel supports environment visibility, camera-frustum selection, RGB
+preview, and overlay visibility. For supported object types, programmatic
+configuration, remote access, and performance details, see
+:doc:`../overview/sim/viser_visualization`.
 
 ### Preview Mode
 

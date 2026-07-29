@@ -10,7 +10,8 @@ Follow the tutorials in this order for the best learning experience:
 
 **Phase 1: Simulation Basics**
 
-1. :doc:`create_scene` — Set up a simulation, add objects, and run the render loop. **Start here.**
+1. :doc:`create_scene` — Set up a simulation, add objects, run the render loop,
+   and inspect the scene through Viser. **Start here.**
 2. :doc:`create_softbody` and :doc:`create_cloth` — Add deformable bodies to your scenes.
 3. :doc:`rigid_object_group` — Manage collections of rigid objects efficiently.
 4. :doc:`rigid_constraint` — Attach and detach two rigid objects via a fixed constraint.

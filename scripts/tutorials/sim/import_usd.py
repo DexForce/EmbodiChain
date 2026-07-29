@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Copyright (c) 2021-2025 DexForce Technology Co., Ltd.
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,10 +20,13 @@ Currently, it supports importing USD files as rigid objects or articulations.
 Multiple arenas are not supported when importing USD files.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
@@ -58,6 +61,7 @@ def main():
         ),  # Enable ray tracing for better visuals
         num_envs=1,
         arena_space=3.0,
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance
@@ -104,7 +108,7 @@ def main():
     )
 
     # Open window when the scene has been set up
-    if not args.headless:
+    if not args.headless and not args.viser:
         sim.open_window()
 
     print("[INFO]: Scene setup complete!")

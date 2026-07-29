@@ -19,11 +19,14 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It shows the basic setup of simulation context, adding objects, and sensors.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RigidBodyAttributesCfg,
@@ -193,6 +196,7 @@ def main():
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance
@@ -209,7 +213,7 @@ def main():
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
+    if not args.headless and not args.viser:
         sim.open_window()
 
     robot_grasp_pose(robot, cube2, sim)

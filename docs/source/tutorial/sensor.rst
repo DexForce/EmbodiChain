@@ -1,7 +1,7 @@
 .. _tutorial_simulate_sensor:
 
 Simulating a Camera Sensor
-=========================
+==========================
 
 .. currentmodule:: embodichain.lab.sim
 
@@ -72,7 +72,6 @@ To run the sensor simulation script:
 
 .. code-block:: bash
 
-   cd /home/dex/projects/yuanhaonan/embodichain
    python scripts/tutorials/sim/create_sensor.py
 
 You can customize the simulation with the following command-line options:
@@ -88,14 +87,23 @@ You can customize the simulation with the following command-line options:
    # Run in headless mode (no GUI, images saved to disk)
    python scripts/tutorials/sim/create_sensor.py --headless
 
+   # View the selected camera frustum and RGB preview in Viser
+   python scripts/tutorials/sim/create_sensor.py --viser
+
    # Enable ray tracing rendering
    python scripts/tutorials/sim/create_sensor.py --renderer
 
    # Attach the camera to the robot end-effector
    python scripts/tutorials/sim/create_sensor.py --attach_sensor
 
+With ``--viser``, use the browser's **Cameras** panel to select the environment
+and camera, toggle its frustum, and show or hide the RGB preview. The preview
+defaults to 2 FPS and can be changed with ``--viser-image-fps``. Depth, masks,
+and normals remain available through the sensor API but are not currently
+shown in the Viser image panel.
+
 Key Features Demonstrated
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This tutorial demonstrates:
 
@@ -104,6 +112,7 @@ This tutorial demonstrates:
 3. **Camera configuration** (intrinsics, extrinsics, clipping planes)
 4. **Real-time visualization** of color, depth, mask, and normal images
 5. **Robot-sensor integration** in a simulation loop
+6. **Browser camera inspection** with a selected frustum and low-frequency RGB preview
 
 Next Steps
 ~~~~~~~~~~
@@ -113,6 +122,6 @@ After completing this tutorial, you can explore:
 - Using other sensor types (e.g., stereo cameras, force sensors)
 - Recording sensor data for offline analysis
 - Integrating sensor feedback into robot control or learning algorithms
+- Configuring :doc:`/overview/sim/viser_visualization` for remote camera inspection
 
 This tutorial provides a foundation for integrating perception into robotic simulation scenarios with SimulationManager.
-This tutorial provides the foundation for integrating perception into robotic simulation scenarios with SimulationManager.

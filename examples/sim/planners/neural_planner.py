@@ -33,6 +33,7 @@ import torch
 from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
@@ -211,6 +212,7 @@ def main() -> None:
             arena_space=args.arena_space,
             gpu_id=effective_gpu_id,
             render_cfg=RenderCfg(renderer=args.renderer),
+            visualization=visualization_cfg_from_args(args),
         )
     )
     try:
@@ -220,7 +222,7 @@ def main() -> None:
 
         if sim.is_use_gpu_physics:
             sim.init_gpu_physics()
-        if not args.headless:
+        if not args.headless and not args.viser:
             sim.open_window()
 
         start_qpos = torch.tensor(

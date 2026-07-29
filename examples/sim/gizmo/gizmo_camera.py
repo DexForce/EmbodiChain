@@ -18,6 +18,8 @@ This script demonstrates how to use the Gizmo class for interactive camera contr
 It shows how to create a gizmo attached to a camera for real-time pose manipulation.
 """
 
+from __future__ import annotations
+
 import argparse
 import cv2
 import numpy as np
@@ -27,6 +29,7 @@ import torch
 torch.set_printoptions(precision=4, sci_mode=False)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
@@ -51,6 +54,7 @@ def main():
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create simulation context
