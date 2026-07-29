@@ -220,10 +220,10 @@ class HandOver(AtomicAction):
         receive_object_to_eef = torch.bmm(
             pose_inv(middle_object_pose), receive_grasp_xpos
         )
-
+        receive_grasp_z = receive_grasp_xpos[..., :3, 2]
         receive_pre_grasp_eef = self.builder.apply_local_offset(
             receive_grasp_xpos,
-            -self.receive_approach_direction * self.cfg.pre_grasp_distance,
+            -receive_grasp_z * self.cfg.pre_grasp_distance,
         )
         # 2.4 - receiving arm delivers the object to the final pose.
         receive_final_eef = torch.bmm(final_object_pose, receive_object_to_eef)

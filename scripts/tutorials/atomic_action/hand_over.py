@@ -70,7 +70,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
-GRIPPER_TCP_Z = 0.15
+GRIPPER_TCP_Z = 0.155
 ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
@@ -97,13 +97,13 @@ FINAL_OBJECT_YAW_DEG = 0.0
 HAND_CLOSE_QPOS = 0.026
 PICKUP_SAMPLE_INTERVAL = 80
 PICKUP_HAND_INTERP_STEPS = 5
-PICKUP_PRE_GRASP_DISTANCE = 0.12
-PICKUP_LIFT_HEIGHT = 0.10
+PICKUP_PRE_GRASP_DISTANCE = 0.2
+PICKUP_LIFT_HEIGHT = 0.1
 HANDOVER_SAMPLE_INTERVAL = 140
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_HOLD_STEPS = 4
 HANDOVER_RETREAT_STEPS = 28
-HANDOVER_PRE_GRASP_DISTANCE = 0.10
+HANDOVER_PRE_GRASP_DISTANCE = 0.2
 HANDOVER_LIFT_HEIGHT = 0.08
 TRAJECTORY_SIM_STEPS = 4
 HANDOVER_RECORD_LOOK_AT = (
@@ -190,20 +190,20 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
         ),
         drive_pros=JointDrivePropertiesCfg(
             stiffness={
-                "LEFT_JOINT[0-9]": 1e5,
-                "RIGHT_JOINT[0-9]": 1e5,
+                "LEFT_JOINT[0-9]": 1e4,
+                "RIGHT_JOINT[0-9]": 1e4,
                 "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
                 "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
             },
             damping={
-                "LEFT_JOINT[0-9]": 1e4,
-                "RIGHT_JOINT[0-9]": 1e4,
+                "LEFT_JOINT[0-9]": 1e3,
+                "RIGHT_JOINT[0-9]": 1e3,
                 "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e1,
                 "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e1,
             },
             max_effort={
-                "LEFT_JOINT[0-9]": 1e6,
-                "RIGHT_JOINT[0-9]": 1e6,
+                "LEFT_JOINT[0-9]": 1e5,
+                "RIGHT_JOINT[0-9]": 1e5,
                 "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
                 "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
             },
@@ -221,13 +221,13 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
                 end_link_name="left_ee_link",
                 root_link_name="left_base_link",
                 tcp=tcp,
-                num_samples=30,
+                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
             ),
             "right_arm": PytorchSolverCfg(
                 end_link_name="right_ee_link",
                 root_link_name="right_base_link",
                 tcp=tcp,
-                num_samples=30,
+                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
             ),
         },
         init_pos=list(ROBOT_INIT_POS),
