@@ -135,6 +135,7 @@ def _with_final_auto_arm_sides(
         )
         for index, placement in enumerate(placements)
         if placement.intent != "coordinated_pickment"
+        and placement.arm_request == "auto"
     }
 
     for index, active_side in inferred_sides.items():

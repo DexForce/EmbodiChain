@@ -117,6 +117,23 @@ and orientation-aware mesh height. These modules may depend on
 generation.relative_intent and relative_offsets, but they must not import
 relative_spec or the relative_geometry compatibility aggregator.
 
+Semantic-step execution
+-----------------------
+
+Object-manipulation model output is an ordered semantic program. Generation
+assigns stable step IDs, linear dependencies, hard or inferred arm bindings,
+postconditions, and the atomic edge range owned by each step. This metadata is
+serialized inside task_graph.json; the existing atomic graph remains the only
+runtime plan and compatibility artifact.
+
+Runtime executes semantic edge ranges in order. At each boundary it validates
+dependencies and live object bindings, lets the existing atomic target
+resolvers and motion planners read current simulator poses, settles physics,
+and evaluates the step postcondition per environment. It must not construct a
+second episode-wide grounded graph or infer reachability from arm-base
+distance. Environments share one semantic program while retaining independent
+success and failure masks.
+
 Config bundle ownership
 -----------------------
 

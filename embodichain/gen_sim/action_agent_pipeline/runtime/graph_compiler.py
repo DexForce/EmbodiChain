@@ -45,6 +45,16 @@ _RECOVERY_KEYS = {
 }
 _COMPILED_BUNDLE_KEYS = {"task_graph", "metadata"}
 _EDGE_KEYS = {"id", "source", "target", *ARM_ACTION_KEYS}
+_SEMANTIC_STEP_KEYS = {
+    "id",
+    "operator",
+    "object",
+    "actor",
+    "goal",
+    "depends_on",
+    "postcondition",
+    "edge_ids",
+}
 
 
 def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
@@ -113,6 +123,17 @@ def compile_agent_graph_spec(
                 edge.get(RIGHT_ARM_ACTION_KEY), action_module
             ),
         )
+    for step in task_spec.get("semantic_steps", []):
+        graph.add_semantic_step(
+            step["id"],
+            operator=step["operator"],
+            object_uid=step["object"],
+            actor=step["actor"],
+            goal=step["goal"],
+            depends_on=step["depends_on"],
+            postcondition=step["postcondition"],
+            edge_ids=step["edge_ids"],
+        )
 
     return graph
 
@@ -175,6 +196,125 @@ def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
                 )
 
     _validate_nominal_path(task_spec, edge_specs)
+    _validate_semantic_steps(task_spec, edge_specs)
+
+
+def _validate_semantic_steps(
+    task_spec: Mapping[str, Any],
+    edge_specs: list[Mapping[str, Any]],
+) -> None:
+    """Validate optional closed-loop metadata against the atomic edge chain."""
+    steps = task_spec.get("semantic_steps")
+    if steps is None:
+        return
+    if task_spec.get("semantic_step_schema_version") != "semantic_steps_v1":
+        raise ValueError(
+            "Task graph with semantic_steps must use "
+            "semantic_step_schema_version='semantic_steps_v1'."
+        )
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("semantic_steps must be a non-empty list.")
+
+    edge_by_id = {edge["id"]: edge for edge in edge_specs}
+    assigned_edges: set[str] = set()
+    assigned_edge_order: list[str] = []
+    completed_steps: set[str] = set()
+    for index, step in enumerate(steps):
+        if not isinstance(step, Mapping):
+            raise TypeError(f"Semantic step {index} must be a mapping.")
+        unknown_keys = set(step) - _SEMANTIC_STEP_KEYS
+        if unknown_keys:
+            raise ValueError(
+                f"Semantic step {index} contains unsupported fields: "
+                f"{', '.join(sorted(unknown_keys))}."
+            )
+        missing_keys = _SEMANTIC_STEP_KEYS - set(step)
+        if missing_keys:
+            raise ValueError(
+                f"Semantic step {index} is missing fields: "
+                f"{', '.join(sorted(missing_keys))}."
+            )
+        step_id = step["id"]
+        if not isinstance(step_id, str) or not step_id:
+            raise ValueError(f"Semantic step {index} requires a non-empty id.")
+        if step_id in completed_steps:
+            raise ValueError(f"Duplicate semantic step id {step_id!r}.")
+
+        dependencies = step["depends_on"]
+        if not isinstance(dependencies, list) or any(
+            not isinstance(item, str) for item in dependencies
+        ):
+            raise TypeError(f"Semantic step {step_id!r} depends_on must be a list.")
+        unknown_dependencies = set(dependencies) - completed_steps
+        if unknown_dependencies:
+            raise ValueError(
+                f"Semantic step {step_id!r} depends on incomplete or unknown "
+                f"step(s): {', '.join(sorted(unknown_dependencies))}."
+            )
+
+        edge_ids = step["edge_ids"]
+        if not isinstance(edge_ids, list) or not edge_ids:
+            raise ValueError(
+                f"Semantic step {step_id!r} requires a non-empty edge_ids list."
+            )
+        unknown_edges = set(edge_ids) - set(edge_by_id)
+        if unknown_edges:
+            raise ValueError(
+                f"Semantic step {step_id!r} references unknown edge(s): "
+                f"{', '.join(sorted(unknown_edges))}."
+            )
+        duplicate_edges = set(edge_ids) & assigned_edges
+        if duplicate_edges:
+            raise ValueError(
+                f"Semantic step {step_id!r} reuses edge(s): "
+                f"{', '.join(sorted(duplicate_edges))}."
+            )
+        actor = step["actor"]
+        goal = step["goal"]
+        postcondition = step["postcondition"]
+        if not isinstance(actor, Mapping) or actor.get("mode") not in {
+            "required",
+            "assigned",
+        }:
+            raise ValueError(
+                f"Semantic step {step_id!r} requires a valid actor mapping."
+            )
+        actor_arm = actor.get("arm")
+        if actor_arm not in {"left_arm", "right_arm"}:
+            raise ValueError(
+                f"Semantic step {step_id!r} actor.arm must be left_arm or right_arm."
+            )
+        actor_side = "left" if actor_arm == "left_arm" else "right"
+        for edge_id in edge_ids:
+            edge = edge_by_id[edge_id]
+            for action_key in ARM_ACTION_KEYS:
+                action_side = _action_robot_side(edge.get(action_key))
+                if action_side is not None and action_side != actor_side:
+                    raise ValueError(
+                        f"Semantic step {step_id!r} requires {actor_arm}, but edge "
+                        f"{edge_id!r} contains a {action_side}_arm action."
+                    )
+        if not isinstance(goal, Mapping) or not goal:
+            raise ValueError(
+                f"Semantic step {step_id!r} requires a non-empty goal mapping."
+            )
+        if not isinstance(postcondition, Mapping) or not postcondition:
+            raise ValueError(
+                f"Semantic step {step_id!r} requires a postcondition mapping."
+            )
+        assigned_edges.update(edge_ids)
+        assigned_edge_order.extend(edge_ids)
+        completed_steps.add(step_id)
+
+    all_edges = set(edge_by_id)
+    if assigned_edges != all_edges:
+        missing = ", ".join(sorted(all_edges - assigned_edges))
+        raise ValueError(f"Semantic steps do not cover graph edge(s): {missing}.")
+    expected_edge_order = [edge["id"] for edge in edge_specs]
+    if assigned_edge_order != expected_edge_order:
+        raise ValueError(
+            "Semantic step edge_ids must cover the nominal graph in execution order."
+        )
 
 
 def _validate_nominal_path(

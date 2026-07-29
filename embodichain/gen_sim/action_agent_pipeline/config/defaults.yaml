@@ -188,3 +188,8 @@ success_evaluator_fallbacks:
   gripper_clear_min_distance: 0.05
   initial_qpos_tolerance: 0.05
   gripper_state_tolerance: 0.001
+
+# Closed-loop semantic steps use a short deterministic settling window before
+# evaluating their postconditions. Callers may override this at runtime.
+closed_loop:
+  semantic_step_settle_steps: 10

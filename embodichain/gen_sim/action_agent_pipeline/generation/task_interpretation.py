@@ -74,7 +74,9 @@ _REQUIRED_SPEC_FIELDS = {
         "order_by",
         "anchor",
     },
-    _TASK_ROUTE_OBJECT_MANIPULATION: {"manipulations"},
+    # Accept the canonical ordered ``steps`` field and the pre-v2
+    # ``manipulations`` spelling during the compatibility window.
+    _TASK_ROUTE_OBJECT_MANIPULATION: set(),
 }
 _FORBIDDEN_SPEC_FIELDS = {
     _TASK_ROUTE_ARRANGEMENT_LINE: {
@@ -223,4 +225,24 @@ def _normalize_task_interpretation_response(
             f"Task interpretation spec for {task_route.route!r} is missing "
             f"required field(s): {', '.join(missing_fields)}."
         )
+    if task_route.route == _TASK_ROUTE_OBJECT_MANIPULATION:
+        _validate_object_manipulation_steps(spec)
     return TaskInterpretationSpec(task_route=task_route, spec=dict(spec))
+
+
+def _validate_object_manipulation_steps(spec: Mapping[str, Any]) -> None:
+    """Require exactly one canonical or legacy ordered-step collection."""
+    present = [key for key in ("steps", "manipulations") if key in spec]
+    if not present:
+        raise ValueError(
+            "Task interpretation spec for 'object_manipulation' is missing "
+            "required field 'steps'."
+        )
+    if len(present) > 1:
+        raise ValueError(
+            "Object-manipulation spec must not define both 'steps' and "
+            "'manipulations'."
+        )
+    steps = spec[present[0]]
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("Object-manipulation steps must be a non-empty list.")

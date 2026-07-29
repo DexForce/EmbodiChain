@@ -71,7 +71,7 @@ Stacking rules:
 
 When route is object_manipulation, use this spec:
 {
-  "manipulations": [
+  "steps": [
     {
       "intent": "place_relative|hold_hover|coordinated_pickment",
       "moved_object": "<rigid_object source_uid>",
@@ -93,12 +93,19 @@ When route is object_manipulation, use this spec:
 }
 
 Object-manipulation rules:
-- Use coordinated_pickment when both arms pick, lift, carry, or move one shared object. Return exactly one manipulation with arm="auto".
+- steps is an ordered semantic program. Preserve every explicitly stated
+  before/after/then sequence from the task description.
+- The same moved_object may appear in more than one step. Repeat it whenever
+  the task moves that object again after an earlier placement.
+- arm="left" or arm="right" is a hard user constraint. Use the explicitly
+  requested arm on that step and never replace it with auto or the other arm.
+- Use coordinated_pickment when both arms pick, lift, carry, or move one shared object. Return exactly one step with arm="auto".
 - A coordinated_pickment may contain zero to four payloads that must first be placed on or inside the shared carrier. Payloads must differ from the carrier.
 - For coordinated_pickment, direction describes carrier motion. Use none for lifting in place. Use terminal_behavior="hold" for 端起, 举起, 悬空, 保持, or hold; otherwise movement defaults to place.
 - Use hold_hover when an object is lifted and held without release or orientation change. Omit reference_object and goal_relation, preserve orientation, and use 0.10 m unless a height is specified.
 - Use place_relative for placing, stacking onto, moving beside, inserting, releasing, or changing object orientation at a spatial target. Include reference_object and goal_relation.
-- A dual-arm task moving two separate objects has exactly two manipulations, different moved objects, and one left plus one right arm. Use auto only when the user did not choose the arm.
+- A dual-arm task moving two separate objects normally has one step per moved
+  object. Use auto only when the user did not choose the arm for that step.
 - Do not mix top-level intent families. Payloads belong only inside the single coordinated_pickment.
 - A reference may be a rigid or background object. For movement relative to the object's initial position, use the moved object or self.
 - Use inside for release into a container and on for placement on a non-container support.

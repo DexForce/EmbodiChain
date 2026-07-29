@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
+import re
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
@@ -317,7 +319,9 @@ def _apply_relative_task_response(
         for entry, forced_side in zip(placement_entries, forced_arm_sides)
     )
     if coordinated_entry is None:
-        placements = _order_relative_placements_by_dependency(placements)
+        # This list is an ordered semantic program. Reordering it would change
+        # explicit "then" instructions and break repeated-object workflows.
+        placements = _with_ordered_step_metadata(placements)
     _validate_relative_placements(placements)
 
     summary = str(response.get("task_prompt_summary", "")).strip()
@@ -363,7 +367,10 @@ def _apply_relative_task_response(
 
 
 def _relative_placement_entries(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    placements = response.get("manipulations", response.get("placements"))
+    placements = response.get(
+        "steps",
+        response.get("manipulations", response.get("placements")),
+    )
     if placements is None:
         return [response]
     if not isinstance(placements, list) or not placements:
@@ -523,9 +530,6 @@ def _validate_relative_placements(
 ) -> None:
     if not placements:
         raise ValueError("Object manipulation requires at least one manipulation.")
-    moved_source_uids = [placement.moved_source_uid for placement in placements]
-    if len(moved_source_uids) != len(set(moved_source_uids)):
-        raise ValueError("Object manipulations must use distinct moved_object values.")
     intents = {placement.intent for placement in placements}
     if intents == {"place_relative", "coordinated_pickment"}:
         coordinated = [
@@ -553,10 +557,47 @@ def _validate_relative_placements(
         raise ValueError("CoordinatedPickment supports exactly one shared object.")
 
 
+_STEP_ID_UNSAFE_RE = re.compile(r"[^0-9a-z]+")
+
+
+def _with_ordered_step_metadata(
+    placements: tuple[RelativePlacementStepSpec, ...],
+) -> tuple[RelativePlacementStepSpec, ...]:
+    """Assign stable IDs and linear dependencies without consulting the model."""
+    result: list[RelativePlacementStepSpec] = []
+    previous_step_id: str | None = None
+    for index, placement in enumerate(placements, start=1):
+        identity = "_".join(
+            (
+                placement.intent,
+                placement.moved_runtime_uid,
+                placement.relation,
+                placement.reference_runtime_uid,
+            )
+        ).lower()
+        slug = _STEP_ID_UNSAFE_RE.sub("_", identity).strip("_") or "step"
+        step_id = f"s{index:02d}_{slug[:72].rstrip('_')}"
+        depends_on = (previous_step_id,) if previous_step_id is not None else ()
+        result.append(
+            replace(
+                placement,
+                step_id=step_id,
+                depends_on=depends_on,
+            )
+        )
+        previous_step_id = step_id
+    return tuple(result)
+
+
 def _order_relative_placements_by_dependency(
     placements: tuple[RelativePlacementStepSpec, ...],
 ) -> tuple[RelativePlacementStepSpec, ...]:
-    """Order two placements so a moved reference object is placed first."""
+    """Return the legacy dependency order for compatibility-only callers.
+
+    New semantic programs intentionally do not call this helper because their
+    model-provided order is authoritative. Keeping the pure helper avoids
+    breaking downstream analysis code that still imports the old utility.
+    """
     if len(placements) != 2:
         return placements
     first, second = placements

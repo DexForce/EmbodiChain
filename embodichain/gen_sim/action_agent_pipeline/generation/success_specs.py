@@ -331,9 +331,10 @@ def _make_relative_success_spec(
                 ],
             }
         return {"op": "all", "terms": [*payload_terms, carrier_term]}
-    if len(spec.placements) == 1:
+    terminal_placements = _terminal_relative_placements(spec.placements)
+    if len(terminal_placements) == 1:
         return _make_relative_placement_success_spec(
-            spec.placements[0],
+            terminal_placements[0],
             side_relation_xy_offsets=side_relation_xy_offsets,
         )
     if all(placement.intent == "hold_hover" for placement in spec.placements):
@@ -352,9 +353,28 @@ def _make_relative_success_spec(
                 placement,
                 side_relation_xy_offsets=side_relation_xy_offsets,
             )
-            for placement in spec.placements
+            for placement in terminal_placements
         ],
     }
+
+
+def _terminal_relative_placements(
+    placements: Sequence[RelativePlacementStepSpec],
+) -> tuple[RelativePlacementStepSpec, ...]:
+    """Keep only each object's final goal for episode-level success.
+
+    Intermediate goals remain attached to semantic steps and are checked when
+    those steps finish. Requiring both the old and new relation at episode end
+    would make a repeated-object task logically impossible.
+    """
+    last_index_by_object = {
+        placement.moved_runtime_uid: index for index, placement in enumerate(placements)
+    }
+    return tuple(
+        placement
+        for index, placement in enumerate(placements)
+        if last_index_by_object[placement.moved_runtime_uid] == index
+    )
 
 
 def _make_relative_placement_success_spec(

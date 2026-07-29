@@ -96,6 +96,9 @@ class RelativePlacementStepSpec:
     pickup_upright_direction: list[float] | None = None
     pickup_rotate_upright: float | None = None
     surface_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE
+    # Stable semantic metadata intentionally excludes generated coordinates.
+    step_id: str = ""
+    depends_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

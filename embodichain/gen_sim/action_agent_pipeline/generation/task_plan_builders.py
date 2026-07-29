@@ -647,7 +647,8 @@ def _uses_serial_dual_sequence(spec: RelativeSpecLike) -> bool:
     """Return whether placement dependencies require sequential execution."""
     first, second = spec.placements
     return (
-        second.reference_source_uid == first.moved_source_uid
+        first.moved_runtime_uid == second.moved_runtime_uid
+        or second.reference_source_uid == first.moved_source_uid
         or first.active_side == second.active_side
         or all(
             getattr(placement, "upright_in_place", False)

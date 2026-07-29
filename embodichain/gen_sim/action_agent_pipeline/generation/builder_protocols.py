@@ -58,6 +58,9 @@ class RelativePlacementLike(Protocol):
     pickup_upright_direction: Sequence[float] | None
     pickup_rotate_upright: float | None
     surface_clearance: float
+    arm_request: str
+    step_id: str
+    depends_on: Sequence[str]
 
 
 class RelativeSpecLike(RelativePlacementLike, Protocol):
