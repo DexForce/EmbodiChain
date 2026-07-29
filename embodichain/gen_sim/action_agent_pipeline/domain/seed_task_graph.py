@@ -1,0 +1,517 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Schema ownership for environment-independent executable Seed graphs."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+import hashlib
+import json
+from typing import Any
+
+__all__ = [
+    "MOTION_POLICY_VERSION",
+    "SEED_TASK_GRAPH_SCHEMA_VERSION",
+    "SEMANTIC_STEP_SCHEMA_VERSION",
+    "seed_task_graph_hash",
+    "validate_seed_task_graph",
+]
+
+SEED_TASK_GRAPH_SCHEMA_VERSION = "seed_task_graph_v2"
+SEMANTIC_STEP_SCHEMA_VERSION = "semantic_steps_v2"
+MOTION_POLICY_VERSION = "action_agent_motion_policy_v1"
+
+_ROUTES = {"arrangement_line", "object_manipulation", "stacking"}
+_ACTOR_MODES = {"auto", "coordinated", "required"}
+_ARM_NAMES = {"left_arm", "right_arm"}
+_BINDING_KINDS = {
+    "coordinated_goal",
+    "current_held_pose",
+    "joint_state",
+    "object",
+    "policy_pose",
+    "semantic_goal",
+}
+_ATOMIC_ACTION_CLASSES = {
+    "CoordinatedPickment",
+    "MoveEndEffector",
+    "MoveHeldObject",
+    "MoveJoints",
+    "PickUp",
+    "Place",
+}
+_CONTROLS = {"arm", "coordinated", "hand"}
+_MOTION_POLICIES = {
+    "default_home",
+    "default_pickup",
+    "default_release",
+    "default_retreat",
+    "default_transport",
+}
+_BINDING_FIELDS = {
+    "coordinated_goal": {"kind", "object"},
+    "current_held_pose": {"kind"},
+    "joint_state": {"kind", "source"},
+    "object": {"affordance", "kind", "object"},
+    "policy_pose": {"kind"},
+    "semantic_goal": {"kind", "semantic_step"},
+}
+_ACTION_CONTRACTS = {
+    "CoordinatedPickment": ("coordinated_goal", "coordinated"),
+    "MoveEndEffector": ("policy_pose", "arm"),
+    "MoveHeldObject": ("semantic_goal", "arm"),
+    "MoveJoints": ("joint_state", None),
+    "PickUp": ("object", "arm"),
+    "Place": ("current_held_pose", "arm"),
+}
+_ACTION_POLICIES = {
+    "CoordinatedPickment": "default_transport",
+    "MoveEndEffector": "default_retreat",
+    "MoveHeldObject": "default_transport",
+    "PickUp": "default_pickup",
+    "Place": "default_release",
+}
+_TOP_LEVEL_KEYS = {
+    "edges",
+    "goal",
+    "motion_policy_version",
+    "nodes",
+    "program",
+    "route",
+    "schema_version",
+    "semantic_step_schema_version",
+    "semantic_steps",
+    "start",
+    "task",
+}
+_STEP_KEYS = {
+    "actor",
+    "depends_on",
+    "edge_ids",
+    "goal",
+    "id",
+    "object",
+    "operator",
+    "postcondition",
+}
+_ACTION_KEYS = {
+    "actor",
+    "atomic_action_class",
+    "control",
+    "motion_policy",
+    "target_binding",
+}
+_GROUNDED_FIELD_NAMES = {
+    "cfg",
+    "distance",
+    "execution",
+    "failure_reason",
+    "high_position",
+    "ik",
+    "joint_state",
+    "lift_height",
+    "offset",
+    "position",
+    "planning",
+    "pre_grasp_distance",
+    "qpos",
+    "release_position",
+    "resolved_eef_pose",
+    "resolved_motion_policy",
+    "resolved_target_object_pose",
+    "resolved_target_position",
+    "rotation_matrix",
+    "runtime",
+    "runtime_status",
+    "status",
+    "surface_clearance",
+    "target_position",
+    "target_qpos",
+    "target_xy",
+    "tolerance",
+    "trajectory",
+}
+_GROUNDED_FIELD_FRAGMENTS = {
+    "distance",
+    "offset",
+    "position",
+    "qpos",
+    "tolerance",
+    "trajectory",
+}
+_DEFERRED_POLICY_FIELDS = {
+    "clearance",
+    "hover_height",
+    "line_spacing",
+    "post_hold_steps",
+    "relation_distance",
+    "retreat_height",
+    "sample_interval",
+}
+
+
+def seed_task_graph_hash(seed_graph: Mapping[str, Any]) -> str:
+    """Return the stable SHA-256 identity of one validated executable Seed."""
+    validate_seed_task_graph(seed_graph)
+    canonical = json.dumps(
+        seed_graph,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_seed_task_graph(
+    seed_graph: Mapping[str, Any],
+    *,
+    task_name: str | None = None,
+    route: str | None = None,
+) -> None:
+    """Validate Seed v2 topology and reject runtime-grounded data leakage."""
+    if not isinstance(seed_graph, Mapping):
+        raise TypeError("Seed task graph must be a mapping.")
+    unknown_graph_keys = set(seed_graph) - _TOP_LEVEL_KEYS
+    if unknown_graph_keys:
+        raise ValueError(
+            "Seed task graph contains unsupported top-level fields: "
+            f"{sorted(unknown_graph_keys)}."
+        )
+    if seed_graph.get("schema_version") != SEED_TASK_GRAPH_SCHEMA_VERSION:
+        actual = seed_graph.get("schema_version")
+        if actual == "seed_task_graph_v1":
+            raise ValueError(
+                "seed_task_graph_v1 is no longer supported. Regenerate the action "
+                "agent config with --overwrite."
+            )
+        raise ValueError(
+            "Seed task graph schema_version must be "
+            f"{SEED_TASK_GRAPH_SCHEMA_VERSION!r}. Legacy/precomputed graphs are "
+            "not supported; regenerate the action-agent config with --overwrite."
+        )
+    if seed_graph.get("semantic_step_schema_version") != SEMANTIC_STEP_SCHEMA_VERSION:
+        raise ValueError(
+            "Seed task graph semantic_step_schema_version must be "
+            f"{SEMANTIC_STEP_SCHEMA_VERSION!r}."
+        )
+    if seed_graph.get("motion_policy_version") != MOTION_POLICY_VERSION:
+        raise ValueError(
+            f"Seed task graph motion_policy_version must be {MOTION_POLICY_VERSION!r}."
+        )
+    graph_task = seed_graph.get("task")
+    if not isinstance(graph_task, str) or not graph_task.strip():
+        raise ValueError("Seed task graph requires a non-empty task name.")
+    if task_name is not None and graph_task != task_name:
+        raise ValueError(
+            f"Seed task graph task {graph_task!r} does not match {task_name!r}."
+        )
+    graph_route = seed_graph.get("route")
+    if graph_route not in _ROUTES:
+        raise ValueError(f"Unsupported seed task graph route: {graph_route!r}.")
+    if route is not None and graph_route != route:
+        raise ValueError(
+            f"Seed task graph route {graph_route!r} does not match {route!r}."
+        )
+    if not isinstance(seed_graph.get("program"), str) or not seed_graph["program"]:
+        raise ValueError("Seed task graph requires a non-empty program.")
+
+    _reject_grounded_fields(seed_graph)
+    nodes = seed_graph.get("nodes")
+    edges = seed_graph.get("edges")
+    steps = seed_graph.get("semantic_steps")
+    if not isinstance(nodes, list) or len(nodes) < 2:
+        raise ValueError("Seed task graph requires at least two nodes.")
+    if not isinstance(edges, list) or not edges:
+        raise ValueError("Seed task graph requires a non-empty edges list.")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("Seed task graph requires non-empty semantic_steps.")
+
+    node_ids: set[str] = set()
+    for index, node in enumerate(nodes):
+        if not isinstance(node, Mapping):
+            raise TypeError(f"Seed node {index} must be a mapping.")
+        if set(node) != {"id", "semantic"}:
+            raise ValueError(f"Seed node {index} must contain id and semantic.")
+        node_id = node["id"]
+        if not isinstance(node_id, str) or not node_id or node_id in node_ids:
+            raise ValueError(f"Invalid or duplicate seed node id: {node_id!r}.")
+        node_ids.add(node_id)
+    for endpoint in ("start", "goal"):
+        if seed_graph.get(endpoint) not in node_ids:
+            raise ValueError(f"Seed graph {endpoint} must reference a defined node.")
+
+    edge_ids: set[str] = set()
+    incoming = {node_id: 0 for node_id in node_ids}
+    outgoing = {node_id: 0 for node_id in node_ids}
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, Mapping):
+            raise TypeError(f"Seed edge {index} must be a mapping.")
+        if set(edge) != {"actions", "id", "source", "target"}:
+            raise ValueError(
+                f"Seed edge {index} must contain id/source/target/actions."
+            )
+        edge_id = edge["id"]
+        if not isinstance(edge_id, str) or not edge_id or edge_id in edge_ids:
+            raise ValueError(f"Invalid or duplicate seed edge id: {edge_id!r}.")
+        edge_ids.add(edge_id)
+        source = edge["source"]
+        target = edge["target"]
+        if source not in node_ids or target not in node_ids:
+            raise ValueError(f"Seed edge {edge_id!r} references an unknown node.")
+        outgoing[source] += 1
+        incoming[target] += 1
+        actions = edge["actions"]
+        if not isinstance(actions, list) or not actions:
+            raise ValueError(f"Seed edge {edge_id!r} requires symbolic actions.")
+        for action in actions:
+            _validate_symbolic_action(edge_id, action)
+
+    start = str(seed_graph["start"])
+    goal = str(seed_graph["goal"])
+    if incoming[start] != 0 or outgoing[goal] != 0:
+        raise ValueError("Seed start/goal topology is invalid.")
+    if any(outgoing[node_id] != 1 for node_id in node_ids - {goal}):
+        raise ValueError("Seed v2 currently requires one deterministic outgoing edge.")
+    if any(incoming[node_id] != 1 for node_id in node_ids - {start}):
+        raise ValueError("Seed v2 currently requires one deterministic incoming edge.")
+    _validate_single_chain(start, goal, node_ids, edges)
+
+    known_steps: set[str] = set()
+    covered_edges: list[str] = []
+    edge_by_id = {str(edge["id"]): edge for edge in edges}
+    for index, step in enumerate(steps):
+        if not isinstance(step, Mapping) or set(step) != _STEP_KEYS:
+            raise ValueError(f"Seed semantic step {index} has invalid fields.")
+        step_id = step["id"]
+        if not isinstance(step_id, str) or not step_id or step_id in known_steps:
+            raise ValueError(f"Invalid or duplicate semantic step id: {step_id!r}.")
+        dependencies = step["depends_on"]
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies
+        ):
+            raise TypeError(f"Semantic step {step_id!r} depends_on must be a list.")
+        unknown_dependencies = set(dependencies) - known_steps
+        if unknown_dependencies:
+            raise ValueError(
+                f"Semantic step {step_id!r} depends on non-prior steps: "
+                f"{sorted(unknown_dependencies)}."
+            )
+        _validate_seed_actor(step_id, step["actor"])
+        if not isinstance(step["operator"], str) or not step["operator"]:
+            raise ValueError(f"Semantic step {step_id!r} requires an operator.")
+        if not isinstance(step["object"], str) or not step["object"]:
+            raise ValueError(f"Semantic step {step_id!r} requires an object.")
+        if not isinstance(step["goal"], Mapping) or not isinstance(
+            step["postcondition"], Mapping
+        ):
+            raise TypeError(f"Semantic step {step_id!r} goals must be mappings.")
+        assigned = step["edge_ids"]
+        if not isinstance(assigned, list) or not assigned:
+            raise ValueError(f"Semantic step {step_id!r} requires edge_ids.")
+        if any(edge_id not in edge_ids for edge_id in assigned):
+            raise ValueError(f"Semantic step {step_id!r} references unknown edges.")
+        for edge_id in assigned:
+            edge_actions = edge_by_id[str(edge_id)]["actions"]
+            for action in edge_actions:
+                actor_matches_step = action["actor"] == step["actor"]
+                coordinated_child = (
+                    step["actor"]["mode"] == "coordinated"
+                    and action["actor"].get("mode") == "required"
+                    and action["actor"].get("arm") in _ARM_NAMES
+                )
+                if not actor_matches_step and not coordinated_child:
+                    raise ValueError(
+                        f"Seed edge {edge_id!r} actor does not match semantic step "
+                        f"{step_id!r}."
+                    )
+                binding = action["target_binding"]
+                if (
+                    binding["kind"] == "semantic_goal"
+                    and binding.get("semantic_step") != step_id
+                ):
+                    raise ValueError(
+                        f"Seed edge {edge_id!r} references the wrong semantic goal."
+                    )
+            if len(edge_actions) > 1:
+                child_arms = {
+                    action["actor"].get("arm")
+                    for action in edge_actions
+                    if action["actor"].get("mode") == "required"
+                }
+                if (
+                    step["actor"]["mode"] != "coordinated"
+                    or len(edge_actions) != 2
+                    or child_arms != _ARM_NAMES
+                ):
+                    raise ValueError(
+                        f"Seed edge {edge_id!r} has an invalid multi-arm action list."
+                    )
+            elif step["actor"]["mode"] == "coordinated" and (
+                edge_actions[0]["atomic_action_class"] != "CoordinatedPickment"
+                or edge_actions[0]["actor"] != step["actor"]
+            ):
+                raise ValueError(
+                    f"Seed edge {edge_id!r} has an invalid coordinated action."
+                )
+        covered_edges.extend(assigned)
+        known_steps.add(step_id)
+    if covered_edges != [str(edge["id"]) for edge in edges]:
+        raise ValueError(
+            "Semantic step edge_ids must cover every Seed edge exactly once in order."
+        )
+
+
+def _validate_seed_actor(step_id: str, actor: Any) -> None:
+    if not isinstance(actor, Mapping) or actor.get("mode") not in _ACTOR_MODES:
+        raise ValueError(f"Seed task graph step {step_id!r} has an invalid actor.")
+    mode = actor["mode"]
+    if mode == "required" and (
+        set(actor) != {"arm", "mode"} or actor.get("arm") not in _ARM_NAMES
+    ):
+        raise ValueError(
+            f"Seed task graph step {step_id!r} required actor needs a valid arm."
+        )
+    if mode == "auto" and set(actor) != {"mode"}:
+        raise ValueError(
+            f"Seed task graph step {step_id!r} auto actor must remain unresolved."
+        )
+    if mode == "coordinated":
+        arms = actor.get("arms")
+        if (
+            set(actor) != {"arms", "mode"}
+            or not isinstance(arms, list)
+            or set(arms) != _ARM_NAMES
+        ):
+            raise ValueError(
+                f"Seed task graph step {step_id!r} coordinated actor needs both arms."
+            )
+
+
+def _validate_symbolic_action(edge_id: str, action: Any) -> None:
+    if not isinstance(action, Mapping) or set(action) != _ACTION_KEYS:
+        raise ValueError(f"Seed edge {edge_id!r} has an invalid symbolic action.")
+    if action["atomic_action_class"] not in _ATOMIC_ACTION_CLASSES:
+        raise ValueError(f"Seed edge {edge_id!r} has an invalid action class.")
+    _validate_seed_actor(edge_id, action["actor"])
+    if action["control"] not in _CONTROLS:
+        raise ValueError(f"Seed edge {edge_id!r} has an invalid control mode.")
+    binding = action["target_binding"]
+    if not isinstance(binding, Mapping) or binding.get("kind") not in _BINDING_KINDS:
+        raise ValueError(f"Seed edge {edge_id!r} has an invalid target binding.")
+    binding_kind = str(binding["kind"])
+    if set(binding) != _BINDING_FIELDS[binding_kind]:
+        raise ValueError(
+            f"Seed edge {edge_id!r} target binding {binding_kind!r} has "
+            "invalid fields."
+        )
+    expected_binding, expected_control = _ACTION_CONTRACTS[
+        str(action["atomic_action_class"])
+    ]
+    if binding_kind != expected_binding or (
+        expected_control is not None and action["control"] != expected_control
+    ):
+        raise ValueError(
+            f"Seed edge {edge_id!r} action/binding/control contract is invalid."
+        )
+    if binding_kind in {"coordinated_goal", "object"} and not isinstance(
+        binding.get("object"), str
+    ):
+        raise ValueError(f"Seed edge {edge_id!r} requires an object binding.")
+    if binding_kind == "semantic_goal" and not isinstance(
+        binding.get("semantic_step"), str
+    ):
+        raise ValueError(f"Seed edge {edge_id!r} requires a semantic step binding.")
+    if binding_kind == "joint_state":
+        source = binding.get("source")
+        expected_control = (
+            "hand" if source in {"gripper_closed", "gripper_open"} else "arm"
+        )
+        if source not in {"gripper_closed", "gripper_open", "initial"} or action[
+            "control"
+        ] != (expected_control):
+            raise ValueError(
+                f"Seed edge {edge_id!r} has an invalid joint-state binding."
+            )
+    policy = action["motion_policy"]
+    if policy not in _MOTION_POLICIES:
+        raise ValueError(f"Seed edge {edge_id!r} requires a motion policy ID.")
+    action_class = str(action["atomic_action_class"])
+    expected_policy = _ACTION_POLICIES.get(action_class)
+    if action_class == "MoveJoints":
+        expected_policy = (
+            "default_home" if binding.get("source") == "initial" else "default_release"
+        )
+    if policy != expected_policy:
+        raise ValueError(
+            f"Seed edge {edge_id!r} action {action_class!r} requires motion "
+            f"policy {expected_policy!r}."
+        )
+
+
+def _validate_single_chain(
+    start: str,
+    goal: str,
+    node_ids: set[str],
+    edges: Sequence[Mapping[str, Any]],
+) -> None:
+    """Reject disconnected cycles that degree-only validation cannot detect."""
+    edge_by_source = {str(edge["source"]): edge for edge in edges}
+    visited = {start}
+    current = start
+    for _ in range(len(edges)):
+        edge = edge_by_source.get(current)
+        if edge is None:
+            break
+        current = str(edge["target"])
+        if current in visited:
+            raise ValueError("Seed v2 topology contains a cycle.")
+        visited.add(current)
+    if current != goal or visited != node_ids:
+        raise ValueError(
+            "Seed v2 topology must be one connected chain from start to goal."
+        )
+
+
+def _reject_grounded_fields(value: Any, path: str = "seed_task_graph") -> None:
+    if isinstance(value, float):
+        raise ValueError(
+            f"Seed task graph must not contain geometric float value at {path}."
+        )
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_text = str(key)
+            normalized_key = key_text.lower()
+            is_grounded_field = (
+                normalized_key in _GROUNDED_FIELD_NAMES
+                or normalized_key in _DEFERRED_POLICY_FIELDS
+                or normalized_key == "absolute_axis_target"
+                or normalized_key == "axis_target"
+                or normalized_key.endswith("_pose")
+                or normalized_key.startswith(("execution_", "ik_", "planning_"))
+                or any(
+                    fragment in normalized_key for fragment in _GROUNDED_FIELD_FRAGMENTS
+                )
+            )
+            if is_grounded_field:
+                raise ValueError(
+                    f"Seed task graph must not contain grounded field "
+                    f"{path}.{key_text}."
+                )
+            _reject_grounded_fields(child, f"{path}.{key_text}")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for index, child in enumerate(value):
+            _reject_grounded_fields(child, f"{path}[{index}]")

@@ -348,14 +348,10 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
     if reference == "absolute":
         _validate_target_fields(
             target_pose,
-            {"reference", "position"},
+            {"reference", "position", "position_by_env"},
             "target_pose",
         )
-        position = target_pose.get("position")
-        if not isinstance(position, list) or len(position) != 3:
-            raise ValueError(
-                "absolute target_pose requires position with three entries."
-            )
+        _validate_absolute_position(target_pose, "target_pose")
         return
 
     _validate_target_fields(
@@ -367,6 +363,31 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
     frame = target_pose.get("frame", "world")
     if frame not in {"world", "eef"}:
         raise ValueError("relative target_pose frame must be 'world' or 'eef'.")
+
+
+def _validate_absolute_position(
+    target_pose: Mapping[str, Any],
+    target_name: str,
+) -> None:
+    position = target_pose.get("position")
+    position_by_env = target_pose.get("position_by_env")
+    if (position is None) == (position_by_env is None):
+        raise ValueError(
+            f"absolute {target_name} requires exactly one of position or "
+            "position_by_env."
+        )
+    if position is not None:
+        if not isinstance(position, list) or len(position) != 3:
+            raise ValueError(f"absolute {target_name} position requires three entries.")
+        return
+    if (
+        not isinstance(position_by_env, list)
+        or not position_by_env
+        or any(not isinstance(item, list) or len(item) != 3 for item in position_by_env)
+    ):
+        raise ValueError(
+            f"absolute {target_name} position_by_env requires a non-empty Nx3 list."
+        )
 
 
 def _validate_target_object_pose(target_object_pose: Mapping[str, Any]) -> None:
@@ -435,14 +456,10 @@ def _validate_target_pose_like(
     if reference == "absolute":
         _validate_target_fields(
             target_pose,
-            {"reference", "position"} | allowed_common,
+            {"reference", "position", "position_by_env"} | allowed_common,
             target_name,
         )
-        position = target_pose.get("position")
-        if not isinstance(position, list) or len(position) != 3:
-            raise ValueError(
-                f"absolute {target_name} requires position with three entries."
-            )
+        _validate_absolute_position(target_pose, target_name)
         return
 
     _validate_target_fields(

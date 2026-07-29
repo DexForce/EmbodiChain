@@ -120,20 +120,14 @@ relative_spec or the relative_geometry compatibility aggregator.
 Semantic-step execution
 -----------------------
 
-Object-manipulation model output is an ordered semantic program. Generation
-normalizes that program into seed_task_graph.json, which is the authoritative
-symbolic artifact. A seed graph contains stable step IDs, dependencies,
-symbolic goals, postconditions, and user-required arm bindings, but never
-atomic edge IDs, absolute targets, trajectories, or joint states. The same seed
-graph can therefore describe every environment that shares the object registry.
-
-Deterministic route builders compile the seed graph plus generated scene
-geometry into task_graph.json. Grounding records may duplicate symbolic lookup
-keys, but builders compare their complete canonical semantic projection with
-the seed and fail closed on any mismatch. The compiled graph stores
-seed_graph_hash and is published in the same file transaction as its seed,
-preventing --overwrite from leaving a new semantic program beside a stale
-executable graph.
+Object-manipulation model output is an ordered semantic program. Deterministic
+generation expands that program into seed_task_graph_v2, the complete symbolic
+execution topology. Seed v2 owns stable state and edge IDs, atomic-action
+classes, target bindings, named motion policies, semantic edge groups,
+dependencies, postconditions, and user-required arm bindings. It never owns
+absolute targets, geometric distances, tolerances, IK results, trajectories,
+joint arrays, or execution status. The same Seed can therefore drive every
+environment that shares the object registry.
 
 Arrangement seeds distinguish membership-only rows from ordered rows. A
 generic "form one row" goal stores a canonical object set and permits the
@@ -141,15 +135,21 @@ grounding planner to assign physical slots. Size, color, or explicitly ordered
 goals retain a stable semantic order; collision planning may reschedule their
 actions but must not replace that order with an initial-position ordering.
 
-Runtime executes semantic edge ranges in order. At each boundary it validates
-dependencies and live object bindings, lets the existing atomic target
-resolvers and motion planners read current simulator poses, settles physics,
-and evaluates the step postcondition per environment. It must not construct a
-second episode-wide grounded graph or infer reachability from arm-base
-distance. Runtime continues to execute task_graph.json in this phase;
-seed_task_graph.json is read only to verify the compiled graph hash and is not
-an alternate execution input. Environments share one semantic program while
-retaining independent success and failure masks.
+Runtime consumes Seed v2 directly and executes semantic edge ranges in order.
+At each boundary it validates dependencies, reads live object bindings,
+resolves the robot-profile motion policy, selects an automatic arm per
+environment through candidate planning, grounds only the current step,
+executes it, settles physics, and verifies its symbolic postcondition. A chosen
+arm remains fixed for the rest of that semantic step. Required arms remain hard
+constraints.
+
+Each environment and episode owns a runtime_task_graph_v1 execution record.
+The recorder keeps Seed topology for direct comparison and adds observed poses,
+resolved targets and policies, selected arms, planning summaries, execution
+status, postcondition results, and failures. It atomically checkpoints JSON
+after every semantic step and publishes final JSON and PNG under
+outputs/graph/<task>/runs/<run_id>/episode_N/env_N. Runtime records never
+mutate Seed.
 
 Config bundle ownership
 -----------------------
@@ -167,8 +167,8 @@ modules may import action_agent_config. Compatibility aliases in the entry
 module preserve established private import paths without moving ownership back
 into the dispatcher.
 
-The generation.visualization package owns headless review renderings of the
-symbolic seed and compiled task graph. Config publication renders both PNGs
-from the in-memory bundle after seed/compiled provenance validation and stages
-them in the same rollback-capable transaction as their JSON sources. These
-images are diagnostic artifacts only; runtime never reads them.
+The package-level graph_visualization module owns headless review rendering
+shared by generation and runtime. Config publication renders only Seed v2 PNG
+from the same in-memory snapshot as seed_task_graph.json. Runtime renders one
+grounded Task PNG for each environment and episode after execution. The images
+are diagnostic artifacts only and never become execution inputs.

@@ -147,18 +147,14 @@ class AgenticGenSimEnv(EmbodiedEnv):
         from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import (
             CompileAgent,
             resolve_precomputed_seed_task_graph_path,
-            resolve_precomputed_task_graph_path,
         )
 
         configured_graph = sections["TaskAgent"].get("precomputed_task_graph")
-        if configured_graph is not None and not isinstance(configured_graph, str):
-            raise ValueError("TaskAgent.precomputed_task_graph must be a path string.")
-        # Resolve the graph once during environment construction. Runtime graph
-        # execution is deterministic and never falls back to an online LLM.
-        self.precomputed_task_graph_path = resolve_precomputed_task_graph_path(
-            configured_path=configured_graph,
-            agent_config_path=agent_config_path,
-        )
+        if configured_graph is not None:
+            raise ValueError(
+                "TaskAgent.precomputed_task_graph is a legacy v1 input. Regenerate "
+                "the action-agent config with --overwrite."
+            )
         configured_seed = sections["TaskAgent"].get("seed_task_graph")
         if configured_seed is not None and not isinstance(configured_seed, str):
             raise ValueError("TaskAgent.seed_task_graph must be a path string.")
@@ -233,6 +229,11 @@ class AgenticGenSimEnv(EmbodiedEnv):
         self.right_arm_current_gripper_state = self._initial_gripper_state("right")
 
         self.update_obj_info()
+        self.agent_initial_object_poses = {
+            uid: info["pose"].clone()
+            for uid, info in self.obj_info.items()
+            if isinstance(info, Mapping) and isinstance(info.get("pose"), torch.Tensor)
+        }
 
     def _resolve_agent_arm_slots(self) -> dict[str, dict[str, str | None] | None]:
         configured_slots = getattr(self, "agent_arm_slots", None)
@@ -488,25 +489,20 @@ class AgenticGenSimEnv(EmbodiedEnv):
         )
 
         logger.log_info(
-            f"Using precomputed task graph: {self.precomputed_task_graph_path}",
+            f"Using executable Seed Graph v2: {self.seed_task_graph_path}",
             color="green",
         )
         with timing_scope(
-            "action_agent.task_graph.precomputed_read",
+            "action_agent.seed_task_graph.read",
             metadata={"regenerate": bool(regenerate)},
         ):
-            task_graph = self.precomputed_task_graph_path.read_text(encoding="utf-8")
-            seed_task_graph = (
-                self.seed_task_graph_path.read_text(encoding="utf-8")
-                if self.seed_task_graph_path is not None
-                else None
-            )
+            seed_task_graph = self.seed_task_graph_path.read_text(encoding="utf-8")
         if not getattr(self, "_task_graph_logged", False):
             # The graph is immutable for this environment instance, so print
             # the full source once without flooding logs on later episodes.
             logger.log_info(
-                "Task graph input (precomputed):\n"
-                f"```json\n{task_graph.rstrip()}\n```",
+                "Executable Seed Graph v2 input:\n"
+                f"```json\n{seed_task_graph.rstrip()}\n```",
                 color="green",
             )
             self._task_graph_logged = True
@@ -515,7 +511,6 @@ class AgenticGenSimEnv(EmbodiedEnv):
         compile_agent_input = dict(
             env=self,
             regenerate=regenerate,
-            task_graph=task_graph,
             seed_task_graph=seed_task_graph,
             **kwargs,
         )
@@ -527,23 +522,25 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     # -------------------- get action list --------------------
     def create_demo_action_list(self, regenerate=False, *args, **kwargs):
-        """Compatibility hook that executes the precomputed task graph online.
+        """Compatibility hook that grounds and executes Seed v2 online.
 
         The shared demo runner expects this historical method name. Action
         Agent cannot return an offline list because atomic actions depend on
         live simulator state, so execution is delegated to the explicitly
         named internal method and returns an ``ExecutedActionList`` marker.
         """
-        return self._execute_precomputed_task_graph(regenerate, *args, **kwargs)
+        return self._execute_seed_task_graph(regenerate, *args, **kwargs)
 
-    def _execute_precomputed_task_graph(self, regenerate=False, *args, **kwargs):
-        """Compile and execute the configured task graph against the live env."""
+    def _execute_seed_task_graph(self, regenerate=False, *args, **kwargs):
+        """Ground and execute the configured Seed graph against the live env."""
         with timing_scope(
             "action_agent.generate_graph_for_actions",
             metadata={"regenerate": bool(regenerate)},
         ):
             graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
-                regenerate=regenerate
+                regenerate=regenerate,
+                runtime_run_id=kwargs.get("runtime_run_id"),
+                episode_index=kwargs.get("episode_index", 0),
             )
         atomic_action_kwargs = {
             "allow_grasp_annotation": True,

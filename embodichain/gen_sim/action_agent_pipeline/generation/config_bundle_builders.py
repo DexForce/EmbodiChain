@@ -124,11 +124,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _make_stacking_summary,
     _with_stacking_generated_targets,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.task_graph_builders import (
-    compile_arrangement_task_graph,
-    compile_relative_task_graph,
-    compile_stacking_task_graph,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
     _make_arrangement_extensions_config,
     _make_relative_extensions_config,
@@ -274,11 +269,6 @@ def _build_arrangement_line_bundle(
             robot_profile=robot_profile,
         ),
         "seed_task_graph": seed_task_graph,
-        "task_graph": compile_arrangement_task_graph(
-            task_name,
-            seed_task_graph,
-            spec,
-        ),
         "basic_background": make_arrangement_basic_background(
             project_name,
             spec,
@@ -487,11 +477,6 @@ def _build_stacking_bundle(
             robot_profile=robot_profile,
         ),
         "seed_task_graph": seed_task_graph,
-        "task_graph": compile_stacking_task_graph(
-            task_name,
-            seed_task_graph,
-            spec,
-        ),
         "basic_background": make_stacking_basic_background(
             project_name,
             spec,
@@ -748,11 +733,6 @@ def _build_relative_placement_bundle(
             robot_profile=robot_profile,
         ),
         "seed_task_graph": seed_task_graph,
-        "task_graph": compile_relative_task_graph(
-            task_name,
-            seed_task_graph,
-            spec,
-        ),
         "basic_background": make_relative_basic_background(
             project_name,
             spec,

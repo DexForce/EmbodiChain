@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
-from .graph_png import render_seed_task_graph_png, render_task_graph_png
+from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
+    render_seed_task_graph_png,
+    render_task_graph_png,
+)
 
 __all__ = ["render_seed_task_graph_png", "render_task_graph_png"]

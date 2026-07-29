@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,182 +28,159 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
     write_config_bundle,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
-    compile_seed_graph_metadata,
-)
-from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
-    TASK_GRAPH_PNG_FILENAME,
+    make_relative_seed_task_graph,
 )
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def test_config_bundle_writes_matching_graph_png_artifacts(tmp_path: Path) -> None:
+def test_config_bundle_publishes_only_seed_graph_artifacts(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    graph_root = tmp_path / "outputs" / "graph"
+
     paths = write_config_bundle(
-        output_dir=tmp_path,
+        output_dir=config_dir,
         bundle=_bundle("initial"),
         overwrite=False,
+        graph_output_root=graph_root,
     )
 
-    assert paths.seed_task_graph_png.read_bytes().startswith(_PNG_SIGNATURE)
-    assert paths.task_graph_png.read_bytes().startswith(_PNG_SIGNATURE)
     assert paths.seed_task_graph.is_file()
-    assert paths.task_graph.is_file()
+    assert paths.seed_task_graph_png.read_bytes().startswith(_PNG_SIGNATURE)
+    assert not (config_dir / "task_graph.json").exists()
+    assert not (paths.graph_output_dir / "task_graph.png").exists()
 
 
-@pytest.mark.parametrize(
-    "filename",
-    ["seed_task_graph.png", "task_graph.png"],
-)
-def test_existing_graph_png_requires_overwrite(
+@pytest.mark.parametrize("filename", ["seed_task_graph.png", "task_graph.png"])
+def test_existing_graph_artifact_requires_overwrite(
     tmp_path: Path,
     filename: str,
 ) -> None:
-    (tmp_path / filename).write_bytes(_PNG_SIGNATURE)
+    config_dir = tmp_path / "configs"
+    graph_root = tmp_path / "outputs" / "graph"
+    graph_dir = graph_root / "existing_task"
+    graph_dir.mkdir(parents=True)
+    (graph_dir / filename).write_bytes(_PNG_SIGNATURE)
 
     with pytest.raises(FileExistsError, match=filename):
-        raise_if_generated_files_exist(tmp_path, overwrite=False)
-
-
-def test_config_bundle_overwrite_replaces_graph_pngs(tmp_path: Path) -> None:
-    paths = write_config_bundle(
-        output_dir=tmp_path,
-        bundle=_bundle("old"),
-        overwrite=False,
-    )
-    old_seed_png = paths.seed_task_graph_png.read_bytes()
-    old_task_png = paths.task_graph_png.read_bytes()
-
-    new_paths = write_config_bundle(
-        output_dir=tmp_path,
-        bundle=_bundle("new"),
-        overwrite=True,
-    )
-
-    assert new_paths.seed_task_graph_png.read_bytes() != old_seed_png
-    assert new_paths.task_graph_png.read_bytes() != old_task_png
-
-
-def test_seeded_bundle_rejects_non_renderable_task_graph(tmp_path: Path) -> None:
-    bundle = _bundle("invalid")
-    bundle["task_graph"].pop("nodes")
-
-    with pytest.raises(RuntimeError, match="task_graph.png"):
-        write_config_bundle(
-            output_dir=tmp_path,
-            bundle=bundle,
+        raise_if_generated_files_exist(
+            config_dir,
             overwrite=False,
+            task_name="existing_task",
+            graph_output_root=graph_root,
         )
 
-    assert not list(tmp_path.iterdir())
+
+def test_overwrite_removes_legacy_task_and_compiled_graphs(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    graph_root = tmp_path / "outputs" / "graph"
+    graph_dir = graph_root / "bundle_cleanup"
+    config_dir.mkdir(parents=True)
+    graph_dir.mkdir(parents=True)
+    for filename in (
+        "seed_task_graph.png",
+        "task_graph.json",
+        "task_graph.png",
+        "agent_compiled_graph.json",
+    ):
+        (config_dir / filename).write_text("legacy", encoding="utf-8")
+    (graph_dir / "task_graph.png").write_bytes(_PNG_SIGNATURE)
+
+    paths = write_config_bundle(
+        output_dir=config_dir,
+        bundle=_bundle("new", task_name="bundle_cleanup"),
+        overwrite=True,
+        graph_output_root=graph_root,
+    )
+
+    assert paths.seed_task_graph.is_file()
+    assert not (config_dir / "seed_task_graph.png").exists()
+    assert not (config_dir / "task_graph.json").exists()
+    assert not (config_dir / "task_graph.png").exists()
+    assert not (config_dir / "agent_compiled_graph.json").exists()
+    assert not (graph_dir / "task_graph.png").exists()
 
 
-def test_binary_publication_failure_restores_entire_bundle(
+def test_seed_png_publication_failure_restores_old_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config_dir = tmp_path / "configs"
+    graph_root = tmp_path / "outputs" / "graph"
     paths = write_config_bundle(
-        output_dir=tmp_path,
-        bundle=_bundle("old"),
+        output_dir=config_dir,
+        bundle=_bundle("old", task_name="bundle_rollback"),
         overwrite=False,
+        graph_output_root=graph_root,
     )
     old_contents = {path: path.read_bytes() for path in _artifact_paths(paths)}
     real_replace = os.replace
 
-    def fail_while_publishing_task_graph_png(
-        source: str | os.PathLike[str],
-        destination: str | os.PathLike[str],
-    ) -> None:
+    def fail_seed_png(source, destination) -> None:
         source_path = Path(source)
         destination_path = Path(destination)
-        if (
-            source_path.suffix == ".tmp"
-            and destination_path.name == TASK_GRAPH_PNG_FILENAME
+        if source_path.suffix == ".tmp" and destination_path.name == (
+            "seed_task_graph.png"
         ):
-            raise OSError("injected task graph PNG publication failure")
+            raise OSError("injected seed PNG publication failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(
-        config_io.os,
-        "replace",
-        fail_while_publishing_task_graph_png,
-    )
-
+    monkeypatch.setattr(config_io.os, "replace", fail_seed_png)
     with pytest.raises(OSError, match="injected"):
         write_config_bundle(
-            output_dir=tmp_path,
-            bundle=_bundle("new"),
+            output_dir=config_dir,
+            bundle=_bundle("new", task_name="bundle_rollback"),
             overwrite=True,
+            graph_output_root=graph_root,
         )
 
     assert {path: path.read_bytes() for path in _artifact_paths(paths)} == old_contents
-    assert not list(tmp_path.glob(".*.tmp"))
-    assert not list(tmp_path.glob(".*.bak"))
+    assert not list(tmp_path.rglob(".*.tmp"))
+    assert not list(tmp_path.rglob(".*.bak"))
 
 
-def _bundle(label: str) -> dict:
-    seed_graph = {
-        "schema_version": "seed_task_graph_v1",
-        "task": f"bundle_{label}",
-        "route": "object_manipulation",
-        "program": "place_relative",
-        "steps": [
-            {
-                "id": "s01_place",
-                "operator": "place_relative",
-                "object": f"object_{label}",
-                "actor": {"mode": "required", "arm": "left_arm"},
-                "goal": {
-                    "relation": "left_of",
-                    "reference_object": "reference",
-                    "reference_state": "live",
-                    "orientation_goal": "preserve",
-                    "orientation_axis": "none",
-                },
-                "depends_on": [],
-                "postcondition": {
-                    "type": "semantic_goal",
-                    "operator": "place_relative",
-                    "relation": "left_of",
-                },
-            }
-        ],
-    }
-    task_graph = compile_seed_graph_metadata(
-        {
-            "task": f"bundle_{label}",
-            "start": "v0",
-            "goal": "v1",
-            "nodes": [
-                {"id": "v0", "semantic": "Initial state"},
-                {"id": "v1", "semantic": f"Move object for {label}"},
-            ],
-            "edges": [
-                {
-                    "id": "e01",
-                    "source": "v0",
-                    "target": "v1",
-                    "left_arm_action": {
-                        "atomic_action_class": "PickUp",
-                        "target_object": {"obj_name": f"object_{label}"},
-                    },
-                    "right_arm_action": None,
-                }
-            ],
-            "semantic_steps": [
-                {
-                    "id": "s01_place",
-                    "edge_ids": ["e01"],
-                }
-            ],
-        },
-        seed_graph,
+def test_config_bundle_rejects_config_stage_task_graph(tmp_path: Path) -> None:
+    bundle = _bundle("invalid")
+    bundle["task_graph"] = {"nodes": [], "edges": []}
+
+    with pytest.raises(ValueError, match="must not publish task_graph"):
+        write_config_bundle(
+            output_dir=tmp_path / "configs",
+            bundle=bundle,
+            overwrite=False,
+            graph_output_root=tmp_path / "outputs" / "graph",
+        )
+
+
+def _bundle(label: str, *, task_name: str | None = None) -> dict:
+    task_name = task_name or f"bundle_{label}"
+    placement = SimpleNamespace(
+        intent="place_relative",
+        moved_runtime_uid=f"object_{label}",
+        reference_runtime_uid="reference",
+        relation="left_of",
+        reference_is_initial_pose=False,
+        orientation_goal="preserve",
+        orientation_axis="none",
+        orientation_align_to_runtime_uid=None,
+        arm_request="left",
+        step_id="s01_place",
+        depends_on=(),
+    )
+    seed = make_relative_seed_task_graph(
+        task_name,
+        SimpleNamespace(
+            intent="place_relative",
+            placements=(placement,),
+            coordinated_direction=None,
+            coordinated_terminal_behavior=None,
+        ),
     )
     return {
         "gym_config": {"label": label, "kind": "gym"},
         "agent_config": {"label": label, "kind": "agent"},
         "task_prompt": f"{label} task",
-        "seed_task_graph": seed_graph,
-        "task_graph": task_graph,
+        "seed_task_graph": seed,
         "basic_background": f"{label} background",
         "atom_actions": f"{label} actions",
         "summary": {"label": label},
@@ -216,8 +194,6 @@ def _artifact_paths(paths) -> tuple[Path, ...]:
         paths.task_prompt,
         paths.seed_task_graph,
         paths.seed_task_graph_png,
-        paths.task_graph,
-        paths.task_graph_png,
         paths.basic_background,
         paths.atom_actions,
     )

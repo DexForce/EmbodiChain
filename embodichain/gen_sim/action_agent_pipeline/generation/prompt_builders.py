@@ -29,7 +29,6 @@ from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,
     SEED_TASK_GRAPH_FILENAME,
-    TASK_GRAPH_FILENAME,
     TASK_PROMPT_FILENAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_diagnostics import (
@@ -75,19 +74,10 @@ __all__ = [
 
 
 def make_agent_config() -> dict[str, Any]:
-    """Build the stable agent-config schema for deterministic graph execution.
-
-    ``TaskAgent.precomputed_task_graph`` is the authoritative execution input,
-    while ``TaskAgent.seed_task_graph`` identifies the symbolic source checked
-    before compilation. ``Agent.prompt_kwargs`` is preserved so existing config
-    consumers can find the accompanying diagnostic text files; the runtime does
-    not interpret those files.
-    """
+    """Build the stable agent config for runtime grounding of Seed Graph v2."""
     return {
         "TaskAgent": {
-            "prompt_name": "generate_task_graph",
             "seed_task_graph": SEED_TASK_GRAPH_FILENAME,
-            "precomputed_task_graph": TASK_GRAPH_FILENAME,
         },
         "CompileAgent": {},
         "Agent": {

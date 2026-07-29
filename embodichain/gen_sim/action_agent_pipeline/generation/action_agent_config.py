@@ -126,9 +126,9 @@ def generate_action_agent_config_from_project(
 
     ``task_description`` is required: one LLM interpretation selects a supported
     route (stacking, arrangement line, object manipulation) and its semantic
-    intent. The matching deterministic generator first serializes the symbolic
-    seed graph, then derives every pose, slot, and atomic graph edge from it and
-    the scene geometry.
+    intent. The matching deterministic generator expands it into an executable
+    Seed Graph v2. Environment geometry remains in the simulator config and is
+    grounded into per-environment Task graphs only by ``run_agent``.
 
     Args:
         gym_project: Project root, formatted scene folder, ``gym_config.json``,
@@ -191,7 +191,11 @@ def generate_action_agent_config_from_project(
         )
 
     output_dir_path = Path(output_dir).expanduser().resolve()
-    _raise_if_generated_files_exist(output_dir_path, overwrite)
+    _raise_if_generated_files_exist(
+        output_dir_path,
+        overwrite,
+        task_name,
+    )
     robot_profile = resolve_robot_profile(robot_profile)
 
     input_path = Path(gym_project).expanduser().resolve()

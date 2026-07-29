@@ -47,21 +47,21 @@ __all__ = [
 class GeneratedActionAgentConfigPaths:
     """Paths written by the action-agent config generator.
 
-    ``gym_config``, ``agent_config``, and ``task_graph`` are runtime inputs.
-    ``seed_task_graph`` is the authoritative symbolic generation record.
-    The two PNG paths are review visualizations of the matching graph snapshot.
-    ``task_prompt``, ``basic_background``, and ``atom_actions`` remain
-    diagnostic records retained for human review and compatibility.
+    ``gym_config``, ``agent_config``, and ``seed_task_graph`` are runtime inputs.
+    The Seed PNG is published under the repository-level
+    ``outputs/graph/<task_name>`` folder. Runtime Task graphs are created later
+    for each environment and episode and therefore are not part of this
+    config-stage path contract. ``task_prompt``, ``basic_background``, and
+    ``atom_actions`` remain diagnostic records retained for human review.
     """
 
     output_dir: Path
+    graph_output_dir: Path
     gym_config: Path
     agent_config: Path
     task_prompt: Path
     seed_task_graph: Path
     seed_task_graph_png: Path
-    task_graph: Path
-    task_graph_png: Path
     basic_background: Path
     atom_actions: Path
     summary: dict[str, Any]

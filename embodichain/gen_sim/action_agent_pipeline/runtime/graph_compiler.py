@@ -14,20 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Compile executable Seed Graph v2 into the live runtime graph."""
+
 from __future__ import annotations
 
-import hashlib
-import importlib
 from collections.abc import Mapping
-import json
+from copy import deepcopy
+import importlib
 from pathlib import Path
-import re
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
-    ARM_ACTION_KEYS,
-    LEFT_ARM_ACTION_KEY,
-    RIGHT_ARM_ACTION_KEY,
+from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
+    SEED_TASK_GRAPH_SCHEMA_VERSION,
+    validate_seed_task_graph,
 )
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import extract_json_object
 
@@ -35,36 +34,18 @@ __all__ = [
     "compile_agent_graph_from_file",
     "compile_agent_graph_spec",
     "load_agent_graph_bundle",
-    "validate_seed_graph_pair",
 ]
-
-_RECOVERY_KEYS = {
-    "recovery_graph",
-    "recovery_spec",
-    "recovery_bindings",
-    "recovery_nodes",
-    "recovery_edges",
-    "recovery_branches",
-    "recoveries",
-}
-_COMPILED_BUNDLE_KEYS = {"task_graph", "metadata"}
-_EDGE_KEYS = {"id", "source", "target", *ARM_ACTION_KEYS}
-_SEMANTIC_STEP_KEYS = {
-    "id",
-    "operator",
-    "object",
-    "actor",
-    "goal",
-    "depends_on",
-    "postcondition",
-    "edge_ids",
-}
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
-    """Load a compiled graph JSON bundle from disk."""
-    return extract_json_object(Path(path).read_text(encoding="utf-8"))
+    """Load a Seed graph from disk and reject removed compiled bundles."""
+    spec = extract_json_object(Path(path).read_text(encoding="utf-8"))
+    if "task_graph" in spec or "metadata" in spec:
+        raise ValueError(
+            "Compiled/precomputed task graphs are no longer supported. Regenerate "
+            "the action-agent config with --overwrite."
+        )
+    return spec
 
 
 def compile_agent_graph_from_file(
@@ -73,62 +54,53 @@ def compile_agent_graph_from_file(
     graph_cls: type | None = None,
     action_module: Any = None,
 ) -> Any:
-    """Compile a graph JSON bundle from disk into an executable graph."""
-    bundle = load_agent_graph_bundle(path)
-    if "task_graph" in bundle:
-        unknown_bundle_keys = set(bundle) - _COMPILED_BUNDLE_KEYS
-        if unknown_bundle_keys:
-            raise ValueError(
-                "Compiled graph artifact contains unsupported top-level fields: "
-                f"{', '.join(sorted(unknown_bundle_keys))}."
-            )
-        task_graph = bundle["task_graph"]
-    else:
-        task_graph = bundle
+    """Compile Seed v2 from disk into an executable runtime graph."""
     return compile_agent_graph_spec(
-        task_graph,
+        load_agent_graph_bundle(path),
         graph_cls=graph_cls,
         action_module=action_module,
     )
 
 
 def compile_agent_graph_spec(
-    task_graph: str | Mapping[str, Any],
+    seed_graph: str | Mapping[str, Any],
     *,
     graph_cls: type | None = None,
     action_module: Any = None,
 ) -> Any:
-    """Compile a nominal JSON graph into ``AgentTaskGraph``."""
-    task_spec = extract_json_object(task_graph)
-    _reject_recovery_keys(task_spec)
-    _validate_task_spec(task_spec)
-    graph_cls, action_module = _resolve_runtime(
-        graph_cls=graph_cls,
-        action_module=action_module,
-    )
-
+    """Compile a validated Seed v2 mapping without grounding its actions."""
+    del action_module
+    seed_spec = extract_json_object(seed_graph)
+    if seed_spec.get("schema_version") != SEED_TASK_GRAPH_SCHEMA_VERSION:
+        if seed_spec.get("schema_version") != "seed_task_graph_v1":
+            raise ValueError(
+                "Legacy/precomputed task_graph input is no longer supported. "
+                "Regenerate the action-agent config with --overwrite."
+            )
+    validate_seed_task_graph(seed_spec)
+    if graph_cls is None:
+        graph_cls = getattr(
+            importlib.import_module(
+                "embodichain.gen_sim.action_agent_pipeline.runtime.task_graph"
+            ),
+            "AgentTaskGraph",
+        )
     graph = graph_cls(
-        start=task_spec["start"],
-        goal=task_spec["goal"],
-        max_transitions=int(task_spec.get("max_transitions", 1000)),
+        start=seed_spec["start"],
+        goal=seed_spec["goal"],
+        max_transitions=len(seed_spec["edges"]) + 1,
+        seed_graph=seed_spec,
     )
-
-    for node in task_spec.get("nodes", []):
+    for node in seed_spec["nodes"]:
         graph.add_node(node["id"], node.get("semantic", ""))
-
-    for edge in task_spec.get("edges", []):
+    for edge in seed_spec["edges"]:
         graph.add_edge(
             edge["id"],
             edge["source"],
             edge["target"],
-            left_arm_action=_compile_action(
-                edge.get(LEFT_ARM_ACTION_KEY), action_module
-            ),
-            right_arm_action=_compile_action(
-                edge.get(RIGHT_ARM_ACTION_KEY), action_module
-            ),
+            symbolic_actions=edge["actions"],
         )
-    for step in task_spec.get("semantic_steps", []):
+    for step in seed_spec["semantic_steps"]:
         graph.add_semantic_step(
             step["id"],
             operator=step["operator"],
@@ -139,389 +111,4 @@ def compile_agent_graph_spec(
             postcondition=step["postcondition"],
             edge_ids=step["edge_ids"],
         )
-
     return graph
-
-
-def validate_seed_graph_pair(
-    task_graph: str | Mapping[str, Any],
-    seed_graph: str | Mapping[str, Any],
-) -> None:
-    """Verify that the executable graph identifies the supplied seed exactly."""
-    task_spec = extract_json_object(task_graph)
-    seed_spec = extract_json_object(seed_graph)
-    _validate_seed_provenance(task_spec)
-
-    seed_schema = seed_spec.get("schema_version")
-    if seed_schema != task_spec.get("seed_graph_schema_version"):
-        raise ValueError(
-            "Runtime seed_task_graph.json schema does not match task_graph.json."
-        )
-    canonical_seed = json.dumps(
-        seed_spec,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    actual_hash = hashlib.sha256(canonical_seed.encode("utf-8")).hexdigest()
-    if actual_hash != task_spec.get("seed_graph_hash"):
-        raise ValueError(
-            "Runtime seed_task_graph.json does not match the seed_graph_hash "
-            "stored in task_graph.json. Regenerate the config bundle."
-        )
-
-
-def _resolve_runtime(
-    *,
-    graph_cls: type | None,
-    action_module: Any,
-) -> tuple[type, Any]:
-    if graph_cls is None:
-        graph_cls = _resolve_attr(
-            importlib.import_module(
-                "embodichain.gen_sim.action_agent_pipeline.runtime.task_graph"
-            ),
-            "AgentTaskGraph",
-        )
-    if action_module is None:
-        action_module = importlib.import_module(
-            "embodichain.gen_sim.action_agent_pipeline.runtime.atom_actions"
-        )
-    return graph_cls, action_module
-
-
-def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
-    _validate_seed_provenance(task_spec)
-    node_ids = set()
-    for node in task_spec.get("nodes", []):
-        node_id = node["id"]
-        if node_id in node_ids:
-            raise ValueError(f"Duplicate graph node id '{node_id}'.")
-        node_ids.add(node_id)
-
-    for required_node in (task_spec["start"], task_spec["goal"]):
-        if required_node not in node_ids:
-            raise ValueError(f"Graph node '{required_node}' is not defined.")
-
-    edge_specs = list(task_spec.get("edges", []))
-    edge_ids = set()
-    for edge in edge_specs:
-        unknown_edge_keys = set(edge) - _EDGE_KEYS
-        if unknown_edge_keys:
-            raise ValueError(
-                f"Nominal edge '{edge.get('id', '<unknown>')}' contains unsupported "
-                f"fields: {', '.join(sorted(unknown_edge_keys))}."
-            )
-        edge_id = edge["id"]
-        if edge_id in edge_ids:
-            raise ValueError(f"Duplicate graph edge id '{edge_id}'.")
-        edge_ids.add(edge_id)
-        if _is_empty_action_spec(
-            edge.get(LEFT_ARM_ACTION_KEY)
-        ) and _is_empty_action_spec(edge.get(RIGHT_ARM_ACTION_KEY)):
-            raise ValueError(f"Nominal edge '{edge_id}' must define an arm action.")
-        _validate_edge_action_slots(edge, edge_id)
-
-        for node_key in ("source", "target"):
-            node_id = edge[node_key]
-            if node_id not in node_ids:
-                raise ValueError(
-                    f"Edge '{edge_id}' references unknown {node_key} node '{node_id}'."
-                )
-
-    _validate_nominal_path(task_spec, edge_specs)
-    _validate_semantic_steps(task_spec, edge_specs)
-
-
-def _validate_seed_provenance(task_spec: Mapping[str, Any]) -> None:
-    """Validate optional seed identity without making seed a runtime input."""
-    seed_hash = task_spec.get("seed_graph_hash")
-    seed_schema = task_spec.get("seed_graph_schema_version")
-    if seed_hash is None and seed_schema is None:
-        return
-    if not isinstance(seed_hash, str) or _SHA256_RE.fullmatch(seed_hash) is None:
-        raise ValueError("Task graph seed_graph_hash must be a SHA-256 hex digest.")
-    if seed_schema != "seed_task_graph_v1":
-        raise ValueError(
-            "Task graph seed_graph_schema_version must be 'seed_task_graph_v1'."
-        )
-
-
-def _validate_semantic_steps(
-    task_spec: Mapping[str, Any],
-    edge_specs: list[Mapping[str, Any]],
-) -> None:
-    """Validate optional closed-loop metadata against the atomic edge chain."""
-    steps = task_spec.get("semantic_steps")
-    if steps is None:
-        return
-    if task_spec.get("semantic_step_schema_version") != "semantic_steps_v1":
-        raise ValueError(
-            "Task graph with semantic_steps must use "
-            "semantic_step_schema_version='semantic_steps_v1'."
-        )
-    if not isinstance(steps, list) or not steps:
-        raise ValueError("semantic_steps must be a non-empty list.")
-
-    edge_by_id = {edge["id"]: edge for edge in edge_specs}
-    assigned_edges: set[str] = set()
-    assigned_edge_order: list[str] = []
-    completed_steps: set[str] = set()
-    for index, step in enumerate(steps):
-        if not isinstance(step, Mapping):
-            raise TypeError(f"Semantic step {index} must be a mapping.")
-        unknown_keys = set(step) - _SEMANTIC_STEP_KEYS
-        if unknown_keys:
-            raise ValueError(
-                f"Semantic step {index} contains unsupported fields: "
-                f"{', '.join(sorted(unknown_keys))}."
-            )
-        missing_keys = _SEMANTIC_STEP_KEYS - set(step)
-        if missing_keys:
-            raise ValueError(
-                f"Semantic step {index} is missing fields: "
-                f"{', '.join(sorted(missing_keys))}."
-            )
-        step_id = step["id"]
-        if not isinstance(step_id, str) or not step_id:
-            raise ValueError(f"Semantic step {index} requires a non-empty id.")
-        if step_id in completed_steps:
-            raise ValueError(f"Duplicate semantic step id {step_id!r}.")
-
-        dependencies = step["depends_on"]
-        if not isinstance(dependencies, list) or any(
-            not isinstance(item, str) for item in dependencies
-        ):
-            raise TypeError(f"Semantic step {step_id!r} depends_on must be a list.")
-        unknown_dependencies = set(dependencies) - completed_steps
-        if unknown_dependencies:
-            raise ValueError(
-                f"Semantic step {step_id!r} depends on incomplete or unknown "
-                f"step(s): {', '.join(sorted(unknown_dependencies))}."
-            )
-
-        edge_ids = step["edge_ids"]
-        if not isinstance(edge_ids, list) or not edge_ids:
-            raise ValueError(
-                f"Semantic step {step_id!r} requires a non-empty edge_ids list."
-            )
-        unknown_edges = set(edge_ids) - set(edge_by_id)
-        if unknown_edges:
-            raise ValueError(
-                f"Semantic step {step_id!r} references unknown edge(s): "
-                f"{', '.join(sorted(unknown_edges))}."
-            )
-        duplicate_edges = set(edge_ids) & assigned_edges
-        if duplicate_edges:
-            raise ValueError(
-                f"Semantic step {step_id!r} reuses edge(s): "
-                f"{', '.join(sorted(duplicate_edges))}."
-            )
-        actor = step["actor"]
-        goal = step["goal"]
-        postcondition = step["postcondition"]
-        if not isinstance(actor, Mapping) or actor.get("mode") not in {
-            "required",
-            "assigned",
-        }:
-            raise ValueError(
-                f"Semantic step {step_id!r} requires a valid actor mapping."
-            )
-        actor_arm = actor.get("arm")
-        if actor_arm not in {"left_arm", "right_arm"}:
-            raise ValueError(
-                f"Semantic step {step_id!r} actor.arm must be left_arm or right_arm."
-            )
-        actor_side = "left" if actor_arm == "left_arm" else "right"
-        for edge_id in edge_ids:
-            edge = edge_by_id[edge_id]
-            for action_key in ARM_ACTION_KEYS:
-                action_side = _action_robot_side(edge.get(action_key))
-                if action_side is not None and action_side != actor_side:
-                    raise ValueError(
-                        f"Semantic step {step_id!r} requires {actor_arm}, but edge "
-                        f"{edge_id!r} contains a {action_side}_arm action."
-                    )
-        if not isinstance(goal, Mapping) or not goal:
-            raise ValueError(
-                f"Semantic step {step_id!r} requires a non-empty goal mapping."
-            )
-        if not isinstance(postcondition, Mapping) or not postcondition:
-            raise ValueError(
-                f"Semantic step {step_id!r} requires a postcondition mapping."
-            )
-        assigned_edges.update(edge_ids)
-        assigned_edge_order.extend(edge_ids)
-        completed_steps.add(step_id)
-
-    all_edges = set(edge_by_id)
-    if assigned_edges != all_edges:
-        missing = ", ".join(sorted(all_edges - assigned_edges))
-        raise ValueError(f"Semantic steps do not cover graph edge(s): {missing}.")
-    expected_edge_order = [edge["id"] for edge in edge_specs]
-    if assigned_edge_order != expected_edge_order:
-        raise ValueError(
-            "Semantic step edge_ids must cover the nominal graph in execution order."
-        )
-
-
-def _validate_nominal_path(
-    task_spec: Mapping[str, Any],
-    edge_specs: list[Mapping[str, Any]],
-) -> None:
-    # Runtime execution has no branch selector. Enforcing one outgoing edge per
-    # node here turns that limitation into a validated graph invariant.
-    outgoing_edges: dict[str, Mapping[str, Any]] = {}
-    for edge in edge_specs:
-        source = edge["source"]
-        if source in outgoing_edges:
-            raise ValueError(
-                f"Nominal node '{source}' has multiple outgoing edges. "
-                "The current graph executor expects one deterministic nominal path."
-            )
-        outgoing_edges[source] = edge
-
-    current = task_spec["start"]
-    goal = task_spec["goal"]
-    visited_edges = set()
-    visited_nodes = {current}
-
-    while current != goal:
-        edge = outgoing_edges.get(current)
-        if edge is None:
-            raise ValueError(
-                f"Nominal graph has no start-to-goal path from node '{current}'."
-            )
-        edge_id = edge["id"]
-        if edge_id in visited_edges:
-            raise ValueError("Nominal graph contains a cycle.")
-
-        visited_edges.add(edge_id)
-        current = edge["target"]
-        if current in visited_nodes and current != goal:
-            raise ValueError("Nominal graph contains a cycle.")
-        visited_nodes.add(current)
-
-    all_edge_ids = {edge["id"] for edge in edge_specs}
-    unused_edge_ids = all_edge_ids - visited_edges
-    # Reject disconnected or alternate paths even if start can reach goal. This
-    # keeps every serialized action auditable and guarantees it will execute.
-    if unused_edge_ids:
-        unused = ", ".join(sorted(unused_edge_ids))
-        raise ValueError(
-            f"Nominal graph contains edges outside the start-to-goal path: {unused}."
-        )
-
-
-def _compile_action(spec: Any, action_module: Any) -> Any:
-    if _is_empty_action_spec(spec):
-        return None
-    if not isinstance(spec, Mapping):
-        raise TypeError(f"Action spec must be a mapping or null, but got {type(spec)}.")
-    if "fn" in spec:
-        raise ValueError(
-            "Legacy fn/kwargs action schema is not supported. Use atomic action "
-            "class JSON spec with atomic_action_class, robot_name, control, cfg, "
-            "and exactly one of target_object, target_pose, target_qpos, or "
-            "target_object_pose."
-        )
-    if "action" in spec:
-        raise ValueError(
-            "Legacy action schema is not supported. Use atomic_action_class with "
-            "CoordinatedPickment, PickUp, MoveEndEffector, MoveJoints, "
-            "MoveHeldObject, or Place."
-        )
-    if spec.get("atomic_action_class") is None:
-        raise ValueError(
-            "Atomic action class schema requires atomic_action_class, robot_name, "
-            "control, cfg, and target fields."
-        )
-
-    normalized = action_module.normalize_atomic_action_spec(spec)
-    spec_cls = getattr(action_module, "AtomicActionSpec", None)
-    if spec_cls is None:
-        return normalized
-    return spec_cls.from_normalized(normalized)
-
-
-def _validate_edge_action_slots(edge: Mapping[str, Any], edge_id: str) -> None:
-    left_action = edge.get(LEFT_ARM_ACTION_KEY)
-    right_action = edge.get(RIGHT_ARM_ACTION_KEY)
-    left_is_coordinated = _is_coordinated_action_spec(left_action)
-    right_is_coordinated = _is_coordinated_action_spec(right_action)
-    if left_is_coordinated and right_is_coordinated:
-        raise ValueError(
-            f"Nominal edge '{edge_id}' may contain only one CoordinatedPickment "
-            "action."
-        )
-    if left_is_coordinated and not _is_empty_action_spec(right_action):
-        raise ValueError(
-            f"Nominal edge '{edge_id}' uses CoordinatedPickment in left_arm_action; "
-            "right_arm_action must be null."
-        )
-    if right_is_coordinated and not _is_empty_action_spec(left_action):
-        raise ValueError(
-            f"Nominal edge '{edge_id}' uses CoordinatedPickment in right_arm_action; "
-            "left_arm_action must be null."
-        )
-
-    for slot_name, expected_side, action in (
-        (LEFT_ARM_ACTION_KEY, "left", left_action),
-        (RIGHT_ARM_ACTION_KEY, "right", right_action),
-    ):
-        action_side = _action_robot_side(action)
-        if action_side is not None and action_side != expected_side:
-            raise ValueError(
-                f"Nominal edge '{edge_id}' {slot_name} contains "
-                f"robot_name={_action_robot_name(action)!r}, which resolves to "
-                f"{action_side}_arm. Keep the outer graph slot consistent with "
-                "the semantic arm name."
-            )
-
-
-def _is_coordinated_action_spec(spec: Any) -> bool:
-    if not isinstance(spec, Mapping):
-        return False
-    return spec.get("atomic_action_class") == "CoordinatedPickment"
-
-
-def _action_robot_side(spec: Any) -> str | None:
-    robot_name = _action_robot_name(spec)
-    if robot_name is None:
-        return None
-    text = robot_name.strip().lower()
-    if "right" in text:
-        return "right"
-    if "left" in text:
-        return "left"
-    return None
-
-
-def _action_robot_name(spec: Any) -> str | None:
-    if not isinstance(spec, Mapping):
-        return None
-    value = spec.get("robot_name")
-    if value is None:
-        return None
-    return str(value)
-
-
-def _is_empty_action_spec(spec: Any) -> bool:
-    return spec is None or (
-        isinstance(spec, str) and spec.strip().lower() in {"", "none", "null"}
-    )
-
-
-def _reject_recovery_keys(task_spec: Mapping[str, Any]) -> None:
-    present = _RECOVERY_KEYS & set(task_spec)
-    if present:
-        raise ValueError(
-            "Recovery graph fields are no longer supported: "
-            f"{', '.join(sorted(present))}."
-        )
-
-
-def _resolve_attr(namespace: Any, name: str) -> Any:
-    if isinstance(namespace, Mapping):
-        return namespace[name]
-    return getattr(namespace, name)

@@ -16,34 +16,26 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
-    COMPILED_GRAPH_FILENAME,
     SEED_TASK_GRAPH_FILENAME,
     TASK_GRAPH_FILENAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
     extract_json_object,
-    normalize_json_content,
 )
-from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.logger import log_info
 
 __all__ = [
     "CompileAgent",
     "resolve_precomputed_seed_task_graph_path",
-    "resolve_precomputed_task_graph_path",
 ]
-
-COMPILED_GRAPH_SCHEMA_VERSION = "nominal_graph_v1"
 
 
 class CompileAgent:
-    """Compile and execute nominal atomic-action graph specs."""
+    """Validate and execute immutable Seed Graph v2 specs in memory."""
 
     def __init__(
         self,
@@ -58,149 +50,43 @@ class CompileAgent:
             setattr(self, key, value)
 
     def generate(self, **kwargs: Any):
-        file_path = self._compiled_graph_path(kwargs.get("log_dir"))
-        task_graph = extract_json_object(kwargs["task_graph"])
-        seed_task_graph = kwargs.get("seed_task_graph")
-        if seed_task_graph is not None:
-            from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
-                validate_seed_graph_pair,
-            )
-
-            validate_seed_graph_pair(task_graph, seed_task_graph)
-        elif task_graph.get("seed_graph_hash") is not None:
-            raise ValueError(
-                "A task graph with seed provenance requires seed_task_graph.json "
-                "before runtime compilation."
-            )
-        task_graph_hash = _stable_json_hash(task_graph)
-
-        # The cache is valid only for the exact source graph and compiler
-        # schema. ``regenerate`` bypasses this artifact cache; it never mutates
-        # the generation-stage task_graph.json supplied by the caller.
-        if not kwargs.get("regenerate", False) and file_path.exists():
-            existing_bundle = extract_json_object(file_path.read_text(encoding="utf-8"))
-            metadata = existing_bundle.get("metadata", {})
-            if (
-                metadata.get("schema_version") == COMPILED_GRAPH_SCHEMA_VERSION
-                and metadata.get("task_graph_hash") == task_graph_hash
-            ):
-                log_info(f"Compiled graph artifact already exists at {file_path}.")
-                return file_path, kwargs, None
-
-        content = normalize_json_content(
-            {
-                "task_graph": task_graph,
-                "metadata": {
-                    "schema_version": COMPILED_GRAPH_SCHEMA_VERSION,
-                    "task_graph_hash": task_graph_hash,
-                },
-            }
+        from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
+            validate_seed_task_graph,
         )
 
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
-        log_info(f"Compiled graph artifact saved to {file_path}")
-        return file_path, kwargs, content
+        if "task_graph" in kwargs:
+            raise ValueError(
+                "precomputed task_graph input is no longer supported. Regenerate "
+                "the action-agent config with --overwrite."
+            )
+        if "seed_task_graph" not in kwargs:
+            raise ValueError(
+                "CompileAgent requires seed_task_graph_v2. Regenerate the "
+                "action-agent config with --overwrite."
+            )
+        seed_graph = extract_json_object(kwargs["seed_task_graph"])
+        validate_seed_task_graph(seed_graph, task_name=self.task_name)
+        log_info("Validated executable Seed Graph v2 for runtime grounding.")
+        return seed_graph, kwargs, None
 
-    def _compiled_graph_path(self, log_dir: str | Path | None) -> Path:
-        """Resolve the compiled artifact beside its owning config by default.
-
-        An explicit ``log_dir`` remains authoritative for compatibility.
-        Callers without an agent config retain the historical global fallback,
-        while normal CLI runs produce a self-contained config directory.
-        """
-        if log_dir is not None:
-            directory = Path(log_dir).expanduser()
-        elif self.config_dir:
-            directory = Path(self.config_dir).expanduser()
-            # Older direct callers sometimes passed agent_config.json itself
-            # despite the historical ``config_dir`` name.
-            if directory.suffix.lower() == ".json":
-                directory = directory.parent
-        else:
-            directory = Path(database_agent_prompt_dir) / self.task_name
-        return directory / COMPILED_GRAPH_FILENAME
-
-    def act(self, graph_file_path, **kwargs: Any):
-        graph_file_path = Path(graph_file_path)
-        if graph_file_path.suffix != ".json":
-            raise ValueError("CompileAgent executes compiled graph JSON artifacts.")
-
+    def act(self, seed_graph, **kwargs: Any):
         from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
-            compile_agent_graph_from_file,
+            compile_agent_graph_spec,
         )
 
         runtime_kwargs = _runtime_kwargs(kwargs)
-        graph = compile_agent_graph_from_file(graph_file_path)
+        graph = compile_agent_graph_spec(seed_graph)
         result = graph.run(**runtime_kwargs)
-        log_info("Compiled agent graph executed successfully.")
+        log_info("Executable Seed Graph v2 completed runtime execution.")
         return result
-
-
-def resolve_precomputed_task_graph_path(
-    *,
-    configured_path: str | None,
-    agent_config_path: str | None,
-) -> Path:
-    """Resolve the immutable task graph consumed by the runtime.
-
-    An explicit ``precomputed_task_graph`` remains authoritative. Legacy
-    configs without that field fall back to ``task_graph.json`` beside the
-    agent config, which preserves compatibility without reviving online graph
-    generation.
-
-    Args:
-        configured_path: Path from ``TaskAgent.precomputed_task_graph``.
-        agent_config_path: Path to the loaded ``agent_config.json``.
-
-    Returns:
-        The resolved task graph path.
-
-    Raises:
-        FileNotFoundError: If no configured or adjacent task graph exists.
-    """
-    candidates: list[Path] = []
-    config_file = (
-        Path(agent_config_path).expanduser().resolve() if agent_config_path else None
-    )
-
-    if configured_path:
-        graph_path = Path(configured_path).expanduser()
-        if not graph_path.is_absolute():
-            graph_path = (
-                config_file.parent / graph_path
-                if config_file is not None
-                else graph_path.resolve()
-            )
-        candidates.append(graph_path.resolve())
-    elif config_file is not None:
-        candidates.append(config_file.parent / TASK_GRAPH_FILENAME)
-    else:
-        candidates.append(Path(TASK_GRAPH_FILENAME).resolve())
-
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-
-    searched = "\n".join(f"  - {candidate}" for candidate in candidates)
-    raise FileNotFoundError(
-        "Precomputed task graph not found. Searched:\n"
-        f"{searched}\n"
-        "Generate the action-agent config before running the agent."
-    )
 
 
 def resolve_precomputed_seed_task_graph_path(
     *,
     configured_path: str | None,
     agent_config_path: str | None,
-) -> Path | None:
-    """Resolve the symbolic seed used to verify the runtime task graph.
-
-    Generated configs name the seed explicitly. Legacy configs may omit the
-    field; in that case an adjacent seed is used when present, while truly
-    pre-seed bundles continue to run without provenance verification.
-    """
+) -> Path:
+    """Resolve the required executable Seed v2 runtime input."""
     config_file = (
         Path(agent_config_path).expanduser().resolve() if agent_config_path else None
     )
@@ -224,21 +110,24 @@ def resolve_precomputed_seed_task_graph_path(
         if config_file is not None
         else Path(SEED_TASK_GRAPH_FILENAME).resolve()
     )
-    return adjacent if adjacent.is_file() else None
-
-
-def _stable_json_hash(content: dict[str, Any]) -> str:
-    payload = json.dumps(
-        content, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    if not adjacent.is_file():
+        legacy = adjacent.with_name(TASK_GRAPH_FILENAME)
+        if legacy.is_file():
+            raise ValueError(
+                "Found legacy task_graph.json without Seed v2. Regenerate the "
+                "action-agent config with --overwrite."
+            )
+        raise FileNotFoundError(
+            f"Executable Seed task graph not found: {adjacent}. Generate the "
+            "action-agent config before running."
+        )
+    return adjacent
 
 
 def _runtime_kwargs(
     kwargs: dict[str, Any],
 ) -> dict[str, Any]:
     prompt_only_keys = {
-        "task_graph",
         "seed_task_graph",
         "observations",
         "regenerate",

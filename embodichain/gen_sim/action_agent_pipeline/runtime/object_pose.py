@@ -157,6 +157,20 @@ def _resolve_object_target_pose_like(
     target_pose = current_object_pose.clone()
     is_batched = target_pose.ndim == 3
     if reference == "absolute":
+        position_by_env = target_pose_spec.get("position_by_env")
+        if position_by_env is not None:
+            positions = torch.as_tensor(
+                position_by_env,
+                dtype=target_pose.dtype,
+                device=target_pose.device,
+            )
+            if not is_batched or positions.shape != (target_pose.shape[0], 3):
+                raise ValueError(
+                    "absolute position_by_env must match the runtime environment "
+                    "batch."
+                )
+            target_pose[:, :3, 3] = positions
+            return target_pose
         position = target_pose_spec.get("position")
         if not isinstance(position, list) or len(position) != 3:
             raise ValueError("absolute target_object_pose requires position.")
@@ -688,10 +702,26 @@ def _resolve_object_pose_target(env, spec: AtomicActionSpec):
 
 def _resolve_absolute_pose_target(env, spec: AtomicActionSpec):
     position = spec.target_pose.get("position")
-    if not isinstance(position, list) or len(position) != 3:
-        raise ValueError("absolute target_pose requires position with three entries.")
+    position_by_env = spec.target_pose.get("position_by_env")
     _, _, _, current_pose, _ = get_arm_states(env, spec.robot_name)
     target_pose = deepcopy(current_pose)
+    if position_by_env is not None:
+        positions = torch.as_tensor(
+            position_by_env,
+            dtype=torch.float32,
+            device=env.robot.device,
+        )
+        if target_pose.ndim != 3 or positions.shape != (target_pose.shape[0], 3):
+            raise ValueError(
+                "absolute target_pose position_by_env must match the runtime "
+                "environment batch."
+            )
+        target_pose[:, :3, 3] = positions
+        return torch.as_tensor(
+            target_pose, dtype=torch.float32, device=env.robot.device
+        )
+    if not isinstance(position, list) or len(position) != 3:
+        raise ValueError("absolute target_pose requires position with three entries.")
     if target_pose.ndim == 2:
         for index, value in enumerate(position):
             if value is not None:

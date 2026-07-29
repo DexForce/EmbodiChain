@@ -43,6 +43,11 @@ class ExecutedAtomicAction:
     control: str | None
     failed_env_mask: torch.Tensor | None = None
     atomic_action_class: str | None = None
+    resolved_target_pose: torch.Tensor | None = None
+    resolved_object_target_pose: torch.Tensor | None = None
+    resolved_eef_target_pose: torch.Tensor | None = None
+    resolved_left_eef_target_pose: torch.Tensor | None = None
+    resolved_right_eef_target_pose: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)

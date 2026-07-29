@@ -18,10 +18,6 @@ from __future__ import annotations
 
 from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import (
     CompileAgent,
-    resolve_precomputed_task_graph_path,
 )
 
-__all__ = [
-    "CompileAgent",
-    "resolve_precomputed_task_graph_path",
-]
+__all__ = ["CompileAgent"]

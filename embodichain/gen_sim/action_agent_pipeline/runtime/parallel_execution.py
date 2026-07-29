@@ -82,6 +82,8 @@ def execute_parallel_atomic_actions(
     env: Any,
     world_states: dict[str, WorldState] | None = None,
     failed_env_mask: torch.Tensor | np.ndarray | None = None,
+    left_active_env_mask: torch.Tensor | np.ndarray | None = None,
+    right_active_env_mask: torch.Tensor | np.ndarray | None = None,
     return_result: bool = False,
     **runtime_kwargs: Any,
 ) -> list[torch.Tensor] | dict[str, Any]:
@@ -97,6 +99,8 @@ def execute_parallel_atomic_actions(
         env=env,
         world_states=world_states,
         failed_env_mask=failed_env_mask,
+        left_active_env_mask=left_active_env_mask,
+        right_active_env_mask=right_active_env_mask,
         return_result=True,
         **runtime_kwargs,
     )
@@ -106,6 +110,7 @@ def execute_parallel_atomic_actions(
         env,
         result["arm_actions"],
         failed_env_mask=result["failed_env_mask"],
+        active_env_masks=result.get("active_env_masks"),
     )
     guard_failed = _coordinated_transport_failure_mask(
         env,
@@ -139,6 +144,8 @@ def build_parallel_action_stream(
     env: Any,
     world_states: dict[str, WorldState] | None = None,
     failed_env_mask: torch.Tensor | np.ndarray | None = None,
+    left_active_env_mask: torch.Tensor | np.ndarray | None = None,
+    right_active_env_mask: torch.Tensor | np.ndarray | None = None,
     return_result: bool = False,
     **runtime_kwargs: Any,
 ) -> list[torch.Tensor] | dict[str, Any]:
@@ -158,6 +165,18 @@ def build_parallel_action_stream(
         num_envs,
         name="failed_env_mask",
     )
+    active_env_masks = {
+        "left": _normalized_active_mask(
+            left_active_env_mask,
+            num_envs,
+            default=left_arm_action is not None,
+        ).to(device=env.device),
+        "right": _normalized_active_mask(
+            right_active_env_mask,
+            num_envs,
+            default=right_arm_action is not None,
+        ).to(device=env.device),
+    }
     if bool(upstream_failed_env_mask.all()):
         result = _failed_parallel_hold_result(
             env,
@@ -277,13 +296,20 @@ def build_parallel_action_stream(
                 f"{side}_arm_action has {action.shape[0]} environments but "
                 f"env.num_envs={num_envs}."
             )
+        inactive_indices = (~active_env_masks[side]).detach().cpu().numpy()
+        action = action.copy()
+        action[inactive_indices] = np.repeat(
+            current_qpos[inactive_indices][:, None, arm_index],
+            action_len,
+            axis=1,
+        )
         actions[:, :, arm_index] = action
 
     node_failed_env_mask = _merge_failed_env_masks(
         num_envs,
         upstream_failed_env_mask,
-        _action_failed_env_mask(left_arm_action),
-        _action_failed_env_mask(right_arm_action),
+        _masked_action_failure(left_arm_action, active_env_masks["left"]),
+        _masked_action_failure(right_arm_action, active_env_masks["right"]),
     )
     if bool(node_failed_env_mask.any()):
         # Replace only failed batches with their current qpos. Successful
@@ -304,7 +330,12 @@ def build_parallel_action_stream(
             isinstance(executed, ExecutedAtomicAction)
             and executed.next_state is not None
         ):
-            next_world_states[side] = executed.next_state
+            next_world_states[side] = _merge_inactive_world_state_qpos(
+                executed.next_state,
+                previous_state=world_states.get(side),
+                current_qpos=current_qpos,
+                active_env_mask=active_env_masks[side],
+            )
     if bool(node_failed_env_mask.any()):
         next_world_states = {
             side: _hold_failed_world_state_qpos(
@@ -333,6 +364,7 @@ def build_parallel_action_stream(
             "right": right_arm_action,
         },
         "failed_env_mask": node_failed_env_mask,
+        "active_env_masks": active_env_masks,
     }
 
 
@@ -351,6 +383,71 @@ def _action_failed_env_mask(action: Any) -> torch.Tensor | None:
     if isinstance(action, ExecutedAtomicAction):
         return action.failed_env_mask
     return None
+
+
+def _masked_action_failure(
+    action: Any,
+    active_env_mask: torch.Tensor,
+) -> torch.Tensor | None:
+    failed = _action_failed_env_mask(action)
+    if failed is None:
+        return None
+    return failed.to(device=active_env_mask.device, dtype=torch.bool) & active_env_mask
+
+
+def _normalized_active_mask(
+    value: torch.Tensor | np.ndarray | None,
+    num_envs: int,
+    *,
+    default: bool,
+) -> torch.Tensor:
+    if value is None:
+        return torch.full((num_envs,), default, dtype=torch.bool)
+    mask = torch.as_tensor(value, dtype=torch.bool).flatten()
+    if mask.shape != (num_envs,):
+        raise ValueError(
+            f"active_env_mask must have shape ({num_envs},), got {tuple(mask.shape)}."
+        )
+    return mask
+
+
+def _merge_inactive_world_state_qpos(
+    candidate: WorldState,
+    *,
+    previous_state: WorldState | None,
+    current_qpos: np.ndarray,
+    active_env_mask: torch.Tensor,
+) -> WorldState:
+    """Keep inactive batches at the joint state actually sent to the robot.
+
+    Atomic actions plan the full vectorized batch even when an arm is assigned
+    to only some environments. The action stream masks inactive rows, so the
+    cached WorldState must apply the same mask before a later step reuses it.
+    """
+    inactive = ~active_env_mask.to(
+        device=candidate.last_qpos.device,
+        dtype=torch.bool,
+    )
+    if not bool(inactive.any()):
+        return candidate
+    last_qpos = candidate.last_qpos.clone()
+    if previous_state is not None:
+        inactive_qpos = previous_state.last_qpos.to(
+            device=last_qpos.device,
+            dtype=last_qpos.dtype,
+        )
+    else:
+        inactive_qpos = torch.as_tensor(
+            current_qpos,
+            device=last_qpos.device,
+            dtype=last_qpos.dtype,
+        )
+    last_qpos[inactive] = inactive_qpos[inactive]
+    return WorldState(
+        last_qpos=last_qpos,
+        held_object=candidate.held_object,
+        coordinated_held_object=candidate.coordinated_held_object,
+    )
 
 
 def step_env_with_actions(
@@ -543,14 +640,23 @@ def _sync_agent_states_from_parallel_actions(
     arm_actions: Mapping[str, Any],
     *,
     failed_env_mask: torch.Tensor | None = None,
+    active_env_masks: Mapping[str, torch.Tensor] | None = None,
 ) -> None:
-    for executed in arm_actions.values():
+    for side, executed in arm_actions.items():
         if not isinstance(executed, ExecutedAtomicAction):
             continue
+        state_sync_mask = failed_env_mask
+        if active_env_masks is not None and side in active_env_masks:
+            inactive = ~active_env_masks[side].to(dtype=torch.bool)
+            state_sync_mask = (
+                inactive
+                if state_sync_mask is None
+                else state_sync_mask.to(inactive.device, dtype=torch.bool) | inactive
+            )
         action_np = _hold_failed_atomic_action_for_state_sync(
             env,
             executed,
-            failed_env_mask,
+            state_sync_mask,
         )
         if executed.control == "coordinated":
             _sync_agent_states_from_coordinated_action(env, action_np)

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 from typing import Any
@@ -103,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--regenerate",
         action="store_true",
-        help="Rebuild the compiled graph artifact instead of reusing its cache.",
+        help="Force Seed Graph v2 to be reparsed and revalidated before execution.",
         default=False,
     )
     return parser
@@ -225,11 +226,18 @@ def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: 
         log_warning("Preview mode is handled by the shared runner and is skipped here.")
 
     log_info("Start action-agent data generation.", color="green")
+    runtime_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    log_info(
+        f"Runtime task graph run_id: {runtime_run_id}; output root: "
+        f"outputs/graph/{args.task_name}/runs/{runtime_run_id}",
+        color="green",
+    )
     for trajectory_idx in range(gym_config.get("max_episodes", 1)):
         _generate_action_agent_trajectory(
             args,
             env,
             trajectory_idx,
+            runtime_run_id=runtime_run_id,
         )
     _, _ = _reset_env_with_physical_collision(env)
 
@@ -238,6 +246,8 @@ def _generate_action_agent_trajectory(
     args: argparse.Namespace,
     env: gymnasium.Env,
     trajectory_idx: int,
+    *,
+    runtime_run_id: str,
 ) -> bool:
     with timing_scope(
         "run_agent.trajectory_reset",
@@ -254,6 +264,8 @@ def _generate_action_agent_trajectory(
             save_video=getattr(args, "save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
+            runtime_run_id=runtime_run_id,
+            episode_index=trajectory_idx,
         )
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
@@ -261,6 +273,9 @@ def _generate_action_agent_trajectory(
 
     if getattr(action_list, "already_executed", False):
         log_info("Action list was already executed by the action-agent runtime.")
+        runtime_graph_dir = getattr(action_list, "runtime_graph_output_dir", None)
+        if runtime_graph_dir:
+            log_info(f"Runtime task graphs saved to: {runtime_graph_dir}")
         with timing_scope(
             "run_agent.evaluate_success",
             metadata={"trajectory_idx": trajectory_idx},

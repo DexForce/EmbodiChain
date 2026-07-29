@@ -14,7 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Convert deterministic task plans into executable nominal task graphs."""
+"""Compatibility facade for executable Seed Graph v2 builders.
+
+Config generation no longer produces a grounded task graph. Historical builder
+names remain importable inside the package, but now return the immutable Seed
+v2 topology that the runtime grounds per environment.
+"""
 
 from __future__ import annotations
 
@@ -27,31 +32,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols impo
     RelativeSpecLike,
     StackingSpecLike,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
-    build_nominal_task_graph,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
-    compile_seed_graph_metadata,
     make_arrangement_seed_task_graph,
     make_relative_seed_task_graph,
     make_stacking_seed_task_graph,
     validate_seed_task_graph,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.task_plan_builders import (
-    _arrangement_step_edge_blocks,
-    _coordinated_pickment_graph_steps,
-    _dual_relative_graph_steps,
-    _hold_hover_graph_steps,
-    _nominal_step,
-    _single_relative_graph_steps,
-    _stacking_step_edge_blocks,
-    _uses_serial_dual_sequence,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.relative_offsets import (
-    _side_relation_xy_offsets,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
-    _make_relative_placement_success_spec,
 )
 
 __all__ = [
@@ -59,8 +44,8 @@ __all__ = [
     "compile_relative_task_graph",
     "compile_stacking_task_graph",
     "make_arrangement_task_graph",
-    "make_stacking_task_graph",
     "make_relative_task_graph",
+    "make_stacking_task_graph",
 ]
 
 
@@ -68,8 +53,7 @@ def make_arrangement_task_graph(
     task_name: str,
     spec: ArrangementSpecLike,
 ) -> dict[str, Any]:
-    seed_graph = make_arrangement_seed_task_graph(task_name, spec)
-    return compile_arrangement_task_graph(task_name, seed_graph, spec)
+    return make_arrangement_seed_task_graph(task_name, spec)
 
 
 def compile_arrangement_task_graph(
@@ -77,35 +61,19 @@ def compile_arrangement_task_graph(
     seed_graph: Mapping[str, Any],
     spec: ArrangementSpecLike,
 ) -> dict[str, Any]:
-    """Compile a symbolic arrangement seed into its grounded atomic graph."""
-    validate_seed_task_graph(
-        seed_graph,
-        task_name=task_name,
-        route="arrangement_line",
-    )
-    _validate_seed_matches_grounding(
+    return _validate_compilation_input(
+        task_name,
         seed_graph,
         make_arrangement_seed_task_graph(task_name, spec),
         route="arrangement_line",
     )
-    steps = []
-    # The seed owns the desired ordered layout. The deterministic arrangement
-    # planner remains free to choose a collision-safe execution schedule.
-    for step in spec.steps:
-        steps.extend(
-            _nominal_step(title, actions)
-            for title, actions in _arrangement_step_edge_blocks(step)
-        )
-    graph = build_nominal_task_graph(task_name=task_name, steps=steps)
-    return compile_seed_graph_metadata(graph, seed_graph)
 
 
 def make_stacking_task_graph(
     task_name: str,
     spec: StackingSpecLike,
 ) -> dict[str, Any]:
-    seed_graph = make_stacking_seed_task_graph(task_name, spec)
-    return compile_stacking_task_graph(task_name, seed_graph, spec)
+    return make_stacking_seed_task_graph(task_name, spec)
 
 
 def compile_stacking_task_graph(
@@ -113,35 +81,19 @@ def compile_stacking_task_graph(
     seed_graph: Mapping[str, Any],
     spec: StackingSpecLike,
 ) -> dict[str, Any]:
-    """Compile a symbolic stacking seed into its grounded atomic graph."""
-    validate_seed_task_graph(seed_graph, task_name=task_name, route="stacking")
-    _validate_seed_matches_grounding(
+    return _validate_compilation_input(
+        task_name,
         seed_graph,
         make_stacking_seed_task_graph(task_name, spec),
         route="stacking",
     )
-    ordered_steps = _unique_specs_in_seed_order(seed_graph, spec.steps, "runtime_uid")
-    seed_goal = seed_graph["steps"][0]["goal"]
-    steps = []
-    for step in ordered_steps:
-        steps.extend(
-            _nominal_step(title, actions)
-            for title, actions in _stacking_step_edge_blocks(
-                step,
-                object_anchored=seed_goal["reference_state"] == "live",
-                stack_mode=seed_goal["stack_mode"],
-            )
-        )
-    graph = build_nominal_task_graph(task_name=task_name, steps=steps)
-    return compile_seed_graph_metadata(graph, seed_graph)
 
 
 def make_relative_task_graph(
     task_name: str,
     spec: RelativeSpecLike,
 ) -> dict[str, Any]:
-    seed_graph = make_relative_seed_task_graph(task_name, spec)
-    return compile_relative_task_graph(task_name, seed_graph, spec)
+    return make_relative_seed_task_graph(task_name, spec)
 
 
 def compile_relative_task_graph(
@@ -149,131 +101,24 @@ def compile_relative_task_graph(
     seed_graph: Mapping[str, Any],
     spec: RelativeSpecLike,
 ) -> dict[str, Any]:
-    """Compile ordered manipulation semantics with deterministic geometry."""
-    validate_seed_task_graph(
-        seed_graph,
-        task_name=task_name,
-        route="object_manipulation",
-    )
-    _validate_seed_matches_grounding(
+    return _validate_compilation_input(
+        task_name,
         seed_graph,
         make_relative_seed_task_graph(task_name, spec),
         route="object_manipulation",
     )
-    seed_steps = list(seed_graph["steps"])
-    seed_intent = seed_graph["program"]
-    semantic_groups = None
-    if seed_intent == "coordinated_pickment":
-        steps = _coordinated_pickment_graph_steps(spec)
-    elif seed_intent == "hold_hover":
-        steps = _hold_hover_graph_steps(spec)
-    elif len(spec.placements) > 1:
-        if _uses_serial_dual_sequence(spec):
-            semantic_groups = [
-                (placement, _single_relative_graph_steps(placement))
-                for placement in spec.placements
-            ]
-            steps = [step for _, group_steps in semantic_groups for step in group_steps]
-        else:
-            steps = _dual_relative_graph_steps(spec)
-    else:
-        steps = _single_relative_graph_steps(spec)
-        semantic_groups = [(spec.placements[0], steps)]
-    graph = build_nominal_task_graph(task_name=task_name, steps=steps)
-    if semantic_groups is not None:
-        graph["semantic_step_schema_version"] = "semantic_steps_v1"
-        graph["semantic_steps"] = _relative_semantic_steps(
-            graph,
-            semantic_groups,
-            seed_steps,
-        )
-    return compile_seed_graph_metadata(graph, seed_graph)
 
 
-def _relative_semantic_steps(
-    graph: dict[str, Any],
-    groups: list[tuple[Any, list[Any]]],
-    seed_steps: list[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Bind ordered semantic operations to their generated atomic edge ranges."""
-    if len(groups) != len(seed_steps):
-        raise ValueError(
-            "Semantic seed steps do not match the compiled relative edge groups."
-        )
-    graph_edges = graph["edges"]
-    result: list[dict[str, Any]] = []
-    edge_cursor = 0
-    for (placement, atomic_steps), seed_step in zip(groups, seed_steps):
-        edge_count = len(atomic_steps)
-        edge_ids = [
-            edge["id"] for edge in graph_edges[edge_cursor : edge_cursor + edge_count]
-        ]
-        edge_cursor += edge_count
-        result.append(
-            {
-                "id": seed_step["id"],
-                "operator": seed_step["operator"],
-                "object": seed_step["object"],
-                "actor": _compiled_relative_actor(seed_step["actor"], placement),
-                "goal": deepcopy(dict(seed_step["goal"])),
-                "depends_on": list(seed_step["depends_on"]),
-                "postcondition": _make_relative_placement_success_spec(
-                    placement,
-                    side_relation_xy_offsets=_side_relation_xy_offsets,
-                ),
-                "edge_ids": edge_ids,
-            }
-        )
-    if edge_cursor != len(graph_edges):
-        raise ValueError("Semantic-step edge groups do not cover the generated graph.")
-    return result
-
-
-def _compiled_relative_actor(
-    seed_actor: Mapping[str, Any],
-    placement: Any,
-) -> dict[str, Any]:
-    active_arm = f"{placement.active_side}_arm"
-    if seed_actor["mode"] == "required":
-        required_arm = seed_actor["arm"]
-        if required_arm != active_arm:
-            raise ValueError(
-                f"Required seed actor {required_arm!r} was changed to "
-                f"{active_arm!r} during deterministic compilation."
-            )
-        return {"mode": "required", "arm": required_arm}
-    return {"mode": "assigned", "arm": active_arm}
-
-
-def _validate_seed_matches_grounding(
+def _validate_compilation_input(
+    task_name: str,
     seed_graph: Mapping[str, Any],
-    expected_seed_graph: Mapping[str, Any],
+    expected: Mapping[str, Any],
     *,
     route: str,
-) -> None:
-    """Reject grounded data produced from any semantic program but this seed.
-
-    The grounded spec deliberately carries geometry together with duplicated
-    semantic lookup keys. Exact comparison of its canonical symbolic projection
-    prevents those convenience fields from becoming a second source of truth.
-    """
-    if dict(seed_graph) != dict(expected_seed_graph):
+) -> dict[str, Any]:
+    validate_seed_task_graph(seed_graph, task_name=task_name, route=route)
+    if dict(seed_graph) != dict(expected):
         raise ValueError(
-            f"{route} grounding context was not derived from the supplied seed "
-            "task graph."
+            f"{route} Seed v2 was not derived from the supplied semantic plan."
         )
-
-
-def _unique_specs_in_seed_order(
-    seed_graph: Mapping[str, Any],
-    specs: Any,
-    uid_attribute: str,
-) -> list[Any]:
-    spec_list = list(specs)
-    by_uid = {str(getattr(spec, uid_attribute)): spec for spec in spec_list}
-    seed_uids = [str(step["object"]) for step in seed_graph["steps"]]
-    if len(by_uid) != len(spec_list) or set(seed_uids) != set(by_uid):
-        raise ValueError(
-            "Seed graph objects do not match the deterministic route specification."
-        )
-    return [by_uid[uid] for uid in seed_uids]
+    return deepcopy(dict(seed_graph))

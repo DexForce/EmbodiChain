@@ -58,6 +58,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.trajectory_runtime import
 )
 from embodichain.lab.sim.atomic_actions import WorldState
 from embodichain.utils.logger import log_info, log_warning
+from embodichain.utils.math import pose_inv
 
 __all__ = ["execute_atomic_action"]
 
@@ -111,6 +112,30 @@ def _execute_atomic_action_result(
         cfg.downstream_object_target_poses = _resolve_pickup_downstream_object_targets(
             env, spec, target, runtime_kwargs
         )
+    resolved_target_pose = target if isinstance(target, torch.Tensor) else None
+    resolved_object_target_pose, resolved_eef_target_pose = _resolved_pose_targets(
+        spec,
+        resolved_target_pose,
+        state=state,
+    )
+    coordinated_object_target_pose = getattr(target, "object_target_pose", None)
+    coordinated_left_eef_target_pose = None
+    coordinated_right_eef_target_pose = None
+    if isinstance(coordinated_object_target_pose, torch.Tensor):
+        coordinated_left_eef_target_pose = torch.bmm(
+            coordinated_object_target_pose,
+            target.left_object_to_eef.to(
+                device=coordinated_object_target_pose.device,
+                dtype=coordinated_object_target_pose.dtype,
+            ),
+        )
+        coordinated_right_eef_target_pose = torch.bmm(
+            coordinated_object_target_pose,
+            target.right_object_to_eef.to(
+                device=coordinated_object_target_pose.device,
+                dtype=coordinated_object_target_pose.dtype,
+            ),
+        )
     target = _build_typed_target(spec, target)
     if state is None:
         state = WorldState(last_qpos=env.robot.get_qpos().clone())
@@ -124,6 +149,11 @@ def _execute_atomic_action_result(
         target=target,
         state=state,
     )
+    if (
+        spec.atomic_action_class == "PickUp"
+        and result.next_state.held_object is not None
+    ):
+        resolved_eef_target_pose = result.next_state.held_object.grasp_xpos
     failed_env_mask = _failed_env_mask(result.success, result.trajectory.shape[0])
     if failed_env_mask is not None and bool(failed_env_mask.any()):
         n_failed = int(failed_env_mask.sum().item())
@@ -152,6 +182,9 @@ def _execute_atomic_action_result(
             spec,
             result,
             failed_env_mask=failed_env_mask,
+            object_target_pose=coordinated_object_target_pose,
+            left_eef_target_pose=coordinated_left_eef_target_pose,
+            right_eef_target_pose=coordinated_right_eef_target_pose,
         )
     if spec.atomic_action_class == "MoveJoints":
         joint_ids = arm_joints if spec.control == "arm" else eef_joints
@@ -191,6 +224,11 @@ def _execute_atomic_action_result(
         control=spec.control,
         failed_env_mask=failed_env_mask,
         atomic_action_class=spec.atomic_action_class,
+        resolved_target_pose=resolved_target_pose,
+        resolved_object_target_pose=resolved_object_target_pose,
+        resolved_eef_target_pose=resolved_eef_target_pose,
+        resolved_left_eef_target_pose=None,
+        resolved_right_eef_target_pose=None,
     )
 
 
@@ -200,6 +238,9 @@ def _executed_coordinated_atomic_action(
     result,
     *,
     failed_env_mask: torch.Tensor | None = None,
+    object_target_pose: torch.Tensor | None = None,
+    left_eef_target_pose: torch.Tensor | None = None,
+    right_eef_target_pose: torch.Tensor | None = None,
 ) -> ExecutedAtomicAction:
     trajectory = result.trajectory
     if isinstance(trajectory, torch.Tensor):
@@ -232,4 +273,47 @@ def _executed_coordinated_atomic_action(
         control="coordinated",
         failed_env_mask=failed_env_mask,
         atomic_action_class=spec.atomic_action_class,
+        resolved_target_pose=None,
+        resolved_object_target_pose=object_target_pose,
+        resolved_eef_target_pose=None,
+        resolved_left_eef_target_pose=left_eef_target_pose,
+        resolved_right_eef_target_pose=right_eef_target_pose,
     )
+
+
+def _resolved_pose_targets(
+    spec: AtomicActionSpec,
+    target: torch.Tensor | None,
+    *,
+    state: WorldState | None,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Classify the planner target as an object pose and/or an EEF pose."""
+    if target is None:
+        return None, None
+    if spec.atomic_action_class == "MoveHeldObject":
+        if state is None or state.held_object is None:
+            return target, None
+        object_to_eef = state.held_object.object_to_eef.to(
+            device=target.device,
+            dtype=target.dtype,
+        )
+        if object_to_eef.ndim == 2:
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(target.shape[0], 1, 1)
+        return target, torch.bmm(target, object_to_eef)
+    if spec.atomic_action_class == "Place":
+        if (
+            state is not None
+            and state.held_object is not None
+            and spec.target_object_pose
+        ):
+            object_to_eef = state.held_object.object_to_eef.to(
+                device=target.device,
+                dtype=target.dtype,
+            )
+            if object_to_eef.ndim == 2:
+                object_to_eef = object_to_eef.unsqueeze(0).repeat(target.shape[0], 1, 1)
+            return torch.bmm(target, pose_inv(object_to_eef)), target
+        return None, target
+    if spec.atomic_action_class == "MoveEndEffector":
+        return None, target
+    return None, None

@@ -20,6 +20,7 @@ from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Any
 
@@ -27,6 +28,7 @@ from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     AGENT_CONFIG_FILENAME,
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,
+    COMPILED_GRAPH_FILENAME,
     FAST_GYM_CONFIG_FILENAME,
     SEED_TASK_GRAPH_FILENAME,
     SEED_TASK_GRAPH_PNG_FILENAME,
@@ -38,12 +40,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     GeneratedActionAgentConfigPaths,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
-    seed_task_graph_hash,
     validate_seed_task_graph,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.visualization import (
+from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
     render_seed_task_graph_png,
-    render_task_graph_png,
 )
 
 __all__ = [
@@ -54,76 +54,85 @@ __all__ = [
     "write_text",
 ]
 
+_SAFE_TASK_DIR_RE = re.compile(r"[^0-9A-Za-z._-]+")
+
 
 def write_config_bundle(
     *,
     output_dir: Path,
     bundle: Mapping[str, Any],
     overwrite: bool,
+    graph_output_root: Path | None = None,
 ) -> GeneratedActionAgentConfigPaths:
-    """Write runtime inputs and review diagnostics as one portable bundle.
-
-    The seed graph is the symbolic source and ``task_graph.json`` is its
-    deterministic executable compilation. The task prompt, background, and
-    atomic-action text files remain review-only compatibility records.
-    """
+    """Write Seed v2 runtime inputs and review diagnostics as one bundle."""
+    task_name = _bundle_task_name(bundle, fallback=output_dir.name)
+    graph_output_dir = _resolve_graph_output_root(graph_output_root) / _safe_task_dir(
+        task_name
+    )
     paths = GeneratedActionAgentConfigPaths(
         output_dir=output_dir,
+        graph_output_dir=graph_output_dir,
         gym_config=output_dir / FAST_GYM_CONFIG_FILENAME,
         agent_config=output_dir / AGENT_CONFIG_FILENAME,
         task_prompt=output_dir / TASK_PROMPT_FILENAME,
         seed_task_graph=output_dir / SEED_TASK_GRAPH_FILENAME,
-        seed_task_graph_png=output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
-        task_graph=output_dir / TASK_GRAPH_FILENAME,
-        task_graph_png=output_dir / TASK_GRAPH_PNG_FILENAME,
+        seed_task_graph_png=graph_output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
         basic_background=output_dir / BASIC_BACKGROUND_FILENAME,
         atom_actions=output_dir / ATOM_ACTIONS_FILENAME,
         summary=dict(bundle.get("summary", {})),
     )
-    raise_if_generated_files_exist(output_dir, overwrite)
-    _validate_seed_compilation_pair(bundle)
+    raise_if_generated_files_exist(
+        output_dir,
+        overwrite,
+        task_name=task_name,
+        graph_output_root=graph_output_root,
+    )
+    _validate_seed_bundle(bundle)
 
     serialized_files: list[tuple[Path, str | bytes]] = [
         (paths.gym_config, _serialize_json(bundle["gym_config"])),
         (paths.agent_config, _serialize_json(bundle["agent_config"])),
         (paths.task_prompt, _serialize_text(bundle["task_prompt"])),
     ]
-    # Legacy direct callers may not yet provide a seed graph. Every production
-    # route does, and publishing it in the same transaction prevents mixed
-    # seed/compiled snapshots during --overwrite.
-    if "seed_task_graph" in bundle:
-        serialized_files.append(
-            (paths.seed_task_graph, _serialize_json(bundle["seed_task_graph"]))
-        )
-        try:
-            seed_graph_png = render_seed_task_graph_png(bundle["seed_task_graph"])
-        except Exception as error:
-            raise RuntimeError("Failed to render seed_task_graph.png.") from error
-        serialized_files.append((paths.seed_task_graph_png, seed_graph_png))
+    serialized_files.append(
+        (paths.seed_task_graph, _serialize_json(bundle["seed_task_graph"]))
+    )
+    try:
+        seed_graph_png = render_seed_task_graph_png(bundle["seed_task_graph"])
+    except Exception as error:
+        raise RuntimeError("Failed to render seed_task_graph.png.") from error
+    serialized_files.append((paths.seed_task_graph_png, seed_graph_png))
     serialized_files.extend(
         [
-            (paths.task_graph, _serialize_json(bundle["task_graph"])),
             (paths.basic_background, _serialize_text(bundle["basic_background"])),
             (paths.atom_actions, _serialize_text(bundle["atom_actions"])),
         ]
     )
-    # Preserve compatibility only for historical seedless callers that publish
-    # a placeholder task_graph mapping. A production bundle has a seed and must
-    # fail closed if its compiled graph cannot be visualized.
-    if "seed_task_graph" in bundle or _has_renderable_task_graph_shape(
-        bundle["task_graph"]
-    ):
-        try:
-            task_graph_png = render_task_graph_png(bundle["task_graph"])
-        except Exception as error:
-            raise RuntimeError("Failed to render task_graph.png.") from error
-        serialized_files.append((paths.task_graph_png, task_graph_png))
     output_dir.mkdir(parents=True, exist_ok=True)
+    if any(path.parent == graph_output_dir for path, _ in serialized_files):
+        graph_output_dir.mkdir(parents=True, exist_ok=True)
     _write_file_transaction(serialized_files)
+    if overwrite:
+        # These v1 artifacts are not valid runtime inputs for Seed v2. Remove
+        # them only after the complete replacement bundle has been published.
+        for obsolete in (
+            output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
+            output_dir / TASK_GRAPH_FILENAME,
+            output_dir / TASK_GRAPH_PNG_FILENAME,
+            output_dir / COMPILED_GRAPH_FILENAME,
+            graph_output_dir / TASK_GRAPH_PNG_FILENAME,
+        ):
+            obsolete.unlink(missing_ok=True)
     return paths
 
 
-def raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
+def raise_if_generated_files_exist(
+    output_dir: Path,
+    overwrite: bool,
+    task_name: str | None = None,
+    *,
+    graph_output_root: Path | None = None,
+) -> None:
     if overwrite:
         return
     output_files = [
@@ -134,9 +143,20 @@ def raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
         output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
         output_dir / TASK_GRAPH_FILENAME,
         output_dir / TASK_GRAPH_PNG_FILENAME,
+        output_dir / COMPILED_GRAPH_FILENAME,
         output_dir / BASIC_BACKGROUND_FILENAME,
         output_dir / ATOM_ACTIONS_FILENAME,
     ]
+    if task_name:
+        graph_output_dir = _resolve_graph_output_root(
+            graph_output_root
+        ) / _safe_task_dir(task_name)
+        output_files.extend(
+            [
+                graph_output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
+                graph_output_dir / TASK_GRAPH_PNG_FILENAME,
+            ]
+        )
     existing = [path for path in output_files if path.exists()]
     if existing:
         existing_text = ", ".join(path.as_posix() for path in existing)
@@ -161,27 +181,16 @@ def read_json(path: Path) -> dict[str, Any]:
         return json.load(file)
 
 
-def _validate_seed_compilation_pair(bundle: Mapping[str, Any]) -> None:
-    """Reject a mixed symbolic seed and deterministic task graph before writing."""
+def _validate_seed_bundle(bundle: Mapping[str, Any]) -> None:
+    """Require the executable Seed v2 that is the sole config-stage graph."""
     seed_graph = bundle.get("seed_task_graph")
-    if seed_graph is None:
-        # Compatibility-only direct callers may still publish the historical
-        # six-file bundle. Production route builders always provide a seed.
-        return
     if not isinstance(seed_graph, Mapping):
         raise TypeError("seed_task_graph bundle entry must be a mapping.")
     validate_seed_task_graph(seed_graph)
-    task_graph = bundle.get("task_graph")
-    if not isinstance(task_graph, Mapping):
-        raise TypeError("task_graph bundle entry must be a mapping.")
-    expected_hash = seed_task_graph_hash(seed_graph)
-    if task_graph.get("seed_graph_hash") != expected_hash:
+    if "task_graph" in bundle:
         raise ValueError(
-            "task_graph.json was not compiled from the bundled seed_task_graph.json."
-        )
-    if task_graph.get("seed_graph_schema_version") != seed_graph.get("schema_version"):
-        raise ValueError(
-            "task_graph.json seed schema metadata does not match the bundled seed."
+            "Config generation must not publish task_graph.json. Runtime creates "
+            "one grounded Task graph per environment and episode."
         )
 
 
@@ -195,14 +204,34 @@ def _serialize_text(content: str) -> str:
     return content.rstrip() + "\n"
 
 
-def _has_renderable_task_graph_shape(task_graph: Any) -> bool:
-    return (
-        isinstance(task_graph, Mapping)
-        and isinstance(task_graph.get("nodes"), list)
-        and bool(task_graph["nodes"])
-        and isinstance(task_graph.get("edges"), list)
-        and bool(task_graph["edges"])
-    )
+def _bundle_task_name(bundle: Mapping[str, Any], *, fallback: str) -> str:
+    for graph_key in ("seed_task_graph",):
+        graph = bundle.get(graph_key)
+        if isinstance(graph, Mapping):
+            task_name = graph.get("task")
+            if isinstance(task_name, str) and task_name.strip():
+                return task_name.strip()
+    if fallback.strip():
+        return fallback.strip()
+    raise ValueError("Config bundle requires a task name for graph visualization.")
+
+
+def _safe_task_dir(task_name: str) -> str:
+    safe_name = _SAFE_TASK_DIR_RE.sub("_", task_name).strip("._")
+    if not safe_name:
+        raise ValueError(
+            "Task name does not contain a safe graph output directory name."
+        )
+    return safe_name
+
+
+def _resolve_graph_output_root(graph_output_root: Path | None) -> Path:
+    if graph_output_root is not None:
+        return Path(graph_output_root).expanduser().resolve()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "setup.py").is_file() and (parent / "embodichain").is_dir():
+            return parent / "outputs" / "graph"
+    raise RuntimeError("Unable to resolve the repository outputs/graph directory.")
 
 
 def _write_file_transaction(files: list[tuple[Path, str | bytes]]) -> None:

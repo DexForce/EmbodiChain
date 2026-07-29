@@ -16,18 +16,21 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from io import BytesIO
+from types import SimpleNamespace
 
 from PIL import Image, ImageStat
 import pytest
 
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
-    seed_task_graph_hash,
+    make_relative_seed_task_graph,
+    validate_seed_task_graph,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.visualization.graph_png import (
-    _build_seed_display_graph,
-    _edge_semantic_step_ids,
-    _task_positions,
+from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
+    _display_edge,
+    _display_edge_lines,
+    _task_groups,
     _validated_task_display_graph,
     render_seed_task_graph_png,
     render_task_graph_png,
@@ -36,134 +39,153 @@ from embodichain.gen_sim.action_agent_pipeline.generation.visualization.graph_pn
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def test_seed_graph_reuses_entities_and_preserves_semantic_relations() -> None:
-    seed_graph = _relative_seed_graph()
+def test_seed_v2_renderer_shows_complete_symbolic_topology() -> None:
+    seed = _relative_seed_graph()
 
-    display_graph = _build_seed_display_graph(seed_graph)
+    graph, nodes, edges = _validated_task_display_graph(seed)
+    groups = _task_groups(seed, edges)
+    first_label = _display_edge_lines(_display_edge(edges[0], groups[0]))
 
-    assert "entity:object_a" in display_graph
-    assert "entity:object_c" in display_graph
-    assert (
-        sum(
-            1
-            for _, target, attributes in display_graph.edges(data=True)
-            if target == "entity:object_a" and attributes["relation"] == "acts_on"
-        )
-        == 2
-    )
-    assert (
-        sum(
-            1
-            for _, target, attributes in display_graph.edges(data=True)
-            if target == "entity:object_c" and attributes["relation"] == "references"
-        )
-        == 2
-    )
-    assert display_graph.has_edge("step:s01_move_left", "step:s02_move_right")
+    assert graph.number_of_nodes() == len(seed["nodes"])
+    assert graph.number_of_edges() == len(seed["edges"])
+    assert len(nodes) == len(seed["nodes"])
+    assert "PickUp" in first_label[0]
+    assert any("object a" in line for line in first_label)
+    assert any("object" in line and "default_pickup" in line for line in first_label)
+    _assert_nonblank_png(render_seed_task_graph_png(seed))
 
 
-def test_seed_renderer_produces_nonblank_png_with_stable_dimensions() -> None:
-    seed_graph = _relative_seed_graph(task_name="中文可视化任务")
+def test_seed_renderer_is_stable_and_supports_chinese_task_name() -> None:
+    seed = _relative_seed_graph(task_name="中文可视化任务")
 
-    first = render_seed_task_graph_png(seed_graph)
-    second = render_seed_task_graph_png(seed_graph)
+    first = _assert_nonblank_png(render_seed_task_graph_png(seed))
+    second = _assert_nonblank_png(render_seed_task_graph_png(seed))
 
-    first_image = _assert_nonblank_png(first)
-    second_image = _assert_nonblank_png(second)
-    assert first_image.size == second_image.size
+    assert first.size == second.size
 
 
-def test_arrangement_members_are_displayed_without_virtual_object() -> None:
-    seed_graph = _arrangement_seed_graph(order_constraint="ordered")
+def test_runtime_renderer_displays_grounded_arm_position_and_status() -> None:
+    runtime = _runtime_graph()
+    _, _, edges = _validated_task_display_graph(runtime)
+    group = _task_groups(runtime, edges)[0]
 
-    display_graph = _build_seed_display_graph(seed_graph)
-    member_labels = [
-        attributes["label"]
-        for _, _, attributes in display_graph.edges(data=True)
-        if attributes["relation"] == "member"
-    ]
+    lines = _display_edge_lines(_display_edge(edges[0], group))
 
-    assert "entity:__arrangement__" not in display_graph
-    assert member_labels == ["member #1", "member #2", "member #3"]
+    assert lines[0].endswith("[R] PickUp")
+    assert any("executed" in line for line in lines)
+    _assert_nonblank_png(render_task_graph_png(runtime))
 
 
-def test_task_graph_uses_serpentine_layout_for_long_single_chain() -> None:
-    task_graph = _task_graph(edge_count=30)
-    display_graph, _, _ = _validated_task_display_graph(task_graph)
+def test_seed_rejects_runtime_geometry_leakage() -> None:
+    seed = _relative_seed_graph()
+    seed["edges"][0]["actions"][0]["target_binding"]["position"] = [1.0, 2.0, 3.0]
 
-    positions, is_chain = _task_positions(display_graph, task_graph)
+    with pytest.raises(ValueError, match="grounded field"):
+        validate_seed_task_graph(seed)
 
-    assert is_chain
-    assert positions["v0"] == (0.0, 0.0)
-    assert positions["v5"][0] > positions["v0"][0]
-    assert positions["v6"][0] == positions["v5"][0]
-    assert positions["v7"][0] < positions["v6"][0]
-    assert len(set(positions.values())) == 31
-
-
-def test_task_renderer_supports_semantic_groups_and_dual_arm_edges() -> None:
-    task_graph = _task_graph(edge_count=2, dual_arm=True)
-    task_graph["semantic_steps"] = [
-        {
-            "id": "s01_move",
-            "edge_ids": ["e01"],
-        },
-        {
-            "id": "s02_finish",
-            "edge_ids": ["e02"],
-        },
-    ]
-    task_graph["seed_graph_hash"] = seed_task_graph_hash(_relative_seed_graph())
-
-    display_graph, _, edge_records = _validated_task_display_graph(task_graph)
-    semantic_steps = _edge_semantic_step_ids(task_graph, edge_records)
-    image = render_task_graph_png(task_graph)
-
-    assert display_graph.number_of_edges() == 2
-    assert semantic_steps == {"e01": "s01_move", "e02": "s02_finish"}
-    _assert_nonblank_png(image)
+    seed = _relative_seed_graph()
+    seed["semantic_steps"][0]["goal"]["sample_interval"] = 30
+    with pytest.raises(ValueError, match="grounded field"):
+        validate_seed_task_graph(seed)
 
 
-@pytest.mark.parametrize(
-    ("mutation", "error_match"),
-    [
-        (lambda graph: graph.update(nodes=[]), "non-empty nodes"),
-        (
-            lambda graph: graph["nodes"].append({"id": "v0", "semantic": "duplicate"}),
-            "Duplicate task graph node",
-        ),
-        (
-            lambda graph: graph["edges"][0].update(target="unknown"),
-            "unknown endpoint",
-        ),
-        (
-            lambda graph: graph["edges"].append(
-                {
-                    "id": "cycle",
-                    "source": "v2",
-                    "target": "v0",
-                    "left_arm_action": {"atomic_action_class": "MoveJoints"},
-                    "right_arm_action": None,
-                }
-            ),
-            "directed acyclic",
-        ),
-    ],
-)
-def test_task_renderer_rejects_invalid_graphs(mutation, error_match: str) -> None:
-    task_graph = _task_graph(edge_count=2)
-    mutation(task_graph)
+def test_seed_rejects_invalid_symbolic_action_contract() -> None:
+    seed = _relative_seed_graph()
+    seed["edges"][0]["actions"][0]["target_binding"]["unexpected"] = "value"
 
-    with pytest.raises(ValueError, match=error_match):
-        render_task_graph_png(task_graph)
+    with pytest.raises(ValueError, match="invalid fields"):
+        validate_seed_task_graph(seed)
+
+    seed = _relative_seed_graph()
+    seed["edges"][0]["actions"][0]["motion_policy"] = "default_home"
+    with pytest.raises(ValueError, match="requires motion policy"):
+        validate_seed_task_graph(seed)
 
 
-def test_seed_renderer_rejects_non_prior_dependency() -> None:
-    seed_graph = _relative_seed_graph()
-    seed_graph["steps"][0]["depends_on"] = ["s02_move_right"]
+def test_seed_rejects_v1_with_regeneration_message() -> None:
+    with pytest.raises(ValueError, match="--overwrite"):
+        validate_seed_task_graph({"schema_version": "seed_task_graph_v1"})
 
+
+def test_seed_rejects_invalid_dependency_and_edge_coverage() -> None:
+    seed = _relative_seed_graph()
+    seed["semantic_steps"][0]["depends_on"] = ["unknown"]
     with pytest.raises(ValueError, match="non-prior"):
-        render_seed_task_graph_png(seed_graph)
+        validate_seed_task_graph(seed)
+
+    seed = _relative_seed_graph()
+    seed["semantic_steps"][0]["edge_ids"] = seed["semantic_steps"][0]["edge_ids"][:-1]
+    with pytest.raises(ValueError, match="cover every Seed edge"):
+        validate_seed_task_graph(seed)
+
+    seed = _relative_seed_graph()
+    seed["edges"][0]["target"], seed["edges"][2]["target"] = (
+        seed["edges"][2]["target"],
+        seed["edges"][0]["target"],
+    )
+    with pytest.raises(ValueError, match="topology"):
+        validate_seed_task_graph(seed)
+
+
+def _relative_seed_graph(task_name: str = "relative_visualization") -> dict:
+    placements = (
+        SimpleNamespace(
+            intent="place_relative",
+            moved_runtime_uid="object_a",
+            reference_runtime_uid="object_c",
+            relation="left_of",
+            reference_is_initial_pose=False,
+            orientation_goal="preserve",
+            orientation_axis="none",
+            orientation_align_to_runtime_uid=None,
+            arm_request="left",
+            step_id="s01_move_left",
+            depends_on=(),
+        ),
+        SimpleNamespace(
+            intent="place_relative",
+            moved_runtime_uid="object_a",
+            reference_runtime_uid="object_c",
+            relation="right_of",
+            reference_is_initial_pose=False,
+            orientation_goal="preserve",
+            orientation_axis="none",
+            orientation_align_to_runtime_uid=None,
+            arm_request="right",
+            step_id="s02_move_right",
+            depends_on=("s01_move_left",),
+        ),
+    )
+    return make_relative_seed_task_graph(
+        task_name,
+        SimpleNamespace(
+            intent="place_relative",
+            placements=placements,
+            coordinated_direction=None,
+            coordinated_terminal_behavior=None,
+        ),
+    )
+
+
+def _runtime_graph() -> dict:
+    seed = _relative_seed_graph()
+    runtime = deepcopy(seed)
+    runtime["schema_version"] = "runtime_task_graph_v1"
+    runtime["seed_graph_schema_version"] = "seed_task_graph_v2"
+    runtime["seed_graph_hash"] = "a" * 64
+    runtime["run_id"] = "20260729T000000.000000Z"
+    runtime["episode_index"] = 0
+    runtime["env_id"] = 0
+    runtime["robot_profile"] = "dual_franka"
+    first_runtime = runtime["edges"][0]["actions"][0].setdefault("runtime", {})
+    first_runtime.update(
+        {
+            "assigned_arm": "right_arm",
+            "resolved_target_position": [0.1, 0.2, 0.3],
+            "status": "executed",
+        }
+    )
+    return runtime
 
 
 def _assert_nonblank_png(content: bytes) -> Image.Image:
@@ -179,127 +201,3 @@ def _assert_nonblank_png(content: bytes) -> Image.Image:
     )
     assert max(ImageStat.Stat(image.convert("RGB")).var) > 0.0
     return image
-
-
-def _relative_seed_graph(task_name: str = "relative_visualization") -> dict:
-    first_step = _relative_seed_step(
-        step_id="s01_move_left",
-        arm="left_arm",
-        relation="left_of",
-        dependencies=[],
-    )
-    second_step = _relative_seed_step(
-        step_id="s02_move_right",
-        arm="right_arm",
-        relation="right_of",
-        dependencies=["s01_move_left"],
-    )
-    return {
-        "schema_version": "seed_task_graph_v1",
-        "task": task_name,
-        "route": "object_manipulation",
-        "program": "place_relative",
-        "steps": [first_step, second_step],
-    }
-
-
-def _relative_seed_step(
-    *,
-    step_id: str,
-    arm: str,
-    relation: str,
-    dependencies: list[str],
-) -> dict:
-    return {
-        "id": step_id,
-        "operator": "place_relative",
-        "object": "object_a",
-        "actor": {"mode": "required", "arm": arm},
-        "goal": {
-            "relation": relation,
-            "reference_object": "object_c",
-            "reference_state": "live",
-            "orientation_goal": "preserve",
-            "orientation_axis": "none",
-        },
-        "depends_on": dependencies,
-        "postcondition": {
-            "type": "semantic_goal",
-            "operator": "place_relative",
-            "relation": relation,
-        },
-    }
-
-
-def _arrangement_seed_graph(*, order_constraint: str) -> dict:
-    return {
-        "schema_version": "seed_task_graph_v1",
-        "task": "arrangement_visualization",
-        "route": "arrangement_line",
-        "program": "arrange_in_line",
-        "steps": [
-            {
-                "id": "s01_arrange",
-                "operator": "arrange_in_line",
-                "object": "__arrangement__",
-                "actor": {"mode": "auto"},
-                "goal": {
-                    "layout": "line",
-                    "objects": ["object_a", "object_b", "object_c"],
-                    "order_constraint": order_constraint,
-                    "axis": "world_y",
-                    "anchor": "table_center",
-                    "order_by": "explicit",
-                    "order_direction": "given",
-                },
-                "depends_on": [],
-                "postcondition": {
-                    "type": (
-                        "objects_in_ordered_line"
-                        if order_constraint == "ordered"
-                        else "objects_in_line"
-                    ),
-                },
-            }
-        ],
-    }
-
-
-def _task_graph(*, edge_count: int, dual_arm: bool = False) -> dict:
-    nodes = [
-        {
-            "id": f"v{index}",
-            "semantic": f"Node {index} with a deliberately descriptive label",
-        }
-        for index in range(edge_count + 1)
-    ]
-    edges = []
-    for index in range(1, edge_count + 1):
-        left_action = {
-            "atomic_action_class": "PickUp" if index == 1 else "MoveHeldObject",
-            "target_object": {"obj_name": f"object_{index}"},
-        }
-        right_action = (
-            {
-                "atomic_action_class": "MoveHeldObject",
-                "target_object": {"obj_name": f"object_{index}"},
-            }
-            if dual_arm and index == 1
-            else None
-        )
-        edges.append(
-            {
-                "id": f"e{index:02d}",
-                "source": f"v{index - 1}",
-                "target": f"v{index}",
-                "left_arm_action": left_action,
-                "right_arm_action": right_action,
-            }
-        )
-    return {
-        "task": "compiled_visualization",
-        "start": "v0",
-        "goal": f"v{edge_count}",
-        "nodes": nodes,
-        "edges": edges,
-    }

@@ -171,6 +171,10 @@ def build_pipeline_record(
         "source_gym_config": _record_path(source_gym_config, repo_root),
         "input_path": _record_path(Path(resolution.path), repo_root),
         "config_output_dir": _record_path(Path(generated_paths.output_dir), repo_root),
+        "graph_output_dir": _record_path(
+            Path(generated_paths.graph_output_dir),
+            repo_root,
+        ),
         "generated_gym_config": _record_path(
             Path(generated_paths.gym_config),
             repo_root,
@@ -191,16 +195,6 @@ def build_pipeline_record(
         "generated_seed_task_graph_png": (
             _record_path(Path(generated_paths.seed_task_graph_png), repo_root)
             if getattr(generated_paths, "seed_task_graph_png", None) is not None
-            else None
-        ),
-        "generated_task_graph": (
-            _record_path(Path(generated_paths.task_graph), repo_root)
-            if getattr(generated_paths, "task_graph", None) is not None
-            else None
-        ),
-        "generated_task_graph_png": (
-            _record_path(Path(generated_paths.task_graph_png), repo_root)
-            if getattr(generated_paths, "task_graph_png", None) is not None
             else None
         ),
         "generated_basic_background": _record_path(
