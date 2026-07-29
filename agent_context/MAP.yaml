@@ -259,6 +259,9 @@ topics:
       - rl training
       - reinforcement learning
       - ppo
+      - apg
+      - analytic policy gradient
+      - differentiable training
       - rl agent
       - actor critic
       - rollout buffer
@@ -268,6 +271,8 @@ topics:
       - rl
       - reinforcement
       - ppo
+      - apg
+      - differentiable
       - actor
       - critic
       - buffer
@@ -280,6 +285,9 @@ topics:
     paths:
       - topics/rl-learning/rl-learning.md
     source_of_truth:
+      - embodichain/learning/rl/env.py
+      - embodichain/learning/rl/differentiable_trainer.py
+      - embodichain/learning/rl/experimental/newton/
       - embodichain/learning/rl/train.py
       - embodichain/learning/rl/algo/
       - embodichain/learning/rl/buffer/

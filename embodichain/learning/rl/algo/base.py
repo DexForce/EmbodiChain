@@ -16,12 +16,17 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from abc import ABC, abstractmethod
+from typing import Dict, Generic, TypeVar
+
 import torch
-from tensordict import TensorDict
+
+__all__ = ["BaseAlgorithm"]
+
+RolloutT = TypeVar("RolloutT")
 
 
-class BaseAlgorithm:
+class BaseAlgorithm(ABC, Generic[RolloutT]):
     """Base class for RL algorithms.
 
     Algorithms only implement policy updates over collected rollouts.
@@ -29,6 +34,7 @@ class BaseAlgorithm:
 
     device: torch.device
 
-    def update(self, rollout: TensorDict) -> Dict[str, float]:
+    @abstractmethod
+    def update(self, rollout: RolloutT) -> Dict[str, float]:
         """Update policy using collected data and return training losses."""
         raise NotImplementedError

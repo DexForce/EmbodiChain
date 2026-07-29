@@ -16,16 +16,17 @@
 
 from __future__ import annotations
 
-from typing import Dict, Tuple, Type, Any
+from typing import Any, Dict, Tuple, Type
+
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from .apg import APG, APGCfg, segmented_discounted_return
 from .base import BaseAlgorithm
 from .common import compute_gae
-from .ppo import PPOCfg, PPO
-from .grpo import GRPOCfg, GRPO
+from .grpo import GRPO, GRPOCfg
+from .ppo import PPO, PPOCfg
 
-# name -> (CfgClass, AlgoClass)
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
     "ppo": (PPOCfg, PPO),
     "grpo": (GRPOCfg, GRPO),
@@ -38,7 +39,7 @@ def get_registered_algo_names() -> list[str]:
 
 def build_algo(
     name: str,
-    cfg_kwargs: Dict[str, float],
+    cfg_kwargs: Dict[str, Any],
     policy,
     device: torch.device,
     *,
@@ -69,6 +70,9 @@ def build_algo(
 
 __all__ = [
     "BaseAlgorithm",
+    "APGCfg",
+    "APG",
+    "segmented_discounted_return",
     "PPOCfg",
     "PPO",
     "GRPOCfg",

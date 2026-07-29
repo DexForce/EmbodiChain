@@ -14,23 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from . import algo
-from . import buffer
-from . import models
-from . import utils
-from .differentiable_trainer import (
-    DifferentiableTrainer,
-    DifferentiableTrainerCfg,
-)
-from .env import DifferentiableObservation, DifferentiableVecEnv
+"""Temporary Newton reference environments for gradient validation."""
 
-__all__ = [
-    "DifferentiableObservation",
-    "DifferentiableTrainer",
-    "DifferentiableTrainerCfg",
-    "DifferentiableVecEnv",
-    "algo",
-    "buffer",
-    "models",
-    "utils",
-]
+from __future__ import annotations
+
+from .planar_reach import NewtonPlanarReachEnv, NewtonPlanarReachEnvCfg
+
+__all__ = ["NewtonPlanarReachEnv", "NewtonPlanarReachEnvCfg"]
