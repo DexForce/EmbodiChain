@@ -257,6 +257,8 @@ def cli() -> None:
     print(f"Generated gym config: {paths.gym_config}")
     print(f"Generated agent config: {paths.agent_config}")
     print(f"Generated task prompt: {paths.task_prompt}")
+    if getattr(paths, "seed_task_graph", None) is not None:
+        print(f"Generated seed task graph: {paths.seed_task_graph}")
     print(f"Generated task graph: {paths.task_graph}")
     print(f"Generated basic background: {paths.basic_background}")
     print(f"Generated atom actions: {paths.atom_actions}")

@@ -38,6 +38,7 @@ __all__ = [
 FAST_GYM_CONFIG_FILENAME: Final = "fast_gym_config.json"
 AGENT_CONFIG_FILENAME: Final = "agent_config.json"
 TASK_PROMPT_FILENAME: Final = "task_prompt.txt"
+SEED_TASK_GRAPH_FILENAME: Final = "seed_task_graph.json"
 TASK_GRAPH_FILENAME: Final = "task_graph.json"
 BASIC_BACKGROUND_FILENAME: Final = "basic_background.txt"
 ATOM_ACTIONS_FILENAME: Final = "atom_actions.txt"

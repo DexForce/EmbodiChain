@@ -48,6 +48,7 @@ class GeneratedActionAgentConfigPaths:
     """Paths written by the action-agent config generator.
 
     ``gym_config``, ``agent_config``, and ``task_graph`` are runtime inputs.
+    ``seed_task_graph`` is the authoritative symbolic generation record.
     ``task_prompt``, ``basic_background``, and ``atom_actions`` are diagnostic
     records retained for human review and compatibility with existing tooling.
     """
@@ -56,6 +57,7 @@ class GeneratedActionAgentConfigPaths:
     gym_config: Path
     agent_config: Path
     task_prompt: Path
+    seed_task_graph: Path
     task_graph: Path
     basic_background: Path
     atom_actions: Path

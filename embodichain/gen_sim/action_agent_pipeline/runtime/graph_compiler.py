@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping
 from pathlib import Path
+import re
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.protocol.actions import (
@@ -55,6 +56,7 @@ _SEMANTIC_STEP_KEYS = {
     "postcondition",
     "edge_ids",
 }
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
@@ -158,6 +160,7 @@ def _resolve_runtime(
 
 
 def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
+    _validate_seed_provenance(task_spec)
     node_ids = set()
     for node in task_spec.get("nodes", []):
         node_id = node["id"]
@@ -197,6 +200,20 @@ def _validate_task_spec(task_spec: Mapping[str, Any]) -> None:
 
     _validate_nominal_path(task_spec, edge_specs)
     _validate_semantic_steps(task_spec, edge_specs)
+
+
+def _validate_seed_provenance(task_spec: Mapping[str, Any]) -> None:
+    """Validate optional seed identity without making seed a runtime input."""
+    seed_hash = task_spec.get("seed_graph_hash")
+    seed_schema = task_spec.get("seed_graph_schema_version")
+    if seed_hash is None and seed_schema is None:
+        return
+    if not isinstance(seed_hash, str) or _SHA256_RE.fullmatch(seed_hash) is None:
+        raise ValueError("Task graph seed_graph_hash must be a SHA-256 hex digest.")
+    if seed_schema != "seed_task_graph_v1":
+        raise ValueError(
+            "Task graph seed_graph_schema_version must be 'seed_task_graph_v1'."
+        )
 
 
 def _validate_semantic_steps(

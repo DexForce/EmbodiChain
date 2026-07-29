@@ -126,8 +126,9 @@ def generate_action_agent_config_from_project(
 
     ``task_description`` is required: one LLM interpretation selects a supported
     route (stacking, arrangement line, object manipulation) and its semantic
-    intent. The matching deterministic generator then derives every pose, slot,
-    and graph edge from scene geometry.
+    intent. The matching deterministic generator first serializes the symbolic
+    seed graph, then derives every pose, slot, and atomic graph edge from it and
+    the scene geometry.
 
     Args:
         gym_project: Project root, formatted scene folder, ``gym_config.json``,

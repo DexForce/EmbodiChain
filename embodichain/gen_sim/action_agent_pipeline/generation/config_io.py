@@ -28,11 +28,16 @@ from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     ATOM_ACTIONS_FILENAME,
     BASIC_BACKGROUND_FILENAME,
     FAST_GYM_CONFIG_FILENAME,
+    SEED_TASK_GRAPH_FILENAME,
     TASK_GRAPH_FILENAME,
     TASK_PROMPT_FILENAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     GeneratedActionAgentConfigPaths,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
+    seed_task_graph_hash,
+    validate_seed_task_graph,
 )
 
 __all__ = [
@@ -52,30 +57,43 @@ def write_config_bundle(
 ) -> GeneratedActionAgentConfigPaths:
     """Write runtime inputs and review diagnostics as one portable bundle.
 
-    The JSON task graph is the executable source. The task prompt, background,
-    and atomic-action text files describe the same generated plan for auditing
-    and backward-compatible tooling; runtime execution does not parse them.
+    The seed graph is the symbolic source and ``task_graph.json`` is its
+    deterministic executable compilation. The task prompt, background, and
+    atomic-action text files remain review-only compatibility records.
     """
     paths = GeneratedActionAgentConfigPaths(
         output_dir=output_dir,
         gym_config=output_dir / FAST_GYM_CONFIG_FILENAME,
         agent_config=output_dir / AGENT_CONFIG_FILENAME,
         task_prompt=output_dir / TASK_PROMPT_FILENAME,
+        seed_task_graph=output_dir / SEED_TASK_GRAPH_FILENAME,
         task_graph=output_dir / TASK_GRAPH_FILENAME,
         basic_background=output_dir / BASIC_BACKGROUND_FILENAME,
         atom_actions=output_dir / ATOM_ACTIONS_FILENAME,
         summary=dict(bundle.get("summary", {})),
     )
     raise_if_generated_files_exist(output_dir, overwrite)
+    _validate_seed_compilation_pair(bundle)
 
     serialized_files = [
         (paths.gym_config, _serialize_json(bundle["gym_config"])),
         (paths.agent_config, _serialize_json(bundle["agent_config"])),
         (paths.task_prompt, _serialize_text(bundle["task_prompt"])),
-        (paths.task_graph, _serialize_json(bundle["task_graph"])),
-        (paths.basic_background, _serialize_text(bundle["basic_background"])),
-        (paths.atom_actions, _serialize_text(bundle["atom_actions"])),
     ]
+    # Legacy direct callers may not yet provide a seed graph. Every production
+    # route does, and publishing it in the same transaction prevents mixed
+    # seed/compiled snapshots during --overwrite.
+    if "seed_task_graph" in bundle:
+        serialized_files.append(
+            (paths.seed_task_graph, _serialize_json(bundle["seed_task_graph"]))
+        )
+    serialized_files.extend(
+        [
+            (paths.task_graph, _serialize_json(bundle["task_graph"])),
+            (paths.basic_background, _serialize_text(bundle["basic_background"])),
+            (paths.atom_actions, _serialize_text(bundle["atom_actions"])),
+        ]
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_file_transaction(serialized_files)
     return paths
@@ -88,6 +106,7 @@ def raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
         output_dir / FAST_GYM_CONFIG_FILENAME,
         output_dir / AGENT_CONFIG_FILENAME,
         output_dir / TASK_PROMPT_FILENAME,
+        output_dir / SEED_TASK_GRAPH_FILENAME,
         output_dir / TASK_GRAPH_FILENAME,
         output_dir / BASIC_BACKGROUND_FILENAME,
         output_dir / ATOM_ACTIONS_FILENAME,
@@ -114,6 +133,30 @@ def write_text(path: Path, content: str) -> None:
 def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
         return json.load(file)
+
+
+def _validate_seed_compilation_pair(bundle: Mapping[str, Any]) -> None:
+    """Reject a mixed symbolic seed and deterministic task graph before writing."""
+    seed_graph = bundle.get("seed_task_graph")
+    if seed_graph is None:
+        # Compatibility-only direct callers may still publish the historical
+        # six-file bundle. Production route builders always provide a seed.
+        return
+    if not isinstance(seed_graph, Mapping):
+        raise TypeError("seed_task_graph bundle entry must be a mapping.")
+    validate_seed_task_graph(seed_graph)
+    task_graph = bundle.get("task_graph")
+    if not isinstance(task_graph, Mapping):
+        raise TypeError("task_graph bundle entry must be a mapping.")
+    expected_hash = seed_task_graph_hash(seed_graph)
+    if task_graph.get("seed_graph_hash") != expected_hash:
+        raise ValueError(
+            "task_graph.json was not compiled from the bundled seed_task_graph.json."
+        )
+    if task_graph.get("seed_graph_schema_version") != seed_graph.get("schema_version"):
+        raise ValueError(
+            "task_graph.json seed schema metadata does not match the bundled seed."
+        )
 
 
 def _serialize_json(data: Mapping[str, Any]) -> str:

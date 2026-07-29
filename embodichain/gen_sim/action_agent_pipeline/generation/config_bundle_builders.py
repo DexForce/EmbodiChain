@@ -65,15 +65,12 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
     make_agent_config,
     make_arrangement_atom_actions_prompt,
     make_arrangement_basic_background,
-    make_arrangement_task_graph,
     make_arrangement_task_prompt,
     make_relative_atom_actions_prompt,
     make_relative_basic_background,
-    make_relative_task_graph,
     make_relative_task_prompt,
     make_stacking_atom_actions_prompt,
     make_stacking_basic_background,
-    make_stacking_task_graph,
     make_stacking_task_prompt,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry import (
@@ -101,6 +98,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_transport_geo
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     RobotProfile,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
+    make_arrangement_seed_task_graph,
+    make_relative_seed_task_graph,
+    make_stacking_seed_task_graph,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
 )
@@ -118,6 +120,11 @@ from embodichain.gen_sim.action_agent_pipeline.generation.scene_transforms impor
 from embodichain.gen_sim.action_agent_pipeline.generation.stacking_spec import (
     _make_stacking_summary,
     _with_stacking_generated_targets,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.task_graph_builders import (
+    compile_arrangement_task_graph,
+    compile_relative_task_graph,
+    compile_stacking_task_graph,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
     _make_arrangement_extensions_config,
@@ -151,6 +158,7 @@ def _build_arrangement_line_bundle(
     arrangement_debug_visualization: bool,
     load_template_material: bool,
 ) -> dict[str, Any]:
+    seed_task_graph = make_arrangement_seed_task_graph(task_name, spec)
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
@@ -262,7 +270,12 @@ def _build_arrangement_line_bundle(
             spec,
             robot_profile=robot_profile,
         ),
-        "task_graph": make_arrangement_task_graph(task_name, spec),
+        "seed_task_graph": seed_task_graph,
+        "task_graph": compile_arrangement_task_graph(
+            task_name,
+            seed_task_graph,
+            spec,
+        ),
         "basic_background": make_arrangement_basic_background(
             project_name,
             spec,
@@ -350,6 +363,7 @@ def _build_stacking_bundle(
     source_scene_z_rotation_degrees: float,
     load_template_material: bool,
 ) -> dict[str, Any]:
+    seed_task_graph = make_stacking_seed_task_graph(task_name, spec)
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
@@ -461,7 +475,12 @@ def _build_stacking_bundle(
             spec,
             robot_profile=robot_profile,
         ),
-        "task_graph": make_stacking_task_graph(task_name, spec),
+        "seed_task_graph": seed_task_graph,
+        "task_graph": compile_stacking_task_graph(
+            task_name,
+            seed_task_graph,
+            spec,
+        ),
         "basic_background": make_stacking_basic_background(
             project_name,
             spec,
@@ -572,6 +591,7 @@ def _build_relative_placement_bundle(
     surface_release_clearance: float,
     load_template_material: bool,
 ) -> dict[str, Any]:
+    seed_task_graph = make_relative_seed_task_graph(task_name, spec)
     spec = _with_relative_surface_release_clearance(
         spec,
         _validate_surface_release_clearance(surface_release_clearance),
@@ -716,7 +736,12 @@ def _build_relative_placement_bundle(
             spec,
             robot_profile=robot_profile,
         ),
-        "task_graph": make_relative_task_graph(task_name, spec),
+        "seed_task_graph": seed_task_graph,
+        "task_graph": compile_relative_task_graph(
+            task_name,
+            seed_task_graph,
+            spec,
+        ),
         "basic_background": make_relative_basic_background(
             project_name,
             spec,

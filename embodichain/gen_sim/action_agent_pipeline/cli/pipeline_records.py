@@ -183,6 +183,11 @@ def build_pipeline_record(
             Path(generated_paths.task_prompt),
             repo_root,
         ),
+        "generated_seed_task_graph": (
+            _record_path(Path(generated_paths.seed_task_graph), repo_root)
+            if getattr(generated_paths, "seed_task_graph", None) is not None
+            else None
+        ),
         "generated_task_graph": (
             _record_path(Path(generated_paths.task_graph), repo_root)
             if getattr(generated_paths, "task_graph", None) is not None

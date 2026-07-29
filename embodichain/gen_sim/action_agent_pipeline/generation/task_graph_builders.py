@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
@@ -27,6 +29,13 @@ from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols impo
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
     build_nominal_task_graph,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
+    compile_seed_graph_metadata,
+    make_arrangement_seed_task_graph,
+    make_relative_seed_task_graph,
+    make_stacking_seed_task_graph,
+    validate_seed_task_graph,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.task_plan_builders import (
     _arrangement_step_edge_blocks,
@@ -46,6 +55,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
 )
 
 __all__ = [
+    "compile_arrangement_task_graph",
+    "compile_relative_task_graph",
+    "compile_stacking_task_graph",
     "make_arrangement_task_graph",
     "make_stacking_task_graph",
     "make_relative_task_graph",
@@ -56,21 +68,52 @@ def make_arrangement_task_graph(
     task_name: str,
     spec: ArrangementSpecLike,
 ) -> dict[str, Any]:
+    seed_graph = make_arrangement_seed_task_graph(task_name, spec)
+    return compile_arrangement_task_graph(task_name, seed_graph, spec)
+
+
+def compile_arrangement_task_graph(
+    task_name: str,
+    seed_graph: Mapping[str, Any],
+    spec: ArrangementSpecLike,
+) -> dict[str, Any]:
+    """Compile a symbolic arrangement seed into its grounded atomic graph."""
+    validate_seed_task_graph(
+        seed_graph,
+        task_name=task_name,
+        route="arrangement_line",
+    )
+    _validate_arrangement_seed(seed_graph, spec)
     steps = []
+    # The seed owns the desired ordered layout. The deterministic arrangement
+    # planner remains free to choose a collision-safe execution schedule.
     for step in spec.steps:
         steps.extend(
             _nominal_step(title, actions)
             for title, actions in _arrangement_step_edge_blocks(step)
         )
-    return build_nominal_task_graph(task_name=task_name, steps=steps)
+    graph = build_nominal_task_graph(task_name=task_name, steps=steps)
+    return compile_seed_graph_metadata(graph, seed_graph)
 
 
 def make_stacking_task_graph(
     task_name: str,
     spec: StackingSpecLike,
 ) -> dict[str, Any]:
+    seed_graph = make_stacking_seed_task_graph(task_name, spec)
+    return compile_stacking_task_graph(task_name, seed_graph, spec)
+
+
+def compile_stacking_task_graph(
+    task_name: str,
+    seed_graph: Mapping[str, Any],
+    spec: StackingSpecLike,
+) -> dict[str, Any]:
+    """Compile a symbolic stacking seed into its grounded atomic graph."""
+    validate_seed_task_graph(seed_graph, task_name=task_name, route="stacking")
+    ordered_steps = _unique_specs_in_seed_order(seed_graph, spec.steps, "runtime_uid")
     steps = []
-    for step in spec.steps:
+    for step in ordered_steps:
         steps.extend(
             _nominal_step(title, actions)
             for title, actions in _stacking_step_edge_blocks(
@@ -79,13 +122,31 @@ def make_stacking_task_graph(
                 stack_mode=spec.stack_mode,
             )
         )
-    return build_nominal_task_graph(task_name=task_name, steps=steps)
+    graph = build_nominal_task_graph(task_name=task_name, steps=steps)
+    return compile_seed_graph_metadata(graph, seed_graph)
 
 
 def make_relative_task_graph(
     task_name: str,
     spec: RelativeSpecLike,
 ) -> dict[str, Any]:
+    seed_graph = make_relative_seed_task_graph(task_name, spec)
+    return compile_relative_task_graph(task_name, seed_graph, spec)
+
+
+def compile_relative_task_graph(
+    task_name: str,
+    seed_graph: Mapping[str, Any],
+    spec: RelativeSpecLike,
+) -> dict[str, Any]:
+    """Compile ordered manipulation semantics with deterministic geometry."""
+    validate_seed_task_graph(
+        seed_graph,
+        task_name=task_name,
+        route="object_manipulation",
+    )
+    seed_steps = list(seed_graph["steps"])
+    _validate_relative_seed_order(seed_steps, spec)
     semantic_groups = None
     if spec.intent == "coordinated_pickment":
         steps = _coordinated_pickment_graph_steps(spec)
@@ -106,49 +167,41 @@ def make_relative_task_graph(
     graph = build_nominal_task_graph(task_name=task_name, steps=steps)
     if semantic_groups is not None:
         graph["semantic_step_schema_version"] = "semantic_steps_v1"
-        graph["semantic_steps"] = _relative_semantic_steps(graph, semantic_groups)
-    return graph
+        graph["semantic_steps"] = _relative_semantic_steps(
+            graph,
+            semantic_groups,
+            seed_steps,
+        )
+    return compile_seed_graph_metadata(graph, seed_graph)
 
 
 def _relative_semantic_steps(
     graph: dict[str, Any],
     groups: list[tuple[Any, list[Any]]],
+    seed_steps: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Bind ordered semantic operations to their generated atomic edge ranges."""
+    if len(groups) != len(seed_steps):
+        raise ValueError(
+            "Semantic seed steps do not match the compiled relative edge groups."
+        )
     graph_edges = graph["edges"]
     result: list[dict[str, Any]] = []
     edge_cursor = 0
-    previous_step_id: str | None = None
-    for index, (placement, atomic_steps) in enumerate(groups, start=1):
+    for (placement, atomic_steps), seed_step in zip(groups, seed_steps):
         edge_count = len(atomic_steps)
         edge_ids = [
             edge["id"] for edge in graph_edges[edge_cursor : edge_cursor + edge_count]
         ]
         edge_cursor += edge_count
-        step_id = getattr(placement, "step_id", "") or f"s{index:02d}_step"
-        configured_dependencies = tuple(getattr(placement, "depends_on", ()))
-        depends_on = list(
-            configured_dependencies
-            or ((previous_step_id,) if previous_step_id is not None else ())
-        )
-        arm_request = str(getattr(placement, "arm_request", "auto"))
         result.append(
             {
-                "id": step_id,
-                "operator": placement.intent,
-                "object": placement.moved_runtime_uid,
-                "actor": {
-                    "mode": "required" if arm_request != "auto" else "assigned",
-                    "arm": f"{placement.active_side}_arm",
-                },
-                "goal": {
-                    "relation": placement.relation,
-                    "reference_object": placement.reference_runtime_uid,
-                    "reference_state": (
-                        "initial" if placement.reference_is_initial_pose else "live"
-                    ),
-                },
-                "depends_on": depends_on,
+                "id": seed_step["id"],
+                "operator": seed_step["operator"],
+                "object": seed_step["object"],
+                "actor": _compiled_relative_actor(seed_step["actor"], placement),
+                "goal": deepcopy(dict(seed_step["goal"])),
+                "depends_on": list(seed_step["depends_on"]),
                 "postcondition": _make_relative_placement_success_spec(
                     placement,
                     side_relation_xy_offsets=_side_relation_xy_offsets,
@@ -156,7 +209,95 @@ def _relative_semantic_steps(
                 "edge_ids": edge_ids,
             }
         )
-        previous_step_id = step_id
     if edge_cursor != len(graph_edges):
         raise ValueError("Semantic-step edge groups do not cover the generated graph.")
     return result
+
+
+def _compiled_relative_actor(
+    seed_actor: Mapping[str, Any],
+    placement: Any,
+) -> dict[str, Any]:
+    active_arm = f"{placement.active_side}_arm"
+    if seed_actor["mode"] == "required":
+        required_arm = seed_actor["arm"]
+        if required_arm != active_arm:
+            raise ValueError(
+                f"Required seed actor {required_arm!r} was changed to "
+                f"{active_arm!r} during deterministic compilation."
+            )
+        return {"mode": "required", "arm": required_arm}
+    return {"mode": "assigned", "arm": active_arm}
+
+
+def _validate_relative_seed_order(
+    seed_steps: list[Mapping[str, Any]],
+    spec: RelativeSpecLike,
+) -> None:
+    placements = list(spec.placements)
+    if len(seed_steps) != len(placements):
+        raise ValueError(
+            "Relative seed step count does not match the normalized LLM program."
+        )
+    for index, (seed_step, placement) in enumerate(zip(seed_steps, placements)):
+        expected_relation = (
+            "held_above_initial"
+            if placement.intent == "hold_hover"
+            else placement.relation
+        )
+        expected_reference = (
+            placement.moved_runtime_uid
+            if placement.intent == "hold_hover"
+            else placement.reference_runtime_uid
+        )
+        expected = (
+            placement.intent,
+            placement.moved_runtime_uid,
+            expected_relation,
+            expected_reference,
+        )
+        actual_goal = seed_step["goal"]
+        actual = (
+            seed_step["operator"],
+            seed_step["object"],
+            actual_goal.get("relation"),
+            actual_goal.get("reference_object"),
+        )
+        if actual != expected:
+            raise ValueError(
+                f"Relative seed step {index} no longer matches its normalized "
+                "LLM semantic step."
+            )
+
+
+def _validate_arrangement_seed(
+    seed_graph: Mapping[str, Any],
+    spec: ArrangementSpecLike,
+) -> None:
+    seed_steps = seed_graph["steps"]
+    if len(seed_steps) != 1 or seed_steps[0]["operator"] != "arrange_in_line":
+        raise ValueError("Arrangement seed graph requires one arrange_in_line step.")
+    goal_objects = seed_steps[0]["goal"].get("objects")
+    expected_objects = [
+        step.runtime_uid
+        for step in sorted(spec.steps, key=lambda item: int(item.slot_index))
+    ]
+    if goal_objects != expected_objects:
+        raise ValueError(
+            "Arrangement seed object order does not match the normalized LLM goal."
+        )
+
+
+def _unique_specs_in_seed_order(
+    seed_graph: Mapping[str, Any],
+    specs: Any,
+    uid_attribute: str,
+) -> list[Any]:
+    spec_list = list(specs)
+    by_uid = {str(getattr(spec, uid_attribute)): spec for spec in spec_list}
+    seed_uids = [str(step["object"]) for step in seed_graph["steps"]]
+    if len(by_uid) != len(spec_list) or set(seed_uids) != set(by_uid):
+        raise ValueError(
+            "Seed graph objects do not match the deterministic route specification."
+        )
+    return [by_uid[uid] for uid in seed_uids]
