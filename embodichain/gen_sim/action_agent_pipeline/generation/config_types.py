@@ -49,8 +49,9 @@ class GeneratedActionAgentConfigPaths:
 
     ``gym_config``, ``agent_config``, and ``task_graph`` are runtime inputs.
     ``seed_task_graph`` is the authoritative symbolic generation record.
-    ``task_prompt``, ``basic_background``, and ``atom_actions`` are diagnostic
-    records retained for human review and compatibility with existing tooling.
+    The two PNG paths are review visualizations of the matching graph snapshot.
+    ``task_prompt``, ``basic_background``, and ``atom_actions`` remain
+    diagnostic records retained for human review and compatibility.
     """
 
     output_dir: Path
@@ -58,7 +59,9 @@ class GeneratedActionAgentConfigPaths:
     agent_config: Path
     task_prompt: Path
     seed_task_graph: Path
+    seed_task_graph_png: Path
     task_graph: Path
+    task_graph_png: Path
     basic_background: Path
     atom_actions: Path
     summary: dict[str, Any]

@@ -259,7 +259,11 @@ def cli() -> None:
     print(f"Generated task prompt: {paths.task_prompt}")
     if getattr(paths, "seed_task_graph", None) is not None:
         print(f"Generated seed task graph: {paths.seed_task_graph}")
+    if getattr(paths, "seed_task_graph_png", None) is not None:
+        print(f"Generated seed task graph image: {paths.seed_task_graph_png}")
     print(f"Generated task graph: {paths.task_graph}")
+    if getattr(paths, "task_graph_png", None) is not None:
+        print(f"Generated task graph image: {paths.task_graph_png}")
     print(f"Generated basic background: {paths.basic_background}")
     print(f"Generated atom actions: {paths.atom_actions}")
     if paths.summary:

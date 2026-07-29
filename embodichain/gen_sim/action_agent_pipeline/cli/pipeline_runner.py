@@ -163,6 +163,15 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     task_graph_path = getattr(paths, "task_graph", None)
     if task_graph_path is not None:
         print(f"Generated task graph: {task_graph_path}", flush=True)
+    seed_task_graph_png_path = getattr(paths, "seed_task_graph_png", None)
+    if seed_task_graph_png_path is not None:
+        print(
+            f"Generated seed task graph image: {seed_task_graph_png_path}",
+            flush=True,
+        )
+    task_graph_png_path = getattr(paths, "task_graph_png", None)
+    if task_graph_png_path is not None:
+        print(f"Generated task graph image: {task_graph_png_path}", flush=True)
     if args.skip_run_agent:
         write_llm_usage_summary(usage_paths)
         return 0

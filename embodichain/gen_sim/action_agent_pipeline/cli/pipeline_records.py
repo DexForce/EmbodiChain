@@ -188,9 +188,19 @@ def build_pipeline_record(
             if getattr(generated_paths, "seed_task_graph", None) is not None
             else None
         ),
+        "generated_seed_task_graph_png": (
+            _record_path(Path(generated_paths.seed_task_graph_png), repo_root)
+            if getattr(generated_paths, "seed_task_graph_png", None) is not None
+            else None
+        ),
         "generated_task_graph": (
             _record_path(Path(generated_paths.task_graph), repo_root)
             if getattr(generated_paths, "task_graph", None) is not None
+            else None
+        ),
+        "generated_task_graph_png": (
+            _record_path(Path(generated_paths.task_graph_png), repo_root)
+            if getattr(generated_paths, "task_graph_png", None) is not None
             else None
         ),
         "generated_basic_background": _record_path(

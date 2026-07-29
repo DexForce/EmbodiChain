@@ -166,3 +166,9 @@ They may use scene_transforms and bundle_support, but none of these owner
 modules may import action_agent_config. Compatibility aliases in the entry
 module preserve established private import paths without moving ownership back
 into the dispatcher.
+
+The generation.visualization package owns headless review renderings of the
+symbolic seed and compiled task graph. Config publication renders both PNGs
+from the in-memory bundle after seed/compiled provenance validation and stages
+them in the same rollback-capable transaction as their JSON sources. These
+images are diagnostic artifacts only; runtime never reads them.

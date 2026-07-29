@@ -29,7 +29,9 @@ from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     BASIC_BACKGROUND_FILENAME,
     FAST_GYM_CONFIG_FILENAME,
     SEED_TASK_GRAPH_FILENAME,
+    SEED_TASK_GRAPH_PNG_FILENAME,
     TASK_GRAPH_FILENAME,
+    TASK_GRAPH_PNG_FILENAME,
     TASK_PROMPT_FILENAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
@@ -38,6 +40,10 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
     seed_task_graph_hash,
     validate_seed_task_graph,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.visualization import (
+    render_seed_task_graph_png,
+    render_task_graph_png,
 )
 
 __all__ = [
@@ -67,7 +73,9 @@ def write_config_bundle(
         agent_config=output_dir / AGENT_CONFIG_FILENAME,
         task_prompt=output_dir / TASK_PROMPT_FILENAME,
         seed_task_graph=output_dir / SEED_TASK_GRAPH_FILENAME,
+        seed_task_graph_png=output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
         task_graph=output_dir / TASK_GRAPH_FILENAME,
+        task_graph_png=output_dir / TASK_GRAPH_PNG_FILENAME,
         basic_background=output_dir / BASIC_BACKGROUND_FILENAME,
         atom_actions=output_dir / ATOM_ACTIONS_FILENAME,
         summary=dict(bundle.get("summary", {})),
@@ -75,7 +83,7 @@ def write_config_bundle(
     raise_if_generated_files_exist(output_dir, overwrite)
     _validate_seed_compilation_pair(bundle)
 
-    serialized_files = [
+    serialized_files: list[tuple[Path, str | bytes]] = [
         (paths.gym_config, _serialize_json(bundle["gym_config"])),
         (paths.agent_config, _serialize_json(bundle["agent_config"])),
         (paths.task_prompt, _serialize_text(bundle["task_prompt"])),
@@ -87,6 +95,11 @@ def write_config_bundle(
         serialized_files.append(
             (paths.seed_task_graph, _serialize_json(bundle["seed_task_graph"]))
         )
+        try:
+            seed_graph_png = render_seed_task_graph_png(bundle["seed_task_graph"])
+        except Exception as error:
+            raise RuntimeError("Failed to render seed_task_graph.png.") from error
+        serialized_files.append((paths.seed_task_graph_png, seed_graph_png))
     serialized_files.extend(
         [
             (paths.task_graph, _serialize_json(bundle["task_graph"])),
@@ -94,6 +107,17 @@ def write_config_bundle(
             (paths.atom_actions, _serialize_text(bundle["atom_actions"])),
         ]
     )
+    # Preserve compatibility only for historical seedless callers that publish
+    # a placeholder task_graph mapping. A production bundle has a seed and must
+    # fail closed if its compiled graph cannot be visualized.
+    if "seed_task_graph" in bundle or _has_renderable_task_graph_shape(
+        bundle["task_graph"]
+    ):
+        try:
+            task_graph_png = render_task_graph_png(bundle["task_graph"])
+        except Exception as error:
+            raise RuntimeError("Failed to render task_graph.png.") from error
+        serialized_files.append((paths.task_graph_png, task_graph_png))
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_file_transaction(serialized_files)
     return paths
@@ -107,7 +131,9 @@ def raise_if_generated_files_exist(output_dir: Path, overwrite: bool) -> None:
         output_dir / AGENT_CONFIG_FILENAME,
         output_dir / TASK_PROMPT_FILENAME,
         output_dir / SEED_TASK_GRAPH_FILENAME,
+        output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
         output_dir / TASK_GRAPH_FILENAME,
+        output_dir / TASK_GRAPH_PNG_FILENAME,
         output_dir / BASIC_BACKGROUND_FILENAME,
         output_dir / ATOM_ACTIONS_FILENAME,
     ]
@@ -169,7 +195,17 @@ def _serialize_text(content: str) -> str:
     return content.rstrip() + "\n"
 
 
-def _write_file_transaction(files: list[tuple[Path, str]]) -> None:
+def _has_renderable_task_graph_shape(task_graph: Any) -> bool:
+    return (
+        isinstance(task_graph, Mapping)
+        and isinstance(task_graph.get("nodes"), list)
+        and bool(task_graph["nodes"])
+        and isinstance(task_graph.get("edges"), list)
+        and bool(task_graph["edges"])
+    )
+
+
+def _write_file_transaction(files: list[tuple[Path, str | bytes]]) -> None:
     """Replace a group of files and restore the old group on ordinary failure.
 
     Every new file is fully written and fsynced in its destination directory
@@ -179,24 +215,30 @@ def _write_file_transaction(files: list[tuple[Path, str]]) -> None:
     staged: list[tuple[Path, Path]] = []
     try:
         for destination, content in files:
-            staged.append((destination, _stage_text_file(destination, content)))
+            staged.append((destination, _stage_file(destination, content)))
         _commit_staged_files(staged)
     finally:
         for _, staged_path in staged:
             staged_path.unlink(missing_ok=True)
 
 
-def _stage_text_file(destination: Path, content: str) -> Path:
-    """Write and fsync one hidden temporary file beside its destination."""
+def _stage_file(destination: Path, content: str | bytes) -> Path:
+    """Write and fsync one text or binary temporary file beside its destination."""
+    is_binary = isinstance(content, bytes)
     descriptor, temp_name = tempfile.mkstemp(
         dir=destination.parent,
         prefix=f".{destination.name}.",
         suffix=".tmp",
-        text=True,
+        text=not is_binary,
     )
     temp_path = Path(temp_name)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+        mode = "wb" if is_binary else "w"
+        with os.fdopen(
+            descriptor,
+            mode,
+            encoding=None if is_binary else "utf-8",
+        ) as file:
             file.write(content)
             file.flush()
             os.fsync(file.fileno())
