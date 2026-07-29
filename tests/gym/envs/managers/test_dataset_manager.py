@@ -23,6 +23,7 @@ import torch
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 from embodichain.lab.gym.envs.managers.dataset_manager import DatasetManager
+from embodichain.lab.gym.utils.profiler import EnvProfiler
 
 
 class DatasetManagerStub:
@@ -51,6 +52,10 @@ def make_env_for_episode_selection(
         dataset_manager=manager,
         episode_success_status=success_status,
         _task_success=torch.zeros(num_envs, dtype=torch.bool),
+        # _initialize_episode opens profiler sections around each manager call;
+        # a disabled EnvProfiler is a no-op so the stub can exercise the save
+        # logic without a real BaseEnv (which would need a sim).
+        _profiler=EnvProfiler(None, torch.device("cpu")),
         cfg=SimpleNamespace(
             events=None,
             observations=None,

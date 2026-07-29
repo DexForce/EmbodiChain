@@ -188,7 +188,9 @@ class EventManager(ManagerBase):
             )
 
         # iterate over all the event functors
-        for index, functor_cfg in enumerate(self._mode_functor_cfgs[mode]):
+        for index, (functor_name, functor_cfg) in enumerate(
+            zip(self._mode_functor_names[mode], self._mode_functor_cfgs[mode])
+        ):
             functor_cfg: EventCfg
             if mode == "interval":
                 self._interval_functor_step_count[index] += 1
@@ -203,7 +205,7 @@ class EventManager(ManagerBase):
                 ):
 
                     # call the event functor (with None for env_ids)
-                    functor_cfg.func(self._env, None, **functor_cfg.params)
+                    self._call_functor(functor_name, functor_cfg, self._env, None)
                 else:
                     valid_env_ids = (
                         (
@@ -216,16 +218,18 @@ class EventManager(ManagerBase):
                     )
                     if len(valid_env_ids) > 0:
                         # call the event functor
-                        functor_cfg.func(self._env, valid_env_ids, **functor_cfg.params)
+                        self._call_functor(
+                            functor_name, functor_cfg, self._env, valid_env_ids
+                        )
             elif mode == "reset":
                 # resolve the environment indices
                 if env_ids is None:
                     env_ids = slice(None)
 
-                functor_cfg.func(self._env, env_ids, **functor_cfg.params)
+                self._call_functor(functor_name, functor_cfg, self._env, env_ids)
             else:
                 # call the event functor
-                functor_cfg.func(self._env, env_ids, **functor_cfg.params)
+                self._call_functor(functor_name, functor_cfg, self._env, env_ids)
 
     """
     Operations - Functor settings.

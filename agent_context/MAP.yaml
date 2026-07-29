@@ -18,6 +18,8 @@ topics:
       - task registration
       - 环境框架
       - 任务环境
+      - env profiler
+      - env profiling
     keywords:
       - env
       - environment
@@ -31,6 +33,12 @@ topics:
       - step
       - reset
       - wrapper
+      - profiler
+      - profiling
+      - profile
+      - EnvProfiler
+      - EnvProfilerCfg
+      - time profiling
     paths:
       - topics/env-framework/env-framework.md
     source_of_truth:

@@ -37,4 +37,10 @@ Miscellaneous
 
 .. automodule:: embodichain.lab.gym.utils.misc
 
+
+Profiling
+~~~~~~~~~
+
+.. automodule:: embodichain.lab.gym.utils.profiler
+
    

@@ -233,6 +233,33 @@ class ManagerBase(ABC):
         """
         raise NotImplementedError
 
+    def _call_functor(self, functor_name: str, functor_cfg: FunctorCfg, *args):
+        """Invoke a functor, timed under ``env._profiler`` when profiling is on.
+
+        Centralizes per-functor wall-time accounting so every registered
+        functor is profiled automatically without per-functor wrapping. The
+        section name is the functor's config attribute name; it nests under
+        whatever parent section is currently active (e.g. ``event_interval`` or
+        ``obs_compute``), so per-functor timings appear as children of the
+        manager call site. No-op (zero overhead) when profiling is disabled.
+
+        Args:
+            functor_name: The functor's unique name (config attribute name).
+            functor_cfg: The functor's configuration (provides ``func`` and
+                ``params``).
+            *args: Positional arguments forwarded to ``functor_cfg.func``
+                ahead of ``functor_cfg.params`` (typically ``self._env`` and
+                ``env_ids`` / the obs payload).
+
+        Returns:
+            Whatever the functor returns.
+        """
+        profiler = getattr(self._env, "_profiler", None)
+        if profiler is None:
+            return functor_cfg.func(*args, **functor_cfg.params)
+        with profiler.section(functor_name):
+            return functor_cfg.func(*args, **functor_cfg.params)
+
     """
     Implementation specific.
     """

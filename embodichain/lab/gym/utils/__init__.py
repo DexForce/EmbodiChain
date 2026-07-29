@@ -13,3 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
+
+__all__ = ["EnvProfiler", "EnvProfilerCfg"]

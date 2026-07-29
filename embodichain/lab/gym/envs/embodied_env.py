@@ -490,29 +490,31 @@ class EmbodiedEnv(BaseEnv):
     ):
         # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
-            if self.current_rollout_step < self._max_rollout_steps:
-                if self._rollout_buffer_mode == "rl":
-                    self._write_rl_rollout_step(
-                        obs=obs,
-                        rewards=rewards,
-                        dones=dones,
-                        terminateds=kwargs.get("terminateds"),
-                        truncateds=kwargs.get("truncateds"),
-                    )
+            with self._profiler.section("rollout_write"):
+                if self.current_rollout_step < self._max_rollout_steps:
+                    if self._rollout_buffer_mode == "rl":
+                        self._write_rl_rollout_step(
+                            obs=obs,
+                            rewards=rewards,
+                            dones=dones,
+                            terminateds=kwargs.get("terminateds"),
+                            truncateds=kwargs.get("truncateds"),
+                        )
+                    else:
+                        self._write_episode_rollout_step(
+                            obs=obs,
+                            action=action,
+                            rewards=rewards,
+                        )
                 else:
-                    self._write_episode_rollout_step(
-                        obs=obs,
-                        action=action,
-                        rewards=rewards,
+                    logger.log_warning(
+                        f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
+                            Data will not be recorded in the rollout buffer."
                     )
-            else:
-                logger.log_warning(
-                    f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
-                        Data will not be recorded in the rollout buffer."
-                )
-            self.current_rollout_step += 1
+                self.current_rollout_step += 1
 
-        self._write_trajectory_step()
+        with self._profiler.section("trajectory_write"):
+            self._write_trajectory_step()
 
         # Update success status for all environments where episode is done
         if "success" in info:
@@ -521,7 +523,8 @@ class EmbodiedEnv(BaseEnv):
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
-            obs = self.observation_manager.compute(obs)
+            with self._profiler.section("obs_compute"):
+                obs = self.observation_manager.compute(obs)
         return obs
 
     def _extend_reward(
@@ -533,9 +536,10 @@ class EmbodiedEnv(BaseEnv):
         **kwargs,
     ) -> torch.Tensor:
         if self.reward_manager:
-            extra_rewards, reward_info = self.reward_manager.compute(
-                obs=obs, action=action, info=info
-            )
+            with self._profiler.section("reward_compute"):
+                extra_rewards, reward_info = self.reward_manager.compute(
+                    obs=obs, action=action, info=info
+                )
             info["rewards"] = reward_info
             # Add manager terms to base reward from get_reward() so task reward is kept
             rewards = rewards + extra_rewards
@@ -554,7 +558,8 @@ class EmbodiedEnv(BaseEnv):
         """
         if self.cfg.events:
             if "interval" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="interval")
+                with self._profiler.section("event_interval"):
+                    self.event_manager.apply(mode="interval")
 
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
@@ -586,19 +591,21 @@ class EmbodiedEnv(BaseEnv):
                     ]
 
                 if env_ids_to_save.numel() > 0:
-                    self.dataset_manager.apply(
-                        mode="save",
-                        env_ids=env_ids_to_save,
-                    )
+                    with self._profiler.section("dataset_save"):
+                        self.dataset_manager.apply(
+                            mode="save",
+                            env_ids=env_ids_to_save,
+                        )
 
         # Save recorded camera data before resetting
         if self.cfg.events and self.event_manager is not None:
             from embodichain.lab.gym.envs.managers.record import record_camera_data
 
-            for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
-                for functor_cfg in mode_cfgs:
-                    if isinstance(functor_cfg.func, record_camera_data):
-                        functor_cfg.func.save_and_clear()
+            with self._profiler.section("record_camera_save"):
+                for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+                    for functor_cfg in mode_cfgs:
+                        if isinstance(functor_cfg.func, record_camera_data):
+                            functor_cfg.func.save_and_clear()
 
         # Clear episode buffers and reset success status for environments being reset
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
@@ -611,8 +618,9 @@ class EmbodiedEnv(BaseEnv):
         if _traj_buffer is not None and getattr(
             self.cfg, "trajectory_auto_save", False
         ):
-            for env_id in env_ids_to_process.tolist():
-                self._save_trajectory_for_env(env_id)
+            with self._profiler.section("trajectory_save"):
+                for env_id in env_ids_to_process.tolist():
+                    self._save_trajectory_for_env(env_id)
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
@@ -623,22 +631,26 @@ class EmbodiedEnv(BaseEnv):
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="reset", env_ids=env_ids)
+                with self._profiler.section("event_reset"):
+                    self.event_manager.apply(mode="reset", env_ids=env_ids)
 
         # reset observation manager for environments that need a reset
         # This clears any cached data in observation functors (e.g., physics attributes)
         if self.cfg.observations:
-            self.observation_manager.reset(env_ids=env_ids)
+            with self._profiler.section("obs_reset"):
+                self.observation_manager.reset(env_ids=env_ids)
 
         # reset reward manager for environments that need a reset
         if self.cfg.rewards:
-            self.reward_manager.reset(env_ids=env_ids)
+            with self._profiler.section("reward_reset"):
+                self.reward_manager.reset(env_ids=env_ids)
 
         # Dataset saving can be disabled while the dataset configuration remains
         # present.  In that mode no DatasetManager is created in __init__, so
         # reset must not dereference the optional manager.
         if self.cfg.dataset and self.dataset_manager is not None:
-            self.dataset_manager.reset(env_ids=env_ids)
+            with self._profiler.section("dataset_reset"):
+                self.dataset_manager.reset(env_ids=env_ids)
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
         """Infer whether the rollout buffer is expert recording or RL training data."""
@@ -1239,4 +1251,7 @@ class EmbodiedEnv(BaseEnv):
         if self.dataset_manager:
             self.dataset_manager.finalize()
 
+        # Report before sim.destroy(): destroy() exits the process without
+        # returning to Python, so the report must be flushed first.
+        self._profiler.report()
         self.sim.destroy()
