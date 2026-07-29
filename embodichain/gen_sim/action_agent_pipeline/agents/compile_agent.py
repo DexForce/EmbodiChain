@@ -23,6 +23,7 @@ from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     COMPILED_GRAPH_FILENAME,
+    SEED_TASK_GRAPH_FILENAME,
     TASK_GRAPH_FILENAME,
 )
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
@@ -32,7 +33,11 @@ from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
 from embodichain.data import database_agent_prompt_dir
 from embodichain.utils.logger import log_info
 
-__all__ = ["CompileAgent", "resolve_precomputed_task_graph_path"]
+__all__ = [
+    "CompileAgent",
+    "resolve_precomputed_seed_task_graph_path",
+    "resolve_precomputed_task_graph_path",
+]
 
 COMPILED_GRAPH_SCHEMA_VERSION = "nominal_graph_v1"
 
@@ -55,6 +60,18 @@ class CompileAgent:
     def generate(self, **kwargs: Any):
         file_path = self._compiled_graph_path(kwargs.get("log_dir"))
         task_graph = extract_json_object(kwargs["task_graph"])
+        seed_task_graph = kwargs.get("seed_task_graph")
+        if seed_task_graph is not None:
+            from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+                validate_seed_graph_pair,
+            )
+
+            validate_seed_graph_pair(task_graph, seed_task_graph)
+        elif task_graph.get("seed_graph_hash") is not None:
+            raise ValueError(
+                "A task graph with seed provenance requires seed_task_graph.json "
+                "before runtime compilation."
+            )
         task_graph_hash = _stable_json_hash(task_graph)
 
         # The cache is valid only for the exact source graph and compiler
@@ -173,6 +190,43 @@ def resolve_precomputed_task_graph_path(
     )
 
 
+def resolve_precomputed_seed_task_graph_path(
+    *,
+    configured_path: str | None,
+    agent_config_path: str | None,
+) -> Path | None:
+    """Resolve the symbolic seed used to verify the runtime task graph.
+
+    Generated configs name the seed explicitly. Legacy configs may omit the
+    field; in that case an adjacent seed is used when present, while truly
+    pre-seed bundles continue to run without provenance verification.
+    """
+    config_file = (
+        Path(agent_config_path).expanduser().resolve() if agent_config_path else None
+    )
+    if configured_path:
+        seed_path = Path(configured_path).expanduser()
+        if not seed_path.is_absolute():
+            seed_path = (
+                config_file.parent / seed_path
+                if config_file is not None
+                else seed_path.resolve()
+            )
+        resolved = seed_path.resolve()
+        if not resolved.is_file():
+            raise FileNotFoundError(
+                f"Configured seed task graph not found: {resolved}."
+            )
+        return resolved
+
+    adjacent = (
+        config_file.parent / SEED_TASK_GRAPH_FILENAME
+        if config_file is not None
+        else Path(SEED_TASK_GRAPH_FILENAME).resolve()
+    )
+    return adjacent if adjacent.is_file() else None
+
+
 def _stable_json_hash(content: dict[str, Any]) -> str:
     payload = json.dumps(
         content, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -183,5 +237,10 @@ def _stable_json_hash(content: dict[str, Any]) -> str:
 def _runtime_kwargs(
     kwargs: dict[str, Any],
 ) -> dict[str, Any]:
-    prompt_only_keys = {"task_graph", "observations", "regenerate"}
+    prompt_only_keys = {
+        "task_graph",
+        "seed_task_graph",
+        "observations",
+        "regenerate",
+    }
     return {key: value for key, value in kwargs.items() if key not in prompt_only_keys}

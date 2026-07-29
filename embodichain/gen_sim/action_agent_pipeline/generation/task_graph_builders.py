@@ -83,7 +83,11 @@ def compile_arrangement_task_graph(
         task_name=task_name,
         route="arrangement_line",
     )
-    _validate_arrangement_seed(seed_graph, spec)
+    _validate_seed_matches_grounding(
+        seed_graph,
+        make_arrangement_seed_task_graph(task_name, spec),
+        route="arrangement_line",
+    )
     steps = []
     # The seed owns the desired ordered layout. The deterministic arrangement
     # planner remains free to choose a collision-safe execution schedule.
@@ -111,15 +115,21 @@ def compile_stacking_task_graph(
 ) -> dict[str, Any]:
     """Compile a symbolic stacking seed into its grounded atomic graph."""
     validate_seed_task_graph(seed_graph, task_name=task_name, route="stacking")
+    _validate_seed_matches_grounding(
+        seed_graph,
+        make_stacking_seed_task_graph(task_name, spec),
+        route="stacking",
+    )
     ordered_steps = _unique_specs_in_seed_order(seed_graph, spec.steps, "runtime_uid")
+    seed_goal = seed_graph["steps"][0]["goal"]
     steps = []
     for step in ordered_steps:
         steps.extend(
             _nominal_step(title, actions)
             for title, actions in _stacking_step_edge_blocks(
                 step,
-                object_anchored=spec.anchor == "object",
-                stack_mode=spec.stack_mode,
+                object_anchored=seed_goal["reference_state"] == "live",
+                stack_mode=seed_goal["stack_mode"],
             )
         )
     graph = build_nominal_task_graph(task_name=task_name, steps=steps)
@@ -145,12 +155,17 @@ def compile_relative_task_graph(
         task_name=task_name,
         route="object_manipulation",
     )
+    _validate_seed_matches_grounding(
+        seed_graph,
+        make_relative_seed_task_graph(task_name, spec),
+        route="object_manipulation",
+    )
     seed_steps = list(seed_graph["steps"])
-    _validate_relative_seed_order(seed_steps, spec)
+    seed_intent = seed_graph["program"]
     semantic_groups = None
-    if spec.intent == "coordinated_pickment":
+    if seed_intent == "coordinated_pickment":
         steps = _coordinated_pickment_graph_steps(spec)
-    elif spec.intent == "hold_hover":
+    elif seed_intent == "hold_hover":
         steps = _hold_hover_graph_steps(spec)
     elif len(spec.placements) > 1:
         if _uses_serial_dual_sequence(spec):
@@ -230,61 +245,22 @@ def _compiled_relative_actor(
     return {"mode": "assigned", "arm": active_arm}
 
 
-def _validate_relative_seed_order(
-    seed_steps: list[Mapping[str, Any]],
-    spec: RelativeSpecLike,
-) -> None:
-    placements = list(spec.placements)
-    if len(seed_steps) != len(placements):
-        raise ValueError(
-            "Relative seed step count does not match the normalized LLM program."
-        )
-    for index, (seed_step, placement) in enumerate(zip(seed_steps, placements)):
-        expected_relation = (
-            "held_above_initial"
-            if placement.intent == "hold_hover"
-            else placement.relation
-        )
-        expected_reference = (
-            placement.moved_runtime_uid
-            if placement.intent == "hold_hover"
-            else placement.reference_runtime_uid
-        )
-        expected = (
-            placement.intent,
-            placement.moved_runtime_uid,
-            expected_relation,
-            expected_reference,
-        )
-        actual_goal = seed_step["goal"]
-        actual = (
-            seed_step["operator"],
-            seed_step["object"],
-            actual_goal.get("relation"),
-            actual_goal.get("reference_object"),
-        )
-        if actual != expected:
-            raise ValueError(
-                f"Relative seed step {index} no longer matches its normalized "
-                "LLM semantic step."
-            )
-
-
-def _validate_arrangement_seed(
+def _validate_seed_matches_grounding(
     seed_graph: Mapping[str, Any],
-    spec: ArrangementSpecLike,
+    expected_seed_graph: Mapping[str, Any],
+    *,
+    route: str,
 ) -> None:
-    seed_steps = seed_graph["steps"]
-    if len(seed_steps) != 1 or seed_steps[0]["operator"] != "arrange_in_line":
-        raise ValueError("Arrangement seed graph requires one arrange_in_line step.")
-    goal_objects = seed_steps[0]["goal"].get("objects")
-    expected_objects = [
-        step.runtime_uid
-        for step in sorted(spec.steps, key=lambda item: int(item.slot_index))
-    ]
-    if goal_objects != expected_objects:
+    """Reject grounded data produced from any semantic program but this seed.
+
+    The grounded spec deliberately carries geometry together with duplicated
+    semantic lookup keys. Exact comparison of its canonical symbolic projection
+    prevents those convenience fields from becoming a second source of truth.
+    """
+    if dict(seed_graph) != dict(expected_seed_graph):
         raise ValueError(
-            "Arrangement seed object order does not match the normalized LLM goal."
+            f"{route} grounding context was not derived from the supplied seed "
+            "task graph."
         )
 
 

@@ -146,6 +146,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
         from embodichain.gen_sim.action_agent_pipeline.agents.compile_agent import (
             CompileAgent,
+            resolve_precomputed_seed_task_graph_path,
             resolve_precomputed_task_graph_path,
         )
 
@@ -156,6 +157,13 @@ class AgenticGenSimEnv(EmbodiedEnv):
         # execution is deterministic and never falls back to an online LLM.
         self.precomputed_task_graph_path = resolve_precomputed_task_graph_path(
             configured_path=configured_graph,
+            agent_config_path=agent_config_path,
+        )
+        configured_seed = sections["TaskAgent"].get("seed_task_graph")
+        if configured_seed is not None and not isinstance(configured_seed, str):
+            raise ValueError("TaskAgent.seed_task_graph must be a path string.")
+        self.seed_task_graph_path = resolve_precomputed_seed_task_graph_path(
+            configured_path=configured_seed,
             agent_config_path=agent_config_path,
         )
         self.compile_agent = CompileAgent(
@@ -488,6 +496,11 @@ class AgenticGenSimEnv(EmbodiedEnv):
             metadata={"regenerate": bool(regenerate)},
         ):
             task_graph = self.precomputed_task_graph_path.read_text(encoding="utf-8")
+            seed_task_graph = (
+                self.seed_task_graph_path.read_text(encoding="utf-8")
+                if self.seed_task_graph_path is not None
+                else None
+            )
         if not getattr(self, "_task_graph_logged", False):
             # The graph is immutable for this environment instance, so print
             # the full source once without flooding logs on later episodes.
@@ -503,6 +516,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
             env=self,
             regenerate=regenerate,
             task_graph=task_graph,
+            seed_task_graph=seed_task_graph,
             **kwargs,
         )
         graph_file_path, compile_kwargs, graph_content = self.compile_agent.generate(

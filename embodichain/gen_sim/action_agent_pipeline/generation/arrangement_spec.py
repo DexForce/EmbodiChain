@@ -374,6 +374,7 @@ def _apply_arrangement_task_response(
         spacing=spacing,
         layout_clearance=_LAYOUT_CLEARANCE,
         category_order=category_order,
+        semantic_order=tuple(runtime_uids[uid] for uid in ordered_source_uids),
     )
 
 

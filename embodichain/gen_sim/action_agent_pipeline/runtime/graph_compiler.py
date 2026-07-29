@@ -16,8 +16,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 from collections.abc import Mapping
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -33,6 +35,7 @@ __all__ = [
     "compile_agent_graph_from_file",
     "compile_agent_graph_spec",
     "load_agent_graph_bundle",
+    "validate_seed_graph_pair",
 ]
 
 _RECOVERY_KEYS = {
@@ -138,6 +141,34 @@ def compile_agent_graph_spec(
         )
 
     return graph
+
+
+def validate_seed_graph_pair(
+    task_graph: str | Mapping[str, Any],
+    seed_graph: str | Mapping[str, Any],
+) -> None:
+    """Verify that the executable graph identifies the supplied seed exactly."""
+    task_spec = extract_json_object(task_graph)
+    seed_spec = extract_json_object(seed_graph)
+    _validate_seed_provenance(task_spec)
+
+    seed_schema = seed_spec.get("schema_version")
+    if seed_schema != task_spec.get("seed_graph_schema_version"):
+        raise ValueError(
+            "Runtime seed_task_graph.json schema does not match task_graph.json."
+        )
+    canonical_seed = json.dumps(
+        seed_spec,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    actual_hash = hashlib.sha256(canonical_seed.encode("utf-8")).hexdigest()
+    if actual_hash != task_spec.get("seed_graph_hash"):
+        raise ValueError(
+            "Runtime seed_task_graph.json does not match the seed_graph_hash "
+            "stored in task_graph.json. Regenerate the config bundle."
+        )
 
 
 def _resolve_runtime(

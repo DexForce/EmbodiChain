@@ -31,6 +31,9 @@ from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
     make_light_config as _make_light_config,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_intent import (
+    _arrangement_order_is_constrained,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _with_arrangement_generated_pose_targets,
 )
@@ -296,6 +299,14 @@ def _build_arrangement_line_bundle(
 def _make_arrangement_summary(spec: ArrangementLineSpec) -> dict[str, Any]:
     return {
         "mode": "arrangement_line",
+        "order_constraint": (
+            "ordered"
+            if _arrangement_order_is_constrained(
+                spec.order_by,
+                task_description=spec.task_description,
+            )
+            else "free"
+        ),
         "axis": spec.axis,
         "anchor": spec.anchor,
         "order_by": spec.order_by,

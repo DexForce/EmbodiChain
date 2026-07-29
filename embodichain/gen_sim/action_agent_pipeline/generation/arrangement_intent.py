@@ -38,6 +38,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.naming import (
 
 __all__ = [
     "_arrangement_object_categories",
+    "_arrangement_order_is_constrained",
     "_normalize_anchor",
     "_normalize_order_by",
     "_normalize_order_direction",
@@ -65,6 +66,17 @@ _SIZE_ORDER_MARKERS = (
     "size order",
 )
 _COLOR_ORDER_MARKERS = ("按颜色", "颜色顺序", "color order", "by color")
+_EXPLICIT_ORDER_MARKERS = (
+    "依次",
+    "按顺序",
+    "顺序排列",
+    "从左到右",
+    "从右到左",
+    "in order",
+    "left to right",
+    "right to left",
+    "sequence",
+)
 _COLOR_NAMES = (
     "红",
     "绿",
@@ -107,6 +119,18 @@ def _validated_arrangement_order(
         if not explicit_color_order:
             return "explicit", "given"
     return order_by, order_direction
+
+
+def _arrangement_order_is_constrained(
+    order_by: str,
+    *,
+    task_description: str,
+) -> bool:
+    """Return whether final object order is part of the user's semantic goal."""
+    if order_by in {"size", "color"}:
+        return True
+    text = task_description.strip().lower()
+    return any(marker in text for marker in _EXPLICIT_ORDER_MARKERS)
 
 
 def _arrangement_object_categories(

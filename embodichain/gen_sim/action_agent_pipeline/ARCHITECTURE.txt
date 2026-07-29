@@ -128,9 +128,18 @@ atomic edge IDs, absolute targets, trajectories, or joint states. The same seed
 graph can therefore describe every environment that shares the object registry.
 
 Deterministic route builders compile the seed graph plus generated scene
-geometry into task_graph.json. The compiled graph stores seed_graph_hash and is
-published in the same file transaction as its seed, preventing --overwrite
-from leaving a new semantic program beside a stale executable graph.
+geometry into task_graph.json. Grounding records may duplicate symbolic lookup
+keys, but builders compare their complete canonical semantic projection with
+the seed and fail closed on any mismatch. The compiled graph stores
+seed_graph_hash and is published in the same file transaction as its seed,
+preventing --overwrite from leaving a new semantic program beside a stale
+executable graph.
+
+Arrangement seeds distinguish membership-only rows from ordered rows. A
+generic "form one row" goal stores a canonical object set and permits the
+grounding planner to assign physical slots. Size, color, or explicitly ordered
+goals retain a stable semantic order; collision planning may reschedule their
+actions but must not replace that order with an initial-position ordering.
 
 Runtime executes semantic edge ranges in order. At each boundary it validates
 dependencies and live object bindings, lets the existing atomic target
@@ -138,9 +147,9 @@ resolvers and motion planners read current simulator poses, settles physics,
 and evaluates the step postcondition per environment. It must not construct a
 second episode-wide grounded graph or infer reachability from arm-base
 distance. Runtime continues to execute task_graph.json in this phase;
-seed_task_graph.json is generation provenance, not an alternate execution
-input. Environments share one semantic program while retaining independent
-success and failure masks.
+seed_task_graph.json is read only to verify the compiled graph hash and is not
+an alternate execution input. Environments share one semantic program while
+retaining independent success and failure masks.
 
 Config bundle ownership
 -----------------------

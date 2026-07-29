@@ -25,6 +25,9 @@ from typing import Any
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     defaults_section,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_intent import (
+    _arrangement_order_is_constrained,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_layout import (
     _ArrangementFootprint,
     _arrangement_object_footprint,
@@ -133,6 +136,10 @@ def _arrangement_plan_execution(
     generated_objects: Sequence[SceneObject],
     rigid_configs: Mapping[str, Mapping[str, Any]],
 ) -> tuple[str, list[ArrangementLineStepSpec]] | None:
+    order_is_constrained = _arrangement_order_is_constrained(
+        spec.order_by,
+        task_description=spec.task_description,
+    )
     groups = [
         [step for step in spec.steps if step.category == category]
         for category in spec.category_order
@@ -142,7 +149,7 @@ def _arrangement_plan_execution(
     group_orders = [
         (
             [tuple(group)]
-            if spec.order_by in {"size", "color"}
+            if order_is_constrained
             else list(permutations(sorted(group, key=lambda step: step.runtime_uid)))
         )
         for group in groups
@@ -223,6 +230,10 @@ def _arrangement_plan_execution(
             if best is None or candidate[0] < best[0]:
                 best = candidate
     if best is None:
+        if order_is_constrained:
+            # A hard semantic order may change execution scheduling, but it
+            # must never silently degrade to an initial-position ordering.
+            return None
         return _arrangement_initial_side_order_fallback(
             spec,
             slots,

@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +176,10 @@ class ArrangementLineSpec:
     layout_clearance: float
     category_order: tuple[str, ...] = ()
     spatial_direction: str = "ascending"
+    # This survives physical slot reassignment and execution scheduling. It is
+    # excluded from dataclass equality to preserve compatibility with callers
+    # that construct historical specs directly.
+    semantic_order: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)

@@ -98,6 +98,7 @@ class ArrangementSpecLike(Protocol):
     line_origin_xy: Sequence[float]
     spacing: float
     layout_clearance: float
+    semantic_order: Sequence[str]
     steps: Sequence[ArrangementStepLike]
 
 
