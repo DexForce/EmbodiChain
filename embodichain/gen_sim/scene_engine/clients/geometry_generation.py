@@ -142,7 +142,8 @@ class GeometryGenerationClient:
         last_error: Exception | None = None
         for _ in range(self._max_attempts):
             try:
-                with ExitStack() as stack:  # This stack manages the context of multiple open files, ensuring they are closed after the request.
+                # This stack manages the context of multiple open files, ensuring they are closed after the request.
+                with ExitStack() as stack:
                     image_file = stack.enter_context(image_path.open("rb"))
                     mask_files = [
                         stack.enter_context(mask_path.open("rb"))
