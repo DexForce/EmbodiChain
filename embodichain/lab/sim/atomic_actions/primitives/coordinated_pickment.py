@@ -31,7 +31,6 @@ from ..core import (
     ActionResult,
     AtomicAction,
     CoordinatedHeldObjectState,
-    CoordinatedPickmentTarget,
     GraspTarget,
     ObjectSemantics,
     WorldState,
@@ -652,7 +651,9 @@ class CoordinatedPickment(AtomicAction):
         )
         # approach
         full_arm_traj[:, :n_approach_actual, :] = approach_arm
-        full_hand_traj[:, :n_approach_actual, :] = hand_open_qpos
+        full_hand_traj[:, :n_approach_actual, :] = self._repeat_qpos(
+            hand_open_qpos, n_approach_actual
+        )
         # close
         full_arm_traj[:, n_approach_actual : n_approach_actual + n_close, :] = (
             grasp_arm_qpos.unsqueeze(1)
@@ -662,7 +663,9 @@ class CoordinatedPickment(AtomicAction):
         )
         # lift
         full_arm_traj[:, n_approach_actual + n_close :, :] = lift_arm
-        full_hand_traj[:, n_approach_actual + n_close :, :] = hand_close_qpos
+        full_hand_traj[:, n_approach_actual + n_close :, :] = self._repeat_qpos(
+            hand_close_qpos, n_lift_actual
+        )
         return is_success, full_arm_traj, full_hand_traj
 
     def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:

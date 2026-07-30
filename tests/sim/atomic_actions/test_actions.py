@@ -29,8 +29,6 @@ from embodichain.lab.sim.planners.utils import MoveType, PlanResult
 from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
     AtomicAction,
-    CoordinatedHeldObjectState,
-    CoordinatedPickmentTarget,
     CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
@@ -193,6 +191,22 @@ def _make_dual_arm_mock_robot():
         return torch.ones(seed.shape[0], dtype=torch.bool), seed + offset
 
     robot.compute_ik = compute_ik
+
+    # CoordinatedPickment resolves dual-arm grasps from the robot's per-arm
+    # solvers and root link poses, so expose both on the mock.
+    robot._solvers = {
+        "left_arm": Mock(root_link_name="left_base_link"),
+        "right_arm": Mock(root_link_name="right_base_link"),
+    }
+
+    def get_link_pose(link_name=None, to_matrix=True):
+        pose = torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        # Distinct root x-offsets keep the left->right direction well defined.
+        if link_name == "right_base_link":
+            pose[:, 0, 3] = 0.6
+        return pose
+
+    robot.get_link_pose = get_link_pose
     return robot
 
 
@@ -209,6 +223,55 @@ def _hand_open():
 
 def _hand_close():
     return torch.full((HAND_DOF,), 0.025, dtype=torch.float32)
+
+
+def _make_dual_arm_pickment_semantics(
+    *,
+    left_grasp_xpos: torch.Tensor | None = None,
+    right_grasp_xpos: torch.Tensor | None = None,
+    label: str = "pencil",
+) -> ObjectSemantics:
+    """ObjectSemantics whose affordance yields fixed dual-arm grasp poses.
+
+    CoordinatedPickment samples grasps from the affordance at execution time,
+    so the tests stub ``get_dual_arm_valid_grasp_poses`` to return a single
+    deterministic grasp pose per environment and a mock entity pose.
+    """
+    affordance = AntipodalAffordance()
+    left_grasp = (
+        left_grasp_xpos
+        if left_grasp_xpos is not None
+        else torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+    )
+    right_grasp = (
+        right_grasp_xpos
+        if right_grasp_xpos is not None
+        else torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+    )
+
+    grasp_result = [
+        {
+            "left": {
+                "grasp_poses": left_grasp[i].unsqueeze(0),
+                "total_cost": torch.zeros(1, dtype=torch.float32),
+            },
+            "right": {
+                "grasp_poses": right_grasp[i].unsqueeze(0),
+                "total_cost": torch.zeros(1, dtype=torch.float32),
+            },
+        }
+        for i in range(NUM_ENVS)
+    ]
+    affordance.get_dual_arm_valid_grasp_poses = Mock(return_value=grasp_result)
+    entity = Mock()
+    entity.get_local_pose = Mock(
+        return_value=torch.eye(4, dtype=torch.float32)
+        .unsqueeze(0)
+        .repeat(NUM_ENVS, 1, 1)
+    )
+    return ObjectSemantics(
+        affordance=affordance, geometry={}, label=label, entity=entity
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1033,11 +1096,13 @@ class TestCoordinatedPickmentAction:
     def setup_method(self):
         self.mg = _make_dual_arm_mock_motion_generator()
 
-    def test_target_type_is_coordinated_pickment_target(self):
-        assert CoordinatedPickment.TargetType is CoordinatedPickmentTarget
+    def test_target_type_is_grasp_target(self):
+        # CoordinatedPickment samples dual-arm grasps from a GraspTarget's
+        # affordance, mirroring the coordinated_pickment tutorial.
+        assert CoordinatedPickment.TargetType is GraspTarget
         assert CoordinatedPickment.__bases__ == (AtomicAction,)
 
-    def test_execute_returns_full_dof_trajectory_and_dual_held_state(self):
+    def test_execute_returns_full_dof_trajectory(self):
         cfg = CoordinatedPickmentCfg(
             left_hand_open_qpos=_hand_open(),
             left_hand_close_qpos=_hand_close(),
@@ -1049,20 +1114,18 @@ class TestCoordinatedPickmentAction:
             object_motion_keyframes=3,
         )
         action = CoordinatedPickment(self.mg, cfg)
-        sem = ObjectSemantics(
-            affordance=AntipodalAffordance(), geometry={}, label="pencil"
-        )
+        semantics = _make_dual_arm_pickment_semantics(label="pencil")
         state = WorldState(last_qpos=torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF))
-        result = action.execute(
-            CoordinatedPickmentTarget(
-                object_target_pose=torch.eye(4),
-                object_semantics=sem,
-                left_object_to_eef=torch.eye(4),
-                right_object_to_eef=torch.eye(4),
-                object_initial_pose=torch.eye(4),
-            ),
-            state,
-        )
+
+        def interpolate(trajectory, interp_num, device):
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(GraspTarget(semantics=semantics), state)
+
         assert result.success.all()
         assert result.success.shape == (NUM_ENVS,)
         assert result.trajectory.shape == (NUM_ENVS, 30, DUAL_TOTAL_DOF)
@@ -1074,13 +1137,11 @@ class TestCoordinatedPickmentAction:
             result.trajectory[:, -1, action.right_hand_joint_ids],
             _hand_close().unsqueeze(0).repeat(NUM_ENVS, 1),
         )
-        assert isinstance(
-            result.next_state.coordinated_held_object,
-            CoordinatedHeldObjectState,
-        )
+        # Pickment only pinches and lifts; it does not record a held object.
         assert result.next_state.held_object is None
+        assert result.next_state.coordinated_held_object is None
 
-    def test_execute_freezes_only_environment_with_partial_ik_failure(self):
+    def test_execute_freezes_failed_arm_only(self):
         action = CoordinatedPickment(
             self.mg,
             CoordinatedPickmentCfg(
@@ -1096,7 +1157,7 @@ class TestCoordinatedPickmentAction:
         )
         original_compute_ik = self.mg.robot.compute_ik
 
-        def fail_second_env_during_move(
+        def fail_second_env_right_arm(
             pose=None, name=None, joint_seed=None, qpos_seed=None
         ):
             success, qpos = original_compute_ik(
@@ -1105,37 +1166,50 @@ class TestCoordinatedPickmentAction:
                 joint_seed=joint_seed,
                 qpos_seed=qpos_seed,
             )
+            # Env 1's right-arm grasp sits beyond the threshold, so only its
+            # right-arm planning fails; the left arm and env 0 still succeed.
             if name == "right_arm" and float(pose[1, 0, 3]) > 0.15:
                 success = success.clone()
                 success[1] = False
             return success, qpos
 
-        self.mg.robot.compute_ik = fail_second_env_during_move
-        target_pose = torch.eye(4)
-        target_pose[0, 3] = 0.3
+        self.mg.robot.compute_ik = fail_second_env_right_arm
+        right_grasp_xpos = (
+            torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        right_grasp_xpos[1, 0, 3] = 0.3
+        semantics = _make_dual_arm_pickment_semantics(
+            right_grasp_xpos=right_grasp_xpos, label="tray"
+        )
         state = WorldState(last_qpos=torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF))
-        semantics = ObjectSemantics(
-            affordance=AntipodalAffordance(), geometry={}, label="tray"
-        )
 
-        result = action.execute(
-            CoordinatedPickmentTarget(
-                object_target_pose=target_pose,
-                object_semantics=semantics,
-                left_object_to_eef=torch.eye(4),
-                right_object_to_eef=torch.eye(4),
-                object_initial_pose=torch.eye(4),
-            ),
-            state,
-        )
+        def interpolate(trajectory, interp_num, device):
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=interpolate,
+        ):
+            result = action.execute(GraspTarget(semantics=semantics), state)
 
         assert result.success.tolist() == [True, False]
+        # Env 0 still moves through the pickment trajectory.
         assert not torch.allclose(result.trajectory[0], state.last_qpos[0])
+        # Env 1's failed right arm is frozen at its start qpos...
         assert torch.allclose(
-            result.trajectory[1],
-            state.last_qpos[1].unsqueeze(0).repeat(30, 1),
+            result.trajectory[1, :, action.right_arm_joint_ids],
+            state.last_qpos[1, action.right_arm_joint_ids].unsqueeze(0).repeat(30, 1),
         )
-        assert torch.allclose(result.next_state.last_qpos[1], state.last_qpos[1])
+        # ...while its succeeded left arm moves away from the start.
+        assert not torch.allclose(
+            result.trajectory[1, :, action.left_arm_joint_ids],
+            state.last_qpos[1, action.left_arm_joint_ids].unsqueeze(0).repeat(30, 1),
+        )
+        # The frozen right arm carries into the successor world state.
+        assert torch.allclose(
+            result.next_state.last_qpos[1, action.right_arm_joint_ids],
+            state.last_qpos[1, action.right_arm_joint_ids],
+        )
 
 
 # ---------------------------------------------------------------------------

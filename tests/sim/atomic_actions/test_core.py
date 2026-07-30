@@ -28,7 +28,6 @@ from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
     ActionResult,
     CoordinatedHeldObjectState,
-    CoordinatedPickmentTarget,
     CoordinatedPlacementTarget,
     GraspTarget,
     HeldObjectState,
@@ -99,17 +98,6 @@ class TestTypedTargets:
         t = HeldObjectPoseTarget(object_target_pose=torch.eye(4))
         with pytest.raises(dataclasses.FrozenInstanceError):
             t.object_target_pose = torch.zeros(4, 4)  # type: ignore[misc]
-
-    def test_coordinated_pickment_target_holds_object_offsets(self):
-        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="pencil")
-        target = CoordinatedPickmentTarget(
-            object_target_pose=torch.eye(4),
-            object_semantics=sem,
-            left_object_to_eef=torch.eye(4),
-            right_object_to_eef=torch.eye(4),
-        )
-        assert target.object_semantics is sem
-        assert target.left_object_to_eef.shape == (4, 4)
 
     def test_coordinated_placement_target_holds_both_held_objects(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="block")

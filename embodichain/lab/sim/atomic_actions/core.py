@@ -145,26 +145,6 @@ class HeldObjectPoseTarget:
 
 
 @dataclass(frozen=True)
-class CoordinatedPickmentTarget:
-    """Object-centric target for picking and moving one object with two hands."""
-
-    object_target_pose: torch.Tensor
-    """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
-
-    object_semantics: ObjectSemantics
-    """Semantic description of the shared object."""
-
-    left_object_to_eef: torch.Tensor
-    """Transform from object frame to left end-effector frame."""
-
-    right_object_to_eef: torch.Tensor
-    """Transform from object frame to right end-effector frame."""
-
-    object_initial_pose: torch.Tensor | None = None
-    """Optional initial object pose. Defaults to ``object_semantics.entity`` pose."""
-
-
-@dataclass(frozen=True)
 class CoordinatedPlacementTarget:
     """Object-centric target for dual-arm coordinated placement."""
 
@@ -196,7 +176,6 @@ Target = (
     | NamedJointPositionTarget
     | GraspTarget
     | HeldObjectPoseTarget
-    | CoordinatedPickmentTarget
     | CoordinatedPlacementTarget
 )
 
@@ -358,7 +337,6 @@ __all__ = [
     "ActionResult",
     "AtomicAction",
     "CoordinatedHeldObjectState",
-    "CoordinatedPickmentTarget",
     "CoordinatedPlacementTarget",
     "GraspTarget",
     "HeldObjectState",
