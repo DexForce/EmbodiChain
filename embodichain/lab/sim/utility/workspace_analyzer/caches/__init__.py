@@ -22,10 +22,18 @@ from embodichain.lab.sim.utility.workspace_analyzer.caches.disk_cache import Dis
 from embodichain.lab.sim.utility.workspace_analyzer.caches.cache_manager import (
     CacheManager,
 )
+from embodichain.lab.sim.utility.workspace_analyzer.caches.results_cache import (
+    DEFAULT_RESULTS_CACHE_DIR,
+    ResultsCache,
+    compute_cache_key,
+)
 
 __all__ = [
     "BaseCache",
     "MemoryCache",
     "DiskCache",
     "CacheManager",
+    "DEFAULT_RESULTS_CACHE_DIR",
+    "ResultsCache",
+    "compute_cache_key",
 ]

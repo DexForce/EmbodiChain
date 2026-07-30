@@ -7,6 +7,7 @@ The Workspace Analyzer provides comprehensive analysis of robot workspace charac
    :maxdepth: 2
 
    Overview and Usage <workspace_analyzer.md>
+   CLI <cli.md>
    Configuration System <configs.md>
    Sampling Strategies <samplers.md>
    Visualization Options <visualizers.md>

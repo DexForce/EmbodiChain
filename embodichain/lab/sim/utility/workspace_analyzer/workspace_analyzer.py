@@ -24,6 +24,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from contextlib import contextmanager
 from typing import List, Tuple, Dict, Any
+import hashlib
 import os
 import sys
 
@@ -48,6 +49,10 @@ from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
     BaseSampler,
 )
 from embodichain.lab.sim.utility.workspace_analyzer.caches import CacheManager
+from embodichain.lab.sim.utility.workspace_analyzer.caches.results_cache import (
+    ResultsCache,
+    compute_cache_key,
+)
 from embodichain.lab.sim.utility.workspace_analyzer.constraints import (
     WorkspaceConstraintChecker,
 )
@@ -72,6 +77,19 @@ class AnalysisMode(Enum):
 
     PLANE_SAMPLING = "plane_sampling"
     """Sample on a specific plane within Cartesian space."""
+
+
+def _tensor_to_list(value: Any) -> Any:
+    """Convert a tensor/array to a JSON-able list, returning None for None."""
+    if value is None:
+        return None
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().tolist()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return value
 
 
 @dataclass
@@ -201,6 +219,9 @@ class WorkspaceAnalyzer:
         self.metrics_results: Dict[str, Any] = {}
         self.current_mode: AnalysisMode | None = None
         self.success_rates: torch.Tensor | None = None
+        # Path of the most recently written/read results cache entry (None until
+        # a disk results cache is used). Exposed for CLI consumers.
+        self._last_cache_path: Path | None = None
 
     def _determine_control_part(self, control_part_name: str | None) -> str | None:
         """Determine the control part name to use.
@@ -387,8 +408,18 @@ class WorkspaceAnalyzer:
             )
 
     def _create_cache(self):
-        """Create cache manager based on configuration."""
+        """Create the low-level in-memory sampling cache, if enabled.
+
+        Persistent results caching is owned separately by the disk-based
+        :class:`ResultsCache` (see :meth:`_has_results_cache`). The
+        :class:`DiskCache` is intentionally not instantiated here -- it would
+        create an unused ``batches/`` directory next to the results entries,
+        and the analyzer never streams raw poses through it.
+        """
         if not self.config.cache.enabled:
+            return None
+        # Disk mode: results caching is handled by ResultsCache; no BaseCache.
+        if self.config.cache.cache_dir is not None:
             return None
         return CacheManager.create_cache_from_config(self.config.cache)
 
@@ -1240,11 +1271,19 @@ class WorkspaceAnalyzer:
 
         start_time = time.time()
 
-        # Check cache
-        if not force_recompute and self.cache is not None:
-            cached_results = self._load_from_cache()
+        effective_num_samples = (
+            num_samples if num_samples is not None else self.config.sampling.num_samples
+        )
+
+        # Check cache (disk results cache only; see ``_has_results_cache``).
+        if not force_recompute and self._has_results_cache():
+            cached_results = self._load_from_cache(effective_num_samples)
             if cached_results is not None:
                 logger.log_info("Loaded results from cache")
+                self._restore_analysis_state(cached_results)
+                self._log_analysis_summary(cached_results)
+                if visualize:
+                    self._visualize_workspace()
                 return cached_results
 
         # Choose analysis mode
@@ -1400,8 +1439,8 @@ class WorkspaceAnalyzer:
         results["config"] = self.config
         results["analysis_time"] = time.time() - start_time
 
-        # Cache results
-        if self.cache is not None:
+        # Cache results (disk results cache; no-op when cache_dir is unset).
+        if self._has_results_cache():
             self._save_to_cache(results)
 
         # Enhanced completion summary with performance insights
@@ -1966,21 +2005,192 @@ class WorkspaceAnalyzer:
 
         return vis_obj
 
-    def _load_from_cache(self) -> dict[str, Any] | None:
-        """Load analysis results from cache."""
-        if self.cache is None:
-            return None
+    def _has_results_cache(self) -> bool:
+        """Whether a disk results cache is configured.
 
-        # TODO: Implement cache loading logic
-        return None
+        Results caching is disk-only and opt-in via ``CacheConfig.cache_dir``.
+        When ``cache_dir`` is None (the default in-memory mode), no results are
+        cached, preserving the historical no-op behavior of these hooks.
+        """
+        return (
+            self.config.cache is not None
+            and self.config.cache.enabled
+            and self.config.cache.cache_dir is not None
+        )
+
+    def _get_solver_urdf_path(self) -> str | None:
+        """Get the URDF path used by the active solver.
+
+        Falls back to the robot's asset path when the solver does not specify
+        one explicitly.
+        """
+        solver_cfg = getattr(self.robot.cfg, "solver_cfg", None)
+        urdf = None
+        if isinstance(solver_cfg, dict):
+            sc = solver_cfg.get(self.control_part_name)
+            if sc is None and solver_cfg:
+                sc = next(iter(solver_cfg.values()))
+            urdf = getattr(sc, "urdf_path", None)
+        elif solver_cfg is not None:
+            urdf = getattr(solver_cfg, "urdf_path", None)
+        if urdf is None:
+            urdf = getattr(self.robot.cfg, "fpath", None)
+        return urdf
+
+    def _get_control_part_joint_names(self) -> List[str] | None:
+        """Get the expanded joint names of the active control part."""
+        parts = self.robot.control_parts
+        if not parts:
+            return None
+        if self.control_part_name and self.control_part_name in parts:
+            return list(parts[self.control_part_name])
+        return list(next(iter(parts.values())))
+
+    def _build_cache_key_metadata(self, num_samples: int) -> Dict[str, Any]:
+        """Build the input-metadata dict used to key the results cache.
+
+        Includes every input that affects the analysis output so that changing
+        any of them invalidates the cache.
+
+        Args:
+            num_samples: Effective number of samples for this run.
+
+        Returns:
+            Metadata dictionary (JSON-serializable via ``compute_cache_key``).
+        """
+        try:
+            from embodichain import __version__ as pkg_version
+        except Exception:
+            pkg_version = "unknown"
+
+        fpath = getattr(self.robot.cfg, "fpath", None)
+        solver_urdf = self._get_solver_urdf_path()
+        robot_info = {
+            "fpath": os.path.abspath(fpath) if fpath else None,
+            "urdf_path": os.path.abspath(solver_urdf) if solver_urdf else None,
+            "control_part": self.control_part_name,
+            "joint_names": self._get_control_part_joint_names(),
+            "qpos_limits": self.qpos_limits.detach().cpu().numpy().tolist(),
+        }
+        # File stat so edits to the asset/URDF invalidate the cache.
+        for key, path in (("fpath", fpath), ("urdf_path", solver_urdf)):
+            if path and os.path.exists(path):
+                st = os.stat(path)
+                robot_info[f"{key}_size"] = st.st_size
+                robot_info[f"{key}_mtime"] = int(st.st_mtime)
+
+        cfg = self.config
+        sampling = cfg.sampling
+        constraint = cfg.constraint
+        metadata = {
+            "analyzer_version": pkg_version,
+            "robot": robot_info,
+            "mode": cfg.mode.value,
+            "num_samples": int(num_samples),
+            "sampling": {
+                "strategy": (
+                    sampling.strategy.value if sampling.strategy is not None else None
+                ),
+                "seed": sampling.seed,
+                "batch_size": sampling.batch_size,
+                "grid_resolution": sampling.grid_resolution,
+                "gaussian_mean": sampling.gaussian_mean,
+                "gaussian_std": sampling.gaussian_std,
+            },
+            "constraint": {
+                "min_bounds": _tensor_to_list(constraint.min_bounds),
+                "max_bounds": _tensor_to_list(constraint.max_bounds),
+                "joint_limits_scale": constraint.joint_limits_scale,
+                "ground_height": constraint.ground_height,
+            },
+            "ik_samples_per_point": cfg.ik_samples_per_point,
+        }
+
+        if cfg.reference_pose is not None:
+            ref = cfg.reference_pose
+            if isinstance(ref, torch.Tensor):
+                ref = ref.detach().cpu().numpy()
+            metadata["reference_pose_hash"] = hashlib.sha256(
+                np.asarray(ref).tobytes()
+            ).hexdigest()[:16]
+
+        if cfg.mode == AnalysisMode.PLANE_SAMPLING:
+            metadata["plane"] = {
+                "normal": _tensor_to_list(cfg.plane_normal),
+                "point": _tensor_to_list(cfg.plane_point),
+                "bounds": _tensor_to_list(cfg.plane_bounds),
+            }
+        return metadata
+
+    def _load_from_cache(self, num_samples: int) -> Dict[str, Any] | None:
+        """Load analysis results from the disk results cache.
+
+        Args:
+            num_samples: Effective number of samples for this run (used to key
+                the cache).
+
+        Returns:
+            Cached results dict, or None if no disk cache is configured or the
+            entry is absent.
+        """
+        if not self._has_results_cache():
+            return None
+        metadata = self._build_cache_key_metadata(num_samples)
+        key = compute_cache_key(metadata)
+        cache = ResultsCache(self.config.cache.cache_dir)
+        results = cache.load(key)
+        if results is not None:
+            self._last_cache_path = cache.entry_path(key)
+        return results
 
     def _save_to_cache(self, results: Dict[str, Any]) -> None:
-        """Save analysis results to cache."""
-        if self.cache is None:
-            return
+        """Save analysis results to the disk results cache.
 
-        # TODO: Implement cache saving logic
-        pass
+        No-op when no ``cache_dir`` is configured.
+        """
+        if not self._has_results_cache():
+            return
+        num_samples = results.get("num_samples", self.config.sampling.num_samples)
+        metadata = self._build_cache_key_metadata(num_samples)
+        key = compute_cache_key(metadata)
+        cache = ResultsCache(self.config.cache.cache_dir)
+        self._last_cache_path = cache.save(
+            key=key,
+            results=results,
+            metadata=metadata,
+            compression=self.config.cache.compression,
+        )
+
+    def _restore_analysis_state(self, results: Dict[str, Any]) -> None:
+        """Restore analyzer state from cached results for post-load use.
+
+        Populates the attributes consumed by :meth:`_visualize_workspace` and
+        :meth:`_log_analysis_summary` so a cache hit can still be visualized and
+        summarized without recomputation.
+
+        Args:
+            results: Cached results dict.
+        """
+        mode_str = results.get("mode")
+        try:
+            self.current_mode = AnalysisMode(mode_str) if mode_str else None
+        except ValueError:
+            self.current_mode = None
+        self.workspace_points = results.get("workspace_points")
+        self.joint_configurations = results.get("joint_configurations")
+        self.success_rates = results.get("success_rates")
+        if mode_str in ("cartesian_space", "plane_sampling"):
+            self.reachable_points = results.get("reachable_points")
+            self.reachability_mask = results.get("reachability_mask")
+
+    def get_results_cache_path(self) -> Path | None:
+        """Get the path to the most recently used results cache entry.
+
+        Returns:
+            Path to the cache entry directory, or None if no disk results cache
+            has been read or written yet.
+        """
+        return self._last_cache_path
 
     def get_workspace_bounds(self) -> Dict[str, np.ndarray]:
         """Get the bounding box of the analyzed workspace.
