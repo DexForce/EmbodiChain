@@ -20,6 +20,7 @@ from __future__ import annotations
 from contextlib import ExitStack
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 import requests
@@ -39,14 +40,14 @@ class GeometryGenerationClient:
         timeout_s: int,
         max_attempts: int,
         health_path: str,
-        generate_multiple_objects_path: str,
+        generate_objects_path: str,
         session: requests.Session | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
         self._max_attempts = max_attempts
         self._health_path = health_path
-        self._generate_multiple_objects_path = generate_multiple_objects_path
+        self._generate_objects_path = generate_objects_path
         self._session = session or requests.Session()
 
     @classmethod
@@ -57,17 +58,24 @@ class GeometryGenerationClient:
         return cls(**_load_config(config_path))
 
     def check_health(self) -> None:
-        last_error: requests.RequestException | None = None
+        last_error: Exception | None = None
         for _ in range(self._max_attempts):
             try:
                 response = self._session.get(
                     self._url(self._health_path),
-                    # timeout=self._timeout_s,
                     timeout=10,  # Use a shorter timeout for avoiding long waits.
                 )
                 response.raise_for_status()
+                response_data = response.json()
+                if (
+                    not isinstance(response_data, dict)
+                    or response_data.get("ok") is not True
+                ):
+                    raise RuntimeError(
+                        "Geometry Generation Server health response does not contain ok=true."
+                    )
                 return
-            except requests.RequestException as exc:
+            except (requests.RequestException, ValueError, RuntimeError) as exc:
                 last_error = exc
 
         assert last_error is not None
@@ -79,16 +87,19 @@ class GeometryGenerationClient:
     def close(self) -> None:
         self._session.close()
 
-    def generate_multiple_objects(
+    def generate_objects(
         self,
         *,
         image_path: str | Path,
         object_masks: list[tuple[str, Path]],
         output_root: str | Path,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Generate multiple objects from:
-        - An input image.
-        - A list of object masks, each with a unique object_id and a binary mask path.
+        """Generate objects through the geometry server's mask-list endpoint.
+
+        The SAM3D service represents both one-object and multi-object jobs as one
+        image plus a multipart ``masks`` list. The number of list items is the
+        only difference, so keeping one implementation prevents the two client
+        paths from drifting apart.
         """
 
         # Check, validate then wrap each content of the request.
@@ -112,13 +123,14 @@ class GeometryGenerationClient:
                 )
             resolved_object_masks.append((object_id, resolved_mask_path))
 
-        # Use the wrapped data structure to send the request.
-        response_data, response_objects = self._request_multiple_objects(
+        # Send one multipart image + masks request, matching test_sam3d_client.py.
+        response_data, response_objects = self._request_objects(
             image_path=resolved_image_path,
             object_masks=resolved_object_masks,
         )
 
         resolved_output_root = Path(output_root).expanduser().resolve()
+        resolved_output_root.mkdir(parents=True, exist_ok=True)
 
         # This loop will iterate min(len(resolved_object_masks), len(response_objects)) times
         # , which is safe because we validated the lengths earlier.
@@ -133,7 +145,7 @@ class GeometryGenerationClient:
             self._download_glb(response_object["mesh"], output_path)
         return response_data, response_objects
 
-    def _request_multiple_objects(
+    def _request_objects(
         self,
         *,
         image_path: Path,
@@ -150,12 +162,21 @@ class GeometryGenerationClient:
                         for _, mask_path in object_masks
                     ]
                     response = self._session.post(
-                        self._url(self._generate_multiple_objects_path),
-                        data={"json": "1"},
+                        self._url(self._generate_objects_path),
                         files=[
-                            ("image", (image_path.name, image_file)),
+                            (
+                                "image",
+                                (
+                                    image_path.name,
+                                    image_file,
+                                    _image_content_type(image_path),
+                                ),
+                            ),
                             *[
-                                ("masks", (f"{object_id}.png", mask_file))
+                                (
+                                    "masks",
+                                    (f"{object_id}.png", mask_file, "image/png"),
+                                )
                                 for (object_id, _), mask_file in zip(
                                     object_masks,
                                     mask_files,
@@ -171,11 +192,10 @@ class GeometryGenerationClient:
                     raise RuntimeError(
                         "Geometry Generation Server response is not valid JSON."
                     ) from exc
-                response_objects = (
-                    _parse_multiple_objects_response(  # Parse the response.
-                        response_data,
-                        object_ids=[object_id for object_id, _ in object_masks],
-                    )
+                response_data = self._wait_for_task_if_needed(response_data)
+                response_objects = _parse_objects_response(
+                    response_data,
+                    object_ids=[object_id for object_id, _ in object_masks],
                 )
                 return response_data, response_objects
             except (requests.RequestException, RuntimeError) as exc:
@@ -186,6 +206,65 @@ class GeometryGenerationClient:
             "Geometry Generation Server request failed after "
             f"{self._max_attempts} attempts."
         ) from last_error
+
+    def _wait_for_task_if_needed(self, response_data: object) -> dict[str, Any]:
+        """Poll a queued SAM3D job until it returns its final result."""
+        if not isinstance(response_data, dict):
+            raise RuntimeError(
+                "Geometry Generation Server response must be a JSON object."
+            )
+
+        status = response_data.get("status")
+        if not isinstance(status, str) or "waiting" not in status:
+            return response_data
+
+        request_id = response_data.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise RuntimeError(
+                "Geometry Generation Server queued response has no request_id."
+            )
+
+        # The server test client uses one-second polling and permits ten minutes
+        # for a queued job. Keep the same contract here.
+        for _ in range(600):
+            try:
+                response = self._session.get(
+                    self._url(f"/tasks/{request_id}"),
+                    timeout=10,
+                )
+                response.raise_for_status()
+                task_data = response.json()
+            except (requests.RequestException, ValueError) as exc:
+                raise RuntimeError(
+                    f"Geometry Generation Server task polling failed: {request_id}."
+                ) from exc
+
+            if not isinstance(task_data, dict):
+                raise RuntimeError(
+                    "Geometry Generation Server task response must be a JSON object."
+                )
+            task_status = task_data.get("status")
+            if task_status == "succeeded":
+                return task_data
+            if task_status in {"failed", "cancelled"}:
+                raise RuntimeError(
+                    "Geometry Generation Server task "
+                    f"{task_status}: {task_data.get('error', 'unknown error')}"
+                )
+            if not isinstance(task_status, str) or (
+                task_status != "running" and "waiting" not in task_status
+            ):
+                raise RuntimeError(
+                    "Geometry Generation Server returned unknown task status: "
+                    f"{task_status!r}."
+                )
+
+            time.sleep(1)
+
+        raise RuntimeError(
+            "Geometry Generation Server task timed out after 600 seconds: "
+            f"{request_id}."
+        )
 
     def _download_glb(self, mesh_path: str, output_path: Path) -> None:
         last_error: Exception | None = None
@@ -221,7 +300,7 @@ class GeometryGenerationClient:
         return f"{self._base_url}/{path.lstrip('/')}"
 
 
-def _parse_multiple_objects_response(
+def _parse_objects_response(
     response_data: object,
     *,
     object_ids: list[str],
@@ -305,6 +384,12 @@ def _parse_numeric_list(
         ) from exc
 
 
+def _image_content_type(image_path: Path) -> str:
+    if image_path.suffix.lower() in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    return "image/png"
+
+
 def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     resolved_config_path = Path(config_path or _DEFAULT_CONFIG_PATH).expanduser()
     resolved_config_path = resolved_config_path.resolve()
@@ -325,7 +410,7 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         "timeout_s",
         "max_attempts",
         "health_path",
-        "generate_multiple_objects_path",
+        "generate_objects_path",
     )
     missing = [key for key in required_keys if key not in config]
     if missing:
@@ -356,7 +441,7 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     string_keys = (
         "base_url",
         "health_path",
-        "generate_multiple_objects_path",
+        "generate_objects_path",
     )
     for key in string_keys:
         if not isinstance(config[key], str) or not config[key].strip():
@@ -369,7 +454,5 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         "timeout_s": timeout_s,
         "max_attempts": max_attempts,
         "health_path": config["health_path"].strip(),
-        "generate_multiple_objects_path": config[
-            "generate_multiple_objects_path"
-        ].strip(),
+        "generate_objects_path": config["generate_objects_path"].strip(),
     }

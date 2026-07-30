@@ -140,12 +140,10 @@ def _generate_coarse_results_from_masks(
         )  # id + mask, for avoiding the download glbs order confusion.
 
     # Sent the request, wait, then save the intermediate results.
-    response_data, response_objects = (
-        geometry_generation_client.generate_multiple_objects(
-            image_path=image_path,
-            object_masks=object_masks,
-            output_root=coarse_geometry_output_root,  # Keep the coarse geometries
-        )
+    response_data, response_objects = geometry_generation_client.generate_objects(
+        image_path=image_path,
+        object_masks=object_masks,
+        output_root=coarse_geometry_output_root,  # Keep the coarse geometries
     )
     # Write the response JSON which contains all the layout info the server gave us.
     # Keep original response for getting the sam3d coarse layout matrix.
