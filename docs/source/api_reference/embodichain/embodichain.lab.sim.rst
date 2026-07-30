@@ -25,6 +25,7 @@ management, materials, sensors, planning/IK utilities, and action helpers.
    solvers
    planners
    atomic_actions
+   workspace
    types
    utility
 
@@ -133,6 +134,15 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+
+Robot Workspace
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.workspace
+
 Shared Types
 ------------
 

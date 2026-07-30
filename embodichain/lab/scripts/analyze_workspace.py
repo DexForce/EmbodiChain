@@ -48,6 +48,10 @@ Usage examples::
         --robot franka_panda \\
         --preview-cache ~/.cache/embodichain_data/robot_workspace/<key>
 
+    # Analyze or preview with the robot and workspace in a Viser browser
+    embodichain analyze-workspace \\
+        --robot franka_panda --mode joint_space --viser
+
 Results are cached to disk (``--cache-dir``, default
 ``~/.cache/embodichain_data/robot_workspace``) keyed by the robot + parameters,
 so repeated runs and other applications can reuse the reachable workspace
@@ -67,7 +71,7 @@ from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
+    from embodichain.lab.sim.workspace.analyzer import (
         WorkspaceAnalyzerConfig,
     )
 
@@ -88,6 +92,16 @@ _SOLVER_CHOICES = ("pytorch", "pinocchio", "pink")
 
 # Predefined EmbodiChain robots selectable via ``--robot``.
 _ROBOT_CHOICES = ("franka_panda", "cobotmagic", "dexforce_w1", "ur")
+
+
+def _viser_enabled(args: argparse.Namespace) -> bool:
+    """Whether the Viser browser backend was requested."""
+    return bool(getattr(args, "viser", False))
+
+
+def _visualization_enabled(args: argparse.Namespace) -> bool:
+    """Whether workspace visualization has an active display backend."""
+    return bool(args.visualize and (_viser_enabled(args) or not args.headless))
 
 
 def _robot_cfg_cls(name: str):
@@ -187,6 +201,7 @@ def build_sim_cfg(args: argparse.Namespace):
     """
     from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
+    from embodichain.lab.visualization import visualization_cfg_from_args
 
     return SimulationManagerCfg(
         headless=args.headless,
@@ -194,6 +209,7 @@ def build_sim_cfg(args: argparse.Namespace):
         width=args.width,
         height=args.height,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
 
@@ -349,7 +365,7 @@ def build_analyzer_config(
     """
     import torch
 
-    from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+    from embodichain.lab.sim.workspace.configs import (
         CacheConfig,
         DimensionConstraint,
         SamplingConfig,
@@ -357,13 +373,13 @@ def build_analyzer_config(
         VisualizationConfig,
         VisualizationType,
     )
-    from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
+    from embodichain.lab.sim.workspace.analyzer import (
         AnalysisMode,
         WorkspaceAnalyzerConfig,
     )
 
     mode = AnalysisMode(args.mode)
-    visualize = args.visualize and not args.headless
+    visualize = _visualization_enabled(args)
 
     sampling = SamplingConfig(
         strategy=SamplingStrategy(args.sampler),
@@ -375,6 +391,7 @@ def build_analyzer_config(
         enabled=visualize,
         vis_type=VisualizationType(args.vis_type),
         point_size=args.point_size,
+        viser_point_size=getattr(args, "viser_point_size", 0.01),
         voxel_size=args.voxel_size,
         show_unreachable_points=not args.hide_unreachable,
     )
@@ -575,7 +592,7 @@ def preview_cache(args: argparse.Namespace, analyzer: WorkspaceAnalyzer) -> None
             ``args.hide_unreachable``.
         analyzer: Analyzer attached to the loaded robot and simulation.
     """
-    from embodichain.lab.sim.utility.workspace_analyzer.caches.results_cache import (
+    from embodichain.lab.sim.workspace.caches.results_cache import (
         DEFAULT_RESULTS_CACHE_DIR,
         deserialize_results,
     )
@@ -591,12 +608,20 @@ def preview_cache(args: argparse.Namespace, analyzer: WorkspaceAnalyzer) -> None
 
     results = deserialize_results(arrays, {"mode": mode})
     analyzer._restore_analysis_state(results)
-    analyzer.visualize(vis_type=args.vis_type, show=False, backend="sim_manager")
-    log_info(
-        "Workspace cache and robot are visible in the EmbodiChain window. "
-        "Press Ctrl+C to exit.",
-        color="green",
-    )
+    if _viser_enabled(args):
+        analyzer.visualize(vis_type=args.vis_type, show=False, backend="viser")
+        log_info(
+            "Workspace cache and robot are visible in the Viser browser. "
+            "Press Ctrl+C to exit.",
+            color="green",
+        )
+    else:
+        analyzer.visualize(vis_type=args.vis_type, show=False, backend="sim_manager")
+        log_info(
+            "Workspace cache and robot are visible in the EmbodiChain window. "
+            "Press Ctrl+C to exit.",
+            color="green",
+        )
 
 
 def main(args: argparse.Namespace) -> None:
@@ -613,7 +638,7 @@ def main(args: argparse.Namespace) -> None:
     import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManager
-    from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
+    from embodichain.lab.sim.workspace.analyzer import (
         WorkspaceAnalyzer,
     )
 
@@ -651,12 +676,13 @@ def main(args: argparse.Namespace) -> None:
         analyzer_cfg = build_analyzer_config(args, control_part)
         analyzer = WorkspaceAnalyzer(robot=robot, config=analyzer_cfg, sim_manager=sim)
 
-        visualize = args.visualize and not args.headless
+        visualize = _visualization_enabled(args)
+        viser = _viser_enabled(args)
         if args.preview_cache:
             if not visualize:
                 raise ValueError(
-                    "--preview-cache requires an EmbodiChain window; remove "
-                    "--headless/--no-visualize."
+                    "--preview-cache requires a display backend; remove "
+                    "--no-visualize and use a native window or --viser."
                 )
             preview_cache(args, analyzer)
         else:
@@ -673,9 +699,16 @@ def main(args: argparse.Namespace) -> None:
                 analyzer.export_results(args.output, format=args.export_format)
 
         if visualize:
-            if not args.preview_cache:
+            if not args.preview_cache and not viser:
                 log_info(
                     "Workspace visualization window open. Press Ctrl+C to exit.",
+                    color="green",
+                )
+            elif viser:
+                endpoint = sim.visualization_health.endpoint
+                log_info(
+                    f"Viser workspace visualization ready at {endpoint}. "
+                    "Press Ctrl+C to exit.",
                     color="green",
                 )
             try:
@@ -988,7 +1021,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--no-visualize",
         action="store_true",
         default=False,
-        help="Do not visualize the workspace in the sim window.",
+        help="Do not visualize the workspace in the native window or Viser.",
+    )
+    viz.add_argument(
+        "--viser-point-size",
+        type=float,
+        default=0.01,
+        help="Workspace point size in world units for Viser (default: 0.01).",
     )
 
     # --- Simulation ---------------------------------------------------------
@@ -1003,7 +1042,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--headless",
         action="store_true",
         default=False,
-        help="Run without a rendering window (disables visualization).",
+        help="Run without a native rendering window. Viser remains available.",
     )
     sim.add_argument(
         "--renderer",
@@ -1019,17 +1058,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--height", type=int, default=1080, help="Window height (default: 1080)."
     )
 
+    from embodichain.lab.visualization import add_viser_args_to_parser
+
+    add_viser_args_to_parser(parser)
+
     args = parser.parse_args(argv)
+
+    if args.viser_point_size <= 0.0:
+        parser.error("--viser-point-size must be greater than zero.")
 
     # Resolve cache dir default here (after parse) to keep --help output clean.
     if args.cache_dir is None and not args.no_cache:
-        from embodichain.lab.sim.utility.workspace_analyzer.caches import (
+        from embodichain.lab.sim.workspace.caches import (
             DEFAULT_RESULTS_CACHE_DIR,
         )
 
         args.cache_dir = DEFAULT_RESULTS_CACHE_DIR
 
-    # ``args.visualize`` is the user intent; ``main()`` ANDs it with ``--headless``.
+    # ``args.visualize`` is the user intent; Viser remains active in headless mode.
     args.visualize = not args.no_visualize
 
     return args

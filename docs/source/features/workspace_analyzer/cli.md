@@ -158,6 +158,16 @@ Reachable points are shown green and unreachable points red (Cartesian/plane
 modes); pass `--hide-unreachable` to show only the reachable points. Use
 `--vis-type`, `--point-size`, etc. to control the rendering.
 
+To preview the cached workspace and robot in a headless Viser browser instead
+of the native window:
+
+```bash
+embodichain analyze-workspace \
+    --robot franka_panda \
+    --preview-cache <cache-name> \
+    --viser
+```
+
 ### Loading cached data from other applications
 
 Other applications can load the cached reachable workspace directly with NumPy,
@@ -179,10 +189,25 @@ configs = data["joint_configurations"] # (M, num_joints) IK solutions
 print(meta["mode"], meta["num_reachable"], "/", meta["num_samples"])
 ```
 
+For environment randomization, prefer the runtime API so sampled joint
+configurations are converted to poses using each environment's current robot
+base:
+
+```python
+from embodichain.lab.sim.workspace import RobotWorkspace
+
+workspace = RobotWorkspace.from_cache(entry, device="cuda")
+indices = workspace.sample_indices(16, strategy="voxel_uniform")
+candidate_qpos = workspace.qpos[indices]
+```
+
+See [Runtime Workspace Sampling](runtime.md) for Robot and event-functor
+integration.
+
 To look up an entry by its inputs from Python, use the analyzer's cache key:
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.caches import (
+from embodichain.lab.sim.workspace.caches import (
     ResultsCache, compute_cache_key,
 )
 # metadata = analyzer._build_cache_key_metadata(num_samples)  # same inputs
@@ -199,11 +224,28 @@ After computation, the workspace is drawn in the simulation window (reachable
 points green, unreachable red in Cartesian/plane modes). The window stays open
 until `Ctrl+C`.
 
+Use `--viser` to publish the robot and workspace to a browser while running the
+simulation headlessly:
+
+```bash
+embodichain analyze-workspace \
+    --robot ur --robot-params '{"robot_type":"ur5"}' \
+    --mode joint_space --num-samples 20000 \
+    --viser --viser-port 8080
+```
+
+Viser currently renders the workspace as a point cloud. Other `--vis-type`
+values fall back to point-cloud rendering in Viser while retaining their
+existing behavior in the native window.
+
 | Argument | Description |
 |----------|-------------|
 | `--vis-type {point_cloud,voxel,sphere,axis}` | Visualization type (default: `point_cloud`). |
 | `--point-size`, `--voxel-size` | Rendering sizes. |
+| `--viser` | Open a headless browser visualization containing the robot and workspace. |
+| `--viser-point-size` | Viser workspace point size in world units (default: `0.01`). |
+| `--viser-host`, `--viser-port`, `--viser-fps` | Viser server and update settings. |
 | `--hide-unreachable` | Show only reachable points in Cartesian/plane modes. |
 | `--no-visualize` | Skip visualization. |
-| `--headless` | Run without a window (disables visualization). |
+| `--headless` | Run without the native window; Viser remains available. |
 | `--sim-device`, `--renderer`, `--width`, `--height` | Simulation/render settings. |

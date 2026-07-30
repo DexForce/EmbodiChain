@@ -1,12 +1,15 @@
-Workspace Analyzer
-======================
+Robot Workspace
+===============
 
-The Workspace Analyzer provides comprehensive analysis of robot workspace characteristics, including joint space and Cartesian space analysis capabilities for understanding robot reachability, workspace volume, and performance metrics.
+The ``embodichain.lab.sim.workspace`` package provides offline workspace
+analysis, persistent cache management, visualization, and runtime sampling for
+task-environment randomization.
 
 .. toctree::
    :maxdepth: 2
 
    Overview and Usage <workspace_analyzer.md>
+   Runtime Sampling <runtime.md>
    CLI <cli.md>
    Configuration System <configs.md>
    Sampling Strategies <samplers.md>
@@ -14,4 +17,3 @@ The Workspace Analyzer provides comprehensive analysis of robot workspace charac
    Caching System <caches.md>
    Constraint Handling <constraints.md>
    Metric Computation <metrics.md>
-   
