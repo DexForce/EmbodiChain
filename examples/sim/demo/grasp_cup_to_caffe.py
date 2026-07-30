@@ -94,7 +94,7 @@ def create_robot(sim: SimulationManager) -> Robot:
     cfg = DexforceW1Cfg.from_dict(
         {
             "uid": "dexforce_w1",
-            "version": "v021",
+            "version": "v025",
             "init_pos": [0.4, -0.5, 0.0],
         }
     )
@@ -158,56 +158,6 @@ def create_robot(sim: SimulationManager) -> Robot:
         0.0000e00,
     ]
     return sim.add_robot(cfg=cfg)
-
-
-def draw_initial_kinematic_markers(
-    sim: SimulationManager,
-    robot: Robot,
-) -> None:
-    """Draw the initial right-arm TCP and the simulated left_ee link frame."""
-    right_arm_ids = robot.get_joint_ids("right_arm")
-    right_arm_qpos = robot.get_qpos()[:, right_arm_ids]
-    right_tcp_xpos = robot.compute_fk(
-        qpos=right_arm_qpos,
-        name="right_arm",
-        to_matrix=True,
-    )
-    left_ee_xpos = robot.get_link_pose(
-        link_name="left_ee",
-        to_matrix=True,
-    )
-
-    # Draw only environment 0 so multiple identical initial poses do not
-    # overlap when the demo is launched with more than one environment.
-    sim.draw_marker(
-        cfg=MarkerCfg(
-            name="initial_right_tcp",
-            marker_type="axis",
-            axis_xpos=right_tcp_xpos[0],
-            axis_size=0.005,
-            axis_len=0.15,
-            arena_index=0,
-        )
-    )
-    sim.draw_marker(
-        cfg=MarkerCfg(
-            name="initial_left_ee",
-            marker_type="axis",
-            axis_xpos=left_ee_xpos[0],
-            axis_size=0.003,
-            axis_len=0.10,
-            arena_index=0,
-        )
-    )
-
-    logger.log_info(
-        "Initial right-arm TCP marker (axis length 0.15 m):\n"
-        f"{right_tcp_xpos[0].detach().cpu().numpy()}"
-    )
-    logger.log_info(
-        "Initial left_ee marker (axis length 0.10 m):\n"
-        f"{left_ee_xpos[0].detach().cpu().numpy()}"
-    )
 
 
 def create_table(sim: SimulationManager) -> RigidObject:
@@ -472,8 +422,6 @@ def main():
     caffe = create_caffe(sim)
     cup = create_cup(sim)
 
-    draw_initial_kinematic_markers(sim, robot)
-
     sim.update(step=1)
 
     # apply random perturbation
@@ -485,10 +433,6 @@ def main():
 
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
-
-    import pdb
-
-    pdb.set_trace()
 
     run_simulation(sim, robot, cup, caffe)
 
