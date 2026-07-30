@@ -57,7 +57,7 @@ def main(args):
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
 
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     import torch

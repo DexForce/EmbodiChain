@@ -108,7 +108,7 @@ def main():
     )
 
     # Open window when the scene has been set up
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     print("[INFO]: Scene setup complete!")

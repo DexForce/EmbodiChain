@@ -184,7 +184,7 @@ def main():
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     run_simulation(sim)

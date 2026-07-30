@@ -265,7 +265,7 @@ def main():
 
     logger.log_info("Scene exported successfully.")
 
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
         logger.log_info("Press Ctrl+C to exit.")
         try:

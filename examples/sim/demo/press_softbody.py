@@ -189,7 +189,7 @@ def main():
     robot = create_robot(sim)
     soft_cow = create_soft_cow(sim)
     sim.init_gpu_physics()
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     press_cow(sim, robot)

@@ -121,7 +121,7 @@ def main():
     print("[INFO]: Created constraint 'cube_weld' between cube_a and cube_b.")
 
     # Open the viewer (unless --headless) so the welded motion is visible.
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     print("[INFO]: Stepping physics while ATTACHED (relative pose held):")

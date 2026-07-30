@@ -271,7 +271,7 @@ def main():
     cloth = create_cloth(sim)
     padding_box = create_padding_box(sim)
     sim.init_gpu_physics()
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
     sim.update(step=10)  # Let the cloth settle before interaction
 

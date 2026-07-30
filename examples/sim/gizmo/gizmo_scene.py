@@ -61,7 +61,7 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=args.headless,
+        headless=True,
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
@@ -164,55 +164,71 @@ def main():
     )
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
+    native_window_opened = False
+    if not args.headless:
+        native_window_opened = sim.open_window()
+
     # Enable gizmo for all assets after all are created and initialized
-    sim.enable_gizmo(
-        uid="w1_gizmo_test",
-        control_part="left_arm",
-        enable_native=not sim.sim_config.headless,
-    )
-    if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
-        logger.log_error("Failed to enable left arm gizmo!")
-        return
+    if native_window_opened or args.viser:
+        sim.enable_gizmo(
+            uid="w1_gizmo_test",
+            control_part="left_arm",
+            enable_native=native_window_opened,
+        )
+        if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
+            logger.log_error("Failed to enable left arm gizmo!")
+            return
 
-    sim.enable_gizmo(
-        uid="w1_gizmo_test",
-        control_part="right_arm",
-        enable_native=not sim.sim_config.headless,
-    )
-    if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
-        logger.log_error("Failed to enable right arm gizmo!")
-        return
+        sim.enable_gizmo(
+            uid="w1_gizmo_test",
+            control_part="right_arm",
+            enable_native=native_window_opened,
+        )
+        if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
+            logger.log_error("Failed to enable right arm gizmo!")
+            return
 
-    sim.enable_gizmo(
-        uid="interactive_cube",
-        enable_native=not sim.sim_config.headless,
-    )
-    if not sim.has_gizmo("interactive_cube"):
-        logger.log_error("Failed to enable gizmo for cube!")
-        return
+        sim.enable_gizmo(
+            uid="interactive_cube",
+            enable_native=native_window_opened,
+        )
+        if not sim.has_gizmo("interactive_cube"):
+            logger.log_error("Failed to enable gizmo for cube!")
+            return
 
-    sim.enable_gizmo(
-        uid="scene_camera",
-        enable_native=not sim.sim_config.headless,
-    )
-    if not sim.has_gizmo("scene_camera"):
-        logger.log_error("Failed to enable gizmo for camera!")
-        return
-
-    sim.open_window()
+        sim.enable_gizmo(
+            uid="scene_camera",
+            enable_native=native_window_opened,
+        )
+        if not sim.has_gizmo("scene_camera"):
+            logger.log_error("Failed to enable gizmo for camera!")
+            return
+    else:
+        logger.log_warning(
+            "Gizmo interaction is disabled in headless mode without Viser."
+        )
 
     logger.log_info("Gizmo Scene example started!")
-    logger.log_info("Four gizmos are active in the scene:")
-    logger.log_info("1. Left arm gizmo - Use to drag the left arm end-effector (EE)")
-    logger.log_info("2. Right arm gizmo - Use to drag the right arm end-effector (EE)")
-    logger.log_info("3. Cube gizmo - Use to drag and position the cube")
-    logger.log_info("4. Camera gizmo - Use to drag and orient the camera")
+    if native_window_opened or args.viser:
+        logger.log_info("Four gizmos are active in the scene:")
+        logger.log_info(
+            "1. Left arm gizmo - Use to drag the left arm end-effector (EE)"
+        )
+        logger.log_info(
+            "2. Right arm gizmo - Use to drag the right arm end-effector (EE)"
+        )
+        logger.log_info("3. Cube gizmo - Use to drag and position the cube")
+        logger.log_info("4. Camera gizmo - Use to drag and orient the camera")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, show_camera_window=native_window_opened)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(
+    sim: SimulationManager,
+    *,
+    show_camera_window: bool,
+) -> None:
     step_count = 0
     # Get the camera instance by uid
     camera = sim.get_sensor("scene_camera")
@@ -226,7 +242,7 @@ def run_simulation(sim: SimulationManager):
             step_count += 1
 
             # Display camera view in a window every 5 steps
-            if camera is not None and step_count % 5 == 0:
+            if show_camera_window and camera is not None and step_count % 5 == 0:
                 camera.update()
                 data = camera.get_data()
                 if "color" in data:
@@ -261,7 +277,8 @@ def run_simulation(sim: SimulationManager):
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
-        cv2.destroyAllWindows()
+        if show_camera_window:
+            cv2.destroyAllWindows()
         sim.destroy()
         logger.log_info("Simulation terminated successfully")
 

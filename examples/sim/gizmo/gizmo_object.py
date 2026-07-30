@@ -47,7 +47,7 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=args.headless,
+        headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
         render_cfg=RenderCfg(
@@ -89,29 +89,33 @@ def main():
         )
     )
 
+    native_window_opened = False
+    if not args.headless:
+        native_window_opened = sim.open_window()
+
     # Enable native-window or Viser Gizmo control.
-    if not sim.sim_config.headless or args.viser:
+    if native_window_opened or args.viser:
         sim.enable_gizmo(
             uid="cube1",
-            enable_native=not sim.sim_config.headless,
+            enable_native=native_window_opened,
         )
         sim.enable_gizmo(
             uid="cube2",
-            enable_native=not sim.sim_config.headless,
+            enable_native=native_window_opened,
+        )
+    else:
+        logger.log_warning(
+            "Gizmo interaction is disabled in headless mode without Viser."
         )
 
     logger.log_info("Scene setup complete!")
     logger.log_info(f"Running simulation with 1 environment(s)")
-    if not sim.sim_config.headless or args.viser:
+    if native_window_opened or args.viser:
         if sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")
         if sim.has_gizmo("cube2"):
             logger.log_info("Gizmo enabled for cube2 - you can drag it around!")
     logger.log_info("Press Ctrl+C to stop the simulation")
-
-    # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
 
     # Run the simulation
     run_simulation(sim)
@@ -130,15 +134,13 @@ def run_simulation(sim: SimulationManager):
         while True:
             sim.update(step=1)
 
-            # Update all gizmos if any are enabled
-            sim.update_gizmos()
-
             step_count += 1
 
             # Disable gizmo after 200000 steps (example)
             if step_count == 200000 and gizmo_enabled:
                 logger.log_info("Disabling gizmo at step 200000")
-                sim.disable_gizmo("cube")
+                sim.disable_gizmo("cube1")
+                sim.disable_gizmo("cube2")
                 gizmo_enabled = False
 
             # Print FPS every second

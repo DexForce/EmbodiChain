@@ -150,7 +150,7 @@ def main():
     print("[INFO]: Add soft object complete!")
 
     # Open window when the scene has been set up
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")

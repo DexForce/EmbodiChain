@@ -76,6 +76,10 @@ The atomic-action tutorials receive the same options through
 configuration into their environment configuration. Gizmo examples accept
 `--viser`, which uses a headless simulation with browser-native transform
 controls. Omit `--viser` to use the DexSim native window instead.
+Application launchers only need to check `--headless` before calling
+`open_window()`; the simulation manager safely skips the native window while
+Viser is configured. It also rejects Viser startup while the native window is
+already open.
 
 Cloth uses its welded physical surface topology. DexSim does not currently
 expose the PhysX soft-body collision topology, so the soft-body preview uses

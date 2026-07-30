@@ -544,7 +544,7 @@ def main():
     heave_ice = create_heave_ice(sim)
     ice_cubes = create_ice_cubes(sim)
 
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     # Randomize ice positions

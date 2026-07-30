@@ -264,6 +264,89 @@ def test_headless_simulation_does_not_enable_viser() -> None:
     assert cfg.visualization.backend == "none"
 
 
+@pytest.mark.parametrize(
+    ("backend", "runtime_active", "expected"),
+    [
+        ("none", False, True),
+        ("none", True, False),
+        ("viser", False, False),
+    ],
+)
+def test_native_window_availability_depends_on_visualization_backend(
+    backend: str,
+    runtime_active: bool,
+    expected: bool,
+) -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend=backend),
+    )
+    sim._visualization_runtime = object() if runtime_active else None
+
+    assert sim.can_open_native_window() is expected
+
+
+def test_open_window_skips_viser_backend() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="viser"),
+    )
+    sim._visualization_runtime = None
+    sim._world = MagicMock()
+
+    opened = sim.open_window()
+
+    assert not opened
+    sim._world.open_window.assert_not_called()
+
+
+def test_open_window_allows_native_backend() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="none"),
+    )
+    sim._visualization_runtime = None
+    sim._world = MagicMock()
+    sim._window_record_hotkey_cfg = None
+    sim._window_record_input_control = None
+    sim._window_camera_pose_hotkey_cfg = None
+    sim._window_camera_pose_input_control = None
+    sim.is_window_opened = False
+
+    opened = sim.open_window()
+
+    assert opened
+    sim._world.open_window.assert_called_once_with()
+    assert sim.is_window_opened
+
+
+def test_open_window_is_idempotent() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="none"),
+    )
+    sim._visualization_runtime = None
+    sim._world = MagicMock()
+    sim.is_window_opened = True
+
+    opened = sim.open_window()
+
+    assert opened
+    sim._world.open_window.assert_not_called()
+
+
+def test_start_visualization_rejects_open_native_window() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="viser"),
+    )
+    sim.is_window_opened = True
+    sim._visualization_runtime = None
+
+    with pytest.raises(RuntimeError, match="native DexSim window"):
+        sim.start_visualization()
+
+
 def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> None:
     lifecycle: list[str] = []
     world = MagicMock()

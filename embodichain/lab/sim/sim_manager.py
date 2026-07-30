@@ -126,9 +126,9 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run without an automatically opened native window.
 
-    This is forced to ``True`` when the Viser backend is enabled. Call
-    :meth:`SimulationManager.open_window` explicitly when a native window is
-    still required. Viser Gizmos do not require a native window.
+    This is forced to ``True`` when the Viser backend is enabled. Viser and
+    the native DexSim window are mutually exclusive; browser Gizmos do not
+    require a native window.
     """
 
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
@@ -519,6 +519,11 @@ class SimulationManager:
         """Start the configured live visualizer and publish the current scene."""
         if self.sim_config.visualization.backend == "none":
             return None
+        if getattr(self, "is_window_opened", False):
+            raise RuntimeError(
+                "Cannot start the Viser backend while the native DexSim window "
+                "is open. Close the native window before starting Viser."
+            )
         if self._visualization_runtime is not None:
             if self._visualization_runtime.is_running:
                 return self._visualization_runtime
@@ -812,8 +817,38 @@ class SimulationManager:
     def get_world(self) -> dexsim.World:
         return self._world
 
-    def open_window(self) -> None:
-        """Open the simulation window."""
+    def can_open_native_window(self) -> bool:
+        """Return whether the native DexSim window may be opened.
+
+        The Viser backend owns visualization while it is configured or
+        running, so a native window must not be opened for the same simulation.
+
+        Returns:
+            ``True`` unless the Viser backend is configured or running.
+        """
+        return (
+            self.sim_config.visualization.backend != "viser"
+            and self._visualization_runtime is None
+        )
+
+    def open_window(self) -> bool:
+        """Open the native DexSim simulation window when allowed.
+
+        Viser owns visualization while it is configured or running. In that
+        case this method safely skips the native window so launchers do not
+        need a separate Viser condition.
+
+        Returns:
+            ``True`` when the native window is open, otherwise ``False``.
+        """
+        if not self.can_open_native_window():
+            logger.log_info(
+                "Skipping the native DexSim window because the Viser backend "
+                "is configured or running."
+            )
+            return False
+        if self.is_window_opened:
+            return True
         self._world.open_window()
         self._window = self._world.get_windows()
 
@@ -828,6 +863,7 @@ class SimulationManager:
         ):
             self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
         self.is_window_opened = True
+        return True
 
     def close_window(self) -> None:
         """Close the simulation window."""

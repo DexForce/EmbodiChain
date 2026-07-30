@@ -720,7 +720,7 @@ def main() -> None:
 
         # Delay viewer/recorder startup until the robot and every obstacle have
         # been loaded and placed at their final initial poses.
-        if not args.headless and not args.viser:
+        if not args.headless:
             sim.open_window()
         _start_headless_recording(sim, args)
         if args.hold_steps:

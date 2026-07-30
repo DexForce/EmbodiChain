@@ -129,8 +129,7 @@ def main() -> None:
 
     robot: Robot = sim.add_robot(cfg=cfg)
 
-    if not args.viser:
-        sim.open_window()
+    sim.open_window()
 
     arm_name = "arm"
     device = robot.device

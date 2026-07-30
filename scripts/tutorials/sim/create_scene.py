@@ -117,7 +117,7 @@ def main() -> None:
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     if args.headless and not args.viser:

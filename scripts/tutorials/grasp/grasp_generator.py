@@ -235,7 +235,7 @@ if __name__ == "__main__":
         is_filter_ground_collision=True,
         n_top_grasps=30,
     )
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     # Annotate part of the mug to be grasped by following the instructions in the visualization window:

@@ -429,7 +429,7 @@ def main():
     apply_random_xy_perturbation(cup, max_perturbation=0.05)
     apply_random_xy_perturbation(caffe, max_perturbation=0.05)
 
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     if sim.is_use_gpu_physics:

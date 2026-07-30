@@ -229,6 +229,18 @@ Scripts using the common environment launcher accept:
 | `--viser-soft-body-fps` | `5.0` | Deformable mesh update limit. |
 | `--viser-env-ids ID ...` | `0` | Environment IDs to publish, or `all`. |
 
+Application launchers only need to preserve an explicit `--headless` request:
+
+```python
+if not args.headless:
+    sim.open_window()
+```
+
+`SimulationManager.open_window()` returns `False` without opening a native
+window when the Viser backend is configured or running, so launchers do not
+need their own Viser condition. Starting Viser while the native window is
+already open is rejected.
+
 ## Health and telemetry
 
 Use the manager properties to inspect the running service:

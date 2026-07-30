@@ -77,7 +77,7 @@ def main():
         sim.init_gpu_physics()
 
     # Open visualization window if not headless
-    if not args.headless and not args.viser:
+    if not args.headless:
         sim.open_window()
 
     # Run simulation loop
