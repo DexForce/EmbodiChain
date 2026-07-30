@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Create a pull request for EmbodiChain following the project's PR template and conventions, including selecting proper GitHub repository labels
+description: Create a pull request for EmbodiChain following the project's PR template and conventions, including proportional validation and proper GitHub repository labels
 ---
 
 # EmbodiChain Pull Request Creator
@@ -44,7 +44,29 @@ Write a description that includes:
 - **Motivation and context**: Why this change is needed
 - **Dependencies**: List any dependencies required for this change
 
-### 4. Run Code Formatting
+### 4. Select Proportional Validation
+
+Inspect the changed files and validate only the affected behavior. Do not run the
+full test suite automatically.
+
+- Workflow-only changes: run `actionlint` on the changed workflows and any
+  directly related workflow-script tests.
+- Documentation-only changes: run the relevant docs checks or build; do not run
+  Python tests unless executable examples or docs tooling changed.
+- Isolated Python changes: run the nearest matching test module or package.
+- Shared infrastructure or cross-package changes: run affected package tests and
+  focused integration tests.
+- Run the full suite only for broad cross-cutting changes, global dependency or
+  test-configuration changes, release-critical changes that cannot be validated
+  narrowly, or when the user explicitly requests it.
+
+If a validation command is likely to take more than two minutes, state why it is
+needed before starting it. Honor an explicit user request to skip or narrow tests,
+and record skipped checks honestly in the PR description.
+
+Use the `pre-commit-check` skill for the detailed selection and reporting rules.
+
+### 5. Run Code Formatting
 
 Before creating the PR, ensure code is formatted:
 
@@ -59,7 +81,7 @@ git add -A
 git commit -m "Format code with black"
 ```
 
-### 5. Create or Update Branch
+### 6. Create or Update Branch
 
 If not already on a feature branch:
 
@@ -73,7 +95,7 @@ Recommended branch naming:
 - `enhance/<description>` - for enhancements
 - `docs/<description>` - for documentation changes
 
-### 6. Commit Changes
+### 7. Commit Changes
 
 Commit with a clear message following conventional commits format:
 
@@ -83,13 +105,13 @@ git commit -m "type(scope): brief description
 Detailed description of the change."
 ```
 
-### 7. Push to Remote
+### 8. Push to Remote
 
 ```bash
 git push -u origin <branch-name>
 ```
 
-### 8. Create the PR
+### 9. Create the PR
 
 Use the gh CLI with the proper PR template:
 
@@ -97,7 +119,7 @@ Use the gh CLI with the proper PR template:
 gh pr create --title "<PR Title>" --body "<PR Body>"
 ```
 
-### 9. Select and Apply Labels
+### 10. Select and Apply Labels
 
 After creating the PR, select proper labels from the repository label list and apply them.
 

@@ -21,7 +21,7 @@ the agent should:
 3. Load only the matched Markdown files under `agent_context/`
 4. Avoid reading `docs/source/` unless the user explicitly asks for the Sphinx documentation
 
-Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `atomic-actions`, `rl-learning`, `configclass-pattern`, `randomization`.
+Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
@@ -49,6 +49,7 @@ EmbodiChain/
 │   │   └── rl/                   # RL: PPO/GRPO algo, rollout buffer, collectors, policies
 │   ├── data/                     # Assets, datasets, constants, enums
 │   ├── lab/                      # Simulation lab
+│   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
 │   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
