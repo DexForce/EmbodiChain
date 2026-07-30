@@ -1947,6 +1947,40 @@ def test_recorder_finalizes_aborted_episode(
     assert (env_dir / "task_graph.png").is_file()
 
 
+def test_recorder_renderer_failure_does_not_block_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime import task_graph_artifact
+
+    seed = make_relative_seed_task_graph("renderer_failure", _relative_spec())
+    env = SimpleNamespace(num_envs=1, agent_robot_profile="dual_franka")
+    monkeypatch.setattr(task_graph_artifact, "_outputs_root", lambda: tmp_path)
+
+    def fail_renderer(document):
+        raise RuntimeError("injected renderer failure")
+
+    recorder = RuntimeTaskGraphRecorder(
+        seed,
+        env=env,
+        run_id="renderer_failure_run",
+        episode_index=0,
+        graph_renderer=fail_renderer,
+    )
+    recorder.finalize(torch.tensor([False]))
+
+    env_dir = (
+        tmp_path
+        / "renderer_failure"
+        / "runs"
+        / "renderer_failure_run"
+        / "episode_0000"
+        / "env_0000"
+    )
+    assert (env_dir / "task_graph.json").is_file()
+    assert not (env_dir / "task_graph.png").exists()
+
+
 def _relative_spec(
     *,
     release_position: list[float] | None = None,

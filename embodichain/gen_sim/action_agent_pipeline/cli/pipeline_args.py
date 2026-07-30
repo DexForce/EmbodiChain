@@ -329,6 +329,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pass --headless to run_agent to avoid opening a simulator window.",
     )
     parser.add_argument(
+        "--render-graphs",
+        "--render_graphs",
+        dest="render_graphs",
+        action="store_true",
+        default=False,
+        help=(
+            "Render the Seed graph and per-environment runtime Task graphs "
+            "under outputs/graph/<task_name>."
+        ),
+    )
+    parser.add_argument(
         "--llm-usage-output",
         default=None,
         help=(

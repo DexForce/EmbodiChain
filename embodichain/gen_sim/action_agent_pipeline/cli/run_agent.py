@@ -17,8 +17,10 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Mapping
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 import gymnasium
@@ -54,6 +56,7 @@ _WINDOW_LOOK_AT_CONFIG = _RUN_AGENT_DEFAULTS["window_look_at"]
 _SHOW_PHYSICAL_COLLISION_ENV = _PHYSICAL_COLLISION_CONFIG["environment_variable"]
 _PHYSICAL_COLLISION_RGBA = tuple(_PHYSICAL_COLLISION_CONFIG["rgba"])
 _FALSE_ENV_VALUES = frozenset(_PHYSICAL_COLLISION_CONFIG["false_env_values"])
+_SAFE_GRAPH_COMPONENT_RE = re.compile(r"[^0-9A-Za-z._-]+")
 
 
 def cli() -> None:
@@ -118,6 +121,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable all parallel action packing for validation runs.",
     )
+    parser.add_argument(
+        "--render-graphs",
+        "--render_graphs",
+        dest="render_graphs",
+        action="store_true",
+        default=False,
+        help=(
+            "Render the Seed graph and per-environment runtime Task graphs "
+            "under outputs/graph/<task_name>."
+        ),
+    )
     return parser
 
 
@@ -125,6 +139,7 @@ def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: 
     """Compatibility wrapper around the runtime-owned episode runner."""
     if getattr(args, "preview", False):
         log_warning("Preview mode is handled by the shared runner and is skipped here.")
+    runtime_graph_renderer = _configure_graph_rendering(args, env)
     run_action_agent(
         env=env,
         gym_config=gym_config,
@@ -144,6 +159,7 @@ def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: 
         final_reset=bool(getattr(args, "headless", False)),
         seed=getattr(args, "seed", None),
         strict_serial=bool(getattr(args, "strict_serial", False)),
+        runtime_graph_renderer=runtime_graph_renderer,
     )
 
 
@@ -154,6 +170,7 @@ def _generate_action_agent_trajectory(
     *,
     runtime_run_id: str,
 ) -> bool:
+    runtime_graph_renderer = _configure_graph_rendering(args, env)
     return generate_action_agent_trajectory(
         env=env,
         episode_index=trajectory_idx,
@@ -176,7 +193,52 @@ def _generate_action_agent_trajectory(
             else int(args.seed) + trajectory_idx
         ),
         strict_serial=bool(getattr(args, "strict_serial", False)),
+        runtime_graph_renderer=runtime_graph_renderer,
     )
+
+
+def _configure_graph_rendering(
+    args: argparse.Namespace,
+    env: gymnasium.Env,
+) -> Callable[[Mapping[str, Any]], bytes] | None:
+    """Lazily enable Seed and runtime graph rendering for the CLI."""
+    if not bool(getattr(args, "render_graphs", False)):
+        return None
+
+    from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
+        render_seed_task_graph_png,
+        render_task_graph_png,
+    )
+
+    seed_path = _get_wrapped_attr(env, "seed_task_graph_path")
+    if seed_path is None:
+        log_warning("Seed graph visualization skipped: seed graph path is unavailable.")
+        return render_task_graph_png
+
+    try:
+        seed_graph = load_config(seed_path)
+        task_name = _safe_graph_component(str(seed_graph.get("task", args.task_name)))
+        output_path = _graph_output_root() / task_name / "seed_task_graph.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(render_seed_task_graph_png(seed_graph))
+        log_info(f"Seed task graph saved to: {output_path}", color="green")
+    except Exception as exc:
+        log_warning(f"Failed to render Seed task graph: {exc}")
+    return render_task_graph_png
+
+
+def _graph_output_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "setup.py").is_file() and (parent / "embodichain").is_dir():
+            return parent / "outputs" / "graph"
+    raise RuntimeError("Unable to resolve outputs/graph for graph visualization.")
+
+
+def _safe_graph_component(value: str) -> str:
+    safe_value = _SAFE_GRAPH_COMPONENT_RE.sub("_", value).strip("._")
+    if not safe_value:
+        raise ValueError("Task name does not contain a safe graph directory name.")
+    return safe_value
 
 
 def _reset_env_with_physical_collision(

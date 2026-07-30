@@ -34,6 +34,7 @@ def run_agent_command(
     agent_config: Path,
     regenerate: bool,
     headless: bool = False,
+    render_graphs: bool = False,
 ) -> int:
     command = [
         sys.executable,
@@ -50,6 +51,8 @@ def run_agent_command(
         command.append("--headless")
     if regenerate:
         command.append("--regenerate")
+    if render_graphs:
+        command.append("--render-graphs")
 
     env = os.environ.copy()
     if env.get("EMBODICHAIN_LLM_USAGE_PATH"):

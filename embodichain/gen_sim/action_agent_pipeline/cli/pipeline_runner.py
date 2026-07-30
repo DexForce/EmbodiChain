@@ -145,6 +145,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
                 DEFAULT_SURFACE_RELEASE_CLEARANCE,
             ),
             acd_method=args.acd_method,
+            render_graphs=bool(getattr(args, "render_graphs", False)),
             overwrite=args.overwrite_config,
         )
     with timing_scope("pipeline.write_manifests"):
@@ -180,6 +181,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             agent_config=paths.agent_config,
             regenerate=args.regenerate,
             headless=getattr(args, "headless", False),
+            render_graphs=bool(getattr(args, "render_graphs", False)),
         )
     write_llm_usage_summary(usage_paths)
     return return_code

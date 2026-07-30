@@ -46,6 +46,7 @@ def _finalize_and_write_bundle(
     mesh_normalizer: GlbGeometryNormalizer,
     acd_method: str,
     overwrite: bool,
+    render_graphs: bool = False,
 ) -> GeneratedActionAgentConfigPaths:
     """Finalize and write the runtime configuration bundle.
 
@@ -64,10 +65,18 @@ def _finalize_and_write_bundle(
     summary["mesh_loading_mode"] = "baked_glb"
     summary["acd_method"] = acd_method
     summary.pop("convex_decomposition_method", None)
+    graph_renderer = None
+    if render_graphs:
+        from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
+            render_seed_task_graph_png,
+        )
+
+        graph_renderer = render_seed_task_graph_png
     return _write_config_bundle(
         output_dir=output_dir,
         bundle=bundle,
         overwrite=overwrite,
+        graph_renderer=graph_renderer,
     )
 
 

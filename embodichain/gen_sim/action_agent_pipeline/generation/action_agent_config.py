@@ -118,6 +118,7 @@ def generate_action_agent_config_from_project(
     surface_release_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE,
     acd_method: str = "vhacd",
     arrangement_debug_visualization: bool = False,
+    render_graphs: bool = False,
     overwrite: bool = False,
     max_episodes: int = DEFAULT_MAX_EPISODES,
     max_episode_steps: int = DEFAULT_MAX_EPISODE_STEPS,
@@ -175,6 +176,8 @@ def generate_action_agent_config_from_project(
             objects. Only ``"vhacd"`` is supported.
         arrangement_debug_visualization: Legacy compatibility flag. Arrangement
             geometry is now resolved and recorded per runtime environment.
+        render_graphs: If true, render the coordinate-free Seed graph under
+            ``outputs/graph/<task_name>/seed_task_graph.png``.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -249,6 +252,7 @@ def generate_action_agent_config_from_project(
             mesh_normalizer=mesh_normalizer,
             acd_method=acd_method,
             overwrite=overwrite,
+            render_graphs=render_graphs,
         )
     if task_route.route == _TASK_ROUTE_ARRANGEMENT_LINE:
         spec = _build_arrangement_line_spec_from_response(
@@ -281,6 +285,7 @@ def generate_action_agent_config_from_project(
             mesh_normalizer=mesh_normalizer,
             acd_method=acd_method,
             overwrite=overwrite,
+            render_graphs=render_graphs,
         )
     if task_route.route == _TASK_ROUTE_UNSUPPORTED:
         raise ValueError(
@@ -323,4 +328,5 @@ def generate_action_agent_config_from_project(
         mesh_normalizer=mesh_normalizer,
         acd_method=acd_method,
         overwrite=overwrite,
+        render_graphs=render_graphs,
     )

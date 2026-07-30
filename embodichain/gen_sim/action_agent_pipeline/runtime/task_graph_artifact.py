@@ -33,6 +33,7 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
     seed_task_graph_hash,
 )
+from embodichain.utils.logger import log_warning
 
 __all__ = ["RuntimeTaskGraphRecorder"]
 
@@ -398,12 +399,20 @@ class RuntimeTaskGraphRecorder:
                 )
             )
             if self.graph_renderer is not None:
-                files.append(
-                    (
-                        directory / "task_graph.png",
-                        self.graph_renderer(document),
+                try:
+                    rendered_graph = self.graph_renderer(document)
+                except Exception as exc:
+                    log_warning(
+                        "Runtime Task graph visualization failed for "
+                        f"env {env_id}: {exc}"
                     )
-                )
+                else:
+                    files.append(
+                        (
+                            directory / "task_graph.png",
+                            rendered_graph,
+                        )
+                    )
         _write_file_transaction(files)
 
     def _initial_document(self, env_id: int) -> dict[str, Any]:

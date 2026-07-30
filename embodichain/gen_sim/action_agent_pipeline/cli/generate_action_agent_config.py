@@ -219,6 +219,14 @@ def cli() -> None:
         ),
     )
     parser.add_argument(
+        "--render-graphs",
+        "--render_graphs",
+        dest="render_graphs",
+        action="store_true",
+        default=False,
+        help="Render the Seed graph under outputs/graph/<task_name>.",
+    )
+    parser.add_argument(
         "--max_episodes",
         type=int,
         default=DEFAULT_MAX_EPISODES,
@@ -252,6 +260,7 @@ def cli() -> None:
         surface_release_clearance=args.surface_release_clearance,
         acd_method=args.acd_method,
         arrangement_debug_visualization=args.arrangement_debug_visualization,
+        render_graphs=args.render_graphs,
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,
         max_episode_steps=args.max_episode_steps,

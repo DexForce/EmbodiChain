@@ -113,7 +113,7 @@ def test_config_generation_dispatches_each_route_once(
     monkeypatch.setattr(
         action_agent_config,
         validator_name,
-        lambda built, built_spec: calls.append(("validate", (built, built_spec))),
+        lambda *args: calls.append(("validate", args)),
     )
     monkeypatch.setattr(
         action_agent_config,
@@ -127,6 +127,7 @@ def test_config_generation_dispatches_each_route_once(
         task_name="task4_2",
         task_description="将罐头摆成一排",
         robot_profile="franka",
+        render_graphs=True,
         overwrite=True,
     )
 
@@ -142,6 +143,46 @@ def test_config_generation_dispatches_each_route_once(
     assert calls[0] == ("profile", "franka")
     assert calls[2][1]["response"] is semantic_spec
     assert calls[3][1]["robot_profile"] == "resolved_franka"
+    assert calls[-1][1][1]["render_graphs"] is True
+
+
+@pytest.mark.parametrize("render_graphs", [False, True])
+def test_bundle_finalization_injects_graph_renderer_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    render_graphs: bool,
+) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        bundle_finalization, "_apply_acd_method", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        bundle_finalization,
+        "_attach_mesh_normalization_summary",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        bundle_finalization,
+        "_attach_body_scale_bake_summary",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        bundle_finalization,
+        "_write_config_bundle",
+        lambda **kwargs: captured.update(kwargs) or "paths",
+    )
+
+    result = bundle_finalization._finalize_and_write_bundle(
+        {"gym_config": {}, "summary": {}},
+        output_dir=tmp_path,
+        mesh_normalizer=SimpleNamespace(),
+        acd_method="vhacd",
+        overwrite=False,
+        render_graphs=render_graphs,
+    )
+
+    assert result == "paths"
+    assert (captured["graph_renderer"] is not None) is render_graphs
 
 
 def test_config_generation_preserves_unsupported_route_error(
