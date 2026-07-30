@@ -293,6 +293,28 @@ class TestActionSmoothnessPenalty:
         # All have negative penalty from action difference
         assert torch.all(result < 0)
 
+    def test_zero_when_expert_buffer_lacks_rl_keys(self):
+        """Expert buffers without done/action keys yield zero penalty."""
+        env = MockEnv(num_envs=4)
+        env.current_rollout_step = 1
+        env.rollout_buffer = {
+            "obs": torch.zeros(4, 100, 8),
+            "actions": torch.zeros(4, 100, 6),
+            "rewards": torch.zeros(4, 100),
+        }
+        result = action_smoothness_penalty(env, {}, torch.ones(4, 6), {})
+        assert result.shape == (4,)
+        assert torch.all(result == 0)
+
+    def test_zero_when_rollout_buffer_missing(self):
+        """Missing rollout buffer yields zero penalty."""
+        env = MockEnv(num_envs=4)
+        env.current_rollout_step = 1
+        env.rollout_buffer = None
+        result = action_smoothness_penalty(env, {}, torch.ones(4, 6), {})
+        assert result.shape == (4,)
+        assert torch.all(result == 0)
+
 
 class TestJointLimitPenalty:
     """Tests for joint_limit_penalty reward functor."""

@@ -291,7 +291,8 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
-        if self.cfg.dataset and not self.cfg.filter_dataset_saving:
+        dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
+        if dataset_terms and not self.cfg.filter_dataset_saving:
             self.dataset_manager = DatasetManager(self.cfg.dataset, self)
             self.cfg.init_rollout_buffer = True
 
