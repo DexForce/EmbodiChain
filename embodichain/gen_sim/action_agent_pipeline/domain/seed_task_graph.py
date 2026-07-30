@@ -31,9 +31,9 @@ __all__ = [
     "validate_seed_task_graph",
 ]
 
-SEED_TASK_GRAPH_SCHEMA_VERSION = "seed_task_graph_v2"
-SEMANTIC_STEP_SCHEMA_VERSION = "semantic_steps_v2"
-MOTION_POLICY_VERSION = "action_agent_motion_policy_v1"
+SEED_TASK_GRAPH_SCHEMA_VERSION = "seed_task_graph_v3"
+SEMANTIC_STEP_SCHEMA_VERSION = "semantic_steps_v3"
+MOTION_POLICY_VERSION = "action_agent_motion_policy_v2"
 
 _ROUTES = {"arrangement_line", "object_manipulation", "stacking"}
 _ACTOR_MODES = {"auto", "coordinated", "required"}
@@ -116,6 +116,7 @@ _ACTION_KEYS = {
     "target_binding",
 }
 _GROUNDED_FIELD_NAMES = {
+    "active_arm",
     "cfg",
     "distance",
     "execution",
@@ -182,7 +183,7 @@ def validate_seed_task_graph(
     task_name: str | None = None,
     route: str | None = None,
 ) -> None:
-    """Validate Seed v2 topology and reject runtime-grounded data leakage."""
+    """Validate Seed v3 topology and reject runtime-grounded data leakage."""
     if not isinstance(seed_graph, Mapping):
         raise TypeError("Seed task graph must be a mapping.")
     unknown_graph_keys = set(seed_graph) - _TOP_LEVEL_KEYS
@@ -193,10 +194,10 @@ def validate_seed_task_graph(
         )
     if seed_graph.get("schema_version") != SEED_TASK_GRAPH_SCHEMA_VERSION:
         actual = seed_graph.get("schema_version")
-        if actual == "seed_task_graph_v1":
+        if actual in {"seed_task_graph_v1", "seed_task_graph_v2"}:
             raise ValueError(
-                "seed_task_graph_v1 is no longer supported. Regenerate the action "
-                "agent config with --overwrite."
+                f"{actual} is no longer supported. Regenerate the action-agent "
+                "config with --overwrite."
             )
         raise ValueError(
             "Seed task graph schema_version must be "
@@ -285,9 +286,9 @@ def validate_seed_task_graph(
     if incoming[start] != 0 or outgoing[goal] != 0:
         raise ValueError("Seed start/goal topology is invalid.")
     if any(outgoing[node_id] != 1 for node_id in node_ids - {goal}):
-        raise ValueError("Seed v2 currently requires one deterministic outgoing edge.")
+        raise ValueError("Seed v3 currently requires one deterministic outgoing edge.")
     if any(incoming[node_id] != 1 for node_id in node_ids - {start}):
-        raise ValueError("Seed v2 currently requires one deterministic incoming edge.")
+        raise ValueError("Seed v3 currently requires one deterministic incoming edge.")
     _validate_single_chain(start, goal, node_ids, edges)
 
     known_steps: set[str] = set()
@@ -373,6 +374,8 @@ def validate_seed_task_graph(
         raise ValueError(
             "Semantic step edge_ids must cover every Seed edge exactly once in order."
         )
+    if graph_route == "arrangement_line":
+        _validate_arrangement_steps(steps, edge_by_id)
 
 
 def _validate_seed_actor(step_id: str, actor: Any) -> None:
@@ -413,7 +416,13 @@ def _validate_symbolic_action(edge_id: str, action: Any) -> None:
     if not isinstance(binding, Mapping) or binding.get("kind") not in _BINDING_KINDS:
         raise ValueError(f"Seed edge {edge_id!r} has an invalid target binding.")
     binding_kind = str(binding["kind"])
-    if set(binding) != _BINDING_FIELDS[binding_kind]:
+    valid_binding_fields = set(binding) == _BINDING_FIELDS[binding_kind]
+    if binding_kind == "semantic_goal":
+        valid_binding_fields = valid_binding_fields or set(binding) == {
+            *_BINDING_FIELDS[binding_kind],
+            "phase",
+        }
+    if not valid_binding_fields:
         raise ValueError(
             f"Seed edge {edge_id!r} target binding {binding_kind!r} has "
             "invalid fields."
@@ -435,6 +444,11 @@ def _validate_symbolic_action(edge_id: str, action: Any) -> None:
         binding.get("semantic_step"), str
     ):
         raise ValueError(f"Seed edge {edge_id!r} requires a semantic step binding.")
+    if binding_kind == "semantic_goal" and "phase" in binding:
+        if binding["phase"] not in {"staging", "final"}:
+            raise ValueError(
+                f"Seed edge {edge_id!r} has an invalid semantic-goal phase."
+            )
     if binding_kind == "joint_state":
         source = binding.get("source")
         expected_control = (
@@ -478,12 +492,135 @@ def _validate_single_chain(
             break
         current = str(edge["target"])
         if current in visited:
-            raise ValueError("Seed v2 topology contains a cycle.")
+            raise ValueError("Seed v3 topology contains a cycle.")
         visited.add(current)
     if current != goal or visited != node_ids:
         raise ValueError(
-            "Seed v2 topology must be one connected chain from start to goal."
+            "Seed v3 topology must be one connected chain from start to goal."
         )
+
+
+def _validate_arrangement_steps(
+    steps: Sequence[Mapping[str, Any]],
+    edge_by_id: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Validate the coordinate-free arrangement contract and six-edge skeleton."""
+    expected_actions = [
+        "PickUp",
+        "MoveHeldObject",
+        "MoveHeldObject",
+        "Place",
+        "MoveEndEffector",
+        "MoveJoints",
+    ]
+    objects: list[str] | None = None
+    slots: list[int] = []
+    constraints: set[str] = set()
+    for step in steps:
+        step_id = str(step["id"])
+        if step["operator"] != "place_in_line":
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} must use place_in_line."
+            )
+        goal = step["goal"]
+        required_goal_fields = {
+            "anchor",
+            "axis",
+            "layout",
+            "nominal_slot_index",
+            "objects",
+            "order_constraint",
+            "order_by",
+            "order_direction",
+            "orientation_axis",
+            "orientation_goal",
+            "slot_constraint",
+        }
+        if set(goal) != required_goal_fields:
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} has invalid goal fields."
+            )
+        if goal["layout"] != "line":
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} must use line layout."
+            )
+        if goal["anchor"] != "table_center":
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} must use table_center."
+            )
+        if goal["axis"] not in {"world_x", "world_y"}:
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} has an invalid world axis."
+            )
+        if goal["slot_constraint"] not in {"free_reassignable", "required"}:
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} has invalid slot constraint."
+            )
+        expected_constraint = (
+            "required" if goal["order_constraint"] == "ordered" else "free_reassignable"
+        )
+        if goal["slot_constraint"] != expected_constraint:
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} has inconsistent constraints."
+            )
+        step_objects = goal["objects"]
+        if (
+            not isinstance(step_objects, list)
+            or not step_objects
+            or not all(isinstance(uid, str) and uid for uid in step_objects)
+        ):
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} requires object UIDs."
+            )
+        if objects is None:
+            objects = list(step_objects)
+        elif step_objects != objects:
+            raise ValueError("Arrangement steps must share one nominal object order.")
+        slot = goal["nominal_slot_index"]
+        if not isinstance(slot, int) or isinstance(slot, bool):
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} needs an integer slot."
+            )
+        slots.append(slot)
+        constraints.add(str(goal["slot_constraint"]))
+
+        assigned_edges = [edge_by_id[str(edge_id)] for edge_id in step["edge_ids"]]
+        action_classes = [
+            str(edge["actions"][0]["atomic_action_class"]) for edge in assigned_edges
+        ]
+        if action_classes != expected_actions:
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} must use the six-edge "
+                "pickup/staging/final/place/retreat/home topology."
+            )
+        phases = [
+            assigned_edges[index]["actions"][0]["target_binding"].get("phase")
+            for index in (1, 2)
+        ]
+        if phases != ["staging", "final"]:
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} must bind staging then final."
+            )
+        postcondition = step["postcondition"]
+        if (
+            postcondition.get("nominal_slot_index") != slot
+            or postcondition.get("slot_constraint") != goal["slot_constraint"]
+        ):
+            raise ValueError(
+                f"Arrangement semantic step {step_id!r} postcondition is inconsistent."
+            )
+
+    expected_slots = list(range(len(steps)))
+    if slots != expected_slots:
+        raise ValueError(
+            "Arrangement nominal slots must cover [0, count) in spatial order."
+        )
+    if objects != [str(step["object"]) for step in steps]:
+        raise ValueError(
+            "Arrangement objects and semantic steps must share nominal spatial order."
+        )
+    if len(constraints) != 1:
+        raise ValueError("Arrangement steps must use one consistent slot constraint.")
 
 
 def _reject_grounded_fields(value: Any, path: str = "seed_task_graph") -> None:

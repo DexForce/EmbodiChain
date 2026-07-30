@@ -42,6 +42,8 @@ _COMMON_POLICIES: dict[str, dict[str, Any]] = {
         "relation_distance": 0.18,
         "hover_height": 0.10,
         "line_spacing": 0.14,
+        "transport_clearance": 0.10,
+        "staging_lift_height": 0.30,
         "surface_clearance": 0.005,
         "postcondition_tolerance": 0.08,
     },

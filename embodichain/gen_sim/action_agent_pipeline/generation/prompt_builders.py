@@ -74,7 +74,7 @@ __all__ = [
 
 
 def make_agent_config() -> dict[str, Any]:
-    """Build the stable agent config for runtime grounding of Seed Graph v2."""
+    """Build the stable agent config for runtime grounding of Seed Graph v3."""
     return {
         "TaskAgent": {
             "seed_task_graph": SEED_TASK_GRAPH_FILENAME,

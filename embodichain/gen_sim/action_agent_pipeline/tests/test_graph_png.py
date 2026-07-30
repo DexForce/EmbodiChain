@@ -163,7 +163,7 @@ def test_large_seed_uses_a_bounded_vertical_node_link_canvas() -> None:
 
     image = _assert_nonblank_png(render_seed_task_graph_png(seed))
 
-    assert len(seed["nodes"]) == 31
+    assert len(seed["nodes"]) == 37
     assert image.height > image.width
     assert image.height <= 8000
 
@@ -292,8 +292,8 @@ def _runtime_graph() -> dict:
     for edge_id in first_seed_step["edge_ids"]:
         edge_by_id[edge_id]["actions"][0]["actor"] = {"mode": "auto"}
     runtime = deepcopy(seed)
-    runtime["schema_version"] = "runtime_task_graph_v1"
-    runtime["seed_graph_schema_version"] = "seed_task_graph_v2"
+    runtime["schema_version"] = "runtime_task_graph_v2"
+    runtime["seed_graph_schema_version"] = "seed_task_graph_v3"
     runtime["seed_graph_hash"] = "a" * 64
     runtime["run_id"] = "20260729T000000.000000Z"
     runtime["episode_index"] = 0

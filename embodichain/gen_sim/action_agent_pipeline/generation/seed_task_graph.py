@@ -111,25 +111,25 @@ def make_arrangement_seed_task_graph(
     if len(runtime_uids) != len(set(runtime_uids)):
         raise ValueError("Arrangement seed objects must be distinct.")
 
+    ordered_source_steps = sorted(
+        source_steps,
+        key=lambda item: int(item.slot_index),
+    )
+    ordered_uids = [str(step.runtime_uid) for step in ordered_source_steps]
     if order_is_constrained:
         configured_order = tuple(getattr(spec, "semantic_order", ()))
-        ordered_uids = list(
-            configured_order
-            or (
-                step.runtime_uid
-                for step in sorted(source_steps, key=lambda item: int(item.slot_index))
-            )
-        )
-        if set(ordered_uids) != set(runtime_uids) or len(ordered_uids) != len(
-            runtime_uids
-        ):
+        if configured_order and list(configured_order) != ordered_uids:
             raise ValueError(
-                "Arrangement semantic_order must contain every selected object once."
+                "Ordered arrangement nominal slots must preserve semantic_order."
             )
-    else:
-        ordered_uids = sorted(runtime_uids)
 
     source_by_uid = {str(step.runtime_uid): step for step in source_steps}
+    slot_constraint = "required" if order_is_constrained else "free_reassignable"
+    anchor = str(spec.anchor)
+    if anchor == "center":
+        anchor = "table_center"
+    if anchor != "table_center":
+        raise ValueError("Arrangement Seed v3 requires anchor='table_center'.")
     semantic_steps: list[dict[str, Any]] = []
     previous_step_id: str | None = None
     for slot_index, object_uid in enumerate(ordered_uids):
@@ -146,10 +146,11 @@ def make_arrangement_seed_task_graph(
                     "objects": ordered_uids,
                     "order_constraint": ("ordered" if order_is_constrained else "free"),
                     "axis": spec.axis,
-                    "anchor": spec.anchor,
+                    "anchor": anchor,
                     "order_by": spec.order_by,
                     "order_direction": spec.order_direction,
-                    "slot_index": slot_index,
+                    "nominal_slot_index": slot_index,
+                    "slot_constraint": slot_constraint,
                     "orientation_goal": str(source_step.orientation_goal),
                     "orientation_axis": str(source_step.orientation_axis),
                 },
@@ -158,7 +159,8 @@ def make_arrangement_seed_task_graph(
                 ),
                 "postcondition": {
                     "type": "line_member_placed",
-                    "slot_index": slot_index,
+                    "nominal_slot_index": slot_index,
+                    "slot_constraint": slot_constraint,
                     "order_constraint": ("ordered" if order_is_constrained else "free"),
                 },
             }
@@ -227,7 +229,7 @@ def _build_executable_seed(
     semantic_steps: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if not semantic_steps:
-        raise ValueError("Executable Seed v2 requires at least one semantic step.")
+        raise ValueError("Executable Seed v3 requires at least one semantic step.")
     nodes = [
         {
             "id": "v0_start",
@@ -349,20 +351,56 @@ def _symbolic_actions_for_step(
                 )
             ],
         ),
-        (
-            "move_to_semantic_goal",
-            f"`{object_uid}` held at its semantic goal",
-            [
-                _symbolic_action(
-                    "MoveHeldObject",
-                    actor,
-                    "semantic_goal",
-                    "default_transport",
-                    semantic_step=str(step["id"]),
-                )
-            ],
-        ),
     ]
+    if operator == "place_in_line":
+        actions.extend(
+            [
+                (
+                    "move_to_staging",
+                    f"`{object_uid}` held above its nominal line slot",
+                    [
+                        _symbolic_action(
+                            "MoveHeldObject",
+                            actor,
+                            "semantic_goal",
+                            "default_transport",
+                            semantic_step=str(step["id"]),
+                            phase="staging",
+                        )
+                    ],
+                ),
+                (
+                    "move_to_final",
+                    f"`{object_uid}` held at its nominal line slot",
+                    [
+                        _symbolic_action(
+                            "MoveHeldObject",
+                            actor,
+                            "semantic_goal",
+                            "default_transport",
+                            semantic_step=str(step["id"]),
+                            phase="final",
+                        )
+                    ],
+                ),
+            ]
+        )
+    else:
+        actions.append(
+            (
+                "move_to_semantic_goal",
+                f"`{object_uid}` held at its semantic goal",
+                [
+                    _symbolic_action(
+                        "MoveHeldObject",
+                        actor,
+                        "semantic_goal",
+                        "default_transport",
+                        semantic_step=str(step["id"]),
+                    )
+                ],
+            )
+        )
     if operator == "hold_hover":
         actions.append(
             (

@@ -64,7 +64,7 @@ def write_config_bundle(
     overwrite: bool,
     graph_output_root: Path | None = None,
 ) -> GeneratedActionAgentConfigPaths:
-    """Write Seed v2 runtime inputs and review diagnostics as one bundle."""
+    """Write Seed v3 runtime inputs and review diagnostics as one bundle."""
     task_name = _bundle_task_name(bundle, fallback=output_dir.name)
     graph_output_dir = _resolve_graph_output_root(graph_output_root) / _safe_task_dir(
         task_name
@@ -113,7 +113,7 @@ def write_config_bundle(
         graph_output_dir.mkdir(parents=True, exist_ok=True)
     _write_file_transaction(serialized_files)
     if overwrite:
-        # These v1 artifacts are not valid runtime inputs for Seed v2. Remove
+        # These legacy artifacts are not valid runtime inputs for Seed v3. Remove
         # them only after the complete replacement bundle has been published.
         for obsolete in (
             output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
@@ -182,7 +182,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def _validate_seed_bundle(bundle: Mapping[str, Any]) -> None:
-    """Require the executable Seed v2 that is the sole config-stage graph."""
+    """Require the executable Seed v3 that is the sole config-stage graph."""
     seed_graph = bundle.get("seed_task_graph")
     if not isinstance(seed_graph, Mapping):
         raise TypeError("seed_task_graph bundle entry must be a mapping.")

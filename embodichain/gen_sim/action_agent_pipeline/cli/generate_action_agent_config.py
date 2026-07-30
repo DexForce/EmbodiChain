@@ -213,7 +213,10 @@ def cli() -> None:
         "--arrangement-debug-visualization",
         action="store_true",
         default=False,
-        help="Draw arrangement target slots and high transport points.",
+        help=(
+            "Legacy compatibility flag; runtime Task graphs now record "
+            "per-environment arrangement geometry."
+        ),
     )
     parser.add_argument(
         "--max_episodes",

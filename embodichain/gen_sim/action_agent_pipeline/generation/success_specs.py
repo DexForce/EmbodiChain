@@ -35,6 +35,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     RelativePlacementStepSpec,
     StackingSpec,
 )
+from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
+    validate_seed_task_graph,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
     RobotProfile,
@@ -62,9 +65,6 @@ _SUPPORT_MIN_Z_OFFSET = float(_SUCCESS_DEFAULTS["support_min_z_offset"])
 _SUPPORT_MAX_Z_OFFSET = float(_SUCCESS_DEFAULTS["support_max_z_offset"])
 _OBJECT_MAX_TILT = float(_SUCCESS_DEFAULTS["object_max_tilt"])
 _ARRANGEMENT_MAX_XY_TOLERANCE = float(_SUCCESS_DEFAULTS["arrangement_max_xy_tolerance"])
-_ARRANGEMENT_SPACING_TOLERANCE_FRACTION = float(
-    _SUCCESS_DEFAULTS["arrangement_spacing_tolerance_fraction"]
-)
 _COORDINATED_POSITION_TOLERANCE = float(
     _SUCCESS_DEFAULTS["coordinated_position_tolerance"]
 )
@@ -117,7 +117,7 @@ def _make_relative_extensions_config(
 
 
 def _make_arrangement_extensions_config(
-    spec: ArrangementLineSpec,
+    seed_graph: Mapping[str, Any],
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> dict[str, Any]:
@@ -126,7 +126,7 @@ def _make_arrangement_extensions_config(
         **profile.runtime_extensions(),
         "ignore_terminations_during_agent": True,
         "viewer_camera_uid": DEFAULT_VIEWER_CAMERA_UID,
-        "agent_success": _make_arrangement_success_spec(spec),
+        "agent_success": _make_arrangement_success_spec(seed_graph),
     }
 
 
@@ -187,63 +187,40 @@ def _make_stacking_success_spec(spec: StackingSpec) -> dict[str, Any]:
     return {"op": "all", "terms": terms}
 
 
-def _make_arrangement_success_spec(spec: ArrangementLineSpec) -> dict[str, Any]:
-    terms: list[dict[str, Any]] = []
-    # Scale the tolerance with slot spacing, but cap it so adjacent slots can
-    # never satisfy each other's success region in a dense arrangement.
-    xy_tolerance = min(
-        _ARRANGEMENT_MAX_XY_TOLERANCE,
-        float(spec.spacing) * _ARRANGEMENT_SPACING_TOLERANCE_FRACTION,
-    )
-    semantic_steps = sorted(spec.steps, key=lambda step: step.slot_index)
-    ordered_objects = [step.runtime_uid for step in semantic_steps]
-    arrangement_axis = _arrangement_success_axis(spec)
-    terms.extend(
-        [
-            {
-                "type": SuccessTerm.OBJECTS_COLLINEAR,
-                "objects": ordered_objects,
-                "axis": arrangement_axis,
-                "tolerance": xy_tolerance,
-            },
+def _make_arrangement_success_spec(
+    seed_graph: Mapping[str, Any],
+) -> dict[str, Any]:
+    semantic_steps = list(seed_graph["semantic_steps"])
+    ordered_objects = [str(step["object"]) for step in semantic_steps]
+    goal = semantic_steps[0]["goal"]
+    arrangement_axis = "x" if goal["axis"] == "world_x" else "y"
+    terms: list[dict[str, Any]] = [
+        {
+            "type": SuccessTerm.OBJECTS_COLLINEAR,
+            "objects": ordered_objects,
+            "axis": arrangement_axis,
+            "tolerance": _ARRANGEMENT_MAX_XY_TOLERANCE,
+        }
+    ]
+    if goal["order_constraint"] == "ordered":
+        terms.append(
             {
                 "type": SuccessTerm.OBJECTS_ORDERED,
                 "objects": ordered_objects,
                 "axis": arrangement_axis,
                 "direction": "ascending",
-                "tolerance": xy_tolerance,
-            },
-        ]
-    )
-    for step in semantic_steps:
-        terms.extend(
-            [
-                {
-                    "type": SuccessTerm.OBJECT_XY_NEAR,
-                    "object": step.runtime_uid,
-                    "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
-                    "tolerance": xy_tolerance,
-                },
-                {
-                    "type": SuccessTerm.OBJECT_NOT_FALLEN,
-                    "object": step.runtime_uid,
-                    "max_tilt": _OBJECT_MAX_TILT,
-                },
-            ]
+                "tolerance": _ARRANGEMENT_MAX_XY_TOLERANCE,
+            }
         )
+    terms.extend(
+        {
+            "type": SuccessTerm.OBJECT_NOT_FALLEN,
+            "object": object_uid,
+            "max_tilt": _OBJECT_MAX_TILT,
+        }
+        for object_uid in ordered_objects
+    )
     return {"op": "all", "terms": terms}
-
-
-def _arrangement_success_axis(spec: ArrangementLineSpec) -> str:
-    if len(spec.steps) >= 2:
-        x_values = [float(step.target_xy[0]) for step in spec.steps]
-        y_values = [float(step.target_xy[1]) for step in spec.steps]
-        x_span = max(x_values) - min(x_values)
-        y_span = max(y_values) - min(y_values)
-        return "x" if x_span >= y_span else "y"
-    if spec.axis == "world_x":
-        return "x"
-    return "y"
 
 
 def _make_relative_success_spec(
@@ -571,8 +548,9 @@ def _validate_relative_bundle(
 
 def _validate_arrangement_bundle(
     bundle: Mapping[str, Any],
-    spec: ArrangementLineSpec,
+    spec: ArrangementLineSpec | None = None,
 ) -> None:
+    del spec
     gym_config = bundle["gym_config"]
     if gym_config.get("id") != ACTION_AGENT_ENV_ID:
         raise ValueError(f"Generated gym config must use {ACTION_AGENT_ENV_ID}.")
@@ -584,7 +562,12 @@ def _validate_arrangement_bundle(
     rigid_uids = set(rigid_uid_list)
     background_uids = {obj["uid"] for obj in gym_config.get("background", [])}
     scene_uids = rigid_uids | background_uids
-    required = {step.runtime_uid for step in spec.steps}
+    seed_graph = bundle.get("seed_task_graph")
+    if not isinstance(seed_graph, Mapping):
+        raise ValueError("Generated arrangement bundle requires a Seed graph.")
+    validate_seed_task_graph(seed_graph, route="arrangement_line")
+    semantic_steps = list(seed_graph["semantic_steps"])
+    required = {str(step["object"]) for step in semantic_steps}
     missing = required - rigid_uids
     if missing:
         raise ValueError(
@@ -602,6 +585,41 @@ def _validate_arrangement_bundle(
         raise ValueError(
             f"Arrangement config registry missing: {sorted(required - registered)}"
         )
+    success_objects = _success_object_uids(
+        gym_config["env"]["extensions"]["agent_success"]
+    )
+    if success_objects != required:
+        raise ValueError(
+            "Arrangement success objects do not match Seed objects: "
+            f"success={sorted(success_objects)}, seed={sorted(required)}."
+        )
+    summary = bundle.get("summary", {})
+    bindings = summary.get("nominal_bindings", [])
+    expected_bindings = [
+        {
+            "object": str(step["object"]),
+            "nominal_slot_index": int(step["goal"]["nominal_slot_index"]),
+            "slot_constraint": str(step["goal"]["slot_constraint"]),
+            "orientation_goal": str(step["goal"]["orientation_goal"]),
+            "orientation_axis": str(step["goal"]["orientation_axis"]),
+        }
+        for step in semantic_steps
+    ]
+    if bindings != expected_bindings:
+        raise ValueError("Arrangement config summary does not match the Seed binding.")
+
+
+def _success_object_uids(success: Mapping[str, Any]) -> set[str]:
+    if success.get("op") in {"all", "and", "any", "or"}:
+        result: set[str] = set()
+        for term in success.get("terms", []):
+            result.update(_success_object_uids(term))
+        return result
+    objects = success.get("objects")
+    if isinstance(objects, Sequence) and not isinstance(objects, (str, bytes)):
+        return {str(uid) for uid in objects}
+    object_uid = success.get("object")
+    return {str(object_uid)} if isinstance(object_uid, str) else set()
 
 
 def _validate_stacking_bundle(

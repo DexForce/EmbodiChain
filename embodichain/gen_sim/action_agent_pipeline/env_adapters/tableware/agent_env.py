@@ -489,7 +489,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
         )
 
         logger.log_info(
-            f"Using executable Seed Graph v2: {self.seed_task_graph_path}",
+            f"Using executable Seed Graph v3: {self.seed_task_graph_path}",
             color="green",
         )
         with timing_scope(
@@ -501,7 +501,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
             # The graph is immutable for this environment instance, so print
             # the full source once without flooding logs on later episodes.
             logger.log_info(
-                "Executable Seed Graph v2 input:\n"
+                "Executable Seed Graph v3 input:\n"
                 f"```json\n{seed_task_graph.rstrip()}\n```",
                 color="green",
             )
@@ -522,7 +522,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     # -------------------- get action list --------------------
     def create_demo_action_list(self, regenerate=False, *args, **kwargs):
-        """Compatibility hook that grounds and executes Seed v2 online.
+        """Compatibility hook that grounds and executes Seed v3 online.
 
         The shared demo runner expects this historical method name. Action
         Agent cannot return an offline list because atomic actions depend on

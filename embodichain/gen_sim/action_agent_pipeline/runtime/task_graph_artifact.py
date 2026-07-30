@@ -76,6 +76,11 @@ class RuntimeTaskGraphRecorder:
             {str(step["id"]): step for step in document["semantic_steps"]}
             for document in self.documents
         ]
+        self._step_id_by_edge = {
+            str(edge_id): str(step["id"])
+            for step in self.seed_graph["semantic_steps"]
+            for edge_id in step["edge_ids"]
+        }
 
     def begin_step(
         self,
@@ -86,20 +91,43 @@ class RuntimeTaskGraphRecorder:
         reference_pose: torch.Tensor | None,
         active_mask: torch.Tensor,
         selection_failed_mask: torch.Tensor,
+        physical_control_parts: Sequence[str | None] | None = None,
+        arrangement_metadata: Sequence[Mapping[str, Any]] | None = None,
+        candidate_failures: Sequence[Mapping[str, str | None]] | None = None,
     ) -> None:
         for env_id, document in enumerate(self.documents):
             record = self._step_by_id[env_id][step.id]["runtime"]
             selection_failed = bool(selection_failed_mask[env_id].item())
             if selection_failed:
                 record["status"] = "failed"
-                record["failure_reason"] = "no feasible arm candidate"
+                failures = (
+                    dict(candidate_failures[env_id])
+                    if candidate_failures is not None
+                    else {}
+                )
+                failed_phases = ", ".join(
+                    f"{arm}={phase}"
+                    for arm, phase in failures.items()
+                    if phase is not None
+                )
+                record["failure_reason"] = "no feasible arm candidate" + (
+                    f" ({failed_phases})" if failed_phases else ""
+                )
+                record["candidate_failures"] = failures
             else:
                 record["status"] = (
                     "grounding" if bool(active_mask[env_id].item()) else "skipped"
                 )
             record["assigned_arm"] = assignments[env_id]
+            record["physical_control_part"] = (
+                physical_control_parts[env_id]
+                if physical_control_parts is not None
+                else assignments[env_id]
+            )
             record["observed_object_pose"] = _pose_at(object_pose, env_id)
             record["observed_reference_pose"] = _pose_at(reference_pose, env_id)
+            if arrangement_metadata is not None:
+                record["arrangement"] = deepcopy(dict(arrangement_metadata[env_id]))
             document["status"] = "running"
 
     def record_edge(
@@ -165,6 +193,15 @@ class RuntimeTaskGraphRecorder:
                 runtime.update(
                     {
                         "assigned_arm": assigned_arm,
+                        "semantic_arm": assigned_arm,
+                        "physical_control_part": self._step_by_id[env_id][
+                            self._step_id_by_edge[edge_id]
+                        ]["runtime"].get("physical_control_part"),
+                        "phase": (
+                            "pickup"
+                            if action_record.get("atomic_action_class") == "PickUp"
+                            else action_record.get("target_binding", {}).get("phase")
+                        ),
                         "status": (
                             "failed"
                             if did_fail
@@ -215,7 +252,12 @@ class RuntimeTaskGraphRecorder:
                         },
                         "failure_reason": (
                             (
-                                "no feasible arm candidate"
+                                self._step_by_id[env_id][
+                                    self._step_id_by_edge[edge_id]
+                                ]["runtime"].get(
+                                    "failure_reason",
+                                    "no feasible arm candidate",
+                                )
                                 if failed_during_grounding
                                 else "IK or motion planning failed"
                             )
@@ -288,6 +330,7 @@ class RuntimeTaskGraphRecorder:
         failed_mask: torch.Tensor | None,
         *,
         aborted_reason: str | None = None,
+        relation_success: torch.Tensor | None = None,
     ) -> None:
         """Publish final JSON and PNG even when execution aborted."""
         files: list[tuple[Path, str | bytes]] = []
@@ -299,6 +342,11 @@ class RuntimeTaskGraphRecorder:
                 document["status"] = "failed"
             else:
                 document["status"] = "success"
+            document["relation_success"] = (
+                bool(relation_success[env_id].item())
+                if relation_success is not None
+                else None
+            )
             document["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
             directory = self._env_dir(env_id)
             directory.mkdir(parents=True, exist_ok=True)
@@ -337,7 +385,7 @@ class RuntimeTaskGraphRecorder:
                     "assigned_arm": None,
                 }
         return {
-            "schema_version": "runtime_task_graph_v1",
+            "schema_version": "runtime_task_graph_v2",
             "task": self.seed_graph["task"],
             "run_id": self.run_id,
             "episode_index": self.episode_index,

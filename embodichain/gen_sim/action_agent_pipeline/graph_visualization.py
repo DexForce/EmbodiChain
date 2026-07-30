@@ -140,7 +140,7 @@ class _NodeLinkGroupLayout:
 
 
 def render_seed_task_graph_png(seed_graph: Mapping[str, Any]) -> bytes:
-    """Render every Seed v2 state and symbolic action in execution order."""
+    """Render every Seed v3 state and symbolic action in execution order."""
     validate_seed_task_graph(seed_graph)
     return _render_graph_timeline(seed_graph)
 
@@ -443,6 +443,15 @@ def _draw_node_link_group(
     detail_parts = []
     if group.goal:
         detail_parts.append(_compiled_goal_summary(group.object_uid, group.goal))
+    if isinstance(group.runtime, Mapping):
+        arrangement = group.runtime.get("arrangement")
+        if isinstance(arrangement, Mapping):
+            nominal = arrangement.get("nominal_slot_index")
+            resolved = arrangement.get("resolved_slot_index")
+            slot_text = f"slot {resolved}"
+            if arrangement.get("slot_reassigned"):
+                slot_text += f" (reassigned from {nominal})"
+            detail_parts.append(slot_text)
     if group.depends_on:
         detail_parts.append(
             "depends: "
@@ -896,7 +905,7 @@ def _draw_seed_dependencies(
 def _seed_relation_summary(step: Mapping[str, Any]) -> tuple[str, str]:
     goal = step["goal"]
     operator = str(step["operator"])
-    if operator == "arrange_in_line":
+    if operator == "place_in_line":
         objects = [_humanize_uid(str(uid)) for uid in goal["objects"]]
         order = "  →  ".join(objects)
         if goal.get("order_constraint") != "ordered":
@@ -904,7 +913,8 @@ def _seed_relation_summary(step: Mapping[str, Any]) -> tuple[str, str]:
         relation = f"LINE  |  {_truncate(order, 92)}"
         metadata = (
             f"axis {goal.get('axis', 'auto')}  ·  anchor {goal.get('anchor', 'auto')}"
-            f"  ·  {goal.get('order_constraint', 'free')} order"
+            f"  ·  slot {goal.get('nominal_slot_index', '?')}"
+            f"  ·  {goal.get('slot_constraint', 'free_reassignable')}"
         )
         return relation, metadata
 
@@ -955,7 +965,7 @@ def _draw_task_header(
     edge_count: int,
     group_count: int,
 ) -> None:
-    is_seed = task_graph.get("schema_version") == "seed_task_graph_v2"
+    is_seed = task_graph.get("schema_version") == "seed_task_graph_v3"
     title = (
         "Executable Seed Directed State-Action Graph"
         if is_seed
@@ -1322,7 +1332,9 @@ def _display_action(
             _humanize_uid(str(bound_object)) if bound_object else kind.replace("_", " ")
         )
         policy = action.get("motion_policy")
-        detail = f"{kind} · {policy}" if policy else kind
+        phase = binding.get("phase")
+        binding_text = f"{kind}:{phase}" if phase else kind
+        detail = f"{binding_text} · {policy}" if policy else binding_text
 
     runtime = action.get("runtime")
     if isinstance(runtime, Mapping):
@@ -1352,7 +1364,14 @@ def _display_action(
             primary = "obj " + _compact_xyz(object_position)
         failure_reason = runtime.get("failure_reason")
         if failure_reason:
-            details = [str(failure_reason)]
+            phase = runtime.get("phase")
+            details = [
+                (
+                    f"{phase}: {failure_reason}"
+                    if phase in {"pickup", "staging", "final"}
+                    else str(failure_reason)
+                )
+            ]
         else:
             details = []
             if reference_position is not None:
@@ -2049,7 +2068,7 @@ def _symbolic_action_arm(action: Mapping[str, Any]) -> str:
 
 
 def _graph_footer(graph: Mapping[str, Any]) -> str:
-    if graph.get("schema_version") == "seed_task_graph_v2":
+    if graph.get("schema_version") == "seed_task_graph_v3":
         return "Symbolic bindings and named policies only; no runtime coordinates."
     return "One environment and episode; coordinates and execution status are grounded."
 
@@ -2071,6 +2090,8 @@ def _compact_runtime_policy(policy: Mapping[str, Any]) -> str:
     preferred_keys = (
         "relation_distance",
         "line_spacing",
+        "transport_clearance",
+        "staging_lift_height",
         "surface_clearance",
         "pre_grasp_distance",
         "lift_height",
@@ -2090,6 +2111,8 @@ def _compact_runtime_policy(policy: Mapping[str, Any]) -> str:
             "sample_interval": "samples",
             "retreat_height": "retreat",
             "line_spacing": "spacing",
+            "transport_clearance": "clear",
+            "staging_lift_height": "stage",
             "lift_height": "lift",
         }[key]
         value = policy[key]
@@ -2127,6 +2150,11 @@ def _compiled_goal_summary(
     reference = goal.get("reference_object")
     if reference:
         return f"goal: {object_name} {relation} " f"{_humanize_uid(str(reference))}"
+    if "nominal_slot_index" in goal:
+        return (
+            f"goal: {object_name} {relation} slot "
+            f"{goal['nominal_slot_index']} ({goal.get('slot_constraint', 'required')})"
+        )
     return f"goal: {object_name} {relation}"
 
 
@@ -2138,6 +2166,8 @@ def _postcondition_summary(postcondition: Mapping[str, Any]) -> str:
             parts.append(str(postcondition["relation"]).replace("_", " "))
         if "layer_index" in postcondition:
             parts.append(f"layer {postcondition['layer_index']}")
+        if "nominal_slot_index" in postcondition:
+            parts.append(f"slot {postcondition['nominal_slot_index']}")
         return " · ".join(parts)
     terms = postcondition.get("terms")
     if isinstance(terms, list):

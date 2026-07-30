@@ -14,19 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Render arrangement diagnostics from the shared deterministic action plan."""
+"""Render coordinate-free arrangement diagnostics from the executable Seed."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.generation.builder_protocols import (
-    ArrangementSpecLike,
-    ArrangementStepLike,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.diagnostic_common import (
-    _format_indexed_edge_blocks,
     _format_runtime_object_registry,
     _robot_context,
 )
@@ -34,12 +29,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import 
     DEFAULT_ROBOT_PROFILE_ID,
     RobotProfile,
     resolve_robot_profile,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.task_plan_builders import (
-    _arrangement_step_edge_blocks,
-)
-from embodichain.gen_sim.action_agent_pipeline.prompts.template_loader import (
-    render_prompt_template,
 )
 
 __all__ = [
@@ -52,149 +41,116 @@ __all__ = [
 def make_arrangement_task_prompt(
     task_name: str,
     project_name: str,
-    spec: ArrangementSpecLike,
+    seed_graph: Mapping[str, Any],
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
+    task_description: str = "",
 ) -> str:
-    resolve_robot_profile(robot_profile)
-    edge_count = sum(_arrangement_step_edge_count(step) for step in spec.steps)
-    edge_index = 1
-    step_blocks_list = []
-    for step in spec.steps:
-        step_blocks_list.append(_arrangement_step_prompt_block(edge_index, step))
-        edge_index += _arrangement_step_edge_count(step)
-    step_blocks = "\n\n".join(step_blocks_list)
-    final_order = ", ".join(
-        f"`{step.runtime_uid}` at slot {step.slot_index}"
-        for step in sorted(spec.steps, key=lambda item: item.slot_index)
-    )
-    world_axis = _arrangement_world_axis(spec)
-    return render_prompt_template(
-        "arrangement_task.txt",
-        task_name=task_name,
-        task_prompt_summary=spec.task_prompt_summary,
-        task_description=spec.task_description,
-        axis=spec.axis,
-        world_axis=world_axis,
-        spatial_direction=spec.spatial_direction,
-        anchor=spec.anchor,
-        project_name=project_name,
-        line_origin_xy=list(spec.line_origin_xy),
-        spacing=f"{float(spec.spacing):.6g}",
-        layout_clearance=f"{float(spec.layout_clearance):.6g}",
-        order_by=spec.order_by,
-        order_direction=spec.order_direction,
-        category_order=list(spec.category_order),
-        final_order=final_order,
-        edge_count=edge_count,
-        step_blocks=step_blocks,
-    )
-
-
-def _arrangement_world_axis(spec: ArrangementSpecLike) -> str:
-    if len(spec.steps) >= 2:
-        x_values = [float(step.target_xy[0]) for step in spec.steps]
-        y_values = [float(step.target_xy[1]) for step in spec.steps]
-        x_span = max(x_values) - min(x_values)
-        y_span = max(y_values) - min(y_values)
-        return "x" if x_span >= y_span else "y"
-    if spec.axis == "world_x":
-        return "x"
-    return "y"
-
-
-def _arrangement_step_edge_count(step: ArrangementStepLike) -> int:
-    return len(_arrangement_step_edge_blocks(step))
-
-
-def _arrangement_step_prompt_block(start_edge: int, step: ArrangementStepLike) -> str:
-    return _format_indexed_edge_blocks(
-        _arrangement_step_edge_blocks(step),
-        start_index=start_edge,
+    profile = resolve_robot_profile(robot_profile)
+    steps = _arrangement_steps(seed_graph)
+    first_goal = steps[0]["goal"]
+    step_lines = [
+        (
+            f"- {step['id']}: place `{step['object']}` in nominal slot "
+            f"{step['goal']['nominal_slot_index']} "
+            f"({step['goal']['slot_constraint']}); execute edges "
+            f"{', '.join(step['edge_ids'])}."
+        )
+        for step in steps
+    ]
+    return "\n".join(
+        [
+            f"# Task `{task_name}`",
+            "",
+            task_description or "Arrange the selected objects into one line.",
+            "",
+            f"- Project: `{project_name}`",
+            f"- Robot: {profile.display_name}",
+            f"- Axis: `{first_goal['axis']}`",
+            f"- Anchor: `{first_goal['anchor']}`",
+            f"- Order constraint: `{first_goal['order_constraint']}`",
+            "- Runtime contract: resolve table bounds, spacing, target poses, and "
+            "active arm independently for every environment.",
+            "",
+            "## Seed Semantic Steps",
+            *step_lines,
+        ]
     )
 
 
 def make_arrangement_basic_background(
     project_name: str,
-    spec: ArrangementSpecLike,
+    seed_graph: Mapping[str, Any],
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
     object_registry: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
-    notes = spec.basic_background_notes or (
-        "No extra scene notes were provided by the config-stage LLM."
-    )
     object_lines = "\n".join(
-        _arrangement_object_background_line(step) for step in spec.steps
+        (
+            f"- `{step['object']}`: nominal slot "
+            f"{step['goal']['nominal_slot_index']}, "
+            f"constraint={step['goal']['slot_constraint']}, actor=auto."
+        )
+        for step in _arrangement_steps(seed_graph)
     )
     registry = _format_runtime_object_registry(object_registry)
-    return render_prompt_template(
-        "arrangement_background.txt",
-        project_name=project_name,
-        robot_display_name=profile.display_name,
-        robot_context=_robot_context(profile),
-        object_lines=object_lines,
-        registry=registry,
-        notes=notes,
-    )
-
-
-def _arrangement_object_background_line(step: ArrangementStepLike) -> str:
-    attrs = []
-    if step.color:
-        attrs.append(f"color={step.color}")
-    if step.size_score is not None:
-        attrs.append(f"size_score={float(step.size_score):.6g}")
-    attr_text = f" ({', '.join(attrs)})" if attrs else ""
-    return (
-        f"- {step.runtime_uid}: source `{step.source_uid}`{attr_text}, "
-        f"slot {step.slot_index} at xy={list(step.target_xy)}, "
-        f"handled by {step.active_side}_arm."
+    return "\n".join(
+        [
+            f"# Arrangement Background for `{project_name}`",
+            "",
+            f"Robot: {profile.display_name}",
+            _robot_context(profile),
+            "",
+            "The Seed is coordinate-free. Object poses, table geometry, motion "
+            "policy values, and semantic-to-physical arm mappings are runtime data.",
+            "",
+            "## Nominal Bindings",
+            object_lines,
+            "",
+            "## Runtime Object Registry",
+            registry,
+        ]
     )
 
 
 def make_arrangement_atom_actions_prompt(
-    spec: ArrangementSpecLike,
+    seed_graph: Mapping[str, Any],
     *,
     robot_profile: RobotProfile | str = DEFAULT_ROBOT_PROFILE_ID,
 ) -> str:
     profile = resolve_robot_profile(robot_profile)
-    blocks = "\n\n".join(_arrangement_atom_action_block(step) for step in spec.steps)
-    return render_prompt_template(
-        "arrangement_actions.txt",
-        robot_display_name=profile.display_name,
-        blocks=blocks,
+    edge_by_id = {str(edge["id"]): edge for edge in seed_graph["edges"]}
+    blocks: list[str] = []
+    for step in _arrangement_steps(seed_graph):
+        action_lines: list[str] = []
+        for edge_id in step["edge_ids"]:
+            action = edge_by_id[str(edge_id)]["actions"][0]
+            binding = action["target_binding"]
+            phase = f", phase={binding['phase']}" if "phase" in binding else ""
+            action_lines.append(
+                f"- `{edge_id}`: {action['atomic_action_class']}; "
+                f"actor={action['actor']['mode']}; binding={binding['kind']}"
+                f"{phase}; policy={action['motion_policy']}."
+            )
+        blocks.extend([f"## {step['id']} ({step['object']})", *action_lines, ""])
+    return "\n".join(
+        [
+            f"# Symbolic Atomic Actions for {profile.display_name}",
+            "",
+            "All geometric and arm-selection fields are resolved at runtime.",
+            "",
+            *blocks,
+        ]
     )
 
 
-def _arrangement_atom_action_block(step: ArrangementStepLike) -> str:
-    active_slot = f"{step.active_side}_arm_action"
-    actions = [
-        edge_actions[active_slot]
-        for _, edge_actions in _arrangement_step_edge_blocks(step)
-    ]
-    if step.orientation_goal == "preserve":
-        return render_prompt_template(
-            "arrangement_action_block_preserve.txt",
-            runtime_uid=step.runtime_uid,
-            slot_index=step.slot_index,
-            pickup_spec=actions[0],
-            high_preserve_spec=actions[1],
-            release_move_spec=actions[2],
-            release_spec=actions[3],
-            retreat_spec=actions[4],
-            return_spec=actions[5],
-        )
-    return render_prompt_template(
-        "arrangement_action_block_align.txt",
-        runtime_uid=step.runtime_uid,
-        slot_index=step.slot_index,
-        pickup_spec=actions[0],
-        high_preserve_spec=actions[1],
-        high_align_spec=actions[2],
-        release_move_spec=actions[3],
-        release_spec=actions[4],
-        retreat_spec=actions[5],
-        return_spec=actions[6],
-    )
+def _arrangement_steps(
+    seed_graph: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    if seed_graph.get("route") != "arrangement_line":
+        raise ValueError("Arrangement diagnostics require an arrangement Seed.")
+    steps = seed_graph.get("semantic_steps")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("Arrangement diagnostics require semantic steps.")
+    return list(steps)

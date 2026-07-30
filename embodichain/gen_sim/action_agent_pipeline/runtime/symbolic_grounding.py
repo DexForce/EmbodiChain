@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Ground Seed v2 bindings from the current state of every environment."""
+"""Ground Seed v3 bindings from the current state of every environment."""
 
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ def ground_symbolic_action(
     *,
     env: Any,
     arm: str,
+    arrangement_plan: Any = None,
 ) -> GroundedSymbolicAction:
     """Resolve one symbolic action without mutating the Seed graph."""
     robot_profile = str(getattr(env, "agent_robot_profile", ""))
@@ -84,6 +85,8 @@ def ground_symbolic_action(
             object_pose=object_pose,
             reference_pose=reference_pose,
             policy=policy,
+            phase=str(binding.get("phase", "final")),
+            arrangement_plan=arrangement_plan,
         )
         target_spec: dict[str, Any] = {
             "reference": "absolute",
@@ -96,7 +99,11 @@ def ground_symbolic_action(
         align_to = semantic_step.goal.get("orientation_reference_object")
         if align_to is not None:
             target_spec["align_to"] = str(align_to)
-        support = _surface_support(semantic_step)
+        support = (
+            None
+            if binding.get("phase") == "staging"
+            else _surface_support(semantic_step)
+        )
         if support is not None:
             target_spec.update(
                 {
@@ -137,6 +144,8 @@ def ground_symbolic_action(
             object_pose=object_pose,
             reference_pose=reference_pose,
             policy=policy,
+            phase="final",
+            arrangement_plan=arrangement_plan,
         )
         spec["control"] = "arm"
         spec["target_object"] = {
@@ -239,6 +248,8 @@ def _semantic_target_positions(
     object_pose: torch.Tensor,
     reference_pose: torch.Tensor | None,
     policy: Mapping[str, Any],
+    phase: str,
+    arrangement_plan: Any,
 ) -> torch.Tensor:
     goal = semantic_step.goal
     operator = semantic_step.operator
@@ -261,15 +272,16 @@ def _semantic_target_positions(
             target[:, 2] += float(policy["hover_height"])
         return target
     if operator == "place_in_line":
-        objects = [str(uid) for uid in goal["objects"]]
-        anchor_pose = _live_pose(env, objects[0])
-        target = anchor_pose[:, :3, 3].clone()
-        slot_index = int(goal["slot_index"])
-        axis = str(goal.get("axis", "world_x"))
-        axis_index = 0 if axis in {"world_x", "x"} else 1
-        direction = -1.0 if goal.get("order_direction") == "descending" else 1.0
-        target[:, axis_index] += direction * slot_index * float(policy["line_spacing"])
-        return target
+        if arrangement_plan is None:
+            raise ValueError(
+                "Arrangement semantic goals require a per-environment runtime plan."
+            )
+        return arrangement_plan.target_positions(
+            semantic_step,
+            object_pose=object_pose,
+            phase=phase,
+            policy=policy,
+        )
 
     base = (
         reference_pose[:, :3, 3].clone()

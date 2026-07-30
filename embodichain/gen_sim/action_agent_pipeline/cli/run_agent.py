@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--regenerate",
         action="store_true",
-        help="Force Seed Graph v2 to be reparsed and revalidated before execution.",
+        help="Force Seed Graph v3 to be reparsed and revalidated before execution.",
         default=False,
     )
     return parser
@@ -280,7 +280,10 @@ def _generate_action_agent_trajectory(
             "run_agent.evaluate_success",
             metadata={"trajectory_idx": trajectory_idx},
         ):
-            _log_task_success(env)
+            _log_task_success(
+                env,
+                semantic_success=getattr(action_list, "runtime_success", None),
+            )
         return True
 
     with timing_scope(
@@ -301,7 +304,11 @@ def _generate_action_agent_trajectory(
     return True
 
 
-def _log_task_success(env: gymnasium.Env) -> bool | None:
+def _log_task_success(
+    env: gymnasium.Env,
+    *,
+    semantic_success: torch.Tensor | None = None,
+) -> bool | None:
     try:
         success_fn = (
             env.get_wrapper_attr("is_task_success")
@@ -315,6 +322,8 @@ def _log_task_success(env: gymnasium.Env) -> bool | None:
 
     if isinstance(success, torch.Tensor):
         success_bool = success.detach().cpu().flatten().bool()
+        if semantic_success is not None:
+            success_bool &= semantic_success.detach().cpu().flatten().bool()
         n_success = int(success_bool.sum().item())
         n_total = int(success_bool.numel())
         log_info(

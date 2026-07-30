@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compile executable Seed Graph v2 into the live runtime graph."""
+"""Compile executable Seed Graph v3 into the live runtime graph."""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
-    SEED_TASK_GRAPH_SCHEMA_VERSION,
     validate_seed_task_graph,
 )
 from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import extract_json_object
@@ -54,7 +53,7 @@ def compile_agent_graph_from_file(
     graph_cls: type | None = None,
     action_module: Any = None,
 ) -> Any:
-    """Compile Seed v2 from disk into an executable runtime graph."""
+    """Compile Seed v3 from disk into an executable runtime graph."""
     return compile_agent_graph_spec(
         load_agent_graph_bundle(path),
         graph_cls=graph_cls,
@@ -68,15 +67,9 @@ def compile_agent_graph_spec(
     graph_cls: type | None = None,
     action_module: Any = None,
 ) -> Any:
-    """Compile a validated Seed v2 mapping without grounding its actions."""
+    """Compile a validated Seed v3 mapping without grounding its actions."""
     del action_module
     seed_spec = extract_json_object(seed_graph)
-    if seed_spec.get("schema_version") != SEED_TASK_GRAPH_SCHEMA_VERSION:
-        if seed_spec.get("schema_version") != "seed_task_graph_v1":
-            raise ValueError(
-                "Legacy/precomputed task_graph input is no longer supported. "
-                "Regenerate the action-agent config with --overwrite."
-            )
     validate_seed_task_graph(seed_spec)
     if graph_cls is None:
         graph_cls = getattr(

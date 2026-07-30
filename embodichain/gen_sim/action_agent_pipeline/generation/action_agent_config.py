@@ -127,7 +127,7 @@ def generate_action_agent_config_from_project(
     ``task_description`` is required: one LLM interpretation selects a supported
     route (stacking, arrangement line, object manipulation) and its semantic
     intent. The matching deterministic generator expands it into an executable
-    Seed Graph v2. Environment geometry remains in the simulator config and is
+    Seed Graph v3. Environment geometry remains in the simulator config and is
     grounded into per-environment Task graphs only by ``run_agent``.
 
     Args:
@@ -173,8 +173,8 @@ def generate_action_agent_config_from_project(
             surfaces for ``object_on_surface`` release moves.
         acd_method: Convex decomposition backend written to generated mesh
             objects. Only ``"vhacd"`` is supported.
-        arrangement_debug_visualization: If true, write target-slot and
-            high-transport-point markers into the generated environment config.
+        arrangement_debug_visualization: Legacy compatibility flag. Arrangement
+            geometry is now resolved and recorded per runtime environment.
         overwrite: If false, fail when generated files already exist.
         max_episodes: Value written to ``fast_gym_config.json``.
         max_episode_steps: Value written to ``fast_gym_config.json``.
@@ -275,7 +275,7 @@ def generate_action_agent_config_from_project(
             arrangement_debug_visualization=arrangement_debug_visualization,
             load_template_material=load_template_material,
         )
-        _validate_arrangement_bundle(bundle, spec)
+        _validate_arrangement_bundle(bundle)
         return _finalize_and_write_bundle(
             _with_task_route_summary(bundle, task_route),
             output_dir=output_dir_path,

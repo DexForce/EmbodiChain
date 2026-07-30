@@ -31,9 +31,6 @@ from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
 from embodichain.gen_sim.action_agent_pipeline.generation.action_agent_templates import (
     make_light_config as _make_light_config,
 )
-from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_intent import (
-    _arrangement_order_is_constrained,
-)
 from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec import (
     _with_arrangement_generated_pose_targets,
 )
@@ -105,6 +102,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import
     make_arrangement_seed_task_graph,
     make_relative_seed_task_graph,
     make_stacking_seed_task_graph,
+    seed_task_graph_hash,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
@@ -156,7 +154,6 @@ def _build_arrangement_line_bundle(
     arrangement_debug_visualization: bool,
     load_template_material: bool,
 ) -> dict[str, Any]:
-    seed_task_graph = make_arrangement_seed_task_graph(task_name, spec)
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
@@ -239,24 +236,27 @@ def _build_arrangement_line_bundle(
         robot_profile=robot_profile,
     )
     spec = _with_arrangement_generated_pose_targets(spec, gym_config)
+    seed_task_graph = make_arrangement_seed_task_graph(task_name, spec)
     gym_config["env"]["extensions"] = _make_arrangement_extensions_config(
-        spec,
+        seed_task_graph,
         robot_profile=robot_profile,
     )
     if arrangement_debug_visualization:
-        gym_config["env"]["extensions"]["arrangement_debug"] = (
-            _make_arrangement_debug_config(spec)
+        logger.log_info(
+            "Arrangement debug geometry is deferred to each runtime environment; "
+            "the config bundle publishes only the coordinate-free Seed."
         )
-        for step in spec.steps:
-            logger.log_info(
-                "Arrangement debug slot "
-                f"{step.slot_index}: object={step.runtime_uid}, "
-                f"category={step.category}, arm={step.active_side}_arm, "
-                f"target={step.release_position}, high={step.high_position}."
-            )
+    seed_order = {
+        str(step["object"]): int(step["goal"]["nominal_slot_index"])
+        for step in seed_task_graph["semantic_steps"]
+    }
+    dataset_spec = replace(
+        spec,
+        steps=tuple(sorted(spec.steps, key=lambda step: seed_order[step.runtime_uid])),
+    )
     gym_config["env"]["dataset"] = _make_arrangement_dataset_config(
         project_name,
-        spec,
+        dataset_spec,
         robot_profile=robot_profile,
     )
     return {
@@ -265,85 +265,50 @@ def _build_arrangement_line_bundle(
         "task_prompt": make_arrangement_task_prompt(
             task_name,
             project_name,
-            spec,
+            seed_task_graph,
             robot_profile=robot_profile,
+            task_description=spec.task_description,
         ),
         "seed_task_graph": seed_task_graph,
         "basic_background": make_arrangement_basic_background(
             project_name,
-            spec,
+            seed_task_graph,
             robot_profile=robot_profile,
             object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
         ),
         "atom_actions": make_arrangement_atom_actions_prompt(
-            spec,
+            seed_task_graph,
             robot_profile=robot_profile,
         ),
         "summary": {
             "robot_profile": robot_profile.summary(),
-            **_make_arrangement_summary(spec),
+            **_make_arrangement_summary(seed_task_graph),
         },
     }
 
 
-def _make_arrangement_summary(spec: ArrangementLineSpec) -> dict[str, Any]:
+def _make_arrangement_summary(seed_graph: Mapping[str, Any]) -> dict[str, Any]:
+    semantic_steps = list(seed_graph["semantic_steps"])
+    goal = semantic_steps[0]["goal"]
     return {
         "mode": "arrangement_line",
-        "order_constraint": (
-            "ordered"
-            if _arrangement_order_is_constrained(
-                spec.order_by,
-                task_description=spec.task_description,
-            )
-            else "free"
-        ),
-        "axis": spec.axis,
-        "anchor": spec.anchor,
-        "order_by": spec.order_by,
-        "order_direction": spec.order_direction,
-        "line_origin_xy": [
-            float(spec.line_origin_xy[0]),
-            float(spec.line_origin_xy[1]),
-        ],
-        "spacing": float(spec.spacing),
-        "layout_clearance": float(spec.layout_clearance),
-        "category_order": list(spec.category_order),
-        "spatial_direction": spec.spatial_direction,
-        "placements": [
+        "order_constraint": goal["order_constraint"],
+        "axis": goal["axis"],
+        "anchor": goal["anchor"],
+        "order_by": goal["order_by"],
+        "order_direction": goal["order_direction"],
+        "objects": [str(step["object"]) for step in semantic_steps],
+        "nominal_bindings": [
             {
-                "object": step.runtime_uid,
-                "source_uid": step.source_uid,
-                "slot_index": step.slot_index,
-                "active_arm": f"{step.active_side}_arm",
-                "target_xy": [float(step.target_xy[0]), float(step.target_xy[1])],
-                "orientation_goal": step.orientation_goal,
-                "orientation_axis": step.orientation_axis,
-                "category": step.category,
-                "cross_side": step.cross_side,
-                "execution_index": step.execution_index,
-                "blocked_by": list(step.blocked_by),
+                "object": str(step["object"]),
+                "nominal_slot_index": int(step["goal"]["nominal_slot_index"]),
+                "slot_constraint": str(step["goal"]["slot_constraint"]),
+                "orientation_goal": str(step["goal"]["orientation_goal"]),
+                "orientation_axis": str(step["goal"]["orientation_axis"]),
             }
-            for step in spec.steps
+            for step in semantic_steps
         ],
-    }
-
-
-def _make_arrangement_debug_config(spec: ArrangementLineSpec) -> dict[str, Any]:
-    return {
-        "slots": [
-            {
-                "object": step.runtime_uid,
-                "category": step.category,
-                "arm": f"{step.active_side}_arm",
-                "target": [float(value) for value in step.release_position],
-                "high": [float(value) for value in step.high_position],
-                "slot_index": step.slot_index,
-                "cross_side": step.cross_side,
-                "execution_index": step.execution_index,
-                "blocked_by": list(step.blocked_by),
-            }
-            for step in spec.steps
-        ]
+        "seed_graph_hash": seed_task_graph_hash(seed_graph),
     }
 
 

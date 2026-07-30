@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,8 +35,17 @@ from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_agent_config,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.success_specs import (
+    _make_arrangement_success_spec,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.motion_policy import (
     resolve_motion_policy,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.arrangement_runtime import (
+    ArrangementRuntimePlan,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (
+    _select_arm_parts,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.parallel_execution import (
     _merge_inactive_world_state_qpos,
@@ -48,17 +58,41 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.symbolic_grounding import
 from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph_artifact import (
     RuntimeTaskGraphRecorder,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph import (
+    AgentGraphEdge,
+    _physical_control_parts_for_assignments,
+    _postcondition_target_positions,
+)
 from embodichain.lab.sim.atomic_actions import WorldState
 
 
 class _Object:
-    def __init__(self, positions: list[list[float]]) -> None:
+    def __init__(
+        self,
+        positions: list[list[float]],
+        *,
+        half_extents: tuple[float, float, float] = (0.04, 0.04, 0.05),
+    ) -> None:
         self.pose = torch.eye(4).repeat(len(positions), 1, 1)
         self.pose[:, :3, 3] = torch.tensor(positions)
+        x, y, z = half_extents
+        self.vertices = torch.tensor(
+            [
+                [sx * x, sy * y, sz * z]
+                for sx in (-1.0, 1.0)
+                for sy in (-1.0, 1.0)
+                for sz in (-1.0, 1.0)
+            ],
+            dtype=torch.float32,
+        )
 
     def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
         assert to_matrix
         return self.pose
+
+    def get_vertices(self, *, env_ids, scale: bool) -> torch.Tensor:
+        assert scale
+        return self.vertices.unsqueeze(0).repeat(len(env_ids), 1, 1)
 
 
 class _Sim:
@@ -67,6 +101,9 @@ class _Sim:
 
     def get_rigid_object(self, uid: str):
         return self.objects.get(uid)
+
+    def get_rigid_object_uid_list(self) -> list[str]:
+        return list(self.objects)
 
 
 def test_agent_config_references_only_executable_seed() -> None:
@@ -134,11 +171,32 @@ def test_arrangement_and_stacking_expand_each_object_into_a_step() -> None:
     )
 
     assert len(arrangement["semantic_steps"]) == 3
-    assert [step["goal"]["slot_index"] for step in arrangement["semantic_steps"]] == [
-        0,
-        1,
-        2,
+    assert [
+        step["goal"]["nominal_slot_index"] for step in arrangement["semantic_steps"]
+    ] == [0, 1, 2]
+    assert [step["object"] for step in arrangement["semantic_steps"]] == [
+        "can_2",
+        "can_1",
+        "can_0",
     ]
+    assert all(
+        step["goal"]["slot_constraint"] == "required"
+        for step in arrangement["semantic_steps"]
+    )
+    assert [
+        edge["actions"][0]["atomic_action_class"] for edge in arrangement["edges"][:6]
+    ] == [
+        "PickUp",
+        "MoveHeldObject",
+        "MoveHeldObject",
+        "Place",
+        "MoveEndEffector",
+        "MoveJoints",
+    ]
+    assert [
+        arrangement["edges"][index]["actions"][0]["target_binding"]["phase"]
+        for index in (1, 2)
+    ] == ["staging", "final"]
     assert arrangement["semantic_steps"][1]["depends_on"] == [
         arrangement["semantic_steps"][0]["id"]
     ]
@@ -397,6 +455,118 @@ def test_auto_arm_candidate_checks_transport_reachability(
     assert failed.tolist() == [False, False]
 
 
+def test_semantic_goal_target_is_not_overwritten_by_release_edge() -> None:
+    semantic_target = torch.tensor([[0.1, 0.2, 0.3]])
+    release_target = torch.tensor([[0.1, 0.2, 0.39]])
+    semantic_pose = torch.eye(4).unsqueeze(0)
+    semantic_pose[:, :3, 3] = semantic_target
+    release_pose = torch.eye(4).unsqueeze(0)
+    release_pose[:, :3, 3] = release_target
+    semantic_edge = AgentGraphEdge(
+        id="e01_transport",
+        source="v0",
+        target="v1",
+        symbolic_actions=(
+            {
+                "atomic_action_class": "MoveHeldObject",
+                "target_binding": {"kind": "semantic_goal"},
+            },
+        ),
+    )
+    release_edge = AgentGraphEdge(
+        id="e02_release",
+        source="v1",
+        target="v2",
+        symbolic_actions=(
+            {
+                "atomic_action_class": "Place",
+                "target_binding": {"kind": "current_held_pose"},
+            },
+        ),
+    )
+
+    resolved_semantic = _postcondition_target_positions(
+        semantic_edge,
+        arm_actions={
+            "left": SimpleNamespace(resolved_object_target_pose=semantic_pose)
+        },
+        grounded_actions=(SimpleNamespace(target_object_pose=semantic_target),),
+    )
+    resolved_release = _postcondition_target_positions(
+        release_edge,
+        arm_actions={"left": SimpleNamespace(resolved_object_target_pose=release_pose)},
+        grounded_actions=(SimpleNamespace(target_object_pose=None),),
+    )
+
+    assert torch.equal(resolved_semantic, semantic_target)
+    assert resolved_release is None
+
+
+def test_auto_arm_skips_candidate_planning_when_every_environment_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    seed = make_relative_seed_task_graph(
+        "failed_auto_candidate",
+        _relative_spec(first_arm="auto"),
+    )
+    graph = compile_agent_graph_spec(seed)
+    step = next(iter(graph.semantic_steps.values()))
+
+    def unexpected_plan(**kwargs):
+        raise AssertionError("candidate planning must not run for failed environments")
+
+    monkeypatch.setattr(graph, "_plan_arm_candidate", unexpected_plan)
+    assignments, selection_failed = graph._select_step_arms(
+        step,
+        env=SimpleNamespace(num_envs=2, device=torch.device("cpu")),
+        world_states={"left": None, "right": None},
+        failed=torch.tensor([True, True]),
+        runtime_kwargs={},
+    )
+
+    assert assignments == [None, None]
+    assert selection_failed.tolist() == [False, False]
+
+
+def test_reversed_semantic_arm_slots_resolve_to_physical_control_parts() -> None:
+    env = SimpleNamespace(
+        left_arm_joints=[4, 5],
+        left_eef_joints=[6],
+        right_arm_joints=[0, 1],
+        right_eef_joints=[2],
+        get_agent_arm_control_part=lambda is_left: (
+            "right_arm" if is_left else "left_arm"
+        ),
+        get_agent_eef_control_part=lambda is_left: (
+            "right_eef" if is_left else "left_eef"
+        ),
+    )
+
+    semantic_left = _select_arm_parts(env, "left_arm")
+    semantic_right = _select_arm_parts(env, "right_arm")
+    physical_assignments = _physical_control_parts_for_assignments(
+        env,
+        ["left_arm", "right_arm", None, "coordinated"],
+    )
+
+    assert semantic_left[0] is True
+    assert semantic_left[1:3] == ("right_arm", "right_eef")
+    assert semantic_left[3:] == ([4, 5], [6])
+    assert semantic_right[0] is False
+    assert semantic_right[1:3] == ("left_arm", "left_eef")
+    assert semantic_right[3:] == ([0, 1], [2])
+    assert physical_assignments == [
+        "right_arm",
+        "left_arm",
+        None,
+        "coordinated",
+    ]
+
+
 def test_grounding_reads_moved_object_and_live_reference_again() -> None:
     seed = make_relative_seed_task_graph("move_twice", _relative_spec(two_steps=True))
     env = SimpleNamespace(
@@ -456,6 +626,288 @@ def test_motion_policy_requires_known_profile_and_policy() -> None:
         resolve_motion_policy("unknown", "default_pickup")
     with pytest.raises(ValueError, match="not registered"):
         resolve_motion_policy("dual_franka", "unknown")
+
+
+def test_runtime_arrangement_slots_are_centered_per_environment() -> None:
+    seed = make_arrangement_seed_task_graph(
+        "runtime_line",
+        SimpleNamespace(
+            task_description="arrange freely",
+            order_by="none",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=(),
+            steps=tuple(
+                SimpleNamespace(
+                    runtime_uid=f"object_{index}",
+                    slot_index=index,
+                    orientation_goal="preserve",
+                    orientation_axis="none",
+                )
+                for index in range(3)
+            ),
+        ),
+    )
+    table = _Object(
+        [[0.0, 0.0, 0.0], [0.3, -0.2, 0.0]],
+        half_extents=(0.6, 0.5, 0.04),
+    )
+    objects = {
+        f"object_{index}": _Object(
+            [[0.1 * index, 0.0, 0.1], [0.3, -0.2 + 0.1 * index, 0.1]]
+        )
+        for index in range(3)
+    }
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=_Sim({"table": table, **objects}),
+    )
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(seed)
+    plan = ArrangementRuntimePlan(
+        env=env,
+        semantic_steps=list(graph.semantic_steps.values()),
+    )
+
+    assert plan.slot_positions[:, :, 1].mean(dim=1).tolist() == pytest.approx(
+        [0.0, -0.2]
+    )
+    assert plan.slot_positions[0, :, 1].tolist() == pytest.approx(
+        [-plan.spacing[0].item(), 0.0, plan.spacing[0].item()]
+    )
+    assert plan.slot_positions[1, :, 1].tolist() != pytest.approx(
+        plan.slot_positions[0, :, 1].tolist()
+    )
+    table_lower = plan.table_bounds[:, 0, :2]
+    table_upper = plan.table_bounds[:, 1, :2]
+    assert bool((plan.slot_positions[:, :, :2] >= table_lower[:, None, :]).all())
+    assert bool((plan.slot_positions[:, :, :2] <= table_upper[:, None, :]).all())
+
+
+def test_runtime_arrangement_searches_a_safe_parallel_row() -> None:
+    seed = make_arrangement_seed_task_graph(
+        "offset_line",
+        SimpleNamespace(
+            task_description="form a row",
+            order_by="none",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=(),
+            steps=tuple(
+                SimpleNamespace(
+                    runtime_uid=f"object_{index}",
+                    slot_index=index,
+                    orientation_goal="preserve",
+                    orientation_axis="none",
+                )
+                for index in range(3)
+            ),
+        ),
+    )
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        sim=_Sim(
+            {
+                "table": _Object(
+                    [[0.0, 0.0, 0.0]],
+                    half_extents=(0.6, 0.5, 0.04),
+                ),
+                "fixed_obstacle": _Object(
+                    [[0.0, 0.0, 0.1]],
+                    half_extents=(0.06, 0.22, 0.08),
+                ),
+                **{
+                    f"object_{index}": _Object([[0.3, 0.1 * index, 0.1]])
+                    for index in range(3)
+                },
+            }
+        ),
+    )
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(seed)
+    plan = ArrangementRuntimePlan(
+        env=env,
+        semantic_steps=list(graph.semantic_steps.values()),
+    )
+
+    assert abs(float(plan.slot_positions[0, :, 0].mean())) >= 0.125
+
+
+def test_arrangement_success_is_relational_and_seed_derived() -> None:
+    steps = tuple(
+        SimpleNamespace(
+            runtime_uid=f"object_{index}",
+            slot_index=index,
+            orientation_goal="preserve",
+            orientation_axis="none",
+        )
+        for index in range(3)
+    )
+    free_seed = make_arrangement_seed_task_graph(
+        "free_success",
+        SimpleNamespace(
+            task_description="form a row",
+            order_by="none",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=(),
+            steps=steps,
+        ),
+    )
+    ordered_seed = make_arrangement_seed_task_graph(
+        "ordered_success",
+        SimpleNamespace(
+            task_description="arrange by size",
+            order_by="size",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=tuple(step.runtime_uid for step in steps),
+            steps=steps,
+        ),
+    )
+
+    free_success = _make_arrangement_success_spec(free_seed)
+    ordered_success = _make_arrangement_success_spec(ordered_seed)
+    free_types = [term["type"] for term in free_success["terms"]]
+    ordered_types = [term["type"] for term in ordered_success["terms"]]
+
+    assert "object_xy_near" not in str(free_success)
+    assert "target_xy" not in str(ordered_success)
+    assert "objects_ordered" not in free_types
+    assert "objects_ordered" in ordered_types
+
+
+def test_seed_v2_requires_regeneration() -> None:
+    legacy = make_relative_seed_task_graph("legacy_v2", _relative_spec())
+    legacy["schema_version"] = "seed_task_graph_v2"
+
+    with pytest.raises(ValueError, match="--overwrite"):
+        seed_task_graph_hash(legacy)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("target_xy", [0.1, 0.2]),
+        ("active_arm", "left_arm"),
+        ("trajectory", [[0.0, 1.0]]),
+    ],
+)
+def test_seed_v3_rejects_grounded_arrangement_fields(
+    field_name: str,
+    value,
+) -> None:
+    seed = make_arrangement_seed_task_graph(
+        "coordinate_free",
+        SimpleNamespace(
+            task_description="form a row",
+            order_by="none",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=(),
+            steps=(
+                SimpleNamespace(
+                    runtime_uid="object_a",
+                    slot_index=0,
+                    orientation_goal="preserve",
+                    orientation_axis="none",
+                ),
+            ),
+        ),
+    )
+    invalid = deepcopy(seed)
+    invalid["semantic_steps"][0]["goal"][field_name] = value
+
+    with pytest.raises(ValueError, match="grounded|geometric"):
+        seed_task_graph_hash(invalid)
+
+
+def test_free_arrangement_rematches_only_unfinished_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    seed = make_arrangement_seed_task_graph(
+        "free_rematch",
+        SimpleNamespace(
+            task_description="form a row",
+            order_by="none",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=(),
+            steps=tuple(
+                SimpleNamespace(
+                    runtime_uid=f"object_{index}",
+                    slot_index=index,
+                    orientation_goal="preserve",
+                    orientation_axis="none",
+                )
+                for index in range(3)
+            ),
+        ),
+    )
+    graph = compile_agent_graph_spec(seed)
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "table": _Object(
+                    [[0.0, 0.0, 0.0]],
+                    half_extents=(0.6, 0.5, 0.04),
+                ),
+                **{
+                    f"object_{index}": _Object([[0.0, 0.1 * index, 0.1]])
+                    for index in range(3)
+                },
+            }
+        ),
+    )
+    plan = ArrangementRuntimePlan(
+        env=env,
+        semantic_steps=list(graph.semantic_steps.values()),
+    )
+    steps = list(graph.semantic_steps.values())
+    plan.mark_completed(steps[0].id, torch.tensor([True]))
+
+    def candidate(step, *, arrangement_plan, **kwargs):
+        slot = int(arrangement_plan.resolved_slots[step.id][0].item())
+        expected = 2 if step.id == steps[1].id else 1
+        feasible = torch.tensor([slot == expected])
+        return feasible, torch.tensor([float(slot + 1)])
+
+    monkeypatch.setattr(graph, "_plan_arm_candidate", candidate)
+    reassigned = graph._reassign_free_slots(
+        env=env,
+        world_states={"left": None, "right": None},
+        failed=torch.tensor([False]),
+        trigger_mask=torch.tensor([True]),
+        runtime_kwargs={},
+        arrangement_plan=plan,
+    )
+
+    assert reassigned.tolist() == [True]
+    assert int(plan.resolved_slots[steps[0].id][0]) == 0
+    assert int(plan.resolved_slots[steps[1].id][0]) == 2
+    assert int(plan.resolved_slots[steps[2].id][0]) == 1
+    assert plan.metadata(steps[1])[0]["slot_reassigned"] is True
 
 
 def test_compile_agent_rejects_precomputed_task_graph() -> None:
