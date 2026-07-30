@@ -143,11 +143,14 @@ class DifferentiableTrainer:
 
     def load_checkpoint(self, path: str | Path) -> None:
         """Restore policy, optimizer, and trainer counters."""
-        checkpoint = torch.load(
-            path,
-            map_location=self.algorithm.device,
-            weights_only=True,
-        )
+        try:
+            checkpoint = torch.load(
+                path,
+                map_location=self.algorithm.device,
+                weights_only=True,
+            )
+        except TypeError:
+            checkpoint = torch.load(path, map_location=self.algorithm.device)
         version = checkpoint.get("schema_version")
         if version != _CHECKPOINT_SCHEMA_VERSION:
             raise ValueError(

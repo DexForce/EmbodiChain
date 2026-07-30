@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
+import pytest
 import torch
 import torch.nn as nn
 from gymnasium.spaces import Box
@@ -156,3 +157,32 @@ def test_checkpoint_restores_policy_optimizer_and_counters(tmp_path: Path) -> No
     assert restored.global_step == trainer.global_step
     assert restored.num_updates == trainer.num_updates
     assert restored_algorithm.optimizer.state_dict()["state"]
+
+
+def test_checkpoint_load_falls_back_for_older_torch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env, policy, algorithm = _make_components()
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(),
+        env,
+        policy,
+        algorithm,
+    )
+    checkpoint_path = trainer.save_checkpoint(tmp_path / "apg.pt")
+    torch_load = torch.load
+    calls: list[bool] = []
+
+    def compatible_load(*args: Any, **kwargs: Any) -> Any:
+        if "weights_only" in kwargs:
+            calls.append(True)
+            raise TypeError("weights_only is unsupported")
+        calls.append(False)
+        return torch_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", compatible_load)
+
+    trainer.load_checkpoint(checkpoint_path)
+
+    assert calls == [True, False]
