@@ -96,7 +96,6 @@ def create_pk_serial_chain(
             raise ValueError(f"URDF file not found at path: {urdf_path}")
         except IOError as e:
             raise ValueError(f"Failed to read URDF file: {e}")
-
         with suppress_stdout_stderr():
             if root_link_name is None:
                 return pk.build_serial_chain_from_urdf(
