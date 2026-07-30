@@ -70,7 +70,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_hand_open_close_qpos,
     prepare_tutorial_scene,
+    publish_tutorial_scene,
     replay_trajectory,
+    serve_tutorial_scene,
 )
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
@@ -374,6 +376,7 @@ def run_assemble_demo(
     sim.update(step=10)
     clone_local_pose_from_first_env(cube)
     cube.clear_dynamics()
+    publish_tutorial_scene(sim, args)
 
     can_semantics = create_antipodal_semantics(
         can,
@@ -494,7 +497,11 @@ def main() -> None:
         light_pos=(0.0, -0.4, 3.0),
     )
     robot = create_dual_ur5_robot(sim)
-    run_assemble_demo(args, sim, robot)
+    try:
+        run_assemble_demo(args, sim, robot)
+        serve_tutorial_scene(sim, args)
+    finally:
+        sim.destroy()
 
 
 if __name__ == "__main__":

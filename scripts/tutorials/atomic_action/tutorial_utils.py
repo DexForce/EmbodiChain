@@ -43,6 +43,7 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
 from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
+from embodichain.utils import logger
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -344,6 +345,54 @@ def prepare_tutorial_scene(
     if wait_for_user:
         input(prompt)
     return wait_for_user
+
+
+def publish_tutorial_scene(sim: SimulationManager, args: argparse.Namespace) -> None:
+    """Immediately push the current scene to the Viser browser.
+
+    Tutorials build their scene and then run slow grasp annotation and motion
+    planning before the next :meth:`SimulationManager.update`. Without this call
+    the browser stays empty during that gap. It is a no-op unless ``--viser`` is
+    set, so callers can always invoke it right after assembling the scene.
+
+    Args:
+        sim: Simulation manager whose scene should be published.
+        args: Parsed tutorial arguments.
+    """
+    if getattr(args, "viser", False):
+        sim.capture_visualization_safely(force=True)
+
+
+def serve_tutorial_scene(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+    *,
+    message: str = "Viser browser preview open. Press Ctrl+C to exit.",
+) -> bool:
+    """Keep stepping the simulation so the Viser browser stays live.
+
+    After a tutorial replays its trajectory the process would otherwise exit and
+    tear the browser scene down. When ``--viser`` is set this blocks with a
+    physics-stepping loop until the user interrupts (``Ctrl+C``); otherwise it is
+    a no-op, so callers can always invoke it just before cleanup.
+
+    Args:
+        sim: Simulation manager to keep stepping.
+        args: Parsed tutorial arguments.
+        message: Informational message logged before the keep-alive loop.
+
+    Returns:
+        Whether a keep-alive loop was run.
+    """
+    if not getattr(args, "viser", False):
+        return False
+    logger.log_info(message, color="green")
+    try:
+        while True:
+            sim.update(step=1)
+    except KeyboardInterrupt:
+        pass
+    return True
 
 
 def replay_trajectory(
@@ -656,7 +705,9 @@ __all__ = [
     "make_top_down_eef_pose",
     "get_tutorial_window_size",
     "prepare_tutorial_scene",
+    "publish_tutorial_scene",
     "replay_trajectory",
+    "serve_tutorial_scene",
     "should_open_tutorial_window",
     "should_wait_for_tutorial_input",
     "start_auto_play_recording",

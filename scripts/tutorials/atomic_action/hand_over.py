@@ -64,7 +64,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     get_hand_open_close_qpos,
     clone_local_pose_from_first_env,
     prepare_tutorial_scene,
+    publish_tutorial_scene,
     replay_trajectory,
+    serve_tutorial_scene,
 )
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
@@ -306,6 +308,7 @@ def run_handover_demo(
     settle_object(sim, obj, step=0)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
+    publish_tutorial_scene(sim, args)
     object_semantics = create_antipodal_semantics(
         obj, label="handover", n_sample=10000, force_reannotate=False
     )
@@ -436,7 +439,11 @@ def main() -> None:
         light_pos=(0.0, -0.4, 3.0),
     )
     robot = create_dual_ur5_robot(sim)
-    run_handover_demo(args, sim, robot)
+    try:
+        run_handover_demo(args, sim, robot)
+        serve_tutorial_scene(sim, args)
+    finally:
+        sim.destroy()
 
 
 if __name__ == "__main__":
