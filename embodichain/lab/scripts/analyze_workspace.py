@@ -43,7 +43,11 @@ Usage examples::
         --asset /path/to/robot.usd --urdf /path/to/robot.urdf \\
         --ee-link tcp_link --joints "joint_[1-6]"
 
-Results are cached to disk (``--cache-dir``) keyed by the robot + parameters,
+    # Preview an already-computed workspace cache (no robot/analysis needed)
+    embodichain analyze-workspace --preview-cache ~/.cache/embodichain_data/robot_workspace/<key>
+
+Results are cached to disk (``--cache-dir``, default
+``~/.cache/embodichain_data/robot_workspace``) keyed by the robot + parameters,
 so repeated runs and other applications can reuse the reachable workspace
 without recomputing. Pass ``--output`` to export a copy to a user path.
 """
@@ -70,6 +74,7 @@ __all__ = [
     "build_robot_cfg",
     "build_preset_robot_cfg",
     "build_analyzer_config",
+    "preview_cache",
     "parse_args",
     "main",
     "cli",
@@ -453,15 +458,166 @@ def _print_summary(results: dict, analyzer) -> None:
         log_info("Results cache disabled (use --cache-dir to enable).")
 
 
+def _load_preview_data(path: str, cache_dir: str) -> tuple[dict, str | None]:
+    """Load workspace arrays and mode from a cached result.
+
+    ``path`` may be:
+
+    - a cache entry directory (containing ``results.npz`` + ``meta.json``),
+    - a ``results.npz`` file directly, or
+    - a bare cache key, looked up under ``cache_dir``.
+
+    Args:
+        path: Path to a cache entry directory, an ``.npz`` file, or a cache key.
+        cache_dir: Cache root used to resolve a bare key.
+
+    Returns:
+        Tuple of (arrays dict of numpy arrays, mode string or None).
+
+    Raises:
+        FileNotFoundError: If no ``results.npz`` can be resolved for ``path``.
+    """
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    if p.is_dir():
+        npz_path = p / "results.npz"
+    elif p.is_file():
+        npz_path = p
+    else:
+        # Treat as a cache key under the cache root.
+        npz_path = Path(cache_dir) / path / "results.npz"
+
+    if not npz_path.is_file():
+        raise FileNotFoundError(
+            f"Preview cache not found for {path!r}: expected results.npz at "
+            f"{npz_path}. Pass a cache entry directory, an .npz file, or a key "
+            f"under --cache-dir."
+        )
+
+    meta_path = npz_path.parent / "meta.json"
+    meta: dict = {}
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (OSError, ValueError):
+            meta = {}
+
+    with np.load(str(npz_path)) as npz:
+        arrays = {name: npz[name] for name in npz.files}
+
+    mode = meta.get("mode")
+    if mode is None:
+        mode = "cartesian_space" if "reachable_points" in arrays else "joint_space"
+    return arrays, mode
+
+
+def _preview_points_and_colors(
+    arrays: dict, mode: str | None, hide_unreachable: bool
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select preview points and color them by reachability.
+
+    Args:
+        arrays: Arrays dict from :func:`_load_preview_data`.
+        mode: Analysis mode (``joint_space`` / ``cartesian_space`` /
+            ``plane_sampling``) or None.
+        hide_unreachable: If True in IK modes, show only reachable points.
+
+    Returns:
+        Tuple of (points (N, 3), colors (N, 3) RGB in [0, 1]). Reachable points
+        are green, unreachable red (IK modes only); joint-space points are all
+        green.
+    """
+    is_ik = mode in ("cartesian_space", "plane_sampling")
+
+    if (
+        is_ik
+        and hide_unreachable
+        and "reachable_points" in arrays
+        and len(arrays["reachable_points"]) > 0
+    ):
+        points = np.asarray(arrays["reachable_points"])
+        colors = np.zeros((len(points), 3))
+        colors[:, 1] = 1.0  # green
+        return points, colors
+
+    if "workspace_points" in arrays:
+        points = np.asarray(arrays["workspace_points"])
+    elif "all_points" in arrays:
+        points = np.asarray(arrays["all_points"])
+    else:
+        points = np.asarray(arrays[next(iter(arrays))])
+
+    colors = np.zeros((len(points), 3))
+    mask = arrays.get("reachability_mask") if is_ik else None
+    if mask is not None and len(mask) == len(points):
+        mask_bool = np.asarray(mask).astype(bool)
+        colors[mask_bool, 1] = 1.0  # green reachable
+        colors[~mask_bool, 0] = 1.0  # red unreachable
+    else:
+        colors[:, 1] = 1.0  # all green
+    return points, colors
+
+
+def preview_cache(args: argparse.Namespace) -> None:
+    """Visualize an already-computed workspace cache without recomputing.
+
+    Loads the cached results from ``--preview-cache`` and renders them with an
+    Open3D window. No robot or simulation is required.
+
+    Args:
+        args: Parsed CLI arguments. Uses ``args.preview_cache``, ``args.cache_dir``,
+            ``args.vis_type``, ``args.point_size``, ``args.voxel_size`` and
+            ``args.hide_unreachable``.
+    """
+    from embodichain.lab.sim.utility.workspace_analyzer.caches.results_cache import (
+        DEFAULT_RESULTS_CACHE_DIR,
+    )
+    from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+        VisualizationType,
+    )
+    from embodichain.lab.sim.utility.workspace_analyzer.visualizers import (
+        VisualizerFactory,
+    )
+
+    cache_dir = args.cache_dir or DEFAULT_RESULTS_CACHE_DIR
+    arrays, mode = _load_preview_data(args.preview_cache, cache_dir)
+    points, colors = _preview_points_and_colors(arrays, mode, args.hide_unreachable)
+    log_info(
+        f"Previewing workspace cache: {args.preview_cache} | mode={mode} | "
+        f"{len(points)} points",
+        color="green",
+    )
+
+    viz_type = VisualizationType(args.vis_type)
+    factory = VisualizerFactory()
+    kwargs: dict = {"backend": "open3d"}
+    if viz_type == VisualizationType.POINT_CLOUD:
+        kwargs["point_size"] = args.point_size
+    elif viz_type == VisualizationType.VOXEL:
+        kwargs["voxel_size"] = args.voxel_size
+    visualizer = factory.create_visualizer(viz_type=viz_type, **kwargs)
+    visualizer.visualize(points, colors=colors)
+    log_info("Preview window open. Close the window to exit.", color="green")
+    visualizer.show()
+
+
 def main(args: argparse.Namespace) -> None:
     """Run the workspace analysis end-to-end.
 
     Loads the robot, runs analysis (with caching), prints a summary, optionally
     exports results, and keeps the visualization window open until Ctrl+C.
+    With ``--preview-cache``, instead loads and visualizes an already-computed
+    cache without running any analysis.
 
     Args:
         args: Parsed CLI arguments.
     """
+    if args.preview_cache:
+        preview_cache(args)
+        return
+
     import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManager
@@ -560,16 +716,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # --- Robot source -------------------------------------------------------
-    robot = parser.add_argument_group("Robot source")
+    # --- Source (choose one) ------------------------------------------------
+    robot = parser.add_argument_group("Source (choose one)")
     source = robot.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--asset",
         type=str,
         default=None,
         help="Path to a robot asset (.urdf/.usd/.usda/.usdc). Builds a generic "
-        "RobotCfg; requires --ee-link (and --urdf for USD assets). Mutually "
-        "exclusive with --robot.",
+        "RobotCfg; requires --ee-link (and --urdf for USD assets).",
     )
     source.add_argument(
         "--robot",
@@ -580,6 +735,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "kinematics solver come from the preset, so --ee-link/--joints are not "
         "needed -- only --control-part (optional). Choices: franka_panda, "
         "cobotmagic, dexforce_w1, ur.",
+    )
+    source.add_argument(
+        "--preview-cache",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Preview an already-computed workspace cache without recomputing. "
+        "PATH is a cache entry directory, a results.npz file, or a cache key "
+        "(looked up under --cache-dir). Opens an Open3D window; no "
+        "--robot/--asset needed.",
     )
     robot.add_argument(
         "--robot-params",
@@ -769,7 +934,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="Directory for cached results. Default: "
-        "~/.cache/embodichain/workspace_analyzer/results.",
+        "~/.cache/embodichain_data/robot_workspace.",
     )
     cache.add_argument(
         "--no-cache",

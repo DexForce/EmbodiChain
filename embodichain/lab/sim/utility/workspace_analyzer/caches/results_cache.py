@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 DEFAULT_RESULTS_CACHE_DIR = os.path.expanduser(
-    "~/.cache/embodichain/workspace_analyzer/results"
+    "~/.cache/embodichain_data/robot_workspace"
 )
 
 # Tensor/array fields stored in the .npz archive.

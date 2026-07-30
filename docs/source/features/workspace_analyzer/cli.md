@@ -110,7 +110,7 @@ reachable workspace without recomputing.
 
 | Argument | Description |
 |----------|-------------|
-| `--cache-dir PATH` | Cache root. Default: `~/.cache/embodichain/workspace_analyzer/results`. |
+| `--cache-dir PATH` | Cache root. Default: `~/.cache/embodichain_data/robot_workspace`. |
 | `--no-cache` | Disable caching. |
 | `--force-recompute` | Recompute even if a cached entry exists. |
 | `--output PATH` | Export a copy of the results to a user path. |
@@ -119,7 +119,7 @@ reachable workspace without recomputing.
 After a run, the CLI prints the cache entry path, e.g.:
 
 ```
-Results cached at: ~/.cache/embodichain/workspace_analyzer/results/4c0a3a3190d75d28
+Results cached at: ~/.cache/embodichain_data/robot_workspace/4c0a3a3190d75d28
 ```
 
 Each entry is a directory containing:
@@ -128,6 +128,29 @@ Each entry is a directory containing:
   `all_points`, `joint_configurations`, `success_rates`, `reachability_mask`.
 - `meta.json` - mode, sample counts, metrics, analysis time, and the input
   metadata used to compute the cache key.
+
+### Previewing a cached workspace
+
+To re-visualize an already-computed workspace without recomputing (and without
+specifying the robot again), pass `--preview-cache`. It loads the cache and
+opens an Open3D window; no `--robot`/`--asset` is required (it is mutually
+exclusive with them).
+
+```bash
+# By cache entry directory (the path printed after a run)
+embodichain analyze-workspace \
+    --preview-cache ~/.cache/embodichain_data/robot_workspace/4c0a3a3190d75d28
+
+# By results.npz file directly
+embodichain analyze-workspace --preview-cache /path/to/results.npz
+
+# By cache key (looked up under --cache-dir)
+embodichain analyze-workspace --preview-cache 4c0a3a3190d75d28
+```
+
+Reachable points are shown green and unreachable points red (Cartesian/plane
+modes); pass `--hide-unreachable` to show only the reachable points. Use
+`--vis-type`, `--point-size`, etc. to control the rendering.
 
 ### Loading cached data from other applications
 
@@ -139,7 +162,7 @@ import json
 import numpy as np
 from pathlib import Path
 
-entry = Path("~/.cache/embodichain/workspace_analyzer/results/4c0a3a3190d75d28").expanduser()
+entry = Path("~/.cache/embodichain_data/robot_workspace/4c0a3a3190d75d28").expanduser()
 data = np.load(entry / "results.npz")
 meta = json.loads((entry / "meta.json").read_text())
 

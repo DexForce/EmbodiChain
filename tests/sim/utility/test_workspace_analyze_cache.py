@@ -170,6 +170,114 @@ def test_compute_cache_key_stability_and_sensitivity():
 
 
 # ---------------------------------------------------------------------------
+# Preview-cache helpers (no simulation)
+# ---------------------------------------------------------------------------
+
+
+def _write_cache_entry(tmp_path, results, mode):
+    from embodichain.lab.sim.utility.workspace_analyzer.caches import (
+        ResultsCache,
+        compute_cache_key,
+    )
+
+    cache = ResultsCache(tmp_path / "robot_workspace")
+    key = compute_cache_key({"mode": mode, "num_samples": results["num_samples"]})
+    entry = cache.save(key, results, metadata={"mode": mode})
+    return cache.cache_dir, key, entry
+
+
+def test_load_preview_data_from_dir(tmp_path):
+    """Loading from a cache entry directory returns arrays + mode."""
+    from embodichain.lab.scripts.analyze_workspace import _load_preview_data
+
+    results = _joint_results()
+    cache_dir, _key, entry = _write_cache_entry(tmp_path, results, "joint_space")
+    arrays, mode = _load_preview_data(str(entry), str(cache_dir))
+    assert mode == "joint_space"
+    assert "workspace_points" in arrays
+    assert arrays["workspace_points"].shape[0] == results["num_samples"]
+
+
+def test_load_preview_data_from_npz_file(tmp_path):
+    """Loading directly from a results.npz file works (meta from sibling)."""
+    from embodichain.lab.scripts.analyze_workspace import _load_preview_data
+
+    results = _cartesian_results()
+    cache_dir, _key, entry = _write_cache_entry(tmp_path, results, "cartesian_space")
+    arrays, mode = _load_preview_data(str(entry / "results.npz"), str(cache_dir))
+    assert mode == "cartesian_space"
+    assert "reachable_points" in arrays
+    assert "reachability_mask" in arrays
+
+
+def test_load_preview_data_from_key(tmp_path):
+    """A bare cache key is resolved under the cache dir."""
+    from embodichain.lab.scripts.analyze_workspace import _load_preview_data
+
+    results = _joint_results()
+    cache_dir, key, _entry = _write_cache_entry(tmp_path, results, "joint_space")
+    arrays, mode = _load_preview_data(key, str(cache_dir))
+    assert mode == "joint_space"
+    assert "workspace_points" in arrays
+
+
+def test_load_preview_data_missing_raises(tmp_path):
+    """An unknown path/key raises FileNotFoundError."""
+    from embodichain.lab.scripts.analyze_workspace import _load_preview_data
+
+    with pytest.raises(FileNotFoundError):
+        _load_preview_data("nonexistent_key", str(tmp_path / "robot_workspace"))
+
+
+def test_preview_colors_joint_all_green():
+    """Joint-space preview colors all points green."""
+    from embodichain.lab.scripts.analyze_workspace import _preview_points_and_colors
+
+    arrays = {"workspace_points": np.random.rand(5, 3)}
+    points, colors = _preview_points_and_colors(arrays, "joint_space", False)
+    assert points.shape == (5, 3)
+    assert np.allclose(colors, np.array([[0.0, 1.0, 0.0]] * 5))
+
+
+def test_preview_colors_cartesian_mask():
+    """Cartesian preview colors reachable green, unreachable red."""
+    from embodichain.lab.scripts.analyze_workspace import _preview_points_and_colors
+
+    arrays = {
+        "workspace_points": np.random.rand(3, 3),
+        "reachability_mask": np.array([True, False, True]),
+        "reachable_points": np.random.rand(2, 3),
+    }
+    _points, colors = _preview_points_and_colors(arrays, "cartesian_space", False)
+    assert np.allclose(colors[0], [0.0, 1.0, 0.0])  # reachable green
+    assert np.allclose(colors[1], [1.0, 0.0, 0.0])  # unreachable red
+    assert np.allclose(colors[2], [0.0, 1.0, 0.0])
+
+
+def test_preview_colors_hide_unreachable():
+    """hide_unreachable shows only reachable points (green)."""
+    from embodichain.lab.scripts.analyze_workspace import _preview_points_and_colors
+
+    arrays = {
+        "workspace_points": np.random.rand(3, 3),
+        "reachability_mask": np.array([True, False, True]),
+        "reachable_points": np.random.rand(2, 3),
+    }
+    points, colors = _preview_points_and_colors(arrays, "cartesian_space", True)
+    assert points.shape == (2, 3)
+    assert np.allclose(colors, np.array([[0.0, 1.0, 0.0]] * 2))
+
+
+def test_parse_args_preview_cache_no_robot_required():
+    """--preview-cache does not require --robot/--asset (mutex source group)."""
+    from embodichain.lab.scripts.analyze_workspace import parse_args
+
+    a = parse_args(["--preview-cache", "/tmp/foo", "--headless"])
+    assert a.preview_cache == "/tmp/foo"
+    assert a.asset is None and a.robot is None
+
+
+# ---------------------------------------------------------------------------
 # CLI config builder tests (no simulation)
 # ---------------------------------------------------------------------------
 
