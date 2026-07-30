@@ -1,11 +1,12 @@
 ---
 name: pre-commit-check
-description: Use before committing or creating a PR for EmbodiChain to verify code style, headers, annotations, exports, and docstrings pass CI checks
+description: Use before committing or creating a PR for EmbodiChain to select proportional validation and verify affected code style, tests, headers, annotations, exports, and docstrings
 ---
 
 # Pre-Commit Check
 
-Run all local checks that the CI pipeline enforces, catching issues before pushing.
+Run proportional local checks for the files being changed, catching relevant
+issues before pushing without defaulting to the full test suite.
 
 ## When to Use
 
@@ -24,6 +25,9 @@ git status --short
 ```
 
 Collect all changed/added `.py` files.
+
+Classify the change by affected area: workflow, docs, packaging, isolated Python
+module, package-wide behavior, or cross-cutting infrastructure.
 
 ### 2. Run Black Formatting Check
 
@@ -100,14 +104,42 @@ For any new configuration class:
 - Must use `from dataclasses import MISSING` for required fields
 - Import from `embodichain.utils import configclass`
 
-### 9. Check Test Coverage
+### 9. Select and Run Relevant Tests
+
+Do not treat the CI test job as a requirement to run `pytest tests` locally for
+every change. Choose the smallest command set that exercises the affected
+behavior:
+
+| Change scope | Default validation |
+|---|---|
+| `.github/workflows/**` only | `actionlint` on changed workflows; run related script tests only when workflow scripts changed |
+| Docs content only | Relevant Sphinx build or docs-specific tests |
+| One Python module | Matching `tests/**/test_<module>.py` |
+| One package/subsystem | Tests for that package plus focused integration tests |
+| Packaging/release code | Package build and artifact validation |
+| Shared core, global test config, or multiple subsystems | Broader affected tests; full suite only when narrow coverage is not credible |
+
+Skip runtime tests when no executable behavior is affected, but still run the
+appropriate syntax or configuration validator. Run the full suite only when:
+
+- the change affects shared core behavior used throughout the repository;
+- global dependencies, test configuration, or environment initialization changed;
+- several subsystems are modified together;
+- a release-critical behavior cannot be validated narrowly; or
+- the user explicitly requests it.
+
+Before starting a command likely to take more than two minutes, report the
+selected scope and why narrower validation is insufficient. Honor explicit user
+instructions to skip or narrow tests.
+
+### 10. Check Test Coverage
 
 For any new public module or function:
 - A corresponding test must exist at `tests/<subpackage>/test_<module>.py`
 - Test file must also have the Apache 2.0 header
 - Report if tests are missing
 
-### 10. Summary Report
+### 11. Summary Report
 
 Output a pass/fail summary:
 
@@ -121,6 +153,8 @@ Pre-Commit Check Results
 [PASS] Docstrings on public APIs
 [PASS] Type annotations
 [PASS] @configclass usage
+[PASS] Targeted tests — tests/foo/test_bar.py
+[N/A] Full test suite — isolated change covered by targeted tests
 [WARN] Missing tests for: bar.py
 
 Fix the above issues before committing.
@@ -134,7 +168,9 @@ The project's CI pipeline (`.github/workflows/main.yml`) runs:
 2. **test** job: `pytest tests`
 3. **build** job: Sphinx docs build
 
-This skill covers items 1 and 2 locally. Docs build is heavier and typically only needed for documentation changes.
+This skill always covers the relevant lint and structural checks, then selects
+tests proportionally. It does not require reproducing the entire CI pipeline for
+every local change.
 
 ## Common Mistakes
 
@@ -155,4 +191,5 @@ This skill covers items 1 and 2 locally. Docs build is heavier and typically onl
 | Header check | Verify first line is `# ---...---` |
 | `__future__` import | Grep for `from __future__ import annotations` |
 | `__all__` export | Grep for `__all__` in module |
-| Run tests | `pytest tests/<path>` |
+| Run targeted tests | `pytest tests/<affected-path>` |
+| Run full tests | `pytest tests` only when the full-suite criteria above apply |
