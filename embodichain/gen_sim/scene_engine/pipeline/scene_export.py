@@ -55,22 +55,24 @@ _Y_UP_TO_Z_UP_ROTATION = np.array(
 )
 
 
-def export_scene_to_gym(
+def export_scene(
     *,
     scene: Scene,
     output_root: str | Path,
     table_max_convex_hull_num: int = _DEFAULT_MAX_CONVEX_HULL_NUM,
     asset_max_convex_hull_num: int = _DEFAULT_MAX_CONVEX_HULL_NUM,
 ) -> Path:
-    """Write the Gym config and copy SimReady GLBs into ``mesh_assets``.
+    """Write a scene-only config and copy SimReady GLBs into ``mesh_assets``.
 
     Scene layouts are y-up. The simulator automatically converts each y-up GLB
     to z-up, so this exporter copies each GLB unchanged and converts only its
     world position and rotation for ``init_pos`` and ``init_rot``. ``body_scale``
-    remains the original y-up scale associated with the GLB.
+    remains the original y-up scale associated with the GLB. This is not a
+    complete ``EmbodiedEnv``/``run-env`` configuration because a generated
+    scene does not determine a robot, its placement, or its control setup.
     """
     if scene.table is None:
-        raise ValueError("Cannot export a gym scene without a table.")
+        raise ValueError("Cannot export a scene without a table.")
     table_max_convex_hull_num = _positive_int(
         table_max_convex_hull_num,
         field_name="table_max_convex_hull_num",
@@ -80,32 +82,30 @@ def export_scene_to_gym(
         field_name="asset_max_convex_hull_num",
     )
 
-    export_root = Path(output_root).expanduser().resolve() / "gym_export"
+    export_root = Path(output_root).expanduser().resolve() / "scene_export"
     mesh_assets_root = export_root / "mesh_assets"
     mesh_assets_root.mkdir(parents=True, exist_ok=True)
 
     scene_objects = [scene.table, *scene.assets]
     object_ids = [scene_object.id for scene_object in scene_objects]
     if len(set(object_ids)) != len(object_ids):
-        raise ValueError("Gym export requires unique table and asset ids.")
+        raise ValueError("Scene export requires unique table and asset ids.")
 
     exported_entries = {
-        scene_object.id: _copy_scene_object_to_gym_assets(
+        scene_object.id: _copy_scene_object_to_assets(
             scene_object=scene_object,
             mesh_assets_root=mesh_assets_root,
         )
         for scene_object in scene_objects
     }
-    gym_config = {
-        "id": f"Prompt2Scene-{int(time.time() * 1000)}-v0",
-        "max_episodes": 10,
-        "max_episode_steps": 300,
-        "env": {"events": {}, "observations": {}, "dataset": {}},
-        "robot": {},
-        "sensor": [],
-        "light": {},
+    scene_config = {
+        "format": "embodichain.scene-export/v1",
+        # This identifies the exported scene data only. It is deliberately not
+        # a Gymnasium environment ID because scene exports do not register or
+        # instantiate an EmbodiedEnv.
+        "scene_id": f"scene-engine-{int(time.time() * 1000)}",
         "background": [
-            _gym_object_config(
+            _scene_object_config(
                 scene_object=scene.table,
                 asset_relative_path=exported_entries[scene.table.id],
                 body_type="kinematic",
@@ -114,7 +114,7 @@ def export_scene_to_gym(
             )
         ],
         "rigid_object": [
-            _gym_object_config(
+            _scene_object_config(
                 scene_object=asset,
                 asset_relative_path=exported_entries[asset.id],
                 body_type="dynamic",
@@ -124,15 +124,15 @@ def export_scene_to_gym(
             for asset in scene.assets
         ],
     }
-    gym_config_path = export_root / "gym_config.json"
-    gym_config_path.write_text(
-        json.dumps(gym_config, indent=2, ensure_ascii=False) + "\n",
+    scene_config_path = export_root / "scene_config.json"
+    scene_config_path.write_text(
+        json.dumps(scene_config, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    return gym_config_path
+    return scene_config_path
 
 
-def _copy_scene_object_to_gym_assets(
+def _copy_scene_object_to_assets(
     *,
     scene_object: Table | Asset,
     mesh_assets_root: Path,
@@ -157,7 +157,7 @@ def _copy_scene_object_to_gym_assets(
     return destination_glb_path.relative_to(mesh_assets_root.parent).as_posix()
 
 
-def _gym_object_config(
+def _scene_object_config(
     *,
     scene_object: Table | Asset,
     asset_relative_path: str,
@@ -165,7 +165,7 @@ def _gym_object_config(
     attrs: dict[str, float | int],
     max_convex_hull_num: int,
 ) -> dict[str, object]:
-    """Build one z-up gym object config from a final y-up scene object."""
+    """Build one z-up scene-only object config from a final y-up scene object."""
     pos_y_up = _scene_vector(scene_object, "pos")
     rot_y_up = _scene_vector(scene_object, "rot")
     scale_y_up = _scene_vector(scene_object, "scale")

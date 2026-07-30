@@ -28,24 +28,29 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import LightCfg, MeshCfg, RigidObjectCfg
 
 
-def preview_gym_export(
+def preview_scene_export(
     *,
     output_root: str | Path,
     device: str = "cpu",
     headless: bool = False,
 ) -> None:
-    """Load ``gym_export/gym_config.json`` and preview its table and assets."""
+    """Load ``scene_export/scene_config.json`` and preview its table and assets."""
     resolved_output_root = Path(output_root).expanduser().resolve()
-    config_path = resolved_output_root / "gym_export" / "gym_config.json"
+    config_path = resolved_output_root / "scene_export" / "scene_config.json"
     if not config_path.is_file():
-        raise FileNotFoundError(f"Gym config not found: {config_path}")
+        raise FileNotFoundError(f"Scene config not found: {config_path}")
 
     try:
-        gym_config = json.loads(config_path.read_text(encoding="utf-8"))
+        scene_config = json.loads(config_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Gym config is not valid JSON: {config_path}") from exc
-    if not isinstance(gym_config, dict):
-        raise ValueError("Gym config must be a JSON object.")
+        raise ValueError(f"Scene config is not valid JSON: {config_path}") from exc
+    if not isinstance(scene_config, dict):
+        raise ValueError("Scene config must be a JSON object.")
+    if scene_config.get("format") != "embodichain.scene-export/v1":
+        raise ValueError(
+            "Expected an EmbodiChain scene export "
+            "(format='embodichain.scene-export/v1')."
+        )
 
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -62,20 +67,20 @@ def preview_gym_export(
         _add_lights(sim)
         _add_objects(
             sim=sim,
-            entries=_config_entries(gym_config, "background"),
+            entries=_config_entries(scene_config, "background"),
             config_dir=config_path.parent,
             label="table",
         )
         _add_objects(
             sim=sim,
-            entries=_config_entries(gym_config, "rigid_object"),
+            entries=_config_entries(scene_config, "rigid_object"),
             config_dir=config_path.parent,
             label="asset",
         )
 
         if headless:
             sim.update(step=1)
-            print(f"Loaded gym export headlessly: {config_path}")
+            print(f"Loaded scene export headlessly: {config_path}")
             return
 
         print(f"Previewing: {config_path}")
@@ -90,14 +95,14 @@ def preview_gym_export(
 
 
 def _config_entries(
-    gym_config: dict[str, Any],
+    scene_config: dict[str, Any],
     field_name: str,
 ) -> list[dict[str, Any]]:
-    entries = gym_config.get(field_name, [])
+    entries = scene_config.get(field_name, [])
     if not isinstance(entries, list) or not all(
         isinstance(entry, dict) for entry in entries
     ):
-        raise ValueError(f"Gym config field {field_name!r} must be a list of objects.")
+        raise ValueError(f"Scene config field {field_name!r} must be a list of objects.")
     return entries
 
 
@@ -126,12 +131,12 @@ def _add_objects(
         uid = entry.get("uid")
         shape = entry.get("shape")
         if not isinstance(uid, str) or not uid:
-            raise ValueError(f"Gym {label} has no valid uid.")
+            raise ValueError(f"Scene {label} has no valid uid.")
         if not isinstance(shape, dict) or not isinstance(shape.get("fpath"), str):
-            raise ValueError(f"Gym {label} {uid!r} has no shape.fpath.")
+            raise ValueError(f"Scene {label} {uid!r} has no shape.fpath.")
         if shape.get("shape_type") != "Mesh":
             raise ValueError(
-                f"Gym {label} {uid!r} must use shape_type='Mesh' for preview."
+                f"Scene {label} {uid!r} must use shape_type='Mesh' for preview."
             )
 
         mesh_path = (config_dir / shape["fpath"]).resolve()
@@ -164,21 +169,21 @@ def _add_objects(
 
 def _vector3(value: object, *, field_name: str) -> list[float]:
     if not isinstance(value, list) or len(value) != 3:
-        raise ValueError(f"Gym config field {field_name!r} must be a length-3 list.")
+        raise ValueError(f"Scene config field {field_name!r} must be a length-3 list.")
     try:
         return [float(item) for item in value]
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Gym config field {field_name!r} must be numeric.") from exc
+        raise ValueError(f"Scene config field {field_name!r} must be numeric.") from exc
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Preview a Scene Engine gym export in EmbodiChain simulation."
+        description="Preview a Scene Engine scene-only export in EmbodiChain simulation."
     )
     parser.add_argument(
         "output_root",
         type=Path,
-        help="Scene Engine output root containing gym_export/.",
+        help="Scene Engine output root containing scene_export/.",
     )
     parser.add_argument(
         "--device",
@@ -191,7 +196,7 @@ def main() -> None:
         help="Load and validate the exported scene without opening a window.",
     )
     args = parser.parse_args()
-    preview_gym_export(
+    preview_scene_export(
         output_root=args.output_root,
         device=args.device,
         headless=args.headless,

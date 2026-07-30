@@ -41,7 +41,7 @@ from embodichain.gen_sim.scene_engine.utils.logger import log_stage_end, log_sta
 from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
     generate_scene_and_refine,
 )
-from embodichain.gen_sim.scene_engine.pipeline.gym_export import export_scene_to_gym
+from embodichain.gen_sim.scene_engine.pipeline.scene_export import export_scene
 
 
 def generate_scene_from_image(
@@ -107,7 +107,7 @@ def generate_scene_from_image(
 
     # 4. Scene Export
     log_stage_start("Scene Export")
-    export_scene_to_gym(
+    export_scene(
         scene=scene,
         output_root=resolved_output_root,
         table_max_convex_hull_num=16,
